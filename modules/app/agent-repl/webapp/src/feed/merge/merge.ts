@@ -29,7 +29,7 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/str
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { tick } from "../ticking.js";
+import { stopTicking, tick } from "../ticking.js";
 import type {
   FeedMerge,
   FeedMergeError,
@@ -77,6 +77,10 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
       commit.className = "merge-commit";
       commit.textContent = result.value.commit;
       el.append(commit);
+      // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES: the clock beside a
+      // landed merge is the span the MESSAGE reports, and nothing on this
+      // element ticks past it.
+      stopTicking(el);
       return el;
     }
     case "error":
@@ -85,6 +89,7 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
         "data-state",
         requireCase(result.value.reason, `${PATH}.error.reason`).case,
       );
+      stopTicking(el);
       return el;
     default:
       return unreachableArm(`${PATH}.result`, armName(result));

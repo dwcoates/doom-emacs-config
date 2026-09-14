@@ -22,9 +22,10 @@ import {
   SHELL_SETTLED_ARMS,
   STOP_OUTCOME_MS,
 } from "../../../src/feed/cards/shell.js";
+import { TICKING_ATTRIBUTE } from "../../../src/feed/ticking.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { armsOf } from "../arms.js";
-import { feedId, harness, rowContext, WORKSPACE } from "../harness.js";
+import { countingTicker, feedId, harness, rowContext, WORKSPACE } from "../harness.js";
 
 const ROW = "shell-1";
 const COMMAND = "npm run build -- --watch";
@@ -162,6 +163,45 @@ describe("drawFeedShell clocks", () => {
       ctxFor().rc,
     );
     expect(el.querySelector(".shell-clock")?.textContent).toBe("12s");
+  });
+
+  it("holds no live subscription once the command has settled", () => {
+    // Arrange: a ticker whose live subscriptions the test can count.
+    const ticker = countingTicker();
+    const h = harness({ ticker });
+    const row = create(FeedRowSchema, {
+      id: feedId(ROW),
+      row: { case: "detachedShell", value: { shell: {} } },
+    });
+    // Act: the terminal frame.
+    const el = drawFeedShell(
+      shell({ startedAtMs: 0n, settled: { endedAtMs: 12_000n, outcome: "completed" } }),
+      rowContext(h.ctx, row),
+    );
+    document.body.append(el);
+    // Assert: a settled card subscribes to nothing.
+    expect(ticker.live()).toBe(0);
+    el.remove();
+  });
+
+  it("freezes the settled figure at the message's own duration, not the wall clock", () => {
+    vi.setSystemTime(999_999);
+    const el = drawFeedShell(
+      shell({ startedAtMs: 1000n, settled: { endedAtMs: 8000n, outcome: "completed" } }),
+      ctxFor().rc,
+    );
+    document.body.append(el);
+    vi.advanceTimersByTime(60_000);
+    expect(el.querySelector(".shell-clock")?.textContent).toBe("7s");
+    el.remove();
+  });
+
+  it("clears the marker a live draw left, so the settled element reads as stopped", () => {
+    const el = drawFeedShell(
+      shell({ startedAtMs: 0n, settled: { endedAtMs: 12_000n, outcome: "completed" } }),
+      ctxFor().rc,
+    );
+    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
   });
 
   it("draws the quiet-for reading from the last observed append", () => {

@@ -153,7 +153,19 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   exactly one fractional digit, a trailing ".0" trimmed, and the unit chosen by
   the RENDERED value (999950 reads "1M").
 - **CLOCKS TICK CLIENT-SIDE.** The wire ships instants; subscribe to the shared
-  ticker and format with `src/duration.ts`. Never a `setInterval` of your own.
+  ticker and format with `src/duration.ts`. Never a `setInterval` of your own,
+  and never `ctx.ticker.subscribe` directly either: go through `tick`
+  (`src/feed/ticking.ts`), which is what makes the subscription FINDABLE by
+  `stopTicking` from a replace site, a dispose, or the turn-end backstop.
+- **A TIMER STOPS WHEN ITS UNIT SETTLES.** A card drawn with a terminal arm
+  calls `stopTicking` on its own element and shows the span the MESSAGE
+  reports, never a wall-clock reading. Whoever discards an element stops it
+  first — every site that replaces a host's children goes through the ONE
+  helper, `replaceTicking`, which stops what it drops and keeps what it merely
+  moves. As a backstop, `feed-view` stops every remaining clock in a turn once
+  that turn's `turn_ended` row lands, and records one DEBUG
+  (`feed.turn-end-stopped-clocks`) naming the rows it had to stop — a card that
+  needed the backstop failed the first rule, and that log is how it is found.
 - **STREAMS ARE STANDING.** A client ends a watch only by aborting it. A stream
   ending on its own is a transport failure: report it and reopen. Stopping
   anything is an `Interrupt` rpc, never a stream close. The webapp never
