@@ -194,7 +194,10 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   });
 
   it.each(FOOTER_PANELS.map((panel) => [panel]))("draws the %s panel when selected", (panel) => {
-    expect(drawPanel(panel).panel.getAttribute("data-panel")).toBe(panel);
+    // The agents panel folds away with no rows, so it needs a live agent to
+    // draw at all; every other panel draws its own empty state.
+    const init: ExpandedInit = panel === "agents" ? { agents: [AGENT_ROW] } : {};
+    expect(drawPanel(panel, init).panel.getAttribute("data-panel")).toBe(panel);
   });
 
   it("wears the shared list-delimiter class every panel and dropdown uses", () => {
@@ -435,9 +438,36 @@ describe("the agents panel", () => {
     expect(panel.querySelector(".footer-row-unreachable")).toBeNull();
   });
 
-  it("draws its empty line when nothing is live", () => {
-    const { panel } = drawPanel("agents");
-    expect(panel.querySelector("[data-empty]")?.textContent).toBe("no live agents");
+  it("folds away entirely when nothing is live, rather than drawing a bare stop-all", () => {
+    // The header carries the fan-wide "stop all"; with no rows there is nothing
+    // to stop, so the whole panel collapses (null) instead of standing empty.
+    const h = harness();
+    expect(
+      drawFooterExpanded(expanded({ agents: [] }), "agents", {
+        ctx: h.ctx,
+        stops: createStopControls(h.ctx),
+        revealRow: async () => true,
+      }),
+    ).toBeNull();
+  });
+
+  it("stays drawn while the fan-wide stop is holding its outcome, even with no rows", () => {
+    // The push "stop all" causes has no rows — the set it just emptied — and
+    // that is exactly when the control carries "stopped N agents". Folding then
+    // would erase the count, so the panel stays until the answer clears.
+    const h = harness();
+    const stops = createStopControls(h.ctx);
+    const note = document.createElement("span");
+    note.className = "footer-stop-note";
+    note.textContent = "stopped 4 agents";
+    stops.allAgents.appendChild(note);
+    const panel = drawFooterExpanded(expanded({ agents: [] }), "agents", {
+      ctx: h.ctx,
+      stops,
+      revealRow: async () => true,
+    });
+    expect(panel).not.toBeNull();
+    expect(panel?.querySelector(".footer-stop-note")?.textContent).toBe("stopped 4 agents");
   });
 
   it("refuses a row with no jump target", () => {

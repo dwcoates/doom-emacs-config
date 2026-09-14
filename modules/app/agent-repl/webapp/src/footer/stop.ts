@@ -365,11 +365,26 @@ function drawRefusal(wrapper: HTMLElement, arm: string, message: string): void {
   wrapper.appendChild(refusal);
 }
 
+/** The three things a click can leave on a control: a note, a confirm, a refusal. */
+const STOP_ANSWER_SELECTOR = ".footer-stop-note, .footer-stop-confirm, .footer-stop-refusal";
+
 /** Drop whatever the previous click left, so a re-click starts clean. */
 function clearAnswer(wrapper: HTMLElement): void {
-  for (const el of wrapper.querySelectorAll(
-    ".footer-stop-note, .footer-stop-confirm, .footer-stop-refusal",
-  )) {
+  for (const el of wrapper.querySelectorAll(STOP_ANSWER_SELECTOR)) {
     el.remove();
   }
+}
+
+/**
+ * Whether a stop control is currently carrying an answer (a note, a confirm
+ * challenge, or a refusal).
+ *
+ * The agents panel reads this to decide whether it may fold: the fan-wide stop
+ * empties the live set, so the push it causes has no rows, and folding then
+ * would erase the outcome the control just drew. While the control holds an
+ * answer the panel stays; the answer expires on its own and the next push
+ * folds.
+ */
+export function stopControlHasAnswer(wrapper: HTMLElement): boolean {
+  return wrapper.querySelector(STOP_ANSWER_SELECTOR) !== null;
 }
