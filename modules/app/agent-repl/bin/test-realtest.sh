@@ -1138,7 +1138,12 @@ test_unknown_selector_declines_before_anything() {
     dir="$(scratch_bin bad-selector)"
     prepare_home
     ready_json > "$SCRATCH/readiness.json"
-    SCRIPT_ARGS=(9)
+    # 99 rather than a number just past the last authored realtest: the
+    # world table grows one row per realtest and a fixture spelled "the next
+    # one" stops testing an unknown selector the day that realtest lands,
+    # which is exactly what 9 did when realtest 9 was authored. The plan
+    # holds 24 realtests and will never hold 99.
+    SCRIPT_ARGS=(99)
 
     out="$(run_script "$dir")" || status=$?
     if [ "$status" -ne "$EXIT_DECLINED" ]; then
