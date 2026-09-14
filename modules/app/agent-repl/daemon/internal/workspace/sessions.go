@@ -1944,9 +1944,19 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// permissionMode renders a recorded mode name as the vendor's mode oneof. An
-// unrecognized or empty name yields the DEFAULT mode, which is the gated one:
-// an unknown name never resolves to a mode that disables the gate.
+// permissionMode renders a recorded mode name as the vendor's mode oneof.
+//
+// AN UNRECOGNIZED, EMPTY, OR `default` NAME YIELDS `auto` (owner ruling
+// 2026-09-14: "the default permission mode should be auto for the SDK/shim").
+// `auto` is a GATED mode — a classifier decides each ask rather than the user,
+// which is why it is absent from UngatedPermissionModes — so this fallback
+// still never resolves an unknown name to a mode that drops the gate.
+//
+// THIS IS ALSO WHERE A STORED `default` IS UPGRADED. A session row written
+// before the ruling carries "default"; the next start asks the shim for `auto`
+// here, the shim reports `auto` back, and recordFacts rewrites the row to
+// "auto" from that report. Nothing rewrites the row without a start, because
+// nothing else knows the session came up.
 func permissionMode(name string) *conversationv1.AgentPermissionMode {
 	switch name {
 	case "acceptEdits", "accept_edits":
@@ -1957,15 +1967,18 @@ func permissionMode(name string) *conversationv1.AgentPermissionMode {
 		return &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_Plan{Plan: &conversationv1.AgentPermissionModePlan{}}}
 	case "dontAsk", "dont_ask":
 		return &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_DontAsk{DontAsk: &conversationv1.AgentPermissionModeDontAsk{}}}
-	case "auto":
-		return &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}}}
 	default:
-		return &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_Default{Default: &conversationv1.AgentPermissionModeDefault{}}}
+		return &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}}}
 	}
 }
 
-// permissionModeName is permissionMode's inverse: the recorded spelling of a
-// mode the shim reported.
+// permissionModeName is the recorded spelling of a mode the shim REPORTED.
+//
+// It is permissionMode's inverse on every arm the shim can pick, and the one
+// place `default` is still written down: the vendor may report it for a
+// session started before the auto ruling, and that fact is recorded as it was
+// reported rather than relabeled. permissionMode then upgrades it at the next
+// start.
 func permissionModeName(mode *conversationv1.AgentPermissionMode) string {
 	switch mode.GetMode().(type) {
 	case *conversationv1.AgentPermissionMode_AcceptEdits:
