@@ -90,6 +90,18 @@ means the daemon and this build disagree about the contract.
   are rpc arguments, so `--session-id`, `--model`, `--permission-mode` and
   `--resume` do not exist. Neither does `--claude-bin`: the SDK's own bundled,
   pinned binary is the engine (R12).
+- **THE UNSTATED PERMISSION MODE IS `auto`, NOT THE VENDOR'S `default`** (owner
+  ruling 2026-09-14: "the default permission mode should be auto for the
+  SDK/shim"). `DEFAULT_PERMISSION_MODE` in `src/engine/permission-gate.ts` is
+  the one place it is written; the session's `permissionMode` starts there, so
+  a `StartSession{fresh}` that names no mode and a resume whose transcript
+  states none both reach `createQuery` as `permissionMode: "auto"`. NOTHING IS
+  DROPPED BY THE CHOICE: `auto` keeps the gate, with a classifier deciding each
+  ask instead of the user, which is why it is not in the daemon's
+  `UngatedPermissionModes` and needs no creation consent. `default` stays a
+  mode the vendor can REPORT and both conversion tables carry it in full — the
+  shim simply never PICKS it for anyone. Every mode change is still one pushed
+  `permission_mode_changed` update, logged as before.
 - **Environment**, all refusals rather than defaults:
   - `CLAUDE_CONFIG_DIR` (required) — which ACCOUNT the session runs as.
   - `AGENT_REPL_OWNED=1` (required) — the daemon's mark; a shim refuses to run
