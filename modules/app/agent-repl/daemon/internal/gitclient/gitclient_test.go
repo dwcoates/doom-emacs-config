@@ -274,6 +274,97 @@ func TestBranchExistsVerifiesUnderRefsHeadsOnly(t *testing.T) {
 	fake.assertSubject(0, "show-ref", "--verify", "--quiet", "refs/heads/v1")
 }
 
+// --- RepositoryOf -------------------------------------------------------
+
+func TestRepositoryOfAnswersTheMainWorktree(t *testing.T) {
+	// Arrange: `worktree list --porcelain` lists the main worktree FIRST.
+	git, _ := newTestClient(t)
+	main := existingDir(t, "main")
+	linked := existingDir(t, "linked")
+	newFakeGit(t, ok("worktree "+main+"\nHEAD abc\n\nworktree "+linked+"\n", "worktree", "list"))
+
+	// Act.
+	got, inRepository, err := git.RepositoryOf(context.Background(), linked)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RepositoryOf: %v", err)
+	}
+	if !inRepository {
+		t.Fatal("RepositoryOf = not in a repository, want the main worktree git listed first")
+	}
+	// The answer is CANONICALIZED, which on macOS resolves /var to /private/var.
+	canonical, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", main, err)
+	}
+	if got != canonical {
+		t.Fatalf("RepositoryOf = %q, want the first listed worktree %q", got, canonical)
+	}
+}
+
+// TestRepositoryOfAnswersFalseWithoutAnErrorRecord pins WHY this method exists
+// beside MainWorktree: a person picks the path, so "that is not in a
+// repository" is the answer the question was asked to get -- never a fault an
+// operator has to explain away.
+func TestRepositoryOfAnswersFalseWithoutAnErrorRecord(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n", "worktree", "list"))
+
+	// Act.
+	got, inRepository, err := git.RepositoryOf(context.Background(), "/elsewhere")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RepositoryOf: %v", err)
+	}
+	if inRepository || got != "" {
+		t.Fatalf("RepositoryOf = (%q, %v), want no repository", got, inRepository)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.repository_of"); found {
+		t.Fatal("a path outside every repository was recorded at ERROR; it is an ordinary answer")
+	}
+}
+
+// TestRepositoryOfAnswersFalseForABareRepository is the second shape of the
+// same answer: git ran fine and named no worktree, so there is no directory to
+// record as the repository's.
+func TestRepositoryOfAnswersFalseForABareRepository(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("", "worktree", "list"))
+
+	// Act.
+	_, inRepository, err := git.RepositoryOf(context.Background(), "/bare")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RepositoryOf: %v", err)
+	}
+	if inRepository {
+		t.Fatal("RepositoryOf = in a repository, want false for a listing with no worktree")
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.repository_of"); found {
+		t.Fatal("a bare repository was recorded at ERROR; it is an ordinary answer")
+	}
+}
+
+func TestRepositoryOfAsksGitWithTheWorktreeListing(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	dir := existingDir(t, "repo")
+	fake := newFakeGit(t, ok("worktree "+dir+"\n", "worktree", "list"))
+
+	// Act.
+	if _, _, err := git.RepositoryOf(context.Background(), dir); err != nil {
+		t.Fatalf("RepositoryOf: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "list", "--porcelain")
+}
+
 // --- ResolveRef ---------------------------------------------------------
 
 func TestResolveRefAnswersTheFullSha(t *testing.T) {
