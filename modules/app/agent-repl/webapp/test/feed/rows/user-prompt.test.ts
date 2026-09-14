@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedUserPrompt } from "../../../src/feed/rows/user-prompt.js";
+import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 /** A prompt with the given blocks. */
 function prompt(blocks: unknown[], author = "You") {
@@ -93,5 +94,17 @@ describe("drawFeedUserPrompt: an arm this build has no case for", () => {
     expect((thrown as MalformedView).detail).toBe(
       "arm 'redacted' is not one this build can draw",
     );
+  });
+});
+
+describe("drawFeedUserPrompt: the record of the row", () => {
+  it("records the drawn row at info, a row being drawn exactly once", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    // ACT
+    drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    // ASSERT
+    const record = await forwardedRecord(capture, "feed.draw-user-prompt");
+    expect(record.level.case).toBe("info");
   });
 });
