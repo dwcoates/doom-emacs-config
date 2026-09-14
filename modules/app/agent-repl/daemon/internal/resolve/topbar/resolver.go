@@ -379,18 +379,40 @@ func displayMode(mode string) string {
 // the figure is not live rides the hover, where it costs the strip no width.
 func (r *resolver) contextChip(s *wsState) *frontendv1.TopbarContextChip {
 	return &frontendv1.TopbarContextChip{
-		Text:      formatTokens(contextTokens(s)),
+		Text:      contextChipText(s),
 		Breakdown: r.tokenBreakdown(s),
 	}
 }
 
-// contextTokens is the figure the chip states.
+// contextUnknownText is what the chip states when a context cut has discarded
+// the transcript the last reading described and no fresh reading has landed
+// yet: an em dash, not a number. Fabricating a figure the vendor never reported
+// — a stale total, or a 0 the context is not at — is exactly the defect this
+// state exists to avoid, so the chip says "unknown until the next reading"
+// rather than stating a count it cannot honestly state.
+const contextUnknownText = "—"
+
+// contextChipText is the chip's stated figure, or the unknown dash while a cut
+// stands with no fresh reading to replace the discarded one.
+//
+// THE COLD GATE STILL WINS: its count is a fresh transcript read for THIS
+// resume, so a standing gate is never in the unknown state — it has a figure.
+func contextChipText(s *wsState) string {
+	if s.coldGate && s.coldGateTokens > 0 {
+		return formatTokens(s.coldGateTokens)
+	}
+	if s.contextCut && s.contextUsage == nil {
+		return contextUnknownText
+	}
+	return formatTokens(contextTokens(s))
+}
+
+// contextTokens is the numeric figure the chip and the breakdown resolve from.
 //
 // THE COLD GATE'S OWN COUNT WINS while a gate stands: it is what the shim read
 // off the transcript for THIS resume, whereas a remembered `context_usage` is
-// what some earlier session of this workspace last reported. Absent both, the
-// chip states 0 — the honest figure for a workspace that has held no context
-// yet, and never a blank, which reads as "loading".
+// what some earlier session of this workspace last reported. Absent both, it is
+// 0 — the honest figure for a workspace that has held no context yet.
 func contextTokens(s *wsState) int64 {
 	if s.coldGate && s.coldGateTokens > 0 {
 		return s.coldGateTokens
@@ -726,6 +748,47 @@ func (r *resolver) observeUnmodeled(s *wsState, act *conversationv1.AgentActivit
 	}
 }
 
+// OnContextCut is the cut that discards the transcript the chip's figure was
+// read off.
+//
+// A CLEAR OR A COMPLETED COMPACTION invalidates the last `context_usage`: the
+// tokens the chip states are the ones the cut just removed. So the chip drops
+// that figure and states the count is unknown until the vendor's fresh reading
+// arrives, rather than leaving a stale total standing — the defect this fixes.
+//
+// A FAILED COMPACTION CUT NOTHING. The context is unchanged, so the last
+// reading still describes it and the chip keeps stating it.
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
+	if cut == nil {
+		return
+	}
+	arm, cutMade := contextCutArm(cut)
+	r.mutate(ws, "daemon.topbar.on_context_cut", "the topbar took a context cut",
+		dlog.Context{"arm": arm, "cut_made": cutMade}, func(s *wsState) {
+			if !cutMade {
+				return
+			}
+			s.contextUsage = nil
+			s.contextCut = true
+		})
+}
+
+// contextCutArm names the cut's arm for the record and reports whether it
+// actually removed context. A failed compaction is the only arm that cut
+// nothing, so it is the only one the chip does not react to.
+func contextCutArm(cut *conversationv1.ContextCut) (string, bool) {
+	switch cut.GetCut().(type) {
+	case *conversationv1.ContextCut_Cleared:
+		return "cleared", true
+	case *conversationv1.ContextCut_Compacted:
+		return "compacted", true
+	case *conversationv1.ContextCut_CompactionFailed:
+		return "compaction_failed", false
+	default:
+		return "unset", false
+	}
+}
+
 // OnSessionUpdate carries model changes, diagnostics, context usage and the
 // permission mode.
 func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) {
@@ -758,7 +821,13 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 	case *conversationv1.SessionUpdate_Title:
 		return "title", func(s *wsState) { s.sessionTitle = u.Title.GetText() }
 	case *conversationv1.SessionUpdate_ContextUsage:
-		return "context_usage", func(s *wsState) { s.contextUsage = u.ContextUsage }
+		return "context_usage", func(s *wsState) {
+			// THE FRESH READING ENDS THE UNKNOWN STATE. Whatever a cut
+			// discarded, this is the vendor's answer for the context that
+			// remains, so it both states the figure and retires the dash.
+			s.contextUsage = u.ContextUsage
+			s.contextCut = false
+		}
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died", func(*wsState) {}
 	case *conversationv1.SessionUpdate_AccountUsage:

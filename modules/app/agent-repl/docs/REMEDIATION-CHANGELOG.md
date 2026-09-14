@@ -12,6 +12,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon topbar: the context chip drops its figure on a `/clear` or completed compaction (`resolve/topbar` gains `OnContextCut`, resetting `contextUsage` and stating an em-dash until the vendor's fresh reading lands) instead of leaving the stale pre-cut total standing; a FAILED compaction cut nothing so the figure is kept (owner ruling 2026-09-14: `/clear` and `/compact` must be reflected in the topbar token count, never a stale value)
 - register repository: `SPC j .` also registers the repository's main worktree as an open workspace, through the same `internal/workspace.register` `RegisterWorkspace` runs, and the success carries `workspace`/`workspace_already_known` (owner ruling 2026-09-14: a repository registered from a file was not available for selection in `SPC p p`)
 - proto feed: `FeedResponseUsageStamp` carries `at_ms` (tag 2), the epoch-ms instant the response settled, additive with the Go/TS bindings regenerated (owner ruling 2026-09-14: hovering the response's token count reveals its relative timestamp)
 - daemon feed: `resolve/feed/response.go` stamps the fold's settle instant once from `deps.Now()` (the same clock every other feed timestamp uses) into the usage corner's `at_ms`, zero while arriving and unchanged across a re-delivery of the terminal on the other store plane (same ruling)
