@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- daemon dlog: a workspace logger resolves its sink at write time instead of pinning it, and a close releases the handle without poisoning, so a record emitted after `Evict` re-opens the remembered target and appends while a nuked directory takes the central fallback at DEBUG (21 `daemon.dlog.sink_failure` errors across 7 workspaces, realtest 9 first run, 2026-09-13)
 - daemon footer: every daemon fault kind reaches the strip -- `health.ObserveFaults` decorates the ONE state client every raise site shares, and `internal/health/footer.go` maps each kind to (status, substatus, activity) at open and retracts it at close (owner ruling, every daemon fault kind reaches the footer, 2026-09-13)
 - footer proto: `FooterStatusActivityFault{kind, detail}` in all ten activity oneofs plus `blocked · daemon_impaired`, the one new substatus; four of the five buckets already existed (same ruling)
 - daemon cold gate: a failed re-open ANSWERS with `AnswerColdGateError.reopen_failed{detail}` and opens the `cold_gate_reopen_failed` fault, instead of a Connect internal the webapp worded as an unreachable daemon (FOOTER-TOPOLOGY-AUDIT section 4, two incidents 2026-09-13)
