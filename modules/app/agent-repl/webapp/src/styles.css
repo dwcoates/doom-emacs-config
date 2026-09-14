@@ -411,7 +411,6 @@ body::after {
    lives ONLY on the two fold glyphs, whose character ("▸"/"▾") is a control's
    state and carries no information a reader would ever quote, and where a
    stray selection during a double-click-to-fold is pure noise. */
-#ws-sidebar .row .chev,
 #ws-sidebar [data-section-fold],
 #ws-sidebar .repo-head .tri {
   user-select: none;
@@ -752,23 +751,10 @@ body::after {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
 }
-#ws-sidebar .row .chev {
-  color: var(--muted);
-  font-size: 0.7rem;
-  padding: 0 0.3em;
-  border-radius: 4px;
-  flex: 0 0 auto;
-  transition: transform 0.12s;
-  /* HOVER-ONLY (owner ruling 3, 2026-09-13). `visibility`, never `display`:
-     the glyph keeps its slot, so the name beside it does not jump sideways
-     the moment the pointer arrives. `data-shown` is set by row.ts from the
-     one predicate -- pointer over the row, keyboard focus inside it, or the
-     row's details already open -- so the appearance has a single source. */
-  visibility: hidden;
-}
-#ws-sidebar .row .chev[data-shown] { visibility: visible; }
-#ws-sidebar .row .chev:hover { background: var(--code-bg); }
-#ws-sidebar .ws.open > .row .chev { transform: rotate(90deg); }
+/* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
+   should have the same effect as opening the chevron currently does. No need
+   for a chevron to show the dropdown on hover." The row opens its own panel
+   after a short intent delay; `row.ts` owns both delays. */
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
@@ -793,7 +779,7 @@ body::after {
 
    Indented to the name's own column so it reads as this row's continuation
    rather than a child workspace, and always visible: a merge the user must
-   act on may not hide behind the detail panel's chevron. */
+   act on may not hide behind the detail panel. */
 #ws-sidebar .ws-merge,
 #ws-sidebar .ws-merge-note {
   margin: 0 0.7rem 0.1rem 2rem;

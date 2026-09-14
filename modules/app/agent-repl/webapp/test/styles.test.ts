@@ -23,7 +23,6 @@ import stylesheet from "../src/styles.css?raw";
  * earns it: the element's text is a control's state, not information.
  */
 const ALLOWED: ReadonlyMap<string, string> = new Map([
-  ["#ws-sidebar .row .chev", "the row's expand chevron: a '▸' glyph, no information in it"],
   ["#ws-sidebar [data-section-fold]", "the section fold triangle: '▸'/'▾' is the fold's state"],
   ["#ws-sidebar .repo-head .tri", "the repo header's fold triangle, the same glyph and the same state"],
   [".thinking summary::marker", "the disclosure marker only; the summary's TEXT stays user-select: text"],
