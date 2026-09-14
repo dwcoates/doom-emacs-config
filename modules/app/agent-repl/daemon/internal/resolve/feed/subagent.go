@@ -700,6 +700,21 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": sh.settled != nil})
 }
 
+// shellStart answers the instant a run's clock counts from. The authoritative
+// start wins whenever one has landed; until then the run's first-observed
+// instant stands in, stamped ONCE here off the daemon clock, so the clock never
+// counts from the epoch while a producer's re-announced `start` is still in
+// flight (see shellState.firstObservedMs).
+func (r *resolver) shellStart(sh *shellState) int64 {
+	if sh.startedAtMs != 0 {
+		return sh.startedAtMs
+	}
+	if sh.firstObservedMs == 0 {
+		sh.firstObservedMs = r.deps.Now().UnixMilli()
+	}
+	return sh.firstObservedMs
+}
+
 // spoolCap is how much of a spool's tail the daemon carries. The body is a
 // SNAPSHOT replaced whole on every push, so a cap here is what keeps watching
 // a long command from costing more than running it.
@@ -709,7 +724,7 @@ const spoolCap = 16 * 1024
 func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settled *frontendv1.FeedShellSettled) {
 	shell := &frontendv1.FeedShell{
 		Command: &frontendv1.FeedShellCommand{Text: sh.command},
-		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: sh.startedAtMs},
+		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: r.shellStart(sh)},
 	}
 	if sh.spool != "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.spool != \"\""})

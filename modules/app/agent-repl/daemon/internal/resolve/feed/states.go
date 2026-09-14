@@ -174,8 +174,22 @@ type planState struct {
 type shellState struct {
 	// command is the command line, drawn verbatim.
 	command string
-	// startedAtMs is the ORIGINAL instant; detaching does not reset it.
+	// startedAtMs is the ORIGINAL instant; detaching does not reset it. It is
+	// AUTHORITATIVE: only a source that actually saw the command issued sets it
+	// — the foreground unit's own start, or a `start` frame on the run's stream.
 	startedAtMs int64
+	// firstObservedMs is the daemon-clock instant this run was FIRST seen, kept
+	// only as the clock's fallback when no authoritative start has arrived yet.
+	//
+	// A DETACHED RUN'S FIRST FRAME NEED NOT BE ITS `start`. Two producers write
+	// one run under one key — the shim's stream and the sidecar's spool tail —
+	// so a reconnect or replay legitimately delivers an `update`/`progress`
+	// BEFORE the re-announced `start`. Drawn from startedAtMs alone that window
+	// stamped the runtime at zero, and the live clock counted up from the epoch
+	// — an absurd age (observed as ~56 years). The daemon stamps this once on
+	// first sight so the clock counts from a sane instant until the real start
+	// lands, at which point startedAtMs takes over and the clock corrects.
+	firstObservedMs int64
 	// spool is the accumulated output.
 	spool string
 	// nextOffset is the byte offset the next update must start at. A frame
