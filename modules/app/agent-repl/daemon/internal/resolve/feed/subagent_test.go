@@ -474,6 +474,61 @@ func TestADetachedShellDrawsItsCommandAndItsClock(t *testing.T) {
 	}
 }
 
+// TestAShellSeenFirstWithoutAStartCountsFromWhenItWasObserved covers the
+// two-plane race: the sidecar's spool tail delivers an `update` before the
+// shim's re-announced `start`, so the run's first frame carries no start
+// instant. The clock must count from the daemon's first-observed instant, never
+// from the epoch (which drew the run as ~56 years old).
+func TestAShellSeenFirstWithoutAStartCountsFromWhenItWasObserved(t *testing.T) {
+	// Arrange, Act: the first frame the daemon ever sees is an update.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Assert: the runtime is stamped with the observed instant, not zero.
+	if got := h.shellRow().GetRuntime().GetStartedAtMs(); got != h.nowMs {
+		t.Fatalf("started_at = %d, want the first-observed instant %d (never the epoch)", got, h.nowMs)
+	}
+}
+
+// TestAnAuthoritativeStartReplacesTheObservedFallback covers the correction: the
+// re-announced `start` lands after the update-first fallback, and it carries the
+// ORIGINAL instant, so the clock corrects back to the true start.
+func TestAnAuthoritativeStartReplacesTheObservedFallback(t *testing.T) {
+	// Arrange: an update-first shell drew its fallback clock.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Act: the run's own `start` re-announcement arrives, naming the true start.
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert: the authoritative start wins over the fallback.
+	if got := h.shellRow().GetRuntime().GetStartedAtMs(); got != 1_000 {
+		t.Fatalf("started_at = %d, want the authoritative start 1000", got)
+	}
+}
+
+// TestTheObservedFallbackIsStampedOnce covers that the fallback is a fixed
+// instant, not the wall clock: a later push while the start is still unknown
+// keeps the instant the run was first seen, so the clock does not creep forward.
+func TestTheObservedFallbackIsStampedOnce(t *testing.T) {
+	// Arrange: an update-first shell was first observed at the initial clock.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	first := h.shellRow().GetRuntime().GetStartedAtMs()
+
+	// Act: time moves and another update lands, still with no authoritative start.
+	h.nowMs += 5_000
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 10})
+
+	// Assert: the observed instant did not creep with the clock.
+	if got := h.shellRow().GetRuntime().GetStartedAtMs(); got != first {
+		t.Fatalf("started_at = %d, want the once-stamped instant %d", got, first)
+	}
+}
+
 func TestASpoolWithNoOutputYetIsUnsetRatherThanEmpty(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
