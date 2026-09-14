@@ -1603,6 +1603,21 @@ submission stands and nothing is submitted twice."
   "Decode SubmitPromptError's `no_session' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-no-session json))
 
+(defun agent-repl-wire-decode-submit-prompt-cold-gate (json)
+  "Decode SubmitPromptColdGate from JSON into (`:detail').
+The workspace's session is PARKED AT ITS COLD GATE: a session exists and
+is serving, and it takes no prompt until the gate is answered in the
+panel.  `detail' is the gate's own account of what was refused cold --
+the same sentence the gate card and the footer carry -- and is never
+switched on."
+  (let ((message "SubmitPromptColdGate"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-submit-prompt-error-cold-gate (json)
+  "Decode SubmitPromptError's `cold_gate' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-cold-gate json))
+
 (defun agent-repl-wire-decode-submit-prompt-error-duplicate-submission (json)
   "Decode SubmitPromptError's `duplicate_submission' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-duplicate-submission json))
@@ -1652,7 +1667,7 @@ logs, and is never switched on."
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -1665,7 +1680,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'feedUndecodable :feed-undecodable #'agent-repl-wire-decode-submit-prompt-error-feed-undecodable)
          (list 'noSession :no-session #'agent-repl-wire-decode-submit-prompt-error-no-session)
          (list 'duplicateSubmission :duplicate-submission #'agent-repl-wire-decode-submit-prompt-error-duplicate-submission)
-         (list 'bubbleRefused :bubble-refused #'agent-repl-wire-decode-submit-prompt-error-bubble-refused))))))
+         (list 'bubbleRefused :bubble-refused #'agent-repl-wire-decode-submit-prompt-error-bubble-refused)
+         (list 'coldGate :cold-gate #'agent-repl-wire-decode-submit-prompt-error-cold-gate))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
