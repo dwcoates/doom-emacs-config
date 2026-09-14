@@ -427,6 +427,16 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's merge command")
     ("verbs.el" agent-repl-verb-restart "agent-repl: restart %s"
      "confirms the user's restart command")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped"
+     "confirms the user's interrupt stopped the running turn")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: nothing to interrupt"
+     "tells the user there was no running turn to interrupt")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s agent%s also ended"
+     "confirms the interrupt stopped the turn and how many agents it also ended")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: the interrupt answer could not be read"
+     "tells the user the interrupt outcome could not be read")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn left running"
+     "tells the user the interrupt left the turn running")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
     ("verbs.el" agent-repl-verb-create "agent-repl: naming the workspace..."
