@@ -1131,3 +1131,115 @@ describe("the detached-unmodeled detail", () => {
     expect(harness.text(".topbar-warning-clock")).toBe("running 14s");
   });
 });
+
+/**
+ * THE STRIP'S CENTERING, ON THE WHOLE MOUNTED PAGE.
+ *
+ * The owner's report, 2026-09-13, verbatim: "the topbar format is wrong. it's
+ * centered on the center section plus the chips. like this:
+ * `<login>      <center><chips>            ` but the CENTER and ONLY the
+ * center should be in the center. like this:
+ * `<login>          <center>         <chips>`".
+ *
+ * The cause was the row's own template. `1fr` is `minmax(auto, 1fr)`, whose
+ * floor is that track's min-content, so a right group wider than the free
+ * share floored ITS track while the left one kept the share: unequal flanks,
+ * and the title pushed left by half the difference. jsdom lays nothing out, so
+ * what is assertable here is the rule the cascade hands the mounted row —
+ * which is where the defect lived.
+ */
+describe("the strip's centering", () => {
+  /** The row as the mounted page has it, with the real stylesheet installed. */
+  async function mountedRow(): Promise<Element> {
+    // A WIDE RIGHT GROUP AND A NARROW LEFT ONE: the asymmetry the owner saw.
+    await withTopbar({
+      title: "port the webapp",
+      email: "d@e.io",
+      models: [
+        {
+          name: "fake-opus-4-8",
+          displayName: "Opus 4.8 (the long one)",
+          description: "the big one",
+        },
+      ],
+      contextText: "184.3k",
+      warnings: [topbarWarning("sessionFault"), topbarWarning("detachedUnmodeled")],
+    });
+    const row = harness.$(".topbar-row");
+    if (!row) throw new Error("the topbar drew no row");
+    return row;
+  }
+
+  /** The three tracks of the row's `grid-template-columns`, in order. */
+  function tracks(template: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = "";
+    for (const ch of template) {
+      if (ch === "(") depth += 1;
+      if (ch === ")") depth -= 1;
+      if (ch === " " && depth === 0) {
+        if (current !== "") parts.push(current);
+        current = "";
+        continue;
+      }
+      current += ch;
+    }
+    if (current !== "") parts.push(current);
+    return parts;
+  }
+
+  it("gives the row's two flank tracks the same free size", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const row = await mountedRow();
+      // Act
+      const declared = tracks(cascadedValue(row, "grid-template-columns"));
+      // Assert: equal AND floorless — a floor is what made them differ.
+      expect([declared[0], declared[2]]).toEqual(["minmax(0, 1fr)", "minmax(0, 1fr)"]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("clamps the middle track so the title cannot reach either group", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const row = await mountedRow();
+      // Act
+      const declared = tracks(cascadedValue(row, "grid-template-columns"));
+      // Assert
+      expect(declared[1]).toBe("fit-content(50%)");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("draws the title between the two flank groups", async () => {
+    // Arrange / Act
+    const row = await mountedRow();
+    // Assert: the middle track holds the title and nothing else does.
+    expect([...row.children].map((el) => el.className.split(" ")[0])).toEqual([
+      "topbar-left",
+      "topbar-title",
+      "topbar-right",
+    ]);
+  });
+
+  it("lets the wide right group compress into its track", async () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const row = await mountedRow();
+      const right = row.querySelector(".topbar-right");
+      if (!right) throw new Error("the topbar drew no right group");
+      // Act / Assert: without this the group spills out of its floorless
+      // track and over the title.
+      expect(cascadedValue(right, "min-width")).toBe("0px");
+    } finally {
+      teardown();
+    }
+  });
+});
