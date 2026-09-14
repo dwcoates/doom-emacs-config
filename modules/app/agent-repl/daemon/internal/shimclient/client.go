@@ -210,18 +210,18 @@ func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff
 	ctx, cancel := context.WithCancel(context.Background())
 	return &client{
 		daemonStandDown: daemonStandDown,
-		log:           log,
-		ws:            ws,
-		udsPath:       udsPath,
-		rpc:           shimv1connect.NewShimClient(newUDSClient(udsPath), udsBaseURL),
-		back:          back,
-		grace:         DefaultKillGrace,
-		lockProbe:     probe,
-		link:          newLinkFeed(),
-		exit:          make(chan ExitInfo, 1),
-		dead:          make(chan struct{}),
-		monitorCtx:    ctx,
-		cancelMonitor: cancel,
+		log:             log,
+		ws:              ws,
+		udsPath:         udsPath,
+		rpc:             shimv1connect.NewShimClient(newUDSClient(udsPath), udsBaseURL),
+		back:            back,
+		grace:           DefaultKillGrace,
+		lockProbe:       probe,
+		link:            newLinkFeed(),
+		exit:            make(chan ExitInfo, 1),
+		dead:            make(chan struct{}),
+		monitorCtx:      ctx,
+		cancelMonitor:   cancel,
 	}
 }
 

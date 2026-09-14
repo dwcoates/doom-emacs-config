@@ -481,7 +481,7 @@ func TestTheOverageWindowCarriesItsOwnFigures(t *testing.T) {
 
 	// Assert
 	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetOverage()
-	wantResetsAtS := instant.Add(3 * time.Hour).UnixMilli() / 1000
+	wantResetsAtS := instant.Add(3*time.Hour).UnixMilli() / 1000
 	if got.GetUtilization() != 0.42 || got.GetResetsAtS() != wantResetsAtS {
 		t.Fatalf("overage = %+v, want utilization 0.42 and reset %d", got, wantResetsAtS)
 	}

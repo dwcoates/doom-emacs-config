@@ -197,7 +197,7 @@ type fakeVerbs struct {
 	selectAccountDir      string
 	selectAccountLoggedIn bool
 	selectAccountErr      error
-	assignTaskErr        error
+	assignTaskErr         error
 }
 
 func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {
