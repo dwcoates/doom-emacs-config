@@ -128,16 +128,24 @@ reaches the footer or the feed.
 further five (N4) are drawn somewhere, but not at the footer or the feed, and
 are listed so the owner can rule on whether their surface suffices.
 
-### N1 — daemon facts with no webapp carrier (6)
+### N1 — daemon facts with no webapp carrier (6) — 1, 4 and 5 CLOSED
 
-| # | row | evidence |
-|---|---|---|
-| 1 | every open fault kind except the three link kinds — 16 of 19, including `conversation_abandoned`, `prompts_dir_missing`, `resume_failed`, `bounce_died`, `bounce_unknown`, `session_absent`, `daemon_state_unreadable`, `adoption_window_expired` | `daemon/internal/health/kinds.go:19-78` |
-| 2 | `HostFault` as a whole: the webapp has no equivalent of `WatchHostWorkspace`'s fault list | `daemon/internal/server/host.go:418` |
-| 3 | the eleven daemon-minted `frontend.v1.FailureKind` arms, `session_start_failed` included | `proto/src/frontend/v1/failure.proto:100-120` |
-| 4 | an `AnswerColdGate` whose re-open failed — no arm exists (§4) | `proto/src/agentrepl/v1/endpoint_answer_cold_gate.proto:54-71` |
-| 5 | every unlanded refusal arm: raised under `OpenWorkspace`'s vocabulary from inside the cold-gate re-open, answered on an `AnswerColdGateResponse` that has no such arm | `daemon/internal/workspace/sessions.go:1265,1276,1288,1299,1306`; `daemon/internal/server/refuse.go:165` |
-| 6 | ~190 of the 193 distinct workspace-scoped `log.Info` progress messages | §2d |
+Rows 1, 4 and 5 closed on 2026-09-13 under the owner's ruling that EVERY daemon
+fault kind reaches the footer. The carrier is the footer's own status tree: the
+mapping is decided once in `daemon/internal/health/footer.go` (THE FAULT
+PARTITION, restated normatively in `footer.proto`'s `FooterStatus` header and in
+the module `AGENTS.md`), and the footer is told from the ONE place faults are
+written — `health.ObserveFaults` decorates the state client every raise site
+shares — rather than from plumbing beside each raise.
+
+| # | row | drawn | evidence |
+|---|---|---|---|
+| 1 | every open fault kind except the three link kinds — 16 of 19 | **drawn: footer**. `disconnected · start_failed`: `shim_start_failed`, `resume_failed`, `relaunch_resume_failed`, session-scope `adoption_window_expired`, `cold_gate_reopen_failed`. `disconnected · dead`: `shim_died`, `bounce_died`, `session_absent`. `disconnected · severed`: `link_severed`, `watch_open_refused`. `blocked · daemon_impaired`: `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `deploy_script_failed`, `successor_spawn_failed`, `daemon_state_unreadable`, daemon-scope `adoption_window_expired`. NON-ESCALATING, activity line only: `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned` — the shim answered in each, and `disconnected` closes the composer. `bounce_disposition` alone draws nothing: it is opened and closed in one breath and never stands | `daemon/internal/health/footer.go`; `daemon/internal/resolve/footer/faults.go`; `proto/src/frontend/v1/footer.proto` (`FooterStatusActivityFault`, `FooterSubStatusBlockedDaemonImpaired`) |
+| 2 | `HostFault` as a whole: the webapp has no equivalent of `WatchHostWorkspace`'s fault list | still NOWHERE as a LIST — and now deliberately so. The strip draws ONE standing fault, the strongest, and the ruling's three-cell shape has no room for a list. A fault ROSTER, if one is ever wanted, is a panel question, not a strip one | `daemon/internal/server/host.go:418` |
+| 3 | the eleven daemon-minted `frontend.v1.FailureKind` arms, `session_start_failed` included | **NOWHERE** — untouched. They are a client-local failure vocabulary the daemon still sets on nothing | `proto/src/frontend/v1/failure.proto:100-120` |
+| 4 | an `AnswerColdGate` whose re-open failed — no arm existed (§4) | **drawn: control + footer**. `AnswerColdGateError.reopen_failed{detail}` is the answer at the buttons, and the `cold_gate_reopen_failed` fault is the same sentence on the strip under `disconnected · start_failed` | `proto/src/agentrepl/v1/endpoint_answer_cold_gate.proto`; `daemon/internal/workspace/answers.go`; `webapp/src/feed/asks/cold-gate.ts` |
+| 5 | every unlanded refusal arm raised under `OpenWorkspace`'s vocabulary from inside the cold-gate re-open | **drawn for THIS path**: those refusals reach `AnswerColdGate`'s own `reopen_failed` arm, because the branch that swallowed them now answers rather than falling through to a Connect internal. The GENERAL unlanded-arm path (any rpc, any vocabulary) is untouched and is still priority 3 | `daemon/internal/workspace/answers.go`; `daemon/internal/server/refuse.go:165` |
+| 6 | ~190 of the 193 distinct workspace-scoped `log.Info` progress messages | **NOWHERE** — untouched | §2d |
 
 ### N2 — client-observed conditions with nowhere to go (5) — CLOSED
 
@@ -227,13 +235,13 @@ Two contract questions the remediation cannot settle on its own, for the owner:
 
 | # | item | why first |
 |---|---|---|
-| 1 | **`AnswerColdGate`'s re-open failure has no arm.** Add the arm(s) `AnswerColdGateError` needs so a failed re-open is an ANSWER rather than a `CodeInternal`, and stop raising `OpenWorkspace`'s vocabulary from a cold-gate call path | the ruling's own incident; the user's answer to a gate silently does nothing, twice on one day |
-| 2 | **`ResumeCold`'s failure raises no fault and no footer line.** A failed re-open is a bring-up death and should take `noteStartFailed`'s path — `shim_start_failed` + `SetStartFailed` + a dead link — exactly as a failed spawn does | it is the same failure the owner already ruled on for held prompts (`REALTEST-JUDGEMENT-CALLS.md` row 65, 2026-09-12), applied to the one bring-up path that was missed |
+| 1 | ~~**`AnswerColdGate`'s re-open failure has no arm.**~~ **DONE** — `AnswerColdGateError.reopen_failed{detail}`, raised under this verb's own vocabulary. Add the arm(s) `AnswerColdGateError` needs so a failed re-open is an ANSWER rather than a `CodeInternal`, and stop raising `OpenWorkspace`'s vocabulary from a cold-gate call path | the ruling's own incident; the user's answer to a gate silently does nothing, twice on one day |
+| 2 | ~~**`ResumeCold`'s failure raises no fault and no footer line.**~~ **DONE** — the answer path opens `cold_gate_reopen_failed`, which the partition puts at `disconnected · start_failed` with the failure's own line. A failed re-open is a bring-up death and should take `noteStartFailed`'s path — `shim_start_failed` + `SetStartFailed` + a dead link — exactly as a failed spawn does | it is the same failure the owner already ruled on for held prompts (`REALTEST-JUDGEMENT-CALLS.md` row 65, 2026-09-12), applied to the one bring-up path that was missed |
 | 3 | **The unlanded-arm path draws nothing.** Any refusal the response cannot carry becomes a Connect error the user reads as "the daemon could not be reached" | it is silent by construction and affects every rpc, not just this one |
 | 4 | ~~**A unary transport failure leaves nothing durable.**~~ **DONE** — it files a footer verdict; the `control_plane_failed` card is still open as described. File `control_plane_failed` from `callUnary`'s own catch, so every failed verb has a card, and settle rule (b)'s footer question | the failure sink already has the arm; this is the cheapest of the five rules |
 | 5 | ~~**`source_ended` files nothing.**~~ **DONE** — it files a footer verdict. A subscription whose source finished leaves its component permanently unfed with no notice | a whole surface can go stale silently |
 | 6 | **The four `OpenFeed` swallows** (each REPORTS now; what is left is the retry loop naming a refused open as an unreachable daemon) (`feed.ts:307`, `feed.ts:315`, `feed.ts:196`, `bubble.ts:359`) | a feed that stops tailing is the failure most likely to be read as "the agent is idle" |
-| 7 | **Sixteen fault kinds have no webapp carrier.** Settle rule (d)'s carrier, then draw them | large but not acute: Emacs sees them today |
+| 7 | ~~**Sixteen fault kinds have no webapp carrier.**~~ **DONE** — the carrier is the footer's own status tree; see N1 row 1 | large but not acute: Emacs sees them today |
 | 8 | **Progress selection.** Pick the operations a user waits on and give them footer activity kinds | the widest and the least urgent |
 
 ## 7. Log evidence, 2026-09-13
