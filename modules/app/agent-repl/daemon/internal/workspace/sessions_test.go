@@ -188,6 +188,13 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 		s.spawned = make(map[ids.WorkspaceID]int)
 	}
 	s.spawned[spec.WorkspaceID] = s.client.pid
+	// THE FORK'S PID REACHES THE CALLER BEFORE ANYTHING BLOCKS, exactly as the
+	// real supervisor hands it over between cmd.Start and the bring-up. A fake
+	// that skipped it would let the durable-pid invariant pass every test
+	// about it without ever being written.
+	if spec.Spawned != nil {
+		spec.Spawned(s.client.pid)
+	}
 	// THE TEST'S OWN HOOK SURVIVES the supervisor's deregistration: a scenario
 	// that watches the socket go when the process does arms it before the
 	// spawn, and losing it here would make the socket outlive the shim in
@@ -307,6 +314,34 @@ type fleetFixture struct {
 	// standDown is the ORDER the stand-down's steps happened in, shared by the
 	// fake watcher and the fake client, because the ordering is the guarantee.
 	standDown *[]string
+	// shimAlive scripts the kernel's answer about a RECORDED spawn's pid,
+	// which is what tells a shim that is still starting from no shim at all.
+	// Nil means every recorded pid is dead, which is what every scenario that
+	// is not about the starting window wants.
+	shimAlive func(pid int) bool
+}
+
+// fleetStepClock is a Clock that never sleeps: After fires at once and ADVANCES
+// the clock, so a bounded poll pays its real passes in no wall time.
+type fleetStepClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fleetStepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fleetStepClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	fired := c.now
+	c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	ch <- fired
+	return ch
 }
 
 // recordingLinkSink answers the three view sinks' OnLink and nothing else: the
@@ -403,6 +438,8 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		},
 		Now:        func() time.Time { return fixedNow },
 		AdoptBound: f.adoptBound,
+		Clock:      &fleetStepClock{now: fixedNow},
+		ShimAlive:  func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
 	})
 	if err != nil {
 		t.Fatalf("NewFleet: %v", err)

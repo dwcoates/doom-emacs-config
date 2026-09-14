@@ -893,3 +893,106 @@ func TestForgetWritesNothingWhenTheWorkspaceIsUnknown(t *testing.T) {
 		t.Fatalf("a refused Forget removed %d repository rows, want none removed", 1-n)
 	}
 }
+
+// TestSetSpawnedShimPIDRecordsTheForksPidWithoutASession pins the fact the
+// whole starting-shim adoption rests on: the pid is durable for a workspace
+// that has NO session row at all, which is exactly the state a registered
+// workspace is in when its first shim is forked.
+func TestSetSpawnedShimPIDRecordsTheForksPidWithoutASession(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	pid := 4242
+
+	// Act
+	if err := s.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetSpawnedShimPID: %v", err)
+	}
+	got, err := s.Workspace(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.SpawnedShimPID == nil || *got.SpawnedShimPID != pid {
+		t.Fatalf("spawned shim pid = %v, want %d", got.SpawnedShimPID, pid)
+	}
+}
+
+// TestSetSpawnedShimPIDClearsTheRecordedSpawn pins the retraction a stopped
+// spawn performs: a pid left behind makes the next boot wait out its whole
+// adoption bound for a process that is gone.
+func TestSetSpawnedShimPIDClearsTheRecordedSpawn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	pid := 4242
+	if err := s.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetSpawnedShimPID: %v", err)
+	}
+
+	// Act
+	if err := s.SetSpawnedShimPID(context.Background(), ws.ID, nil); err != nil {
+		t.Fatalf("SetSpawnedShimPID(nil): %v", err)
+	}
+	got, err := s.Workspace(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.SpawnedShimPID != nil {
+		t.Fatalf("spawned shim pid = %d, want nil after the spawn was stood down", *got.SpawnedShimPID)
+	}
+}
+
+// TestSetSpawnedShimPIDRefusesANonPositivePid pins the refusal: the value is
+// handed to kill(pid, 0), where 0 and negatives address process groups.
+func TestSetSpawnedShimPIDRefusesANonPositivePid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	zero := 0
+
+	// Act
+	err := s.SetSpawnedShimPID(context.Background(), ws.ID, &zero)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("SetSpawnedShimPID accepted a non-positive pid")
+	}
+}
+
+// TestSetSpawnedShimPIDRefusesAnUnknownWorkspace pins that a write matching no
+// row is a refusal rather than a silent success.
+func TestSetSpawnedShimPIDRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	pid := 4242
+
+	// Act
+	err := s.SetSpawnedShimPID(context.Background(), WorkspaceID("no-such-workspace"), &pid)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetSpawnedShimPID on an unknown workspace = %v, want ErrNotFound", err)
+	}
+}
+
+// TestWorkspaceRefusesACorruptSpawnedShimPid pins the decode: a non-positive
+// pid on disk is a corrupt row, never a silently dropped value.
+func TestWorkspaceRefusesACorruptSpawnedShimPid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	corrupt(t, s, `UPDATE workspaces SET spawned_shim_pid = 0 WHERE id = ?`, ws.ID)
+
+	// Act
+	_, err := s.Workspace(context.Background(), ws.ID)
+
+	// Assert
+	var decodeErr *DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("Workspace = %v, want a DecodeError for a non-positive recorded pid", err)
+	}
+}

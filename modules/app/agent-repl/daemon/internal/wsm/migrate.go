@@ -51,7 +51,21 @@ var migrations = []migration{
 	{To: 5, Name: "host_session_identity_backfill", DDL: hostSessionIdentityBackfillDDL},
 	{To: 6, Name: "creation_jobs_drop_one_shot_finish", DDL: creationJobsDropOneShotFinishDDL},
 	{To: 7, Name: "sessions_selected_config_dir", DDL: sessionsSelectedConfigDirDDL},
+	{To: 8, Name: "workspaces_spawned_shim_pid", DDL: spawnedShimPidDDL},
 }
+
+// spawnedShimPidDDL adds the pid of the shim a daemon SPAWNED for a workspace.
+//
+// It is a WORKSPACE fact and not a session one, which is the whole reason it
+// is a new column rather than a second writer of sessions.shim_pid: a
+// registered workspace that has never had a session has NO session row at all,
+// and the pid must be durable from the instant of the fork -- long before any
+// StartSession could file one. Every existing row is NULL, which reads exactly
+// as "no daemon has a spawn outstanding for this workspace", the same thing a
+// cleared value means.
+const spawnedShimPidDDL = `
+ALTER TABLE workspaces ADD COLUMN spawned_shim_pid INTEGER;
+`
 
 // sessionsSelectedConfigDirDDL adds the root the USER CHOSE for a workspace.
 // Every existing row is stamped '' by the column default, which is exactly
