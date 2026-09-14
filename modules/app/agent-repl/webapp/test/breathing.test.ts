@@ -16,8 +16,15 @@ import {
   bubbleWaveStyle,
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
+  STATUS_WAVE_CYCLE_MS,
+  STATUS_WAVE_LETTER_OFFSET_MS,
+  STATUS_WAVE_PERIOD_MS,
+  StatusWave,
+  WAVING_STATUS_ARMS,
   startPromptWave,
+  statusWordWaves,
 } from "../src/breathing.js";
+import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -458,5 +465,90 @@ describe("startPromptWave: a fresh prompt bubble arrives waving", () => {
     startPromptWave(bubble, NOW);
     // Assert
     expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
+  });
+});
+
+describe("StatusWave: the footer status word's travelling letter bulge", () => {
+  it("lags each letter behind the one before it by exactly one offset", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.delayMs(NOW, 0);
+
+    // Act
+    const first = wave.delayMs(NOW, 0);
+    const second = wave.delayMs(NOW, 1);
+
+    // Assert
+    expect(second - first).toBe(STATUS_WAVE_LETTER_OFFSET_MS);
+  });
+
+  it("reduces the delay modulo TWO periods, because the rule alternates", () => {
+    // Arrange — index 10 is exactly one period along; a one-period modulus
+    // would fold it back to zero and flip the bulge's direction.
+    const wave = new StatusWave();
+
+    // Act
+    const got = wave.delayMs(NOW, 10);
+
+    // Assert
+    expect(got).toBe(STATUS_WAVE_PERIOD_MS);
+  });
+
+  it("wraps at the end of the forward-and-back cycle", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.delayMs(NOW, 0);
+
+    // Act
+    const got = wave.delayMs(NOW + STATUS_WAVE_CYCLE_MS, 0);
+
+    // Assert
+    expect(got).toBe(0);
+  });
+
+  it("carries the elapsed time into every letter, so a redraw continues the wave", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.delayMs(NOW, 0);
+
+    // Act
+    const got = wave.delayMs(NOW + 900, 2);
+
+    // Assert
+    expect(got).toBe(900 + 2 * STATUS_WAVE_LETTER_OFFSET_MS);
+  });
+
+  it("floors the wave at zero when the clock goes backwards", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.delayMs(NOW, 0);
+
+    // Act
+    const got = wave.delayMs(NOW - 5000, 0);
+
+    // Assert
+    expect(got).toBe(0);
+  });
+});
+
+describe("statusWordWaves: which statuses mean progress", () => {
+  it.each([...WAVING_STATUS_ARMS].map((arm) => [arm]))("waves the %s arm", (arm) => {
+    // Arrange / Act / Assert
+    expect(statusWordWaves(arm)).toBe(true);
+  });
+
+  it.each(
+    FOOTER_STATUS_CASES.filter((arm) => !WAVING_STATUS_ARMS.has(arm)).map((arm) => [arm]),
+  )("holds the %s arm still", (arm) => {
+    // Arrange / Act / Assert
+    expect(statusWordWaves(arm)).toBe(false);
+  });
+
+  it("names only arms the contract declares, so a renamed arm cannot rot the set", () => {
+    // Arrange / Act
+    const unknown = [...WAVING_STATUS_ARMS].filter((arm) => !FOOTER_STATUS_CASES.includes(arm));
+
+    // Assert
+    expect(unknown).toEqual([]);
   });
 });
