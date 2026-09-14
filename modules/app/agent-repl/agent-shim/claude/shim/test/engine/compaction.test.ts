@@ -272,12 +272,18 @@ describe("reading a transcript whose last line states almost nothing", () => {
     expect(readAmbient(file).sessionId).toBe(OBSERVED_AMBIENT.sessionId);
   });
 
-  it("carries no optional field the last line did not state", () => {
-    // The ambient is rebuilt from the LAST line, so a terse tail line means
-    // terse ambient — nothing is inherited except the conversation's own id.
+  it("carries every field an EARLIER line stated, because a terse line states nothing about them", () => {
+    // AMENDED, AND THE OLD ASSERTION WAS THE DEFECT. This used to require that
+    // nothing but the session id survived a terse last line, on the reading
+    // that "the ambient is rebuilt from the LAST line". In the field that cost
+    // every one of 63 compactions its whole ambient — no cwd, no version, no
+    // gitBranch, and no `logicalParentUuid` — because the CLI writes a
+    // `last-prompt`/`summary` bookkeeping line at exactly the moment a
+    // hibernation compacts (owner's workspace, 2026-09-14). A line that does
+    // not state a field says nothing about it.
     const file = transcript([{ ...OBSERVED_AMBIENT, uuid: "u-1" }, { type: "summary" }]);
 
-    expect(readAmbient(file)).toEqual({ sessionId: OBSERVED_AMBIENT.sessionId });
+    expect(readAmbient(file)).toEqual({ ...OBSERVED_AMBIENT, lastUuid: "u-1" });
   });
 });
 
@@ -364,5 +370,95 @@ describe("reading a compaction back off the transcript", () => {
     writeFileSync(file, `${JSON.stringify(boundary)}\n${JSON.stringify(summary)}\n{not json\n`, "utf8");
 
     expect(transcriptTailIsCompaction(file)).toBe(false);
+  });
+});
+
+describe("the ambient fields a bookkeeping last line must not erase", () => {
+  // THE VENDOR WRITES LINES THAT ARE NOT CONVERSATION RECORDS. `last-prompt`,
+  // `queue-operation` and `summary` carry `sessionId` and little else, and a
+  // compaction very often lands right after one: all 63 on the owner's
+  // chess960-review-failures-enm transcript did (2026-09-14).
+  const lastPrompt = {
+    type: "last-prompt",
+    lastPrompt: "Summarize this conversation in full",
+    leafUuid: "11a2666e-5e78-458c-960e-6c4f14a3d4d7",
+    sessionId: OBSERVED_AMBIENT.sessionId,
+  };
+  const said = {
+    ...OBSERVED_AMBIENT,
+    type: "assistant",
+    uuid: "b60c9557-0ce9-400c-a845-ee915c0a2315",
+  };
+
+  it("keeps the workspace directory", () => {
+    expect(readAmbient(transcript([said, lastPrompt])).cwd).toBe(OBSERVED_AMBIENT.cwd);
+  });
+
+  it("keeps the CLI version", () => {
+    expect(readAmbient(transcript([said, lastPrompt])).version).toBe(OBSERVED_AMBIENT.version);
+  });
+
+  it("keeps the branch", () => {
+    expect(readAmbient(transcript([said, lastPrompt])).gitBranch).toBe(OBSERVED_AMBIENT.gitBranch);
+  });
+
+  it("keeps the slug", () => {
+    expect(readAmbient(transcript([said, lastPrompt])).slug).toBe(OBSERVED_AMBIENT.slug);
+  });
+
+  it("keeps the user type", () => {
+    expect(readAmbient(transcript([said, lastPrompt])).userType).toBe(OBSERVED_AMBIENT.userType);
+  });
+
+  it("keeps the entrypoint", () => {
+    expect(readAmbient(transcript([said, lastPrompt])).entrypoint).toBe(OBSERVED_AMBIENT.entrypoint);
+  });
+
+  it("keeps the last CHAIN NODE's uuid, not the bookkeeping line's absence of one", () => {
+    // THE WORST OF THE SET. `logicalParentUuid` is how the vendor's own
+    // boundary says where the chain restarts, and a boundary written without
+    // it names no predecessor at all.
+    expect(readAmbient(transcript([said, lastPrompt])).lastUuid).toBe(
+      "b60c9557-0ce9-400c-a845-ee915c0a2315",
+    );
+  });
+
+  it("still lets a later line CHANGE a field", () => {
+    // The merge is "a line that does not state a field says nothing about it",
+    // not "the first value wins": `gitBranch` and `slug` really do move.
+    const moved = { ...said, gitBranch: "DWC/later", uuid: "c0000000-0000-4000-8000-000000000001" };
+
+    expect(readAmbient(transcript([said, moved])).gitBranch).toBe("DWC/later");
+  });
+
+  it("writes a boundary carrying every field the vendor's own boundary carries", () => {
+    // The observed vendor line is
+    // `testdata/corpus/transcript-lines/system-compact_boundary.jsonl`.
+    const ambient = readAmbient(transcript([said, lastPrompt]));
+
+    const { boundary } = compactionLines({
+      ambient,
+      summary: "what happened",
+      preTokens: 1,
+      postTokens: 2,
+      durationMs: 3,
+      trigger: "manual",
+      atMs: 0,
+      permissionMode: "default",
+      newUuid: () => "d0000000-0000-4000-8000-000000000001",
+    });
+
+    expect(
+      [
+        "logicalParentUuid",
+        "userType",
+        "entrypoint",
+        "cwd",
+        "sessionId",
+        "version",
+        "gitBranch",
+        "slug",
+      ].filter((field) => boundary[field] === undefined),
+    ).toEqual([]);
   });
 });

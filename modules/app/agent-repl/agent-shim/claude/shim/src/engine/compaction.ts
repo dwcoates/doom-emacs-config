@@ -82,10 +82,27 @@ interface TranscriptAmbient {
 }
 
 /**
- * Read the ambient fields off the transcript's own last parseable line.
+ * Read the ambient fields off the transcript, each from the LAST line to state
+ * it.
  *
- * The LAST line, not the first: `gitBranch` and `slug` change over a
+ * The LAST value, not the first: `gitBranch` and `slug` change over a
  * conversation's life, and the records this writer appends belong at its end.
+ *
+ * PER FIELD, AND NOT PER LINE. A transcript's last line is very often not a
+ * conversation record at all — the CLI writes `last-prompt`, `queue-operation`
+ * and `summary` bookkeeping lines carrying `sessionId` and nothing else — and
+ * while this function rebuilt the whole accumulator from each line, ONE such
+ * line at the end erased every field the conversation had already stated.
+ *
+ * That is not hypothetical: all 63 compactions on the owner's
+ * chess960-review-failures-enm transcript (2026-09-14) landed right after a
+ * `last-prompt` line, and every boundary the shim wrote there carries
+ * `sessionId` alone — no `cwd`, `version`, `gitBranch`, `userType`,
+ * `entrypoint` or `slug`, and, worst of the set, no `logicalParentUuid`, which
+ * is the field the vendor's own boundary uses to say where the chain restarts.
+ * The observed vendor boundary
+ * (`testdata/corpus/transcript-lines/system-compact_boundary.jsonl`) carries
+ * all seven.
  */
 export function readAmbient(file: string): TranscriptAmbient {
   const contents = readFileSync(file, "utf8");
@@ -101,7 +118,10 @@ export function readAmbient(file: string): TranscriptAmbient {
     }
     const pick = (key: string): string | undefined =>
       typeof record[key] === "string" ? (record[key]) : undefined;
+    // MERGED ONTO WHAT IS ALREADY KNOWN. A line that does not state a field
+    // says nothing about it; only a line that DOES may change it.
     ambient = {
+      ...ambient,
       sessionId: pick("sessionId") ?? ambient.sessionId,
       ...(pick("cwd") === undefined ? {} : { cwd: pick("cwd") }),
       ...(pick("version") === undefined ? {} : { version: pick("version") }),
@@ -109,6 +129,9 @@ export function readAmbient(file: string): TranscriptAmbient {
       ...(pick("userType") === undefined ? {} : { userType: pick("userType") }),
       ...(pick("entrypoint") === undefined ? {} : { entrypoint: pick("entrypoint") }),
       ...(pick("slug") === undefined ? {} : { slug: pick("slug") }),
+      // THE LAST RECORD THAT IS A CHAIN NODE, which is the last one carrying a
+      // `uuid`. The bookkeeping lines have none, and the boundary's
+      // `logicalParentUuid` has to name a record the loader can find.
       ...(pick("uuid") === undefined ? {} : { lastUuid: pick("uuid") }),
     };
   }
