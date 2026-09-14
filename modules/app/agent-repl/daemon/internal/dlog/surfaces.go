@@ -151,13 +151,53 @@ func (d droppedSink) write(line []byte) error {
 	return nil
 }
 
+// workspaceDest routes one workspace's records to that workspace's sink BY
+// DIRECTORY, resolving the sink at write time instead of pinning the *sink the
+// logger was built from.
+//
+// THE PIN WAS THE DEFECT. Long-lived components -- the topbar's publisher, the
+// shim client supervisor, the stop path -- hold a workspace logger for as long
+// as they run, and Evict releases the sink they were built on. Every record
+// they wrote afterwards met a released handle, and eviction poisoned it, so
+// ordinary INFO records about the workspace's own teardown came back as
+// sink_failure errors. Resolving here instead lets openSink's remembered
+// target do what it was written for: the sink re-opens and appends to the same
+// file the canonical link already names.
+type workspaceDest struct {
+	s *surfaces
+	// dir is already cleanDir'd, and is the surfaces' own map key.
+	dir  string
+	name string
+}
+
+// write resolves the sink and appends. The two ways resolution can fail are
+// both ordinary and neither is an error record:
+//
+//   - the surfaces are CLOSED, and the record is dropped with the one stderr
+//     warning droppedSink documents, because the run log is closed too;
+//   - the workspace DIRECTORY is gone -- a nuke, or a merge that removed the
+//     worktree -- which is exactly the condition WorkspaceOrCentral names: the
+//     record lands in the central sink and the condition is reported once per
+//     directory at DEBUG.
+func (d workspaceDest) write(line []byte) error {
+	_, sk, err := d.s.resolve(d.dir, d.name)
+	if err == nil {
+		return sk.write(line)
+	}
+	if errors.Is(err, errSurfacesClosed) {
+		return droppedSink{s: d.s}.write(line)
+	}
+	d.s.noteCentralFallback(d.dir, err)
+	return d.s.runLog.write(line)
+}
+
 // Workspace resolves the logger whose durable sink is the canonical
 // <dir>/.claude/emacs/daemon.log. It fails rather than falling back to the
 // global sink -- EXCEPT once the surfaces are closed, where it hands back a
 // dropping logger so a request racing the daemon's shutdown is answered by its
 // handler instead of failing inside logging.
 func (s *surfaces) Workspace(dir string) (Logger, error) {
-	ws, sk, err := s.resolve(dir, "daemon")
+	ws, _, err := s.resolve(dir, "daemon")
 	if errors.Is(err, errSurfacesClosed) {
 		clean, cerr := cleanDir(dir)
 		if cerr != nil {
@@ -177,9 +217,14 @@ func (s *surfaces) Workspace(dir string) (Logger, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The sink resolve just opened is NOT captured: the destination re-resolves
+	// by directory on every record, so a logger that outlives an eviction goes
+	// on writing to the workspace's own log. Resolving here still refuses a
+	// directory that cannot host a sink, which is the contract this surface's
+	// callers depend on.
 	return &logger{
 		s:       s,
-		dest:    sk,
+		dest:    workspaceDest{s: s, dir: ws.dir, name: "daemon"},
 		runtime: RuntimeDaemon,
 		base:    Context{KeyWorkspaceDir: ws.dir, KeyWorkspaceID: ws.id, KeyWorkspaceDirHash: ws.dirHash},
 	}, nil
