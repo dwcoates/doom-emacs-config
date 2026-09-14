@@ -525,7 +525,7 @@ completion UI rather than the product. That reasoning inverts here:
 `agent-repl-send` reads the COMPOSER rather than taking an argument, so a
 prompt inserted through a probe would be testing the send with the composer
 removed from it — and the composer is half of what the plan's item names. So
-`SPC o v` selects the composer, `i` enters insert state, the prompt's
+`SPC o v` leaves the editor standing in the composer, `i` enters insert state, the prompt's
 characters are posted from a keycode table (`rt9PromptKeys`), `<escape>`
 returns to normal state, and `RET` — the composer's own send key
 (`lisp/input.el`, `agent-repl-input-mode-map`, `:ni "RET"`) — is the act. The
@@ -539,14 +539,27 @@ the prompt the editor actually holds rather than the one the run meant to type
 — so one dropped keystroke costs one finding instead of invalidating every
 assertion after it.
 
-**`SPC o v` IS PROVEN BY ITS EFFECT, NOT BY A PROMPT.** It asks no minibuffer
-question, so the substrate's `wsActProveChord` does not apply; the pair realtest
-8 uses for `SPC j d` and `SPC j x` is used instead — Emacs's own
-`(recent-keys)` carrying the sequence, and the workspace's composer being the
-selected buffer. A failure there is FATAL rather than collected, which is the
-opposite of this layer's usual rule and is deliberate: everything after it types
-characters wherever the point is, and a run that typed a prompt into the owner's
-source file and pressed return there would be worse than a run that stopped.
+**`SPC o v` IS A TOGGLE, AND IT IS PROVEN BY ITS EFFECT, NOT BY A PROMPT.**
+`agent-repl-focus-input` selects the composer from anywhere else and jumps BACK
+to the workspace's webview when the editor already stands in the composer
+(`lisp/panels.el`). A minted workspace auto-selects its composer on arrival
+(`maybe-autoselect-input`, branch=select-input-win), so the run's FIRST press
+usually moves the editor off the composer, and the act is written for that: it
+reads where the editor stands before pressing, asserts the landing the toggle
+predicts, records which case it was in the manifest, and presses a second time
+when the first landed on the webview.
+
+Each press asks no minibuffer question, so the substrate's `wsActProveChord`
+does not apply; the pair realtest 8 uses for `SPC j d` and `SPC j x` is used
+instead — Emacs's own `(recent-keys)` carrying the sequence, and the predicted
+window's buffer being the selected one. The selection is read as
+`(window-buffer (selected-window))`, never as `(current-buffer)`: every probe
+form runs inside the transport's own `with-temp-file`, so `(current-buffer)` in
+a probe is the transport's temp buffer. A landing anywhere but the predicted one
+is FATAL rather than collected, which is the opposite of this layer's usual rule
+and is deliberate: everything after this types characters wherever the point is,
+and a run that typed a prompt into the owner's source file and pressed return
+there would be worse than a run that stopped.
 
 **The fake vendor answers from the DEFAULT PROSE SCENARIO, and nothing extra is
 stated on the launch.** A guarded daemon spawns every shim with `--fake`, so the
