@@ -103,14 +103,19 @@ func (w *allowanceWindow) fileFigures(utilizationPercent float64, resetsAtMs int
 	return true
 }
 
-// rateState is the two drawn allowances. The five-hour window is the session
-// allowance and the seven-day window (with its per-model and overage-included
-// aliases) is the weekly one.
+// rateState is the drawn allowances. The five-hour window is the session
+// allowance, the seven-day window (with its per-model and overage-included
+// aliases) is the weekly one, and the vendor's own overage window is the
+// third.
 type rateState struct {
 	// session is the rolling five-hour allowance.
 	session allowanceWindow
 	// weekly is the seven-day allowance.
 	weekly allowanceWindow
+	// overage is the allowance the vendor bills beyond the two above. It
+	// stays unfigured — and so draws absent — on the accounts that never
+	// report an overage window at all.
+	overage allowanceWindow
 	// at is when the newest evidence for either window was observed.
 	at time.Time
 	// sample is the newest account-usage SAMPLE's outcome, arm for arm from

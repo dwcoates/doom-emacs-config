@@ -441,7 +441,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
-			r.observeRateLimitStatus(ws, s, u.RateLimitStatus)
+			r.observeRateLimitStatus(s, u.RateLimitStatus)
 		}
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) {
@@ -579,10 +579,9 @@ func unavailableSample(unavailable *conversationv1.SessionAccountUsageUnavailabl
 // arm join. An event that carries a utilization also supplies the figure, and
 // as the newest sighting to arrive it is the one drawn — see `fileFigures`,
 // which states why arrival rather than a timestamp orders the two sources.
-// The overage window has no cell in the contract, so it
-// is logged and dropped rather than drawn against a window it is not about;
-// a status naming no window is not filable at all.
-func (r *resolver) observeRateLimitStatus(ws ids.WorkspaceID, s *wsState, status *conversationv1.SessionRateLimitStatus) {
+// The overage window is its own allowance cell and files exactly like the
+// other two; a status naming no window is not filable at all.
+func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.SessionRateLimitStatus) {
 	if status == nil {
 		return
 	}
@@ -596,10 +595,7 @@ func (r *resolver) observeRateLimitStatus(ws ids.WorkspaceID, s *wsState, status
 		*conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
 		window = &s.rate.weekly
 	case *conversationv1.SessionRateLimitType_Overage:
-		r.logOf(ws, s).Warn("daemon.footer.rate_limit_overage",
-			"the vendor reported the overage window, which the footer contract has no allowance cell for",
-			dlog.Context{})
-		return
+		window = &s.rate.overage
 	default:
 		return
 	}
