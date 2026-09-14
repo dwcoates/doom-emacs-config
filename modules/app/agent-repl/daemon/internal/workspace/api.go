@@ -77,6 +77,32 @@ type CreateSpec struct {
 	PermissionMode string
 	// Priority is the roster priority recorded at creation, nil when unset.
 	Priority *wsm.Priority
+	// Progress receives the create's stage transitions as they happen, for a
+	// caller relaying them to a client. Nil for the legacy synchronous create,
+	// which emits nothing; the verb never assumes it is set.
+	Progress CreateProgress
+}
+
+// CreateStage is one stage a Create passes through between acceptance and its
+// terminal outcome. It is the verb's own vocabulary, proto-free: the caller
+// maps it onto whatever channel carries progress.
+type CreateStage int
+
+const (
+	// CreateStageDerivingName: the daemon is minting the workspace's name with
+	// a headless naming call. Reported only when the create supplied no name.
+	CreateStageDerivingName CreateStage = iota
+	// CreateStageCreatingWorktree: the daemon is materializing the git
+	// worktree (`git worktree add`), the step a cancelled request context used
+	// to kill mid-run.
+	CreateStageCreatingWorktree
+)
+
+// CreateProgress receives a Create's stage transitions in order. The terminal
+// outcome is NOT reported here: it is the verb's own return value, which the
+// caller maps. A create with no reporter leaves this nil.
+type CreateProgress interface {
+	Stage(CreateStage)
 }
 
 // InterruptTarget names what an Interrupt aims at. Exactly one is set.

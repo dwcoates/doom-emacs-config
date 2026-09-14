@@ -929,3 +929,55 @@ func TestCreateMintsAutoWhenTheCreationNamesNoMode(t *testing.T) {
 		t.Fatalf("minted permission mode = %q, want auto", got)
 	}
 }
+
+// recordingProgress records the stages a Create reports through its
+// CreateProgress reporter, in order.
+type recordingProgress struct{ stages []CreateStage }
+
+func (r *recordingProgress) Stage(stage CreateStage) { r.stages = append(r.stages, stage) }
+
+// TestCreateReportsDerivingNameThenCreatingWorktreeWhenItMintsTheName pins the
+// stage set a derived-name create reports, at the real points: the naming call
+// (DerivingName) then the worktree materialization (CreatingWorktree), in order.
+func TestCreateReportsDerivingNameThenCreatingWorktreeWhenItMintsTheName(t *testing.T) {
+	// Arrange: a create with an initial prompt and no name, so it mints one.
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "DWC")
+	spec := standardSpec(t, f)
+	rec := &recordingProgress{}
+	spec.Progress = rec
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(rec.stages) != 2 ||
+		rec.stages[0] != CreateStageDerivingName ||
+		rec.stages[1] != CreateStageCreatingWorktree {
+		t.Fatalf("stages = %v, want [DerivingName CreatingWorktree]", rec.stages)
+	}
+}
+
+// TestCreateDoesNotReportDerivingNameForASuppliedName pins that a create which
+// supplies its own name mints none, so it reports only the worktree stage.
+func TestCreateDoesNotReportDerivingNameForASuppliedName(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "DWC")
+	spec := standardSpec(t, f)
+	spec.Name = "chosen-name"
+	rec := &recordingProgress{}
+	spec.Progress = rec
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(rec.stages) != 1 || rec.stages[0] != CreateStageCreatingWorktree {
+		t.Fatalf("stages = %v, want [CreatingWorktree] only", rec.stages)
+	}
+}
