@@ -68,7 +68,7 @@ export const TURN_ERROR_WAIT_ARMS: readonly string[] = ["rateLimited", "overload
 /** The terminal row. */
 export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLElement {
   const outcome = requireCase(msg.outcome, `${PATH}.outcome`);
-  log.debug(`drawing a turn_ended row as ${outcome.case}`, {
+  log.info(`drawing a turn_ended row as ${outcome.case}`, {
     operation: "feed.draw-turn-ended",
     context: { outcome: outcome.case },
   });
@@ -140,7 +140,7 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   // carries the row-level marker above.
   const bubble = row.querySelector(".bubble.assistant");
   if (bubble !== null) bubble.classList.add(FINAL_RESPONSE_CLASS);
-  log.debug("marked the answering row with the final-answer treatment", {
+  log.info("marked the answering row with the final-answer treatment", {
     operation: "feed.final-answer-marked",
     context: { answer: answer.value, styled_bubble: bubble !== null },
   });
@@ -174,7 +174,7 @@ export function drawFeedTurnEndedErrored(
   const wait = retryWait(error);
   if (wait !== null) el.append(drawRetryCountdown(endedAtMs, wait, rc));
 
-  log.debug(`drew the turn error arm ${error.case}`, {
+  log.info(`drew the turn error arm ${error.case}`, {
     operation: "feed.draw-turn-error",
     context: {
       arm: error.case,

@@ -66,7 +66,7 @@ export function drawFeedSessionSeparation(
   rc: RowContext,
 ): HTMLElement {
   const kind = requireCase(msg.kind, `${PATH}.kind`);
-  log.debug(`drawing a separation row as ${kind.case}`, {
+  log.info(`drawing a separation row as ${kind.case}`, {
     operation: "feed.draw-separation",
     context: { arm: kind.case, has_tokens: msg.tokens !== undefined },
   });
