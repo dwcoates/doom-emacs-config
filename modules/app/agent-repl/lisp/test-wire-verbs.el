@@ -2360,22 +2360,57 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-register-repository-success
                     (agent-repl-test-wire-verbs--parse
-                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}"))
-                   '(:repository (:id "repo-1" :dir "/r/one") :already-known nil)))))
+                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/r/one\"}}"))
+                   '(:repository (:id "repo-1" :dir "/r/one") :already-known nil
+                     :workspace (:id "ws-1" :dir "/r/one")
+                     :workspace-already-known nil)))))
 
 (ert-deftest agent-repl-test-wire-verbs-register-repository-success-carries-already-known ()
   "`already_known' is an ANSWER, so it decodes rather than being inferred."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-register-repository-success
                     (agent-repl-test-wire-verbs--parse
-                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"alreadyKnown\":true}"))
-                   '(:repository (:id "repo-1" :dir "/r/one") :already-known t)))))
+                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"alreadyKnown\":true,\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/r/one\"}}"))
+                   '(:repository (:id "repo-1" :dir "/r/one") :already-known t
+                     :workspace (:id "ws-1" :dir "/r/one")
+                     :workspace-already-known nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-success-carries-the-workspace-ref ()
+  "The success carries the main worktree the same call registered as a workspace.
+It is what `SPC p p\=' switches to, so a success without it would say the
+registration happened while naming nothing the user can act on."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-wire-decode-register-repository-success
+                               (agent-repl-test-wire-verbs--parse
+                                "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/r/one\"}}"))
+                              :workspace)
+                   '(:id "ws-1" :dir "/r/one")))))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-success-carries-workspace-already-known ()
+  "`workspace_already_known' decodes on its own: it is independent of the
+repository's own `already_known', and the ack reports the two apart."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-register-repository-success
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/r/one\"},\"workspaceAlreadyKnown\":true}"))
+                   '(:repository (:id "repo-1" :dir "/r/one") :already-known nil
+                     :workspace (:id "ws-1" :dir "/r/one")
+                     :workspace-already-known t)))))
 
 (ert-deftest agent-repl-test-wire-verbs-register-repository-success-without-a-ref-is-a-breach ()
   "A success naming no repository says nothing the caller can use."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-register-repository-success
-                   (agent-repl-test-wire-verbs--parse "{\"alreadyKnown\":true}"))
+                   (agent-repl-test-wire-verbs--parse "{\"alreadyKnown\":true,\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/r/one\"}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-register-repository-success-without-a-workspace-is-a-breach ()
+  "A success naming no workspace is a breach for the same reason: the endpoint
+always registers the main worktree, so an answer without it is not one."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-register-repository-success
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}"))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-register-repository-error-not-in-a-repository-arm ()
@@ -2411,9 +2446,11 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-register-repository-response
                     (agent-repl-test-wire-verbs--parse
-                     "{\"success\":{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}}"))
+                     "{\"success\":{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/r/one\"}}}"))
                    '(:arm :success
-                     :value (:repository (:id "repo-1" :dir "/r/one") :already-known nil))))))
+                     :value (:repository (:id "repo-1" :dir "/r/one") :already-known nil
+                             :workspace (:id "ws-1" :dir "/r/one")
+                             :workspace-already-known nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-register-repository-response-error-arm ()
   "The response's `error' arm decodes through the shared result oneof."
