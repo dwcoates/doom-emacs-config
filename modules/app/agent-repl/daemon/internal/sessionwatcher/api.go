@@ -205,6 +205,13 @@ type TopbarSink interface {
 	// OnSessionUpdate carries model changes, diagnostics, context usage,
 	// account usage and session faults.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
+	// OnContextCut is the cut's END SIGNAL — /clear or a compaction — and the
+	// chip's evidence that its last `context_usage` no longer describes the
+	// context. A clear or a completed compaction discards the transcript the
+	// stale total was read off, so the chip drops that figure rather than
+	// stating it until the next reading; a FAILED compaction cut nothing, so
+	// the chip keeps the total it already had.
+	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
 	// OnActivity is here only for the unmodeled-activity warning: an activity
 	// the schema does not model is a warning the topbar shows.
 	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity)

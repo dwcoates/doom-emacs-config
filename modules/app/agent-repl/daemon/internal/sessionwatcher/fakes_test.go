@@ -563,6 +563,10 @@ func (s *topbarSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.S
 	s.rec.emit(event{sink: "topbar", method: "OnSessionUpdate", detail: sessionArm(update)})
 }
 
+func (s *topbarSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut) {
+	s.rec.emit(event{sink: "topbar", method: "OnContextCut", agent: agent.GetValue()})
+}
+
 func (s *topbarSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	s.rec.emit(event{sink: "topbar", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
 }
@@ -747,20 +751,24 @@ func (h *harness) quiet() {
 	h.sentinel(h.main)
 }
 
-// sentinel pushes a context cut, whose routing is fixed and short (the feed
-// then the footer), and reads the recorder up to it. Everything returned is
-// what the frame under test provoked.
+// sentinel pushes a context cut, whose routing is fixed and short (the feed,
+// then the footer, then the topbar), and reads the recorder up to it.
+// Everything returned is what the frame under test provoked.
 func (h *harness) sentinel(stream *fakeStream[*shimv1.WatchAgentResponse]) []event {
 	h.t.Helper()
 	stream.send(h.t, entryFrame(frameUpdate("sentinel", &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
 	})))
-	// The cut reaches the feed AND the footer, and the footer is second, so
-	// the FOOTER's call is the sentinel: reading only to the feed's would
-	// leave the footer's behind to pollute the next assertion.
-	seen := h.rec.until(h.t, "footer.OnContextCut")
-	if len(seen) > 0 && seen[len(seen)-1].name() == "feed.OnContextCut" {
-		seen = seen[:len(seen)-1]
+	// The cut reaches the feed, the footer AND the topbar in that order, so
+	// the TOPBAR's call is the sentinel: reading to any earlier one would
+	// leave the later cut calls behind to pollute the next assertion. The two
+	// that precede it are the sentinel's own, not the frame's, so they are
+	// stripped from the tail.
+	seen := h.rec.until(h.t, "topbar.OnContextCut")
+	for _, name := range []string{"footer.OnContextCut", "feed.OnContextCut"} {
+		if len(seen) > 0 && seen[len(seen)-1].name() == name {
+			seen = seen[:len(seen)-1]
+		}
 	}
 	return seen
 }
