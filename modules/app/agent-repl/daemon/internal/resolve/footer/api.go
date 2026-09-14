@@ -93,6 +93,28 @@ type StartFailed struct {
 	Detail string
 }
 
+// Fault is one standing daemon fault, as the footer draws it. The daemon's
+// health package decides which cell a kind claims (THE FAULT PARTITION, stated
+// in internal/health/footer.go and normatively in footer.proto); the resolver
+// takes the verdict and draws it, deriving nothing.
+type Fault struct {
+	// ID is the fault record's id; CloseFault retracts it by this.
+	ID string
+	// Kind is the fault kind, spelled as the daemon's fault vocabulary spells
+	// it. It is drawn in the activity cell.
+	Kind string
+	// Status is the footer status the fault CLAIMS: "disconnected", "blocked",
+	// or EMPTY for a non-escalating fault, which leaves the status exactly as
+	// it stands and takes the activity cell alone.
+	Status string
+	// SubStatus is the bucket within that status, empty when Status is.
+	SubStatus string
+	// Detail is the composed line, drawn verbatim. Empty is legal.
+	Detail string
+	// At is when the fault began standing.
+	At time.Time
+}
+
 // ColdGate is the standing cold-context gate, which owns the composer while it
 // stands.
 type ColdGate struct {
@@ -164,6 +186,17 @@ type Resolver interface {
 	// SetInterrupting fires the waiting-interrupting status the MOMENT an
 	// interrupt registers, before the real turn end arrives.
 	SetInterrupting(ws ids.WorkspaceID, on bool)
+	// OpenFault installs one standing daemon fault. An EMPTY workspace is a
+	// DAEMON-SCOPED fault, which stands on every workspace's strip because it
+	// is every workspace that is owed the service the daemon cannot give.
+	//
+	// It is driven from the ONE place faults are opened — health.ObserveFaults
+	// — never from the raise sites: per-site plumbing is exactly how three
+	// fault kinds came to have a footer path and sixteen did not.
+	OpenFault(ws ids.WorkspaceID, fault Fault)
+	// CloseFault retracts a standing fault by its record id. An empty
+	// workspace retracts a daemon-scoped one.
+	CloseFault(ws ids.WorkspaceID, id string)
 	// SetStartFailed installs the standing bring-up failure whose line the
 	// `disconnected · start_failed` step exists to explain, nil to clear it.
 	// The next successful link edge clears it on its own.

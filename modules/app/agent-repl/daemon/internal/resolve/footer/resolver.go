@@ -22,9 +22,13 @@ type resolver struct {
 	log  dlog.Surfaces
 	opts options
 
-	mu     sync.Mutex
-	states map[ids.WorkspaceID]*wsState
-	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
+	mu sync.Mutex
+	// daemonFaults are the DAEMON-scoped standing faults: they belong to no
+	// workspace and so stand on every workspace's strip, because it is every
+	// workspace that is owed the service the daemon cannot give.
+	daemonFaults []Fault
+	states       map[ids.WorkspaceID]*wsState
+	topics       map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -137,6 +141,39 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	log.Debug(operation, message, ctx)
 	topic.Publish(view)
+}
+
+// mutateAll applies a resolver-WIDE change and republishes every workspace
+// that has a footer, because a daemon-scoped fact stands on all of them. A
+// workspace that has observed nothing yet is left alone: its footer is not
+// published at all until its first fact, and a daemon fault is not the fact
+// that makes a workspace's strip exist.
+func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply func(*wsState), global func()) {
+	type publication struct {
+		topic *publish.Topic[*frontendv1.FooterView]
+		view  *frontendv1.FooterView
+		log   dlog.Logger
+	}
+	r.mu.Lock()
+	global()
+	out := make([]publication, 0, len(r.states))
+	for ws, s := range r.states {
+		if !s.seen {
+			continue
+		}
+		apply(s)
+		out = append(out, publication{r.topicLocked(ws), r.render(ws, s), r.logOf(ws, s)})
+	}
+	r.mu.Unlock()
+
+	if ctx == nil {
+		ctx = dlog.Context{}
+	}
+	r.log.Global().Debug(operation, message, ctx)
+	for _, p := range out {
+		p.log.Debug(operation, message, ctx)
+		p.topic.Publish(p.view)
+	}
 }
 
 // render builds the whole view from the accumulation. Nothing partial is ever
