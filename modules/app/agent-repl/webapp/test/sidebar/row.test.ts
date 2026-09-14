@@ -10,6 +10,7 @@ import {
   drawRosterRow,
   drawRosterRowWhen,
   drawStatusMark,
+  expandVisibleRows,
   placeOpenRowDetails,
   placeRowDetail,
   toggleRowMenu,
@@ -347,6 +348,64 @@ describe("the family", () => {
   it("draws no family box for a childless row", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     expect(drawn.querySelector(".kids")).toBeNull();
+  });
+
+  it("does not draw a closed child", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", children: [row({ id: "ws-2", closed: true })] }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector("[data-roster-row='ws-2']")).toBeNull();
+  });
+
+  it("hoists a live grandchild up in a closed child's place", () => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        children: [row({ id: "ws-2", closed: true, children: [row({ id: "ws-3" })] })],
+      }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".kids [data-roster-row='ws-3']")).not.toBeNull();
+  });
+
+  it("draws no family box when every child is closed and leaves no descendant", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", children: [row({ id: "ws-2", closed: true })] }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".kids")).toBeNull();
+  });
+});
+
+describe("expandVisibleRows", () => {
+  it("keeps an open row", () => {
+    const visible = expandVisibleRows([row({ id: "ws-1", closed: false })], "R");
+    expect(visible.map((v) => v.row.workspace?.workspace?.id)).toEqual(["ws-1"]);
+  });
+
+  it("drops a closed row", () => {
+    const visible = expandVisibleRows([row({ id: "ws-1", closed: true })], "R");
+    expect(visible).toEqual([]);
+  });
+
+  it("hoists a closed row's live child into its place", () => {
+    const visible = expandVisibleRows(
+      [row({ id: "ws-1", closed: true, children: [row({ id: "ws-2" })] })],
+      "R",
+    );
+    expect(visible.map((v) => v.row.workspace?.workspace?.id)).toEqual(["ws-2"]);
+  });
+
+  it("gives a hoisted row the message path it was found at", () => {
+    const visible = expandVisibleRows(
+      [row({ id: "ws-1", closed: true, children: [row({ id: "ws-2" })] })],
+      "R",
+    );
+    expect(visible[0]?.path).toBe("R[0].children[0]");
   });
 });
 
