@@ -255,6 +255,15 @@ type sidecar struct {
 	// moment: keyed by path, a rename bought the same file a second rewind and
 	// a second re-read of its in-progress turn.
 	rewound map[string]bool
+	// rewindWalked and rewindSkipped count what the boot rewind DID with the
+	// corpus: how many transcripts could still have been carrying a turn in
+	// flight and were scanned backward, and how many were at rest and were
+	// watched from their cursor with no backward scan and no re-read. They are
+	// stated as one INFO summary at the catch-up edge, beside the other
+	// summaries the boot walk owes, because the per-file decision is verbose
+	// and thousands of verbose lines say nothing about the SHAPE of the walk.
+	rewindWalked  int
+	rewindSkipped int
 	// Workspace attribution is read once per session's main transcript. Many
 	// sidechain files can share it, so rediscovery reuses the proven identity.
 	workspaceBySession map[string]workspaceAttribution
@@ -295,6 +304,10 @@ type sidecar struct {
 	// summaries were already stated.
 	drainedPass  bool
 	catchupEnded bool
+	// pass is the poll walk currently in progress, spread across as many ticks
+	// as its slice bound needs. Nil between passes: the next tick opens a fresh
+	// one over whatever is watched then.
+	pass *pollPass
 	// suspensionStated remembers that the WARNING opening this outage has been
 	// written. THE OUTAGE IS STATED ONCE, and a process that starts with no
 	// store is in an outage exactly like one whose store died mid-run — so the
@@ -315,6 +328,33 @@ type sidecar struct {
 	jitter func(time.Duration) time.Duration
 	// bootTimeMs is the machine boot time, injectable for the boot sweep's test.
 	bootTimeMs func() int64
+}
+
+// pollPass is ONE walk over every watcher, which on a boot walk is minutes of
+// reading and therefore cannot be one tick's work.
+//
+// WHY A PASS IS SLICED AT ALL. `pollAll` used to walk the whole watched set to
+// completion inside one tick. During a restart's corpus walk that tick lasted
+// minutes, and nothing else on the poll timer ran while it did: not the change
+// probe, so no new transcript was discovered, and not the first poll of a file
+// that had been discovered, so nothing new was read either. Realtest 9, sweep
+// rt-run37: a fresh workspace's turn concluded at 23:46:41, inside a boot walk
+// that ran from 23:44:21 to 23:46:45, and its answer rows reached the store at
+// ~23:47:44. A pass that yields the tick back keeps discovery and a new file's
+// first read on their own one-second clock however large the corpus is.
+//
+// THE PASS IS THE UNIT `drainedPass` IS ABOUT, not the tick. The startup
+// catch-up window closes on a pass that walked EVERY watcher, and that fact now
+// spans slices: `seen` is the roster the pass enrolled and `pending` what it has
+// left, so the window closes when the last of them has been polled and not one
+// tick earlier.
+type pollPass struct {
+	// pending are the paths this pass has still to poll, in walk order.
+	pending []string
+	// seen is every path this pass has enrolled, polled or not. It is what makes
+	// a mid-pass discovery distinguishable from a watcher the pass already
+	// walked.
+	seen map[string]bool
 }
 
 func newSidecar(options Options, log *logging.Bound) *sidecar {
@@ -584,6 +624,12 @@ func (s *sidecar) suspend(operation string, cause error) {
 	// resume from a position the NEXT cycle's store never handed us, which is
 	// the one thing the invariant forbids.
 	s.watchers = map[string]*watched{}
+	// THE PASS GOES WITH THE WATCHERS IT WAS WALKING. Its roster names tailers
+	// that no longer exist, and a resumed cycle rebuilds every one of them from
+	// the position the new cycle's store hands it — so the walk starts over,
+	// which is also why an outage cannot close the catch-up window on a pass
+	// that never finished.
+	s.pass = nil
 	s.store.Close()
 	s.suspendedSince = s.now()
 	s.attempts = 0
@@ -994,7 +1040,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
 	if cursor != nil {
 		tailer.Restore(cursor)
-		s.rewindOnce(target, identity, tailer)
+		s.rewindOnce(target, identity, tailer, now)
 	}
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
 	s.trackDetached(target, now)
@@ -1092,6 +1138,13 @@ func (s *sidecar) mainAgentFor(target discover.Target) string {
 // record's write and upsert identities are digested from its file position,
 // which has not moved.
 func (s *sidecar) rekeyRotations() {
+	// ONE QUESTION FOR THE WHOLE WATCHED SET, ASKED OF THE LINK DIRECTORIES
+	// RATHER THAN OF EVERY ID. Resolve is an in-memory lookup and remembers the
+	// ids nothing links; this is the event that makes a remembered miss wrong,
+	// and it costs one readdir plus a stat per shim workspace however many
+	// watchers there are. Re-globbing per id instead is what made a steady-state
+	// sidecar hold most of a core and stretched a poll tick to seconds.
+	s.identity.RecheckLinks()
 	for path, w := range s.watchers {
 		if w.ctx == nil {
 			continue
@@ -1214,20 +1267,76 @@ func (s *sidecar) bookFor(target discover.Target) string {
 // process, moving a restored cursor back to the first record of the in-progress
 // turn so the converter's in-memory joins re-warm over one re-read turn.
 //
+// THE REWIND IS FOR FILES THAT CAN CARRY A TURN IN FLIGHT, NOT FOR THE CORPUS.
+// The joins it re-warms exist only for a turn this reader was half-way through
+// when it stopped. A transcript that last grew hours ago, whose restored cursor
+// already sits at its end, cannot be holding one: nothing has been appended
+// since long before this process existed, and there is no half-converted turn
+// to re-read. Rewinding it anyway bought nothing and cost the whole boot walk —
+// realtest 9, sweep rt-run37: 1353 transcripts rewound and re-read, 1132 of them
+// last grown over 108 hours earlier, a startup catch-up that ran 2m24s, and a
+// new workspace's answer rows reaching the store a minute after its turn ended.
+//
+// DISCOVERY IS NOT NARROWED BY THIS. Every file is still enumerated, classified
+// and watched; a file at rest is simply watched FROM ITS CURSOR, with no
+// backward scan and no re-read. The moment it grows, the ordinary poll reads
+// the new bytes exactly as it always did.
+//
 // Spools are never rewound: they carry no turns, and their deltas are already
 // offset-carrying.
-func (s *sidecar) rewindOnce(target discover.Target, identity string, tailer *tail.Tailer) {
+func (s *sidecar) rewindOnce(target discover.Target, identity string, tailer *tail.Tailer, now time.Time) {
 	if s.rewound[identity] {
 		return
 	}
 	s.rewound[identity] = true
 	switch target.Kind {
 	case tail.KindSessionTranscript, tail.KindAgentTranscript:
-		tailer.RewindToTurnStart(tail.DefaultRewindWindow, tail.IsUserPromptRecord)
 	default:
 		s.log.With(logging.Context{Operation: "boot-rewind", Path: target.Path}).
 			LogVerbose("no rewind for kind=%s: it carries no turns", target.Kind)
+		return
 	}
+	if reason, atRest := s.atRest(target.Path, tailer.Offset(), now); atRest {
+		s.rewindSkipped++
+		s.log.With(logging.Context{Operation: "boot-rewind", Path: target.Path}).LogVerbose(
+			"no rewind: %s, so no turn of it can be in flight; it is watched from its cursor and not re-read", reason)
+		return
+	}
+	s.rewindWalked++
+	tailer.RewindToTurnStart(tail.DefaultRewindWindow, tail.IsUserPromptRecord)
+}
+
+// atRest answers whether a transcript can be ruled out as carrying a turn in
+// flight, and says in words why.
+//
+// TWO FACTS HAVE TO HOLD, AND THE SECOND IS THE ONE THAT MAKES IT SAFE. The
+// file must have stopped growing longer ago than the LOST tracker's own
+// agent-silence window — the bound this process already uses for "an agent has
+// stopped working on this", reused rather than duplicated as a second knob —
+// AND its restored cursor must already be at the file's end. A cursor BEHIND
+// the end means there are durable bytes this reader has not converted, so the
+// turn they belong to is exactly the half-converted one the rewind is for, and
+// the file is rewound however old it is.
+func (s *sidecar) atRest(path string, offset int64, now time.Time) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		// NOTHING HERE CAN PROVE THE FILE COLD, so it is rewound exactly as it
+		// was before this test existed. The read path states the failure again
+		// with its own context; this states why the rewind ran unconditionally.
+		s.log.With(logging.Context{Operation: "boot-rewind", Path: path, Level: "warn"}).Log(
+			"rewinding without the at-rest test: this file's mtime and size could not be read: %v", err)
+		return "", false
+	}
+	silence := s.tracker.Windows().AgentSilence
+	age := now.Sub(info.ModTime())
+	if age <= silence {
+		return "", false
+	}
+	if offset < info.Size() {
+		return "", false
+	}
+	return fmt.Sprintf("this file last grew %s ago, beyond the %s agent-silence window, and its restored cursor is already at its end (offset %d of %d bytes)",
+		age.Truncate(time.Second), silence, offset, info.Size()), true
 }
 
 // trackDetached starts the LOST policy's clock for a file that IS a detached
@@ -1276,7 +1385,32 @@ func (s *sidecar) pollAll() {
 	s.requireCursors("pollAll")
 	s.rekeyRotations()
 	nowMs := s.now().UnixMilli()
-	for path, w := range s.watchers {
+	s.enrollWatchers()
+	slice := s.pollSlice()
+	deadline := s.now().Add(slice)
+	polled := 0
+	for s.pass != nil && len(s.pass.pending) > 0 {
+		// THE FIRST WATCHER OF A TICK IS ALWAYS POLLED, whatever the slice says:
+		// a bound so small that it expires before any work is done would be a
+		// pass that never advances, which is a corpus never read.
+		if polled > 0 && !s.now().Before(deadline) {
+			s.log.With(logging.Context{
+				Operation: "poll-slice", Repeat: logging.Repeat(polled),
+			}).LogVerbose(
+				"this tick's %s slice is spent after %d watcher(s); %d remain and the pass resumes at them on the next tick",
+				slice, polled, len(s.pass.pending))
+			return
+		}
+		path := s.pass.pending[0]
+		s.pass.pending = s.pass.pending[1:]
+		w, watching := s.watchers[path]
+		if !watching {
+			// The watcher went away mid-pass (a LOST run whose file vanished).
+			// It has still been WALKED — there is nothing left to read from it —
+			// so the pass may still drain.
+			continue
+		}
+		polled++
 		if s.parked[path] {
 			continue
 		}
@@ -1337,9 +1471,75 @@ func (s *sidecar) pollAll() {
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
 		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
 	}
-	// EVERY WATCHER WAS POLLED. Only this exit reaches here: an abandoned pass
-	// returns early above, and an abandoned pass has not drained the corpus.
+	if s.pass == nil {
+		// PRODUCTION WAS SUSPENDED FROM INSIDE THE LOOP — a cancelled terminal's
+		// write found the store gone — and `suspend` retired the pass along with
+		// the tailers it was walking. That pass did not drain the corpus, so the
+		// catch-up window stays open exactly as it does for every other
+		// abandonment.
+		return
+	}
+	// EVERY WATCHER WAS POLLED — across however many slices the pass took. Only
+	// this exit reaches here: an abandoned pass and a spent slice both return
+	// early above, and neither has drained the corpus. The pass is retired so
+	// the next tick enrolls the watched set afresh.
+	s.pass = nil
 	s.drainedPass = true
+}
+
+// pollSliceFraction is the share of ONE poll interval a single pass may spend
+// before it yields the tick back. A half leaves the other half for the change
+// probe, the rekey and the tick's own overhead, and it means a resumed pass
+// gets a fresh slice every interval rather than starving.
+const pollSliceFraction = 2
+
+// pollSlice is how long one tick's poll may run for.
+//
+// IT IS DERIVED, NOT CONFIGURED. Every window in this process that an operator
+// can move is one more thing that can be set to a value the invariant does not
+// survive; this one is a fraction of the poll interval the operator already
+// chose, so a faster poll automatically takes finer slices and the relationship
+// between them cannot be misconfigured.
+func (s *sidecar) pollSlice() time.Duration {
+	interval := s.options.PollInterval
+	if interval <= 0 {
+		interval = DefaultPollInterval
+	}
+	return interval / pollSliceFraction
+}
+
+// enrollWatchers brings the watched set into the current pass, starting one if
+// none is open.
+//
+// A FILE DISCOVERED MID-PASS GOES TO THE FRONT, and that is the whole point of
+// the ordering. The boot walk's pass is thousands of watchers long; a transcript
+// the change probe found on this tick would otherwise wait behind all of them,
+// which is precisely the minutes-late answer the probe exists to prevent. It is
+// enrolled at the head, read on the tick it was found, and the boot walk resumes
+// behind it.
+//
+// EVERY OTHER WATCHER IS WALKED IN A STABLE ORDER, because a pass that resumes
+// must not re-walk what it already did nor skip what it has not: `seen` is the
+// pass's roster and `pending` what is left of it, so "every watcher, exactly
+// once, across as many slices as it takes" is a property of the two together
+// rather than of map iteration luck.
+func (s *sidecar) enrollWatchers() {
+	if s.pass == nil {
+		s.pass = &pollPass{seen: make(map[string]bool, len(s.watchers))}
+	}
+	fresh := make([]string, 0, len(s.watchers)-len(s.pass.seen))
+	for path := range s.watchers {
+		if s.pass.seen[path] {
+			continue
+		}
+		s.pass.seen[path] = true
+		fresh = append(fresh, path)
+	}
+	if len(fresh) == 0 {
+		return
+	}
+	sort.Strings(fresh)
+	s.pass.pending = append(fresh, s.pass.pending...)
 }
 
 // endCatchupOnFirstDrainedPass closes the startup catch-up window the first time
@@ -1356,6 +1556,7 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	}
 	s.catchupEnded = true
 	s.log.EndCatchup()
+	s.stateBootRewindSummary()
 	s.summarizeWithheldResidue()
 	// THE END OF CATCH-UP IS AN EDGE, AND IT IS STATED. It is written after the
 	// summaries, so a reader that has seen this record has seen every total the
@@ -1364,6 +1565,26 @@ func (s *sidecar) endCatchupOnFirstDrainedPass() {
 	// steady state rather than racing the boot walk.
 	s.log.With(logging.Context{Operation: "catchup-end"}).Log(
 		"startup catch-up is over: the first poll pass drained the corpus, and every catch-up operation is stated per record from here")
+}
+
+// stateBootRewindSummary states, once at the catch-up edge, HOW MUCH OF THE
+// CORPUS THE BOOT REWIND ACTUALLY RE-READ.
+//
+// The per-file decision is verbose on both arms — a boot walk makes it once per
+// transcript, which on the owner's machine is over a thousand lines — so nothing
+// at normal verbosity would otherwise say whether the walk re-read two files or
+// two thousand. That number is the whole cost of the walk, and it is the first
+// thing to look at when a restart is slow. A process that rewound nothing and
+// skipped nothing states nothing, exactly as every other catch-up summary does.
+func (s *sidecar) stateBootRewindSummary() {
+	if s.rewindWalked == 0 && s.rewindSkipped == 0 {
+		return
+	}
+	s.log.With(logging.Context{
+		Operation: "boot-rewind-summary", Repeat: logging.Repeat(s.rewindWalked + s.rewindSkipped),
+	}).Log(
+		"the boot rewind scanned %d transcript(s) that could still be carrying a turn in flight; %d more were at rest — last grown beyond the %s agent-silence window with the cursor already at their end — and were watched from their cursor without a backward scan or a re-read",
+		s.rewindWalked, s.rewindSkipped, s.tracker.Windows().AgentSilence)
 }
 
 // summarizeWithheldResidue states ONE INFO record per file for the residue the

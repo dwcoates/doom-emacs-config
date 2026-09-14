@@ -2440,3 +2440,227 @@ func TestTheChangeProbeRefusesToBuildATailerWithoutCursors(t *testing.T) {
 	}()
 	h.sc.discoverChanged()
 }
+
+// TestTheBootRewindIsForFilesThatCanCarryATurnInFlight pins the rewind's SCOPE.
+// The joins it re-warms exist only for a turn this reader was half-way through,
+// so a transcript that stopped growing long ago with its cursor already at its
+// end has nothing to re-warm — and re-reading the whole historical corpus is
+// what made a restart's catch-up take minutes while a live workspace waited.
+func TestTheBootRewindIsForFilesThatCanCarryATurnInFlight(t *testing.T) {
+	turn := int64(len(promptLine + "\n" + assistantLine + "\n"))
+	tests := []struct {
+		name       string
+		age        time.Duration
+		offset     int64
+		wantOffset int64
+	}{
+		{
+			// At rest: beyond the agent-silence window AND read to the end.
+			name: "a transcript at rest is watched from its cursor with no re-read",
+			age:  4 * time.Hour, offset: 2 * turn, wantOffset: 2 * turn,
+		},
+		{
+			// Inside the silence window, so a turn of it may be in flight.
+			name: "a transcript that grew recently is rewound to its turn start",
+			age:  time.Minute, offset: 2 * turn, wantOffset: turn,
+		},
+		{
+			// Durable bytes this reader never converted ARE the half-converted
+			// turn, however long ago the file stopped growing.
+			name: "a cursor behind the file's end is rewound however old the file is",
+			age:  4 * time.Hour, offset: turn, wantOffset: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+			path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+			aged := h.clock.Add(-tc.age)
+			if err := os.Chtimes(path, aged, aged); err != nil {
+				t.Fatalf("stamping %s: %v", path, err)
+			}
+			h.store.cursors = []*storev1.CursorState{{
+				FileId: identityOf(t, path), Path: path, Offset: tc.offset,
+			}}
+
+			// Act.
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+
+			// Assert.
+			if got := h.sc.watchers[path].tailer.Offset(); got != tc.wantOffset {
+				t.Fatalf("offset after the boot rewind = %d, want %d", got, tc.wantOffset)
+			}
+		})
+	}
+}
+
+// TestTheBootRewindStatesWhatTheWalkReRead asserts the one INFO record that
+// says how big the boot walk actually was. Both per-file decisions are verbose,
+// so without this summary nothing at normal verbosity distinguishes a restart
+// that re-read two transcripts from one that re-read two thousand.
+func TestTheBootRewindStatesWhatTheWalkReRead(t *testing.T) {
+	// Arrange: one transcript at rest and one still inside the silence window.
+	h := newHarness(t, &fakeStore{})
+	turn := int64(len(promptLine + "\n" + assistantLine + "\n"))
+	cold := h.transcript(t, "sess-cold", promptLine, assistantLine)
+	warm := h.transcript(t, "sess-warm", promptLine, assistantLine)
+	aged := h.clock.Add(-4 * time.Hour)
+	if err := os.Chtimes(cold, aged, aged); err != nil {
+		t.Fatalf("stamping %s: %v", cold, err)
+	}
+	h.store.cursors = []*storev1.CursorState{
+		{FileId: identityOf(t, cold), Path: cold, Offset: turn},
+		{FileId: identityOf(t, warm), Path: warm, Offset: turn},
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: the boot walk drains, which is the edge the summary is stated at.
+	h.sc.pollAll()
+	h.sc.endCatchupOnFirstDrainedPass()
+
+	// Assert.
+	record := h.requireOnce(t, "boot-rewind-summary", "info")
+	if got := ctxInt(t, record, "repeat_count"); got != 2 {
+		t.Fatalf("boot-rewind-summary repeat_count = %d, want both transcripts counted", got)
+	}
+}
+
+// tickingClock is a fake clock that advances by a fixed step on every reading,
+// which is how a subject exercises a time BOUND without waiting for one. Nothing
+// here sleeps: the step is the only time that passes.
+func tickingClock(start time.Time, step time.Duration) func() time.Time {
+	now := start
+	return func() time.Time {
+		out := now
+		now = now.Add(step)
+		return out
+	}
+}
+
+// TestAPollPassYieldsTheTickAtItsSliceBound pins the slice. A pass over the
+// whole corpus is minutes of reading on a restart, and while it ran nothing else
+// on the poll timer did — not the change probe, so no new transcript was found,
+// and not a newly discovered file's first read. A pass that yields keeps both on
+// their own one-second clock however large the corpus is.
+func TestAPollPassYieldsTheTickAtItsSliceBound(t *testing.T) {
+	// Arrange: more watchers than one slice can walk, and a clock that spends
+	// 300ms of the 500ms slice on every reading.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	for _, session := range []string{"s1", "s2", "s3", "s4", "s5", "s6"} {
+		h.transcript(t, session, promptLine, assistantLine)
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.now = tickingClock(h.clock, 300*time.Millisecond)
+
+	// Act: one tick.
+	h.sc.pollAll()
+
+	// Assert: the tick stopped short and the pass kept its place.
+	if h.sc.pass == nil || len(h.sc.pass.pending) == 0 {
+		t.Fatalf("one tick walked all %d watchers; the slice did not bound the pass", len(h.sc.watchers))
+	}
+	if h.sc.drainedPass {
+		t.Fatal("a pass that stopped at its slice bound was latched as drained")
+	}
+}
+
+// TestASlicedPassResumesUntilEveryWatcherIsWalked pins what the slice must NOT
+// cost: `drainedPass` is a statement about a whole pass, and the startup
+// catch-up window closes off it. Across slices it must fire once, when the last
+// watcher has been polled, and each watcher must be walked exactly once.
+func TestASlicedPassResumesUntilEveryWatcherIsWalked(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	sessions := []string{"s1", "s2", "s3", "s4", "s5", "s6"}
+	for _, session := range sessions {
+		h.transcript(t, session, promptLine, assistantLine)
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.now = tickingClock(h.clock, 300*time.Millisecond)
+
+	// Act: tick until the pass drains, bounded well above the slices it needs.
+	ticks := 0
+	for ; ticks < 20 && !h.sc.drainedPass; ticks++ {
+		h.sc.pollAll()
+		h.sc.endCatchupOnFirstDrainedPass()
+	}
+
+	// Assert.
+	if !h.sc.drainedPass {
+		t.Fatalf("the pass never drained across %d ticks", ticks)
+	}
+	if ticks < 2 {
+		t.Fatalf("the pass drained in %d tick(s); the slice bound was never reached, so nothing about resuming was exercised", ticks)
+	}
+	walked := map[string]int{}
+	for _, rec := range h.ops(t, "tail-pickup") {
+		walked[ctxString(t, rec, "path")]++
+	}
+	if len(walked) != len(sessions) {
+		t.Fatalf("%d of %d watchers were walked across the pass: %v", len(walked), len(sessions), walked)
+	}
+	for path, count := range walked {
+		if count != 1 {
+			t.Fatalf("%s was polled %d times in one pass, want exactly once", path, count)
+		}
+	}
+	h.requireOnce(t, "catchup-end", "info")
+}
+
+// TestANewTranscriptIsReadWhileTheCorpusIsStillBeingWalked is the whole defect,
+// end to end. Realtest 9, sweep rt-run37: a restart's boot walk ran from
+// 23:44:21 to 23:46:45; a fresh workspace's turn concluded at 23:46:41 inside it
+// and its answer rows reached the store at ~23:47:44, because the poll tick that
+// would have found the file was inside the walk.
+func TestANewTranscriptIsReadWhileTheCorpusIsStillBeingWalked(t *testing.T) {
+	// Arrange: a corpus too large for one slice, mid-walk.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	projects := projectsRoot(t, h)
+	for _, session := range []string{"s1", "s2", "s3", "s4", "s5", "s6"} {
+		h.transcript(t, session, promptLine, assistantLine)
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.now = tickingClock(h.clock, 300*time.Millisecond)
+	h.sc.pollAll()
+	if h.sc.drainedPass {
+		t.Fatal("the corpus drained in one tick; the subject needs a walk still in progress")
+	}
+
+	// Act: the vendor writes a new transcript into a known project directory,
+	// and two ordinary poll ticks run — probe, then read.
+	fresh := h.transcript(t, "sess-fresh", promptLine, assistantLine)
+	bumpProjectDir(t, projects)
+	for tick := 0; tick < 2; tick++ {
+		h.sc.discoverChanged()
+		h.sc.pollAll()
+	}
+
+	// Assert: it was discovered and its records are durable, with the boot walk
+	// still unfinished behind it.
+	if _, watched := h.sc.watchers[fresh]; !watched {
+		t.Fatal("the new transcript was not discovered while the corpus was being walked")
+	}
+	picked := false
+	for _, rec := range h.ops(t, "tail-pickup") {
+		if ctxString(t, rec, "path") == fresh {
+			picked = true
+		}
+	}
+	if !picked {
+		t.Fatal("the new transcript's records did not reach the store within two poll ticks of it appearing")
+	}
+}
