@@ -1685,6 +1685,23 @@ describe("the vendor refusing a CONTROL call", () => {
     expect(startSessionDetail(response)).toContain("No conversation found with session ID");
   });
 
+  test("a credential rejection at start is recorded as the auth diagnostic with its account config-dir", async () => {
+    // Auth failures at start land before the session ever opened. The one
+    // greppable diagnostic must name the account (config-dir) the failing token
+    // belonged to, the status and the vendor's own sentence — and no credential.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-auth-error" } });
+
+    await shim.clients.h1.startSession(freshSession());
+
+    const diagnostic = await shim.log.record(
+      (record) => record.operation === "shim.vendor.auth_rejected",
+    );
+    expect(diagnostic.context.http_status).toBe(401);
+    expect(diagnostic.context.vendor_message).toBe("the credential was rejected — sign in again");
+    expect(typeof diagnostic.context.claude_config_dir).toBe("string");
+    expect((diagnostic.context.claude_config_dir as string).length).toBeGreaterThan(0);
+  });
+
   test("a start the vendor ENDED leaves the shim alive for the retry", async () => {
     // The refusal is a session failure, not a process one: the daemon may fix
     // the condition and start again on the same warm shim.

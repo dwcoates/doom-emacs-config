@@ -55,6 +55,10 @@ export interface ContextOverrides {
   readonly mcpServerNames?: readonly string[];
   readonly lastChange?: LastChange;
   readonly reportFault?: (kind: "converter_defect", detail: string) => void;
+  /** The account config-dir the diagnostic api-failure record names. */
+  readonly claudeConfigDir?: string;
+  /** The model the diagnostic api-failure record names. */
+  readonly model?: string;
 }
 
 /** A fold context with the engine's knowledge stubbed to nothing by default. */
@@ -71,6 +75,8 @@ export function foldContext(overrides: ContextOverrides = {}): FoldContext {
     mcpServerNames: () => overrides.mcpServerNames ?? [],
     lastChange: overrides.lastChange,
     ...(overrides.reportFault === undefined ? {} : { reportFault: overrides.reportFault }),
+    ...(overrides.claudeConfigDir === undefined ? {} : { claudeConfigDir: overrides.claudeConfigDir }),
+    ...(overrides.model === undefined ? {} : { model: overrides.model }),
   };
 }
 
