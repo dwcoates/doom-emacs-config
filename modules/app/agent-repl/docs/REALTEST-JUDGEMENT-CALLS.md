@@ -15,6 +15,77 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## The hibernate loop (2026-09-14)
+
+The timeline, read off the owner's live workspace `chess960-review-failures-enm`
+(dir hash `218105ed`), not re-derived:
+
+- Every 5m06s from 09:02 to 10:03 — 13 times — the daemon's idle sweep
+  (`daemon/internal/drain/sweep.go`) sent `Hibernate`. The shim's `hibernate()`
+  ran a FULL compaction each time: a real vendor summary turn under
+  `compactionPrompt` ("Write the summary as the continuation notes a fresh
+  session needs…"), then `compact_boundary` + summary appended to the vendor
+  transcript. Those turns are the "session summary / continuation notes"
+  messages the owner saw in the feed. The transcript
+  `bf5fcae1-0b37-45f2-81bf-857c72e86399.jsonl` holds 63 such boundaries in all.
+- `DefaultStandBound` (`drain/api.go`, a sum of teardown bounds, ~seconds)
+  expired before each compaction turn finished: `daemon.shimclient.hibernate`
+  "shim call failed" `deadline_exceeded`, then `daemon.drain.sweep` ERROR "the
+  hibernate directive failed; deferring the hibernation". The shim logged "an
+  h2c stream was cancelled by its peer" ~10s before finishing the compaction
+  anyway. So the shim compacted, the daemon never stood it down, and the next
+  pass re-ran the whole thing.
+- At 10:07:43 the owner's "hello" ended with the vendor dying:
+  `getContextUsage failed: No message found with message.uuid of: b64f2741…`,
+  then `ProcessTransport is not ready for writing`, then "the vendor query is
+  gone". The shim captured no exit code, no signal and no stderr for that
+  death, so the immediate cause is unrecorded.
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-14 | A hibernation that has already compacted a transcript is asked to compact it again five minutes later. What makes the second ask cheap, and does it survive a restart of either process? | Both a persisted per-session MARK (`engine/compaction-mark.ts`, one file under `$AGENT_REPL_STATE_DIR/shim/<key>/compaction/`, keyed by the transcript's byte length) and a TAIL check on the transcript itself (`transcriptTailIsCompaction`); either one settles it | A transcript is append-only, so "as long as the mark says" and "nothing has been said since" are one statement, and it is one a FRESH PROCESS can make — which the in-memory promise cannot, and a daemon bounce is exactly the case that re-asks. The tail check is kept beside it because the two fail differently: the mark survives an unreadable transcript, the tail survives a state directory that was lost. A mark that cannot be read answers "no mark" and is recorded at INFO — the cost of a lost mark is one extra compaction, and treating an unreadable mark as present would be a hibernation that never compacts at all | Make `hibernationCompactionIsCurrent` (`engine/session.ts`) return false, and delete `compaction-mark.ts` with its suite |
+| 2026-09-14 | `Hibernate`'s answer used to BE the compaction's completion, and the caller's deadline is seconds. Extend `StandBound`, or change the answer? | Change the answer: `HibernateResponse` gains an additive `compacting` arm (tag 3). The compaction runs past the rpc, as it always did, and the caller is told so | Extending `StandBound` is the wrong knob twice over — it is a sum of TEARDOWN bounds whose nesting `api_test.go` pins, and a compaction has no bound at all, so any number chosen would be a number a slower summary turn beats. Bounding the ANSWER instead makes the deadline honest and makes the deferral a state rather than a failure; it is safe only because of the idempotence above, which is why the two landed together | Retire the `compacting` arm in `proto/src/shim/v1/endpoint_hibernate.proto`, and have `hibernate()` await `compacting` before answering |
+| 2026-09-14 | The brief says to stop treating "the deadline expiry of a started compaction" as an ERROR. Should `context.DeadlineExceeded` on the directive be demoted in the sweep? | No — the `compacting` arm removes that case entirely, and a remaining deadline expiry stays an ERROR | With the two-phase answer, a compaction can no longer be what holds the rpc open: the shim answers at once in every path. A `deadline_exceeded` after this change is a shim that accepted a call and stopped answering, which is the wedge `TestSweepGivesUpOnAShimThatNeverAnswersTheDirective` exists for and a fault an operator must see. Demoting it would delete that coverage to fix a case that no longer occurs. FLAGGED for the owner as a deliberate narrowing of the brief's letter | Add a `cancelled(err)` arm to the error branch of `controller.hibernate` (`drain/sweep.go`) |
+| 2026-09-14 | A compaction that FAILS now fails after the rpc that asked for it was answered. Where does its wording go? | Onto the NEXT directive, reported once and then cleared | There is no answer left to carry it at the moment it happens, and dropping it would be the error handling this repo does not allow. Clearing it as it is reported is what lets the ask after that retry the compaction rather than reporting one stale failure forever; the daemon still records it as a `compaction_failed` refusal exactly as before | Drop the `lastCompactionError` arm from `hibernate()` (`engine/session.ts`) |
+| 2026-09-14 | The vendor's death is unrecorded. The SDK reports the STREAM ending; the exit code, the signal and the child's last words live on the process. How are they captured? | `Options.spawnClaudeCodeProcess` — `vendorSpawner` (`sdk/real-query.ts`) wraps the spawn, watches `exit`, and also wires the child's stderr | It is the one declared surface that puts the child in the shim's hands. It costs the SDK's own executable-existence pre-check (the failure then arrives as an `error` event carrying ENOENT, which the SDK already handles) and its stderr-close grace before `exit` (the shim keeps its own bounded stderr ring for the child's whole life, which is what the record quotes). Wiring stderr in the spawner is NOT optional: `SpawnedProcess` declares no stderr, so a spawner that forgot it would trade a death's exit code for every start's reason. FLAGGED for the owner as a change to the real vendor spawn path, which no hermetic suite can exercise | Drop the `spawnClaudeCodeProcess` arm from `realQueryOptions` (`sdk/real-query.ts`); the SDK's own spawn and `Options.stderr` return, and the exit fields read `-1`/`""` |
+| 2026-09-14 | Absence of an exit fact: omit the field, or state it? | State it — `-1` for no code and `""` for no signal | A field that disappears makes "the child exited 0" and "no child ever ended" the same record, and those are opposite diagnoses | Drop the `?? -1` / `?? ""` defaults in `vendorDeathFields` (`engine/session.ts`) |
+| 2026-09-14 | D: can the `compact_boundary`/summary records the shim appends be what makes the vendor's loader lose a message uuid? | THE SHAPE DID DIFFER AND IS FIXED. Whether it caused the lost uuid CANNOT BE ESTABLISHED, and is not claimed | See the finding below | `readAmbient` (`engine/compaction.ts`) — drop the `...ambient` spread to restore the old per-line rebuild |
+
+### D: the shape comparison, and what it does and does not show
+
+Compared: the 63 boundaries the shim wrote on
+`~/.claude-chesscom/projects/…chess960-review-failures-enm/bf5fcae1-….jsonl`
+(read-only) against the observed vendor boundary in
+`testdata/corpus/transcript-lines/system-compact_boundary.jsonl`.
+
+**The shape differed, and the difference is fixed.** Every one of the 63
+boundaries carries exactly these keys: `parentUuid`, `isSidechain`, `type`,
+`subtype`, `content`, `isMeta`, `timestamp`, `uuid`, `level`, `compactMetadata`,
+`sessionId`. The vendor's own boundary carries seven more:
+`logicalParentUuid`, `userType`, `entrypoint`, `cwd`, `version`, `gitBranch`,
+`slug`.
+
+The cause is `readAmbient`, which rebuilt its whole accumulator from each line
+rather than merging, so a field the LAST line did not state was dropped. Every
+one of those 63 compactions landed immediately after a `last-prompt`
+bookkeeping line (line 655 of that transcript is one) carrying only `type`,
+`lastPrompt`, `leafUuid` and `sessionId` — so `sessionId` was all that
+survived. `logicalParentUuid` is the worst of the set: it is the field the
+module's own header says "tells the loader the chain restarts here", and the
+shim's boundaries named no predecessor at all. Fixed, with eight subjects in
+`test/engine/compaction.test.ts`.
+
+**Whether that lost the vendor a message uuid cannot be established, and is not
+claimed.** The uuid in the failure, `b64f2741…`, appears in NO transcript in
+that project directory — all six files, zero occurrences — so there is no
+record to trace a broken chain through. `getContextUsage` is the CLI's own
+control verb and the shim sees only its refusal text; nothing on this side of
+the wire says what the loader was looking for or why. Both facts are true and
+neither implies the other: the shim WAS writing malformed boundaries, and the
+vendor DID lose a uuid, and the link between them is not in evidence here. It
+would take either a vendor-side log or a reproduction against a transcript
+carrying the old boundary shape to settle it.
+
 ## Sidecar discovery latency (2026-09-13)
 
 | Date | Question | Decision | Why | How to reverse |
