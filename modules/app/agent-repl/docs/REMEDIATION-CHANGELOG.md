@@ -11,6 +11,7 @@ anything, scan it for a line the change would reverse.
 Format: `- <area>: <what changed> (<finding>)`. One sentence. No rationale — the
 commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 
+- footer overage: `FooterStatusActivityRateLimited.overage` is a third `FooterAllowance` cell, the resolver files the vendor's `overage` window onto it like the other two, and the tokens sheet draws it as one more allowance row (gap scan, `daemon.footer.rate_limit_overage` warn dropping the figure, 2026-09-13)
 - realtest 9: the focus act is written for the toggle `SPC o v` really is (read where the editor stands, press, assert the predicted landing, press again from the webview) and its selection probe reads `(window-buffer (selected-window))` instead of the transport's own temp buffer (rt-run34, rt9FocusTheComposer)
 - webapp topbar: the strip's row is `minmax(0, 1fr) fit-content(50%) minmax(0, 1fr)`, so both flank tracks are equal and floorless and the title sits at the strip's true center whatever the flanks hold (owner report, "the CENTER and ONLY the center should be in the center", 2026-09-13)
 - daemon dlog: a workspace logger resolves its sink at write time instead of pinning it, and a close releases the handle without poisoning, so a record emitted after `Evict` re-opens the remembered target and appends while a nuked directory takes the central fallback at DEBUG (21 `daemon.dlog.sink_failure` errors across 7 workspaces, realtest 9 first run, 2026-09-13)
