@@ -12,6 +12,8 @@ func agent(v string) *conversationv1.AgentId { return &conversationv1.AgentId{Va
 
 func lease(v string) *LeaseID { l := LeaseID(v); return &l }
 
+func shell(v string) *ShellID { s := ShellID(v); return &s }
+
 func TestEncodeDecodeRoundTripsEveryRowKind(t *testing.T) {
 	for _, kind := range AllRowKinds {
 		t.Run(string(kind), func(t *testing.T) {
@@ -198,6 +200,7 @@ func TestEncodeFeedDecodeFeedRoundTrips(t *testing.T) {
 		{name: "root", feed: Feed{Root: true}},
 		{name: "agent", feed: Feed{Agent: agent("agent-7")}},
 		{name: "merge", feed: Feed{Merge: lease("lease-9")}},
+		{name: "shell", feed: Feed{Shell: shell("work-9")}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -220,7 +223,50 @@ func TestEncodeFeedDecodeFeedRoundTrips(t *testing.T) {
 			if tc.feed.Merge != nil && *got.Merge != *tc.feed.Merge {
 				t.Fatalf("Merge = %q, want %q", *got.Merge, *tc.feed.Merge)
 			}
+			if tc.feed.Shell != nil && (got.Shell == nil || *got.Shell != *tc.feed.Shell) {
+				t.Fatalf("Shell = %v, want %q", got.Shell, *tc.feed.Shell)
+			}
 		})
+	}
+}
+
+// TestEncodeRoundTripsTheShellFeedArm pins the pure feedid Shell arm: a Ref on a
+// shell sub-feed encodes and decodes back to the same work id.
+func TestEncodeRoundTripsTheShellFeedArm(t *testing.T) {
+	// Arrange.
+	ref := Ref{WS: "ws-1", Feed: Feed{Shell: shell("work-7")}, Row: RowKey{Kind: KindDetachedShell, ID: "work-7"}}
+
+	// Act.
+	got, err := Decode(Encode(ref))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if got.Feed.Shell == nil || *got.Feed.Shell != "work-7" {
+		t.Fatalf("Shell = %v, want work-7", got.Feed.Shell)
+	}
+}
+
+// TestDecodeFeedDerivesShellSubFeedFromShellHead pins the addressing the fold
+// rests on: a shell HEAD row's FeedId resolves to the shell's own sub-feed, the
+// way a subagent bubble row resolves to Feed{Agent}.
+func TestDecodeFeedDerivesShellSubFeedFromShellHead(t *testing.T) {
+	// Arrange: a detached shell's head row.
+	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: RowKey{Kind: KindShellHead, ID: "work-3"}}
+
+	// Act.
+	ws, feed, err := DecodeFeed(Encode(ref))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("DecodeFeed: %v", err)
+	}
+	if ws != "ws-1" {
+		t.Fatalf("workspace = %q, want ws-1", ws)
+	}
+	if feed.Shell == nil || *feed.Shell != "work-3" {
+		t.Fatalf("Shell = %v, want work-3", feed.Shell)
 	}
 }
 
