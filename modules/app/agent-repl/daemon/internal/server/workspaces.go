@@ -191,9 +191,11 @@ func (s *server) RegisterWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// RegisterRepository records a repository on its own, resolved from any path
-// inside it. It is NOT a per-workspace verb -- there is no workspace, which is
-// the whole point -- so no ownership refusal applies.
+// RegisterRepository records a repository resolved from any path inside it,
+// and registers that repository's main worktree as an open workspace. It is
+// NOT a per-workspace verb -- the REQUEST carries no ref to key on -- so no
+// ownership refusal applies; the workspace in the answer is minted here,
+// exactly as RegisterWorkspace mints the one it answers with.
 func (s *server) RegisterRepository(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RegisterRepositoryRequest],
@@ -203,19 +205,25 @@ func (s *server) RegisterRepository(
 		return nil, err
 	}
 	resp := &agentreplv1.RegisterRepositoryResponse{}
-	record, alreadyKnown, err := s.deps.Verbs.RegisterRepository(ctx, req.Msg.GetPath())
+	registered, err := s.deps.Verbs.RegisterRepository(ctx, req.Msg.GetPath())
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
-	s.log.Info("daemon.server.register_repository", "registered a repository",
+	s.log.Info("daemon.server.register_repository", "registered a repository and its main worktree",
 		dlog.Context{
-			"path": req.Msg.GetPath(), "repository": string(record.ID), "dir": record.Dir,
-			"already_known": alreadyKnown,
+			"path": req.Msg.GetPath(), "repository": string(registered.Repository.ID),
+			"dir": registered.Repository.Dir, "already_known": registered.RepositoryAlreadyKnown,
+			"workspace":               string(registered.Workspace.ID),
+			"workspace_already_known": registered.WorkspaceAlreadyKnown,
 		})
 	resp.Result = &agentreplv1.RegisterRepositoryResponse_Success{
 		Success: &agentreplv1.RegisterRepositorySuccess{
-			Repository:   &workspacev1.RepositoryRef{Id: string(record.ID), Dir: record.Dir},
-			AlreadyKnown: alreadyKnown,
+			Repository: &workspacev1.RepositoryRef{
+				Id: string(registered.Repository.ID), Dir: registered.Repository.Dir,
+			},
+			AlreadyKnown:          registered.RepositoryAlreadyKnown,
+			Workspace:             refOf(registered.Workspace),
+			WorkspaceAlreadyKnown: registered.WorkspaceAlreadyKnown,
 		},
 	}
 	return connect.NewResponse(resp), nil
