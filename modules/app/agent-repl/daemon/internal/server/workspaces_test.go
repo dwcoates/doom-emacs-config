@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -11,6 +13,7 @@ import (
 
 	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
+	"claude-repld/internal/wsm"
 )
 
 // TestUnknownWorkspaceIsRefusedByArm pins that a ref naming an id the registry
@@ -302,5 +305,272 @@ func TestForgetWorkspaceRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateWorkspace option B: instant ack, background execution detached from the
+// request context, and staged progress on the WatchDaemon channel.
+// ---------------------------------------------------------------------------
+
+// registeredRepoRef registers a repository in the fixture and returns a ref to
+// it, so a create reaches the verb instead of being refused on unknown_repository.
+func registeredRepoRef(h *harness) *workspacev1.RepositoryRef {
+	repo := wsm.Repository{
+		ID: wsm.RepoID("repo-1"), Dir: "/tmp/agent-repl-test-repo",
+		Name: "repo", DefaultBranch: "master",
+	}
+	h.DB.repositories = append(h.DB.repositories, repo)
+	return &workspacev1.RepositoryRef{Id: string(repo.ID)}
+}
+
+// standardCreate builds a standard create request for repoRef, with opID set
+// when non-empty.
+func standardCreate(repoRef *workspacev1.RepositoryRef, opID string) *agentreplv1.CreateWorkspaceRequest {
+	req := &agentreplv1.CreateWorkspaceRequest{
+		Repository: repoRef,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{
+			Standard: &agentreplv1.CreateWorkspaceStandard{},
+		},
+	}
+	if opID != "" {
+		req.OpId = &opID
+	}
+	return req
+}
+
+// proveDaemonSubscription opens a WatchDaemon stream and proves it is live by
+// pushing a drain schedule and receiving it, so a later progress event cannot
+// be lost to a subscription that had not finished attaching.
+func proveDaemonSubscription(t *testing.T, h *harness) *connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse] {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	if err != nil {
+		t.Fatalf("open the daemon stream: %v", err)
+	}
+	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 1})
+	if !stream.Receive() {
+		t.Fatalf("prove the subscription: %v", stream.Err())
+	}
+	return stream
+}
+
+// TestCreateWorkspaceAcksImmediatelyWhenGivenAnOpId pins that a create carrying
+// an op_id is answered with the accepted arm the instant it is accepted, before
+// its work has finished.
+func TestCreateWorkspaceAcksImmediatelyWhenGivenAnOpId(t *testing.T) {
+	// Arrange: a create whose work is held open, so an ack that waited for it
+	// could never return.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+	h.Verbs.createRelease = make(chan struct{})
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(standardCreate(repoRef, "op-ack")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetAccepted().GetOpId(); got != "op-ack" {
+		t.Fatalf("accepted op_id = %q, want %q (result=%v)", got, "op-ack", resp.Msg.GetResult())
+	}
+	close(h.Verbs.createRelease)
+}
+
+// TestCreateWorkspaceStaysSynchronousWithoutAnOpId pins the backward-compatible
+// form: a create with no op_id blocks and answers success itself, unchanged.
+func TestCreateWorkspaceStaysSynchronousWithoutAnOpId(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(standardCreate(repoRef, "")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetWorkspace().GetId(); got != "ws-created" {
+		t.Fatalf("result = %v, want success ws-created", resp.Msg.GetResult())
+	}
+}
+
+// TestCreateWorkspaceRunsToCompletionUnderACancelledRequestContext is the
+// cancellation fix: the accepting request is cancelled WHILE the create is
+// mid-flight, and the create must still run to completion — a succeeded event,
+// never a failure — because its work runs on a context detached from the
+// request. Called through the server directly so the request context is the
+// test's to cancel.
+func TestCreateWorkspaceRunsToCompletionUnderACancelledRequestContext(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+	h.Verbs.createEntered = make(chan struct{})
+	h.Verbs.createRelease = make(chan struct{})
+	stream := proveDaemonSubscription(t, h)
+
+	// Act: accept the create under a cancellable request context, cancel that
+	// context while the create is blocked mid-flight, then let it proceed.
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	defer reqCancel()
+	resp, err := s.CreateWorkspace(reqCtx, connect.NewRequest(standardCreate(repoRef, "op-cancel")))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if resp.Msg.GetAccepted() == nil {
+		t.Fatalf("result = %v, want accepted", resp.Msg.GetResult())
+	}
+	<-h.Verbs.createEntered
+	reqCancel()
+	close(h.Verbs.createRelease)
+
+	// Assert: the terminal outcome is a success, proving the work was not
+	// cancelled with the request.
+	if !stream.Receive() {
+		t.Fatalf("receive the terminal outcome: %v", stream.Err())
+	}
+	prog := stream.Msg().GetMutationProgress()
+	if prog.GetOpId() != "op-cancel" {
+		t.Fatalf("op_id = %q, want op-cancel", prog.GetOpId())
+	}
+	if prog.GetCreate().GetSucceeded() == nil {
+		t.Fatalf("terminal step = %v, want succeeded (the create must survive the cancellation)", prog.GetCreate().GetStep())
+	}
+	if got := prog.GetCreate().GetSucceeded().GetName(); got != "minted" {
+		t.Fatalf("succeeded name = %q, want minted", got)
+	}
+}
+
+// TestCreateWorkspaceRelaysProgressStagesInOrder pins that the stages the verb
+// reports reach the client on the WatchDaemon channel, in order, keyed on the
+// op_id, followed by the terminal succeeded step.
+func TestCreateWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+	h.Verbs.createStages = []workspace.CreateStage{
+		workspace.CreateStageDerivingName,
+		workspace.CreateStageCreatingWorktree,
+	}
+	stream := proveDaemonSubscription(t, h)
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(standardCreate(repoRef, "op-order")))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if resp.Msg.GetAccepted() == nil {
+		t.Fatalf("result = %v, want accepted", resp.Msg.GetResult())
+	}
+
+	// Assert: the two stages arrive in order, then the terminal success.
+	wantStages := []agentreplv1.WorkspaceCreateStage{
+		agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_DERIVING_NAME,
+		agentreplv1.WorkspaceCreateStage_WORKSPACE_CREATE_STAGE_CREATING_WORKTREE,
+	}
+	for i, want := range wantStages {
+		if !stream.Receive() {
+			t.Fatalf("receive stage %d: %v", i, stream.Err())
+		}
+		prog := stream.Msg().GetMutationProgress()
+		if prog.GetOpId() != "op-order" {
+			t.Fatalf("stage %d op_id = %q, want op-order", i, prog.GetOpId())
+		}
+		if got := prog.GetCreate().GetStage(); got != want {
+			t.Fatalf("stage %d = %v, want %v", i, got, want)
+		}
+	}
+	if !stream.Receive() {
+		t.Fatalf("receive the terminal outcome: %v", stream.Err())
+	}
+	if stream.Msg().GetMutationProgress().GetCreate().GetSucceeded() == nil {
+		t.Fatalf("terminal step = %v, want succeeded",
+			stream.Msg().GetMutationProgress().GetCreate().GetStep())
+	}
+}
+
+// TestCreateWorkspaceSurfacesAnInternalFailureAsAFailureEvent pins that a
+// background create that fails with a non-refusal error (a git worktree add
+// failure among them) is surfaced loudly on the progress channel, not swallowed.
+func TestCreateWorkspaceSurfacesAnInternalFailureAsAFailureEvent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createErr = errors.New("materialize worktree: fatal: boom")
+	stream := proveDaemonSubscription(t, h)
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(standardCreate(repoRef, "op-fail")))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if resp.Msg.GetAccepted() == nil {
+		t.Fatalf("result = %v, want accepted", resp.Msg.GetResult())
+	}
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("receive the failure: %v", stream.Err())
+	}
+	failed := stream.Msg().GetMutationProgress().GetCreate().GetFailed()
+	if failed == nil {
+		t.Fatalf("terminal step = %v, want failed",
+			stream.Msg().GetMutationProgress().GetCreate().GetStep())
+	}
+	if got := failed.GetInternal(); !strings.Contains(got, "boom") {
+		t.Fatalf("internal failure = %q, want it to carry the cause", got)
+	}
+}
+
+// TestCreateWorkspaceSurfacesARefusalOnTheFailureEvent pins that a background
+// create refused by the verb (naming_failed here) rides the failure event as
+// the SAME typed refusal the synchronous form answers, so a client words it
+// identically.
+func TestCreateWorkspaceSurfacesARefusalOnTheFailureEvent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createErr = &workspace.Refusal{
+		Rpc: "CreateWorkspace", Arm: workspace.ArmNamingFailed,
+		Reason: "no name was supplied and the naming call could not mint one",
+		Fields: map[string]any{
+			"model": "haiku", "cause": "timeout", "attempts": uint32(2), "answer": "",
+		},
+	}
+	stream := proveDaemonSubscription(t, h)
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(),
+		connect.NewRequest(standardCreate(repoRef, "op-refuse")))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if resp.Msg.GetAccepted() == nil {
+		t.Fatalf("result = %v, want accepted", resp.Msg.GetResult())
+	}
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("receive the failure: %v", stream.Err())
+	}
+	failed := stream.Msg().GetMutationProgress().GetCreate().GetFailed()
+	if failed.GetRefusal().GetNamingFailed() == nil {
+		t.Fatalf("failure cause = %v, want naming_failed refusal", failed.GetCause())
+	}
+	if got := failed.GetRefusal().GetNamingFailed().GetCause(); got != "timeout" {
+		t.Fatalf("naming_failed cause = %q, want timeout", got)
 	}
 }

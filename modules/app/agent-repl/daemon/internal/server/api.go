@@ -188,8 +188,19 @@ type server struct {
 	// learn the workspace had moved.
 	webStateTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]
 	// daemonTopic is the one daemon-level push topic, for Emacs and every
-	// webview alike.
+	// webview alike. It carries STATE — the standing drain schedule and the
+	// stand-down announcement — which publish.Topic replays to a late
+	// subscriber so it draws the current banner the instant it attaches.
 	daemonTopic publish.Topic[*agentreplv1.WatchDaemonResponse]
+	// daemonEventTopic carries daemon-level EVENTS — workspace-mutation
+	// progress — merged onto the same WatchDaemon wire. It is SEPARATE from
+	// daemonTopic for the reason webTopics is separate from webStateTopics: a
+	// Topic replays exactly its latest value, so an event sharing the state
+	// topic would be replayed to a late subscriber IN PLACE OF the standing
+	// drain banner, and a create's stale progress would masquerade as daemon
+	// state. A late subscriber may still replay this topic's last event, which
+	// carries an op_id it never issued and therefore ignores.
+	daemonEventTopic publish.Topic[*agentreplv1.WatchDaemonResponse]
 	// hostHeld and webHeld count the live holders of each workspace's two
 	// streams, which is what ParticipantSource answers from.
 	hostHeld map[ids.WorkspaceID]int
