@@ -4052,9 +4052,10 @@ body.draining #composer-input::placeholder {
 /* THE HOVER TIMESTAMP: the response's settled time, relative and live
    ("5m 30s ago"). Grey (the shared muted token) and a relative notch smaller
    than the figure beside it. Collapsed to zero width and pushed off the right
-   edge until the corner is hovered or focused; the reveal and — because
-   mouse-leave merely drops the state — the reverse are ONE continuous 0.5s
-   transition on width, offset and opacity, never a snap. */
+   edge until the bubble (or, failing that, the corner alone) is hovered or
+   focused; the reveal and — because mouse-leave merely drops the state — the
+   reverse are ONE continuous 0.5s transition on width, offset and opacity,
+   never a snap. */
 .usage-ago {
   color: var(--muted);
   font-size: 0.85em;
@@ -4069,6 +4070,15 @@ body.draining #composer-input::placeholder {
     opacity 0.5s ease,
     transform 0.5s ease;
 }
+/* The reveal triggers off the WHOLE assistant bubble, not just the small
+   corner: hovering the corner used to put the cursor directly on top of the
+   timestamp it had just revealed, obscuring it. Hovering anywhere else in the
+   bubble reveals the same timestamp with the cursor nowhere near it. The
+   corner's own `:hover`/`:focus-within` stay too, since the corner sits inside
+   the bubble and a mouse arriving there (or tabbing to it) should still
+   trigger the reveal on the way toward it (owner ruling, 2026-09-14). */
+.bubble.assistant:hover .usage-ago,
+.bubble.assistant:focus-within .usage-ago,
 .usage-corner:hover .usage-ago,
 .usage-corner:focus-within .usage-ago,
 .usage-corner.usage-corner--revealed .usage-ago {
