@@ -180,6 +180,47 @@ func TestDeliverHandsTheOpenedTurnToTheWatcher(t *testing.T) {
 	}
 }
 
+// THE FOOTER TAKES `submitting` ON RECEIPT, before the shim call. The StartTurn
+// round-trip can be slow, and a footer left idle through it is the stall the
+// owner saw; the submitting phase must be published before StartTurn blocks.
+func TestDeliverPublishesSubmittingToTheFooterBeforeTheShim(t *testing.T) {
+	// Arrange: capture what the footer holds AT the moment StartTurn is entered.
+	h := newHarness(t)
+	var footerAtShim []*footer.TurnStarted
+	h.sender.startHook = func() { footerAtShim = h.footer.startedTurns() }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert: the footer already carried the submitting turn when the shim was
+	// asked.
+	if len(footerAtShim) == 0 || footerAtShim[len(footerAtShim)-1] == nil {
+		t.Fatalf("footer at StartTurn = %+v, want a submitting turn already set", footerAtShim)
+	}
+}
+
+// A SHIM REFUSAL NEVER LEAVES THE FOOTER STUCK ON `submitting`. The failure is
+// surfaced to the caller, and the footer drops the turn rather than showing a
+// submitting phase for a turn that never ran.
+func TestDeliverClearsTheFooterWhenTheShimRefuses(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errors.New("the vendor query is dead")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err == nil {
+		t.Fatal("a shim refusal must be surfaced, never swallowed")
+	}
+
+	// Assert: the last thing the footer was told is that no turn is in flight.
+	turns := h.footer.startedTurns()
+	if len(turns) == 0 || turns[len(turns)-1] != nil {
+		t.Fatalf("footer turns = %+v, want the submitting turn cleared after the refusal", turns)
+	}
+}
+
 func TestDeliverSurfacesAShimRefusal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
