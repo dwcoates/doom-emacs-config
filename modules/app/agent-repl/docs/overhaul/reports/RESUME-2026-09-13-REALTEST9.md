@@ -39,18 +39,28 @@ ruling of 2026-09-13), `docs/REALTEST-PLAN.md` "Status", and
 - Store: schema 7, single serialized writer, read pool, ledger retention,
   no residue persisted, shape catalog (`make -C agent-shim/shim-store shapes`).
 
-## DONE (2026-09-14 00:5x): realtest 9 twice-green, section gate passed
+## 2026-09-14 daytime: owner-driven live fixes (all merged, deployed, gates green)
 
-- rt-run40 and rt-run41 (2026-09-14 00:2x, 00:3x): realtests 1-9 all green,
-  gap scan clean both times. `bin/test-all.sh` passed on every layer (Docker
-  quit afterwards). Plan status row 9 updated; every fix in the changelog.
-- master tip bb45b6bbc, deployed (the commits after the last deploy are
-  docs and a sidecar test only).
-- Realtest 10 (interrupt a running turn) AWAITS THE OWNER: no Emacs key
-  interrupts a turn without a forced restart; the footer stop control is a
-  webview button. See docs/REALTEST-JUDGEMENT-CALLS.md "Realtest 10, the
-  interrupt key". The fake's `!hold` scenario is ready for it.
-- No agents in flight. All agent worktrees removed.
+- Real-vendor defects found by the owner's own prompts: the hibernate loop
+  (compaction every 5 min), the keep-alive rewind anchor taken from
+  non-assistant uuids (vendor died on the second real prompt), cold-gate
+  feedback and typed refusal. All landed; the keep-alive rewind now falls
+  back to a plain resume and never loses the prompt.
+- UI rulings landed: topbar title centered BETWEEN the flanks (equal clear
+  space), chips tight (0.3rem), row spans its header, branch==name dropped;
+  prompt bubble waves from draw to final answer; card timers stop on
+  settle; auto permission mode (no `default`); bubbles +10% wide/long with
+  edge scrollbars visible iff overflow; feed begins at the newest
+  separation; sidebar hover panel (no chevron); footer letter wave on
+  progress statuses; no pseudo workspaces; every text copyable; `SPC j .`
+  registers a repository from a file.
+- OPEN, awaiting the owner: async work (detached subagent/shell) must be
+  bubbles at the response rail AND featured in the footer; three questions
+  asked (dashed lane divider? "moved" duplicate card? clock/stop where?).
+  Realtest 10 interrupt-key ruling still open. Hibernation compactions do
+  not narrate to the footer (terminal phase "hibernated" unruled).
+- Realtest 9 remains twice-green as of 00:3x; today's changes have NOT been
+  re-swept. Next sweep should run 1-9 again before any new section.
 
 ## The loop for realtest 9
 
