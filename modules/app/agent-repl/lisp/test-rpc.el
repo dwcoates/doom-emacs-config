@@ -75,6 +75,9 @@ would abort the very branch a test is asserting."
     ("CreateWorkspace" agent-repl-rpc-create-workspace
      agent-repl-wire-encode-create-workspace-request
      agent-repl-wire-decode-create-workspace-response)
+    ("RegisterRepository" agent-repl-rpc-register-repository
+     agent-repl-wire-encode-register-repository-request
+     agent-repl-wire-decode-register-repository-response)
     ("OpenWorkspace" agent-repl-rpc-open-workspace
      agent-repl-wire-encode-open-workspace-request
      agent-repl-wire-decode-open-workspace-response)

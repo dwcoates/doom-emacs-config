@@ -3,10 +3,10 @@
 ;;; Commentary:
 
 ;; The protojson CODEC for the agentrepl.v1 WORKSPACE VERBS and DAEMON-ADMIN
-;; verbs Emacs calls: CreateWorkspace, OpenWorkspace, CloseWorkspace,
-;; KillWorkspace, NukeWorkspace, MergeWorkspace, RestartWorkspace,
-;; SetWorkspacePriority, SubmitPrompt, UpdateShutdownSchedule,
-;; UpdateMergeQueue, DaemonHealth and SessionHealth.
+;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
+;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
+;; RestartWorkspace, SetWorkspacePriority, SubmitPrompt,
+;; UpdateShutdownSchedule, UpdateMergeQueue, DaemonHealth and SessionHealth.
 ;;
 ;; SCOPE.  This file owns exactly the messages declared in those endpoint
 ;; protos.  The shared leaf vocabularies — WorkspaceRef, RepositoryRef,
@@ -62,6 +62,7 @@
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-repository-ref "agent-repl-wire-common" (ref))
+(declare-function agent-repl-wire-decode-repository-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-user-said "agent-repl-wire-common" (said))
 (declare-function agent-repl-wire-encode-prompt-origin "agent-repl-wire-common" (origin))
 (declare-function agent-repl-wire-encode-drain-reason "agent-repl-wire-common" (reason))
@@ -1391,6 +1392,85 @@ arm this codec does not know is refused as an unknown field."
    "SetWorkspacePriorityResponse" json
    #'agent-repl-wire-decode-set-workspace-priority-response-success
    #'agent-repl-wire-decode-set-workspace-priority-response-error))
+
+
+;;;; ---- RegisterRepository ---------------------------------------------
+;;
+;; A REPOSITORY WITH NO WORKSPACE.  The request carries ANY path inside the
+;; repository -- a file as readily as a directory, because "pick a file" is
+;; the gesture the command is built on -- and the daemon resolves and mints
+;; the identity from it.  `already_known' is an ANSWER rather than a
+;; refusal: re-registering succeeds, and the caller says which of the two it
+;; was.
+
+(defun agent-repl-wire-encode-register-repository-request (request)
+  "Encode RegisterRepositoryRequest from plist REQUEST (:path PATH).
+A PATH, not an identity: the daemon resolves the repository from it and
+mints the identity, which the response returns."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-register-repository-request")
+  (list (cons 'path
+              (agent-repl-wire-verbs--require-string
+               "RegisterRepositoryRequest" "path" (plist-get request :path)))))
+
+(defun agent-repl-wire-decode-register-repository-success-repository (json)
+  "Decode RegisterRepositorySuccess's `repository' use site from JSON."
+  (agent-repl-wire-decode-repository-ref json))
+
+(defun agent-repl-wire-decode-register-repository-success (json)
+  "Decode RegisterRepositorySuccess from JSON into (:repository REF :already-known BOOL)."
+  (let ((message "RegisterRepositorySuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(repository alreadyKnown))
+    (list :repository (agent-repl-wire-decode-register-repository-success-repository
+                       (agent-repl-wire-verbs--require
+                        message "repository" (cdr (assq 'repository json))))
+          :already-known (agent-repl-wire--decode-bool message 'alreadyKnown json))))
+
+(defun agent-repl-wire-decode-register-repository-not-in-a-repository (json)
+  "Decode RegisterRepositoryNotInARepository from JSON.  Empty: the path is
+readable but lies inside no git work tree."
+  (agent-repl-wire-verbs--decode-empty "RegisterRepositoryNotInARepository" json))
+
+(defun agent-repl-wire-decode-register-repository-unreadable-path (json)
+  "Decode RegisterRepositoryUnreadablePath from JSON.  Empty: the path cannot
+be read at all."
+  (agent-repl-wire-verbs--decode-empty "RegisterRepositoryUnreadablePath" json))
+
+(defun agent-repl-wire-decode-register-repository-error-not-in-a-repository (json)
+  "Decode RegisterRepositoryError's `not_in_a_repository' cause arm from JSON."
+  (agent-repl-wire-decode-register-repository-not-in-a-repository json))
+
+(defun agent-repl-wire-decode-register-repository-error-unreadable-path (json)
+  "Decode RegisterRepositoryError's `unreadable_path' cause arm from JSON."
+  (agent-repl-wire-decode-register-repository-unreadable-path json))
+
+(defun agent-repl-wire-decode-register-repository-error (json)
+  "Decode RegisterRepositoryError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "RegisterRepositoryError"))
+    (agent-repl-wire-verbs--check-keys message json '(notInARepository unreadablePath))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'notInARepository :not-in-a-repository
+                       #'agent-repl-wire-decode-register-repository-error-not-in-a-repository)
+                 (list 'unreadablePath :unreadable-path
+                       #'agent-repl-wire-decode-register-repository-error-unreadable-path))))))
+
+(defun agent-repl-wire-decode-register-repository-response-success (json)
+  "Decode RegisterRepositoryResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-register-repository-success json))
+
+(defun agent-repl-wire-decode-register-repository-response-error (json)
+  "Decode RegisterRepositoryResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-register-repository-error json))
+
+(defun agent-repl-wire-decode-register-repository-response (json)
+  "Decode RegisterRepositoryResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "RegisterRepositoryResponse" json
+   #'agent-repl-wire-decode-register-repository-response-success
+   #'agent-repl-wire-decode-register-repository-response-error))
 
 
 ;;;; ---- SubmitPrompt: encode -------------------------------------------

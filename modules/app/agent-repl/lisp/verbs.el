@@ -89,6 +89,7 @@
 (declare-function agent-repl-rpc-merge-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-restart-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-create-workspace "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -1060,6 +1061,68 @@ derives its repository through `agent-repl-verbs--dynamic-repository'."
                    "Repository: " (mapcar #'car candidates) nil t nil nil
                    (and default (agent-repl-verbs--section-label default)))))
       (cdr (assoc choice candidates)))))
+
+(defconst agent-repl-verbs--register-repository-sentences
+  '((:not-in-a-repository . "that path is not inside a git repository")
+    (:unreadable-path . "that path cannot be read"))
+  "The sentence each `RegisterRepositoryError' arm is reported with.
+Both arms are EMPTY -- the path the verb sent is the only fact involved --
+so the sentence is the whole of what the daemon can be quoted as saying,
+and the path is added by the caller that knows it.")
+
+(defun agent-repl-verbs--register-repository-on-error (path value)
+  "Claim a `RegisterRepositoryError' refusal of PATH from VALUE, else nil.
+An arm this command has a sentence for is reported as that sentence; any
+other arm answers nil and falls through to the arm-generic reporting, so a
+refusal the daemon adds later still reaches the user correctly."
+  (let* ((arm (agent-repl-verbs--refusal-arm value))
+         (sentence (cdr (assq (plist-get arm :arm)
+                              agent-repl-verbs--register-repository-sentences))))
+    (when sentence
+      (agent-repl--warn agent-repl--global-log-scope
+                        "elisp.verbs.register-repository-refused path=%S arm=%S"
+                        path (plist-get arm :arm))
+      (message "agent-repl: %s: %s" sentence path)
+      t)))
+
+(defun agent-repl-verbs--register-repository-read-path ()
+  "Read the file the repository is registered FROM.
+The default is the current buffer\='s own file, because the buffer you are
+looking at is almost always in the repository you mean; a buffer visiting
+no file falls back to `default-directory\=', which `read-file-name\=' opens
+there."
+  (let ((default (or (buffer-file-name) default-directory)))
+    (read-file-name "Register repository from file: "
+                    (file-name-directory default) default)))
+
+(defun agent-repl-register-repository ()
+  "Register the repository the picked FILE is inside (`SPC j .\=').
+A repository used to enter the roster only as a SIDE EFFECT of registering
+a workspace in it, so a checkout nobody had worked in yet could not be
+named at all -- and the static create, which is the one mode that picks a
+repository by hand, could offer only repositories some workspace had
+already minted.
+
+THE GESTURE IS PICKING A FILE, not naming a repository root: the daemon
+resolves the repository from any path inside it, so the file you happen to
+be looking at is a complete answer.  Registering one already known is
+success and says so.  The registered repository has NO workspace; it draws
+an empty section on the roster and is pickable by
+`agent-repl-verbs--read-repository\=' from then on."
+  (interactive)
+  (let ((path (agent-repl-verbs--register-repository-read-path)))
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-register-repository (agent-repl-verbs--conn)
+     (list :path path)
+     :op "register-repository"
+     :on-success
+     (lambda (value)
+       (let ((dir (plist-get (plist-get value :repository) :dir)))
+         (message "agent-repl: %s repository %s"
+                  (if (plist-get value :already-known) "already known" "registered")
+                  dir)))
+     :on-error
+     (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
 (defun agent-repl-verbs--read-prompt (prompt-text)
   "Read the creation prompt, defaulting to the composer's current text.

@@ -179,6 +179,10 @@ func (s *fakeServer) RegisterWorkspace(ctx context.Context, req *connect.Request
 	return handleUnary[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse](ctx, s, "RegisterWorkspace", req.Msg)
 }
 
+func (s *fakeServer) RegisterRepository(ctx context.Context, req *connect.Request[v1.RegisterRepositoryRequest]) (*connect.Response[v1.RegisterRepositoryResponse], error) {
+	return handleUnary[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse](ctx, s, "RegisterRepository", req.Msg)
+}
+
 func (s *fakeServer) SelectWorkspace(ctx context.Context, req *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error) {
 	return handleUnary[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse](ctx, s, "SelectWorkspace", req.Msg)
 }
