@@ -77,7 +77,11 @@ describe("statusArmClass", () => {
     // where a merging ROSTER row spends no color and reports itself by glyph.
     ["merging", "tone-purple"],
     ["background", "tone-yellow"],
-    ["blocked", "tone-purple"],
+    // blocked is blue, like disconnected and closing: a blocked session cannot
+    // proceed until something outside it changes, which renders the agent
+    // unusable — the same claim, and the same color, as the roster's
+    // vendor_blocked.
+    ["blocked", "tone-blue"],
     ["disconnected", "tone-blue"],
     ["closing", "tone-blue"],
     ["loading", "tone-red"],
