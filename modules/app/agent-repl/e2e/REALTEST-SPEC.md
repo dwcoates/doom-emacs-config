@@ -511,6 +511,91 @@ is answered from the offline scripted SDK. The launch therefore states the ONE
 variable it always did, and no second knob
 (docs/REALTEST-PLAN.md, "Running realtest 7").
 
+## The conversation realtests, and the one place text is TYPED
+
+Realtest 9 opens the conversation section, and it is the first realtest whose
+subject is a TURN rather than a workspace. Four things about it are specific to
+it; everything else — the cold start, the dedicated scratch repository, the
+leftovers guard, the harvest — is the workspace-act substrate above, unchanged.
+
+**The prompt is TYPED, one real key event per character.** Every other act
+realtest supplies a command's minibuffer answers through the probe transport,
+because typing into a `require-match` `completing-read` would test the
+completion UI rather than the product. That reasoning inverts here:
+`agent-repl-send` reads the COMPOSER rather than taking an argument, so a
+prompt inserted through a probe would be testing the send with the composer
+removed from it — and the composer is half of what the plan's item names. So
+`SPC o v` selects the composer, `i` enters insert state, the prompt's
+characters are posted from a keycode table (`rt9PromptKeys`), `<escape>`
+returns to normal state, and `RET` — the composer's own send key
+(`lisp/input.el`, `agent-repl-input-mode-map`, `:ni "RET"`) — is the act. The
+prompt is lowercase letters and spaces only, because a shifted character would
+need a modifier the table deliberately does not carry.
+
+**The composer is READ BACK before the send, and the read-back text is what the
+turn is judged against.** A dropped character is reported as a harness
+key-delivery finding in its own right, and the answer is still compared against
+the prompt the editor actually holds rather than the one the run meant to type
+— so one dropped keystroke costs one finding instead of invalidating every
+assertion after it.
+
+**`SPC o v` IS PROVEN BY ITS EFFECT, NOT BY A PROMPT.** It asks no minibuffer
+question, so the substrate's `wsActProveChord` does not apply; the pair realtest
+8 uses for `SPC j d` and `SPC j x` is used instead — Emacs's own
+`(recent-keys)` carrying the sequence, and the workspace's composer being the
+selected buffer. A failure there is FATAL rather than collected, which is the
+opposite of this layer's usual rule and is deliberate: everything after it types
+characters wherever the point is, and a run that typed a prompt into the owner's
+source file and pressed return there would be worse than a run that stopped.
+
+**The fake vendor answers from the DEFAULT PROSE SCENARIO, and nothing extra is
+stated on the launch.** A guarded daemon spawns every shim with `--fake`, so the
+one variable the launcher always states covers a turn exactly as it covers
+realtest 7's seed (see docs/REALTEST-PLAN.md, "Running realtest 7"). The prompt
+names no `!scenario`, so it falls through to `PROSE`
+(`agent-shim/claude/shim/src/fake/scenarios/prose.ts`), which thinks on both
+arms — one withheld thinking block, one visible — opens with a fixed sentence,
+and concludes by echoing the prompt verbatim. It was chosen rather than added
+to: `!hold` never concludes (realtest 10's subject) and a scenario minted for
+one run would make that run's evidence about a code path only it takes.
+
+### The edges a turn writes, and the four it does not
+
+Every latency realtest 9 reports is a delta between two real log edges, per the
+rule above. The edges that exist are `elisp.input.send` (INFO, the one body
+every production send site shares), the daemon's own `turns` row carrying the
+prompt, `daemon.promptqueue.deliver` (INFO), `shim.engine.turn` "opened a turn"
+(INFO), the same `turns` row's `closed_at`, and the webapp's
+`feed.draw-user-prompt` and `feed.final-answer-marked`.
+
+FOUR OF THE FACTS THE PLAN'S ITEM NAMES HAVE NO EDGE BEHIND THEM. The realtest
+asserts what exists, says in its own manifest what it could not assert, and each
+gap is recorded as a LOGGING DEFECT in docs/REALTEST-JUDGEMENT-CALLS.md
+("Authoring realtest 9") for the lead to dispatch:
+
+| what item 9 names | why it cannot be asserted today | what the run asserts instead |
+|---|---|---|
+| `daemon.promptqueue.submit` | the ordinary path writes it at DEBUG and the deployed daemon runs at the contract's INFO default | the daemon's durable `turns` row and `daemon.promptqueue.deliver`; the submit record is scanned for and REPORTED |
+| the footer's status through the turn | the footer is drawn in the webview from a resolution whose only account of itself is `daemon.footer.status_decision` at DEBUG; elisp cannot read the webview | the same status vocabulary on the TAB ARM, with the manifest saying the strip itself was not read |
+| the tab arm's transitions | `elisp.status.tab-state` is log-verbose, so the arm's history is nowhere | the arm is SAMPLED every 150ms through the turn; the settled arm is asserted and the working arms are reported, because a transient shorter than one interval would be a flake and not a finding |
+| the answer's text in the feed | no log carries a feed row's prose, and the store that does hold it is 790MB — a snapshot-per-read this layer's one read path would take in minutes | `feed.final-answer-marked` (the feed marked an answering row) plus a `feed.draw-text-block` whose `characters` equals the length of the scenario's known opening sentence |
+
+The turn's phases ship UNBUDGETED, for the reason "Budgets, and why they ship
+unmeasured" gives: they are measured from those edges and reported at the site
+and in the manifest, and become budgets once accumulated runs have sized them.
+The three ceilings realtest 9 carries — the submit edge appearing, the turn
+concluding, the feed's records landing — are OBSERVATION CEILINGS and not
+budgets, exactly as realtest 1's four are.
+
+**The arm sampler has its OWN emacsclient.** `Client.seq` is incremented without
+a lock and the answer files cycle through a fixed ring, so two goroutines
+sharing one client would race for the sequence and read each other's answers.
+Sampling across the send press is safe for THIS chord and would not be for every
+chord: probe traffic makes Emacs busy, and a `quit_char` posted into a busy Emacs
+is handed to `handle_interrupt` rather than queued (the whole C-g account above),
+while `RET` is an ordinary key the kernel of the event loop queues — a probe in
+flight delays it and cannot swallow it.
+
 ## The leftovers a sweep must not leave
 
 A realtest that registers, creates or forks a workspace puts a row in the
@@ -916,6 +1001,11 @@ e2e/realtest/
                                nothing else does, and the kill orphan scan
   realtest_7_fork_a_workspace_test.go
   realtest_8_priority_close_reopen_kill_test.go
+  realtest_9_send_a_prompt_test.go
+                               the conversation section's first realtest: the
+                               typed prompt, the turn's own log edges, the
+                               sampled tab arm, and the four edges the product
+                               does not write
 ```
 
 The unit tests run under the same build tag and need none of the above: they
