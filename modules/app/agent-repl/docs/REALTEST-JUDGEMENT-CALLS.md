@@ -15,6 +15,13 @@ lead:
 
 See `docs/REALTEST-PLAN.md` for run status.
 
+## Realtest 9, first run (2026-09-13)
+
+| Date | Question | Decision | Why | How to reverse |
+| --- | --- | --- | --- | --- |
+| 2026-09-13 | `rt9ComposerSelected` reported the editor standing in `" *temp file*"` for a correctly focused composer. Is that the product losing focus, or the probe? | The probe; it reads `(window-buffer (selected-window))` now | Every probe form is evaluated inside the transport's own `with-temp-file` (`e2e/realtest/emacsclient.go`, `probeWrapper`), so `(current-buffer)` inside a probe is the transport's temp buffer and never the editor's — the probe was asking about itself. Realtest 4's selection probe already reads the selected window for this reason | Restore the `(eq (current-buffer) buf)` comparison in `rt9ComposerSelected` (`e2e/realtest/realtest_9_send_a_prompt_test.go`) |
+| 2026-09-13 | `SPC o v` moved the editor from the auto-selected composer to the webview, and the act asserted "composer" after one press. Change `agent-repl-focus-input`, or the act? | The act | The jump back is the command's designed behavior and the branch carries its own reasoning (`lisp/panels.el`, `focus-input branch=jump-back`); a minted workspace auto-selects its composer (`maybe-autoselect-input`, branch=select-input-win), so the first press finding the composer selected is the ordinary case and an act that asserted the opposite was testing a command the product does not ship | Collapse `rt9PressFocusInput` back into a single unconditional press asserting `"composer"` in `rt9FocusTheComposer` (same file) |
+
 ## The account cell's dropdown, 2026-09-13
 
 | Date | Question | Decision | Why | How to reverse |
