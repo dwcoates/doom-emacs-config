@@ -1139,3 +1139,21 @@ Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
 | 2026-09-13 | The `tree_removed` rule did not cover a reaped task spool or a cleaned-up transcript under a STANDING directory, both of which the reader had already read to the end. Widen the rule, or leave them WARN? | Widen it: `reason` grows `ended` and `fully_read` | The WARNING exists for bytes that could have been lost, and a file whose every byte was read and committed lost none; the vendor reaping a task's output file after the task ends is the ordinary shape of that path, not something an operator can act on | Return only `reasonTreeRemoved` from `vanishReason` (`agent-shim/claude/shim-sidecar/cycle.go`) |
 | 2026-09-13 | "Fully read" needs a size to compare the committed offset against. The size at the vanish is unknowable; use the last one a poll observed, or drop the arm? | The last size a SUCCESSFUL poll observed, and only when a poll ever observed one | It is the only size the reader has evidence for, and the pair it is compared against -- the committed offset -- moves only on a store ack, so a batch still in flight, held, or mid-tail keeps the file's bytes outstanding and keeps the WARNING | `LastSize` and the `sized` flag (`agent-shim/claude/shim-sidecar/internal/tail/tailer.go`) |
 | 2026-09-13 | The tracker carried the tree removal as a boolean through to the conclusion. Add two more booleans, or name the reason? | Name it: `Lost.BenignEnd` is a string, `""` = a genuine loss | Three ways of ending the same way is a vocabulary, and three booleans would let two of them be true at once; the conclusion's own sentence can then say WHICH, and the wire arm stays `file_vanished` exactly as before | `Lost.TreeRemoved` as a bool and the `treeRemoved` entry field (`agent-shim/claude/shim-sidecar/internal/stale/stale.go`) |
+
+## Owner rulings, evening batch (2026-09-13, owner)
+
+- Realtest 9 (and the Conversation section) is the lead's to author, run
+  and remediate to completion without the owner's intervention. No UI
+  look-and-feel changes unless corrective.
+- Every daemon fault kind reaches the footer. Proto additions and modest
+  changes are pre-approved for it. Reuse an existing footer STATUS where
+  one fits (never invent a status when one exists); substatuses are
+  concise, well-formed buckets forming an ONTO relation over the activity
+  values (several activities may land in one substatus; substatuses never
+  overfit to activity cardinality). Status is most general, substatus less
+  general, activity least general.
+- The shim start contract: the lead's recommendation is taken (settle the
+  start on a proven-live control round-trip; learn the init facts with the
+  first turn), since the owner wants the section brought home without
+  intervention.
+- test-all runs as the section gate afterwards.
