@@ -27,17 +27,17 @@ func TestRegisterRepositoryMintsARepositoryFromAFileInsideIt(t *testing.T) {
 	f.git.mainWorktree = dir
 
 	// Act.
-	record, alreadyKnown, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
+	registered, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("RegisterRepository: %v", err)
 	}
-	if alreadyKnown {
+	if registered.RepositoryAlreadyKnown {
 		t.Fatalf("RegisterRepository reported a repository the registry already held, want a fresh mint")
 	}
-	if record.Dir != dir {
-		t.Fatalf("registered dir = %q, want the resolved main worktree %q", record.Dir, dir)
+	if registered.Repository.Dir != dir {
+		t.Fatalf("registered dir = %q, want the resolved main worktree %q", registered.Repository.Dir, dir)
 	}
 }
 
@@ -50,14 +50,14 @@ func TestRegisterRepositoryResolvesTheMainWorktreeRatherThanThePathsOwnDirectory
 	f.git.mainWorktree = main
 
 	// Act.
-	record, _, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, linked))
+	registered, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, linked))
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("RegisterRepository: %v", err)
 	}
-	if record.Dir != main {
-		t.Fatalf("registered dir = %q, want git's main worktree %q", record.Dir, main)
+	if registered.Repository.Dir != main {
+		t.Fatalf("registered dir = %q, want git's main worktree %q", registered.Repository.Dir, main)
 	}
 }
 
@@ -66,23 +66,23 @@ func TestRegisterRepositoryReportsARepositoryTheRegistryAlreadyHeld(t *testing.T
 	f := newFixture(t)
 	dir := worktreeDir(t)
 	f.git.mainWorktree = dir
-	first, _, err := f.verbs.RegisterRepository(context.Background(), dir)
+	first, err := f.verbs.RegisterRepository(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("first RegisterRepository: %v", err)
 	}
 
 	// Act.
-	again, alreadyKnown, err := f.verbs.RegisterRepository(context.Background(), dir)
+	again, err := f.verbs.RegisterRepository(context.Background(), dir)
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("second RegisterRepository: %v", err)
 	}
-	if !alreadyKnown {
+	if !again.RepositoryAlreadyKnown {
 		t.Fatalf("RegisterRepository reported a fresh mint for %s, want already known", dir)
 	}
-	if again.ID != first.ID {
-		t.Fatalf("RegisterRepository = id %q, want the id %q the first call answered", again.ID, first.ID)
+	if again.Repository.ID != first.Repository.ID {
+		t.Fatalf("RegisterRepository = id %q, want the id %q the first call answered", again.Repository.ID, first.Repository.ID)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestRegisterRepositoryRefusesAPathOutsideAnyRepository(t *testing.T) {
 	dir := t.TempDir()
 
 	// Act.
-	_, _, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
+	_, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
 
 	// Assert.
 	asRefusal(t, err, ArmNotInARepository)
@@ -110,7 +110,7 @@ func TestRegisterRepositorySurfacesAProbeGitWouldNotAnswer(t *testing.T) {
 	dir := t.TempDir()
 
 	// Act.
-	_, _, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
+	_, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
 
 	// Assert.
 	if _, refused := AsRefusal(err); refused {
@@ -126,7 +126,7 @@ func TestRegisterRepositoryRefusesAPathThatIsNotThere(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	_, _, err := f.verbs.RegisterRepository(context.Background(), filepath.Join(t.TempDir(), "absent.txt"))
+	_, err := f.verbs.RegisterRepository(context.Background(), filepath.Join(t.TempDir(), "absent.txt"))
 
 	// Assert.
 	asRefusal(t, err, ArmUnreadablePath)
@@ -137,7 +137,7 @@ func TestRegisterRepositoryRefusesAnEmptyPath(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	_, _, err := f.verbs.RegisterRepository(context.Background(), "")
+	_, err := f.verbs.RegisterRepository(context.Background(), "")
 
 	// Assert.
 	asRefusal(t, err, ArmUnreadablePath)
@@ -152,7 +152,7 @@ func TestRegisterRepositoryRecordsTheRepositoryDefaultBranch(t *testing.T) {
 	f.git.defaultBranch = "trunk"
 
 	// Act.
-	if _, _, err := f.verbs.RegisterRepository(context.Background(), dir); err != nil {
+	if _, err := f.verbs.RegisterRepository(context.Background(), dir); err != nil {
 		t.Fatalf("RegisterRepository: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestRegisterRepositorySurfacesADefaultBranchGitWouldNotAnswer(t *testing.T)
 	f.git.defaultErr = errFake
 
 	// Act.
-	_, _, err := f.verbs.RegisterRepository(context.Background(), dir)
+	_, err := f.verbs.RegisterRepository(context.Background(), dir)
 
 	// Assert.
 	if err == nil {
@@ -196,7 +196,7 @@ func TestRegisterRepositorySurfacesARegistryWriteThatFailed(t *testing.T) {
 	f.db.registerRepoErr = errFake
 
 	// Act.
-	_, _, err := f.verbs.RegisterRepository(context.Background(), dir)
+	_, err := f.verbs.RegisterRepository(context.Background(), dir)
 
 	// Assert.
 	if !errors.Is(err, errFake) {
@@ -214,7 +214,7 @@ func TestRegisterRepositoryRepublishesTheRoster(t *testing.T) {
 	f.git.mainWorktree = dir
 
 	// Act.
-	if _, _, err := f.verbs.RegisterRepository(context.Background(), dir); err != nil {
+	if _, err := f.verbs.RegisterRepository(context.Background(), dir); err != nil {
 		t.Fatalf("RegisterRepository: %v", err)
 	}
 
@@ -234,23 +234,146 @@ func TestRegisterRepositoryRepublishesTheRoster(t *testing.T) {
 	}
 }
 
-// TestRegisterRepositoryLeavesTheWorkspaceRegistryAlone pins the verb's whole
-// scope: it mints a repository and nothing else. A repository registered on its
-// own has NO workspace, and minting one would put a row in the roster the user
-// never asked for.
-func TestRegisterRepositoryLeavesTheWorkspaceRegistryAlone(t *testing.T) {
+// TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace is the owner's
+// ruling of 2026-09-14: registering the repository you are standing in must
+// leave you with a workspace you can switch to, because `SPC p p' completes
+// over live workspaces and a repository-only row is not one.
+func TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	dir := worktreeDir(t)
 	f.git.mainWorktree = dir
 
 	// Act.
-	if _, _, err := f.verbs.RegisterRepository(context.Background(), dir); err != nil {
+	registered, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	if registered.Workspace.Dir != dir {
+		t.Fatalf("registered workspace dir = %q, want the repository's main worktree %q",
+			registered.Workspace.Dir, dir)
+	}
+}
+
+// TestRegisterRepositoryMintsTheWorkspaceThroughTheSameRegistration pins that
+// the workspace is not half-made: it goes through `register', so the facts
+// RegisterWorkspace derives from git are on the row this verb wrote too.
+func TestRegisterRepositoryMintsTheWorkspaceThroughTheSameRegistration(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+	f.git.currentBranch = "trunk"
+
+	// Act.
+	if _, err := f.verbs.RegisterRepository(context.Background(), dir); err != nil {
 		t.Fatalf("RegisterRepository: %v", err)
 	}
 
 	// Assert.
-	if len(f.db.registered) != 0 {
-		t.Fatalf("the verb registered %v, want no workspace at all", f.db.registered)
+	if len(f.db.registered) != 1 {
+		t.Fatalf("the verb registered %d workspaces, want exactly the main worktree", len(f.db.registered))
+	}
+	if f.db.registered[0].Branch != "trunk" {
+		t.Fatalf("registered branch = %q, want the branch git reports", f.db.registered[0].Branch)
+	}
+}
+
+// TestRegisterRepositoryReportsAFreshlyMintedWorkspace pins the fresh-repo
+// case: nothing was known, so neither half is flagged already known.
+func TestRegisterRepositoryReportsAFreshlyMintedWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+
+	// Act.
+	registered, err := f.verbs.RegisterRepository(context.Background(), dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	if registered.WorkspaceAlreadyKnown {
+		t.Fatalf("RegisterRepository reported a workspace the registry already held, want a fresh mint")
+	}
+}
+
+// TestRegisterRepositoryMintsTheWorkspaceForARepositoryItAlreadyHeld is the
+// mixed case the two independent bools exist for: a repository registered
+// before this half of the verb landed is already known while its workspace is
+// minted right now.
+func TestRegisterRepositoryMintsTheWorkspaceForARepositoryItAlreadyHeld(t *testing.T) {
+	// Arrange: the repository row is already in the registry, with no workspace
+	// under it.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+	if _, _, err := f.db.RegisterRepository(context.Background(), dir, "master"); err != nil {
+		t.Fatalf("seed the repository: %v", err)
+	}
+
+	// Act.
+	registered, err := f.verbs.RegisterRepository(context.Background(), dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	if !registered.RepositoryAlreadyKnown {
+		t.Fatalf("RegisterRepository = repository already_known false, want the seeded repository")
+	}
+	if registered.WorkspaceAlreadyKnown {
+		t.Fatalf("RegisterRepository = workspace already_known true, want a workspace minted now")
+	}
+}
+
+// TestRegisterRepositoryAdoptsAWorkspaceItAlreadyHeld pins the both-known case:
+// re-registering reuses the workspace rather than minting a second one.
+func TestRegisterRepositoryAdoptsAWorkspaceItAlreadyHeld(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+	first, err := f.verbs.RegisterRepository(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("first RegisterRepository: %v", err)
+	}
+
+	// Act.
+	again, err := f.verbs.RegisterRepository(context.Background(), dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("second RegisterRepository: %v", err)
+	}
+	if !again.WorkspaceAlreadyKnown {
+		t.Fatalf("the second RegisterRepository = workspace already_known false, want true")
+	}
+	if again.Workspace.ID != first.Workspace.ID {
+		t.Fatalf("RegisterRepository = workspace %q, want the one the first call registered, %q",
+			again.Workspace.ID, first.Workspace.ID)
+	}
+}
+
+// TestRegisterRepositorySurfacesTheRegistrationsOwnRefusalUnderItsOwnRpc pins
+// that the SHARED registration's refusal is answered as RegisterRepository's.
+// The body raises it unnamed precisely because it serves two rpcs, and a
+// refusal reaching the client as RegisterWorkspaceError would name an rpc the
+// caller never made.
+func TestRegisterRepositorySurfacesTheRegistrationsOwnRefusalUnderItsOwnRpc(t *testing.T) {
+	// Arrange: git resolves a main worktree that is not a worktree on disk.
+	f := newFixture(t)
+	f.git.mainWorktree = t.TempDir()
+	dir := worktreeDir(t)
+
+	// Act.
+	_, err := f.verbs.RegisterRepository(context.Background(), repoFile(t, dir))
+
+	// Assert.
+	if refusal := asRefusal(t, err, ArmNotAWorktree); refusal.Rpc != "RegisterRepository" {
+		t.Fatalf("refusal rpc = %q, want RegisterRepository", refusal.Rpc)
 	}
 }
