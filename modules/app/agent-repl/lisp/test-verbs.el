@@ -1850,14 +1850,22 @@ came back CLOSED left behind."
 ;; registering a workspace, so a checkout nobody had worked in yet could not
 ;; be named at all.
 
-(defun agent-repl-test-verbs--register-repository-answer (&optional already-known)
+(defun agent-repl-test-verbs--register-repository-answer
+    (&optional already-known workspace-already-known)
   "Return the answers alist for a RegisterRepository that SUCCEEDED.
-ALREADY-KNOWN non-nil scripts the idempotent answer."
+ALREADY-KNOWN non-nil scripts the idempotent answer for the REPOSITORY,
+and WORKSPACE-ALREADY-KNOWN the one for the main-worktree WORKSPACE the
+same call registers.  The two are independent, which is why they are two
+arguments."
   (list (cons :register-repository
               (list :response
                     (list :arm :success
                           :value (list :repository (agent-repl-test-verbs--repo-ref)
-                                       :already-known already-known))))))
+                                       :already-known already-known
+                                       :workspace (list :id "ws-id-1"
+                                                        :dir "/tmp/agent-repl-test/repo")
+                                       :workspace-already-known
+                                       workspace-already-known))))))
 
 (defmacro agent-repl-test-verbs--picking-file (path &rest body)
   "Run BODY with `read-file-name' answering PATH."
@@ -1887,16 +1895,53 @@ ALREADY-KNOWN non-nil scripts the idempotent answer."
       (should (agent-repl-test-verbs--messaged-p
                "registered repository /tmp/agent-repl-test/repo")))))
 
-(ert-deftest agent-repl-verbs-register-repository-reports-one-already-known ()
-  "`already_known' is an ANSWER: the command says so rather than claiming a mint."
+(ert-deftest agent-repl-verbs-register-repository-reports-the-workspace-it-opened ()
+  "The ack names BOTH facts: the repository, and the workspace opened with it.
+The main worktree is what `SPC p p\=' can then switch to, so a report that
+named only the repository would omit the half the owner asked for."
   ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer t)
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
     (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
       ;; Act.
       (agent-repl-register-repository)
       ;; Assert.
       (should (agent-repl-test-verbs--messaged-p
-               "already known repository /tmp/agent-repl-test/repo")))))
+               "registered repository /tmp/agent-repl-test/repo; workspace repo opened")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-a-workspace-already-known ()
+  "A main worktree already registered is reported as already known, not opened."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer nil t)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "registered repository /tmp/agent-repl-test/repo; workspace repo already known")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-the-two-already-knowns-apart ()
+  "The repository may be already known while its workspace is freshly opened.
+That is the state a repository registered before the workspace half landed
+is in, so the two bools are reported independently rather than as one."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer t nil)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "already known repository /tmp/agent-repl-test/repo; workspace repo opened")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-one-already-known ()
+  "`already_known' is an ANSWER: the command says so rather than claiming a mint."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer t t)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "already known repository /tmp/agent-repl-test/repo; workspace repo already known")))))
 
 (ert-deftest agent-repl-verbs-register-repository-reports-a-path-in-no-repository ()
   "The `not_in_a_repository' arm reaches the user as its own sentence."

@@ -25,15 +25,35 @@ import (
 // directory that is not a git worktree at all is REFUSED — registering it would
 // put a row in the roster that no git verb could ever act on.
 func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, error) {
+	record, _, err := v.register(ctx, dir, facts)
+	return record, namedRefusal(err, "RegisterWorkspace")
+}
+
+// register is THE registration, and it is the only one. Both RegisterWorkspace
+// and RegisterRepository run it -- the second for the repository's own main
+// worktree (owner ruling, 2026-09-14) -- because one directory must not have
+// two registration behaviors depending on which rpc announced it. A near-copy
+// in the repository verb would have had to re-derive the naming, re-bind the
+// resolvers, re-claim the serving ownership and re-decide the revival, and the
+// two would have drifted the first time either changed.
+//
+// It answers `created` in addition to the record, which is what tells the
+// repository verb whether it MINTED the workspace or adopted one the registry
+// already held. Register itself has no field to put that in
+// (RegisterWorkspaceSuccess carries the ref and nothing else) and drops it.
+func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, bool, error) {
 	global := v.deps.Log.Global().With(dlog.Context{"dir": dir})
 
 	normalized, err := normalizeDir(dir)
 	if err != nil {
 		global.Error(opRegister, "the announced directory cannot be normalized", dlog.Context{"cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("register %q: %w", dir, err)
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", dir, err)
 	}
 	if !IsWorktree(normalized) {
-		return wsm.Workspace{}, refuse(global, "RegisterWorkspace", ArmNotAWorktree,
+		// THE RPC IS THE CALLER'S TO NAME. This body serves two of them, so
+		// it raises the refusal unnamed and each verb stamps its own through
+		// namedRefusal.
+		return wsm.Workspace{}, false, refuse(global, "", ArmNotAWorktree,
 			fmt.Sprintf("%q is not a git worktree", normalized), false)
 	}
 
@@ -53,7 +73,7 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 		main, err := v.deps.Git.MainWorktree(ctx, normalized)
 		if err != nil {
 			global.Error(opRegister, "could not resolve the repository's main worktree", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
+			return wsm.Workspace{}, false, fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
 		}
 		facts.RepoDir = main
 		global.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": main})
@@ -62,7 +82,7 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 		branch, err := v.deps.Git.CurrentBranch(ctx, normalized)
 		if err != nil {
 			global.Error(opRegister, "could not resolve the checked-out branch", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, fmt.Errorf("register %q: current branch: %w", normalized, err)
+			return wsm.Workspace{}, false, fmt.Errorf("register %q: current branch: %w", normalized, err)
 		}
 		facts.Branch = branch
 		global.Debug(opRegister, "derived the branch from git", dlog.Context{"branch": branch})
@@ -71,7 +91,7 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 		parent, err := v.deps.Git.DefaultBranch(ctx, facts.RepoDir)
 		if err != nil {
 			global.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, fmt.Errorf("register %q: default branch: %w", normalized, err)
+			return wsm.Workspace{}, false, fmt.Errorf("register %q: default branch: %w", normalized, err)
 		}
 		facts.ParentBranch = parent
 		global.Debug(opRegister, "derived the parent branch from git", dlog.Context{"parent_branch": parent})
@@ -80,7 +100,7 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 		branch, err := v.deps.Git.DefaultBranch(ctx, facts.RepoDir)
 		if err != nil {
 			global.Error(opRegister, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, fmt.Errorf("register %q: default branch: %w", normalized, err)
+			return wsm.Workspace{}, false, fmt.Errorf("register %q: default branch: %w", normalized, err)
 		}
 		facts.DefaultBranch = branch
 		global.Debug(opRegister, "derived the repository default branch from git", dlog.Context{
@@ -95,14 +115,14 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 	record, created, err := v.deps.DB.RegisterWorkspace(ctx, normalized, facts)
 	if err != nil {
 		global.Error(opRegister, "could not record the workspace", dlog.Context{"cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("register %q: %w", normalized, err)
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}
 	log, err := v.deps.Log.Workspace(normalized)
 	if err != nil {
 		global.Error(opRegister, "could not resolve the workspace log sink", dlog.Context{
 			"workspace": string(record.ID), "cause": err.Error(),
 		})
-		return wsm.Workspace{}, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
 	}
 	if created {
 		log.Info(opRegister, "registered a new workspace", dlog.Context{
@@ -136,7 +156,7 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 			log.Error(opRegister, "could not re-open the announced workspace", dlog.Context{
 				"workspace": string(record.ID), "cause": err.Error(),
 			})
-			return wsm.Workspace{}, fmt.Errorf("register %q: re-open the closed workspace: %w", normalized, err)
+			return wsm.Workspace{}, false, fmt.Errorf("register %q: re-open the closed workspace: %w", normalized, err)
 		}
 		record.Closed = false
 		log.Info(opRegister, "the announcement re-opened a closed workspace", dlog.Context{
@@ -149,10 +169,10 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 	// directory of is an invariant violation they report and cannot serve.
 	// Registration is the one moment every workspace passes through.
 	if err := v.bindResolvers(log, record.ID, normalized); err != nil {
-		return wsm.Workspace{}, fmt.Errorf("register %q: %w", normalized, err)
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}
 	if err := v.publishNaming(ctx, log, record, facts.DefaultBranch); err != nil {
-		return wsm.Workspace{}, fmt.Errorf("register %q: %w", normalized, err)
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}
 	// THIS DAEMON SERVES IT from here. The claim is what a handover hands
 	// over, and what tells a joining successor which workspaces are still the
@@ -162,14 +182,14 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
 				"workspace": string(record.ID), "instance": string(v.deps.Instance), "cause": err.Error(),
 			})
-			return wsm.Workspace{}, fmt.Errorf("register %q: claim serving: %w", normalized, err)
+			return wsm.Workspace{}, false, fmt.Errorf("register %q: claim serving: %w", normalized, err)
 		}
 	}
 
 	v.reviveRecordedConversation(ctx, log, record, created)
 
 	v.republishRegistry(ctx, log, opRegister)
-	return record, nil
+	return record, created, nil
 }
 
 // The session terminals registration reads. `deleted` refuses resurrection

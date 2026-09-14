@@ -96,11 +96,15 @@ type Verbs interface {
 	// Register records a workspace Emacs announced. Idempotent by normalized
 	// dir.
 	Register(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, error)
-	// RegisterRepository records a repository ON ITS OWN, with no workspace,
-	// resolved from ANY path inside it (a file or a directory) through git's
-	// main worktree. Idempotent by the resolved dir; the bool reports that the
-	// registry already held it, which is an ANSWER rather than a refusal.
-	RegisterRepository(ctx context.Context, path string) (wsm.Repository, bool, error)
+	// RegisterRepository records a repository resolved from ANY path inside it
+	// (a file or a directory) through git's main worktree, AND registers that
+	// main worktree as an open workspace through the same registration
+	// RegisterWorkspace runs (owner ruling, 2026-09-14): a repository with no
+	// workspace is not selectable, because `SPC p p' completes over live
+	// workspaces. Idempotent on both halves; the answer's two bools report
+	// which of them the registry already held, each an ANSWER rather than a
+	// refusal.
+	RegisterRepository(ctx context.Context, path string) (RegisteredRepository, error)
 	// PublishRegistry publishes the roster's durable half once, from what the
 	// registry holds right now. The boot spine calls it before anything is
 	// served: the roster is otherwise published only as a side effect of a
