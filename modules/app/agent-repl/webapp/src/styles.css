@@ -2747,6 +2747,17 @@ pre {
   .pfooter-breath {
     animation-duration: 6s;
   }
+  /* The status word's letter wave STOPS rather than slowing. It restates a
+     fact the strip already spells out in full — the status word itself, its
+     substatus step, the running turn clock — so a reader in this mode loses
+     nothing by it standing still, and the breath above still carries the "the
+     agent is working" motion this query keeps. Stopping also keeps the period a
+     single constant: each letter's negative `animation-delay` is computed
+     against one STATUS_WAVE_PERIOD_MS, and a reduced-motion override that merely
+     LENGTHENED the pass would leave every delay seeking to the wrong phase. */
+  .pfooter-wave-letter {
+    animation: none;
+  }
   /* Per-animation durations, in the order the base rule declares them: the
      slowed rotation, then the unchanged fade-in (whose 1s delay, declared
      in the shorthand, survives this override). */
@@ -3157,6 +3168,56 @@ pre {
 @keyframes pfooter-breath {
   0%, 100% { transform: scale(0.93); }
   50% { transform: scale(1.07); }
+}
+
+/* ---- footer status wave (src/footer/strip.ts, src/breathing.ts) ----
+
+   THE PROGRESS STATUSES' LETTER WAVE (owner's idea, 2026-09-14): "the footer's
+   status word, for statuses that mean PROGRESS (not stagnation), gets a subtle
+   letter wave: each letter is slightly enlarged in sequence, the bulge
+   travelling forwards then backwards continually".
+
+   ADDITIONAL TO THE COLOUR BREATH, which is untouched: the word keeps its arm's
+   tone and the per-arrival shade step, and nothing here sets a colour.
+
+   `transform: scale` and NEVER `font-size`, exactly as `.pfooter-breath` above:
+   a font-size oscillation re-measures the word every frame and shoves the whole
+   strip sideways, while a transform is painted without re-laying anything out —
+   so the waving word occupies exactly the width its resting letters do.
+   `display: inline-block` is what makes a transform apply at all.
+
+   SCALE 1.15, AND NO LAYER PROMOTION. The strip is `font-size: 0.78rem` (12.48px
+   at the default root), so the bulge peaks at 14.35px — visible at a glance and
+   still unmistakably the same word. There is deliberately no `will-change`, no
+   `translateZ(0)` and no `backface-visibility` here: any of them promotes the
+   letter to its own layer, and WebKit then rasterises the glyph ONCE at 1x and
+   scales that bitmap, which is precisely how a scaled word goes blurry. Left
+   unpromoted, WebKit re-rasterises at the animated scale and the letter stays
+   crisp at every point of the wave.
+
+   `transform-origin: 50% 100%` pins the baseline, so a letter grows upward
+   rather than bobbing across it.
+
+   ALTERNATE, so the bulge runs forwards and then backwards rather than snapping
+   back. That makes the animation's true repeat TWO durations, which is why
+   STATUS_WAVE_CYCLE_MS is `2 x` the period the negative delay is reduced modulo.
+   The 2.6s duration must stay in step with STATUS_WAVE_PERIOD_MS (breathing.ts).
+
+   NO `animation-delay` HERE, on purpose: each letter renders its own negative
+   one inline, which is what carries the wave's phase across a footer push, and a
+   delay declared in this rule would be the value that inline style exists to
+   override. */
+.pfooter-status-word {
+  white-space: pre;
+}
+.pfooter-wave-letter {
+  display: inline-block;
+  transform-origin: 50% 100%;
+  animation: pfooter-status-wave 2.6s ease-in-out infinite alternate;
+}
+@keyframes pfooter-status-wave {
+  from { transform: scale(1); }
+  to { transform: scale(1.15); }
 }
 
 /* The turn clock and token cells: tabular figures so a ticking digit never

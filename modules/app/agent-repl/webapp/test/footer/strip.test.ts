@@ -23,6 +23,11 @@ import {
   subStatusWords,
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
+import {
+  STATUS_WAVE_CYCLE_MS,
+  STATUS_WAVE_LETTER_OFFSET_MS,
+  WAVING_STATUS_ARMS,
+} from "../../src/breathing.js";
 import { harness, strip, type Harness, type StripInit } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
 
@@ -1056,5 +1061,106 @@ describe("the fault activity: every daemon fault kind reaches the strip", () => 
     expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
       "shim reported \u00b7 the shim said so",
     );
+  });
+});
+
+// ---- the status word's letter wave ----------------------------------------
+
+describe("the footer status word's letter wave", () => {
+  /** The delay each `.pfooter-wave-letter` of the drawn status word renders with. */
+  function letterDelays(row: HTMLElement): number[] {
+    return [...row.querySelectorAll(".footer-status .pfooter-wave-letter")].map((letter) => {
+      const got = /animation-delay:\s*-(\d+)ms/.exec(letter.getAttribute("style") ?? "");
+      if (got === null) throw new Error(`no negative delay on ${letter.outerHTML}`);
+      return Number(got[1]);
+    });
+  }
+
+  /** The arm's fixture, with its first substatus where the arm declares one. */
+  function armStatus(arm: string): FooterStatus["status"] {
+    const sub = SUBSTATUS_PAIRS.find(([statusCase]) => statusCase === arm)?.[1];
+    return sub === undefined ? status(arm, {}) : withSubStatus(arm, sub);
+  }
+
+  it.each([...WAVING_STATUS_ARMS].map((arm) => [arm]))(
+    "splits the %s word into one span per letter",
+    (arm) => {
+      // Arrange / Act
+      const { row } = drawStrip({ status: armStatus(arm) });
+
+      // Assert
+      expect(letterDelays(row)).toHaveLength(statusWords(arm).length);
+    },
+  );
+
+  it("leaves the split word reading exactly as the arm's own word", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert
+    expect(row.querySelector(".footer-status")?.textContent).toBe("thinking");
+  });
+
+  it("marks the waving cell as a progress status", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert
+    expect(row.querySelector(".footer-status")?.getAttribute("data-status-wave")).toBe("progress");
+  });
+
+  it("advances the delay by one letter offset from each letter to the next", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert — modular, because the cycle can wrap between any two letters.
+    const delays = letterDelays(row);
+    const steps = delays.slice(1).map((delay, index) => {
+      const previous = delays[index] ?? 0;
+      return (delay - previous + STATUS_WAVE_CYCLE_MS) % STATUS_WAVE_CYCLE_MS;
+    });
+    expect(steps).toEqual(steps.map(() => STATUS_WAVE_LETTER_OFFSET_MS));
+  });
+
+  it("continues the phase across a redraw rather than restarting at zero", () => {
+    // Arrange
+    const before = letterDelays(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+    vi.setSystemTime(NOW + 900);
+
+    // Act
+    const after = letterDelays(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+
+    // Assert — the redraw is 900ms further along the same cycle, not back at 0.
+    expect(after[0]).toBe(((before[0] ?? 0) + 900) % STATUS_WAVE_CYCLE_MS);
+  });
+
+  it("keeps the redrawn wave off the cycle's start, so no push reads as a stutter", () => {
+    // Arrange
+    drawStrip({ status: withSubStatus("thinking", "thinking") });
+    vi.setSystemTime(NOW + 900);
+
+    // Act
+    const after = letterDelays(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+
+    // Assert
+    expect(after[0]).not.toBe(0);
+  });
+
+  it.each(
+    FOOTER_STATUS_CASES.filter((arm) => !WAVING_STATUS_ARMS.has(arm)).map((arm) => [arm]),
+  )("draws the %s word as plain text, with no letter spans", (arm) => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: armStatus(arm) });
+
+    // Assert
+    expect(row.querySelectorAll(".footer-status .pfooter-wave-letter")).toHaveLength(0);
+  });
+
+  it("draws the client's own disconnected verdict as plain text too", () => {
+    // Arrange / Act
+    const row = drawClientDisconnectedStrip("daemon unreachable", "a line");
+
+    // Assert
+    expect(row.querySelectorAll(".pfooter-wave-letter")).toHaveLength(0);
   });
 });

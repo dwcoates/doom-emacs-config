@@ -245,3 +245,110 @@ export function startPromptWave(bubble: HTMLElement, nowMs: number = Date.now())
   bubble.setAttribute("style", bubbleWaveStyle(nowMs));
   bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
 }
+
+/**
+ * The footer status word's LETTER WAVE: a bulge that travels along the word
+ * while the session is making PROGRESS, forwards and then backwards, forever.
+ *
+ * Owner's idea, 2026-09-14: the statuses that mean progress rather than
+ * stagnation should say so in the word itself, with each letter slightly
+ * enlarged in sequence. It is ADDITIONAL to the colour breath above, which is
+ * untouched — the colour still steps per arrival and the word still carries its
+ * arm's tone. Nothing here paints a colour.
+ *
+ * `transform: scale`, never `font-size`, for the same reason the breath uses it:
+ * a font-size oscillation re-measures the word sixty times a second and shoves
+ * the whole strip sideways. A transform is painted without re-layout, so the
+ * word's width is exactly what it was at rest.
+ *
+ * PHASE CONTINUITY is the point. The footer rewrites its whole subtree on every
+ * push, and a fresh element starts its CSS animation at 0% — mid-wave that reads
+ * as a stutter on every arriving frame, which is precisely the defect the
+ * bubble's wave and the footer's breath already solved. So the same
+ * {@link AnimationEpoch}: one start time, stamped on first read and never moved,
+ * and every render emits each letter's own negative `animation-delay`.
+ *
+ * THE MODULUS IS TWO PERIODS, not one. The rule runs
+ * `animation-direction: alternate`, so the timeline's EVEN iterations run
+ * forwards and its ODD ones backwards; reducing the delay modulo one period
+ * would land every redraw on an even iteration and flip a receding bulge into an
+ * advancing one. Two periods is the smallest interval over which the animation
+ * actually repeats, so that is the modulus.
+ */
+export const STATUS_WAVE_PERIOD_MS = BREATH_PERIOD_MS;
+
+/**
+ * The smallest interval the waving letter repeats over: one forward pass and
+ * one backward pass. Must stay `2 x` the `pfooter-status-wave` duration.
+ */
+export const STATUS_WAVE_CYCLE_MS = STATUS_WAVE_PERIOD_MS * 2;
+
+/**
+ * How far one letter lags the letter before it, which is the ONLY thing that
+ * makes the bulge travel rather than the whole word breathing in unison.
+ *
+ * A tenth of the period. Across the longest waving word (`thinking`, eight
+ * letters) that spreads the word over 1820ms of the 5200ms cycle — far enough
+ * apart to read as a bulge moving along the letters, near enough that the word
+ * never comes apart into eight unrelated animations.
+ */
+export const STATUS_WAVE_LETTER_OFFSET_MS = STATUS_WAVE_PERIOD_MS / 10;
+
+/** The page-global wave every footer status word renders against. */
+export class StatusWave {
+  private epoch = new AnimationEpoch();
+
+  /** Letter INDEX's offset into the cycle, in `[0, STATUS_WAVE_CYCLE_MS)`. */
+  delayMs(nowMs: number, index: number): number {
+    const elapsed = this.epoch.elapsedMs(nowMs) + index * STATUS_WAVE_LETTER_OFFSET_MS;
+    return elapsed % STATUS_WAVE_CYCLE_MS;
+  }
+}
+
+/** The one wave the footer draws against, so a redraw continues it. */
+export const statusWave = new StatusWave();
+
+/** The class one waving letter wears; the `pfooter-status-wave` rule keys on it. */
+export const STATUS_WAVE_LETTER_CLASS = "pfooter-wave-letter";
+
+/** The span that holds the split letters, so they stay ONE flex item. */
+export const STATUS_WAVE_WORD_CLASS = "pfooter-status-word";
+
+/** The marker a waving status cell wears, and the one value it takes. */
+export const STATUS_WAVE_ATTRIBUTE = "data-status-wave";
+export const STATUS_WAVE_PROGRESS = "progress";
+
+/**
+ * The `FooterStatus` arms that mean the session is GETTING SOMEWHERE.
+ *
+ * `thinking` is the turn itself and carries every one of its steps —
+ * `submitting`, `thinking`, and the two context cuts `clearing` and
+ * `compacting`. `loading` is a context item being taken on, `merging` a merge
+ * running, `closing` a teardown running: all three are an operation underway.
+ *
+ * Everything else stands still because the session does: `waiting` is waiting on
+ * a human or the vendor, `blocked` is blocked, `disconnected` is severed, `idle`
+ * and `interrupted` are settled turns, and `background` is this session holding
+ * nothing while detached work continues elsewhere.
+ */
+export const WAVING_STATUS_ARMS: ReadonlySet<string> = new Set([
+  "thinking",
+  "loading",
+  "merging",
+  "closing",
+]);
+
+/** Whether ARM's status word waves. */
+export function statusWordWaves(armCase: string): boolean {
+  return WAVING_STATUS_ARMS.has(armCase);
+}
+
+/**
+ * The inline style one waving letter renders with, as the whole style value.
+ *
+ * Emitted on EVERY letter of a waving word, at every draw. Without it the letter
+ * seeks to 0% and the wave restarts at the word's head on each push.
+ */
+export function statusWaveStyle(index: number, nowMs: number = Date.now()): string {
+  return `animation-delay:-${Math.round(statusWave.delayMs(nowMs, index))}ms`;
+}
