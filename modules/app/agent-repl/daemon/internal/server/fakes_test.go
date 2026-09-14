@@ -198,6 +198,47 @@ type fakeVerbs struct {
 	selectAccountLoggedIn bool
 	selectAccountErr      error
 	assignTaskErr         error
+
+	// createRec is the workspace a Create returns on success; createErr, when
+	// set, is the failure it returns instead.
+	createRec wsm.Workspace
+	createErr error
+	// createStages are the stages Create reports through spec.Progress, in
+	// order, before it returns — so a test can drive the server's progress
+	// relay without the real naming/worktree steps.
+	createStages []workspace.CreateStage
+	// createEntered, when set, is closed once Create has been called and has
+	// reported its stages; createRelease, when set, blocks Create until the
+	// test closes it. Together they let a test cancel the accepting request
+	// while Create is mid-flight and prove the work is detached from it.
+	createEntered chan struct{}
+	createRelease chan struct{}
+}
+
+// Create records the spec, reports its scripted stages, optionally blocks until
+// released, then returns success or the scripted failure. A cancelled context
+// at the point of return is itself returned as the failure, so a test proves
+// detachment by asserting Create still SUCCEEDED after the request was
+// cancelled.
+func (f *fakeVerbs) Create(ctx context.Context, spec workspace.CreateSpec) (wsm.Workspace, error) {
+	for _, stage := range f.createStages {
+		if spec.Progress != nil {
+			spec.Progress.Stage(stage)
+		}
+	}
+	if f.createEntered != nil {
+		close(f.createEntered)
+	}
+	if f.createRelease != nil {
+		<-f.createRelease
+	}
+	if err := ctx.Err(); err != nil {
+		return wsm.Workspace{}, err
+	}
+	if f.createErr != nil {
+		return wsm.Workspace{}, f.createErr
+	}
+	return f.createRec, nil
 }
 
 func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {
