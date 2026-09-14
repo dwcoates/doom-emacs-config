@@ -85,6 +85,14 @@ import type {
   FooterTokensCellInput,
   FooterTokensCellVerdict,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import {
+  STATUS_WAVE_ATTRIBUTE,
+  STATUS_WAVE_LETTER_CLASS,
+  STATUS_WAVE_PROGRESS,
+  STATUS_WAVE_WORD_CLASS,
+  statusWaveStyle,
+  statusWordWaves,
+} from "../breathing.js";
 import { formatAge, formatCountdown, formatTickedAge, formatTickedElapsed } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
@@ -287,7 +295,7 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
   const word = document.createElement("div");
   word.className = `pfooter-cell pfooter-phase footer-status arm-${status.case} ${statusArmClass(status.case)}`;
   word.setAttribute("data-arm", status.case);
-  word.textContent = statusWords(status.case);
+  drawStatusWord(word, status.case);
 
   const cells: HTMLElement[] = [word];
   const sub =
@@ -305,6 +313,51 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
 
   cells.push(drawFooterStatusActivity(parts, deps, status.case));
   return cells;
+}
+
+/**
+ * The status word, split into per-letter spans WHEN THE STATUS MEANS PROGRESS.
+ *
+ * Owner's idea, 2026-09-14: a status that is getting somewhere says so in the
+ * word, with a bulge travelling along the letters and back. The phase comes from
+ * the page-global `statusWave` (breathing.ts), emitted inline per letter, so a
+ * push that rewrites this whole subtree mid-wave continues the wave instead of
+ * snapping it back to the word's head.
+ *
+ * A NON-PROGRESS STATUS IS PLAIN TEXT. Waiting, blocked, disconnected, idle,
+ * interrupted and background stand still, and they carry no spans at all rather
+ * than spans with a stopped animation: nothing should have to look at a class to
+ * know whether the word is moving.
+ *
+ * THE LETTERS GO INSIDE ONE SPAN because `.pfooter-cell` is a flex container
+ * with a `gap`: eight bare letter spans would become eight flex items and the
+ * word would come apart. The word span is the single flex item; the letters are
+ * inline-block inside it, which is also what lets a transform apply to them.
+ *
+ * The index advances on SPACES too, so the bulge crosses a two-word status at
+ * the same speed it crosses the letters.
+ */
+function drawStatusWord(word: HTMLElement, armCase: string): void {
+  const text = statusWords(armCase);
+  if (!statusWordWaves(armCase)) {
+    word.textContent = text;
+    return;
+  }
+  word.setAttribute(STATUS_WAVE_ATTRIBUTE, STATUS_WAVE_PROGRESS);
+  const holder = document.createElement("span");
+  holder.className = STATUS_WAVE_WORD_CLASS;
+  [...text].forEach((character, index) => {
+    if (character === " ") {
+      holder.appendChild(document.createTextNode(" "));
+      return;
+    }
+    const letter = document.createElement("span");
+    letter.className = STATUS_WAVE_LETTER_CLASS;
+    letter.setAttribute("style", statusWaveStyle(index));
+    letter.textContent = character;
+    holder.appendChild(letter);
+  });
+  word.appendChild(holder);
 }
 
 /** What each status arm carries, and which of it is required. */
