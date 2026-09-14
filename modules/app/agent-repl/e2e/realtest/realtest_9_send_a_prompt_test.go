@@ -877,19 +877,29 @@ func rt9PressSend(ctx context.Context, t *testing.T, client *Client, driver *Key
 // ---- Reading the editor -------------------------------------------------
 
 // rt9ComposerSelected answers where the editor is standing, in the vocabulary
-// the caller needs: "composer" when the selected buffer is this workspace's own
-// input buffer, and otherwise the buffer's name.
+// the caller needs: "composer" when the selected window shows this workspace's
+// own input buffer, and otherwise that window's buffer name.
 //
 // It compares against `:input-buffer` on the workspace's own plist rather than
 // against a buffer NAME pattern, because the name is a presentation detail and
 // the plist entry is the product's own answer to "which buffer is this
 // workspace's composer".
+//
+// IT READS THE SELECTED WINDOW'S BUFFER, NEVER `(current-buffer)`. Every probe
+// form is evaluated inside the transport's own `with-temp-file`
+// (emacsclient.go, `probeWrapper`), so `(current-buffer)` inside a probe is the
+// transport's temp buffer — named " *temp file*" — and never the buffer the
+// owner is standing in. The old form asked that question and answered it about
+// itself: it reported " *temp file*" for a correctly focused editor, which read
+// as the chord having missed. Realtest 4's own selection probe reads
+// `(window-buffer (selected-window))` for this reason and this one matches it.
 func rt9ComposerSelected(ctx context.Context, client *Client, wsName string) (string, error) {
 	form := fmt.Sprintf(`(let* ((ws %q)
+       (sel (window-buffer (selected-window)))
        (buf (and (fboundp 'agent-repl--ws-get) (agent-repl--ws-get ws :input-buffer))))
-  (if (and buf (buffer-live-p buf) (eq (current-buffer) buf))
+  (if (and buf (buffer-live-p buf) (eq sel buf))
       "composer"
-    (buffer-name)))`, wsName)
+    (buffer-name sel)))`, wsName)
 	return client.ReadString(ctx, form)
 }
 
