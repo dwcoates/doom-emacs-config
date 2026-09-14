@@ -400,6 +400,11 @@ unprioritized workspace, a top-level workspace, no ungated consent."
                   (agent-repl-wire-encode-create-workspace-request-allow-ungated
                    (plist-get request :allow-ungated)))
             out))
+    ;; THE OP ID OPTS INTO OPTION B. Present, the daemon acks at once and pushes
+    ;; this create's progress on WatchDaemon keyed on it; absent, the create is
+    ;; the legacy synchronous form.
+    (when (plist-get request :op-id)
+      (push (cons 'opId (plist-get request :op-id)) out))
     (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-create-workspace-request form=%s"
                       (plist-get (plist-get request :form) :arm))
     (nreverse out)))
@@ -589,12 +594,31 @@ arm this codec does not know is refused as an unknown field."
   "Decode CreateWorkspaceResponse's `error' arm from JSON."
   (agent-repl-wire-decode-create-workspace-error json))
 
+(defun agent-repl-wire-decode-create-workspace-accepted (json)
+  "Decode CreateWorkspaceAccepted from JSON into (:op-id ID).
+The option-B ack: the create was accepted and detached to the background,
+so the real outcome arrives on the WatchDaemon progress channel, not here."
+  (list :op-id
+        (agent-repl-wire-verbs--decode-string "CreateWorkspaceAccepted" 'opId json)))
+
+(defun agent-repl-wire-decode-create-workspace-response-accepted (json)
+  "Decode CreateWorkspaceResponse's `accepted' arm from JSON."
+  (agent-repl-wire-decode-create-workspace-accepted json))
+
 (defun agent-repl-wire-decode-create-workspace-response (json)
-  "Decode CreateWorkspaceResponse from JSON into (:arm ARM :value V)."
-  (agent-repl-wire-verbs--decode-result
-   "CreateWorkspaceResponse" json
-   #'agent-repl-wire-decode-create-workspace-response-success
-   #'agent-repl-wire-decode-create-workspace-response-error))
+  "Decode CreateWorkspaceResponse from JSON into (:arm ARM :value V).
+THREE arms, not the standard two: `accepted' is the option-B ack answered
+when the request carried an op_id, in place of `success'/`error'."
+  (agent-repl-wire-verbs--check-keys
+   "CreateWorkspaceResponse" json '(success error accepted))
+  (agent-repl-wire-verbs--decode-oneof
+   "CreateWorkspaceResponse" "result" json
+   (list (list 'success :success
+               #'agent-repl-wire-decode-create-workspace-response-success)
+         (list 'error :error
+               #'agent-repl-wire-decode-create-workspace-response-error)
+         (list 'accepted :accepted
+               #'agent-repl-wire-decode-create-workspace-response-accepted))))
 
 
 ;;;; ---- OpenWorkspace --------------------------------------------------

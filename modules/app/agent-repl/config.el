@@ -214,6 +214,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It needs core.el, connect.el and rpc.el and nothing else, so it loads
 ;; immediately after the transport and before its first consumer.
 (agent-repl--load-module "daemon-link")
+;; WHY: mutation-progress.el is the correlation seat the daemon-link's push
+;; dispatch hands workspace-mutation progress to, and the create verb registers
+;; its callbacks with; it needs only core.el, so it loads beside daemon-link.
+(agent-repl--load-module "mutation-progress")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
