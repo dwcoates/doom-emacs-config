@@ -32,7 +32,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_create_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_create_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY3JlYXRlX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIskDChZDcmVhdGVXb3Jrc3BhY2VSZXF1ZXN0Ei8KCnJlcG9zaXRvcnkYASABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZhI5CghzdGFuZGFyZBgCIAEoCzIlLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VTdGFuZGFyZEgAEjgKCG9uZV9zaG90GAMgASgLMiQuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU9uZVNob3RIABI4CgZwYXJlbnQYBCABKAsyIy5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlUGFyZW50SAGIAQESEgoFbW9kZWwYBSABKAlIAogBARI2Cghwcmlvcml0eRgGIAEoCzIfLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQcmlvcml0eUgDiAEBEkcKDWFsbG93X3VuZ2F0ZWQYByABKAsyKy5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlVW5nYXRlZENvbnNlbnRIBIgBAUIGCgRmb3JtQgkKB19wYXJlbnRCCAoGX21vZGVsQgsKCV9wcmlvcml0eUIQCg5fYWxsb3dfdW5nYXRlZCL9AQoXQ3JlYXRlV29ya3NwYWNlU3RhbmRhcmQSNgoOaW5pdGlhbF9wcm9tcHQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIAIgBARIVCghiYXNlX3JlZhgCIAEoCUgBiAEBEhEKBG5hbWUYAyABKAlIAogBARJFCg1tZXJnZV9hY3Rpb25zGAQgASgLMikuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU1lcmdlQWN0aW9uc0gDiAEBQhEKD19pbml0aWFsX3Byb21wdEILCglfYmFzZV9yZWZCBwoFX25hbWVCEAoOX21lcmdlX2FjdGlvbnMiZAoWQ3JlYXRlV29ya3NwYWNlT25lU2hvdBIpCgZwcm9tcHQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRKBAgCEANKBAgDEARSCnNlbGZfbWVyZ2VSB29wZW5fcHIihQEKFUNyZWF0ZVdvcmtzcGFjZVBhcmVudBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjQKBGZvcmsYAiABKAsyIS5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlRm9ya0gAiAEBQgcKBV9mb3JrIhUKE0NyZWF0ZVdvcmtzcGFjZUZvcmsiHwodQ3JlYXRlV29ya3NwYWNlVW5nYXRlZENvbnNlbnQiwwEKG0NyZWF0ZVdvcmtzcGFjZU1lcmdlQWN0aW9ucxI3Cg9iZWZvcmVfd3NfbWVyZ2UYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIAIgBARI9ChVwb3N0cHJvY2Vzc2luZ19wcm9tcHQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIAYgBAUISChBfYmVmb3JlX3dzX21lcmdlQhgKFl9wb3N0cHJvY2Vzc2luZ19wcm9tcHQikQEKF0NyZWF0ZVdvcmtzcGFjZVJlc3BvbnNlEjcKB3N1Y2Nlc3MYASABKAsyJC5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlU3VjY2Vzc0gAEjMKBWVycm9yGAIgASgLMiIuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IkcKFkNyZWF0ZVdvcmtzcGFjZVN1Y2Nlc3MSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKhBwoUQ3JlYXRlV29ya3NwYWNlRXJyb3ISVQoXdW5nYXRlZF93aXRob3V0X2NvbnNlbnQYASABKAsyMi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlVW5nYXRlZFdpdGhvdXRDb25zZW50SAASNgoHbm9fc2x1ZxgCIAEoCzIjLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VOb1NsdWdIABJjCh9mb3JrX3BhcmVudF9oYXNfbm9fY29udmVyc2F0aW9uGAUgASgLMjguYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUZvcmtQYXJlbnRIYXNOb0NvbnZlcnNhdGlvbkgAEkIKDWJyaWVmX21pc3NpbmcYBiABKAsyKS5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlQnJpZWZNaXNzaW5nSAASTAoSdW5rbm93bl9yZXBvc2l0b3J5GAcgASgLMi4uYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZVVua25vd25SZXBvc2l0b3J5SAASRAoOdW5rbm93bl9wYXJlbnQYCCABKAsyKi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlVW5rbm93blBhcmVudEgAEk0KE2Jhc2VfcmVmX3VucmVzb2x2ZWQYCSABKAsyLi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlQmFzZVJlZlVucmVzb2x2ZWRIABJXChh3b3JrdHJlZV9jcmVhdGlvbl9mYWlsZWQYCiABKAsyMy5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlV29ya3RyZWVDcmVhdGlvbkZhaWxlZEgAEkAKDHNwYXduX2ZhaWxlZBgLIAEoCzIoLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VTcGF3bkZhaWxlZEgAElQKF29uZV9zaG90X3BvbGljeV9taXNzaW5nGAwgASgLMjEuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU9uZVNob3RQb2xpY3lNaXNzaW5nSAASQgoNbmFtaW5nX2ZhaWxlZBgNIAEoCzIpLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VOYW1pbmdGYWlsZWRIAEIHCgVjYXVzZUoECAMQBEoECAQQBVIPZmluaXNoX3JlcXVpcmVkUhNmaW5pc2hfbm90X29uZV9zaG90IiYKJENyZWF0ZVdvcmtzcGFjZVVuZ2F0ZWRXaXRob3V0Q29uc2VudCIXChVDcmVhdGVXb3Jrc3BhY2VOb1NsdWciLAoqQ3JlYXRlV29ya3NwYWNlRm9ya1BhcmVudEhhc05vQ29udmVyc2F0aW9uIisKG0NyZWF0ZVdvcmtzcGFjZUJyaWVmTWlzc2luZxIMCgRuYW1lGAEgASgJIiIKIENyZWF0ZVdvcmtzcGFjZVVua25vd25SZXBvc2l0b3J5Ih4KHENyZWF0ZVdvcmtzcGFjZVVua25vd25QYXJlbnQiLwogQ3JlYXRlV29ya3NwYWNlQmFzZVJlZlVucmVzb2x2ZWQSCwoDcmVmGAEgASgJIjcKJUNyZWF0ZVdvcmtzcGFjZVdvcmt0cmVlQ3JlYXRpb25GYWlsZWQSDgoGZGV0YWlsGAEgASgJIiwKGkNyZWF0ZVdvcmtzcGFjZVNwYXduRmFpbGVkEg4KBmRldGFpbBgBIAEoCSJpCiNDcmVhdGVXb3Jrc3BhY2VPbmVTaG90UG9saWN5TWlzc2luZxIXCg9yZXBvc2l0b3J5X3Jvb3QYASABKAkSEgoKcG9saWN5X2RpchgCIAEoCRIVCg1taXNzaW5nX2ZpbGVzGAMgAygJIl0KG0NyZWF0ZVdvcmtzcGFjZU5hbWluZ0ZhaWxlZBINCgVtb2RlbBgBIAEoCRINCgVjYXVzZRgCIAEoCRIQCghhdHRlbXB0cxgDIAEoDRIOCgZhbnN3ZXIYBCABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_workspace_priority, file_conversation_v1_user, file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY3JlYXRlX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIucDChZDcmVhdGVXb3Jrc3BhY2VSZXF1ZXN0Ei8KCnJlcG9zaXRvcnkYASABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZhI5CghzdGFuZGFyZBgCIAEoCzIlLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VTdGFuZGFyZEgAEjgKCG9uZV9zaG90GAMgASgLMiQuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU9uZVNob3RIABI4CgZwYXJlbnQYBCABKAsyIy5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlUGFyZW50SAGIAQESEgoFbW9kZWwYBSABKAlIAogBARI2Cghwcmlvcml0eRgGIAEoCzIfLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQcmlvcml0eUgDiAEBEkcKDWFsbG93X3VuZ2F0ZWQYByABKAsyKy5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlVW5nYXRlZENvbnNlbnRIBIgBARISCgVvcF9pZBgIIAEoCUgFiAEBQgYKBGZvcm1CCQoHX3BhcmVudEIICgZfbW9kZWxCCwoJX3ByaW9yaXR5QhAKDl9hbGxvd191bmdhdGVkQggKBl9vcF9pZCL9AQoXQ3JlYXRlV29ya3NwYWNlU3RhbmRhcmQSNgoOaW5pdGlhbF9wcm9tcHQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIAIgBARIVCghiYXNlX3JlZhgCIAEoCUgBiAEBEhEKBG5hbWUYAyABKAlIAogBARJFCg1tZXJnZV9hY3Rpb25zGAQgASgLMikuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU1lcmdlQWN0aW9uc0gDiAEBQhEKD19pbml0aWFsX3Byb21wdEILCglfYmFzZV9yZWZCBwoFX25hbWVCEAoOX21lcmdlX2FjdGlvbnMiZAoWQ3JlYXRlV29ya3NwYWNlT25lU2hvdBIpCgZwcm9tcHQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRKBAgCEANKBAgDEARSCnNlbGZfbWVyZ2VSB29wZW5fcHIihQEKFUNyZWF0ZVdvcmtzcGFjZVBhcmVudBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjQKBGZvcmsYAiABKAsyIS5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlRm9ya0gAiAEBQgcKBV9mb3JrIhUKE0NyZWF0ZVdvcmtzcGFjZUZvcmsiHwodQ3JlYXRlV29ya3NwYWNlVW5nYXRlZENvbnNlbnQiwwEKG0NyZWF0ZVdvcmtzcGFjZU1lcmdlQWN0aW9ucxI3Cg9iZWZvcmVfd3NfbWVyZ2UYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIAIgBARI9ChVwb3N0cHJvY2Vzc2luZ19wcm9tcHQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWRIAYgBAUISChBfYmVmb3JlX3dzX21lcmdlQhgKFl9wb3N0cHJvY2Vzc2luZ19wcm9tcHQizAEKF0NyZWF0ZVdvcmtzcGFjZVJlc3BvbnNlEjcKB3N1Y2Nlc3MYASABKAsyJC5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlU3VjY2Vzc0gAEjMKBWVycm9yGAIgASgLMiIuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZUVycm9ySAASOQoIYWNjZXB0ZWQYAyABKAsyJS5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlQWNjZXB0ZWRIAEIICgZyZXN1bHQiKAoXQ3JlYXRlV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiRwoWQ3JlYXRlV29ya3NwYWNlU3VjY2VzcxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIqEHChRDcmVhdGVXb3Jrc3BhY2VFcnJvchJVChd1bmdhdGVkX3dpdGhvdXRfY29uc2VudBgBIAEoCzIyLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VVbmdhdGVkV2l0aG91dENvbnNlbnRIABI2Cgdub19zbHVnGAIgASgLMiMuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU5vU2x1Z0gAEmMKH2ZvcmtfcGFyZW50X2hhc19ub19jb252ZXJzYXRpb24YBSABKAsyOC5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlRm9ya1BhcmVudEhhc05vQ29udmVyc2F0aW9uSAASQgoNYnJpZWZfbWlzc2luZxgGIAEoCzIpLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VCcmllZk1pc3NpbmdIABJMChJ1bmtub3duX3JlcG9zaXRvcnkYByABKAsyLi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlVW5rbm93blJlcG9zaXRvcnlIABJECg51bmtub3duX3BhcmVudBgIIAEoCzIqLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VVbmtub3duUGFyZW50SAASTQoTYmFzZV9yZWZfdW5yZXNvbHZlZBgJIAEoCzIuLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VCYXNlUmVmVW5yZXNvbHZlZEgAElcKGHdvcmt0cmVlX2NyZWF0aW9uX2ZhaWxlZBgKIAEoCzIzLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VXb3JrdHJlZUNyZWF0aW9uRmFpbGVkSAASQAoMc3Bhd25fZmFpbGVkGAsgASgLMiguYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZVNwYXduRmFpbGVkSAASVAoXb25lX3Nob3RfcG9saWN5X21pc3NpbmcYDCABKAsyMS5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlT25lU2hvdFBvbGljeU1pc3NpbmdIABJCCg1uYW1pbmdfZmFpbGVkGA0gASgLMikuYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZU5hbWluZ0ZhaWxlZEgAQgcKBWNhdXNlSgQIAxAESgQIBBAFUg9maW5pc2hfcmVxdWlyZWRSE2ZpbmlzaF9ub3Rfb25lX3Nob3QiJgokQ3JlYXRlV29ya3NwYWNlVW5nYXRlZFdpdGhvdXRDb25zZW50IhcKFUNyZWF0ZVdvcmtzcGFjZU5vU2x1ZyIsCipDcmVhdGVXb3Jrc3BhY2VGb3JrUGFyZW50SGFzTm9Db252ZXJzYXRpb24iKwobQ3JlYXRlV29ya3NwYWNlQnJpZWZNaXNzaW5nEgwKBG5hbWUYASABKAkiIgogQ3JlYXRlV29ya3NwYWNlVW5rbm93blJlcG9zaXRvcnkiHgocQ3JlYXRlV29ya3NwYWNlVW5rbm93blBhcmVudCIvCiBDcmVhdGVXb3Jrc3BhY2VCYXNlUmVmVW5yZXNvbHZlZBILCgNyZWYYASABKAkiNwolQ3JlYXRlV29ya3NwYWNlV29ya3RyZWVDcmVhdGlvbkZhaWxlZBIOCgZkZXRhaWwYASABKAkiLAoaQ3JlYXRlV29ya3NwYWNlU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJImkKI0NyZWF0ZVdvcmtzcGFjZU9uZVNob3RQb2xpY3lNaXNzaW5nEhcKD3JlcG9zaXRvcnlfcm9vdBgBIAEoCRISCgpwb2xpY3lfZGlyGAIgASgJEhUKDW1pc3NpbmdfZmlsZXMYAyADKAkiXQobQ3JlYXRlV29ya3NwYWNlTmFtaW5nRmFpbGVkEg0KBW1vZGVsGAEgASgJEg0KBWNhdXNlGAIgASgJEhAKCGF0dGVtcHRzGAMgASgNEg4KBmFuc3dlchgEIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_workspace_priority, file_conversation_v1_user, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceRequest
@@ -99,6 +99,25 @@ export type CreateWorkspaceRequest = Message<"agentrepl.v1.CreateWorkspaceReques
    * @generated from field: optional agentrepl.v1.CreateWorkspaceUngatedConsent allow_ungated = 7;
    */
   allowUngated?: CreateWorkspaceUngatedConsent | undefined;
+
+  /**
+   * A CLIENT-MINTED OPERATION ID that correlates this create to the staged
+   * progress the daemon pushes for it. PRESENCE IS OPT-IN TO OPTION B: a
+   * create that carries one is ACKED IMMEDIATELY (CreateWorkspaceAccepted)
+   * and its slow work — naming, worktree, bring-up — runs in the background,
+   * DETACHED FROM THIS REQUEST'S CONTEXT so a client deadline or cancellation
+   * can never kill git mid-`worktree add`; every stage and the terminal
+   * outcome then ride WatchDaemon's `mutation_progress` push, keyed on this
+   * id (workspace_mutation_progress.proto). UNSET = the legacy synchronous
+   * form: the rpc blocks until the work finishes and answers success/error
+   * itself, with no progress pushed. The pre-detach refusals (validation, an
+   * unknown repository) are answered synchronously on `error` in BOTH forms;
+   * only the outcomes that can arrive after the ack — naming, worktree, spawn,
+   * and success — ride progress.
+   *
+   * @generated from field: optional string op_id = 8;
+   */
+  opId?: string | undefined;
 };
 
 /**
@@ -298,6 +317,19 @@ export type CreateWorkspaceResponse = Message<"agentrepl.v1.CreateWorkspaceRespo
      */
     value: CreateWorkspaceError;
     case: "error";
+  } | {
+    /**
+     * THE OPTION-B ACK. Answered — instead of `success`/`error` — precisely
+     * when the request carried an `op_id`: the create was accepted and its
+     * work is now running in the background, so this rpc returns at once and
+     * the real outcome rides WatchDaemon's `mutation_progress`, keyed on the
+     * same id. It carries nothing but the echoed id: the workspace has no
+     * identity yet (naming has not run), so there is nothing else to hand back.
+     *
+     * @generated from field: agentrepl.v1.CreateWorkspaceAccepted accepted = 3;
+     */
+    value: CreateWorkspaceAccepted;
+    case: "accepted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -307,6 +339,30 @@ export type CreateWorkspaceResponse = Message<"agentrepl.v1.CreateWorkspaceRespo
  */
 export const CreateWorkspaceResponseSchema: GenMessage<CreateWorkspaceResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_create_workspace, 7);
+
+/**
+ * The option-B acknowledgement: the create was accepted and detached to the
+ * background. The minted workspace identity arrives later on the progress
+ * channel's terminal `succeeded` event, never here.
+ *
+ * @generated from message agentrepl.v1.CreateWorkspaceAccepted
+ */
+export type CreateWorkspaceAccepted = Message<"agentrepl.v1.CreateWorkspaceAccepted"> & {
+  /**
+   * The op_id the request supplied, echoed back so the client can assert the
+   * ack correlates to the create it issued.
+   *
+   * @generated from field: string op_id = 1;
+   */
+  opId: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.CreateWorkspaceAccepted.
+ * Use `create(CreateWorkspaceAcceptedSchema)` to create a new message.
+ */
+export const CreateWorkspaceAcceptedSchema: GenMessage<CreateWorkspaceAccepted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 8);
 
 /**
  * The created workspace's identity — the dir the daemon minted. Everything
@@ -326,7 +382,7 @@ export type CreateWorkspaceSuccess = Message<"agentrepl.v1.CreateWorkspaceSucces
  * Use `create(CreateWorkspaceSuccessSchema)` to create a new message.
  */
 export const CreateWorkspaceSuccessSchema: GenMessage<CreateWorkspaceSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 9);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -439,7 +495,7 @@ export type CreateWorkspaceError = Message<"agentrepl.v1.CreateWorkspaceError"> 
  * Use `create(CreateWorkspaceErrorSchema)` to create a new message.
  */
 export const CreateWorkspaceErrorSchema: GenMessage<CreateWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 10);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
@@ -452,7 +508,7 @@ export type CreateWorkspaceUngatedWithoutConsent = Message<"agentrepl.v1.CreateW
  * Use `create(CreateWorkspaceUngatedWithoutConsentSchema)` to create a new message.
  */
 export const CreateWorkspaceUngatedWithoutConsentSchema: GenMessage<CreateWorkspaceUngatedWithoutConsent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 11);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceNoSlug
@@ -465,7 +521,7 @@ export type CreateWorkspaceNoSlug = Message<"agentrepl.v1.CreateWorkspaceNoSlug"
  * Use `create(CreateWorkspaceNoSlugSchema)` to create a new message.
  */
 export const CreateWorkspaceNoSlugSchema: GenMessage<CreateWorkspaceNoSlug> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 12);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceForkParentHasNoConversation
@@ -478,7 +534,7 @@ export type CreateWorkspaceForkParentHasNoConversation = Message<"agentrepl.v1.C
  * Use `create(CreateWorkspaceForkParentHasNoConversationSchema)` to create a new message.
  */
 export const CreateWorkspaceForkParentHasNoConversationSchema: GenMessage<CreateWorkspaceForkParentHasNoConversation> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 13);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceBriefMissing
@@ -497,7 +553,7 @@ export type CreateWorkspaceBriefMissing = Message<"agentrepl.v1.CreateWorkspaceB
  * Use `create(CreateWorkspaceBriefMissingSchema)` to create a new message.
  */
 export const CreateWorkspaceBriefMissingSchema: GenMessage<CreateWorkspaceBriefMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 13);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 14);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceUnknownRepository
@@ -510,7 +566,7 @@ export type CreateWorkspaceUnknownRepository = Message<"agentrepl.v1.CreateWorks
  * Use `create(CreateWorkspaceUnknownRepositorySchema)` to create a new message.
  */
 export const CreateWorkspaceUnknownRepositorySchema: GenMessage<CreateWorkspaceUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 14);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 15);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceUnknownParent
@@ -523,7 +579,7 @@ export type CreateWorkspaceUnknownParent = Message<"agentrepl.v1.CreateWorkspace
  * Use `create(CreateWorkspaceUnknownParentSchema)` to create a new message.
  */
 export const CreateWorkspaceUnknownParentSchema: GenMessage<CreateWorkspaceUnknownParent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 15);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 16);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceBaseRefUnresolved
@@ -542,7 +598,7 @@ export type CreateWorkspaceBaseRefUnresolved = Message<"agentrepl.v1.CreateWorks
  * Use `create(CreateWorkspaceBaseRefUnresolvedSchema)` to create a new message.
  */
 export const CreateWorkspaceBaseRefUnresolvedSchema: GenMessage<CreateWorkspaceBaseRefUnresolved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 16);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 17);
 
 /**
  * @generated from message agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
@@ -561,7 +617,7 @@ export type CreateWorkspaceWorktreeCreationFailed = Message<"agentrepl.v1.Create
  * Use `create(CreateWorkspaceWorktreeCreationFailedSchema)` to create a new message.
  */
 export const CreateWorkspaceWorktreeCreationFailedSchema: GenMessage<CreateWorkspaceWorktreeCreationFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 17);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 18);
 
 /**
  * The created workspace's bring-up could not start a shim. The SAME daemon
@@ -585,7 +641,7 @@ export type CreateWorkspaceSpawnFailed = Message<"agentrepl.v1.CreateWorkspaceSp
  * Use `create(CreateWorkspaceSpawnFailedSchema)` to create a new message.
  */
 export const CreateWorkspaceSpawnFailedSchema: GenMessage<CreateWorkspaceSpawnFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 18);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 19);
 
 /**
  * A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, and this repository states
@@ -630,7 +686,7 @@ export type CreateWorkspaceOneShotPolicyMissing = Message<"agentrepl.v1.CreateWo
  * Use `create(CreateWorkspaceOneShotPolicyMissingSchema)` to create a new message.
  */
 export const CreateWorkspaceOneShotPolicyMissingSchema: GenMessage<CreateWorkspaceOneShotPolicyMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 19);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 20);
 
 /**
  * EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL. A create that
@@ -679,5 +735,5 @@ export type CreateWorkspaceNamingFailed = Message<"agentrepl.v1.CreateWorkspaceN
  * Use `create(CreateWorkspaceNamingFailedSchema)` to create a new message.
  */
 export const CreateWorkspaceNamingFailedSchema: GenMessage<CreateWorkspaceNamingFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 20);
+  messageDesc(file_agentrepl_v1_endpoint_create_workspace, 21);
 

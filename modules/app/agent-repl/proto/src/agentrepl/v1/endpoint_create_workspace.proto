@@ -53,6 +53,21 @@ message CreateWorkspaceRequest {
   // permission gate. A creation that would produce an ungated session is
   // REFUSED unless this is present — presence IS the consent.
   optional CreateWorkspaceUngatedConsent allow_ungated = 7;
+
+  // A CLIENT-MINTED OPERATION ID that correlates this create to the staged
+  // progress the daemon pushes for it. PRESENCE IS OPT-IN TO OPTION B: a
+  // create that carries one is ACKED IMMEDIATELY (CreateWorkspaceAccepted)
+  // and its slow work — naming, worktree, bring-up — runs in the background,
+  // DETACHED FROM THIS REQUEST'S CONTEXT so a client deadline or cancellation
+  // can never kill git mid-`worktree add`; every stage and the terminal
+  // outcome then ride WatchDaemon's `mutation_progress` push, keyed on this
+  // id (workspace_mutation_progress.proto). UNSET = the legacy synchronous
+  // form: the rpc blocks until the work finishes and answers success/error
+  // itself, with no progress pushed. The pre-detach refusals (validation, an
+  // unknown repository) are answered synchronously on `error` in BOTH forms;
+  // only the outcomes that can arrive after the ack — naming, worktree, spawn,
+  // and success — ride progress.
+  optional string op_id = 8;
 }
 
 // The ordinary workspace create.
@@ -130,7 +145,23 @@ message CreateWorkspaceResponse {
   oneof result {
     CreateWorkspaceSuccess success = 1;
     CreateWorkspaceError error = 2;
+    // THE OPTION-B ACK. Answered — instead of `success`/`error` — precisely
+    // when the request carried an `op_id`: the create was accepted and its
+    // work is now running in the background, so this rpc returns at once and
+    // the real outcome rides WatchDaemon's `mutation_progress`, keyed on the
+    // same id. It carries nothing but the echoed id: the workspace has no
+    // identity yet (naming has not run), so there is nothing else to hand back.
+    CreateWorkspaceAccepted accepted = 3;
   }
+}
+
+// The option-B acknowledgement: the create was accepted and detached to the
+// background. The minted workspace identity arrives later on the progress
+// channel's terminal `succeeded` event, never here.
+message CreateWorkspaceAccepted {
+  // The op_id the request supplied, echoed back so the client can assert the
+  // ack correlates to the create it issued.
+  string op_id = 1;
 }
 
 // The created workspace's identity — the dir the daemon minted. Everything

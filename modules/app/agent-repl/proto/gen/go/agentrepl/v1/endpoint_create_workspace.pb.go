@@ -65,7 +65,21 @@ type CreateWorkspaceRequest struct {
 	// Explicit consent to a session whose permission mode disables the
 	// permission gate. A creation that would produce an ungated session is
 	// REFUSED unless this is present — presence IS the consent.
-	AllowUngated  *CreateWorkspaceUngatedConsent `protobuf:"bytes,7,opt,name=allow_ungated,json=allowUngated,proto3,oneof" json:"allow_ungated,omitempty"`
+	AllowUngated *CreateWorkspaceUngatedConsent `protobuf:"bytes,7,opt,name=allow_ungated,json=allowUngated,proto3,oneof" json:"allow_ungated,omitempty"`
+	// A CLIENT-MINTED OPERATION ID that correlates this create to the staged
+	// progress the daemon pushes for it. PRESENCE IS OPT-IN TO OPTION B: a
+	// create that carries one is ACKED IMMEDIATELY (CreateWorkspaceAccepted)
+	// and its slow work — naming, worktree, bring-up — runs in the background,
+	// DETACHED FROM THIS REQUEST'S CONTEXT so a client deadline or cancellation
+	// can never kill git mid-`worktree add`; every stage and the terminal
+	// outcome then ride WatchDaemon's `mutation_progress` push, keyed on this
+	// id (workspace_mutation_progress.proto). UNSET = the legacy synchronous
+	// form: the rpc blocks until the work finishes and answers success/error
+	// itself, with no progress pushed. The pre-detach refusals (validation, an
+	// unknown repository) are answered synchronously on `error` in BOTH forms;
+	// only the outcomes that can arrive after the ack — naming, worktree, spawn,
+	// and success — ride progress.
+	OpId          *string `protobuf:"bytes,8,opt,name=op_id,json=opId,proto3,oneof" json:"op_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -158,6 +172,13 @@ func (x *CreateWorkspaceRequest) GetAllowUngated() *CreateWorkspaceUngatedConsen
 		return x.AllowUngated
 	}
 	return nil
+}
+
+func (x *CreateWorkspaceRequest) GetOpId() string {
+	if x != nil && x.OpId != nil {
+		return *x.OpId
+	}
+	return ""
 }
 
 type isCreateWorkspaceRequest_Form interface {
@@ -506,6 +527,7 @@ type CreateWorkspaceResponse struct {
 	//
 	//	*CreateWorkspaceResponse_Success
 	//	*CreateWorkspaceResponse_Error
+	//	*CreateWorkspaceResponse_Accepted
 	Result        isCreateWorkspaceResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -566,6 +588,15 @@ func (x *CreateWorkspaceResponse) GetError() *CreateWorkspaceError {
 	return nil
 }
 
+func (x *CreateWorkspaceResponse) GetAccepted() *CreateWorkspaceAccepted {
+	if x != nil {
+		if x, ok := x.Result.(*CreateWorkspaceResponse_Accepted); ok {
+			return x.Accepted
+		}
+	}
+	return nil
+}
+
 type isCreateWorkspaceResponse_Result interface {
 	isCreateWorkspaceResponse_Result()
 }
@@ -578,9 +609,70 @@ type CreateWorkspaceResponse_Error struct {
 	Error *CreateWorkspaceError `protobuf:"bytes,2,opt,name=error,proto3,oneof"`
 }
 
+type CreateWorkspaceResponse_Accepted struct {
+	// THE OPTION-B ACK. Answered — instead of `success`/`error` — precisely
+	// when the request carried an `op_id`: the create was accepted and its
+	// work is now running in the background, so this rpc returns at once and
+	// the real outcome rides WatchDaemon's `mutation_progress`, keyed on the
+	// same id. It carries nothing but the echoed id: the workspace has no
+	// identity yet (naming has not run), so there is nothing else to hand back.
+	Accepted *CreateWorkspaceAccepted `protobuf:"bytes,3,opt,name=accepted,proto3,oneof"`
+}
+
 func (*CreateWorkspaceResponse_Success) isCreateWorkspaceResponse_Result() {}
 
 func (*CreateWorkspaceResponse_Error) isCreateWorkspaceResponse_Result() {}
+
+func (*CreateWorkspaceResponse_Accepted) isCreateWorkspaceResponse_Result() {}
+
+// The option-B acknowledgement: the create was accepted and detached to the
+// background. The minted workspace identity arrives later on the progress
+// channel's terminal `succeeded` event, never here.
+type CreateWorkspaceAccepted struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The op_id the request supplied, echoed back so the client can assert the
+	// ack correlates to the create it issued.
+	OpId          string `protobuf:"bytes,1,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateWorkspaceAccepted) Reset() {
+	*x = CreateWorkspaceAccepted{}
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateWorkspaceAccepted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateWorkspaceAccepted) ProtoMessage() {}
+
+func (x *CreateWorkspaceAccepted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateWorkspaceAccepted.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceAccepted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CreateWorkspaceAccepted) GetOpId() string {
+	if x != nil {
+		return x.OpId
+	}
+	return ""
+}
 
 // The created workspace's identity — the dir the daemon minted. Everything
 // else arrives on the roster stream.
@@ -593,7 +685,7 @@ type CreateWorkspaceSuccess struct {
 
 func (x *CreateWorkspaceSuccess) Reset() {
 	*x = CreateWorkspaceSuccess{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -605,7 +697,7 @@ func (x *CreateWorkspaceSuccess) String() string {
 func (*CreateWorkspaceSuccess) ProtoMessage() {}
 
 func (x *CreateWorkspaceSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -618,7 +710,7 @@ func (x *CreateWorkspaceSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceSuccess.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreateWorkspaceSuccess) GetWorkspace() *v1.WorkspaceRef {
@@ -652,7 +744,7 @@ type CreateWorkspaceError struct {
 
 func (x *CreateWorkspaceError) Reset() {
 	*x = CreateWorkspaceError{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -664,7 +756,7 @@ func (x *CreateWorkspaceError) String() string {
 func (*CreateWorkspaceError) ProtoMessage() {}
 
 func (x *CreateWorkspaceError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -677,7 +769,7 @@ func (x *CreateWorkspaceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceError.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CreateWorkspaceError) GetCause() isCreateWorkspaceError_Cause {
@@ -880,7 +972,7 @@ type CreateWorkspaceUngatedWithoutConsent struct {
 
 func (x *CreateWorkspaceUngatedWithoutConsent) Reset() {
 	*x = CreateWorkspaceUngatedWithoutConsent{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +984,7 @@ func (x *CreateWorkspaceUngatedWithoutConsent) String() string {
 func (*CreateWorkspaceUngatedWithoutConsent) ProtoMessage() {}
 
 func (x *CreateWorkspaceUngatedWithoutConsent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +997,7 @@ func (x *CreateWorkspaceUngatedWithoutConsent) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use CreateWorkspaceUngatedWithoutConsent.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUngatedWithoutConsent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{11}
 }
 
 type CreateWorkspaceNoSlug struct {
@@ -916,7 +1008,7 @@ type CreateWorkspaceNoSlug struct {
 
 func (x *CreateWorkspaceNoSlug) Reset() {
 	*x = CreateWorkspaceNoSlug{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -928,7 +1020,7 @@ func (x *CreateWorkspaceNoSlug) String() string {
 func (*CreateWorkspaceNoSlug) ProtoMessage() {}
 
 func (x *CreateWorkspaceNoSlug) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -941,7 +1033,7 @@ func (x *CreateWorkspaceNoSlug) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceNoSlug.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceNoSlug) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{12}
 }
 
 type CreateWorkspaceForkParentHasNoConversation struct {
@@ -952,7 +1044,7 @@ type CreateWorkspaceForkParentHasNoConversation struct {
 
 func (x *CreateWorkspaceForkParentHasNoConversation) Reset() {
 	*x = CreateWorkspaceForkParentHasNoConversation{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -964,7 +1056,7 @@ func (x *CreateWorkspaceForkParentHasNoConversation) String() string {
 func (*CreateWorkspaceForkParentHasNoConversation) ProtoMessage() {}
 
 func (x *CreateWorkspaceForkParentHasNoConversation) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -977,7 +1069,7 @@ func (x *CreateWorkspaceForkParentHasNoConversation) ProtoReflect() protoreflect
 
 // Deprecated: Use CreateWorkspaceForkParentHasNoConversation.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceForkParentHasNoConversation) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{13}
 }
 
 type CreateWorkspaceBriefMissing struct {
@@ -990,7 +1082,7 @@ type CreateWorkspaceBriefMissing struct {
 
 func (x *CreateWorkspaceBriefMissing) Reset() {
 	*x = CreateWorkspaceBriefMissing{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1002,7 +1094,7 @@ func (x *CreateWorkspaceBriefMissing) String() string {
 func (*CreateWorkspaceBriefMissing) ProtoMessage() {}
 
 func (x *CreateWorkspaceBriefMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1015,7 +1107,7 @@ func (x *CreateWorkspaceBriefMissing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceBriefMissing.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceBriefMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CreateWorkspaceBriefMissing) GetName() string {
@@ -1033,7 +1125,7 @@ type CreateWorkspaceUnknownRepository struct {
 
 func (x *CreateWorkspaceUnknownRepository) Reset() {
 	*x = CreateWorkspaceUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1045,7 +1137,7 @@ func (x *CreateWorkspaceUnknownRepository) String() string {
 func (*CreateWorkspaceUnknownRepository) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1058,7 +1150,7 @@ func (x *CreateWorkspaceUnknownRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUnknownRepository.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{15}
 }
 
 type CreateWorkspaceUnknownParent struct {
@@ -1069,7 +1161,7 @@ type CreateWorkspaceUnknownParent struct {
 
 func (x *CreateWorkspaceUnknownParent) Reset() {
 	*x = CreateWorkspaceUnknownParent{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1081,7 +1173,7 @@ func (x *CreateWorkspaceUnknownParent) String() string {
 func (*CreateWorkspaceUnknownParent) ProtoMessage() {}
 
 func (x *CreateWorkspaceUnknownParent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1094,7 +1186,7 @@ func (x *CreateWorkspaceUnknownParent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceUnknownParent.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceUnknownParent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{16}
 }
 
 type CreateWorkspaceBaseRefUnresolved struct {
@@ -1107,7 +1199,7 @@ type CreateWorkspaceBaseRefUnresolved struct {
 
 func (x *CreateWorkspaceBaseRefUnresolved) Reset() {
 	*x = CreateWorkspaceBaseRefUnresolved{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1119,7 +1211,7 @@ func (x *CreateWorkspaceBaseRefUnresolved) String() string {
 func (*CreateWorkspaceBaseRefUnresolved) ProtoMessage() {}
 
 func (x *CreateWorkspaceBaseRefUnresolved) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1132,7 +1224,7 @@ func (x *CreateWorkspaceBaseRefUnresolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceBaseRefUnresolved.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceBaseRefUnresolved) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CreateWorkspaceBaseRefUnresolved) GetRef() string {
@@ -1152,7 +1244,7 @@ type CreateWorkspaceWorktreeCreationFailed struct {
 
 func (x *CreateWorkspaceWorktreeCreationFailed) Reset() {
 	*x = CreateWorkspaceWorktreeCreationFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1256,7 @@ func (x *CreateWorkspaceWorktreeCreationFailed) String() string {
 func (*CreateWorkspaceWorktreeCreationFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceWorktreeCreationFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1269,7 @@ func (x *CreateWorkspaceWorktreeCreationFailed) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use CreateWorkspaceWorktreeCreationFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceWorktreeCreationFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CreateWorkspaceWorktreeCreationFailed) GetDetail() string {
@@ -1201,7 +1293,7 @@ type CreateWorkspaceSpawnFailed struct {
 
 func (x *CreateWorkspaceSpawnFailed) Reset() {
 	*x = CreateWorkspaceSpawnFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1213,7 +1305,7 @@ func (x *CreateWorkspaceSpawnFailed) String() string {
 func (*CreateWorkspaceSpawnFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1226,7 +1318,7 @@ func (x *CreateWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceSpawnFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceSpawnFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CreateWorkspaceSpawnFailed) GetDetail() string {
@@ -1261,7 +1353,7 @@ type CreateWorkspaceOneShotPolicyMissing struct {
 
 func (x *CreateWorkspaceOneShotPolicyMissing) Reset() {
 	*x = CreateWorkspaceOneShotPolicyMissing{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1273,7 +1365,7 @@ func (x *CreateWorkspaceOneShotPolicyMissing) String() string {
 func (*CreateWorkspaceOneShotPolicyMissing) ProtoMessage() {}
 
 func (x *CreateWorkspaceOneShotPolicyMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1286,7 +1378,7 @@ func (x *CreateWorkspaceOneShotPolicyMissing) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use CreateWorkspaceOneShotPolicyMissing.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceOneShotPolicyMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CreateWorkspaceOneShotPolicyMissing) GetRepositoryRoot() string {
@@ -1334,7 +1426,7 @@ type CreateWorkspaceNamingFailed struct {
 
 func (x *CreateWorkspaceNamingFailed) Reset() {
 	*x = CreateWorkspaceNamingFailed{}
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1346,7 +1438,7 @@ func (x *CreateWorkspaceNamingFailed) String() string {
 func (*CreateWorkspaceNamingFailed) ProtoMessage() {}
 
 func (x *CreateWorkspaceNamingFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1359,7 +1451,7 @@ func (x *CreateWorkspaceNamingFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateWorkspaceNamingFailed.ProtoReflect.Descriptor instead.
 func (*CreateWorkspaceNamingFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CreateWorkspaceNamingFailed) GetModel() string {
@@ -1394,7 +1486,7 @@ var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_priority.proto\x1a\x1aconversation/v1/user.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8f\x04\n" +
+	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_priority.proto\x1a\x1aconversation/v1/user.proto\x1a\x1cworkspace/v1/workspace.proto\"\xb3\x04\n" +
 	"\x16CreateWorkspaceRequest\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
@@ -1404,12 +1496,14 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x06parent\x18\x04 \x01(\v2#.agentrepl.v1.CreateWorkspaceParentH\x01R\x06parent\x88\x01\x01\x12\x19\n" +
 	"\x05model\x18\x05 \x01(\tH\x02R\x05model\x88\x01\x01\x12@\n" +
 	"\bpriority\x18\x06 \x01(\v2\x1f.agentrepl.v1.WorkspacePriorityH\x03R\bpriority\x88\x01\x01\x12U\n" +
-	"\rallow_ungated\x18\a \x01(\v2+.agentrepl.v1.CreateWorkspaceUngatedConsentH\x04R\fallowUngated\x88\x01\x01B\x06\n" +
+	"\rallow_ungated\x18\a \x01(\v2+.agentrepl.v1.CreateWorkspaceUngatedConsentH\x04R\fallowUngated\x88\x01\x01\x12\x18\n" +
+	"\x05op_id\x18\b \x01(\tH\x05R\x04opId\x88\x01\x01B\x06\n" +
 	"\x04formB\t\n" +
 	"\a_parentB\b\n" +
 	"\x06_modelB\v\n" +
 	"\t_priorityB\x10\n" +
-	"\x0e_allow_ungated\"\xa9\x02\n" +
+	"\x0e_allow_ungatedB\b\n" +
+	"\x06_op_id\"\xa9\x02\n" +
 	"\x17CreateWorkspaceStandard\x12E\n" +
 	"\x0einitial_prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\rinitialPrompt\x88\x01\x01\x12\x1e\n" +
 	"\bbase_ref\x18\x02 \x01(\tH\x01R\abaseRef\x88\x01\x01\x12\x17\n" +
@@ -1432,11 +1526,14 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x0fbefore_ws_merge\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\rbeforeWsMerge\x88\x01\x01\x12S\n" +
 	"\x15postprocessing_prompt\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidH\x01R\x14postprocessingPrompt\x88\x01\x01B\x12\n" +
 	"\x10_before_ws_mergeB\x18\n" +
-	"\x16_postprocessing_prompt\"\xa1\x01\n" +
+	"\x16_postprocessing_prompt\"\xe6\x01\n" +
 	"\x17CreateWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.CreateWorkspaceSuccessH\x00R\asuccess\x12:\n" +
-	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"R\n" +
+	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\x05error\x12C\n" +
+	"\baccepted\x18\x03 \x01(\v2%.agentrepl.v1.CreateWorkspaceAcceptedH\x00R\bacceptedB\b\n" +
+	"\x06result\".\n" +
+	"\x17CreateWorkspaceAccepted\x12\x13\n" +
+	"\x05op_id\x18\x01 \x01(\tR\x04opId\"R\n" +
 	"\x16CreateWorkspaceSuccess\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xea\b\n" +
 	"\x14CreateWorkspaceError\x12l\n" +
@@ -1489,7 +1586,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*CreateWorkspaceRequest)(nil),                     // 0: agentrepl.v1.CreateWorkspaceRequest
 	(*CreateWorkspaceStandard)(nil),                    // 1: agentrepl.v1.CreateWorkspaceStandard
@@ -1499,57 +1596,59 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*CreateWorkspaceUngatedConsent)(nil),              // 5: agentrepl.v1.CreateWorkspaceUngatedConsent
 	(*CreateWorkspaceMergeActions)(nil),                // 6: agentrepl.v1.CreateWorkspaceMergeActions
 	(*CreateWorkspaceResponse)(nil),                    // 7: agentrepl.v1.CreateWorkspaceResponse
-	(*CreateWorkspaceSuccess)(nil),                     // 8: agentrepl.v1.CreateWorkspaceSuccess
-	(*CreateWorkspaceError)(nil),                       // 9: agentrepl.v1.CreateWorkspaceError
-	(*CreateWorkspaceUngatedWithoutConsent)(nil),       // 10: agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
-	(*CreateWorkspaceNoSlug)(nil),                      // 11: agentrepl.v1.CreateWorkspaceNoSlug
-	(*CreateWorkspaceForkParentHasNoConversation)(nil), // 12: agentrepl.v1.CreateWorkspaceForkParentHasNoConversation
-	(*CreateWorkspaceBriefMissing)(nil),                // 13: agentrepl.v1.CreateWorkspaceBriefMissing
-	(*CreateWorkspaceUnknownRepository)(nil),           // 14: agentrepl.v1.CreateWorkspaceUnknownRepository
-	(*CreateWorkspaceUnknownParent)(nil),               // 15: agentrepl.v1.CreateWorkspaceUnknownParent
-	(*CreateWorkspaceBaseRefUnresolved)(nil),           // 16: agentrepl.v1.CreateWorkspaceBaseRefUnresolved
-	(*CreateWorkspaceWorktreeCreationFailed)(nil),      // 17: agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
-	(*CreateWorkspaceSpawnFailed)(nil),                 // 18: agentrepl.v1.CreateWorkspaceSpawnFailed
-	(*CreateWorkspaceOneShotPolicyMissing)(nil),        // 19: agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	(*CreateWorkspaceNamingFailed)(nil),                // 20: agentrepl.v1.CreateWorkspaceNamingFailed
-	(*v1.RepositoryRef)(nil),                           // 21: workspace.v1.RepositoryRef
-	(*WorkspacePriority)(nil),                          // 22: agentrepl.v1.WorkspacePriority
-	(*v11.UserSaid)(nil),                               // 23: conversation.v1.UserSaid
-	(*v1.WorkspaceRef)(nil),                            // 24: workspace.v1.WorkspaceRef
+	(*CreateWorkspaceAccepted)(nil),                    // 8: agentrepl.v1.CreateWorkspaceAccepted
+	(*CreateWorkspaceSuccess)(nil),                     // 9: agentrepl.v1.CreateWorkspaceSuccess
+	(*CreateWorkspaceError)(nil),                       // 10: agentrepl.v1.CreateWorkspaceError
+	(*CreateWorkspaceUngatedWithoutConsent)(nil),       // 11: agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
+	(*CreateWorkspaceNoSlug)(nil),                      // 12: agentrepl.v1.CreateWorkspaceNoSlug
+	(*CreateWorkspaceForkParentHasNoConversation)(nil), // 13: agentrepl.v1.CreateWorkspaceForkParentHasNoConversation
+	(*CreateWorkspaceBriefMissing)(nil),                // 14: agentrepl.v1.CreateWorkspaceBriefMissing
+	(*CreateWorkspaceUnknownRepository)(nil),           // 15: agentrepl.v1.CreateWorkspaceUnknownRepository
+	(*CreateWorkspaceUnknownParent)(nil),               // 16: agentrepl.v1.CreateWorkspaceUnknownParent
+	(*CreateWorkspaceBaseRefUnresolved)(nil),           // 17: agentrepl.v1.CreateWorkspaceBaseRefUnresolved
+	(*CreateWorkspaceWorktreeCreationFailed)(nil),      // 18: agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
+	(*CreateWorkspaceSpawnFailed)(nil),                 // 19: agentrepl.v1.CreateWorkspaceSpawnFailed
+	(*CreateWorkspaceOneShotPolicyMissing)(nil),        // 20: agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
+	(*CreateWorkspaceNamingFailed)(nil),                // 21: agentrepl.v1.CreateWorkspaceNamingFailed
+	(*v1.RepositoryRef)(nil),                           // 22: workspace.v1.RepositoryRef
+	(*WorkspacePriority)(nil),                          // 23: agentrepl.v1.WorkspacePriority
+	(*v11.UserSaid)(nil),                               // 24: conversation.v1.UserSaid
+	(*v1.WorkspaceRef)(nil),                            // 25: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
-	21, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
+	22, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
 	1,  // 1: agentrepl.v1.CreateWorkspaceRequest.standard:type_name -> agentrepl.v1.CreateWorkspaceStandard
 	2,  // 2: agentrepl.v1.CreateWorkspaceRequest.one_shot:type_name -> agentrepl.v1.CreateWorkspaceOneShot
 	3,  // 3: agentrepl.v1.CreateWorkspaceRequest.parent:type_name -> agentrepl.v1.CreateWorkspaceParent
-	22, // 4: agentrepl.v1.CreateWorkspaceRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
+	23, // 4: agentrepl.v1.CreateWorkspaceRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
 	5,  // 5: agentrepl.v1.CreateWorkspaceRequest.allow_ungated:type_name -> agentrepl.v1.CreateWorkspaceUngatedConsent
-	23, // 6: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
+	24, // 6: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
 	6,  // 7: agentrepl.v1.CreateWorkspaceStandard.merge_actions:type_name -> agentrepl.v1.CreateWorkspaceMergeActions
-	23, // 8: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
-	24, // 9: agentrepl.v1.CreateWorkspaceParent.workspace:type_name -> workspace.v1.WorkspaceRef
+	24, // 8: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
+	25, // 9: agentrepl.v1.CreateWorkspaceParent.workspace:type_name -> workspace.v1.WorkspaceRef
 	4,  // 10: agentrepl.v1.CreateWorkspaceParent.fork:type_name -> agentrepl.v1.CreateWorkspaceFork
-	23, // 11: agentrepl.v1.CreateWorkspaceMergeActions.before_ws_merge:type_name -> conversation.v1.UserSaid
-	23, // 12: agentrepl.v1.CreateWorkspaceMergeActions.postprocessing_prompt:type_name -> conversation.v1.UserSaid
-	8,  // 13: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
-	9,  // 14: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
-	24, // 15: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
-	10, // 16: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
-	11, // 17: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
-	12, // 18: agentrepl.v1.CreateWorkspaceError.fork_parent_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkParentHasNoConversation
-	13, // 19: agentrepl.v1.CreateWorkspaceError.brief_missing:type_name -> agentrepl.v1.CreateWorkspaceBriefMissing
-	14, // 20: agentrepl.v1.CreateWorkspaceError.unknown_repository:type_name -> agentrepl.v1.CreateWorkspaceUnknownRepository
-	15, // 21: agentrepl.v1.CreateWorkspaceError.unknown_parent:type_name -> agentrepl.v1.CreateWorkspaceUnknownParent
-	16, // 22: agentrepl.v1.CreateWorkspaceError.base_ref_unresolved:type_name -> agentrepl.v1.CreateWorkspaceBaseRefUnresolved
-	17, // 23: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
-	18, // 24: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
-	19, // 25: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
-	20, // 26: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	24, // 11: agentrepl.v1.CreateWorkspaceMergeActions.before_ws_merge:type_name -> conversation.v1.UserSaid
+	24, // 12: agentrepl.v1.CreateWorkspaceMergeActions.postprocessing_prompt:type_name -> conversation.v1.UserSaid
+	9,  // 13: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
+	10, // 14: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
+	8,  // 15: agentrepl.v1.CreateWorkspaceResponse.accepted:type_name -> agentrepl.v1.CreateWorkspaceAccepted
+	25, // 16: agentrepl.v1.CreateWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 17: agentrepl.v1.CreateWorkspaceError.ungated_without_consent:type_name -> agentrepl.v1.CreateWorkspaceUngatedWithoutConsent
+	12, // 18: agentrepl.v1.CreateWorkspaceError.no_slug:type_name -> agentrepl.v1.CreateWorkspaceNoSlug
+	13, // 19: agentrepl.v1.CreateWorkspaceError.fork_parent_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkParentHasNoConversation
+	14, // 20: agentrepl.v1.CreateWorkspaceError.brief_missing:type_name -> agentrepl.v1.CreateWorkspaceBriefMissing
+	15, // 21: agentrepl.v1.CreateWorkspaceError.unknown_repository:type_name -> agentrepl.v1.CreateWorkspaceUnknownRepository
+	16, // 22: agentrepl.v1.CreateWorkspaceError.unknown_parent:type_name -> agentrepl.v1.CreateWorkspaceUnknownParent
+	17, // 23: agentrepl.v1.CreateWorkspaceError.base_ref_unresolved:type_name -> agentrepl.v1.CreateWorkspaceBaseRefUnresolved
+	18, // 24: agentrepl.v1.CreateWorkspaceError.worktree_creation_failed:type_name -> agentrepl.v1.CreateWorkspaceWorktreeCreationFailed
+	19, // 25: agentrepl.v1.CreateWorkspaceError.spawn_failed:type_name -> agentrepl.v1.CreateWorkspaceSpawnFailed
+	20, // 26: agentrepl.v1.CreateWorkspaceError.one_shot_policy_missing:type_name -> agentrepl.v1.CreateWorkspaceOneShotPolicyMissing
+	21, // 27: agentrepl.v1.CreateWorkspaceError.naming_failed:type_name -> agentrepl.v1.CreateWorkspaceNamingFailed
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -1568,8 +1667,9 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[7].OneofWrappers = []any{
 		(*CreateWorkspaceResponse_Success)(nil),
 		(*CreateWorkspaceResponse_Error)(nil),
+		(*CreateWorkspaceResponse_Accepted)(nil),
 	}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[10].OneofWrappers = []any{
 		(*CreateWorkspaceError_UngatedWithoutConsent)(nil),
 		(*CreateWorkspaceError_NoSlug)(nil),
 		(*CreateWorkspaceError_ForkParentHasNoConversation)(nil),
@@ -1588,7 +1688,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
