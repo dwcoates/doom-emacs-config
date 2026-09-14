@@ -863,6 +863,14 @@ body::after {
      `--topbar-cell-gap` edge padding, and a second inset here stacked on top
      of it is what held the strip's content off the window's edges. */
   padding: 0;
+  /* THE ROW SPANS THE HEADER. The one in-flow child here is `.topbar-strip`
+     (the reveal layer is `position: absolute`), and a flex item with no width
+     rule shrink-wraps to its content: the strip, and the `.topbar-row` grid
+     inside it, then occupied only the left part of the header, so the row's
+     two `minmax(0, 1fr)` flanks split the CONTENT width and the chips landed
+     near the middle of the strip instead of at its right edge. `flex: 1 1 0`
+     on the strip below, plus `width: 100%` on the row, is what makes the row
+     span the header from edge to edge. */
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
   /* Positioning context for the absolute-centered #task-summary (§2.14). */
@@ -5354,9 +5362,21 @@ body.draining #composer-input::placeholder {
    term the row spends is in it: this rule's own `padding` inset at each end,
    then a flank group, then a `gap`, before the title's box begins. Everything below stays the
    layout of record, so a page with no JS running still gets this strip. */
+/* The strip wrapper `mountTopbar` puts inside the header, and the header's
+   ONE in-flow child. It is a flex item, so it is told to take the header's
+   whole inline size rather than shrink-wrap the row it holds. */
+.topbar-strip {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* SPANS THE HEADER, EDGE TO EDGE. `width: 100%` against the strip above is
+   what gives the three tracks the full header width to divide; without it the
+   grid sizes to its content and everything packs to the left. */
 .topbar-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
   align-items: center;
   /* ONE TOKEN, BOTH FRAME DISTANCES (owner ruling 1). The gap between the
      three TRACKS and the inset at the strip's edges are the same measure by
