@@ -187,6 +187,81 @@ describe("the sections", () => {
   });
 });
 
+describe("closed workspaces never appear in a live grouping", () => {
+  it("drops a closed row from a repository section", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "ws-live" }), row({ id: "ws-closed", closed: true })],
+          }),
+        ],
+      }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-closed']")).toBeNull();
+    expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-live']")).not.toBeNull();
+  });
+
+  it("drops a killed row, whose lifecycle arm is inactive", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "ws-killed", closed: true, status: { case: "inactive", value: {} } })],
+          }),
+        ],
+      }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-killed']")).toBeNull();
+  });
+
+  it("draws no '?' glyph once the closed rows are gone", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "ws-killed", closed: true, status: { case: "inactive", value: {} } })],
+          }),
+        ],
+      }),
+      sidebarContext(),
+    );
+    const glyphs = [...pane(drawn, "repository").querySelectorAll(".st")].map((el) => el.textContent);
+    expect(glyphs).not.toContain("?");
+  });
+
+  it("drops a closed row from a task section", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        tasks: [taskSection({ id: "task-1", rows: [row({ id: "ws-closed", closed: true })] })],
+      }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "task").querySelector("[data-roster-row='ws-closed']")).toBeNull();
+  });
+
+  it("hoists a killed parent's live child up in its place", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [
+          repoSection({
+            id: "repo-1",
+            rows: [row({ id: "ws-killed", closed: true, children: [row({ id: "ws-child" })] })],
+          }),
+        ],
+      }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-killed']")).toBeNull();
+    expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-child']")).not.toBeNull();
+  });
+});
+
 describe("recently merged", () => {
   /** A roster carrying one landed merge -- the band only draws with rows. */
   function landed(): ReturnType<typeof roster> {
@@ -194,6 +269,20 @@ describe("recently merged", () => {
       merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]),
     });
   }
+
+  it("keeps a merged row, which is closed on the wire, in the band", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        merged: mergedSection([
+          row({ id: "ws-9", closed: true, status: { case: "merged", value: {} } }),
+        ]),
+      }),
+      sidebarContext(),
+    );
+    expect(
+      pane(drawn, "repository").querySelector(".merged-section [data-roster-row='ws-9']"),
+    ).not.toBeNull();
+  });
 
   it("appears under BOTH groupings", () => {
     const drawn = drawWorkspaceRoster(landed(), sidebarContext());

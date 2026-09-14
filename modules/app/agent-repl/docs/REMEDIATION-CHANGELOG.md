@@ -1,3 +1,4 @@
+- webapp sidebar: closed and killed rows (the daemon's `closed = true`, still emitted so Emacs reconciles its tabs) are dropped from both live groupings with their live descendants hoisted in place, so the `inactive` "?" row is gone and a kill from the dropdown visibly removes the workspace; the recently-merged band still draws its `closed = true` rows (owner ruling 2026-09-14: closed/killed/nuked never appear, and kill seemed to have no effect)
 - webapp: the purple response and blue prompt bubbles cap 15% below their prior widths (82.5%→70.125%, 60%→51%), max-width only; other bubbles and both bubbles' margins unchanged (owner ruling 2026-09-14).
 # Remediation changelog
 
