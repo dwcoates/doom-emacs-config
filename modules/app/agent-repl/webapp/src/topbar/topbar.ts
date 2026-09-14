@@ -4,15 +4,27 @@
  * LEFT TIGHT, CENTER CONTENT-CENTERED, RIGHT TIGHT — the account cell (its
  * connectivity glyph, then its label) at the left edge, then the model
  * selector, the permission-mode picker, the context chip and the warning chip
- * at the right edge. The flank groups never spread, and the title between them
- * is centered on its OWN content against the whole strip rather than on what
- * the two groups leave over: the row is a three-track grid whose outer tracks
- * are `minmax(0, 1fr)` — equal free shares with no content floor of their
- * own — so a wide right group does not push the title left, and the middle
- * track is capped at half the row so the title ellipsis-clips rather than
- * growing into either group (styles.css, owner ruling 2, corrected
- * 2026-09-13: a bare `1fr` floors each flank at its own content, which is
- * what had been pushing the title left of center).
+ * at the right edge. The flank groups never spread, and the TITLE, alone, sits
+ * at the strip's center.
+ *
+ * THAT TAKES TWO LAYERS, and each does only what it can do honestly:
+ *
+ * - THE GRID CENTERS THE TRACK. The row is a three-track grid whose outer
+ *   tracks are `minmax(0, 1fr)` — equal free shares with no content floor of
+ *   their own — so the middle track's midpoint is the row's midpoint at every
+ *   width, and `fit-content(50%)` keeps an unbounded title from eating the
+ *   strip (styles.css, owner ruling 2, corrected 2026-09-13).
+ * - THE MEASURED CAP CENTERS THE TEXT. A grid cannot know what the two flank
+ *   GROUPS measure inside their equal tracks, so a long title fills its whole
+ *   track and ends one gap from the chips while the narrower flank leaves
+ *   clear room — a centered track reading as an off-center title. After every
+ *   draw `capTopbarTitle` (title-cap.ts) caps the title's width from the
+ *   measured flanks and the row's own insets — `rowWidth − 2 · edgePadding
+ *   − 2 · max(leftWidth, rightWidth) − 2 · gap` — so the visible text keeps
+ *   exactly the same clear space on both sides and never touches either one.
+ *
+ * The stylesheet stays the layout of record: the cap is an inline `max-width`
+ * and nothing else, so a page with no JS running still gets today's strip.
  *
  * EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE, so reading `drawTopbarView`
  * enumerates the topbar's subcomponents and each one's props are its own
@@ -46,6 +58,7 @@ import {
   drawTopbarConnectivity,
   drawTopbarTitle,
 } from "./strip.js";
+import { capTopbarTitle, watchTitleCap } from "./title-cap.js";
 import { drawTopbarWarningStrip } from "./warnings.js";
 
 /** What every mount answers with. */
@@ -80,6 +93,10 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
   // Mounted AFTER the strip so the layer is the later sibling and paints over
   // it; both live inside the host, which is the reveal's positioning context.
   const reveals = mountRevealLayer(host, deps.geometry);
+  // A resize changes the flanks' widths without producing a push, so the cap
+  // is re-measured from the window too — coalesced to one frame, and removed
+  // with the mount.
+  const titleCap = watchTitleCap(strip);
   const tc: TopbarContext = { ctx, reveals, openLogin: deps.openLogin };
 
   const stream = watchStream(ctx, {
@@ -91,7 +108,12 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
       // The old strip's clock subscriptions come down BEFORE the new one goes
       // up, so nothing ticks against an element already detached.
       stopTicking(strip);
-      strip.replaceChildren(drawTopbarView(view, tc));
+      const row = drawTopbarView(view, tc);
+      strip.replaceChildren(row);
+      // MEASURED ONLY ONCE IN THE DOCUMENT. The flank widths this reads are
+      // laid-out boxes, so the cap is applied after the row is the strip's
+      // child rather than inside the draw.
+      capTopbarTitle(row);
       // The controls re-registered their reveals as they were drawn; whatever
       // the reader had open re-opens against the NEW anchors and content.
       reveals.refresh();
@@ -102,6 +124,7 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
     dispose(): void {
       log.debug("disposing the topbar", { operation: "topbar.dispose" });
       stream.cancel();
+      titleCap.dispose();
       reveals.dispose();
       stopTicking(strip);
       host.replaceChildren();

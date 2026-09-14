@@ -5332,7 +5332,22 @@ body.draining #composer-input::placeholder {
    cannot know either group's width, so it can only guess a max-width and
    still overlap an asymmetric strip, where the tracks make both the centering
    and the non-overlap facts of the layout. The reveal layer is unaffected
-   either way — it is the row's SIBLING inside the host, not a descendant. */
+   either way — it is the row's SIBLING inside the host, not a descendant.
+
+   THIS RULE CENTERS THE TRACK; IT DOES NOT CENTER THE TEXT, and the second
+   half of the job belongs to `src/topbar/title-cap.ts`. The tracks are equal
+   whatever the two groups hold, but the GROUPS inside them are not: measured
+   live at row width 1090px, the tracks came out 292.5 / 472.9 / 292.5 while
+   the left group was only 160px of its track and the right group filled its
+   own. A long title then fills its whole middle track, so its right edge sits
+   one gap from the chips with clear room still on the left — a centered track
+   reading as an off-center title. After every draw, `capTopbarTitle` measures
+   the two groups and sets an inline `max-width` on `.topbar-title` of
+   `rowWidth − 2 · edgePadding − 2 · max(leftWidth, rightWidth) − 2 · gap`,
+   the widest box that leaves EXACTLY the same clear space on both sides. Every
+   term the row spends is in it: this rule's own `padding` inset at each end,
+   then a flank group, then a `gap`, before the title's box begins. Everything below stays the
+   layout of record, so a page with no JS running still gets this strip. */
 .topbar-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr);
@@ -5367,10 +5382,13 @@ body.draining #composer-input::placeholder {
   justify-self: end;
   min-width: 0;
 }
-/* THE MIDDLE TRACK. Sized to its content up to the template's half-row cap, so
+/* THE MIDDLE TRACK. Sized to its content up to the template's half-row cap —
+   and, once the strip is laid out, to the measured cap `title-cap.ts` sets as
+   an inline `max-width` so the visible text clears both flanks equally. So
    this rule carries only what happens when the content does not fit: ellipsis
    rather than wrapping, because the strip is one line high by definition and
-   the whole title is in the tooltip. */
+   the whole title is in the tooltip. `text-align: center` is what keeps the
+   text centered INSIDE the capped box. */
 .topbar-title {
   min-width: 0;
   overflow: hidden;
