@@ -206,6 +206,10 @@ describe("offerableOptions", () => {
     );
   });
 
+  it("skips an option whose model name is empty, which names no model either", () => {
+    expect(offerableOptions([option(""), option("opus")]).map((o) => o.model?.name)).toEqual(["opus"]);
+  });
+
   it("refuses an option carrying no model", () => {
     expect(() => offerableOptions([create(ModelOptionSchema, { displayName: "x" })])).toThrow(
       MalformedView,

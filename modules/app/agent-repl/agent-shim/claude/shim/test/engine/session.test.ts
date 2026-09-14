@@ -4244,6 +4244,24 @@ describe("the model catalog's capabilities", () => {
       conversationv1.AgentEffortLevel.UNSPECIFIED,
     ]);
   });
+
+  it("omits a catalog row whose value is the synthetic marker", async () => {
+    const catalog = await catalogFor([
+      { value: SYNTHETIC_MODEL, displayName: "Default", description: "the CLI's own pick" },
+      { value: "opus", displayName: "Opus", description: "a real model" },
+    ]);
+
+    expect(catalog.map((option) => option.model?.name)).toEqual(["opus"]);
+  });
+
+  it("omits a catalog row whose value is empty", async () => {
+    const catalog = await catalogFor([
+      { value: "", displayName: "Default", description: "names no model" },
+      { value: "opus", displayName: "Opus", description: "a real model" },
+    ]);
+
+    expect(catalog.map((option) => option.model?.name)).toEqual(["opus"]);
+  });
 });
 
 /**
