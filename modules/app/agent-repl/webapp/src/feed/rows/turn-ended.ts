@@ -56,6 +56,17 @@ const PATH = "FeedTurnEnded";
 export const FINAL_RESPONSE_CLASS = "final-response";
 
 /**
+ * THE MARK THE ANSWERING ROW WEARS, on its chrome.
+ *
+ * Spelled once and read back by the feed: the prompt bubble's wave ends when
+ * its turn's FINAL ANSWER lands (owner ruling, 2026-09-14), and this attribute
+ * is the feed's own record that it has — so `markWorkingPrompts` asks for it
+ * by this name rather than by a second string that could drift from the one
+ * written here.
+ */
+export const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
+
+/**
  * The error arms that CARRY A WAIT, which is the only per-arm knowledge left in
  * this module now that the wording is the daemon's.
  *
@@ -134,7 +145,7 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
     });
     return;
   }
-  row.setAttribute("data-final-answer", "true");
+  row.setAttribute(FINAL_ANSWER_ATTRIBUTE, "true");
   // The existing green-border rule keys on the response bubble itself, so the
   // class goes where that rule can see it. A card drawn some other way still
   // carries the row-level marker above.

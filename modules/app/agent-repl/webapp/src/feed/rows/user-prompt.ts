@@ -13,7 +13,7 @@
  * oneof, so an unset one is a malformed view here rather than a bubble drawn
  * with no body.
  */
-import { bubbleWaveStyle } from "../../breathing.js";
+import { startPromptWave } from "../../breathing.js";
 import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -30,15 +30,16 @@ const PATH = "FeedUserPrompt";
 /**
  * The prompt bubble.
  *
- * The wave's PHASE is stamped inline, as it always has been: the feed rebuilds
- * a row's body wholesale and a fresh node restarts a CSS animation at 0%, so
- * without the negative delay every redraw would jump the wave back to the left
- * edge.
+ * IT WAVES FROM THE MOMENT IT IS DRAWN. `startPromptWave` stamps both halves of
+ * the signal: the mark the `bubble-wave` rule keys on, and the wave's PHASE as
+ * a negative inline `animation-delay` — the feed rebuilds a row's body
+ * wholesale and a fresh node restarts a CSS animation at 0%, so without the
+ * delay every redraw would jump the band back to the left edge.
  *
- * WHETHER THE WAVE RUNS AT ALL IS NOT DECIDED HERE. A renderer is handed one
- * message and draws it; whether this prompt's turn is still in flight is a fact
- * about the FEED's rows, not about this message, so the feed marks the bubble
- * (`markWorkingPrompts` in feed-view.ts) and this stamps only the phase.
+ * WHEN IT STOPS IS NOT DECIDED HERE. A renderer is handed one message and draws
+ * it; whether this prompt's turn has settled is a fact about the FEED's rows,
+ * not about this message, so the feed clears the mark (`markWorkingPrompts` in
+ * feed-view.ts) on the same pass that drew the bubble.
  */
 export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   log.info("drawing a user prompt row", {
@@ -47,7 +48,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   });
   const bubble = document.createElement("div");
   bubble.className = "bubble user";
-  bubble.setAttribute("style", bubbleWaveStyle());
+  startPromptWave(bubble);
   bubble.append(drawFeedUserPromptAuthor(requireMessage(msg.author, `${PATH}.author`)));
 
   const result = requireCase(msg.result, `${PATH}.result`);

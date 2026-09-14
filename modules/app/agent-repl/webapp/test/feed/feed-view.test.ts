@@ -532,10 +532,82 @@ describe("createFeedController: the working prompt's thinking wave", () => {
     expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
   });
 
-  it("leaves a prompt that belongs to no turn still", () => {
+  it("waves a prompt the daemon has not yet stamped with a turn", () => {
+    // A locally minted, unacknowledged prompt is one the reader can see and
+    // cannot possibly have an answer to yet (owner ruling, 2026-09-14).
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("p1", "one")]), "replace");
+    expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      PROMPT_WAVE_WORKING,
+    );
+  });
+
+  it("waves a prompt from the push that drew it, before any other arrives", () => {
+    const { controller, host } = fixture();
+    controller.upsert(userPromptRow("p1", "one", "t1"));
+    expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      PROMPT_WAVE_WORKING,
+    );
+  });
+
+  it("stops the wave when the turn's FINAL ANSWER is marked", () => {
+    // The conclusion names the answering row and carries no turn of its own,
+    // so the only thing that can settle this prompt is the final-answer mark
+    // the feed put on the answer — which carries the turn.
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([
+        userPromptRow("p1", "one", "t1"),
+        responseRow("r1", "the answer", undefined, "t1"),
+        turnEndedRow("e1", undefined, "concluded", "r1"),
+      ]),
+      "replace",
+    );
     expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("keeps waving while an answer of ANOTHER turn is marked final", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([
+        userPromptRow("p1", "one", "t1"),
+        responseRow("r0", "an older answer", undefined, "t0"),
+        turnEndedRow("e0", undefined, "concluded", "r0"),
+      ]),
+      "replace",
+    );
+    expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      PROMPT_WAVE_WORKING,
+    );
+  });
+
+  it("does not re-add the wave to a settled prompt on a later push", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1"), turnEndedRow("e1", "t1")]),
+      "replace",
+    );
+    controller.upsert(responseRow("r9", "something else"));
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("does not re-add the wave when the settled prompt is itself redrawn", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([userPromptRow("p1", "one", "t1"), turnEndedRow("e1", "t1")]),
+      "replace",
+    );
+    controller.upsert(userPromptRow("p1", "one, edited", "t1"));
+    expect(promptBubble(host, "p1").hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("does not take the wave off a prompt whose turn has not ended", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([userPromptRow("p1", "one", "t1")]), "replace");
+    controller.upsert(responseRow("r1", "still working", undefined, "t1"));
+    expect(promptBubble(host, "p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
+      PROMPT_WAVE_WORKING,
+    );
   });
 
   it("waves an agent-addressed prompt whose turn is in flight", () => {
