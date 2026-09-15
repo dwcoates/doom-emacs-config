@@ -8,6 +8,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedSkill, SKILL_OUTCOME_ARMS } from "../../../src/feed/cards/skill.js";
+import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { harness, rowContext } from "../harness.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
@@ -128,22 +129,52 @@ describe("drawFeedSkill", () => {
     );
   });
 
-  it("folds the document by default", () => {
+  it("starts collapsed, marking the whole card one click-to-expand fold", () => {
+    // Card-level fold (owner ruling, 2026-09-15): the card is a `.tool-fold`
+    // and begins without `.expanded`, so it opens as a unit on a click.
     const el = drawFeedSkill(skill(loaded("# heading")), rc());
-    expect(el.querySelector<HTMLElement>(".skill-content")?.hidden).toBe(true);
+    expect(el.classList.contains("tool-fold")).toBe(true);
+    expect(el.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
 
-  it("opens the document on the reader's click", () => {
-    const el = drawFeedSkill(skill(loaded("# heading")), rc());
-    el.querySelector<HTMLButtonElement>('[data-fold="skill-document"]')?.click();
-    expect(el.querySelector<HTMLElement>(".skill-content")?.hidden).toBe(false);
+  it("shows NO document preview while collapsed", () => {
+    // The section is HIDDEN on a collapsed card, not a height-capped peek.
+    const remove = installStylesheet();
+    try {
+      const el = drawFeedSkill(skill(loaded("# heading")), rc());
+      document.body.replaceChildren(el);
+      expect(cascadedValue(el.querySelector(".skill-content") as Element, "display")).toBe("none");
+    } finally {
+      remove();
+    }
   });
 
-  it("keeps a document the reader opened open across a re-push", () => {
-    const first = drawFeedSkill(skill(loaded("# heading")), rc());
-    first.querySelector<HTMLButtonElement>('[data-fold="skill-document"]')?.click();
-    const second = drawFeedSkill(skill(loaded("# heading\n\nmore")), rc(first));
-    expect(second.querySelector<HTMLElement>(".skill-content")?.hidden).toBe(false);
+  it("reveals the document, scrolling at 50vh, once the card is expanded", () => {
+    const remove = installStylesheet();
+    try {
+      const el = drawFeedSkill(skill(loaded("# heading")), rc());
+      el.classList.add(EXPANDED_CLASS);
+      document.body.replaceChildren(el);
+      const doc = el.querySelector(".skill-content") as Element;
+      expect(cascadedValue(doc, "display")).toBe("block");
+      expect(cascadedValue(doc, "max-height")).toBe("50vh");
+    } finally {
+      remove();
+    }
+  });
+
+  it("opens the card on the reader's click, via the feed's card-level fold", () => {
+    // The existing feed-wide click-to-expand toggles the whole card open; a
+    // click on the head (the collapsed face) is what the reader aims at.
+    const el = drawFeedSkill(skill(loaded("# heading")), rc());
+    const feed = document.createElement("div");
+    feed.append(el);
+    document.body.replaceChildren(feed);
+    installClickExpand(feed, () => "");
+    (el.querySelector(".tool-head") as HTMLElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    expect(el.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
   it("draws the allowances sentence verbatim when the skill declared any", () => {
