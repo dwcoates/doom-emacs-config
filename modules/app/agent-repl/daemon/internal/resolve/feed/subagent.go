@@ -363,8 +363,21 @@ func applyTotals(bubble *frontendv1.FeedSubagent, totals *conversationv1.AgentSu
 	}
 	switch usage := totals.GetUsage().(type) {
 	case *conversationv1.AgentSubagentTotals_Full:
-		misses := usage.Full.GetInputMisses()
-		sum := misses.GetWritten() + misses.GetUnwritten() + usage.Full.GetOutputTokens()
+		// THE RUN'S TOTAL, every token it consumed — cache reads included. The
+		// head draws ONE figure standing for the whole run, the same quantity
+		// the live path shows (AgentSubagentProgress.total_tokens, the vendor's
+		// running grand total) and the async path shows (total_only.total_tokens),
+		// so the number does not change basis when a live bubble settles. The
+		// cache-read bucket is CHEAP but it is still tokens the run consumed:
+		// dropping it (as this once did) understated the total by the cached
+		// context a subagent reads, which for a Claude Code run is most of it.
+		// This is deliberately NOT the footer's "expensive sum" — that cell
+		// answers "what did this turn cost", a different question with its own
+		// component breakdown; this answers "how big was this run".
+		full := usage.Full
+		hits := full.GetInputHits()
+		misses := full.GetInputMisses()
+		sum := hits.GetRead() + misses.GetWritten() + misses.GetUnwritten() + full.GetOutputTokens()
 		bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(sum) + " tok"}
 	case *conversationv1.AgentSubagentTotals_TotalOnly:
 		if usage.TotalOnly.TotalTokens == nil {
