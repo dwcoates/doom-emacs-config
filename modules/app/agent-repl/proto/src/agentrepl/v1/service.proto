@@ -12,6 +12,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_select_response.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_get_feed_page.proto";
@@ -70,6 +71,12 @@ service AgentRepl {
   // The composer's submission, whole; the daemon recognizes programmatically
   // handled commands transparently. See endpoint_submit_prompt.proto.
   rpc SubmitPrompt(SubmitPromptRequest) returns (SubmitPromptResponse);
+
+  // Move or clear the response-selection cursor (reply-to-a-past-response):
+  // the daemon computes the newly selected final-response feedid from its
+  // ordered rows, pushes it to the webapp on the feed watch, and acks it
+  // here. See endpoint_select_response.proto.
+  rpc SelectResponse(SelectResponseRequest) returns (SelectResponseResponse);
 
   // The refusal card's "engineer support for it" offer: spawn a support
   // workspace with a daemon-composed brief. See

@@ -32,7 +32,21 @@ message WatchFeedRequest {
 // One feed row upsert, delivered live: a new row, or a whole replacement of
 // one already shown (a growing response's re-push, a settled tool card, a
 // task bubble another act touched). The client upserts by FeedRow.id.
+//
+// A frame carries EITHER a row upsert (`row`) OR a response-selection push
+// (`selection`), never both. The selection push is the daemon's per-workspace
+// reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
+// the ROOT feed's watch so the webapp recolors the selected final-response
+// bubble, center-scrolls it, and suppresses tail-follow while a selection is
+// active. Row upserts still travel with their own feedids (FeedRow.id), so a
+// selection frame naming feedids of ROWS keeps the stream's "the connection
+// is the placement" invariant intact — it names rows within this feed, not a
+// second feed.
 message WatchFeedResponse {
-  // The upserted row, whole.
+  // The upserted row, whole. Set on a row-upsert frame; unset on a selection
+  // frame.
   frontend.v1.FeedRow row = 1;
+  // The response-selection state, whole. Set on a selection frame; unset on a
+  // row-upsert frame. Pushed on the root feed's watch only.
+  optional frontend.v1.FeedSelection selection = 2;
 }
