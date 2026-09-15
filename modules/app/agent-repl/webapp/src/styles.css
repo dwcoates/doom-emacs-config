@@ -1758,6 +1758,24 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    which is exactly "the caret does not toggle" as a reader sees it, and it is
    invisible to every jsdom drawing test, which install no stylesheet at all. */
 .agent-panel[hidden] { display: none; }
+/* FLUSH INTERIOR (owner ruling, 2026-09-14): the reframed subagent/detached
+   bubble frames as a tool card, so its recursive sub-feed sits DIRECTLY in that
+   card rather than inside a second bordered box. `.bubble-subfeed` drops the
+   base `.agent-panel` box chrome -- the `--bg` fill, the 1px border, the radius
+   and the box padding -- so the interior reads as one card's body, the way a
+   normal tool card's output sits in the card, not a card-within-a-card. The
+   flex-column stacking (`.tool-card.bubble-fold`) and the head-to-feed gap
+   (`.agent-panel`'s own `margin-top`) are untouched, and so is the sub-feed and
+   its rows; only the inner container's box treatment is removed. The teal
+   card's `.fold-fixed > .agent-panel` box is a different treatment and keeps its
+   own chrome -- this rule is scoped to the bubble sub-feed alone. Placed after
+   the base `.agent-panel` block so equal specificity resolves by source order. */
+.bubble-subfeed {
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
 /* A SUB-FEED BUBBLE STACKS: the collapsed head line, and the sub-feed beneath
    it. `bubble.ts` appends exactly those two children in that order, and every
    other rule here is written for that shape -- the panel's own padding
