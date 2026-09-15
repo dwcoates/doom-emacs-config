@@ -1326,10 +1326,10 @@ pre {
 .bubble.user {
   background: var(--user);
   width: fit-content;
-  /* The blue prompt bubble caps 15% below its prior 60% (owner ruling,
-     2026-09-14): 60% * 0.85 = 51%. ONLY the max width changes — the margin
+  /* The blue prompt bubble caps at 77% (owner ruling,
+     2026-09-15): 77%. ONLY the max width changes — the margin
      below keeps its bias off the unscaled --agent-bubble-cap. */
-  max-width: 51%;
+  max-width: 77%;
   margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
   /* The prompt's verbatim <pre> carried no leading of its own, so it fell to
@@ -1561,7 +1561,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   /* The purple response bubble caps 15% below the shared bubble cap (owner
      ruling, 2026-09-14): 82.5% * 0.85. ONLY the max width changes — the
      margin below keeps its bias off the unscaled --agent-bubble-cap. */
-  max-width: calc(var(--agent-bubble-cap) * 0.85);
+  max-width: 77%;
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
   margin-right: auto;
 }
