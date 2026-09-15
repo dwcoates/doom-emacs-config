@@ -281,6 +281,27 @@ func PromptLine(at Attribution, discriminator, upsertKey, pageAgent string, prom
 	})
 }
 
+// PeerLine stores a served PEER MESSAGE as a line in `pageAgent`'s book — the
+// same StorePageLine envelope PromptLine builds, carrying the PeerMessage arm of
+// the item oneof.
+//
+// THE STORE SERVES IT BY THE SAME PATH A PROMPT TAKES. route.go routes a page
+// line whose item is a peer_message (validating the recipient and the book
+// match), the shim reader maps it to HistoryEntry.peerMessage, and the daemon
+// draws it as the abbreviated peer bubble. Used for an ADOPTED transcript's peer
+// messages, which the live stream would emit itself on a running session; the
+// two planes carry the SAME vendor record uuid so their rows collapse to one.
+func PeerLine(at Attribution, discriminator, upsertKey, pageAgent string, peer *conversationv1.PeerMessage) *storev1.StoreEntry {
+	return entry(at, discriminator, upsertKey, pageAgent, func(u *storev1.StoreAgentUpdate) {
+		u.AgentInfo = &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
+			PageAgentId: agentID(pageAgent),
+			AgentItem: &storev1.StoreAgentItem{
+				Item: &storev1.StoreAgentItem_PeerMessage{PeerMessage: peer},
+			},
+		}}
+	})
+}
+
 // BashRun stores a detached shell run's frame, wrapped with the unit id the
 // spawning stream announced so a reader holding the announcement resolves it.
 // NOT paginatable by construction.
