@@ -646,6 +646,134 @@ func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
 	}
 }
 
+func TestClassifySourceAdoptsIdleTranscriptWhenNoRecord(t *testing.T) {
+	// Arrange: no session record, and an on-disk transcript last touched well
+	// outside the idle window — the interactive-CLI conversation to continue.
+	f := newFleetFixture(t)
+	f.accounts.newest = account.AdoptableTranscript{
+		Transcript:      account.Transcript{Path: "/config/projects/enc/adopt-me.jsonl", ConfigDir: "/config"},
+		VendorSessionID: "adopt-me",
+		ModTime:         fixedNow.Add(-2 * TranscriptAdoptionIdleWindow),
+		LastRecordAt:    fixedNow.Add(-time.Hour),
+	}
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if got.Fresh || got.VendorSessionID != "adopt-me" {
+		t.Fatalf("classifySource() = %+v, want a resume of adopt-me", got)
+	}
+}
+
+func TestClassifySourceComesUpFreshWhenNewestTranscriptTooFresh(t *testing.T) {
+	// Arrange: no session record, but the newest transcript was modified inside
+	// the idle window — another writer may still hold it, so the idle guard
+	// declines it and the session comes up fresh.
+	f := newFleetFixture(t)
+	f.accounts.newest = account.AdoptableTranscript{
+		Transcript:      account.Transcript{Path: "/config/projects/enc/live.jsonl", ConfigDir: "/config"},
+		VendorSessionID: "live",
+		ModTime:         fixedNow.Add(-time.Second),
+	}
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if !got.Fresh || got.VendorSessionID != "" {
+		t.Fatalf("classifySource() = %+v, want a fresh start (idle guard)", got)
+	}
+}
+
+func TestClassifySourceComesUpFreshWhenNoTranscriptToAdopt(t *testing.T) {
+	// Arrange: no session record and no transcript on disk at all.
+	f := newFleetFixture(t)
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if !got.Fresh {
+		t.Fatalf("classifySource() = %+v, want a fresh start", got)
+	}
+	if !f.accounts.newestProbed {
+		t.Fatalf("the no-record branch never probed for a transcript to adopt")
+	}
+}
+
+func TestClassifySourceComesUpFreshWhenAdoptionProbeFails(t *testing.T) {
+	// Arrange: no session record, and the probe itself errors — a probe failure
+	// must fall back to fresh with a log, never crash or mis-route.
+	f := newFleetFixture(t)
+	f.accounts.newestErr = errors.New("readdir blew up")
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if !got.Fresh {
+		t.Fatalf("classifySource() = %+v, want a fresh start on probe failure", got)
+	}
+	if !recordedAt(f, dlog.LevelWarn, opBringUp, "could not probe for a transcript to adopt; the session comes up FRESH") {
+		t.Fatalf("a failed adoption probe was not logged loudly")
+	}
+}
+
+func TestClassifySourceWithRecordNeverProbesForAdoption(t *testing.T) {
+	// Arrange: a workspace that DOES have a session record resumes its own
+	// conversation exactly as before and never probes for a transcript to adopt.
+	f := newFleetFixture(t)
+	session := wsm.Session{VendorSessionID: "vendor-1"}
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if got.Fresh || got.VendorSessionID != "vendor-1" {
+		t.Fatalf("classifySource() = %+v, want a resume of vendor-1", got)
+	}
+	if f.accounts.newestProbed {
+		t.Fatalf("a recorded session must not probe for a transcript to adopt")
+	}
+}
+
+func TestClassifySourceEmptyVendorIdRecordNeverProbesForAdoption(t *testing.T) {
+	// Arrange: a record exists but names no conversation. Owner ruling: adoption
+	// is confined to the NO-RECORD branch, so a record with an empty vendor id
+	// still starts fresh WITHOUT probing.
+	f := newFleetFixture(t)
+
+	// Act.
+	got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", wsm.Session{}, true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("classifySource: %v", err)
+	}
+	if !got.Fresh {
+		t.Fatalf("classifySource() = %+v, want a fresh start", got)
+	}
+	if f.accounts.newestProbed {
+		t.Fatalf("a record with an empty vendor id must not probe for a transcript to adopt")
+	}
+}
+
 // abandonedFaults is the conversation-abandoned rows the fake state client
 // holds, which is the record a user gets that history was left behind.
 func abandonedFaults(db *fakeDB) []wsm.Fault {
