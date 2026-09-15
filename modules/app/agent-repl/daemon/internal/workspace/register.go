@@ -171,6 +171,17 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	if err := v.bindResolvers(log, record.ID, normalized); err != nil {
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}
+	// THE FOOTER IS PRIMED HERE, as the topbar's naming is below. The footer
+	// topic is PER-WORKSPACE and empty after a daemon restart rebuilds the
+	// resolver, unlike the editor-global roster that a reconnecting subscriber
+	// always replays; an idle session produces no fresh live edge to publish
+	// a first view, so without this prime serveTopic and the adoption
+	// Republish have nothing to hand a reconnecting client and the footer
+	// stays blank. Registration is the reconnect edge every workspace passes
+	// through (Emacs re-announces every workspace it holds), so priming here
+	// keeps the topic current. Bind first: Prime writes to the workspace's own
+	// log sink, which bindResolvers just resolved.
+	v.deps.Footer.Prime(record.ID)
 	if err := v.publishNaming(ctx, log, record, facts.DefaultBranch); err != nil {
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}

@@ -249,6 +249,24 @@ type Resolver interface {
 	// the failure is installed, so the count arrives second and accrues onto
 	// the failure already standing.
 	AddDroppedPrompts(ws ids.WorkspaceID, n uint32)
+	// Prime publishes the workspace's CURRENT footer view at registration, so
+	// the per-workspace footer topic holds a complete view for a
+	// (re)connecting subscriber to replay even before any live session fact
+	// arrives — the same register-time prime the topbar takes through
+	// SetNaming.
+	//
+	// THE FOOTER TOPIC IS PER-WORKSPACE, and unlike the GLOBAL roster (which
+	// always retains a current value) it is empty after a daemon restart
+	// rebuilds the resolver. An idle session then produces no fresh live edge,
+	// so serveTopic and Republish would have nothing to hand a reconnecting
+	// subscriber and the footer would stay blank until the next live change —
+	// which for an idle session may never come. Priming at registration —
+	// the one edge every workspace passes through on a reconnect (Emacs
+	// re-announces every workspace it holds) — is what keeps the topic
+	// current. The view is drawn from the accumulated state, so a prime on a
+	// live daemon whose footer already stands renders the same view and is a
+	// no-op through the topic's value dedup; it never regresses a live footer.
+	Prime(ws ids.WorkspaceID)
 	// Topic is the workspace's footer publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FooterView]
 }
