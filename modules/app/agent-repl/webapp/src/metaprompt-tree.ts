@@ -656,6 +656,14 @@ const CONNECTOR_SEGMENTS = new Set([
 ]);
 
 interface Branch {
+  /**
+   * Leading whitespace before the aligned tree prefix. The daemon formatter's
+   * output is 4-column-aligned, but the model sometimes emits a stray leading
+   * space (or a non-4-aligned run) before a connector; that indent is preserved
+   * verbatim so the branch and its wrapped continuation hang together, rather
+   * than desyncing segment alignment and forcing the line to render raw.
+   */
+  indent: string;
   prefix: string;
   label: string;
   body: string;
@@ -680,7 +688,7 @@ function continuationPrefix(b: Branch): string {
 
 /** Branch.text_column: the column at which the branch text starts. */
 function textColumn(b: Branch): number {
-  return visibleWidth(b.prefix) + visibleWidth(b.label);
+  return visibleWidth(b.indent) + visibleWidth(b.prefix) + visibleWidth(b.label);
 }
 
 /**
@@ -694,20 +702,24 @@ function continuationIndent(b: Branch, hasChildren: boolean): string {
     hasChildren && labelWidth > 0
       ? "│" + " ".repeat(labelWidth - 1)
       : " ".repeat(labelWidth);
-  return continuationPrefix(b) + padding;
+  return b.indent + continuationPrefix(b) + padding;
 }
 
-/** Branch.is_parent_of: whether OTHER is a direct child of B. */
+/** Branch.is_parent_of: whether OTHER is a direct child of B. The leading
+ * indent is part of the structure a child inherits, so it is compared too. */
 function isParentOf(b: Branch, other: Branch): boolean {
-  const cont = continuationPrefix(b);
+  const cont = b.indent + continuationPrefix(b);
+  const otherFull = other.indent + other.prefix;
   return (
-    other.prefix.startsWith(cont) &&
-    [...other.prefix].length === [...cont].length + SEGMENT_WIDTH
+    otherFull.startsWith(cont) &&
+    [...otherFull].length === [...cont].length + SEGMENT_WIDTH
   );
 }
 
-/** parse_prefix: split LINE into its tree prefix and the remainder after it. */
-function parsePrefix(line: string): { prefix: string; remainder: string } {
+/** aligned_prefix: walk LINE's 4-column tree segments from the start, stopping
+ * at the connector. This is the daemon formatter's exact prefix model, which
+ * assumes the prefix begins at column 0. */
+function alignedPrefix(line: string): { prefix: string; remainder: string } {
   const cps = [...line];
   let position = 0;
   let collected = "";
@@ -719,6 +731,42 @@ function parsePrefix(line: string): { prefix: string; remainder: string } {
     if (CONNECTOR_SEGMENTS.has(segment)) break;
   }
   return { prefix: collected, remainder: cps.slice(position).join("") };
+}
+
+/** Whether CODE is a space or tab, the only leading indent the peeler steps
+ * over. */
+function isIndentCp(code: number): boolean {
+  return code === CH_SPACE || code === CH_TAB;
+}
+
+/**
+ * parse_prefix: split LINE into an optional leading INDENT, its aligned tree
+ * PREFIX, and the REMAINDER after it.
+ *
+ * REGRESSION WATCH (leading whitespace before a connector must NOT force raw):
+ * a stray non-4-aligned leading space before a connector desyncs the aligned
+ * segment walk, so a branch like ` └── 1.1 …` would otherwise parse to an empty
+ * prefix and, lacking a label at its head, render raw and overflow the bubble.
+ * The peeler steps over the MINIMAL leading-whitespace run that lets the aligned
+ * walk find a connector-terminated prefix or a labelled remainder, so a genuine
+ * 4-aligned space segment (`    ├── …`) is still consumed as a segment and only
+ * the stray excess becomes indent. When no branch shape is found at any offset,
+ * it falls back to the aligned walk at column 0 (so continuations and genuine
+ * prose behave exactly as before).
+ */
+function parsePrefix(line: string): { indent: string; prefix: string; remainder: string } {
+  const cps = [...line];
+  for (let skip = 0; skip <= cps.length; skip++) {
+    if (skip > 0 && !isIndentCp(cps[skip - 1].charCodeAt(0))) break;
+    const { prefix, remainder } = alignedPrefix(cps.slice(skip).join(""));
+    const segs = segments(prefix);
+    const hasConnector = prefix !== "" && CONNECTOR_SEGMENTS.has(segs[segs.length - 1]);
+    if (hasConnector || matchLabel(remainder)) {
+      return { indent: cps.slice(0, skip).join(""), prefix, remainder };
+    }
+  }
+  const { prefix, remainder } = alignedPrefix(line);
+  return { indent: "", prefix, remainder };
 }
 
 const LABEL_RE = /^(\d+(?:\.\d+)*\.?\s+)/;
@@ -733,16 +781,16 @@ function matchLabel(s: string): { label: string; end: number } | null {
 /** parse_branch: parse LINE as a branch head, or return null. */
 function parseBranch(line: string): Branch | null {
   if (line.trim() === "") return null;
-  const { prefix, remainder } = parsePrefix(line);
+  const { indent, prefix, remainder } = parsePrefix(line);
   const segs = segments(prefix);
   const hasConnector = prefix !== "" && CONNECTOR_SEGMENTS.has(segs[segs.length - 1]);
   const matched = matchLabel(remainder);
   if (!matched) {
     // A branch with no label is still a branch when it carries a connector.
     if (!hasConnector) return null;
-    return { prefix, label: "", body: remainder.trim() };
+    return { indent, prefix, label: "", body: remainder.trim() };
   }
-  return { prefix, label: matched.label, body: remainder.slice(matched.end).trim() };
+  return { indent, prefix, label: matched.label, body: remainder.slice(matched.end).trim() };
 }
 
 /**
@@ -752,7 +800,7 @@ function parseBranch(line: string): Branch | null {
  */
 function parseContinuation(line: string): { column: number; text: string } | null {
   if (line.trim() === "") return null;
-  const { prefix, remainder } = parsePrefix(line);
+  const { indent, prefix, remainder } = parsePrefix(line);
   if (prefix !== "") {
     const segs = segments(prefix);
     if (CONNECTOR_SEGMENTS.has(segs[segs.length - 1])) return null;
@@ -764,7 +812,7 @@ function parseContinuation(line: string): { column: number; text: string } | nul
   const text = stripped;
   if (text === "") return null;
   if (matchLabel(text)) return null;
-  return { column: visibleWidth(prefix) + padding, text: text.replace(/\s+$/u, "") };
+  return { column: visibleWidth(indent) + visibleWidth(prefix) + padding, text: text.replace(/\s+$/u, "") };
 }
 
 // ---------------------------------------------------------------------------
@@ -873,7 +921,9 @@ function wrapBranch(
   }
   const packed = pack(toPieces(tokenize(branch.body), field), field);
   const indent = continuationIndent(branch, hasChildren);
-  const lines: RenderLine[] = [{ prefix: branch.prefix + branch.label, body: packed.lines[0], raw: false }];
+  const lines: RenderLine[] = [
+    { prefix: branch.indent + branch.prefix + branch.label, body: packed.lines[0], raw: false },
+  ];
   for (let i = 1; i < packed.lines.length; i++) {
     lines.push({ prefix: indent, body: packed.lines[i], raw: false });
   }

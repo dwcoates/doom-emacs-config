@@ -24,7 +24,7 @@ import {
   proseHtml,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
-import { DEFAULT_TREE_COLS } from "../../../src/metaprompt-tree.js";
+import { DEFAULT_TREE_COLS, visibleWidth } from "../../../src/metaprompt-tree.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
@@ -632,6 +632,23 @@ describe("the wrapped tree a settled response carries", () => {
     expect(host.querySelector("strong")).toBeNull();
     expect(host.textContent).toContain("__name__");
     expect(host.textContent).toContain("1.4 Verified");
+  });
+
+  it("wraps a branch the model emitted with a stray leading space, no line overflows", () => {
+    // Arrange — the live bug: a `└──` branch arrives with one leading space, so
+    // the wrapper must still treat it as a branch or it renders raw and spills.
+    const tree = [
+      "1 👋 Hello again",
+      " └── 1.1 Nothing has changed since the last message, with hello/ (Go) and hello-rs/ (Rust)",
+    ].join("\n");
+    // Act — a width narrower than the branch text forces a wrap.
+    const host = document.createElement("div");
+    host.innerHTML = proseHtml(tree, 60);
+    // Assert — a tree rendered, and no rendered tree line exceeds the width.
+    const lines = [...host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")];
+    expect(host.querySelector(".mp-tree")).not.toBeNull();
+    expect(lines.length).toBeGreaterThan(2);
+    expect(lines.every((el) => visibleWidth(el.textContent ?? "") <= 60)).toBe(true);
   });
 
   it("re-wraps: a narrower width yields more lines than a wider one", () => {
