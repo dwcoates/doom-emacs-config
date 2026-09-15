@@ -25,6 +25,31 @@ func TestOpenExternalOpensAnAbsoluteUrl(t *testing.T) {
 	}
 }
 
+// TestOpenExternalRoutesTheChromeProfileByTheSessionAccount pins that a link
+// opens in the SAME Chrome window — personal or work — the session's account
+// signs in as: the verb reads the account in force and hands the browser the
+// profile it routes to.
+func TestOpenExternalRoutesTheChromeProfileByTheSessionAccount(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.account.email = "dodge@chess.com"
+	f.browser.profileByEmail = map[string]string{"dodge@chess.com": "Profile 6"}
+
+	// Act.
+	if err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x"); err != nil {
+		t.Fatalf("OpenExternal: %v", err)
+	}
+
+	// Assert.
+	if len(f.browser.askedEmails) != 1 || f.browser.askedEmails[0] != "dodge@chess.com" {
+		t.Fatalf("asked emails = %v, want the session's account", f.browser.askedEmails)
+	}
+	if len(f.browser.openedProfiles) != 1 || f.browser.openedProfiles[0] != "Profile 6" {
+		t.Fatalf("opened profiles = %v, want the work profile", f.browser.openedProfiles)
+	}
+}
+
 func TestOpenExternalRefusesARelativeUrl(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

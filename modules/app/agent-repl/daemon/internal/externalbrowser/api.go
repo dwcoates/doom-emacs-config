@@ -51,9 +51,19 @@ func DefaultLauncherConfiguredAt(path string) bool {
 
 // Opener opens links externally.
 type Opener interface {
-	// Open launches url in the pinned profile. A refused or malformed url is
-	// an error the caller surfaces; nothing is opened silently.
-	Open(ctx context.Context, url string) error
+	// Open launches url in the named Chrome profile directory (e.g.
+	// "Profile 6"). An empty profile takes the opener's pinned default. A
+	// refused or malformed url is an error the caller surfaces; nothing is
+	// opened silently.
+	Open(ctx context.Context, url, profile string) error
+	// ProfileForAccount resolves the Chrome profile directory the session's
+	// account signs in as, reading Chrome's own Local State. A blank email, an
+	// unreadable Local State, or no matching profile all FALL BACK to the
+	// pinned default, and every fall-through is logged loudly (WARN for a
+	// non-empty email that could not be matched) rather than swallowed. It
+	// never fails: a link the user clicked must open somewhere, and the pinned
+	// default is that somewhere.
+	ProfileForAccount(email string) string
 }
 
 // Config assembles an Opener.
@@ -64,8 +74,14 @@ type Config struct {
 	// either override is invoked as `<cmd> <url>` and nothing else.
 	LauncherCmd string
 	// Profile is the pinned browser profile directory, used only on the
-	// default path. Empty takes DefaultProfileDirectory.
+	// default path and as the FALLBACK when an account cannot be routed to a
+	// profile. Empty takes DefaultProfileDirectory.
 	Profile string
+	// LocalStatePath is Chrome's Local State document, read by
+	// ProfileForAccount to route an account email to its on-disk profile
+	// directory. Empty takes DefaultLocalStatePath; a path that cannot be read
+	// is the fallback case, logged and routed to the pinned default.
+	LocalStatePath string
 	// DefaultLauncherBin is the browser executable the DEFAULT path hands a
 	// url to. Empty takes DefaultBinary. It exists for the same reason
 	// LauncherCmd does — the launcher's spelling is injected rather than
