@@ -19,7 +19,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { FeedRow } from "../../frontend/v1/feed_pb";
+import type { FeedRow, FeedSelection } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { FeedWatchToken } from "./feed_token_pb";
 import { file_agentrepl_v1_feed_token } from "./feed_token_pb";
@@ -29,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4iNgoRV2F0Y2hGZWVkUmVzcG9uc2USIQoDcm93GAEgASgLMhQuZnJvbnRlbmQudjEuRmVlZFJvd0IqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_feed, file_agentrepl_v1_feed_token]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ieAoRV2F0Y2hGZWVkUmVzcG9uc2USIQoDcm93GAEgASgLMhQuZnJvbnRlbmQudjEuRmVlZFJvdxIyCglzZWxlY3Rpb24YAiABKAsyGi5mcm9udGVuZC52MS5GZWVkU2VsZWN0aW9uSACIAQFCDAoKX3NlbGVjdGlvbkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_feed, file_agentrepl_v1_feed_token]);
 
 /**
  * Opens the tail of the ONE feed the token names.
@@ -58,15 +58,34 @@ export const WatchFeedRequestSchema: GenMessage<WatchFeedRequest> = /*@__PURE__*
  * one already shown (a growing response's re-push, a settled tool card, a
  * task bubble another act touched). The client upserts by FeedRow.id.
  *
+ * A frame carries EITHER a row upsert (`row`) OR a response-selection push
+ * (`selection`), never both. The selection push is the daemon's per-workspace
+ * reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
+ * the ROOT feed's watch so the webapp recolors the selected final-response
+ * bubble, center-scrolls it, and suppresses tail-follow while a selection is
+ * active. Row upserts still travel with their own feedids (FeedRow.id), so a
+ * selection frame naming feedids of ROWS keeps the stream's "the connection
+ * is the placement" invariant intact — it names rows within this feed, not a
+ * second feed.
+ *
  * @generated from message agentrepl.v1.WatchFeedResponse
  */
 export type WatchFeedResponse = Message<"agentrepl.v1.WatchFeedResponse"> & {
   /**
-   * The upserted row, whole.
+   * The upserted row, whole. Set on a row-upsert frame; unset on a selection
+   * frame.
    *
    * @generated from field: frontend.v1.FeedRow row = 1;
    */
   row?: FeedRow | undefined;
+
+  /**
+   * The response-selection state, whole. Set on a selection frame; unset on a
+   * row-upsert frame. Pushed on the root feed's watch only.
+   *
+   * @generated from field: optional frontend.v1.FeedSelection selection = 2;
+   */
+  selection?: FeedSelection | undefined;
 };
 
 /**

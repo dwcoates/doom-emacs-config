@@ -87,10 +87,24 @@ func (x *WatchFeedRequest) GetWatch() *FeedWatchToken {
 // One feed row upsert, delivered live: a new row, or a whole replacement of
 // one already shown (a growing response's re-push, a settled tool card, a
 // task bubble another act touched). The client upserts by FeedRow.id.
+//
+// A frame carries EITHER a row upsert (`row`) OR a response-selection push
+// (`selection`), never both. The selection push is the daemon's per-workspace
+// reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
+// the ROOT feed's watch so the webapp recolors the selected final-response
+// bubble, center-scrolls it, and suppresses tail-follow while a selection is
+// active. Row upserts still travel with their own feedids (FeedRow.id), so a
+// selection frame naming feedids of ROWS keeps the stream's "the connection
+// is the placement" invariant intact — it names rows within this feed, not a
+// second feed.
 type WatchFeedResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The upserted row, whole.
-	Row           *v1.FeedRow `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
+	// The upserted row, whole. Set on a row-upsert frame; unset on a selection
+	// frame.
+	Row *v1.FeedRow `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
+	// The response-selection state, whole. Set on a selection frame; unset on a
+	// row-upsert frame. Pushed on the root feed's watch only.
+	Selection     *v1.FeedSelection `protobuf:"bytes,2,opt,name=selection,proto3,oneof" json:"selection,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -132,15 +146,25 @@ func (x *WatchFeedResponse) GetRow() *v1.FeedRow {
 	return nil
 }
 
+func (x *WatchFeedResponse) GetSelection() *v1.FeedSelection {
+	if x != nil {
+		return x.Selection
+	}
+	return nil
+}
+
 var File_agentrepl_v1_endpoint_watch_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\n" +
 	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
 	"\x10WatchFeedRequest\x122\n" +
-	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\";\n" +
+	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\x88\x01\n" +
 	"\x11WatchFeedResponse\x12&\n" +
-	"\x03row\x18\x01 \x01(\v2\x14.frontend.v1.FeedRowR\x03rowB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x03row\x18\x01 \x01(\v2\x14.frontend.v1.FeedRowR\x03row\x12=\n" +
+	"\tselection\x18\x02 \x01(\v2\x1a.frontend.v1.FeedSelectionH\x00R\tselection\x88\x01\x01B\f\n" +
+	"\n" +
+	"_selectionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_feed_proto_rawDescOnce sync.Once
@@ -160,15 +184,17 @@ var file_agentrepl_v1_endpoint_watch_feed_proto_goTypes = []any{
 	(*WatchFeedResponse)(nil), // 1: agentrepl.v1.WatchFeedResponse
 	(*FeedWatchToken)(nil),    // 2: agentrepl.v1.FeedWatchToken
 	(*v1.FeedRow)(nil),        // 3: frontend.v1.FeedRow
+	(*v1.FeedSelection)(nil),  // 4: frontend.v1.FeedSelection
 }
 var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
 	3, // 1: agentrepl.v1.WatchFeedResponse.row:type_name -> frontend.v1.FeedRow
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4, // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_feed_proto_init() }
@@ -177,6 +203,7 @@ func file_agentrepl_v1_endpoint_watch_feed_proto_init() {
 		return
 	}
 	file_agentrepl_v1_feed_token_proto_init()
+	file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
