@@ -368,10 +368,25 @@ export function proseHtml(markdown: string, cols: number): string {
 }
 
 /**
- * The live column limit the tree wraps to: the body's content-box width divided
- * by one monospace column, measured in the body's own font so the count is the
- * bubble's true width. A host that cannot lay out (a detached body, a test with
- * no layout engine) yields no measurement and falls back to the default width.
+ * The column limit the tree wraps to: the MAXIMUM content width the bubble may
+ * occupy divided by one monospace column, measured in the body's own font so the
+ * count is true to the bubble's widest allowed line. A host that cannot lay out
+ * (a detached body, a test with no layout engine) yields no measurement and
+ * falls back to the default width.
+ *
+ * REGRESSION WATCH (breadcrumb, per AGENTS.md): this once measured
+ * `body.clientWidth` — the body's CURRENT rendered content-box width. But the
+ * assistant bubble is `width: fit-content` under a max-width cap
+ * (`.bubble.assistant`, `--agent-bubble-cap * 0.85` in styles.css), so
+ * `fit-content` shrinks the bubble to its content and `clientWidth` measured the
+ * ALREADY-shrunk width — a chicken-and-egg where the tree wrapped to fit the
+ * narrow bubble, which kept the bubble narrow, so later trees wrapped
+ * prematurely (narrower than an earlier bubble whose lines would fit). The port
+ * that moved tree wrapping from the daemon (fixed max width) to the webapp lost
+ * the "wrap to the MAX bubble width, never prematurely" invariant. The fix
+ * measures against the resolved max-width cap, so `fit-content` sizes the bubble
+ * to the true longest line and the tree wraps only when a line exceeds the cap.
+ * This is a watch flag, not a lock.
  */
 export function measureTreeCols(body: HTMLElement): number {
   const doc = body.ownerDocument;
@@ -388,9 +403,63 @@ export function measureTreeCols(body: HTMLElement): number {
   probe.remove();
   const style = view.getComputedStyle(body);
   const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
-  const contentPx = body.clientWidth - pad;
+  const contentPx = maxBodyContentPx(body, view) ?? body.clientWidth - pad;
   if (!(charPx > 0) || !(contentPx > 0)) return DEFAULT_TREE_COLS;
   return Math.max(1, Math.floor(contentPx / charPx));
+}
+
+/**
+ * The body's content-box width WHEN THE BUBBLE IS AT ITS CAP — the width the
+ * tree must wrap to, not the fit-content width it currently renders at.
+ *
+ * The cap is the bubble's resolved `max-width` (CSS stays the single source of
+ * truth for the cap fraction; nothing here hardcodes it). `box-sizing:
+ * border-box` is global (styles.css), so the cap constrains the bubble's BORDER
+ * box, which is exactly `bubble.getBoundingClientRect().width`. The horizontal
+ * insets from that border box down to the body's content box (the bubble's
+ * border and padding, the scroll box's, and the body's padding) do NOT change
+ * with content width, so they can be read from the CURRENT geometry and
+ * subtracted from the cap: `capPx - (bubbleBorderBox - bodyContent)`.
+ *
+ * Returns `null` when there is no bubble ancestor, no resolvable cap, or no
+ * layout — the caller then falls back to the legacy clientWidth measure (which
+ * itself yields the DEFAULT_TREE_COLS fallback under a layout-less host).
+ */
+function maxBodyContentPx(body: HTMLElement, view: Window): number | null {
+  const bubble = body.closest<HTMLElement>(".bubble");
+  if (bubble === null) return null;
+  const capPx = resolveMaxWidthPx(bubble, view);
+  if (capPx === null) return null;
+  const style = view.getComputedStyle(body);
+  const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+  const bodyContent = body.clientWidth - pad;
+  const bubbleBorderBox = bubble.getBoundingClientRect().width;
+  if (!(bubbleBorderBox > 0)) return null;
+  const insets = bubbleBorderBox - bodyContent;
+  const contentPx = capPx - insets;
+  return contentPx > 0 ? contentPx : null;
+}
+
+/**
+ * The bubble's `max-width`, resolved to px. Per CSSOM the resolved value of
+ * `max-width` is the COMPUTED value (a percentage stays a percentage, a calc of
+ * one percentage serializes as `calc(N%)`), not the used px — so a percentage is
+ * resolved here against the bubble's containing block (its parent's content-box
+ * width). A browser that hands back px instead is honored directly. Anything
+ * else — `none`, an empty value, or a calc mixing units we cannot resolve with a
+ * single containing-block multiply — returns `null` so the caller falls back.
+ */
+function resolveMaxWidthPx(bubble: HTMLElement, view: Window): number | null {
+  const mw = view.getComputedStyle(bubble).maxWidth;
+  if (mw === "" || mw === "none") return null;
+  const px = /^(-?[\d.]+)px$/.exec(mw);
+  if (px !== null) return Number.parseFloat(px[1]);
+  const pct = /^(?:calc\()?\s*(-?[\d.]+)%\s*\)?$/.exec(mw);
+  if (pct !== null) {
+    const containing = bubble.parentElement?.clientWidth ?? 0;
+    if (containing > 0) return (Number.parseFloat(pct[1]) / 100) * containing;
+  }
+  return null;
 }
 
 /**
