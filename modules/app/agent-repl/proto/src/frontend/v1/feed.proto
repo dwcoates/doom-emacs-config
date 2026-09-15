@@ -77,6 +77,27 @@ message FeedId {
   string value = 1;
 }
 
+// THE RESPONSE-SELECTION STATE for one feed (reply-to-a-past-response mode).
+// The daemon owns it and pushes it on the feed watch so the webapp can render
+// it: recolor the selected final-response bubble (green → blue),
+// center-scroll it (clamped at the feed edges), and suppress tail-follow
+// while a selection is active so a newly arriving response does not yank the
+// viewport off the centered bubble. Cleared (double-escape) returns the
+// webapp to the feed bottom.
+message FeedSelection {
+  // The currently selected final-response row, or UNSET for "none" (no
+  // selection, or the selection was just cleared).
+  optional FeedId selected = 1;
+  // Whether response-selection mode is active. While true the webapp does not
+  // follow the tail and does not auto-scroll on new rows. False the moment
+  // the selection clears.
+  bool active = 2;
+  // Which row the webapp should CENTER in the viewport, clamped at the feed
+  // edges by the webapp when there is not room to center. UNSET when nothing
+  // is selected (the webapp returns to the bottom instead).
+  optional FeedId center = 3;
+}
+
 // One row of the feed. THE ARM IS THE KIND — see the file header for the
 // taxonomy.
 message FeedRow {
