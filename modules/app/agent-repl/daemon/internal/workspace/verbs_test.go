@@ -167,3 +167,26 @@ func TestARepublishLevelsACancelledRosterReadAtInfo(t *testing.T) {
 		})
 	}
 }
+
+func TestRepublishRegistryLogsItsCompletionAtInfo(t *testing.T) {
+	// Arrange: a verb whose only roster publish is republishRegistry's success.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert: a roster republish is a production-visible mutation, so its
+	// completion stands at info rather than debug.
+	var level string
+	for _, r := range f.log.logger.Records() {
+		if r.Message == "republished the roster registry" {
+			level = r.Level
+		}
+	}
+	if level != "info" {
+		t.Fatalf("the roster republish completion is %q, want info", level)
+	}
+}
