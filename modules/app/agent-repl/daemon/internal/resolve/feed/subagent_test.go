@@ -422,16 +422,60 @@ func TestAMonitorDrawsNoFeedRow(t *testing.T) {
 
 // ---- THE DETACHED SHELL BUBBLE ----
 
-// shellRow finds the detached shell bubble on the root feed.
-func (h *harness) shellRow() *frontendv1.FeedShell {
+// shellHead finds the detached shell's HEAD bubble — the command, clock and
+// stop, carried on whichever parent feed it landed on (shell_head arm). It is
+// the canonical bubble; there is no top-level detached-shell row any more.
+func (h *harness) shellHead() *frontendv1.FeedShell {
 	h.t.Helper()
-	for _, row := range h.rows(rootFeed()) {
-		if detached := row.GetDetachedShell(); detached != nil {
-			return detached.GetShell()
+	for _, row := range h.everyRow() {
+		if head := row.GetShellHead(); head != nil {
+			return head
 		}
 	}
-	h.t.Fatal("no detached shell bubble on the root feed")
+	h.t.Fatal("no detached shell HEAD bubble on any feed")
 	return nil
+}
+
+// shellBody finds the detached shell's spool BODY row on the shell's sub-feed
+// (detached_shell arm). It is present only once there is output; a body with no
+// output is drawn nowhere, which is what onlyShellBody exists to assert.
+func (h *harness) shellBody(work string) *frontendv1.FeedShell {
+	h.t.Helper()
+	for _, row := range h.rows(shellSubFeed(work)) {
+		if body := row.GetDetachedShell(); body != nil {
+			return body.GetShell()
+		}
+	}
+	h.t.Fatalf("no detached shell BODY row on the sub-feed for %q", work)
+	return nil
+}
+
+// hasShellBody reports whether the shell's spool BODY row exists on its
+// sub-feed — false before any output.
+func (h *harness) hasShellBody(work string) bool {
+	h.t.Helper()
+	for _, row := range h.rows(shellSubFeed(work)) {
+		if row.GetDetachedShell() != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// everyRow returns every row across every feed the workspace holds, for
+// assertions that a row does — or does not — appear anywhere.
+func (h *harness) everyRow() []*frontendv1.FeedRow {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	defer h.resolver.mu.Unlock()
+	s := h.resolver.state(testWorkspace)
+	var out []*frontendv1.FeedRow
+	for _, f := range s.feeds {
+		for _, id := range f.order {
+			out = append(out, f.rows[id])
+		}
+	}
+	return out
 }
 
 // bash sends one frame on a detached shell's own stream.
@@ -462,7 +506,7 @@ func TestADetachedShellDrawsItsCommandAndItsClock(t *testing.T) {
 	})
 
 	// Assert: the "$" chrome is the client's, so the text is the command.
-	shell := h.shellRow()
+	shell := h.shellHead()
 	if shell.GetCommand().GetText() != "npm run dev" {
 		t.Fatalf("command = %q", shell.GetCommand().GetText())
 	}
@@ -471,6 +515,70 @@ func TestADetachedShellDrawsItsCommandAndItsClock(t *testing.T) {
 	}
 	if shell.GetLive() == nil {
 		t.Fatalf("state = %T, want live", shell.GetState())
+	}
+}
+
+// TestABornDetachedShellMintsItsOwnCanonicalBubble pins the born-detached case:
+// a shell with no spawning tool-call (the Created/OnBash path) mints its OWN
+// canonical bubble — a HEAD on the parent feed, the spool as the BODY on the
+// shell's own sub-feed — and NO top-level detached-shell row anywhere.
+func TestABornDetachedShellMintsItsOwnCanonicalBubble(t *testing.T) {
+	// Arrange, Act: a born-detached run with output.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Assert: exactly ONE head bubble on the root feed, and NO top-level
+	// detached-shell (spool body) row beside it.
+	var heads, topLevelBodies int
+	var headRow *frontendv1.FeedRow
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetShellHead() != nil {
+			heads++
+			headRow = row
+		}
+		if row.GetDetachedShell() != nil {
+			topLevelBodies++
+		}
+	}
+	if heads != 1 {
+		t.Fatalf("head bubbles on root = %d, want exactly 1", heads)
+	}
+	if topLevelBodies != 0 {
+		t.Fatalf("top-level detached-shell rows on root = %d, want none", topLevelBodies)
+	}
+
+	// The head carries the command and clock; the spool is the BODY on the
+	// shell's own sub-feed.
+	if got := headRow.GetShellHead().GetCommand().GetText(); got != "npm run dev" {
+		t.Fatalf("head command = %q, want the command on the head", got)
+	}
+	if headRow.GetShellHead().GetSpool() != nil {
+		t.Fatalf("the head carries a spool, want it spool-less (spool is the body)")
+	}
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
+		t.Fatalf("body spool = %q, want the output on the sub-feed body", got)
+	}
+
+	// The head is a KindShellHead row keyed by the work id — the row kind whose
+	// FeedId feedid.DecodeFeed resolves to the shell's own sub-feed (proven in
+	// feedid's TestDecodeFeedDerivesShellSubFeedFromShellHead). The bubble's
+	// body rides that sub-feed, whose OWN key the head is minted against.
+	wantHeadID := testEncode(feedid.Ref{
+		WS:   testWorkspace,
+		Feed: rootFeed(),
+		Row:  feedid.RowKey{Kind: feedid.KindShellHead, ID: "work-1"},
+	}).GetValue()
+	if got := headRow.GetId().GetValue(); got != wantHeadID {
+		t.Fatalf("head id = %q, want the KindShellHead row keyed by the work id %q", got, wantHeadID)
+	}
+	// The head's sub-feed was minted (its body, asserted above, rides it), so an
+	// expand's OpenFeed resolves.
+	if !h.hasRecord("debug", "daemon.feed.sub_feed") {
+		t.Fatalf("records = %+v, want the shell bubble's sub-feed recorded", h.records())
 	}
 }
 
@@ -485,7 +593,7 @@ func TestAShellSeenFirstWithoutAStartCountsFromWhenItWasObserved(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
 
 	// Assert: the runtime is stamped with the observed instant, not zero.
-	if got := h.shellRow().GetRuntime().GetStartedAtMs(); got != h.nowMs {
+	if got := h.shellHead().GetRuntime().GetStartedAtMs(); got != h.nowMs {
 		t.Fatalf("started_at = %d, want the first-observed instant %d (never the epoch)", got, h.nowMs)
 	}
 }
@@ -505,7 +613,7 @@ func TestAnAuthoritativeStartReplacesTheObservedFallback(t *testing.T) {
 	})
 
 	// Assert: the authoritative start wins over the fallback.
-	if got := h.shellRow().GetRuntime().GetStartedAtMs(); got != 1_000 {
+	if got := h.shellHead().GetRuntime().GetStartedAtMs(); got != 1_000 {
 		t.Fatalf("started_at = %d, want the authoritative start 1000", got)
 	}
 }
@@ -517,14 +625,14 @@ func TestTheObservedFallbackIsStampedOnce(t *testing.T) {
 	// Arrange: an update-first shell was first observed at the initial clock.
 	h := newHarness(t)
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
-	first := h.shellRow().GetRuntime().GetStartedAtMs()
+	first := h.shellHead().GetRuntime().GetStartedAtMs()
 
 	// Act: time moves and another update lands, still with no authoritative start.
 	h.nowMs += 5_000
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 10})
 
 	// Assert: the observed instant did not creep with the clock.
-	if got := h.shellRow().GetRuntime().GetStartedAtMs(); got != first {
+	if got := h.shellHead().GetRuntime().GetStartedAtMs(); got != first {
 		t.Fatalf("started_at = %d, want the once-stamped instant %d", got, first)
 	}
 }
@@ -538,8 +646,8 @@ func TestASpoolWithNoOutputYetIsUnsetRatherThanEmpty(t *testing.T) {
 	})
 
 	// Assert: present from the FIRST output, and not before.
-	if h.shellRow().GetSpool() != nil {
-		t.Fatalf("spool = %+v, want unset before any output", h.shellRow().GetSpool())
+	if h.hasShellBody("work-1") {
+		t.Fatalf("a spool body row exists, want none before any output")
 	}
 }
 
@@ -556,12 +664,11 @@ func TestSpoolUpdatesAccumulateAndStampTheBeat(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 10})
 
 	// Assert: spool growth IS the beat.
-	shell := h.shellRow()
-	if shell.GetSpool().GetText() != "compiling\nready\n" {
-		t.Fatalf("spool = %q", shell.GetSpool().GetText())
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\nready\n" {
+		t.Fatalf("spool = %q", got)
 	}
-	if shell.GetLive().GetLastProgress().GetAtMs() != h.nowMs {
-		t.Fatalf("last_progress = %d, want the observed append", shell.GetLive().GetLastProgress().GetAtMs())
+	if got := h.shellHead().GetLive().GetLastProgress().GetAtMs(); got != h.nowMs {
+		t.Fatalf("last_progress = %d, want the observed append", got)
 	}
 }
 
@@ -578,7 +685,7 @@ func TestASpoolGapIsRefusedRatherThanConcatenatedAcross(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 999})
 
 	// Assert: output that never existed is never drawn.
-	if got := h.shellRow().GetSpool().GetText(); got != "compiling\n" {
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
 		t.Fatalf("spool = %q, want the frame refused", got)
 	}
 	if !h.hasRecord("error", "daemon.feed.spool_gap") {
@@ -601,7 +708,7 @@ func TestACappedSpoolKeepsItsTailAndSaysWhatItDropped(t *testing.T) {
 	}
 
 	// Act.
-	spool := h.shellRow().GetSpool()
+	spool := h.shellBody("work-1").GetSpool()
 
 	// Assert: the TAIL, cut on a line boundary, with the drop stated.
 	if len(spool.GetText()) > spoolCap {
@@ -625,8 +732,8 @@ func TestAnUncappedSpoolStatesNoTruncation(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "hi\n", FromOffset: 0})
 
 	// Assert.
-	if h.shellRow().GetSpool().GetOmitted() != nil {
-		t.Fatalf("omitted = %+v, want unset", h.shellRow().GetSpool().GetOmitted())
+	if h.shellBody("work-1").GetSpool().GetOmitted() != nil {
+		t.Fatalf("omitted = %+v, want unset", h.shellBody("work-1").GetSpool().GetOmitted())
 	}
 }
 
@@ -652,7 +759,7 @@ func TestASettledShellCarriesItsExitChip(t *testing.T) {
 
 	// Assert: a non-zero exit still COMPLETED; the tone is the client's reading
 	// of the code.
-	settled := h.shellRow().GetSettled()
+	settled := h.shellHead().GetSettled()
 	if settled.GetCompleted() == nil {
 		t.Fatalf("outcome = %T, want completed", settled.GetOutcome())
 	}
@@ -680,8 +787,8 @@ func TestAShellKilledBySignalCarriesNoExitChip(t *testing.T) {
 	})
 
 	// Assert: absence draws no chip, never a zero.
-	if h.shellRow().GetSettled().GetExit() != nil {
-		t.Fatalf("exit = %+v, want unset", h.shellRow().GetSettled().GetExit())
+	if h.shellHead().GetSettled().GetExit() != nil {
+		t.Fatalf("exit = %+v, want unset", h.shellHead().GetSettled().GetExit())
 	}
 }
 
@@ -696,8 +803,8 @@ func TestAForegroundShellsMissingTerminationCarriesNoExitChip(t *testing.T) {
 	})
 
 	// Assert.
-	if h.shellRow().GetSettled().GetExit() != nil {
-		t.Fatalf("exit = %+v, want unset", h.shellRow().GetSettled().GetExit())
+	if h.shellHead().GetSettled().GetExit() != nil {
+		t.Fatalf("exit = %+v, want unset", h.shellHead().GetSettled().GetExit())
 	}
 }
 
@@ -724,8 +831,8 @@ func TestACompletedShellWithNoObservedOutputLeavesItsSpoolUnset(t *testing.T) {
 
 	// Assert: UNSET, never an empty spool — an empty spool would draw as a
 	// command that printed nothing.
-	if spool := h.shellRow().GetSpool(); spool != nil {
-		t.Fatalf("spool = %+v, want unset for unobserved output", spool)
+	if h.hasShellBody("work-1") {
+		t.Fatalf("a spool body row exists, want none for unobserved output")
 	}
 }
 
@@ -750,8 +857,8 @@ func TestACompletedShellWithNoObservedOutputStillSettlesAsCompleted(t *testing.T
 	})
 
 	// Assert.
-	if h.shellRow().GetSettled().GetCompleted() == nil {
-		t.Fatalf("outcome = %T, want completed", h.shellRow().GetSettled().GetOutcome())
+	if h.shellHead().GetSettled().GetCompleted() == nil {
+		t.Fatalf("outcome = %T, want completed", h.shellHead().GetSettled().GetOutcome())
 	}
 }
 
@@ -773,8 +880,8 @@ func TestAnInterruptedShellWithNoObservedOutputLeavesItsSpoolUnset(t *testing.T)
 	})
 
 	// Assert.
-	if spool := h.shellRow().GetSpool(); spool != nil {
-		t.Fatalf("spool = %+v, want unset for unobserved output", spool)
+	if h.hasShellBody("work-1") {
+		t.Fatalf("a spool body row exists, want none for unobserved output")
 	}
 }
 
@@ -799,8 +906,8 @@ func TestAnInterruptedShellWithNoObservedOutputSettlesAsTheRecordStatesIt(t *tes
 	})
 
 	// Assert.
-	if h.shellRow().GetSettled().GetLost() == nil {
-		t.Fatalf("outcome = %T, want lost", h.shellRow().GetSettled().GetOutcome())
+	if h.shellHead().GetSettled().GetLost() == nil {
+		t.Fatalf("outcome = %T, want lost", h.shellHead().GetSettled().GetOutcome())
 	}
 }
 
@@ -829,7 +936,7 @@ func TestOutputObservedBeforeAnUnobservedSettleIsStillDrawn(t *testing.T) {
 	})
 
 	// Assert: what WAS observed is never discarded by a later "not observed".
-	if got := h.shellRow().GetSpool().GetText(); got != "compiling\n" {
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
 		t.Fatalf("spool = %q, want the observed output kept", got)
 	}
 }
@@ -850,7 +957,7 @@ func TestAShellWeStoppedSeeingIsLostAndNotCancelled(t *testing.T) {
 	})
 
 	// Assert: not known to have failed, and never drawn as a cancel.
-	settled := h.shellRow().GetSettled()
+	settled := h.shellHead().GetSettled()
 	if settled.GetLost() == nil {
 		t.Fatalf("outcome = %T, want lost", settled.GetOutcome())
 	}
@@ -870,8 +977,8 @@ func TestAShellStoppedByHandIsCancelled(t *testing.T) {
 	})
 
 	// Assert.
-	if h.shellRow().GetSettled().GetCancelled() == nil {
-		t.Fatalf("outcome = %T, want cancelled", h.shellRow().GetSettled().GetOutcome())
+	if h.shellHead().GetSettled().GetCancelled() == nil {
+		t.Fatalf("outcome = %T, want cancelled", h.shellHead().GetSettled().GetOutcome())
 	}
 }
 
@@ -897,7 +1004,7 @@ func TestAForegroundShellThatDetachesKeepsItsCommandAndClock(t *testing.T) {
 	}, noAddress())
 
 	// Assert: the ORIGINAL instant, so the drawn clock does not reset.
-	shell := h.shellRow()
+	shell := h.shellHead()
 	if shell.GetCommand().GetText() != "npm run dev" {
 		t.Fatalf("command = %q, want the command carried across the move", shell.GetCommand().GetText())
 	}
@@ -919,7 +1026,7 @@ func TestADetachedShellsFailureSettlesTheBubble(t *testing.T) {
 	})
 
 	// Assert.
-	settled := h.shellRow().GetSettled()
+	settled := h.shellHead().GetSettled()
 	if settled == nil || settled.GetEndedAtMs() != 9_000 {
 		t.Fatalf("settled = %+v, want the bubble concluded", settled)
 	}
@@ -973,8 +1080,8 @@ func TestAReannouncedDetachmentDoesNotUnsettleASettledShell(t *testing.T) {
 	}, noAddress())
 
 	// Assert.
-	if h.shellRow().GetSettled() == nil {
-		t.Fatalf("state = %T, want the bubble still settled after a replayed announcement", h.shellRow().GetState())
+	if h.shellHead().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled after a replayed announcement", h.shellHead().GetState())
 	}
 }
 
@@ -988,8 +1095,8 @@ func TestASpoolReplayDoesNotUnsettleASettledShell(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{FromOffset: 0, NewOutput: "line-1\n"})
 
 	// Assert
-	if h.shellRow().GetSettled() == nil {
-		t.Fatalf("state = %T, want the bubble still settled after a spool replay", h.shellRow().GetState())
+	if h.shellHead().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled after a spool replay", h.shellHead().GetState())
 	}
 }
 
@@ -1003,8 +1110,8 @@ func TestABeatAfterTheEndDoesNotUnsettleASettledShell(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentToolCallProgress{LastProgressAtMs: 12_000})
 
 	// Assert
-	if h.shellRow().GetSettled() == nil {
-		t.Fatalf("state = %T, want the bubble still settled after a beat", h.shellRow().GetState())
+	if h.shellHead().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled after a beat", h.shellHead().GetState())
 	}
 }
 
@@ -1018,11 +1125,10 @@ func TestASettledShellKeepsTheEXITBytesAReplayDelivers(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{FromOffset: 7, NewOutput: "EXIT=0\n"})
 
 	// Assert
-	shell := h.shellRow()
-	if shell.GetSettled() == nil {
-		t.Fatalf("state = %T, want the bubble still settled", shell.GetState())
+	if h.shellHead().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled", h.shellHead().GetState())
 	}
-	if got := shell.GetSpool().GetText(); got != "line-1\nEXIT=0\n" {
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "line-1\nEXIT=0\n" {
 		t.Fatalf("spool = %q, want the appended bytes on a settled row", got)
 	}
 }
@@ -1284,7 +1390,7 @@ func TestATerminalRestatementNeverRedefinesTheCommand(t *testing.T) {
 			})
 
 			// Assert.
-			shell := h.shellRow()
+			shell := h.shellHead()
 			if got := shell.GetCommand().GetText(); got != tt.want {
 				t.Fatalf("settled command = %q, want %q", got, tt.want)
 			}
@@ -1323,7 +1429,7 @@ func TestADetachedForegroundShellsTerminalKeepsTheCallsOwnCommand(t *testing.T) 
 	})
 
 	// Assert.
-	shell := h.shellRow()
+	shell := h.shellHead()
 	if got := shell.GetCommand().GetText(); got != "for i in 1 2 3; do echo line-$i; done" {
 		t.Fatalf("settled command = %q, want the command the call itself stated", got)
 	}
@@ -1538,7 +1644,7 @@ func TestARedeliveredSpoolPrefixIsAReplayRatherThanAGap(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\nready\n", FromOffset: 0})
 
 	// Assert: the overlap is dropped, the new tail lands, and nothing errors.
-	if got := h.shellRow().GetSpool().GetText(); got != "compiling\nready\n" {
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\nready\n" {
 		t.Fatalf("spool = %q, want the replayed prefix folded rather than doubled", got)
 	}
 	if h.hasRecord("error", "daemon.feed.spool_gap") {
@@ -1559,7 +1665,7 @@ func TestASpoolFrameThatRestatesHeldBytesDifferentlyIsRefused(t *testing.T) {
 	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "COMPILING\nready\n", FromOffset: 0})
 
 	// Assert: a disagreement is real loss, so the frame is refused loudly.
-	if got := h.shellRow().GetSpool().GetText(); got != "compiling\n" {
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
 		t.Fatalf("spool = %q, want the frame refused", got)
 	}
 	if !h.hasRecord("error", "daemon.feed.spool_gap") {
@@ -1969,7 +2075,7 @@ func TestABeatCarryingAnOlderProducerInstantDoesNotWindTheShellsAgeBackwards(t *
 	// Assert: the drawn instant is still the daemon's own append stamp. The
 	// beat reports no growth, so it has nothing to say about the last growth,
 	// and the client's "quiet for N" never runs backwards.
-	shell := h.shellRow()
+	shell := h.shellHead()
 	if got := shell.GetLive().GetLastProgress().GetAtMs(); got != appended {
 		t.Fatalf("last_progress = %d, want the daemon's own append stamp %d", got, appended)
 	}
@@ -1989,7 +2095,7 @@ func TestABeatBeforeAnyOutputLeavesTheShellsLastProgressUnset(t *testing.T) {
 	// Assert: UNSET, because the field is "the last output the daemon
 	// observed" and no output has been observed. A beat must not manufacture
 	// one out of a producer's stamp for a different fact.
-	if h.shellRow().GetLive().GetLastProgress() != nil {
-		t.Fatalf("last_progress = %v, want unset before the first byte", h.shellRow().GetLive().GetLastProgress())
+	if h.shellHead().GetLive().GetLastProgress() != nil {
+		t.Fatalf("last_progress = %v, want unset before the first byte", h.shellHead().GetLive().GetLastProgress())
 	}
 }

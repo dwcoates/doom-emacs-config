@@ -35,6 +35,7 @@ import {
   type FeedId,
   type FeedMerge,
   type FeedRow,
+  type FeedShell,
   type FeedSubagent,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AppContext } from "../rpc/context.js";
@@ -235,6 +236,9 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   function bubbleHead(current: FeedRow, context: RowContext): HTMLElement {
     if (current.row.case === "detachedSubagent") {
       return drawFeedDetachedSubagent(detachedSubagentOf(current), context);
+    }
+    if (current.row.case === "shellHead") {
+      return deps.renderers.shellHead(shellHeadOf(current), context);
     }
     if (unitCase(current) === "merge") {
       return deps.renderers.mergeHead(mergeOf(current), context);
@@ -459,4 +463,12 @@ function mergeOf(row: FeedRow): FeedMerge {
     throw new MalformedView("FeedTurnActivity.unit", "the row is not a merge bubble");
   }
   return row.row.value.unit.value;
+}
+
+/** The shell head on a row the caller has established is one. */
+function shellHeadOf(row: FeedRow): FeedShell {
+  if (row.row.case !== "shellHead") {
+    throw new MalformedView("FeedRow.row", "the row is not a shell head bubble");
+  }
+  return row.row.value;
 }

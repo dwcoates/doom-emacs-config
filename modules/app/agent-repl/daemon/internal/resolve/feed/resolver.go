@@ -492,6 +492,8 @@ func (r *resolver) feedKey(ws ids.WorkspaceID, addr feedid.Feed) string {
 		return "merge:" + string(*addr.Merge)
 	case addr.Agent != nil:
 		return "agent:" + addr.Agent.GetValue()
+	case addr.Shell != nil:
+		return "shell:" + string(*addr.Shell)
 	default:
 		return "root"
 	}

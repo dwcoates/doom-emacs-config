@@ -1098,16 +1098,11 @@ func TestATextOutputShellDrawsNoExitChipWhenNoneWasStated(t *testing.T) {
 // ---- BASH, WHOSE WORK MOVED TO THE BACKGROUND ----
 //
 // A BACKGROUNDED COMMAND DID NOT END, IT MOVED, and the card is not where it
-// finishes. The detached shell row published beneath it is the record of the
-// run and the only row that settles; the card owes the reader the fact that the
-// work left. Without the arm it kept the `running` it drew with forever, above a
-// row already reporting `exit 0` (observed 2026-09-09).
-
-// movedCard is a foreground shell whose work then left for the background.
-func movedCard(h *harness, unit string) *frontendv1.FeedSimpleToolCall {
-	h.t.Helper()
-	return h.activityRow(unit).GetActivity().GetSimpleToolCall()
-}
+// finishes. Ruled 2026-09-14: the detached shell is ALWAYS a canonical bubble
+// and there is NO top-level shell row, so a foreground→detached transition
+// RETIRES the running tool card and redraws the shell HEAD bubble
+// (KindShellHead) in its place. The run reports on the head from then on, and
+// every later frame of the retired unit draws nothing.
 
 // startForegroundBash draws the running card a detachment later moves.
 func startForegroundBash(h *harness, unit, line string) {
@@ -1120,22 +1115,29 @@ func startForegroundBash(h *harness, unit, line string) {
 	}))
 }
 
-func TestACommandWhoseWorkMovedToTheBackgroundDrawsTheMovedArm(t *testing.T) {
+func TestACommandWhoseWorkMovedToTheBackgroundRetiresTheRunningCard(t *testing.T) {
 	// Arrange: a foreground shell, drawn running.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "sleep 600")
+	if !h.hasActivityRow("unit-1") {
+		t.Fatalf("no running card before the move, want one")
+	}
 
 	// Act: the work leaves for the background.
 	h.detachWork("unit-1", "unit-1")
 
-	// Assert.
-	if movedCard(h, "unit-1").GetMoved() == nil {
-		t.Fatalf("outcome = %T, want the moved arm", movedCard(h, "unit-1").GetOutcome())
+	// Assert: the running card is gone and the shell HEAD bubble stands in its
+	// place, carrying the command.
+	if h.hasActivityRow("unit-1") {
+		t.Fatalf("the running card survives the move, want it retired")
+	}
+	if got := h.shellHead().GetCommand().GetText(); got != "sleep 600" {
+		t.Fatalf("head command = %q, want the command carried onto the bubble", got)
 	}
 }
 
-func TestTheDetachedRunsOwnSettleLeavesTheMovedCardAlone(t *testing.T) {
-	// Arrange: the work moved, and the detached shell row is now where it
+func TestTheDetachedRunsOwnSettleSettlesTheHeadNotAMovedCard(t *testing.T) {
+	// Arrange: the work moved, and the detached shell bubble is now where it
 	// reports.
 	h := newHarness(t)
 	startForegroundBash(h, "unit-1", "sleep 600")
@@ -1153,10 +1155,13 @@ func TestTheDetachedRunsOwnSettleLeavesTheMovedCardAlone(t *testing.T) {
 		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
 	})
 
-	// Assert: the ending belongs to the shell row, and the card still says the
-	// work moved rather than borrowing a verdict that is not its own.
-	if movedCard(h, "unit-1").GetMoved() == nil {
-		t.Fatalf("outcome = %T, want the card still on the moved arm", movedCard(h, "unit-1").GetOutcome())
+	// Assert: the ending settles the shell HEAD bubble, and no stale card
+	// reappears beside it.
+	if h.shellHead().GetSettled() == nil {
+		t.Fatalf("state = %T, want the head bubble settled by the run's terminal", h.shellHead().GetState())
+	}
+	if h.hasActivityRow("unit-1") {
+		t.Fatalf("a tool card reappeared beside the bubble, want none")
 	}
 }
 
@@ -1186,7 +1191,7 @@ func TestAForegroundCommandThatEndedWhereItRanStillDrawsReturned(t *testing.T) {
 	}
 }
 
-func TestAReplayedUnitFrameKeepsAMovedCardMoved(t *testing.T) {
+func TestAReplayedUnitFrameAfterTheMoveDrawsNoCard(t *testing.T) {
 	// Arrange: the work moved. The producers go on restating this unit's own
 	// frames afterwards -- the vendor's receipt for the launch, replayed by the
 	// other plane -- and none of them says the work left.
@@ -1202,8 +1207,8 @@ func TestAReplayedUnitFrameKeepsAMovedCardMoved(t *testing.T) {
 		}},
 	}))
 
-	// Assert
-	if movedCard(h, "unit-1").GetMoved() == nil {
-		t.Fatalf("outcome = %T, want the card still on the moved arm after a replay", movedCard(h, "unit-1").GetOutcome())
+	// Assert: a moved unit draws nothing, so the retired card never returns.
+	if h.hasActivityRow("unit-1") {
+		t.Fatalf("a replayed unit frame redrew a tool card, want none after the move")
 	}
 }

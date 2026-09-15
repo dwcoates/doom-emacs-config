@@ -366,6 +366,7 @@ const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
   "plan",
   "findings",
   "shell",
+  "shellHead",
   "permission",
   "question",
   "coldGate",

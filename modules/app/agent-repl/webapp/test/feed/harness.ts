@@ -549,6 +549,7 @@ export function stubRenderers(overrides: Partial<RowRenderers> = {}): RowRendere
     plan: stub("plan"),
     findings: stub("findings"),
     shell: stub("shell"),
+    shellHead: stub("shellHead"),
     permission: stub("permission"),
     question: stub("question"),
     coldGate: stub("coldGate"),

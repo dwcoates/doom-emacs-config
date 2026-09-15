@@ -204,7 +204,7 @@ func TestInterruptDetachedShellStopsTheShell(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedShell, ID: "work-3"}}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: "work-3"}}
 
 	// Act.
 	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
@@ -364,7 +364,7 @@ func TestInterruptDetachedShellAnswersNothingRunningWhenAlreadyEnded(t *testing.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimAlreadyEnded}
-	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedShell, ID: "work-3"}}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: "work-3"}}
 
 	// Act.
 	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
@@ -383,7 +383,7 @@ func TestInterruptDetachedShellPropagatesUnknownWork(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork}
-	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedShell, ID: "work-3"}}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: "work-3"}}
 
 	// Act.
 	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
