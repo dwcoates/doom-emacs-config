@@ -170,6 +170,9 @@ type Client interface {
 	DetachForeground(ctx context.Context, req *shimv1.DetachForegroundRequest) (*shimv1.DetachForegroundResponse, error)
 	// ReadHistory pages an agent's history without opening a watch.
 	ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error)
+	// GatherTitleDigest reads the transcript for the material the daemon
+	// synthesizes a workspace title from when the vendor wrote no ai-title.
+	GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error)
 
 	// Occupy takes the in-memory occupancy guard that backs WSM's lease row,
 	// returning the release function. It refuses while another holder has it.

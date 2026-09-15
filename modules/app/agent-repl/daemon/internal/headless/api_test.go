@@ -1,6 +1,7 @@
 package headless
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -70,6 +71,26 @@ func TestBinSourceNamesWhereTheBinaryCameFrom(t *testing.T) {
 				t.Fatalf("BinSource(%q) = %q, want %q", tt.configured, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCauseOfReadsAHeadlessError(t *testing.T) {
+	// Arrange.
+	err := &Error{Cause: CauseGuardRefused, Detail: "forbidden"}
+
+	// Act, Assert.
+	if got := CauseOf(err); got != CauseGuardRefused {
+		t.Fatalf("CauseOf(*Error) = %q, want %q", got, CauseGuardRefused)
+	}
+}
+
+func TestCauseOfReportsExitStatusForANonHeadlessError(t *testing.T) {
+	// Arrange.
+	err := errors.New("some other failure")
+
+	// Act, Assert — never an empty cause, so the arm always names something.
+	if got := CauseOf(err); got != CauseExitStatus {
+		t.Fatalf("CauseOf(plain) = %q, want %q", got, CauseExitStatus)
 	}
 }
 

@@ -144,6 +144,14 @@ type wsState struct {
 	// the fallback rather than a second title.
 	sessionTitle string
 
+	// synthesizedTitle is the daemon's OWN one-line summary of this
+	// conversation, produced by a cheap headless call over the title digest
+	// when the vendor has written no ai-title. It is the MIDDLE precedence in
+	// title(): the vendor's own summary always wins over it, and it always
+	// wins over the workspace name. Empty until the synthesizer has produced
+	// one; its sole writer is SetSynthesizedTitle.
+	synthesizedTitle string
+
 	// permissionMode is the mode in force, as the session facts spell it.
 	permissionMode string
 	// picker is exactly the switchable set the daemon will accept.

@@ -24,6 +24,7 @@ const (
 	RPCStopBash                 = "StopBash"
 	RPCDetachForeground         = "DetachForeground"
 	RPCReadHistory              = "ReadHistory"
+	RPCGatherTitleDigest        = "GatherTitleDigest"
 )
 
 // newResponse mints the empty response message for one verb, so `answer`
@@ -52,6 +53,8 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.DetachForegroundResponse{}
 	case RPCReadHistory:
 		return &shimv1.ReadHistoryResponse{}
+	case RPCGatherTitleDigest:
+		return &shimv1.GatherTitleDigestResponse{}
 	default:
 		return nil
 	}

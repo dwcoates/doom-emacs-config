@@ -650,6 +650,13 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"topbar.OnSessionUpdate"},
 		},
 		{
+			// The vendor's ai-title was previously UNROUTED and fell to the
+			// default WARN, so the topbar never drew it. It is the topbar's.
+			name:   "the vendor's title is the topbar's",
+			update: titleUpdate(),
+			want:   []string{"topbar.OnSessionUpdate"},
+		},
+		{
 			name:   "a model change is the topbar's and the roster's",
 			update: modelChangedUpdate(),
 			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},

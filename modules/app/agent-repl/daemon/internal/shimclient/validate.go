@@ -398,6 +398,17 @@ func validateDetachForegroundRequest(req *shimv1.DetachForegroundRequest) error 
 	return nil
 }
 
+// validateGatherTitleDigestRequest is GatherTitleDigestRequest's base function.
+// The message carries no fields (the shim resolves its own transcript), so the
+// only illegal shape is a nil request.
+func validateGatherTitleDigestRequest(req *shimv1.GatherTitleDigestRequest) error {
+	const m = "GatherTitleDigestRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	return nil
+}
+
 // validateReadHistoryRequest is ReadHistoryRequest's base function.
 func validateReadHistoryRequest(req *shimv1.ReadHistoryRequest) error {
 	const m = "ReadHistoryRequest"

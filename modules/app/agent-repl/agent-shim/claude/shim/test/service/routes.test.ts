@@ -94,6 +94,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("readHistory")(request);
       return create(shimv1.ReadHistoryResponseSchema, {});
     },
+    async gatherTitleDigest(request) {
+      record("gatherTitleDigest")(request);
+      return create(shimv1.GatherTitleDigestResponseSchema, {});
+    },
     async standDown() {
       record("standDown")(undefined);
       return 0;
@@ -129,6 +133,7 @@ describe("shimRoutes unary delegation", () => {
     ["stopBash", requests.stopBashRequest],
     ["detachForeground", requests.detachForegroundRequest],
     ["readHistory", requests.readHistoryRequest],
+    ["gatherTitleDigest", requests.gatherTitleDigestRequest],
   ] as const)("routes %s to its own engine method", async (verb, build) => {
     // Arrange.
     const { engine, calls } = recordingEngine();

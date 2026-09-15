@@ -47,11 +47,25 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 	case *conversationv1.SessionUpdate_ContextUsage,
 		*conversationv1.SessionUpdate_FastMode,
 		*conversationv1.SessionUpdate_McpServer,
-		*conversationv1.SessionUpdate_IdentityRotated:
+		*conversationv1.SessionUpdate_IdentityRotated,
+		*conversationv1.SessionUpdate_Title:
+		// THE VENDOR'S ai-title RIDES HERE. It was previously unrouted and fell
+		// to the default WARN, so the topbar never drew the vendor's own
+		// conversation summary in place of the workspace name (owner ruling,
+		// 2026-09-13). The topbar resolver already handles the `title` arm; the
+		// gap was only that this route never delivered it. It ALSO drives the
+		// title synthesizer's vendor-present skip: once the vendor states a
+		// title, the daemon stops synthesizing its own.
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar", dlog.Context{
 			"arm": sessionArm(update),
 		})
 		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		// THE VENDOR STATING A TITLE STOPS OUR SYNTHESIS. Its ai-title always
+		// wins, so once it exists the daemon spends no more on a title of its
+		// own.
+		if _, isTitle := update.GetUpdate().(*conversationv1.SessionUpdate_Title); isTitle && w.sinks.Title != nil {
+			w.sinks.Title.OnVendorTitle(w.ws)
+		}
 
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged:
@@ -150,6 +164,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "rate_limit_status"
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting"
+	case *conversationv1.SessionUpdate_Title:
+		return "title"
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died"
 	default:
@@ -321,6 +337,13 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), at, w.addr)
 		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
 		w.sinks.Topbar.OnContextCut(w.ws, agent, update.GetContextCut())
+		// A CLEAR OR A COMPLETED COMPACTION moves the digest boundary, so the
+		// synthesizer resets its hash and re-synthesizes on the next trigger. A
+		// FAILED compaction cut nothing, so the digest is unchanged and the
+		// synthesizer is left alone.
+		if cut := update.GetContextCut(); w.sinks.Title != nil && (cut.GetCleared() != nil || cut.GetCompacted() != nil) {
+			w.sinks.Title.OnContextReset(w.ws)
+		}
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})

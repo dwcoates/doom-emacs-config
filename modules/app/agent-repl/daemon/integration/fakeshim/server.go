@@ -878,6 +878,24 @@ func (s *server) ReadHistory(ctx context.Context, req *connect.Request[shimv1.Re
 	}), nil
 }
 
+// GatherTitleDigest answers an EMPTY digest by default: boundary NONE with no
+// prompts. The daemon's title synthesizer skips synthesis when the digest has
+// nothing to summarize, so a fake with no scripted answer never provokes a
+// headless call (which the vendor guard would refuse in a test anyway).
+func (s *server) GatherTitleDigest(ctx context.Context, req *connect.Request[shimv1.GatherTitleDigestRequest]) (*connect.Response[shimv1.GatherTitleDigestResponse], error) {
+	if err := s.enter(ctx, RPCGatherTitleDigest, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.GatherTitleDigestResponse, *shimv1.GatherTitleDigestResponse](s, RPCGatherTitleDigest); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.GatherTitleDigestResponse{
+		Result: &shimv1.GatherTitleDigestResponse_Success{
+			Success: &shimv1.GatherTitleDigestSuccess{Boundary: shimv1.TitleDigestBoundary_TITLE_DIGEST_BOUNDARY_NONE},
+		},
+	}), nil
+}
+
 // The workflow verbs are kicked this wave: they answer the typed
 // not-implemented refusal and open nothing.
 func (s *server) GetWorkflow(ctx context.Context, req *connect.Request[shimv1.GetWorkflowRequest]) (*connect.Response[shimv1.GetWorkflowResponse], error) {
