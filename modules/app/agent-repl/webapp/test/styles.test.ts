@@ -227,6 +227,24 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     expect(scroll).toMatch(/padding-left:\s*0\s*;[\s\S]*padding-right:\s*0\s*;/);
   });
 
+  it("clips the bubble's horizontal axis so a bubble never side-scrolls", () => {
+    // Arrange / Act
+    const scroll = declarationsOf(".bubble > .bubble-scroll");
+
+    // Assert — overflow-x is pinned to clip (not left unset, which the CSS
+    // overflow spec would promote to auto once overflow-y is hidden/auto).
+    expect(scroll).toMatch(/overflow-x:\s*clip\s*;/);
+  });
+
+  it("never lets the bubble scroll box compute a horizontal scrollbar", () => {
+    // Arrange / Act — no overflow-x:auto/scroll anywhere on the bubble box.
+    const scroll = declarationsOf(".bubble > .bubble-scroll");
+
+    // Assert
+    expect(scroll).not.toMatch(/overflow-x:\s*(auto|scroll)/);
+    expect(scroll).not.toMatch(/overflow:\s*(auto|scroll)/);
+  });
+
   it("hands the inset the bubble gave up to the CONTENT wrapper inside the box", () => {
     // Arrange / Act
     const body = declarationsOf(".bubble-body");
