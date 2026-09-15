@@ -193,6 +193,7 @@ type HistoryEntry struct {
 	//
 	//	*HistoryEntry_UserPrompt
 	//	*HistoryEntry_AgentFrame
+	//	*HistoryEntry_PeerMessage
 	Entry         isHistoryEntry_Entry `protobuf_oneof:"entry"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -253,6 +254,15 @@ func (x *HistoryEntry) GetAgentFrame() *AgentFrame {
 	return nil
 }
 
+func (x *HistoryEntry) GetPeerMessage() *PeerMessage {
+	if x != nil {
+		if x, ok := x.Entry.(*HistoryEntry_PeerMessage); ok {
+			return x.PeerMessage
+		}
+	}
+	return nil
+}
+
 type isHistoryEntry_Entry interface {
 	isHistoryEntry_Entry()
 }
@@ -270,9 +280,18 @@ type HistoryEntry_AgentFrame struct {
 	AgentFrame *AgentFrame `protobuf:"bytes,2,opt,name=agent_frame,json=agentFrame,proto3,oneof"`
 }
 
+type HistoryEntry_PeerMessage struct {
+	// A message another Claude session (a peer, or a returning subagent) sent
+	// into this agent's conversation — never a person's prompt, never this
+	// agent's own work.
+	PeerMessage *PeerMessage `protobuf:"bytes,3,opt,name=peer_message,json=peerMessage,proto3,oneof"`
+}
+
 func (*HistoryEntry_UserPrompt) isHistoryEntry_Entry() {}
 
 func (*HistoryEntry_AgentFrame) isHistoryEntry_Entry() {}
+
+func (*HistoryEntry_PeerMessage) isHistoryEntry_Entry() {}
 
 // Older entries remain below this page.
 type HistoryMore struct {
@@ -409,7 +428,7 @@ var File_conversation_v1_history_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_history_proto_rawDesc = "" +
 	"\n" +
-	"\x1dconversation/v1/history.proto\x12\x0fconversation.v1\x1a\x1bconversation/v1/agent.proto\x1a\x1aconversation/v1/turn.proto\"\xbf\x01\n" +
+	"\x1dconversation/v1/history.proto\x12\x0fconversation.v1\x1a\x1bconversation/v1/agent.proto\x1a\x1aconversation/v1/peer.proto\x1a\x1aconversation/v1/turn.proto\"\xbf\x01\n" +
 	"\vHistoryPage\x129\n" +
 	"\aentries\x18\x01 \x03(\v2\x1f.conversation.v1.HistoryEntryAtR\aentries\x122\n" +
 	"\x04more\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryMoreH\x00R\x04more\x125\n" +
@@ -418,12 +437,13 @@ const file_conversation_v1_history_proto_rawDesc = "" +
 	"\bboundary\"v\n" +
 	"\x0eHistoryEntryAt\x12/\n" +
 	"\x02at\x18\x01 \x01(\v2\x1f.conversation.v1.HistoryPointerR\x02at\x123\n" +
-	"\x05entry\x18\x02 \x01(\v2\x1d.conversation.v1.HistoryEntryR\x05entry\"\x98\x01\n" +
+	"\x05entry\x18\x02 \x01(\v2\x1d.conversation.v1.HistoryEntryR\x05entry\"\xdb\x01\n" +
 	"\fHistoryEntry\x12?\n" +
 	"\vuser_prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptH\x00R\n" +
 	"userPrompt\x12>\n" +
 	"\vagent_frame\x18\x02 \x01(\v2\x1b.conversation.v1.AgentFrameH\x00R\n" +
-	"agentFrameB\a\n" +
+	"agentFrame\x12A\n" +
+	"\fpeer_message\x18\x03 \x01(\v2\x1c.conversation.v1.PeerMessageH\x00R\vpeerMessageB\a\n" +
 	"\x05entry\"M\n" +
 	"\vHistoryMore\x12>\n" +
 	"\n" +
@@ -454,6 +474,7 @@ var file_conversation_v1_history_proto_goTypes = []any{
 	(*HistoryPointer)(nil), // 5: conversation.v1.HistoryPointer
 	(*AgentPrompt)(nil),    // 6: conversation.v1.AgentPrompt
 	(*AgentFrame)(nil),     // 7: conversation.v1.AgentFrame
+	(*PeerMessage)(nil),    // 8: conversation.v1.PeerMessage
 }
 var file_conversation_v1_history_proto_depIdxs = []int32{
 	1, // 0: conversation.v1.HistoryPage.entries:type_name -> conversation.v1.HistoryEntryAt
@@ -463,12 +484,13 @@ var file_conversation_v1_history_proto_depIdxs = []int32{
 	2, // 4: conversation.v1.HistoryEntryAt.entry:type_name -> conversation.v1.HistoryEntry
 	6, // 5: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
 	7, // 6: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
-	5, // 7: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	8, // 7: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
+	5, // 8: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_history_proto_init() }
@@ -477,6 +499,7 @@ func file_conversation_v1_history_proto_init() {
 		return
 	}
 	file_conversation_v1_agent_proto_init()
+	file_conversation_v1_peer_proto_init()
 	file_conversation_v1_turn_proto_init()
 	file_conversation_v1_history_proto_msgTypes[0].OneofWrappers = []any{
 		(*HistoryPage_More)(nil),
@@ -485,6 +508,7 @@ func file_conversation_v1_history_proto_init() {
 	file_conversation_v1_history_proto_msgTypes[2].OneofWrappers = []any{
 		(*HistoryEntry_UserPrompt)(nil),
 		(*HistoryEntry_AgentFrame)(nil),
+		(*HistoryEntry_PeerMessage)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
