@@ -3,6 +3,8 @@ package feed
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/feedid"
 )
 
 // The accumulation. Every one of these exists because a frame of an upserted
@@ -128,6 +130,20 @@ type proseState struct {
 	// stamping once keeps a re-delivery of the terminal (the file plane after
 	// the stream plane) serving the same instant rather than the replay time.
 	settledAtMs int64
+	// turn is the turn this response block belongs to, learned when the fold is
+	// first drawn. It scopes CROSS-UNIT reconciliation: one turn's response
+	// block can reach the resolver under two DIFFERENT activity ids when the two
+	// store planes disagree on the unit — the shim's stream pays out start+delta
+	// updates under one id while the settling whole (the stream's own reconciled
+	// final id, or the sidecar's transcript id) lands under another — and a fold
+	// only ever reconciles against a sibling of the SAME turn.
+	turn string
+	// feed is where this fold's row landed, kept so a divergent sibling can be
+	// retired on the feed it actually drew on.
+	feed feedid.Feed
+	// row is the fold's own row identity, so a settled sibling's whole can retire
+	// this fragment's row when the two are the same block under divergent ids.
+	row *frontendv1.FeedId
 }
 
 // prose resolves a response's fold, creating it on first sight.
