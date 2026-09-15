@@ -13,6 +13,7 @@ package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_select_response.proto";
+import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_get_feed_page.proto";
@@ -77,6 +78,11 @@ service AgentRepl {
   // ordered rows, pushes it to the webapp on the feed watch, and acks it
   // here. See endpoint_select_response.proto.
   rpc SelectResponse(SelectResponseRequest) returns (SelectResponseResponse);
+
+  // Nudge the feed text zoom one small step up or down. Daemon-global,
+  // persisted, pushed to every open feed's watch as a FeedTextScale frame. See
+  // endpoint_adjust_feed_text_scale.proto.
+  rpc AdjustFeedTextScale(AdjustFeedTextScaleRequest) returns (AdjustFeedTextScaleResponse);
 
   // The refusal card's "engineer support for it" offer: spawn a support
   // workspace with a daemon-composed brief. See

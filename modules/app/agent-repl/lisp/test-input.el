@@ -1522,6 +1522,56 @@ used to interrupt before the overhaul."
   "The chord's target is a real interactive command, not a dead symbol."
   (should (commandp #'agent-repl-interrupt-turn)))
 
+;;;; ---- Feed text zoom (C-+ / C--) --------------------------------------
+
+(ert-deftest agent-repl-test-input-feed-text-scale-increase-is-a-command ()
+  "The zoom-in target is a real interactive command (so auto-repeat works)."
+  (should (commandp #'agent-repl-feed-text-scale-increase)))
+
+(ert-deftest agent-repl-test-input-feed-text-scale-decrease-is-a-command ()
+  "The zoom-out target is a real interactive command (so auto-repeat works)."
+  (should (commandp #'agent-repl-feed-text-scale-decrease)))
+
+(ert-deftest agent-repl-test-input-c-plus-zooms-feed-in ()
+  "`C-+' in the composer is bound to the feed zoom-in command.
+Bound with `define-key' (not the `map!' no-op under `emacs -Q'), so the
+override of Doom's global text-scale binding is observable here."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-+"))
+              #'agent-repl-feed-text-scale-increase)))
+
+(ert-deftest agent-repl-test-input-c-minus-zooms-feed-out ()
+  "`C--' in the composer is bound to the feed zoom-out command."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C--"))
+              #'agent-repl-feed-text-scale-decrease)))
+
+(ert-deftest agent-repl-test-input-feed-text-scale-increase-sends-increase ()
+  "Zoom-in asks the daemon for one INCREASE step."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (requests)
+      (cl-letf (((symbol-function 'agent-repl-rpc-adjust-feed-text-scale)
+                 (lambda (_conn request &rest keys)
+                   (push request requests)
+                   (funcall (plist-get keys :on-response) '(:scale 1.02)))))
+        ;; Act
+        (agent-repl-feed-text-scale-increase))
+      ;; Assert
+      (should (eq (plist-get (car requests) :direction) :increase)))))
+
+(ert-deftest agent-repl-test-input-feed-text-scale-decrease-sends-decrease ()
+  "Zoom-out asks the daemon for one DECREASE step."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (requests)
+      (cl-letf (((symbol-function 'agent-repl-rpc-adjust-feed-text-scale)
+                 (lambda (_conn request &rest keys)
+                   (push request requests)
+                   (funcall (plist-get keys :on-response) '(:scale 0.98)))))
+        ;; Act
+        (agent-repl-feed-text-scale-decrease))
+      ;; Assert
+      (should (eq (plist-get (car requests) :direction) :decrease)))))
+
 ;;;; ---- Response selection (reply to a past response) -------------------
 
 (defun agent-repl-test-input--selection ()

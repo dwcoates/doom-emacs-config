@@ -187,6 +187,21 @@ negative value is a contract breach for an unsigned field."
           (agent-repl-wire--fail message-name field "expected a non-negative integer"))
         n))))
 
+(defun agent-repl-wire--decode-double (message-name field object)
+  "Decode OBJECT's non-optional double FIELD of MESSAGE-NAME as a float.
+protojson spells a double as a JSON number, but also ACCEPTS the decimal
+string spelling, so both are honored here; an absent field is the proto3
+default 0.0, which protojson omits.  A non-finite spelling
+\(\"NaN\"/\"Infinity\") is a contract breach for a scale field and is
+refused rather than silently coerced."
+  (let ((raw (agent-repl-wire--raw object field)))
+    (cond
+     ((null raw) 0.0)
+     ((numberp raw) (float raw))
+     ((and (stringp raw) (string-match-p "\\`-?[0-9]+\\(\\.[0-9]+\\)?\\([eE][-+]?[0-9]+\\)?\\'" raw))
+      (float (string-to-number raw)))
+     (t (agent-repl-wire--fail message-name field "expected a double")))))
+
 (defun agent-repl-wire--decode-message (message-name field object decoder)
   "Decode OBJECT's REQUIRED message FIELD of MESSAGE-NAME with DECODER.
 An absent non-optional message field is a contract breach: the validation
