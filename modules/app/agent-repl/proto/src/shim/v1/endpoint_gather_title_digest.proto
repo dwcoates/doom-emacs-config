@@ -1,0 +1,93 @@
+// endpoint_gather_title_digest.proto — GatherTitleDigest: the material the
+// daemon summarizes into a workspace title of its OWN when the vendor has not
+// written one.
+//
+// WHY IT LIVES ON THE SHIM. The shim owns the transcript, and the digest is a
+// fact ABOUT the transcript: the user's prompts since the last context
+// boundary, plus — when the last boundary was a compaction — the compaction
+// summary the vendor already wrote. The daemon cannot read the transcript
+// itself (it does not know the file, and a compaction rewrites it), so it asks
+// the one process that does.
+//
+// THE BOUNDARY IS THE MOST RECENT CUT IN THE CURRENT TRANSCRIPT. A /clear
+// rotates to a NEW transcript file, so "the prompts in the current transcript"
+// is the same statement as "the prompts since the last /clear"; a /compact
+// stays in the SAME file and appends a `compact_boundary` plus the summary, so
+// the compaction is found by scanning that file. The digest reports which
+// boundary it found so the daemon can key its reset and its cost control on the
+// same fact the shim keyed the digest on.
+//
+// NO PAINT ATTESTATION: this answers what the transcript states, never that
+// anything was drawn from it.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Ask for the current title digest of the session's own conversation. The
+// shim resolves the transcript from its own identity, so the request names
+// nothing.
+message GatherTitleDigestRequest {}
+
+// THE ARM IS THE OUTCOME.
+message GatherTitleDigestResponse {
+  oneof result {
+    GatherTitleDigestSuccess success = 1;
+    GatherTitleDigestFailure failure = 2;
+  }
+}
+
+// Which kind of context boundary the digest is measured from. The daemon draws
+// no distinction between NONE and CLEAR for the prompt set — both are "every
+// prompt in the current transcript" — but the two are reported apart because a
+// clear is a deliberate reset the daemon keys its own reset on, while NONE is
+// simply a conversation that has never been cut.
+enum TitleDigestBoundary {
+  // Never sent; an unset boundary is a malformed frame.
+  TITLE_DIGEST_BOUNDARY_UNSPECIFIED = 0;
+  // No cut anywhere in the current transcript: the prompts are the whole
+  // conversation.
+  TITLE_DIGEST_BOUNDARY_NONE = 1;
+  // The current transcript opened at a /clear: the prompts are everything
+  // since that clear (which is everything in this transcript file).
+  TITLE_DIGEST_BOUNDARY_CLEAR = 2;
+  // The most recent cut was a /compact: `last_compact_summary` carries the
+  // summary the compaction wrote, and `prompts` are the prompts that followed
+  // it.
+  TITLE_DIGEST_BOUNDARY_COMPACT = 3;
+}
+
+// The material to summarize.
+message GatherTitleDigestSuccess {
+  // Which boundary the prompts are measured from.
+  TitleDigestBoundary boundary = 1;
+  // The compaction summary the most recent /compact wrote, verbatim. SET ONLY
+  // when `boundary` is COMPACT; a summary is the vendor's own compression of
+  // the discarded history, so it belongs in the digest beside the prompts that
+  // followed it. Absent for every other boundary.
+  optional string last_compact_summary = 2;
+  // The user's prompts since the boundary, oldest first — the slash-command
+  // envelopes, tool-result echoes, compaction artifacts and subagent prompts
+  // the transcript also carries are NOT prompts and are excluded. An empty
+  // list is a legitimate answer for a fresh conversation nobody has prompted
+  // yet.
+  repeated string prompts = 3;
+}
+
+// Not served. THE ARM IS WHY.
+message GatherTitleDigestFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // No transcript exists for this session yet — the vendor has written no
+    // record. Distinct from an empty prompt list, which is a transcript that
+    // exists and carries no prompt.
+    GatherTitleDigestNoTranscript no_transcript = 2;
+    // The transcript could not be read from disk.
+    GatherTitleDigestUnreadable unreadable = 3;
+  }
+}
+message GatherTitleDigestNoTranscript {}
+message GatherTitleDigestUnreadable {}
