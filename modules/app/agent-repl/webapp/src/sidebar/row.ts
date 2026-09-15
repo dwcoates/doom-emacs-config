@@ -295,8 +295,11 @@ export function drawRosterRowWhen(
       );
       return when;
     case "created":
-      tickAge(when, sc, drawRosterRowWhenCreated(shown.value, `${path}.created`), (age) =>
-        `created ${age}`,
+      tickAge(
+        when,
+        sc,
+        drawRosterRowWhenCreated(shown.value, `${path}.created`),
+        (age) => age,
       );
       return when;
     case "lastSelected":
