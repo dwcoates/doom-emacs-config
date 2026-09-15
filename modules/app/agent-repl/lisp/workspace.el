@@ -116,6 +116,10 @@
 (defvar persp-autokill-buffer-on-remove)
 (defvar +workspaces-switch-project-function)
 (defvar +workspaces-on-switch-project-behavior)
+;; Defined by roster.el; declared special here so this file's hook
+;; registration byte-compiles standalone (mirrors daemon.el's forward
+;; declaration of the same abnormal hook).
+(defvar agent-repl-roster-bringup-functions)
 
 (cl-defstruct agent-repl-instantiation
   "Per-environment session state for a Agent REPL workspace.
@@ -1935,6 +1939,104 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp 'persp-remove-buffer)
     (let ((persp-autokill-buffer-on-remove nil))
       (persp-remove-buffer buffer))))
+
+;;;; ---- Startup deletion of persp-mode's pseudo perspectives -------------
+
+(defvar agent-repl--pseudo-perspectives-deleted nil
+  "Non-nil once the startup pseudo-perspective deletion has run.
+`agent-repl--delete-pseudo-perspectives' clears persp-mode's leading
+pseudo perspectives exactly ONCE per session, and this flag is what makes
+it once: a later roster bring-up finds it set and does nothing.  It
+re-defaults to nil on a full module reload; tests reset it explicitly.")
+
+(defun agent-repl--pseudo-perspective-killable-p (name)
+  "Return non-nil when pseudo perspective NAME can be removed by `persp-kill'.
+
+Only a NON-nil pseudo perspective is killable.  persp-mode stores its nil
+perspective (`persp-nil-name', \"none\") in the hash under the LITERAL value
+nil, and `persp-kill' removes a name only through `persp-remove-by-name'
+guarded on the perspective being non-nil — which that one is not — while
+`persp-remove-by-name' itself refuses it outright (it messages that the
+nil perspective cannot be removed).  Worse, `persp-kill' walks and
+detaches the perspective's buffers BEFORE that guard, so calling it on
+\"none\" would strip the nil
+perspective's buffers WITHOUT ever removing the \"none\" name — a
+destructive no-op.  The caller must therefore SKIP it.  Doom's initial
+\"main\" IS a normal `make-persp' perspective and is killable."
+  (and (agent-repl--pseudo-workspace-name-p name)
+       (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name)))
+         (not (and (stringp nil-name) (equal name nil-name))))))
+
+(defun agent-repl--delete-pseudo-perspectives ()
+  "Delete persp-mode's leading pseudo perspectives now a real one exists.
+
+WHY DELETE, NOT HIDE (regression watch, 2026-09-15).  persp-mode seeds a
+session with its own perspectives — `persp-nil-name' (\"none\") and Doom's
+initial \"main\" — that agent-repl never created and that own no workspace
+\(`agent-repl--pseudo-workspace-name-p').  While they sit in
+`persp-names-cache' they take its LEADING slots, so the perspective-list
+index is off by one against the drawn tab bar: the numeral chords and any
+`+workspace/switch-to-N' reach the tab after the one their number names.
+Filtering the pseudos out of the DRAWN list left the slots in the
+underlying list, so the durable fix is to REMOVE them — once they are gone
+`[N]' == `M-<n>' with nothing to filter or index around.
+
+DELETED AFTER THE FIRST REAL WORKSPACE, NEVER BEFORE.  persp-mode requires
+at least one perspective, so deleting the pseudos while nothing else
+exists just makes persp recreate them.  This is driven from the roster's
+first bring-up completion (`agent-repl--delete-pseudos-on-bringup') and it
+refuses to act unless a real workspace perspective is already present in
+`persp-names-cache', so the kill can never strand the session at zero
+perspectives.
+
+Runs at most once (`agent-repl--pseudo-perspectives-deleted').  \"none\" is
+`persp-nil' and is NOT killable (`agent-repl--pseudo-perspective-killable-p');
+it is recorded and left in place rather than hacked out of persp
+internals.  If the frame is standing IN a pseudo when the kill fires, it
+is moved to a real workspace first so the kill does not strand it."
+  (when (and (not agent-repl--pseudo-perspectives-deleted)
+             (agent-repl--ws-system-available-p))
+    (let* ((names (agent-repl--ws-names-cache))
+           (reals (cl-remove-if #'agent-repl--pseudo-workspace-name-p names))
+           (pseudos (cl-remove-if-not #'agent-repl--pseudo-workspace-name-p names)))
+      ;; Never delete while no real perspective survives the kill, and
+      ;; never consume the one-shot before there is anything to delete.
+      (when (and reals pseudos)
+        (setq agent-repl--pseudo-perspectives-deleted t)
+        (let ((current (agent-repl--ws-current-name)))
+          (when (and current (agent-repl--pseudo-workspace-name-p current))
+            (agent-repl--info
+             '(:agent-repl-central "workspace numbering spans the whole session")
+             "elisp.workspace.pseudo-delete-vacate current=%s target=%s"
+             current (car reals))
+            (agent-repl--ws-switch (car reals))))
+        (dolist (pseudo pseudos)
+          (if (agent-repl--pseudo-perspective-killable-p pseudo)
+              (progn
+                (agent-repl--info
+                 '(:agent-repl-central "workspace numbering spans the whole session")
+                 "elisp.workspace.pseudo-delete ws=%s" pseudo)
+                (agent-repl--ws-persp-kill pseudo))
+            (agent-repl--info
+             '(:agent-repl-central "workspace numbering spans the whole session")
+             "elisp.workspace.pseudo-delete-skip-nil ws=%s (persp-nil is not killable)"
+             pseudo)))))))
+
+(defun agent-repl--delete-pseudos-on-bringup (opened _total finished)
+  "Delete the pseudo perspectives once the first roster reconcile settles.
+
+Registered on `agent-repl-roster-bringup-functions' (roster.el), whose
+FINISHED call closes a reconcile pass and whose OPENED counts the real
+workspace tabs that pass brought up.  A finished pass that opened at least
+one tab is the earliest point a real workspace perspective is guaranteed
+to exist — exactly the precondition `agent-repl--delete-pseudo-perspectives'
+needs before it may clear the pseudos.  See that function for why the
+pseudos are DELETED, not hidden."
+  (when (and finished (> opened 0))
+    (agent-repl--delete-pseudo-perspectives)))
+
+(add-hook 'agent-repl-roster-bringup-functions
+          #'agent-repl--delete-pseudos-on-bringup)
 
 ;;;; ---- Projectile integration boundary ---------------------------------
 ;;
