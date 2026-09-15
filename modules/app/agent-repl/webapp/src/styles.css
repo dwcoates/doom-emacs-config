@@ -144,6 +144,15 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* The prompt bubble's own in-flight border: light purple, worn ONLY while
+     `data-wave="working"` is on the bubble (see `.bubble.user[data-wave=
+     "working"]` below and `startPromptWave` / `markPromptWave` in
+     breathing.ts / feed-view.ts) — the SAME attribute that drives the
+     thinking-wave shadow band, so the border can never start or end a frame
+     out of step with the glimmer: one attribute, one lifecycle. Reads clearly
+     against the blue --user fill in this theme; the dark theme lifts it the
+     same way --final-response lifts for its own dark fill. */
+  --prompt-live-border: #c084fc;
   /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
      datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
@@ -306,6 +315,9 @@
     --compact-rule: #f97316;
     --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
+    /* Brighter light purple for the dark theme, as the other state borders
+       lift, so the hairline still reads against the dark --user navy fill. */
+    --prompt-live-border: #d8b4fe;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
@@ -1367,6 +1379,18 @@ pre {
   background-size: 200% 100%;
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
+}
+/* The in-flight prompt's light-purple border. Keyed on the SAME
+   `data-wave="working"` attribute the glimmer above reads, rather than a
+   separate class or JS toggle, so the two can never desync: whatever sets or
+   clears the attribute at the glimmer's own start/end drives this border too,
+   by construction. Only the color changes — `.bubble`'s base rule already
+   reserves the 0.3px border box for every bubble, so this never reflows the
+   feed. Static, not animated: the attribute's presence is itself the signal,
+   so it survives `prefers-reduced-motion` (which only stops the wave's
+   animation above) unchanged. */
+.bubble.user[data-wave="working"] {
+  border-color: var(--prompt-live-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
