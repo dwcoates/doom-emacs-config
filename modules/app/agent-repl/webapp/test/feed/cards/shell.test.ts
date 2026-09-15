@@ -138,6 +138,15 @@ describe("drawFeedShellHead head", () => {
     const el = drawFeedShellHead(shell({ spool: { text: "line one\n" } }), ctxFor().rc);
     expect(el.querySelector(".shell-spool")).toBeNull();
   });
+
+  // A SHELL REPORTS NO TOKENS (owner ruling, 2026-09-14): the token count on a
+  // bubble head is unique to subagent (agent) heads, and a shell head is never
+  // to invent one -- command, clock and stop are all it carries. `FeedShell`
+  // has no tokens field, so the head cannot draw the subagent's token span.
+  it("carries no token count, a shell reporting none", () => {
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
+    expect(el.querySelector(".subagent-tokens")).toBeNull();
+  });
 });
 
 describe("drawFeedShellBody is spool-only", () => {
