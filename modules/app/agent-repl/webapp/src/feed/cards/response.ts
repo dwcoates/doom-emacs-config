@@ -156,17 +156,6 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     bubble.setAttribute("data-thinking", "");
   }
 
-  // THE METADATA STRIP COMES FIRST, and the scroll box under it (owner ruling,
-  // 2026-09-14). The corner stamp is a full-width strip above the prose rather
-  // than a column beside it, so the body's scrollbar starts BENEATH the token
-  // figure instead of running the bubble's whole height next to it.
-  const corner = document.createElement("span");
-  corner.className = "turn-meta";
-  if (u.usage !== undefined) {
-    corner.appendChild(drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`));
-  }
-  bubble.appendChild(corner);
-
   // BEFORE the body, and outside it: the body is rewritten whole by the prose
   // painters (and by every frame of the type-out), so a heading placed inside it
   // would be wiped by the first repaint of an arriving response.
@@ -180,7 +169,24 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // scroll box that holds it (see bubble-scroll.ts).
   const body = document.createElement("div");
   body.className = "bubble-body";
-  bubble.appendChild(bubbleScroll(body));
+  const scroll = bubbleScroll(body);
+
+  // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
+  // The cost corner is inserted INTO the scroll box, BEFORE the body, and floats
+  // top-right (`float: right`, styles.css). The body is a plain block sibling in
+  // the same block-formatting context (the scroll box, which clips its overflow),
+  // so the prose's FIRST line flows to the corner's LEFT and wraps around it;
+  // once the text drops past the corner's height — one line, since the corner is
+  // a single row of token + duration — every SUBSEQUENT line runs the full width.
+  // The corner keeps a CONSTANT reserved width across the hover reveal (the
+  // duration slot is reserved even while collapsed — see `.usage-ago`), so
+  // exposing the duration animates opacity/translate only and never reflows the
+  // first line. It lives here rather than above the box so the wrap can reach it:
+  // a strip above the body could not shorten a line inside the body.
+  if (u.usage !== undefined) {
+    scroll.insertBefore(drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`), body);
+  }
+  bubble.appendChild(scroll);
 
   let characters: number;
   switch (result.case) {
@@ -337,13 +343,17 @@ export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
  * The cost corner: the token figure, drawn verbatim, and — once the response
  * has SETTLED — the relative timestamp it reveals when hovered or focused.
  *
- * THE TWO SIT IN A RIGHT-ANCHORED ROW so the figure stays where it always sat
- * and the timestamp grows in from the RIGHT edge, sliding the figure LEFT to
- * make room (owner ruling, 2026-09-14). The slide is one continuous ~0.5s CSS
- * transition on the timestamp's width and offset, so mouse-leave runs the same
- * transition backwards for free rather than snapping — the stylesheet owns it,
- * and `prefers-reduced-motion` drops it. A state class is toggled here too, so
- * a keyboard focus reveals the same timestamp a hover does.
+ * THE TWO SIT IN A RIGHT-ANCHORED ROW whose width is RESERVED IN FULL — token
+ * plus duration — at all times, so the figure never moves and, because the
+ * corner is a `float: right` in the prose body (see `drawFeedResponse`), the
+ * first prose line that wrapped around it never reflows when the duration is
+ * exposed (owner ruling, 2026-09-15, superseding the 2026-09-14 slide-the-
+ * figure-left reveal). The reveal is one continuous ~0.5s CSS transition on the
+ * timestamp's opacity and offset ALONE — no width or margin animates, since the
+ * duration keeps its layout slot whether or not it is shown — so mouse-leave
+ * runs the same transition backwards for free rather than snapping; the
+ * stylesheet owns it, and `prefers-reduced-motion` drops it. A state class is
+ * toggled here too, so a keyboard focus reveals the same timestamp a hover does.
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.

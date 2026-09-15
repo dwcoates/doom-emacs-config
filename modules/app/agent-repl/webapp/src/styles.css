@@ -4242,11 +4242,24 @@ body.draining #composer-input::placeholder {
    corner stamp and the two state marks. */
 
 /* The cost corner: the token figure, and the settled timestamp it reveals on
-   hover. The two sit in a RIGHT-ANCHORED row so the figure sits where it always
-   sat and the timestamp grows in from the right edge, sliding the figure left
-   to make room (owner ruling, 2026-09-14). `overflow: hidden` clips the
-   timestamp while it is collapsed off the right. */
+   hover. The two sit in a RIGHT-ANCHORED row whose width is RESERVED in full
+   (token + duration) at all times, so the figure never moves and the timestamp
+   fades/slides into its already-reserved slot on hover rather than pushing
+   anything (owner ruling, 2026-09-15, superseding the 2026-09-14 slide-the-
+   figure-left reveal). `overflow: hidden` clips the timestamp while it is
+   collapsed off the right. */
 .usage-corner {
+  /* FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling,
+     2026-09-15). The corner floats top-right INSIDE the scroll box, before the
+     `.bubble-body` block it shares that box's block-formatting context with, so
+     the prose's FIRST line flows to its left and wraps around it and — because
+     the corner is a single row tall (token + duration on one line) — every
+     SUBSEQUENT line drops below it and runs the bubble's full width. The token
+     content lands flush at the box's top-right corner: the hover hit-area
+     padding below is cancelled by an equal negative margin, so the float's
+     margin box is exactly the token+duration content and only the empty padding
+     (never the figure) is clipped by the box's `overflow: hidden`. */
+  float: right;
   display: inline-flex;
   flex-direction: row;
   align-items: baseline;
@@ -4273,22 +4286,26 @@ body.draining #composer-input::placeholder {
 }
 /* THE HOVER TIMESTAMP: the response's settled time, relative and live
    ("5m 30s ago"). Grey (the shared muted token) and a relative notch smaller
-   than the figure beside it. Collapsed to zero width and pushed off the right
-   edge until the bubble (or, failing that, the corner alone) is hovered or
-   focused; the reveal and — because mouse-leave merely drops the state — the
-   reverse are ONE continuous 0.5s transition on width, offset and opacity,
-   never a snap. */
+   than the figure beside it.
+
+   ITS WIDTH IS RESERVED AT ALL TIMES, revealed or not (owner ruling,
+   2026-09-15). The duration keeps its layout width and its `margin-left` gap
+   whether or not it is exposed, so the corner's floated footprint is the FULL
+   token+duration width the whole time and exposing the duration NEVER reflows
+   the first prose line that wrapped around the float. Collapsed, it is merely
+   invisible — pushed off the right edge (`translateX(100%)`, clipped by the
+   corner's `overflow: hidden`) and faded out (`opacity: 0`) — never resized. So
+   the reveal animates opacity and offset ONLY, in one continuous 0.5s
+   transition that mouse-leave runs backwards for free; no width or margin
+   animates, because neither ever changes. */
 .usage-ago {
   color: var(--muted);
   font-size: 0.85em;
   white-space: nowrap;
-  max-width: 0;
-  margin-left: 0;
+  margin-left: 0.35rem;
   opacity: 0;
   transform: translateX(100%);
   transition:
-    max-width 0.5s ease,
-    margin-left 0.5s ease,
     opacity 0.5s ease,
     transform 0.5s ease;
 }
@@ -4304,8 +4321,6 @@ body.draining #composer-input::placeholder {
 .usage-corner:hover .usage-ago,
 .usage-corner:focus-within .usage-ago,
 .usage-corner.usage-corner--revealed .usage-ago {
-  max-width: 8rem;
-  margin-left: 0.35rem;
   opacity: 1;
   transform: translateX(0);
 }

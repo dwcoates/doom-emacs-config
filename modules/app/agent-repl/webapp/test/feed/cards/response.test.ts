@@ -222,7 +222,7 @@ describe("the usage stamp", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".turn-meta .usage-stamp")?.textContent).toBe("2.1k");
+    expect(el.querySelector(".bubble-scroll .usage-stamp")?.textContent).toBe("2.1k");
   });
 
   it("draws no stamp at all when no usage has been observed", () => {
@@ -247,7 +247,7 @@ describe("the usage corner's hover timestamp", () => {
     // Arrange, Act
     const el = drawFeedResponse(settled(1_000n), rowContext());
     // Assert: both elements sit in the one corner.
-    const corner = el.querySelector(".turn-meta .usage-corner");
+    const corner = el.querySelector(".bubble-scroll .usage-corner");
     expect([
       corner?.querySelector(".usage-stamp")?.textContent,
       corner?.querySelector(".usage-ago") !== null,
@@ -354,6 +354,89 @@ describe("the usage corner's hover timestamp", () => {
     const block = stylesheet.slice(at);
     // Assert: the timestamp's transition is dropped there.
     expect(block).toMatch(/\.usage-ago\s*\{[^}]*transition:\s*none/);
+  });
+});
+
+describe("the usage corner's first-line float", () => {
+  /** A settled response whose corner carries a token figure and a settle instant. */
+  function settled(atMs: bigint) {
+    return response({
+      usage: { text: "2.1k", atMs },
+      result: { case: "success", value: { prose: { markdown: "done" } } },
+    });
+  }
+
+  it("puts the corner inside the scroll box, before the body, so the first line wraps beside it", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    // Assert — the corner is the scroll box's FIRST child and the body follows
+    // it, the DOM order a `float: right` needs to shorten the body's first line.
+    const scroll = el.querySelector(".bubble-scroll") as HTMLElement;
+    const corner = scroll.querySelector(".usage-corner") as HTMLElement;
+    const body = scroll.querySelector(".bubble-body") as HTMLElement;
+    expect([scroll.firstElementChild === corner, corner.nextElementSibling === body]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("floats the corner to the right of the prose", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    document.body.appendChild(el);
+    try {
+      // Act
+      const corner = el.querySelector(".usage-corner") as HTMLElement;
+      // Assert — the cascade lands `float: right` on the corner.
+      expect(cascadedValue(corner, "float")).toBe("right");
+    } finally {
+      el.remove();
+      teardown();
+    }
+  });
+
+  it("keeps the duration slot the same layout width whether or not it is revealed", () => {
+    // Arrange — the real stylesheet, and a settled corner whose duration exists.
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    document.body.appendChild(el);
+    try {
+      const corner = el.querySelector(".usage-corner") as HTMLElement;
+      const ago = el.querySelector(".usage-ago") as HTMLElement;
+      // Act — read every width-affecting property collapsed, then revealed.
+      const widthProps = ["margin-left", "max-width", "width"] as const;
+      const collapsed = widthProps.map((p) => cascadedValue(ago, p));
+      corner.classList.add(USAGE_REVEALED_CLASS);
+      const revealed = widthProps.map((p) => cascadedValue(ago, p));
+      // Assert — nothing that sizes the slot changed, so exposing the duration
+      // cannot reflow the first prose line that wrapped around the float.
+      expect(revealed).toEqual(collapsed);
+    } finally {
+      el.remove();
+      teardown();
+    }
+  });
+
+  it("adds no left indent to the body, so lines below the corner run full width", () => {
+    // Arrange — the corner is a float sibling, never a wrapper the body is
+    // inset behind, so subsequent lines are not indented by it.
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    document.body.appendChild(el);
+    try {
+      // Act
+      const body = el.querySelector(".bubble-body") as HTMLElement;
+      // Assert — no left padding and no text-indent reserve corner space; the
+      // float alone shortens only the lines it overlaps (its single row).
+      expect([cascadedValue(body, "padding-left"), cascadedValue(body, "text-indent")]).toEqual([
+        "0",
+        "0",
+      ]);
+    } finally {
+      el.remove();
+      teardown();
+    }
   });
 });
 
@@ -492,7 +575,7 @@ describe("the notice register", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".turn-meta .usage-stamp")?.textContent).toBe("2.1k");
+    expect(el.querySelector(".bubble-scroll .usage-stamp")?.textContent).toBe("2.1k");
   });
 });
 
