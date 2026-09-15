@@ -2866,6 +2866,18 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   contain-intrinsic-size: auto var(--lazy-h, 320px);
 }
 
+/* The overscan buffer's pre-render band (overscan.ts). A row within ~5
+   viewport heights of the scroll box is marked so its content-visibility goes
+   back to `visible`: it lays out at its real height BEFORE the reader scrolls
+   to it, so nothing shifts under them at the edge. The classic
+   content-visibility jitter is a skipped row laying out for the first time as
+   it enters the viewport and its true height replacing the ~320px guess; this
+   pays that layout a band early. A row that leaves the band loses the class and
+   is skippable again, so the perf win survives for rows far from the viewport. */
+.feed-item.overscan {
+  content-visibility: visible;
+}
+
 /* The stand-in for an item whose real render has not been paid for yet
    (lazy-item.ts): the item's own text, wrapped and monospaced-free, at the
    line height the height estimate assumes. Deliberately unstyled beyond

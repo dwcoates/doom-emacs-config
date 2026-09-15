@@ -30,6 +30,8 @@ import {
   type Harness,
 } from "./harness.js";
 import { fireResize } from "../resize-observer.js";
+import { fireIntersection, intersectionObservers } from "../intersection-observer.js";
+import { OVERSCAN_CLASS } from "../../src/feed/overscan.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -781,5 +783,45 @@ describe("mountFeed and the client's link verdict", () => {
       substatus: "feed not tailing",
       activity: "the daemon refused the feed's reveal probe",
     });
+  });
+});
+
+// THE OVERSCAN BUFFER is created by the mount, rooted on the page's scroll box,
+// and torn down when the feed disposes — the same lifecycle as the tail owner's
+// resize subscription beside it.
+
+describe("mountFeed: the overscan buffer", () => {
+  /** Mount into a fresh scroll box the test keeps a handle on. */
+  function mountWithBox(h: Harness = harness()) {
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    return { feed, host, scroll, h };
+  }
+
+  it("roots an observer on the page's scroll box", async () => {
+    const { scroll } = mountWithBox();
+    await settle();
+    expect(intersectionObservers().some((r) => r.root === scroll)).toBe(true);
+  });
+
+  it("pre-renders a drawn row when it enters the band", async () => {
+    const h = harness({
+      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+    });
+    const { host } = mountWithBox(h);
+    await settle();
+    const row = host.querySelector<HTMLElement>('[data-feed-row="p1"]');
+    fireIntersection(row as HTMLElement, true);
+    expect(row?.classList.contains(OVERSCAN_CLASS)).toBe(true);
+  });
+
+  it("tears the observer down when the feed disposes", async () => {
+    const { feed, scroll } = mountWithBox();
+    await settle();
+    feed.dispose();
+    expect(intersectionObservers().some((r) => r.root === scroll)).toBe(false);
   });
 });

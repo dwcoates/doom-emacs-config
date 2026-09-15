@@ -1,6 +1,7 @@
 import { beforeAll } from "vitest";
 import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../../src/log.js";
 import { installResizeObserver } from "../resize-observer.js";
+import { installIntersectionObserver } from "../intersection-observer.js";
 
 /**
  * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
@@ -9,6 +10,13 @@ import { installResizeObserver } from "../resize-observer.js";
  * `test/setup.ts`, so it installs the same environment substitution itself.
  */
 installResizeObserver();
+
+/**
+ * jsdom implements no `IntersectionObserver` either, and the feed mount
+ * subscribes one for the overscan pre-render band (overscan.ts). This project
+ * does not load `test/setup.ts`, so it installs the same substitution itself.
+ */
+installIntersectionObserver();
 
 /**
  * THE LOGGER, INSTALLED BEFORE THE FIRST `beforeAll` MOUNTS.

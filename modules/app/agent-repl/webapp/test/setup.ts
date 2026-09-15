@@ -8,6 +8,7 @@ import {
 import { resetCompactionProgress } from "../src/footer/progress.js";
 import { clearClientFailures } from "../src/rpc/link.js";
 import { installResizeObserver } from "./resize-observer.js";
+import { installIntersectionObserver } from "./intersection-observer.js";
 
 /**
  * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
@@ -17,6 +18,16 @@ import { installResizeObserver } from "./resize-observer.js";
  * the app -- the same standing the harness gives `Element.scrollIntoView`.
  */
 installResizeObserver();
+
+/**
+ * jsdom implements no `IntersectionObserver` either (it performs no layout), and
+ * the feed mount subscribes one to its scroll box for the overscan pre-render
+ * band (overscan.ts). Installed here, once per environment, for the same reason
+ * as the `ResizeObserver` stub above — a missing CAPABILITY of the environment,
+ * not a seam in the app. Without it every feed mount would take the "no
+ * IntersectionObserver" no-op path and the overscan wiring would never run.
+ */
+installIntersectionObserver();
 
 /**
  * Production installs the ClientLog-forwarding logger before runtime work
