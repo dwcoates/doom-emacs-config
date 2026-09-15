@@ -46,25 +46,38 @@ function node(name: string, parent: FakeNode | null, ...classes: string[]): Fake
 }
 
 describe("isCappedSection", () => {
-  it("accepts a Bash output section", () => {
-    // Arrange + Act + Assert
-    expect(isCappedSection(section("tool-output", "bash-output").classList)).toBe(true);
+  it("accepts a card-level tool/skill fold", () => {
+    // Owner ruling, 2026-09-15: a tool-call/skill card is ONE fold, opened as a
+    // unit, so the whole `.tool-fold` card is the capped section.
+    expect(isCappedSection(section("tool-card", "tool-fold").classList)).toBe(true);
   });
 
-  it("accepts a Read preview section", () => {
+  it("accepts the detached shell's live tail, which keeps its own per-section fold", () => {
     // Arrange + Act + Assert
-    expect(isCappedSection(section("tool-output", "tool-read-output").classList)).toBe(true);
+    expect(isCappedSection(section("tool-output", "bash-output", "shell-tail").classList)).toBe(true);
   });
 
-  it("accepts an Edit diff section", () => {
+  it("accepts a hook card's box, which keeps its own per-section fold", () => {
     // Arrange + Act + Assert
-    expect(isCappedSection(section("diff", "diff-output").classList)).toBe(true);
+    expect(isCappedSection(section("tool-output", "bash-output", "hook-output").classList)).toBe(true);
   });
 
   it("accepts a response bubble's scroll box, now that bubbles are click-to-expand", () => {
     // Owner ruling, 2026-09-15: a collapsed bubble no longer scrolls; a click
     // expands it. So its scroll box is a capped, expandable section.
     expect(isCappedSection(section("bubble-scroll").classList)).toBe(true);
+  });
+
+  it("rejects a tool card's INNER output box, which no longer expands on its own", () => {
+    // The card-level fold owns the expansion now; a bare output box inside a
+    // `.tool-fold` card is not itself a click-to-expand section.
+    expect(isCappedSection(section("tool-output", "bash-output").classList)).toBe(false);
+  });
+
+  it("rejects a tool card's INNER input line", () => {
+    // Arrange + Act + Assert — the input line is the header's body, capped by
+    // the card's collapsed state, never a section of its own.
+    expect(isCappedSection(section("bash-input").classList)).toBe(false);
   });
 
   it("rejects an uncapped element such as an assistant bubble", () => {
@@ -81,22 +94,23 @@ describe("CAPPED_SELECTOR", () => {
 });
 
 describe("cappedSectionAt", () => {
-  it("finds the capped section above the click target", () => {
-    // Arrange
+  it("resolves a click inside a tool card's output to the CARD, opened as a unit", () => {
+    // Arrange — a card-level fold: a click deep in the (revealed) output box
+    // resolves to the whole `.tool-fold` card, never to the inner box.
     const feed = node("feed", null);
-    const card = node("card", feed, "tool-card");
+    const card = node("card", feed, "tool-card", "tool-fold");
     const out = node("out", card, "tool-output", "bash-output");
     const text = node("text", out, "stderr");
     // Act + Assert
-    expect(cappedSectionAt(text, feed)?.name).toBe("out");
+    expect(cappedSectionAt(text, feed)?.name).toBe("card");
   });
 
   it("returns the clicked section itself when it is the capped one", () => {
-    // Arrange
+    // Arrange — the detached shell tail keeps its own per-section fold.
     const feed = node("feed", null);
-    const out = node("out", feed, "tool-output");
+    const tail = node("tail", feed, "tool-output", "bash-output", "shell-tail");
     // Act + Assert
-    expect(cappedSectionAt(out, feed)?.name).toBe("out");
+    expect(cappedSectionAt(tail, feed)?.name).toBe("tail");
   });
 
   it("returns null for a click on an uncapped part of the feed", () => {
@@ -125,15 +139,14 @@ describe("cappedSectionAt", () => {
     expect(cappedSectionAt(body, feed)?.name).toBe("scroll");
   });
 
-  it("resolves a click on a subagent description to the box holding its folded JSON", () => {
-    // Arrange — the Agent card as render.ts lays it out: the description line is
-    // all the user can aim at, and the .tool-input box around it is what expands.
+  it("resolves a click on a tool card's collapsed header line to the CARD", () => {
+    // Arrange — a collapsed tool card: the two-row input line is all the reader
+    // can aim at, and clicking it opens the whole `.tool-fold` card.
     const feed = node("feed", null);
-    const card = node("card", feed, "tool-card", "tool-agent");
-    const box = node("box", card, "tool-input", "agent-input");
-    const desc = node("desc", box, "file-path", "agent-input-desc");
+    const card = node("card", feed, "tool-card", "tool-fold");
+    const input = node("input", card, "bash-input", "cmd");
     // Act + Assert
-    expect(cappedSectionAt(desc, feed)?.name).toBe("box");
+    expect(cappedSectionAt(input, feed)?.name).toBe("card");
   });
 });
 
@@ -211,36 +224,34 @@ describe("isExpanded", () => {
 });
 
 describe("expandedKeys", () => {
-  it("keys the expanded section by class and occurrence", () => {
-    // Arrange — a Bash card whose output is open and whose command is not.
-    const sections = [section("bash-input"), section("bash-output", EXPANDED_CLASS)];
+  it("keys the expanded card by class and occurrence", () => {
+    // Arrange — a tool card whose fold the reader opened.
+    const sections = [section("tool-fold", EXPANDED_CLASS)];
     // Act + Assert
-    expect(expandedKeys(sections)).toEqual(["bash-output:0"]);
+    expect(expandedKeys(sections)).toEqual(["tool-fold:0"]);
   });
 
   it("counts occurrences among sections sharing a class", () => {
-    // Arrange — two outputs in one item, only the second open.
-    const sections = [section("tool-output"), section("tool-output", EXPANDED_CLASS)];
+    // Arrange — two tool cards in one item, only the second open.
+    const sections = [section("tool-fold"), section("tool-fold", EXPANDED_CLASS)];
     // Act + Assert
-    expect(expandedKeys(sections)).toEqual(["tool-output:1"]);
+    expect(expandedKeys(sections)).toEqual(["tool-fold:1"]);
   });
 
-  it("keys a multi-class section by its SPECIFIC class, not the generic wrapper", () => {
-    // Arrange — the Bash output carries both tool-output and bash-output. The
-    // specific class names the key, so a plain .tool-output appearing beside
-    // it cannot renumber it out from under an open section.
-    const sections = [section("tool-output", "bash-output", EXPANDED_CLASS)];
+  it("keys a section by its CAPPED class, ignoring the non-capped classes beside it", () => {
+    // Arrange — the shell tail carries tool-output and bash-output too, but only
+    // shell-tail is a capped class, so it names the key.
+    const sections = [section("tool-output", "bash-output", "shell-tail", EXPANDED_CLASS)];
     // Act + Assert
-    expect(expandedKeys(sections)).toEqual(["bash-output:0"]);
+    expect(expandedKeys(sections)).toEqual(["shell-tail:0"]);
   });
 
-  it("keeps a specific section's key stable when a generic one lands above it", () => {
-    // Arrange — a Skill card gaining an error result above its open body,
-    // which is the collision the ordering exists to prevent.
-    const body = section("tool-output", "skill-content", EXPANDED_CLASS);
+  it("keeps a card's key stable when a different-class section lands above it", () => {
+    // Arrange — an open tool card.
+    const body = section("tool-fold", EXPANDED_CLASS);
     const before = expandedKeys([body]);
-    // Act — the result box arrives ahead of it.
-    const after = expandedKeys([section("tool-output"), body]);
+    // Act — a shell tail (a different capped class) arrives ahead of it.
+    const after = expandedKeys([section("shell-tail"), body]);
     // Assert
     expect(after).toEqual(before);
   });
@@ -260,10 +271,10 @@ describe("expandedKeys", () => {
 
 describe("applyExpanded", () => {
   it("re-expands the sections a re-render replaced", () => {
-    // Arrange — the rebuilt item's fresh, capped sections.
-    const sections = [section("bash-input"), section("bash-output")];
+    // Arrange — the rebuilt item's fresh, collapsed cards.
+    const sections = [section("tool-fold"), section("tool-fold")];
     // Act
-    applyExpanded(sections, ["bash-output:0"]);
+    applyExpanded(sections, ["tool-fold:1"]);
     // Assert
     expect(sections.map((s) => s.classes.has(EXPANDED_CLASS))).toEqual([false, true]);
   });
@@ -278,18 +289,19 @@ describe("applyExpanded", () => {
   });
 
   it("drops a key whose section the re-render no longer renders", () => {
-    // Arrange — the rebuilt item carries one section where two were open.
-    const sections = [section("bash-input")];
-    // Act + Assert — the surviving section reopens and the missing one is ignored.
-    expect(() => applyExpanded(sections, ["bash-input:0", "bash-output:0"])).not.toThrow();
+    // Arrange — the rebuilt item carries one card where a card and a shell tail
+    // were open.
+    const sections = [section("tool-fold")];
+    // Act + Assert — the surviving card reopens and the missing key is ignored.
+    expect(() => applyExpanded(sections, ["tool-fold:0", "shell-tail:0"])).not.toThrow();
     expect(sections[0].classes.has(EXPANDED_CLASS)).toBe(true);
   });
 
-  it("keeps an open section open when a different-class section lands above it", () => {
-    // Arrange — an open output whose re-render grew a command line above it,
+  it("keeps an open card open when a different-class section lands above it", () => {
+    // Arrange — an open tool card whose re-render grew a shell tail above it,
     // the layout shift that breaks a positional index.
-    const before = [section("bash-output", EXPANDED_CLASS)];
-    const after = [section("bash-input"), section("bash-output")];
+    const before = [section("tool-fold", EXPANDED_CLASS)];
+    const after = [section("shell-tail"), section("tool-fold")];
     // Act
     applyExpanded(after, expandedKeys(before));
     // Assert
@@ -341,10 +353,12 @@ describe("installClickExpand", () => {
   /** A feed holding one capped section, mounted for real click dispatch. */
   function mountFeed(inner = ""): { feed: HTMLElement; box: HTMLElement } {
     const el = document.createElement("div");
-    el.innerHTML = `<div class="tool-output">${inner}</div>`;
+    // `.tool-fold` is the card-level capped section the handler toggles: a whole
+    // tool-call/skill card, opened as one unit (CAPPED_CLASSES).
+    el.innerHTML = `<div class="tool-fold">${inner}</div>`;
     document.body.appendChild(el);
     feed = el;
-    return { feed: el, box: el.querySelector(".tool-output") as HTMLElement };
+    return { feed: el, box: el.querySelector(".tool-fold") as HTMLElement };
   }
 
   it("expands the capped section a click lands on", () => {
