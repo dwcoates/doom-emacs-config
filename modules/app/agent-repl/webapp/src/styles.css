@@ -1368,6 +1368,21 @@ pre {
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
 }
+/* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
+   animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
+   animations whenever `document.visibilityState === "hidden"` — which the
+   xwidget reports whenever Emacs is not the frontmost app — so the band froze
+   every time the editor lost focus, on screen the whole time. `prompt-wave-
+   driver.ts` stamps this flag while the page is hidden and hand-paints
+   `background-position-x` from a JS timer (timers fire when hidden, the
+   compositor does not); this rule turns the dead animation OFF so that inline
+   paint is what shows, since an animation — even a suspended one — outranks an
+   inline style. It is a WATCH FLAG, not a lock: on return to visible the driver
+   clears the flag and the compositor takes the pass back, re-seeked to the same
+   phase. The fill stays, so the band the driver paints has something to move. */
+html[data-page-hidden] .bubble.user[data-wave="working"] {
+  animation: none;
+}
 /* Left to right, entering fully off the left edge and leaving fully off the
    right. Percentages in `background-position` measure the image's travel
    across the leftover (container − image), which is NEGATIVE for an image
