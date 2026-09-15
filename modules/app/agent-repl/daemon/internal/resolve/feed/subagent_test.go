@@ -176,6 +176,70 @@ func TestAnUpdateKeepsTheOriginalClockAndCarriesTheTokenSum(t *testing.T) {
 	}
 }
 
+// progressBeat advances a spawn's bubble with one running token sum.
+func (h *harness) progressBeat(unit string, tokens uint64) {
+	h.t.Helper()
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: tokens},
+			}},
+		}},
+	})
+}
+
+// TestSuccessiveProgressBeatsReplaceTheBubbleTokenSum locks the bubble's running
+// figure to REPLACE, never sum: each beat is a whole-state running total.
+func TestSuccessiveProgressBeatsReplaceTheBubbleTokenSum(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.progressBeat("spawn-1", 12_400)
+
+	// Act.
+	h.progressBeat("spawn-1", 20_000)
+
+	// Assert.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "20k tok" {
+		t.Fatalf("tokens = %q, want the latest beat's whole sum, never 12.4k + 20k", got)
+	}
+}
+
+// TestASettledTotalSupersedesTheRunningBeat locks the proto's rule that the
+// running figure is superseded by the full accounting at conclusion: a settled
+// async total replaces whatever the last running beat had drawn.
+func TestASettledTotalSupersedesTheRunningBeat(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.progressBeat("spawn-1", 8_600)
+
+	// Act: the run settles with its reconciled total.
+	settledTotal := uint64(11_114)
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				Prompt: &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Report: &conversationv1.AgentSubagentReport{},
+				Totals: &conversationv1.AgentSubagentTotals{
+					Usage: &conversationv1.AgentSubagentTotals_TotalOnly{
+						TotalOnly: &conversationv1.AgentSubagentAsyncUsage{TotalTokens: &settledTotal},
+					},
+				},
+			}},
+		}},
+	})
+
+	// Assert.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "11.1k tok" {
+		t.Fatalf("tokens = %q, want the settled total to supersede the running beat", got)
+	}
+}
+
 func TestASettledSpawnStopsTheClockAndSucceeds(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

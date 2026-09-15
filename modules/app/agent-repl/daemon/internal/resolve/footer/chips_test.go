@@ -309,6 +309,36 @@ func workID(v string) *conversationv1.DetachedWorkId {
 	return &conversationv1.DetachedWorkId{Value: v}
 }
 
+// detachedProgress is a backgrounded run's own running beat, carrying the
+// running token sum a `task_progress` message states.
+func detachedProgress(tokens uint64) *conversationv1.AgentSubagent {
+	return &conversationv1.AgentSubagent{
+		Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+			Progress: &conversationv1.AgentSubagentProgress{TotalTokens: tokens},
+		}},
+	}
+}
+
+// TestSuccessiveDetachedProgressReplacesTheAgentFigure locks the running figure
+// of a BACKGROUNDED agent to REPLACE, never sum: each beat states a whole-state
+// running total, so the later one stands alone rather than being added.
+func TestSuccessiveDetachedProgressReplacesTheAgentFigure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+	h.r.OnSubagent(testWS, workID("work-1"), detachedProgress(12_400))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("work-1"), detachedProgress(20_000))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if got := rows[0].GetTokens().GetText(); got != "20k tok" {
+		t.Fatalf("tokens = %q, want the latest beat's whole sum, never 12.4k + 20k", got)
+	}
+}
+
 func TestADetachedSubagentCountsInTheAgentsChip(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
