@@ -17,7 +17,6 @@ func TestEveryActivityKindThatDrawsNothingDrawsNothing(t *testing.T) {
 		name string
 		item any
 	}{
-		{name: "reasoning is drawn elsewhere", item: &conversationv1.AgentThinking{}},
 		{name: "a task act draws in the footer's checklist only", item: &conversationv1.AgentTaskAct{}},
 		{name: "a monitor is footer-only", item: &conversationv1.AgentMonitor{}},
 		{name: "a self-wakeup drives the footer", item: &conversationv1.AgentScheduleWakeup{}},
@@ -34,8 +33,6 @@ func TestEveryActivityKindThatDrawsNothingDrawsNothing(t *testing.T) {
 				ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
 			}
 			switch i := tc.item.(type) {
-			case *conversationv1.AgentThinking:
-				act.Item = &conversationv1.AgentActivity_Thinking{Thinking: i}
 			case *conversationv1.AgentTaskAct:
 				act.Item = &conversationv1.AgentActivity_TaskAct{TaskAct: i}
 			case *conversationv1.AgentMonitor:
