@@ -195,6 +195,22 @@ func TestProseSettlesAsFromModelByDefault(t *testing.T) {
 	}
 }
 
+func TestProseCarriesTheRecordTimestampAsItsSettleInstant(t *testing.T) {
+	// Arrange. INSTANTS ARE NEVER RE-STAMPED AT EMIT TIME: the settled bubble's
+	// "N ago" corner must be the transcript record's OWN timestamp so a
+	// re-compose reproduces the same instant rather than the daemon's clock.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1, `{"type":"text","text":"the answer"}`))
+
+	// Assert.
+	success := activityOf(entries[0]).GetResponse().GetSuccess()
+	if got := success.GetSettledAt().GetAtMs(); got != 1784750316000 {
+		t.Fatalf("settled_at = %d, want the record's timestamp", got)
+	}
+}
+
 func TestVendorSynthesizedNoticeIsNotDrawnAsTheAgentsAnswer(t *testing.T) {
 	// Arrange. The vendor synthesizes error notices AS assistant prose, so a
 	// consumer that trusts the shape draws an outage as something the agent said.
