@@ -219,6 +219,12 @@ type DB interface {
 	// DrainSchedule loads the schedule in force, nil when none is.
 	DrainSchedule(ctx context.Context) (*DrainSchedule, error)
 
+	// PutFeedTextScale persists the single daemon-global feed text zoom.
+	PutFeedTextScale(ctx context.Context, scale float64) error
+	// FeedTextScale loads the persisted feed text zoom, or DefaultFeedTextScale
+	// when none is set.
+	FeedTextScale(ctx context.Context) (float64, error)
+
 	// ClaimServing records this daemon instance as the workspace's serving
 	// owner — the handover's per-workspace transfer.
 	ClaimServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error

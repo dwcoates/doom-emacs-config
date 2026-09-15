@@ -111,6 +111,12 @@ type fakeDB struct {
 	workspaces   map[ids.WorkspaceID]wsm.Workspace
 	repositories []wsm.Repository
 	drainPut     []wsm.DrainSchedule
+	// feedScalePut records every persisted feed text zoom; feedScalePutErr
+	// fails the write; feedScaleRead is what FeedTextScale answers (0 means the
+	// default).
+	feedScalePut    []float64
+	feedScalePutErr error
+	feedScaleRead   float64
 	// sessions are the durable session records, by workspace.
 	sessions map[ids.WorkspaceID]wsm.Session
 	// sessionErr fails every session read.
@@ -158,6 +164,25 @@ func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 func (f *fakeDB) PutDrainSchedule(_ context.Context, s wsm.DrainSchedule) error {
 	f.drainPut = append(f.drainPut, s)
 	return nil
+}
+
+// PutFeedTextScale records each persisted feed text zoom, or fails when
+// feedScalePutErr is set (the persistence-failure path).
+func (f *fakeDB) PutFeedTextScale(_ context.Context, scale float64) error {
+	if f.feedScalePutErr != nil {
+		return f.feedScalePutErr
+	}
+	f.feedScalePut = append(f.feedScalePut, scale)
+	return nil
+}
+
+// FeedTextScale answers the seeded scale, defaulting to 1.0 like the real
+// store's absent-row case.
+func (f *fakeDB) FeedTextScale(context.Context) (float64, error) {
+	if f.feedScaleRead == 0 {
+		return wsm.DefaultFeedTextScale, nil
+	}
+	return f.feedScaleRead, nil
 }
 
 // fakeOwnership answers a fixed serving standing.

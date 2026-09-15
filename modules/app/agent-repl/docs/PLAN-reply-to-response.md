@@ -125,3 +125,85 @@ selection push), then daemon + webapp + elisp in parallel, integration + tests.
 Every change gets tests (Go table/AAA no time.Sleep; webapp vitest; elisp batch
 ERT). Live-verify the selection highlight + center-scroll + autoscroll
 suppression in the webview after deploy.
+
+---
+
+# Plan — Subagent restore-from-store on resume (consolidated)
+
+Two related, owner-reported bugs, SAME root family (resume path doesn't
+reconstruct subagent state from the store). Awaiting owner "proceed" before
+dispatch. Investigated by the lead + the subagent-bubble agent.
+
+## Bug A — expanded subagent bubble shows only the parent's prompt (#5)
+
+Receipt-backed diagnosis (subagent-bubble agent):
+- A subagent's own conversation reaches the feed ONLY via a `WatchAgent` opened
+  for the created agent — opened only from a LIVE spawn frame
+  (`route.go` routeActivityLocked→watchSpawnedSubagentLocked) or from an item
+  still in `LiveWork` on adoption.
+- On RESUME, the opening `HistoryPage` is per-agent and NOT walked as live frames
+  (`routeOpeningPageLocked`); the MAIN agent's page carries the parent's spawn
+  Start/Success (which mint the sub-feed + draw the commission) but NOT the
+  created agent's own book.
+- So a subagent that finished in a prior session is neither live nor re-watched;
+  its conversation is never fetched. `place(s, created)` is never invoked for its
+  real frames — no ordering/unplaceable bug. Expanded bubble shows only the
+  commission (parent prompt) drawn by `drawCommission`.
+
+## Bug B — detached subagent bubble restores as "failed"
+
+Lead investigation of the store (`~/.cache/agent-repl/store/events.db`):
+- `detached_work` records ALL have a stored terminal; sampled terminals are
+  `success` (kind=bash 737, kind=detached 19, all has_terminal=1).
+- So "failed" is NOT what's stored — the resume path isn't reading the stored
+  terminal and defaults the bubble to failed.
+
+## Consolidated fix (proposed; lead recommended, awaiting owner go)
+
+One "restore subagents from the store on resume" change:
+1. TERMINAL: on resume, draw the detached subagent bubble's terminal from the
+   stored `detached_work.terminal` (the success already there), never a "failed"
+   default.
+2. CONVERSATION (Bug A): option (a) — recognize spawn frames on the opening page
+   and open a `WatchAgent`/replay for each created agent so its own page replays
+   into `Feed{Agent: created}`. Child frames ARE in the store (its book's
+   page_line frames), so this is wiring, not new capture.
+   - Alternatives considered: (b) persist finished-subagent ids + re-watch on
+     resume; (c) shim serves nested child pages. Lead recommends (a).
+
+Additive proto only if needed. Spans sessionwatcher + shim `WatchAgent`.
+
+---
+
+# PENDING STATE AT COMPACTION (2026-09-15)
+
+## Un-merged branch (do NOT merge until after compaction, owner ruling)
+- `fix/delete-pseudo-workspaces-after-load` @ `167bb4e07`, worktree
+  `<scratchpad>/wt-pseudo`. Deletes the "main" pseudo-perspective after the first
+  workspace loads (fixes M-<n> off-by-one). "none"/persp-nil is UNKILLABLE
+  (persp-mode refuses), so only "main" is killed; off-by-one was by ONE, so
+  killing the one killable phantom should resolve it. Hooked
+  `agent-repl-roster-bringup-functions` (finished + opened>0). Batch ERT 274/274.
+  NEEDS: merge + deploy + LIVE-VERIFY (this is a startup-bringup event; hot-load
+  won't re-run it — verify by eval'ing the deletion fn live or after a restart,
+  then check `persp-names` no longer has "main" and M-1 → first real workspace).
+
+## Awaiting owner decisions
+1. Subagent restore-from-store consolidated fix above — proceed? (lead rec:
+   stored terminal + option (a)).
+2. Reply-to-a-past-response feature (top of this file) — architecture + prefix
+   confirmed by owner; ready to dispatch (cross-system fanout).
+
+## Landed + deployed this session (recent, for context)
+- Tab-bar-blue fix (elisp roster decoder accepts RosterRowWhen active/created).
+- Tree wrap: to-cap, detached-cap, indented connectors, inline-code balancing,
+  first-paint (reverted — caused disappearing content), settle-instant duration.
+- Incremental reveal (per-position reconcile, no per-frame rebuild).
+- Overscan buffer (~5 pages) for scroll jitter.
+- Prompt live-purple border keyed on data-wave.
+- Per-letter full-spectrum thinking gradient.
+- Subagent bubble head: yellow token, true total (incl cache reads), real clock,
+  green done badge. (#5 interior still pending — see Bug A.)
+- Detached-shell → canonical tool-call bubble reframe; sidebar when=last-activity
+  (created shows bare age); forward-compat push-arm skew quiet-skip.
+- deploy-all.sh now hot-reloads elisp by default.
