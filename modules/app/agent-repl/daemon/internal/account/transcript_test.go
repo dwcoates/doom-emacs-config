@@ -9,10 +9,178 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
 )
+
+// recordAt is a well-formed vendor record carrying one RFC3339 timestamp, so a
+// test can control the LAST-RECORD instant NewestTranscript selects by.
+func recordAt(ts time.Time) string {
+	return `{"type":"assistant","timestamp":"` + ts.Format(time.RFC3339) + `"}`
+}
+
+// setMtime stamps a file's modification time so a test can separate on-disk
+// mtime from a transcript's own last-record timestamp.
+func setMtime(t *testing.T, path string, mt time.Time) {
+	t.Helper()
+	if err := os.Chtimes(path, mt, mt); err != nil {
+		t.Fatalf("Chtimes() = %v", err)
+	}
+}
+
+func TestNewestTranscriptAdoptsTheOnlyTranscript(t *testing.T) {
+	// Arrange: one transcript under the routed (default) root.
+	f := newTranscriptFixture(t)
+	last := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	path := plantTranscript(t, f.def, f.ws, "uuid-1", recordAt(last))
+
+	// Act.
+	got, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NewestTranscript() = %v, want nil", err)
+	}
+	if got.VendorSessionID != "uuid-1" || got.Path != path || got.ConfigDir != f.def {
+		t.Fatalf("NewestTranscript() = %+v, want uuid-1 at %s under %s", got, path, f.def)
+	}
+	if !got.LastRecordAt.Equal(last) {
+		t.Fatalf("LastRecordAt = %v, want %v", got.LastRecordAt, last)
+	}
+}
+
+func TestNewestTranscriptSelectsByLastRecordTimestamp(t *testing.T) {
+	// Arrange: the OLDER file on disk (earlier mtime) carries the NEWER
+	// last-record timestamp — selection must follow the record, not the mtime.
+	f := newTranscriptFixture(t)
+	older := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	newer := time.Now().Add(-30 * time.Minute).UTC().Truncate(time.Second)
+	winner := plantTranscript(t, f.def, f.ws, "uuid-winner", recordAt(newer))
+	setMtime(t, winner, older) // newer content, older mtime
+	loser := plantTranscript(t, f.def, f.ws, "uuid-loser", recordAt(older))
+	setMtime(t, loser, time.Now()) // older content, newest mtime
+
+	// Act.
+	got, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NewestTranscript() = %v, want nil", err)
+	}
+	if got.VendorSessionID != "uuid-winner" {
+		t.Fatalf("NewestTranscript() = %q, want uuid-winner (newest last-record timestamp)", got.VendorSessionID)
+	}
+}
+
+func TestNewestTranscriptFallsBackToMtimeWhenUnparseable(t *testing.T) {
+	// Arrange: neither transcript carries a parseable timestamp, so the file
+	// mtime is the only ordering left.
+	f := newTranscriptFixture(t)
+	older := plantTranscript(t, f.def, f.ws, "uuid-older", "{}")
+	setMtime(t, older, time.Now().Add(-time.Hour))
+	newer := plantTranscript(t, f.def, f.ws, "uuid-newer", "{}")
+	setMtime(t, newer, time.Now())
+
+	// Act.
+	got, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NewestTranscript() = %v, want nil", err)
+	}
+	if got.VendorSessionID != "uuid-newer" {
+		t.Fatalf("NewestTranscript() = %q, want uuid-newer (newest mtime fallback)", got.VendorSessionID)
+	}
+	if !got.LastRecordAt.IsZero() {
+		t.Fatalf("LastRecordAt = %v, want zero for an unparseable transcript", got.LastRecordAt)
+	}
+}
+
+func TestNewestTranscriptProbesOnlyTheRoutedRoot(t *testing.T) {
+	// Arrange: the transcript lives ONLY under the non-routed root, which is a
+	// different account. Adoption must never reach across accounts.
+	f := newTranscriptFixture(t)
+	plantTranscript(t, f.multi, f.ws, "uuid-other-account", recordAt(time.Now()))
+
+	// Act.
+	_, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if !errors.Is(err, account.ErrNoTranscripts) {
+		t.Fatalf("NewestTranscript() = %v, want ErrNoTranscripts (the other account's root is never probed)", err)
+	}
+}
+
+func TestNewestTranscriptEmptyIsErrNoTranscripts(t *testing.T) {
+	// Arrange: a workspace whose vendor project dir was never created.
+	f := newTranscriptFixture(t)
+
+	// Act.
+	_, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if !errors.Is(err, account.ErrNoTranscripts) {
+		t.Fatalf("NewestTranscript() = %v, want ErrNoTranscripts", err)
+	}
+}
+
+func TestNewestTranscriptIgnoresSidecarsAndNonJSONL(t *testing.T) {
+	// Arrange: only the .jsonl is a transcript; a sidecar dir and a stray
+	// non-.jsonl file beside it must be skipped, never adopted.
+	f := newTranscriptFixture(t)
+	path := plantTranscript(t, f.def, f.ws, "uuid-1", recordAt(time.Now().Add(-time.Hour)))
+	plantSidecar(t, path, "agent-x.json", "{}")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "notes.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+
+	// Act.
+	got, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NewestTranscript() = %v, want nil", err)
+	}
+	if got.VendorSessionID != "uuid-1" {
+		t.Fatalf("NewestTranscript() = %q, want uuid-1 (sidecar and non-jsonl ignored)", got.VendorSessionID)
+	}
+}
+
+func TestNewestTranscriptReportsModTime(t *testing.T) {
+	// Arrange: the ModTime it answers is the file's, the caller's idle-guard
+	// input.
+	f := newTranscriptFixture(t)
+	path := plantTranscript(t, f.def, f.ws, "uuid-1", recordAt(time.Now().Add(-time.Hour)))
+	mt := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
+	setMtime(t, path, mt)
+
+	// Act.
+	got, err := f.r.NewestTranscript(context.Background(), f.ws)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NewestTranscript() = %v, want nil", err)
+	}
+	if !got.ModTime.Truncate(time.Second).Equal(mt) {
+		t.Fatalf("ModTime = %v, want %v", got.ModTime, mt)
+	}
+}
+
+func TestNewestTranscriptRejectsEmptyWorkspaceDir(t *testing.T) {
+	// Arrange: an empty workspace dir has no project dir to probe and must be
+	// refused rather than probing some root's whole projects tree.
+	f := newTranscriptFixture(t)
+
+	// Act.
+	_, err := f.r.NewestTranscript(context.Background(), "")
+
+	// Assert.
+	if err == nil || errors.Is(err, account.ErrNoTranscripts) {
+		t.Fatalf("NewestTranscript(\"\") = %v, want a validation error", err)
+	}
+}
 
 func TestEncodeCWD(t *testing.T) {
 	tests := []struct {
