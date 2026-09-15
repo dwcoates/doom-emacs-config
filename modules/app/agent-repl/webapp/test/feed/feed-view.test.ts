@@ -21,6 +21,7 @@ import {
   type FeedController,
 } from "../../src/feed/feed-view.js";
 import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js";
+import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import {
   agentPromptRow,
@@ -78,7 +79,11 @@ interface Fixture {
 function fixture(
   h: Harness = harness(),
   overrides: Partial<RowContext> = {},
-  opts: { feed?: FeedId; renderers?: Partial<Parameters<typeof stubRenderers>[0]> } = {},
+  opts: {
+    feed?: FeedId;
+    renderers?: Partial<Parameters<typeof stubRenderers>[0]>;
+    overscan?: Overscan;
+  } = {},
 ): Fixture {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
@@ -102,8 +107,22 @@ function fixture(
       revealRow: async () => false,
       ...overrides,
     },
+    overscan: opts.overscan,
   });
   return { h, host, controller, bubbles };
+}
+
+/** An overscan spy: records the elements it is asked to observe and unobserve. */
+function spyOverscan(): Overscan & { observed: HTMLElement[]; unobserved: HTMLElement[] } {
+  const observed: HTMLElement[] = [];
+  const unobserved: HTMLElement[] = [];
+  return {
+    observed,
+    unobserved,
+    observe: (row) => observed.push(row),
+    unobserve: (row) => unobserved.push(row),
+    dispose: () => {},
+  };
 }
 
 /** The row ids the host currently draws, in order. */
@@ -380,6 +399,59 @@ describe("createFeedController: a live removal drops the row", () => {
     controller.upsert(removedRow("ghost"));
     // Assert.
     expect(drawnIds(host)).toEqual(["a"]);
+  });
+});
+
+// THE OVERSCAN WIRING: a row is handed to the pre-render buffer the moment its
+// chrome is born and handed back the moment the feed drops it, so the buffer
+// can force the layout of rows near the viewport without leaking a watch on a
+// row that is no longer on the page.
+
+describe("createFeedController: the overscan buffer watches a row's whole life", () => {
+  it("hands a newly adopted row to the overscan to observe", () => {
+    // Arrange.
+    const overscan = spyOverscan();
+    const { controller, host } = fixture(harness(), {}, { overscan });
+    // Act.
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Assert.
+    const row = host.querySelector<HTMLElement>('[data-feed-row="a"]');
+    expect(overscan.observed).toContain(row);
+  });
+
+  it("hands a live-appended row to the overscan to observe", () => {
+    // Arrange.
+    const overscan = spyOverscan();
+    const { controller, host } = fixture(harness(), {}, { overscan });
+    // Act.
+    controller.upsert(responseRow("a"));
+    // Assert.
+    const row = host.querySelector<HTMLElement>('[data-feed-row="a"]');
+    expect(overscan.observed).toContain(row);
+  });
+
+  it("hands a removed row back to the overscan to unobserve, so nothing leaks", () => {
+    // Arrange.
+    const overscan = spyOverscan();
+    const { controller, host } = fixture(harness(), {}, { overscan });
+    controller.applyPage(page([responseRow("a")]), "replace");
+    const row = host.querySelector<HTMLElement>('[data-feed-row="a"]');
+    // Act.
+    controller.upsert(removedRow("a"));
+    // Assert.
+    expect(overscan.unobserved).toContain(row);
+  });
+
+  it("hands rows dropped above a separation back to the overscan to unobserve", () => {
+    // Arrange.
+    const overscan = spyOverscan();
+    const { controller, host } = fixture(harness(), {}, { overscan });
+    controller.applyPage(page([responseRow("a")]), "replace");
+    const row = host.querySelector<HTMLElement>('[data-feed-row="a"]');
+    // Act: a separation lands after the row, so the row above it is truncated.
+    controller.upsert(separationRow("s"));
+    // Assert.
+    expect(overscan.unobserved).toContain(row);
   });
 });
 

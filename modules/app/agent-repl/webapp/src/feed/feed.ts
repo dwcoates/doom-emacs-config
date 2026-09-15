@@ -57,6 +57,7 @@ import {
 } from "./renderers.js";
 import { drawFeedSubagent, drawFeedDetachedSubagent } from "./rows/subagent.js";
 import { tick, stopTicking } from "./ticking.js";
+import { createOverscan } from "./overscan.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1500;
@@ -100,6 +101,14 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // bubble in it -- root-level, nested, merge or subagent -- is built by
   // `bubbleFor` below, so they all obey the same one.
   const reveal = scrollBox === null || tail === null ? undefined : feedReveal(scrollBox, tail);
+  // THE OVERSCAN BUFFER, rooted on the same scroll box, blows the pre-render
+  // band out to ~5 viewport heights so a row within it lays out at its true
+  // height before the reader scrolls to it — the cure for the first-scroll
+  // `content-visibility: auto` jitter. `null` where there is no box (a fixture)
+  // or the environment ships no `IntersectionObserver`, in which case the feed
+  // works exactly as before, minus the pre-render. ONE instance is shared with
+  // every sub-feed, since they all scroll inside this one box.
+  const overscan = scrollBox === null ? null : createOverscan(scrollBox);
   let watch: StreamHandle | null = null;
   let disposed = false;
 
@@ -117,6 +126,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     bubble: bubbleFor,
     bodyContext: feedContext(),
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
+    overscan: overscan ?? undefined,
   });
 
   openWatch();
@@ -265,6 +275,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       composerFactory: deps.composerFactory,
       head: bubbleHead,
       scroll: reveal,
+      overscan: overscan ?? undefined,
     };
     if (unitCase(row) === "merge") {
       return mountBubble({
@@ -414,6 +425,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     disposed = true;
     watch?.cancel();
     unobserve?.();
+    overscan?.dispose();
     root.dispose();
   }
 }
