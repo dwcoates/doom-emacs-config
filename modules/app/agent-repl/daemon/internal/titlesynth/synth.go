@@ -2,7 +2,6 @@ package titlesynth
 
 import (
 	"context"
-	"errors"
 	"hash/fnv"
 	"strconv"
 	"strings"
@@ -278,7 +277,7 @@ func (s *Synthesizer) callModel(ctx context.Context, ws ids.WorkspaceID, summary
 		// enhancement over the name, so it is recorded at INFO — nobody has to
 		// act on the name still standing.
 		s.deps.Log.Info(opSynth, "the synthesized-title model call did not answer; keeping the workspace name", dlog.Context{
-			"workspace": string(ws), "model": headless.ModelHaiku, "cause": causeOf(err),
+			"workspace": string(ws), "model": headless.ModelHaiku, "cause": headless.CauseOf(err),
 		})
 		return "", false
 	}
@@ -380,12 +379,3 @@ func digestHash(d *shimv1.GatherTitleDigestSuccess) string {
 	return strconv.FormatUint(h.Sum64(), 16)
 }
 
-// causeOf reads a headless failure's closed-set cause, falling back to the exit
-// status for a non-headless error.
-func causeOf(err error) string {
-	var hErr *headless.Error
-	if errors.As(err, &hErr) {
-		return hErr.Cause
-	}
-	return headless.CauseExitStatus
-}
