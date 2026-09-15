@@ -166,6 +166,24 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 			return err
 		}
 	}
+	if req.ReferenceResponseFeedid != nil {
+		if err := validateFeedID("reference_response_feedid", req.GetReferenceResponseFeedid()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSelectResponseRequest is SelectResponseRequest's base function. The
+// direction is required: UNSPECIFIED is never sent, so a request carrying it is
+// InvalidArgument rather than a typed refusal, exactly as the proto states.
+func validateSelectResponseRequest(req *agentreplv1.SelectResponseRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetDirection() == agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_UNSPECIFIED {
+		return invalid("direction", "a response-selection direction is required")
+	}
 	return nil
 }
 

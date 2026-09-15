@@ -159,6 +159,17 @@ func (s *server) watchFeed(
 	}
 
 	rows := tail.Rows(streamCtx)
+
+	// THE RESPONSE-SELECTION PUSH RIDES THE ROOT FEED'S WATCH ONLY. The
+	// FeedSelection frame names rows of THIS feed (the selected/centered
+	// final-response rows), and those rows live on the root feed; a sub-feed's
+	// watch carries none, so it subscribes to no selection. A nil channel in
+	// the select below simply never fires, which is what a non-root feed wants.
+	var selections <-chan *frontendv1.FeedSelection
+	if target.Feed.Root {
+		selections = s.selectionTopic(target.WS).Subscribe(streamCtx)
+	}
+
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a feed tail", dlog.Context{"token": token.GetValue()})
 	for {
@@ -176,6 +187,22 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{Row: row}); err != nil {
+				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		case sel, ok := <-selections:
+			if !ok {
+				// The selection subscription closes only on streamCtx
+				// cancellation, which the row arm handles too; loop and let the
+				// Done case end the stream cleanly.
+				selections = nil
+				continue
+			}
+			if sel == nil {
+				log.Error(rpc, "the selection topic raised an empty selection; it was not sent", nil)
+				continue
+			}
+			if err := out.Send(&agentreplv1.WatchFeedResponse{Selection: sel}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

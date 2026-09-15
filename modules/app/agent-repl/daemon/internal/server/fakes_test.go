@@ -284,14 +284,18 @@ func (f *fakeVerbs) AnswerQuestion(context.Context, ids.WorkspaceID, *conversati
 	return f.answerQuestionErr
 }
 
-// fakePrompts answers one submission outcome.
+// fakePrompts answers one submission outcome and records the said it was
+// handed, so a reply-to-a-past-response test can assert the daemon prepended
+// the referenced response before delivery.
 type fakePrompts struct {
 	prompthandler.Handler
-	outcome prompthandler.Outcome
-	err     error
+	outcome  prompthandler.Outcome
+	err      error
+	lastSaid *conversationv1.UserSaid
 }
 
-func (f *fakePrompts) Submit(context.Context, ids.WorkspaceID, *conversationv1.UserSaid, string, conversationv1.PromptOrigin, *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, _ conversationv1.PromptOrigin, _ *feedid.Ref) (prompthandler.Outcome, error) {
+	f.lastSaid = said
 	return f.outcome, f.err
 }
 
@@ -450,6 +454,20 @@ type fakeFeed struct {
 	lastFeed  feedid.Feed
 	lastRead  feed.ReaderID
 	openCalls int
+	// finals is the ordered selectable final-response set SelectResponse walks;
+	// markdown is each selectable row's copied markdown, keyed by FeedId value,
+	// for the reply-prefix path.
+	finals   []*frontendv1.FeedId
+	markdown map[string]string
+}
+
+func (f *fakeFeed) FinalResponses(ids.WorkspaceID) []*frontendv1.FeedId {
+	return f.finals
+}
+
+func (f *fakeFeed) ResponseMarkdown(_ ids.WorkspaceID, id *frontendv1.FeedId) (string, bool) {
+	md, ok := f.markdown[id.GetValue()]
+	return md, ok
 }
 
 func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {
