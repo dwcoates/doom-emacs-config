@@ -7,6 +7,7 @@ import {
   FeedPageSchema,
   FeedRowRemovedSchema,
   FeedRowSchema,
+  FeedSelectionSchema,
   type FeedId,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -17,6 +18,8 @@ import { forgetOwnTurns, rememberOwnTurn } from "../../src/composer/own-turns.js
 import {
   createFeedController,
   isBubbleRow,
+  SELECTED_RESPONSE_ATTRIBUTE,
+  SELECTED_RESPONSE_CLASS,
   type BubbleLike,
   type FeedController,
 } from "../../src/feed/feed-view.js";
@@ -934,6 +937,181 @@ describe("createFeedController: following the tail", () => {
     acts.length = 0;
     controller.applyPage(page([responseRow("older")]), "prepend");
     expect(acts).toContain("park");
+  });
+});
+
+describe("createFeedController: the response selection", () => {
+  /** A response renderer that draws the real `.bubble.assistant` chrome. */
+  function assistantResponse(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "bubble assistant final-response";
+    return el;
+  }
+
+  /** A scroll box and tail owner whose writes the test records. */
+  function selectionScroll(geometry: {
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+  }) {
+    const acts: string[] = [];
+    const shifts: number[] = [];
+    const box = { ...geometry, querySelector: () => null };
+    const tail = {
+      isFollowing: () => false,
+      park: () => acts.push("park"),
+      place: () => acts.push("place"),
+      release: () => acts.push("release"),
+      shift: (delta: number) => shifts.push(delta),
+    };
+    return { box, tail, acts, shifts };
+  }
+
+  /** A controller drawing assistant bubbles into a recording scroll box. */
+  function selecting(
+    geometry = { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 },
+    withScroll = true,
+  ) {
+    const h = harness();
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const scroll = selectionScroll(geometry);
+    const controller = createFeedController({
+      ctx: h.ctx,
+      host,
+      feed: "root",
+      renderers: stubRenderers({ response: assistantResponse }),
+      body: defaultBubbleBody,
+      revealRow: async () => false,
+      bubble: (row) => stubBubble(row),
+      bodyContext: {
+        ctx: h.ctx,
+        feed: "root",
+        row: create(FeedRowSchema, {}),
+        revealRow: async () => false,
+      },
+      scroll: withScroll ? { box: scroll.box, tail: scroll.tail as never } : undefined,
+    });
+    return { controller, host, acts: scroll.acts, shifts: scroll.shifts };
+  }
+
+  /** The selection state as the daemon pushes it. */
+  function sel(init: { selected?: string; active: boolean; center?: string }) {
+    return create(FeedSelectionSchema, {
+      selected: init.selected === undefined ? undefined : feedId(init.selected),
+      active: init.active,
+      center: init.center === undefined ? undefined : feedId(init.center),
+    });
+  }
+
+  /** Script a row element's box, which jsdom lays out not at all. */
+  function withRowGeometry(el: HTMLElement, offsetTop: number, offsetHeight: number): void {
+    Object.defineProperties(el, {
+      offsetTop: { get: () => offsetTop },
+      offsetHeight: { get: () => offsetHeight },
+    });
+  }
+
+  it("recolors the selected final-response bubble blue", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    // Assert
+    const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
+    expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(true);
+  });
+
+  it("marks the selected row's chrome so the feed's own record names it", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    // Assert
+    const row = host.querySelector('[data-feed-row="r1"]');
+    expect(row?.getAttribute(SELECTED_RESPONSE_ATTRIBUTE)).toBe("true");
+  });
+
+  it("clears the blue from the previously selected bubble when the selection moves", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.upsert(responseRow("r2"));
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    // Act — C-n moves the selection to the next response.
+    controller.applySelection(sel({ selected: "r2", active: true }));
+    // Assert
+    const first = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
+    expect(first?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(false);
+  });
+
+  it("clears the blue from every bubble when the selection is cleared", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    // Act — double-escape clears the selection.
+    controller.applySelection(sel({ active: false }));
+    // Assert
+    const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
+    expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(false);
+  });
+
+  it("releases the tail while a selection is active, so streaming rows do not pull the view", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    // Assert
+    expect(acts).toContain("release");
+  });
+
+  it("returns to the bottom by re-parking when the selection clears", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    acts.length = 0;
+    // Act
+    controller.applySelection(sel({ active: false }));
+    // Assert
+    expect(acts).toContain("park");
+  });
+
+  it("center-scrolls the selected row to the middle of the viewport", () => {
+    // Arrange — a 100px row at offset 500 in a 300px viewport over a 1000px
+    // feed: centering asks for scrollTop 500 - (300 - 100)/2 = 400.
+    const { controller, host, shifts } = selecting();
+    controller.upsert(responseRow("r1"));
+    const row = host.querySelector<HTMLElement>('[data-feed-row="r1"]');
+    withRowGeometry(row as HTMLElement, 500, 100);
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Assert
+    expect(shifts).toEqual([400]);
+  });
+
+  it("does not center a row this feed has not drawn", () => {
+    // Arrange — no rows drawn.
+    const { controller, shifts } = selecting();
+    // Act
+    controller.applySelection(sel({ selected: "gone", active: true, center: "gone" }));
+    // Assert — nothing is scrolled, and nothing throws.
+    expect(shifts).toEqual([]);
+  });
+
+  it("applies the border even with no scroll box", () => {
+    // Arrange — a sub-feed fixture has no scroll box; the border must still land.
+    const { controller, host } = selecting(undefined, false);
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Assert
+    const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
+    expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(true);
   });
 });
 
