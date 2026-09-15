@@ -80,6 +80,8 @@
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-select-response-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-select-response-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-interrupt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-shutdown-schedule-request "wire-verbs" (request))
@@ -314,6 +316,17 @@ The request carries the `UserSaid' content, an idempotency key and the
 REQUIRED origin naming the send site.  There is no precondition: the
 daemon starts or revives the session implicitly and answers with its own
 refusal arms when it will not run the prompt.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-select-response
+  "SelectResponse"
+  agent-repl-wire-encode-select-response-request
+  agent-repl-wire-decode-select-response-response
+  "Move or clear a workspace's reply-to-a-past-response selection cursor.
+The request carries only the workspace ref and a DIRECTION (`:prev',
+`:next', `:clear'): the daemon owns the ordered final-response rows, so it
+computes the newly selected feedid (both directions start at the most
+recent and wrap at each end) and pushes it to the webapp, then acks the
+selected feedid — or NONE — here for Emacs's own state tracking.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-interrupt
   "Interrupt"
