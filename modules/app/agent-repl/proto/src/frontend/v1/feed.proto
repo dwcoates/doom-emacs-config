@@ -532,6 +532,19 @@ message FeedResponse {
   // prose. UNSET = ordinary agent prose. Daemon-composed; the client holds
   // no notice vocabulary.
   optional FeedResponseNotice notice = 5;
+
+  // SET when this bubble is the agent's intermediate THINKING (its
+  // chain-of-thought reasoning on the way to an answer), NOT the answer or the
+  // commentary it says to the user. It reuses the whole prose-bubble machinery
+  // above — the same fragment-fed update/success/error arms, the same markdown
+  // reveal — differing only in HOW IT IS DRAWN: the client renders a thinking
+  // bubble purple and NON-BORDERED, and NEVER applies the green final-answer
+  // border to it. A thinking bubble is never the turn's concluded answer, so
+  // the turn's conclusion can never name it (its row is not filed as an answer
+  // row daemon-side); this flag is the second guard, letting the client's own
+  // green-final-answer rule exclude it structurally. UNSET = an ordinary
+  // response bubble (a partial or a final answer), unchanged.
+  bool thinking = 6;
 }
 
 // The notice register's heading, daemon-composed.
