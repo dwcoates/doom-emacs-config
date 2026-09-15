@@ -47,7 +47,15 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 	case *conversationv1.SessionUpdate_ContextUsage,
 		*conversationv1.SessionUpdate_FastMode,
 		*conversationv1.SessionUpdate_McpServer,
-		*conversationv1.SessionUpdate_IdentityRotated:
+		*conversationv1.SessionUpdate_IdentityRotated,
+		*conversationv1.SessionUpdate_Title:
+		// THE VENDOR'S ai-title RIDES HERE. It was previously unrouted and fell
+		// to the default WARN, so the topbar never drew the vendor's own
+		// conversation summary in place of the workspace name (owner ruling,
+		// 2026-09-13). The topbar resolver already handles the `title` arm; the
+		// gap was only that this route never delivered it. It ALSO drives the
+		// title synthesizer's vendor-present skip: once the vendor states a
+		// title, the daemon stops synthesizing its own.
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar", dlog.Context{
 			"arm": sessionArm(update),
 		})
@@ -150,6 +158,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "rate_limit_status"
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting"
+	case *conversationv1.SessionUpdate_Title:
+		return "title"
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died"
 	default:

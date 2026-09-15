@@ -339,6 +339,10 @@ func (c *fakeClient) ReadHistory(context.Context, *shimv1.ReadHistoryRequest) (*
 	panic("sessionwatcher must not call ReadHistory")
 }
 
+func (c *fakeClient) GatherTitleDigest(context.Context, *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error) {
+	panic("sessionwatcher must not call GatherTitleDigest")
+}
+
 func (c *fakeClient) Occupy(string) (func(), error) { panic("sessionwatcher must not take the lease") }
 func (c *fakeClient) Kill(context.Context, shimclient.KillAttribution) error {
 	panic("sessionwatcher must never kill: attach ends nothing")
@@ -1281,6 +1285,12 @@ func fastModeUpdate() *conversationv1.SessionUpdate {
 		FastMode: &conversationv1.SessionFastMode{
 			State: &conversationv1.SessionFastMode_On{On: &conversationv1.SessionFastModeOn{}},
 		},
+	}}
+}
+
+func titleUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_Title{
+		Title: &conversationv1.SessionTitle{Text: "Add SPC j keybinding support"},
 	}}
 }
 
