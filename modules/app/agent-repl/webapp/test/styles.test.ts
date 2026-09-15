@@ -884,6 +884,97 @@ describe("the cost corner's hover hit area", () => {
       expect(rule.declarations).not.toMatch(/--usage-corner-edge-gap/);
     }
   });
+
+  it("collapses the token toward the right edge, not at its identity position (owner ruling, 2026-09-15: restored synchronized slide)", () => {
+    // Arrange / Act — the token's base (collapsed) transform must be a
+    // rightward translate by the shared slide distance, not `translateX(0)`
+    // or no transform at all.
+    const corner = declarationsOf(".usage-corner") ?? "";
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+
+    // Assert — the corner declares the one shared distance, and the token's
+    // base transform uses that same variable rather than a literal or a
+    // no-op.
+    expect(corner).toMatch(/--usage-slide-distance:\s*[^;]+;/);
+    expect(stamp).toMatch(/transform:\s*translateX\(var\(--usage-slide-distance\)\)/);
+  });
+
+  it("collapses the duration off-right by the same shared distance the token collapses by", () => {
+    // Arrange / Act
+    const corner = declarationsOf(".usage-corner") ?? "";
+    const ago = declarationsOf(".usage-ago") ?? "";
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+
+    // Assert — both read `var(--usage-slide-distance)`, the single value
+    // declared once on the shared `.usage-corner` ancestor, so the two
+    // collapsed offsets are provably the same distance rather than two
+    // numbers that merely look similar.
+    expect(corner).toMatch(/--usage-slide-distance:\s*[^;]+;/);
+    expect(ago).toMatch(/transform:\s*translateX\(var\(--usage-slide-distance\)\)/);
+    expect(stamp).toMatch(/transform:\s*translateX\(var\(--usage-slide-distance\)\)/);
+  });
+
+  it("resolves both the token and the duration to translateX(0) under every reveal trigger", () => {
+    // Arrange / Act — the same trigger selectors that reveal the duration
+    // must also carry the token back to its resting (untranslated) position.
+    const triggers = [
+      ".bubble.assistant:hover",
+      ".bubble.assistant:focus-within",
+      ".usage-corner:hover",
+      ".usage-corner:focus-within",
+      ".usage-corner.usage-corner--revealed",
+    ];
+
+    // Assert
+    for (const trigger of triggers) {
+      const stampRule = declarationsOf(`${trigger} .usage-stamp`) ?? "";
+      const agoRule = declarationsOf(`${trigger} .usage-ago`) ?? "";
+      expect(stampRule).toMatch(/transform:\s*translateX\(0\)/);
+      expect(agoRule).toMatch(/transform:\s*translateX\(0\)/);
+    }
+  });
+
+  it("transitions the token's transform on the same duration and easing as the duration's", () => {
+    // Arrange / Act
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+    const ago = declarationsOf(".usage-ago") ?? "";
+
+    // Assert — both carry `transform 0.5s ease`, so the slide is one
+    // synchronized motion rather than two animations that happen to overlap.
+    expect(stamp).toMatch(/transition:\s*transform 0\.5s ease/);
+    expect(ago).toMatch(/transition:[^;]*transform 0\.5s ease/s);
+  });
+
+  it("never animates the token's width, max-width, or margin, so the reserved footprint stays constant", () => {
+    // Arrange / Act — the token's base rule and every reveal-trigger rule
+    // targeting it.
+    const base = declarationsOf(".usage-stamp") ?? "";
+    const revealed = declarationsOf(".usage-corner.usage-corner--revealed .usage-stamp") ?? "";
+
+    // Assert — only `transform`/`transition` change; no layout-affecting
+    // property is ever declared on the token, so the corner's floated
+    // footprint (token layout width + duration layout width, unaffected by
+    // `transform`) never changes and the first prose line never reflows.
+    for (const decls of [base, revealed]) {
+      expect(decls).not.toMatch(/(?:^|[\s;])width\s*:/);
+      expect(decls).not.toMatch(/(?:^|[\s;])max-width\s*:/);
+      expect(decls).not.toMatch(/(?:^|[\s;])margin/);
+    }
+  });
+
+  it("disables the token's slide transition under reduced motion, alongside the duration's", () => {
+    // Arrange / Act
+    const reduced = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".usage-stamp") && rule.selectors.includes(".usage-ago"),
+    );
+
+    // Assert — the reduced-motion override lists both selectors together and
+    // drops the transition for both, so reduced motion leaves no slide on
+    // either half of the pair.
+    expect(reduced).toBeDefined();
+    expect(reduced?.declarations).toMatch(/transition:\s*none/);
+  });
 })
 
 /**
