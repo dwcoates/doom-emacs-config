@@ -1008,6 +1008,13 @@ message AgentResponseSuccess {
     // produced these words. Draw it as a notice, never as the agent's answer.
     AgentResponseSynthesizedNotice synthesized_notice = 3;
   }
+
+  // When the block settled. UNSET when the producer observed no instant.
+  // Carried so a consumer's "N ago" corner is the REAL settle instant and
+  // stays stable across replays, exactly as every other activity terminal's
+  // settled_at does — a consumer that stamped its own compose-time clock
+  // would reset the corner to zero on every re-compose.
+  optional AgentActivitySettledAt settled_at = 4;
 }
 
 // The model wrote the prose.
@@ -1047,6 +1054,12 @@ message AgentResponseFailure {
   AgentResponseProse prose = 1;
   // Why it ended. Arms are DERIVED from the producer's real sites at the wave.
   AgentResponseFailureReason reason = 2;
+
+  // When the block settled as failed. UNSET when the producer observed no
+  // instant. Carried so a consumer's "N ago" corner is the REAL settle
+  // instant and stays stable across replays, exactly as every other activity
+  // terminal's settled_at does.
+  optional AgentActivitySettledAt settled_at = 3;
 }
 
 // Why a response ended without completing. The arms are the vendor's own
