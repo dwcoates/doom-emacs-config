@@ -804,8 +804,9 @@ still reads on the grey.  The full-vs-bracket background EXTENT still
 belongs to panel visibility (`agent-repl--ws-display-state') for an
 UNSELECTED tab — this override is scoped to `:selected' alone.
 
-The invariant parts are the ones no row has ever varied: `agent-repl--tab-weight' throughout, and the unselected bracket numeral in
-`agent-repl--color-default-bracket'."
+The invariant parts are the ones no row has ever varied:
+`agent-repl--tab-weight' throughout, and the unselected bracket numeral
+in `agent-repl--color-default-bracket'."
   (let* ((look `(:bg ,color
                  :fg ,fg
                  :bracket-fg ,agent-repl--color-default-bracket
