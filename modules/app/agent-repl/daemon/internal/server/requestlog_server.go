@@ -32,6 +32,23 @@ func (s *requestLoggingServer) SubmitPrompt(
 	return s.server.SubmitPrompt(ctx, req)
 }
 
+func (s *requestLoggingServer) SelectResponse(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SelectResponseRequest],
+) (resp *connect.Response[agentreplv1.SelectResponseResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "SelectResponse", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.select_response", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.select_response", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.SelectResponse(ctx, req)
+}
+
 func (s *requestLoggingServer) RequestCommandSupport(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RequestCommandSupportRequest],
