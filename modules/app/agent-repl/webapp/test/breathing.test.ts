@@ -8,7 +8,9 @@ import {
   AnimationEpoch,
   BREATH_PERIOD_MS,
   BREATH_SHADES,
+  BUBBLE_WAVE_FROM_PCT,
   BUBBLE_WAVE_PERIOD_MS,
+  BUBBLE_WAVE_TO_PCT,
   BreathingTicker,
   BubbleWave,
   breathColor,
@@ -311,6 +313,50 @@ describe("BubbleWave: the prompt bubble's wave phase survives a rebuild", () => 
     const got = wave.delayMs(NOW + 100);
     // Assert
     expect(got).toBe(100);
+  });
+});
+
+describe("BubbleWave.positionX: the band's spot for the hidden-page JS driver", () => {
+  it("sits at the pass's start at phase zero, where the keyframes begin", () => {
+    // Arrange — the first read stamps the epoch, so elapsed is zero.
+    const wave = new BubbleWave();
+    // Act
+    const got = wave.positionX(NOW);
+    // Assert — 200%, the band fully off the left edge.
+    expect(got).toBe(BUBBLE_WAVE_FROM_PCT);
+  });
+
+  it("reaches the pass's end just before one whole period elapses", () => {
+    // Arrange
+    const wave = new BubbleWave();
+    wave.positionX(NOW);
+    // Act — a hair short of the period, so it is near the end but not wrapped.
+    const got = wave.positionX(NOW + BUBBLE_WAVE_PERIOD_MS - 1);
+    // Assert — all but 1ms of the travel from 200% down to -100% is spent.
+    const travel = BUBBLE_WAVE_FROM_PCT - BUBBLE_WAVE_TO_PCT;
+    expect(got).toBeCloseTo(BUBBLE_WAVE_TO_PCT + travel / BUBBLE_WAVE_PERIOD_MS, 5);
+  });
+
+  it("wraps with the phase, so a long-open page keeps crossing", () => {
+    // Arrange — one whole period on is the same phase as the start.
+    const wave = new BubbleWave();
+    wave.positionX(NOW);
+    // Act
+    const got = wave.positionX(NOW + BUBBLE_WAVE_PERIOD_MS);
+    // Assert
+    expect(got).toBe(BUBBLE_WAVE_FROM_PCT);
+  });
+
+  it("reads the same epoch as delayMs, so the two channels never disagree", () => {
+    // Arrange — the compositor seeks by delayMs, the driver paints by
+    // positionX; both must describe one wave.
+    const wave = new BubbleWave();
+    const at = NOW + 1234;
+    // Act
+    const fraction = wave.delayMs(at) / BUBBLE_WAVE_PERIOD_MS;
+    const expected = BUBBLE_WAVE_FROM_PCT + (BUBBLE_WAVE_TO_PCT - BUBBLE_WAVE_FROM_PCT) * fraction;
+    // Assert
+    expect(wave.positionX(at)).toBeCloseTo(expected, 9);
   });
 });
 
