@@ -105,6 +105,9 @@ would abort the very branch a test is asserting."
     ("SubmitPrompt" agent-repl-rpc-submit-prompt
      agent-repl-wire-encode-submit-prompt-request
      agent-repl-wire-decode-submit-prompt-response)
+    ("SelectResponse" agent-repl-rpc-select-response
+     agent-repl-wire-encode-select-response-request
+     agent-repl-wire-decode-select-response-response)
     ("UpdateShutdownSchedule" agent-repl-rpc-update-shutdown-schedule
      agent-repl-wire-encode-update-shutdown-schedule-request
      agent-repl-wire-decode-update-shutdown-schedule-response)
