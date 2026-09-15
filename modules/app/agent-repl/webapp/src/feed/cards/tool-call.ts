@@ -98,8 +98,15 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
     context: { outcome: outcome.case },
   });
 
+  // CARD-LEVEL FOLD (owner ruling, 2026-09-15). The whole card is ONE
+  // click-to-expand unit (`.tool-fold`, CAPPED_CLASSES in expand.ts): collapsed
+  // it shows only the head (the title, in full) and its input line (capped at
+  // two rows); its output section is HIDDEN — no preview — until the card is
+  // `.expanded`, at which point the section is revealed (scrolling at 50vh) and
+  // the input line's two-row cap is lifted. The stylesheet keys all of that off
+  // `.tool-fold`/`.tool-fold.expanded`; this end only marks the card.
   const card = document.createElement("div");
-  card.className = "tool-card";
+  card.className = "tool-card tool-fold";
   card.setAttribute("data-state", outcome.case);
 
   const head = document.createElement("div");

@@ -19,36 +19,39 @@
 import { ancestorMatching } from "./dom.js";
 
 /**
- * Classes that mark a height-capped section. One entry per cap rule in
- * styles.css — a section is expandable exactly when the stylesheet caps
- * it, and styles.test.ts holds the two lists to each other.
+ * Classes that mark a click-to-expand section — the thing the feed-wide click
+ * handler toggles `.expanded` on. Each entry is the ONE class a whole
+ * expandable unit is keyed by, and every element carries at most one of them,
+ * so `primaryClass` never has a collision to resolve.
  *
- * ORDER IS LOAD-BEARING: it is the precedence `primaryClass` keys a section
- * by, so the SPECIFIC classes come first and the two generic wrappers
- * (`tool-input`, `tool-output`) come last. A section usually carries both —
- * a skill body is `tool-output skill-content`, a Bash output is
- * `tool-output bash-output` — and keying those on the generic class is what
- * makes their `class:occurrence` identity collide with any plain
- * `.tool-output` that appears beside them. That collision is exactly the
- * failure `expandedKeys` exists to prevent: a Skill card whose result box
- * lands ABOVE its already-expanded body renumbered the body from
- * `tool-output:0` to `tool-output:1`, so the reconcile re-opened the result
- * and collapsed the body under the reader.
+ * CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool-call and a skill card are
+ * ONE fold apiece: the whole `.tool-fold` card is the toggle, its header (title
+ * + a 2-row-capped input line) is the collapsed face, and its output section is
+ * HIDDEN until the card is `.expanded` — no capped preview. The inner section
+ * classes (`.tool-output`, `.bash-output`, `.tool-input`, …) are therefore NOT
+ * listed here: a click anywhere in the card resolves to `.tool-fold`, never to
+ * an inner box, so the card opens and closes as a unit. The stylesheet still
+ * caps and scrolls those inner boxes, but their EXPANDABILITY is the card's.
+ *
+ * THE STANDALONE CAPPED BOXES that keep the old per-section fold are the ones
+ * that live OUTSIDE a `.tool-fold` card: the detached shell's live tail
+ * (`.shell-tail`, in `.shell-bubble`) and the hook card's reason/output
+ * (`.hook-output`), each preserved exactly as it worked before this change.
+ *
+ * `bubble-scroll` is the response/prompt (and peer) bubble's own scroll box,
+ * click-to-expand since 2026-09-15 and deliberately UNTOUCHED here.
  */
 export const CAPPED_CLASSES = [
-  "tool-read-output",
-  "bash-input",
-  "bash-output",
-  "diff-output",
-  "skill-input",
-  "skill-content",
-  "tool-input",
-  "tool-output",
-  // The response/prompt bubble's own scroll box (bubble-scroll.ts). Owner
+  // The card-level fold: a whole tool-call / skill card, opened as one unit.
+  "tool-fold",
+  // The detached shell's live tail — its own per-section fold, unchanged.
+  "shell-tail",
+  // A hook card's reason/output box — its own per-section fold, unchanged.
+  "hook-output",
+  // The response/prompt/peer bubble's own scroll box (bubble-scroll.ts). Owner
   // ruling, 2026-09-15: a collapsed bubble no longer scrolls; clicking it
-  // expands it to at most 50vh, and only then is its scroll revealed — so the
-  // bubble must be click-to-expand like every other capped section. Last in the
-  // list, so `primaryClass` never keys a tool section by it.
+  // expands it to at most 50vh, and only then is its scroll revealed. Last in
+  // the list, and left exactly as it was.
   "bubble-scroll",
 ] as const;
 
