@@ -829,6 +829,19 @@ describe("the cost corner's hover hit area", () => {
     }
     expect(revealed).not.toMatch(/(?:^|[\s;])margin-left\s*:/);
   });
+
+  it("renders the token figure at the same size as the revealed duration (owner ruling, 2026-09-15)", () => {
+    // Arrange / Act — both read the one size declared on their shared
+    // `.usage-corner` ancestor rather than each carrying its own number.
+    const corner = declarationsOf(".usage-corner") ?? "";
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+    const ago = declarationsOf(".usage-ago") ?? "";
+
+    // Assert
+    expect(corner).toMatch(/--usage-ago-font-size:\s*0\.85em/);
+    expect(stamp).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
+    expect(ago).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
+  });
 })
 
 /**
