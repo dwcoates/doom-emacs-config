@@ -34,7 +34,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
-import { activityEntry, agentActivity, prose, type FrameOrigin } from "./entries.js";
+import { activityEntry, agentActivity, prose, settledAt, type FrameOrigin } from "./entries.js";
 import { subagentBook, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
@@ -553,6 +553,11 @@ export function convertAssistantMessage(
                             value: create(conversationv1.AgentResponseFromModelSchema, {}),
                           }
                         : { case: "synthesizedNotice", value: notice },
+                    // THE SETTLE INSTANT RIDES THE FRAME, stamped once from the
+                    // settling event's own time so a re-compose reproduces the
+                    // same "N ago" corner rather than the daemon's clock, exactly
+                    // as every other activity terminal carries settled_at.
+                    settledAt: settledAt(context.nowMs()),
                   }),
                 }
               : {
@@ -560,6 +565,7 @@ export function convertAssistantMessage(
                   value: create(conversationv1.AgentResponseFailureSchema, {
                     prose: prose(block.text),
                     reason: failure,
+                    settledAt: settledAt(context.nowMs()),
                   }),
                 },
         }),
