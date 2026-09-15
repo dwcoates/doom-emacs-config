@@ -368,6 +368,70 @@ func TestTheSettledInstantIsStampedOnceAcrossReDeliveries(t *testing.T) {
 	}
 }
 
+// REGRESSION LOCK (2026-09-14, "response duration always 0s"): a re-compose
+// from a fresh fold (replay/reconnect) must stamp the corner from the terminal
+// arm's carried settled_at, NEVER the compose-time clock — otherwise "N ago"
+// resets to 0s on every replay. Here the harness clock is deliberately far from
+// the carried instant, and the carried instant must win.
+func TestASettledSuccessStampsTheCarriedInstantNotComposeTime(t *testing.T) {
+	// Arrange: a fresh fold whose replay clock differs from the real settle.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	const carried = 1_700_000_000_000
+	h.nowMs = carried + 5_000
+
+	// Act: the terminal arm carries its real settle instant.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose:     &conversationv1.AgentResponseProse{Markdown: "done"},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: carried},
+		}, usage), noAddress())
+
+	// Assert: the corner is the carried settle instant, not the replay clock.
+	if got := h.response().GetUsage().GetAtMs(); got != carried {
+		t.Fatalf("usage at_ms = %d, want the carried settle instant %d, not compose time %d", got, carried, h.nowMs)
+	}
+}
+
+// The failure arm carries its own settled_at for the identical reason.
+func TestASettledFailureStampsTheCarriedInstantNotComposeTime(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	const carried = 1_700_000_000_000
+	h.nowMs = carried + 5_000
+
+	// Act: a failed terminal arm carrying its real settle instant.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseFailure{
+			Prose:     &conversationv1.AgentResponseProse{Markdown: "half an ans"},
+			Reason:    &conversationv1.AgentResponseFailureReason{},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: carried},
+		}, usage), noAddress())
+
+	// Assert.
+	if got := h.response().GetUsage().GetAtMs(); got != carried {
+		t.Fatalf("usage at_ms = %d, want the carried settle instant %d, not compose time %d", got, carried, h.nowMs)
+	}
+}
+
+// A truly live settle whose source carried no instant falls back to the clock —
+// there is nothing else to stamp from.
+func TestASettledResponseWithNoCarriedInstantFallsBackToNow(t *testing.T) {
+	// Arrange, Act: a terminal arm with no settled_at.
+	h := newHarness(t)
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
+		}, usage), noAddress())
+
+	// Assert: the corner is the harness clock, the only instant available.
+	if got := h.response().GetUsage().GetAtMs(); got != h.nowMs {
+		t.Fatalf("usage at_ms = %d, want the fallback clock %d", got, h.nowMs)
+	}
+}
+
 func TestASynthesizedNoticeIsDrawnAsANoticeAndNotAsTheAgentsAnswer(t *testing.T) {
 	// Arrange: the vendor's own outage wording, which arrives in the same shape
 	// as an answer.
