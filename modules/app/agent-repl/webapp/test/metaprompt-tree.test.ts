@@ -208,6 +208,72 @@ describe("wrap engine — the daemon algorithm, ported", () => {
     // Act + Assert
     expect(() => formatTree(["│   ├── 1.2.1. text"], 10)).toThrow(TreeOverflowError);
   });
+
+  it("wraps a connector line carrying a stray leading space (the live overflow bug)", () => {
+    // Arrange — the exact repro line: one leading space before the connector.
+    const line =
+      " └── 1.1 Nothing has changed since the last message, with hello/ (Go) and hello-rs/ (Rust)";
+    // Act
+    const result = formatTree([line], 80);
+    // Assert — it wraps instead of passing through raw, and every line fits.
+    expect(result.lines.length).toBeGreaterThan(1);
+    expect(result.lines.every((l) => !l.raw)).toBe(true);
+    expect(result.lines.every((l) => visibleWidth(lineText(l)) <= 80)).toBe(true);
+  });
+
+  it("preserves the stray leading indent on the branch and its continuations", () => {
+    // Arrange — the wrap continuation must hang under the same one-space indent.
+    const line = " └── 1.1 alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    // Act
+    const lines = formatTree([line], 20).lines;
+    // Assert — head keeps the leading space, and every wrap line starts with it.
+    expect(lineText(lines[0]).startsWith(" └── 1.1 ")).toBe(true);
+    expect(lines.slice(1).every((l) => l.prefix.startsWith(" "))).toBe(true);
+  });
+
+  it("wraps a deeper indented connector, indentation preserved", () => {
+    // Arrange — a stray space before an already-nested connector.
+    const line = " │   └── 2.1 alpha beta gamma delta epsilon zeta eta theta iota";
+    // Act
+    const lines = formatTree([line], 22).lines;
+    // Assert — the whole prefix (leading space + rails) is kept and it wraps.
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lineText(lines[0]).startsWith(" │   └── 2.1 ")).toBe(true);
+    expect(lines.every((l) => visibleWidth(lineText(l)) <= 22)).toBe(true);
+  });
+
+  it("keeps a legitimate 4-space-aligned level as a segment, not stray indent", () => {
+    // Arrange — four leading spaces is one real `└──`-continuation level.
+    const line = "    ├── 3.2 alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    // Act
+    const lines = formatTree([line], 24).lines;
+    // Assert — it wraps and the aligned level is preserved verbatim.
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lineText(lines[0]).startsWith("    ├── 3.2 ")).toBe(true);
+    expect(lines.every((l) => visibleWidth(lineText(l)) <= 24)).toBe(true);
+  });
+
+  it("wraps a no-leading-space connector exactly as before (regression guard)", () => {
+    // Arrange — the same body without the leading space.
+    const bare = "└── 1.1 Nothing has changed since the last message, with hello/ (Go) and hello-rs/ (Rust)";
+    // Act
+    const result = formatTree([bare], 80);
+    // Assert — still wraps, still non-raw, still fits.
+    expect(result.lines.length).toBe(2);
+    expect(result.lines.every((l) => !l.raw)).toBe(true);
+    expect(result.lines.every((l) => visibleWidth(lineText(l)) <= 80)).toBe(true);
+  });
+
+  it("still passes a genuine indented prose line through raw", () => {
+    // Arrange — leading spaces then prose with no connector and no dotted label.
+    const prose = "  just some indented prose that is not a tree branch at all";
+    // Act
+    const lines = formatTree([prose], 20).lines;
+    // Assert — untouched: one raw line, verbatim.
+    expect(lines).toHaveLength(1);
+    expect(lines[0].raw).toBe(true);
+    expect(lines[0].body).toBe(prose);
+  });
 });
 
 describe("renderTreeHtml", () => {
