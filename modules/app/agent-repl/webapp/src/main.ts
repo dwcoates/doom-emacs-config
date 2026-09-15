@@ -44,6 +44,7 @@ import { createPromptWaveDriver } from "./prompt-wave-driver.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
 import { mountHoldTray } from "./tray/tray.js";
+import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { mountFailureOverlay, type FailureOverlayHandle } from "./failure/overlay.js";
 import { ForwardingLogger, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
@@ -248,6 +249,14 @@ export async function boot(): Promise<void> {
     });
 
     mountHoldTray(shell.holdTray, ctx);
+
+    // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
+    // the hold tray would otherwise navigate the webview away from the
+    // conversation; one delegated interceptor over the whole scroll zone (feed
+    // + tray) cancels the click and hands it to OpenExternal / OpenInEditor,
+    // exactly as the structured links do. Hung here, at the feed/markdown seam,
+    // once — every markdown-bearing surface lives inside `feedScroll`.
+    installProseLinkRouting(ctx, shell.feedScroll);
 
     // KEEP THE PROMPT WAVE RUNNING WHILE THE WEBVIEW IS HIDDEN. WebKit suspends
     // the wave's compositor animation whenever the xwidget reports itself
