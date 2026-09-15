@@ -256,6 +256,21 @@ func TestValidateReadHistoryRequest(t *testing.T) {
 	}
 }
 
+// TestValidateGatherTitleDigestRequest asserts a nil request is the only
+// illegal shape (the message carries no fields).
+func TestValidateGatherTitleDigestRequest(t *testing.T) {
+	// Arrange, Act — a nil request is refused.
+	err := validateGatherTitleDigestRequest(nil)
+
+	// Assert.
+	assertInvalidField(t, err, "GatherTitleDigestRequest")
+
+	// Arrange, Act — an empty (non-nil) request is legal.
+	if err := validateGatherTitleDigestRequest(&shimv1.GatherTitleDigestRequest{}); err != nil {
+		t.Fatalf("validateGatherTitleDigestRequest(empty) = %v, want nil", err)
+	}
+}
+
 // TestValidateKillTurnRequest asserts the turn a kill names is required.
 func TestValidateKillTurnRequest(t *testing.T) {
 	// Arrange, Act.

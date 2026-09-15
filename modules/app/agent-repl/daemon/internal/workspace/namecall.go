@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -116,7 +115,7 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt s
 			Timeout:   NamingTimeout,
 		})
 		if err != nil {
-			last = namingFailure{Cause: causeOf(err), Detail: err.Error(), Attempts: uint32(attempt)}
+			last = namingFailure{Cause: headless.CauseOf(err), Detail: err.Error(), Attempts: uint32(attempt)}
 			log.Debug(opNaming, "the workspace naming call did not answer", dlog.Context{
 				"cause": last.Cause, "detail": last.Detail, "attempt": attempt,
 			})
@@ -157,17 +156,6 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt s
 	})
 	failure := last
 	return "", &failure
-}
-
-// causeOf reads a headless failure's closed-set cause. A failure that is not
-// headless's own is reported as an exit status rather than silently becoming
-// an empty cause: the arm's `cause` field always names something.
-func causeOf(err error) string {
-	var hErr *headless.Error
-	if errors.As(err, &hErr) {
-		return hErr.Cause
-	}
-	return headless.CauseExitStatus
 }
 
 // freeName disambiguates a MINTED name against what already exists: an

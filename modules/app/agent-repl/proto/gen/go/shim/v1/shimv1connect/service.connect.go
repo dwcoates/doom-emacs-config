@@ -74,6 +74,8 @@ const (
 	ShimDetachForegroundProcedure = "/shim.v1.Shim/DetachForeground"
 	// ShimReadHistoryProcedure is the fully-qualified name of the Shim's ReadHistory RPC.
 	ShimReadHistoryProcedure = "/shim.v1.Shim/ReadHistory"
+	// ShimGatherTitleDigestProcedure is the fully-qualified name of the Shim's GatherTitleDigest RPC.
+	ShimGatherTitleDigestProcedure = "/shim.v1.Shim/GatherTitleDigest"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -96,6 +98,7 @@ var (
 	shimStopWorkflowMethodDescriptor             = shimServiceDescriptor.Methods().ByName("StopWorkflow")
 	shimDetachForegroundMethodDescriptor         = shimServiceDescriptor.Methods().ByName("DetachForeground")
 	shimReadHistoryMethodDescriptor              = shimServiceDescriptor.Methods().ByName("ReadHistory")
+	shimGatherTitleDigestMethodDescriptor        = shimServiceDescriptor.Methods().ByName("GatherTitleDigest")
 )
 
 // ShimClient is a client for the shim.v1.Shim service.
@@ -156,6 +159,11 @@ type ShimClient interface {
 	// a page already received. Serves cold open, scroll-back, and the daemon's
 	// own catch-up after a restart alike.
 	ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error)
+	// The prompts (and, after a /compact, the compaction summary) the daemon
+	// summarizes into a workspace title of its own when the vendor has written
+	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
+	// nothing.
+	GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error)
 }
 
 // NewShimClient constructs a client for the shim.v1.Shim service. By default, it uses the Connect
@@ -270,6 +278,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			connect.WithSchema(shimReadHistoryMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		gatherTitleDigest: connect.NewClient[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse](
+			httpClient,
+			baseURL+ShimGatherTitleDigestProcedure,
+			connect.WithSchema(shimGatherTitleDigestMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -292,6 +306,7 @@ type shimClient struct {
 	stopWorkflow             *connect.Client[v1.StopWorkflowRequest, v1.StopWorkflowResponse]
 	detachForeground         *connect.Client[v1.DetachForegroundRequest, v1.DetachForegroundResponse]
 	readHistory              *connect.Client[v1.ReadHistoryRequest, v1.ReadHistoryResponse]
+	gatherTitleDigest        *connect.Client[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse]
 }
 
 // StartSession calls shim.v1.Shim.StartSession.
@@ -379,6 +394,11 @@ func (c *shimClient) ReadHistory(ctx context.Context, req *connect.Request[v1.Re
 	return c.readHistory.CallUnary(ctx, req)
 }
 
+// GatherTitleDigest calls shim.v1.Shim.GatherTitleDigest.
+func (c *shimClient) GatherTitleDigest(ctx context.Context, req *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {
+	return c.gatherTitleDigest.CallUnary(ctx, req)
+}
+
 // ShimHandler is an implementation of the shim.v1.Shim service.
 type ShimHandler interface {
 	// SPAWN: bind to a vendor session and bring it to the point where a prompt
@@ -437,6 +457,11 @@ type ShimHandler interface {
 	// a page already received. Serves cold open, scroll-back, and the daemon's
 	// own catch-up after a restart alike.
 	ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error)
+	// The prompts (and, after a /compact, the compaction summary) the daemon
+	// summarizes into a workspace title of its own when the vendor has written
+	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
+	// nothing.
+	GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error)
 }
 
 // NewShimHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -547,6 +572,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		connect.WithSchema(shimReadHistoryMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimGatherTitleDigestHandler := connect.NewUnaryHandler(
+		ShimGatherTitleDigestProcedure,
+		svc.GatherTitleDigest,
+		connect.WithSchema(shimGatherTitleDigestMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/shim.v1.Shim/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ShimStartSessionProcedure:
@@ -583,6 +614,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimDetachForegroundHandler.ServeHTTP(w, r)
 		case ShimReadHistoryProcedure:
 			shimReadHistoryHandler.ServeHTTP(w, r)
+		case ShimGatherTitleDigestProcedure:
+			shimGatherTitleDigestHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -658,4 +691,8 @@ func (UnimplementedShimHandler) DetachForeground(context.Context, *connect.Reque
 
 func (UnimplementedShimHandler) ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.ReadHistory is not implemented"))
+}
+
+func (UnimplementedShimHandler) GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.GatherTitleDigest is not implemented"))
 }

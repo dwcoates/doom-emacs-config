@@ -69,8 +69,11 @@ import {
   setSessionPermissionModeRefused,
   startSessionRefused,
   startSessionStarted,
+  titleDigestGathered,
+  titleDigestRefused,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
+import { readTitleDigest } from "./title-digest.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
@@ -1141,6 +1144,34 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const title = titleTail.read();
     if (title === undefined) return;
     pushes.push(sessionTitleUpdate(title));
+  }
+
+  /**
+   * The title digest: the material the daemon summarizes into a workspace
+   * title of its own when the vendor has stated no ai-title.
+   *
+   * It reads the CURRENT transcript — the same file `pushSessionTitle` tails —
+   * and returns the prompts since the last boundary plus, after a /compact, the
+   * compaction summary. A session with no identity yet has no transcript, which
+   * is the no_transcript arm rather than an empty digest: there is a difference
+   * between "asked before the session named itself" and "a real conversation
+   * with no prompts".
+   */
+  function gatherTitleDigest(): shimv1.GatherTitleDigestResponse {
+    const current = identity;
+    if (current === undefined) {
+      return titleDigestRefused({ kind: "noTranscript" }, "the session has not named a transcript yet");
+    }
+    const file = transcriptPath(deps.env.configDir, deps.env.cwd, current.vendorSessionId);
+    const read = readTitleDigest(file);
+    switch (read.kind) {
+      case "ok":
+        return titleDigestGathered(read.digest);
+      case "no_transcript":
+        return titleDigestRefused({ kind: "noTranscript" }, `no transcript exists at ${file}`);
+      case "unreadable":
+        return titleDigestRefused({ kind: "unreadable" }, read.detail);
+    }
   }
 
   async function pushContextUsage(): Promise<void> {
@@ -4260,6 +4291,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     stopBash: (request) => turns.stopBash(request),
     detachForeground: (request) => turns.detachForeground(request),
     readHistory: (request) => turns.readHistory(request),
+    gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     standDown: async (reason: string) => {
       await teardown(reason);
       return lostRowsAtStandDown > 0 ? 1 : 0;
