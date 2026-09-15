@@ -30,6 +30,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, shimv1 } from "../proto.js";
+import type { TitleDigest } from "../convert/title-digest.js";
 
 // ---------------------------------------------------------------------------
 // StartSession
@@ -592,6 +593,62 @@ export function readHistoryRefused(
 export function readHistoryPage(page: conversationv1.HistoryPage): shimv1.ReadHistoryResponse {
   return create(shimv1.ReadHistoryResponseSchema, {
     result: { case: "success", value: create(shimv1.ReadHistorySuccessSchema, { page }) },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GatherTitleDigest
+// ---------------------------------------------------------------------------
+
+/** Why a title digest could not be gathered. */
+type TitleDigestKind =
+  | { readonly kind: "noTranscript" }
+  | { readonly kind: "unreadable" };
+
+/** The proto boundary enum the digest's boundary maps to. */
+function titleDigestBoundary(boundary: TitleDigest["boundary"]): shimv1.TitleDigestBoundary {
+  switch (boundary) {
+    case "none":
+      return shimv1.TitleDigestBoundary.NONE;
+    case "clear":
+      return shimv1.TitleDigestBoundary.CLEAR;
+    case "compact":
+      return shimv1.TitleDigestBoundary.COMPACT;
+  }
+}
+
+/** The digest as the whole response the handler returns. */
+export function titleDigestGathered(digest: TitleDigest): shimv1.GatherTitleDigestResponse {
+  return create(shimv1.GatherTitleDigestResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.GatherTitleDigestSuccessSchema, {
+        boundary: titleDigestBoundary(digest.boundary),
+        // `lastCompactSummary` is optional-by-presence: it is set only for a
+        // compaction boundary, matching the proto's "SET ONLY when COMPACT".
+        lastCompactSummary: digest.lastCompactSummary,
+        prompts: digest.prompts,
+      }),
+    },
+  });
+}
+
+/** The refusal as the whole response the handler returns. */
+export function titleDigestRefused(
+  cause: TitleDigestKind,
+  detail: string,
+): shimv1.GatherTitleDigestResponse {
+  return create(shimv1.GatherTitleDigestResponseSchema, {
+    result: {
+      case: "failure",
+      value: create(shimv1.GatherTitleDigestFailureSchema, {
+        detail,
+        kind:
+          cause.kind === "noTranscript"
+            ? { case: "noTranscript", value: create(shimv1.GatherTitleDigestNoTranscriptSchema, {}) }
+            : { case: "unreadable", value: create(shimv1.GatherTitleDigestUnreadableSchema, {}) },
+      }),
+    },
   });
 }
 
