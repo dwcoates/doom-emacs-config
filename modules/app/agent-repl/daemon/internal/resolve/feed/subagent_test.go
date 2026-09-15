@@ -2208,3 +2208,52 @@ func TestASettledFullTotalCountsEveryTokenIncludingCacheReads(t *testing.T) {
 		t.Fatalf("tokens = %q, want %q (the run's total, cache reads included)", got, want)
 	}
 }
+
+// TestASettledOnlyReplayReconstructsTheClockFromItsDuration locks the fix for
+// the absurd clock: a settled bubble delivered with no start frame reconstructs
+// its start as end − duration, so the settled clock shows the run's real span
+// rather than the whole age of the epoch.
+func TestASettledOnlyReplayReconstructsTheClockFromItsDuration(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: a settled-only delivery whose totals state the run took 540s.
+	const endedAtMs, durationMs = int64(1_700_000_009_000), uint64(540_000)
+	h.settleSubagentOnly("spawn-1", created, &conversationv1.AgentSubagentTotals{
+		DurationMs: durationMs,
+	}, endedAtMs)
+
+	// Assert: start = end − duration, never zero.
+	got := bubbleOf(h.bubbleRow("spawn-1", created)).GetRuntime().GetStartedAtMs()
+	if got != endedAtMs-int64(durationMs) {
+		t.Fatalf("started_at_ms = %d, want end − duration %d (never the epoch)", got, endedAtMs-int64(durationMs))
+	}
+}
+
+// TestALiveSpawnWithNoStartInstantCountsFromFirstObserved locks the live-path
+// fallback: a start that named no instant leaves the clock at zero, so the
+// bubble is stamped with the first-observed instant rather than counting up
+// from the epoch.
+func TestALiveSpawnWithNoStartInstantCountsFromFirstObserved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: a start that names the agent but carries no started_at instant.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+			}},
+		}},
+	})
+
+	// Assert: the first-observed instant (the injected clock), never zero.
+	got := bubbleOf(h.bubbleRow("spawn-1", created)).GetRuntime().GetStartedAtMs()
+	if got != h.nowMs {
+		t.Fatalf("started_at_ms = %d, want the first-observed instant %d (never zero)", got, h.nowMs)
+	}
+}
