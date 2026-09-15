@@ -598,6 +598,22 @@ logging + repaint sinks are silenced/counted-free by default."
       ;; Assert
       (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
 
+(ert-deftest agent-repl-test-tab-dwell-on-activation-accepts-the-persp-argument ()
+  "The activation hook accepts the argument `persp-activated-functions' passes.
+persp-mode invokes each activation function WITH the activation type, so a
+nil arglist signalled \"Wrong number of arguments\" on every switch and
+aborted the hook run.  Calling it with an argument must not error and must
+still arm the clock."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      ;; Act -- persp-mode calls the hook with the activation type.
+      (agent-repl--tab-dwell-on-activation 'frame)
+      ;; Assert
+      (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
+
 (ert-deftest agent-repl-test-tab-dwell-on-activation-does-not-undemote ()
   "Switching INTO an already-demoted workspace does not un-demote it.
 Only a status update resets; a plain activation just restarts the clock."
