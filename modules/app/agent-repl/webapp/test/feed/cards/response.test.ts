@@ -1160,3 +1160,193 @@ describe("the record of the drawn response", () => {
     expect(capture.sent.some((rec) => rec.operation === "feed.draw-response")).toBe(false);
   });
 });
+
+/**
+ * The reveal reworked to RECONCILE the prose in place rather than rebuild the
+ * whole subtree every animation frame (which flickered). These pin the two
+ * things the rework must hold: at any revealed length the DOM is byte-identical
+ * to a fresh whole render (the oracle `paintWhole` writes), and the nodes that
+ * did not change keep their identity so the reader sees no teardown.
+ */
+describe("the incremental reveal reconciles the prose without rebuilding it", () => {
+  /** The body's prose HTML with the arriving ellipsis stripped, so it compares
+   * against the whole-render oracle, which carries none. */
+  function prose(body: HTMLElement): string {
+    const clone = body.cloneNode(true) as HTMLElement;
+    clone.querySelector(".response-arriving")?.remove();
+    return clone.innerHTML;
+  }
+
+  it("ends the reveal byte-identical to the whole-render oracle", () => {
+    // Arrange — a metaprompt tree, so the tree line-diff path is exercised too.
+    const streamingEl = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: TREE } } } }),
+      rowContext(),
+    );
+    document.body.appendChild(streamingEl);
+    const streamingBody = streamingEl.querySelector<HTMLElement>(".bubble-body");
+    if (streamingBody === null) throw new Error("no bubble body");
+    // Act — drive the type-out to completion.
+    vi.advanceTimersByTime(5000);
+    // The settled draw of the same text is the oracle: one-shot `paintWhole`.
+    const settledBody = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
+      rowContext(),
+    ).querySelector<HTMLElement>(".bubble-body");
+    if (settledBody === null) throw new Error("no settled body");
+    // Assert — the reconciled reveal lands exactly where the one-shot render does.
+    expect(prose(streamingBody)).toBe(settledBody.innerHTML);
+  });
+
+  it("keeps a stable leading tree line's node identity while the tail grows", () => {
+    // Arrange — a tree with long branches, so the reveal spends many frames
+    // inside it and the leading root line settles well before the tail.
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    document.body.appendChild(el);
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    // Advance until the tree is on screen with a leading line, still arriving.
+    let before: Element[] = [];
+    for (let i = 0; i < 60 && before.length < 2; i++) {
+      vi.advanceTimersByTime(16);
+      const lines = [...body.querySelectorAll(".mp-tree .mp-line")];
+      const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
+      if (lines.length >= 2 && shown < SHOWCASE_TREE.length) before = lines;
+    }
+    expect(before.length).toBeGreaterThanOrEqual(2);
+    const firstBefore = before[0];
+    // Act — advance further so the tail wraps onto more lines.
+    let after: Element[] = [];
+    for (let i = 0; i < 60 && after.length <= before.length; i++) {
+      vi.advanceTimersByTime(16);
+      after = [...body.querySelectorAll(".mp-tree .mp-line")];
+    }
+    // Assert — the tail grew and the leading line is the SAME node, never rebuilt.
+    expect(after.length).toBeGreaterThan(before.length);
+    expect(after[0]).toBe(firstBefore);
+  });
+
+  it("re-wraps the arriving tree to the whole render at a new width on resize", () => {
+    // The measure reads a monospace char width off a hidden `.mp-tree` probe;
+    // jsdom lays nothing out, so the probe's width is staged on the prototype.
+    const CHAR_PX = 8;
+    const rect = (w: number): DOMRect =>
+      ({ width: w, height: 0, top: 0, left: 0, right: w, bottom: 0, x: 0, y: 0, toJSON: () => ({}) });
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- reassigned back below
+    const protoRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
+      return this.className === "mp-tree" ? rect(CHAR_PX * 100) : rect(0);
+    };
+    try {
+      // Arrange — draw detached (cols = default 105), then mount under a sized
+      // column and stage a resolvable cap so a resize measures 85 columns.
+      const el = drawFeedResponse(
+        response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+        rowContext(),
+      );
+      const body = el.querySelector<HTMLElement>(".bubble-body");
+      if (body === null) throw new Error("no bubble body");
+      const parent = document.createElement("div");
+      Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
+      parent.appendChild(el);
+      document.body.appendChild(parent);
+      // Drive the type-out to completion so no reveal frame is left pending; the
+      // resize is then the only work the timers run.
+      vi.advanceTimersByTime(5000);
+      el.getBoundingClientRect = () => rect(220);
+      Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
+      vi.spyOn(window, "getComputedStyle").mockImplementation((node: Element) => {
+        if (node === el) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
+        return {
+          maxWidth: "none",
+          paddingLeft: "0px",
+          paddingRight: "0px",
+        } as unknown as CSSStyleDeclaration;
+      });
+      // Act — the width changed: the observer re-measures (85) and repaints.
+      fireResize(body);
+      vi.runOnlyPendingTimers();
+      // Assert — the re-wrapped prose equals the whole render at the NEW width,
+      // and is no longer the render at the 105 columns it first drew at.
+      const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
+      expect(prose(body)).toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), 85));
+      expect(prose(body)).not.toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), 105));
+    } finally {
+      Element.prototype.getBoundingClientRect = protoRect;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("appends to a growing plain paragraph in place rather than rebuilding it", () => {
+    // Arrange — plain prose (no tree), a complete first paragraph and a second
+    // that keeps growing.
+    const markdown =
+      "First paragraph, complete and stable.\n\nSecond paragraph that keeps on growing word by word right here.";
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown } } } }),
+      rowContext(),
+    );
+    document.body.appendChild(el);
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    // Advance until the second paragraph exists (the first is then complete),
+    // still arriving.
+    let secondBefore: Element | null = null;
+    let lenBefore = 0;
+    for (let i = 0; i < 80 && secondBefore === null; i++) {
+      vi.advanceTimersByTime(16);
+      const paras = body.querySelectorAll("p");
+      const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
+      if (paras.length >= 2 && shown < markdown.length) {
+        secondBefore = paras[1];
+        lenBefore = paras[1].textContent?.length ?? 0;
+      }
+    }
+    expect(secondBefore).not.toBeNull();
+    // Act — grow the second paragraph further.
+    let secondAfter: Element | null = null;
+    let lenAfter = 0;
+    for (let i = 0; i < 80 && lenAfter <= lenBefore; i++) {
+      vi.advanceTimersByTime(16);
+      const paras = body.querySelectorAll("p");
+      secondAfter = paras[1] ?? null;
+      lenAfter = paras[1]?.textContent?.length ?? 0;
+    }
+    // Assert — the paragraph is the SAME node with more text: it was appended to
+    // in place, not torn down and rebuilt.
+    expect(secondAfter).toBe(secondBefore);
+    expect(lenAfter).toBeGreaterThan(lenBefore);
+  });
+
+  it("keeps the one arriving ellipsis as the same last node across frames", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "some words arriving over frames" } } } }),
+      rowContext(),
+    );
+    document.body.appendChild(el);
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    vi.advanceTimersByTime(16);
+    const ellipsisBefore = body.querySelector(".response-arriving");
+    // Act — a few more frames of reconciliation.
+    vi.advanceTimersByTime(48);
+    // Assert — the ellipsis survived every reconcile as the SAME node and is
+    // still the body's last child (so its animation was never restarted).
+    expect(body.querySelector(".response-arriving")).toBe(ellipsisBefore);
+    expect(body.lastChild).toBe(ellipsisBefore);
+  });
+
+  it("carries no arriving ellipsis once the response has settled", () => {
+    // Arrange, Act — the settled arm renders whole through paintWhole.
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "the whole answer" } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(".response-arriving")).toBeNull();
+  });
+});
