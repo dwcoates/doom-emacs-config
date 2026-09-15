@@ -178,6 +178,9 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		}
 		applyPrompt(bubble, frame.Success.GetPrompt())
 		applyTotals(bubble, frame.Success.GetTotals())
+		// THE SETTLED SPAN, kept so a settled-only replay (no start frame) can
+		// reconstruct the clock's start as end − duration. See subagentStart.
+		state.durationMs = frame.Success.GetTotals().GetDurationMs()
 		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: &frontendv1.FeedSubagentSettled{
 			EndedAtMs: frame.Success.GetSettledAt().GetAtMs(),
 			Outcome:   &frontendv1.FeedSubagentSettled_Succeeded{Succeeded: &frontendv1.FeedSubagentSucceeded{}},
@@ -198,10 +201,16 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 // the sub-feed the row addresses, and draws the commission on it.
 func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, state *subagentState, commission *conversationv1.AgentSubagentPrompt) *frontendv1.FeedRow {
 	bubble := state.bubble
+	// THE CLOCK NEVER COUNTS FROM THE EPOCH. An authoritative start wins; a
+	// settled-only replay reconstructs its start from the run's duration; a
+	// live bubble with no start yet counts from a first-observed instant. Only
+	// a zero here (the old fallback) drew the ~492762h clock.
+	start := r.subagentStart(state)
 	if bubble.Runtime == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "bubble.Runtime == nil"})
-		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: 0}
+		bubble.Runtime = &frontendv1.FeedSubagentRuntime{}
 	}
+	bubble.Runtime.StartedAtMs = start
 	if bubble.Label == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "bubble.Label == nil"})
 		bubble.Label = &frontendv1.FeedSubagentLabel{Text: "Agent"}
@@ -363,8 +372,21 @@ func applyTotals(bubble *frontendv1.FeedSubagent, totals *conversationv1.AgentSu
 	}
 	switch usage := totals.GetUsage().(type) {
 	case *conversationv1.AgentSubagentTotals_Full:
-		misses := usage.Full.GetInputMisses()
-		sum := misses.GetWritten() + misses.GetUnwritten() + usage.Full.GetOutputTokens()
+		// THE RUN'S TOTAL, every token it consumed — cache reads included. The
+		// head draws ONE figure standing for the whole run, the same quantity
+		// the live path shows (AgentSubagentProgress.total_tokens, the vendor's
+		// running grand total) and the async path shows (total_only.total_tokens),
+		// so the number does not change basis when a live bubble settles. The
+		// cache-read bucket is CHEAP but it is still tokens the run consumed:
+		// dropping it (as this once did) understated the total by the cached
+		// context a subagent reads, which for a Claude Code run is most of it.
+		// This is deliberately NOT the footer's "expensive sum" — that cell
+		// answers "what did this turn cost", a different question with its own
+		// component breakdown; this answers "how big was this run".
+		full := usage.Full
+		hits := full.GetInputHits()
+		misses := full.GetInputMisses()
+		sum := hits.GetRead() + misses.GetWritten() + misses.GetUnwritten() + full.GetOutputTokens()
 		bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(sum) + " tok"}
 	case *conversationv1.AgentSubagentTotals_TotalOnly:
 		if usage.TotalOnly.TotalTokens == nil {
@@ -696,6 +718,37 @@ func (r *resolver) shellStart(sh *shellState) int64 {
 		sh.firstObservedMs = r.deps.Now().UnixMilli()
 	}
 	return sh.firstObservedMs
+}
+
+// subagentStart answers the instant a subagent bubble's clock counts from,
+// never the epoch. It mirrors shellStart's intent, with one difference the
+// subagent needs: a subagent bubble is often delivered SETTLED-ONLY (a replayed
+// history carries no start), and a settled clock draws end − start, so a
+// first-observed instant stamped at replay time would read end − now and, since
+// end is in the past, clamp to "0s" rather than the run's real span.
+//
+// The order is therefore: an authoritative start (from a start frame) wins;
+// else a settled run reconstructs its start from the totals' duration
+// (end − duration), so the settled clock shows the true elapsed; else a LIVE
+// run with no start yet counts from the first-observed instant, stamped ONCE
+// off the daemon clock (see subagentState.firstObservedMs). formatElapsed
+// clamps a negative span to "0s", so a settled run with neither a start nor a
+// duration draws "0s" rather than an absurd age.
+func (r *resolver) subagentStart(state *subagentState) int64 {
+	bubble := state.bubble
+	if ms := bubble.GetRuntime().GetStartedAtMs(); ms != 0 {
+		return ms
+	}
+	if settled, ok := bubble.GetState().(*frontendv1.FeedSubagent_Settled); ok {
+		end := settled.Settled.GetEndedAtMs()
+		if end != 0 && state.durationMs != 0 && end >= int64(state.durationMs) {
+			return end - int64(state.durationMs)
+		}
+	}
+	if state.firstObservedMs == 0 {
+		state.firstObservedMs = r.deps.Now().UnixMilli()
+	}
+	return state.firstObservedMs
 }
 
 // spoolCap is how much of a spool's tail the daemon carries. The body is a
