@@ -4408,16 +4408,26 @@ body.draining #composer-input::placeholder {
      never fills. */
   padding: 0.4rem 1.25rem;
   margin: -0.4rem -1.25rem;
+  /* The one size both the token figure and the revealed duration read
+     (owner ruling, 2026-09-15: the two must match). Declared once here,
+     the shared ancestor, so neither rule below carries its own copy of
+     the number. */
+  --usage-ago-font-size: 0.85em;
 }
 /* The cost corner's figure, drawn verbatim in the token amber the footer's
-   token cell wears, so the same idea reads the same color wherever it appears. */
+   token cell wears, so the same idea reads the same color wherever it appears.
+   Its size matches the revealed duration's (`--usage-ago-font-size`, set on
+   the shared `.usage-corner` ancestor) rather than a second copy of the same
+   number, so the two stay in lockstep if that size ever moves (owner ruling,
+   2026-09-15: the two must render at the same size). */
 .usage-stamp {
   color: var(--info-tokens);
   font-variant-numeric: tabular-nums;
+  font-size: var(--usage-ago-font-size);
 }
 /* THE HOVER TIMESTAMP: the response's settled time, relative and live
-   ("5m 30s ago"). Grey (the shared muted token) and a relative notch smaller
-   than the figure beside it.
+   ("5m 30s ago"). Grey (the shared muted token), and — per the owner ruling
+   above — the SAME size as the token figure beside it.
 
    ITS WIDTH IS RESERVED AT ALL TIMES, revealed or not (owner ruling,
    2026-09-15). The duration keeps its layout width and its `margin-left` gap
@@ -4431,7 +4441,7 @@ body.draining #composer-input::placeholder {
    animates, because neither ever changes. */
 .usage-ago {
   color: var(--muted);
-  font-size: 0.85em;
+  font-size: var(--usage-ago-font-size);
   white-space: nowrap;
   margin-left: 0.35rem;
   opacity: 0;
