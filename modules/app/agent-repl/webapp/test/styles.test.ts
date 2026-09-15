@@ -909,6 +909,19 @@ describe("the prompt bubble's in-flight border", () => {
   });
 });
 
+describe("the arriving response indicator", () => {
+  it("carries no `.response-arriving` rule: the arriving ellipsis is gone", () => {
+    // Arrange / Act — the response-specific arriving-indicator rule.
+    const rule = declarationsOf(".response-arriving");
+
+    // Assert — the rule was removed with the indicator node (owner ruling
+    // 2026-09-15: a streaming response shows its prose only). The shared
+    // `.animated-ellipsis` base stays: it still dresses the footer status
+    // words (highlight.ts) and the plan card's planning indicator (plan.ts).
+    expect(rule).toBeUndefined();
+  });
+});
+
 describe("the thinking bubble", () => {
   it("draws the thinking bubble non-bordered", () => {
     // Arrange / Act

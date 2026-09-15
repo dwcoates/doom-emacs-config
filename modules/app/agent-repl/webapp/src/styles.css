@@ -4454,11 +4454,6 @@ body.draining #composer-input::placeholder {
     transition: none;
   }
 }
-/* The arriving indicator trails the prose that has landed so far. The dots are
-   the same animated ellipsis every other live face uses. */
-.response-arriving {
-  margin-left: 0.15rem;
-}
 /* A bubble the turn's death cut short: the border says it and the marker names
    it. WHY it died is the turn's terminal row, never this bubble's, so the
    marker carries no reason text. */

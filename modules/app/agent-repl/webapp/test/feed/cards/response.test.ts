@@ -154,12 +154,13 @@ describe("the broken state", () => {
 });
 
 describe("the arriving state", () => {
-  it("draws the arriving indicator", () => {
+  it("draws no arriving indicator: a streaming response shows its prose only", () => {
     const el = drawFeedResponse(
       response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
       rowContext(),
     );
-    expect(el.querySelector(".response-arriving")).not.toBeNull();
+    expect(el.querySelector(".response-arriving")).toBeNull();
+    expect(el.querySelector(".animated-ellipsis")).toBeNull();
   });
 
   it("shows nothing of a first-seen response before the first frame", () => {
@@ -520,7 +521,7 @@ describe("the notice register", () => {
   });
 
   // The arriving state is excluded here on purpose: its prose is PACED, so at
-  // draw time the body holds only the arriving indicator (the state's own suite
+  // draw time the body is empty (nothing revealed yet; the state's own suite
   // covers the type-out). The next test asserts the notice leaves that pacing
   // alone.
   it.each(["success", "error"])("draws the prose itself in the %s state, notice or not", (arm) => {
@@ -542,7 +543,10 @@ describe("the notice register", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
+    // The notice is drawn, and the arriving prose is still PACED (nothing
+    // revealed yet at draw time) — the notice does not disturb the type-out.
+    expect(el.classList.contains("response-notice")).toBe(true);
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("0");
   });
 
   it.each(STATES)("marks no notice on an ordinary %s response", (arm) => {
@@ -657,7 +661,7 @@ describe("a host with no animation frames", () => {
     ]).toEqual(["hello world", String("hello world".length)]);
   });
 
-  it("still wears the arriving indicator, since the prose has not settled", () => {
+  it("wears no arriving indicator even with no animation frames", () => {
     // Arrange
     vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
@@ -665,8 +669,10 @@ describe("a host with no animation frames", () => {
       response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
       rowContext(),
     );
-    // Assert
-    expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
+    // Assert — the whole prose is on screen and no indicator node was appended.
+    expect(el.querySelector(".bubble-body")?.textContent).toContain("typing");
+    expect(el.querySelector(".response-arriving")).toBeNull();
+    expect(el.querySelector(".animated-ellipsis")).toBeNull();
   });
 });
 
@@ -1347,12 +1353,11 @@ describe("the record of the drawn response", () => {
  * did not change keep their identity so the reader sees no teardown.
  */
 describe("the incremental reveal reconciles the prose without rebuilding it", () => {
-  /** The body's prose HTML with the arriving ellipsis stripped, so it compares
-   * against the whole-render oracle, which carries none. */
+  /** The body's prose HTML, compared against the whole-render oracle. The
+   * streaming reveal carries no trailing indicator node, so it is exactly the
+   * oracle's markup. */
   function prose(body: HTMLElement): string {
-    const clone = body.cloneNode(true) as HTMLElement;
-    clone.querySelector(".response-arriving")?.remove();
-    return clone.innerHTML;
+    return body.innerHTML;
   }
 
   it("ends the reveal byte-identical to the whole-render oracle", () => {
@@ -1499,7 +1504,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     expect(lenAfter).toBeGreaterThan(lenBefore);
   });
 
-  it("keeps the one arriving ellipsis as the same last node across frames", () => {
+  it("appends no arriving ellipsis on any frame of the reveal", () => {
     // Arrange
     const el = drawFeedResponse(
       response({ result: { case: "update", value: { prose: { markdown: "some words arriving over frames" } } } }),
@@ -1509,13 +1514,14 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     const body = el.querySelector<HTMLElement>(".bubble-body");
     if (body === null) throw new Error("no bubble body");
     vi.advanceTimersByTime(16);
-    const ellipsisBefore = body.querySelector(".response-arriving");
+    // Assert — no indicator on the first frame...
+    expect(body.querySelector(".response-arriving")).toBeNull();
+    expect(body.querySelector(".animated-ellipsis")).toBeNull();
     // Act — a few more frames of reconciliation.
     vi.advanceTimersByTime(48);
-    // Assert — the ellipsis survived every reconcile as the SAME node and is
-    // still the body's last child (so its animation was never restarted).
-    expect(body.querySelector(".response-arriving")).toBe(ellipsisBefore);
-    expect(body.lastChild).toBe(ellipsisBefore);
+    // Assert — ...and none after further frames either.
+    expect(body.querySelector(".response-arriving")).toBeNull();
+    expect(body.querySelector(".animated-ellipsis")).toBeNull();
   });
 
   it("carries no arriving ellipsis once the response has settled", () => {
