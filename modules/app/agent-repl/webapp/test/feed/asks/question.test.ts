@@ -21,6 +21,7 @@ import { testAppContext } from "../../rpc/app-context.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  CONFIRM_TEXT,
   drawFeedQuestion,
   EXPIRED_TEXT,
   QUESTION_STATE_ARMS,
@@ -74,6 +75,53 @@ function type(el: HTMLElement, index: number, text: string): void {
   const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
   const field = blocks[index]?.querySelector<HTMLInputElement>("[data-question-other]");
   if (field != null) field.value = text;
+}
+
+/** Click an option's input inside one question, firing the real toggle path. */
+function clickOpt(el: HTMLElement, index: number, label: string): void {
+  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
+  blocks[index]
+    ?.querySelector<HTMLInputElement>(`[data-question-option="${label}"]`)
+    ?.click();
+}
+
+/** Click one question's tab, by index. */
+function clickTab(el: HTMLElement, index: number): void {
+  el.querySelector<HTMLButtonElement>(`[data-question-tab="${index}"]`)?.click();
+}
+
+/** Press one multi-select question's confirm button, by index. */
+function confirmQ(el: HTMLElement, index: number): void {
+  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
+  blocks[index]?.querySelector<HTMLButtonElement>("[data-question-confirm]")?.click();
+}
+
+/** The index of the active (shown) tab, or -1 when none is. */
+function activeTab(el: HTMLElement): number {
+  const t = el.querySelector(".q-tab.active");
+  return t === null ? -1 : Number(t.getAttribute("data-question-tab"));
+}
+
+/** Each tab's answered flag, in the batch's order. */
+function answeredFlags(el: HTMLElement): boolean[] {
+  return [...el.querySelectorAll<HTMLElement>(".q-tab")].map(
+    (t) => t.getAttribute("data-answered") === "true",
+  );
+}
+
+/** Whether one question's option input is currently checked, by index + label. */
+function isChecked(el: HTMLElement, index: number, label: string): boolean {
+  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
+  return (
+    blocks[index]?.querySelector<HTMLInputElement>(
+      `[data-question-option="${label}"]`,
+    )?.checked === true
+  );
+}
+
+/** A batch of `n` single-select questions, each headed and texted by its index. */
+function singles(n: number): FeedQuestionItem[] {
+  return Array.from({ length: n }, (_v, i) => item({ header: `q${i}`, text: `q${i}?` }));
 }
 
 async function settle(): Promise<void> {
@@ -170,6 +218,181 @@ describe("the standing batch", () => {
     expect([...QUESTION_STATE_ARMS].sort()).toEqual(
       armsOf(FeedQuestionSchema.oneofs, "state").sort(),
     );
+  });
+});
+
+describe("the tabbed layout", () => {
+  it("draws one tab per question of the batch", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(3)), askHarness().rc);
+    expect(el.querySelectorAll(".q-tab").length).toBe(3);
+  });
+
+  it("labels each tab with its question's header", () => {
+    const el = drawFeedQuestion(
+      question({ case: "open", value: {} }, [item({ header: "one" }), item({ header: "two" })]),
+      askHarness().rc,
+    );
+    expect([...el.querySelectorAll(".q-tab-label")].map((n) => n.textContent)).toEqual([
+      "one",
+      "two",
+    ]);
+  });
+
+  it("shows exactly one panel at a time", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(3)), askHarness().rc);
+    const shown = [...el.querySelectorAll<HTMLElement>(".q-panel")].filter((p) => !p.hidden);
+    expect(shown.length).toBe(1);
+  });
+
+  it("shows the first question's panel by default", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(3)), askHarness().rc);
+    expect(activeTab(el)).toBe(0);
+  });
+
+  it("draws a single tab for a one-question batch", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
+    expect(el.querySelectorAll(".q-tab").length).toBe(1);
+  });
+
+  it("auto-advances to the next tab when a single-select is answered", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    expect(activeTab(el)).toBe(1);
+  });
+
+  it("does not advance a multi-select on a mere tick", () => {
+    const el = drawFeedQuestion(
+      question({ case: "open", value: {} }, [item({ multi: true }), item()]),
+      askHarness().rc,
+    );
+    clickOpt(el, 0, "OAuth 2.0");
+    // The tick is not the commit point for a multi-select, so the reader stays.
+    expect(activeTab(el)).toBe(0);
+  });
+
+  it("advances a multi-select once its answer is confirmed", () => {
+    const el = drawFeedQuestion(
+      question({ case: "open", value: {} }, [item({ multi: true }), item()]),
+      askHarness().rc,
+    );
+    clickOpt(el, 0, "OAuth 2.0");
+    confirmQ(el, 0);
+    expect(activeTab(el)).toBe(1);
+  });
+
+  it("draws the confirm button only on a multi-select", () => {
+    const el = drawFeedQuestion(
+      question({ case: "open", value: {} }, [item(), item({ multi: true })]),
+      askHarness().rc,
+    );
+    const confirms = [...el.querySelectorAll<HTMLElement>("[data-question]")].map(
+      (b) => b.querySelector("[data-question-confirm]") !== null,
+    );
+    expect(confirms).toEqual([false, true]);
+  });
+
+  it("words the multi-select confirm the same way everywhere", () => {
+    const el = drawFeedQuestion(
+      question({ case: "open", value: {} }, [item({ multi: true })]),
+      askHarness().rc,
+    );
+    expect(el.querySelector("[data-question-confirm]")?.textContent).toBe(CONFIRM_TEXT);
+  });
+
+  it("marks a tab answered once its question carries an answer", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    expect(answeredFlags(el)[0]).toBe(true);
+  });
+
+  it("leaves an untouched question's tab pending", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    expect(answeredFlags(el)[1]).toBe(false);
+  });
+
+  it("returns to a prior question when its tab is clicked", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    clickTab(el, 0);
+    expect(activeTab(el)).toBe(0);
+  });
+
+  it("reveals the first unanswered question on a blocked submit", async () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0"); // answers q0, advances to q1
+    clickTab(el, 0); // step back so the active tab is not the missing one
+    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    await settle();
+    expect(activeTab(el)).toBe(1);
+  });
+
+  it("submits the whole batch unchanged from the tabbed layout", async () => {
+    const h = askHarness();
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), h.rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    clickOpt(el, 1, "API key");
+    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    await settle();
+    expect(h.calls.question[0]?.answers.map((a) => a.chosen)).toEqual([
+      ["OAuth 2.0"],
+      ["API key"],
+    ]);
+  });
+
+  it("submits a one-question batch exactly as before", async () => {
+    const h = askHarness();
+    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    await settle();
+    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["OAuth 2.0"]);
+  });
+});
+
+describe("toggling a selection off", () => {
+  it("clears a single-select when its chosen radio is clicked again", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    clickOpt(el, 0, "OAuth 2.0");
+    expect(isChecked(el, 0, "OAuth 2.0")).toBe(false);
+  });
+
+  it("clears a multi-select when its ticked box is clicked again", () => {
+    const el = drawFeedQuestion(
+      question({ case: "open", value: {} }, [item({ multi: true })]),
+      askHarness().rc,
+    );
+    clickOpt(el, 0, "OAuth 2.0");
+    clickOpt(el, 0, "OAuth 2.0");
+    expect(isChecked(el, 0, "OAuth 2.0")).toBe(false);
+  });
+
+  it("returns a question to pending once its last choice is cleared", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0");
+    clickTab(el, 0);
+    clickOpt(el, 0, "OAuth 2.0"); // deselect
+    expect(answeredFlags(el)[0]).toBe(false);
+  });
+
+  it("does not advance on a deselect", () => {
+    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
+    clickOpt(el, 0, "OAuth 2.0"); // advances to q1
+    clickTab(el, 0); // back to q0
+    clickOpt(el, 0, "OAuth 2.0"); // deselect
+    expect(activeTab(el)).toBe(0);
+  });
+
+  it("sends no selection for a question whose choice was cleared", async () => {
+    const h = askHarness();
+    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
+    clickOpt(el, 0, "OAuth 2.0"); // select
+    clickOpt(el, 0, "OAuth 2.0"); // clear
+    type(el, 0, "neither"); // an empty question would block submit, so give text
+    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    await settle();
+    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual([]);
   });
 });
 

@@ -66,6 +66,15 @@ const PATH = "FeedQuestion";
 /** What the submit button says. */
 export const SUBMIT_TEXT = "answer";
 
+/**
+ * What a multi-select's per-question commit button says.
+ *
+ * A single-select commits the instant a radio is picked, so it needs no button;
+ * a multi-select has no single "the pick is finished" moment, so the reader says
+ * so explicitly. Pressing it is the multi-select's AUTO-ADVANCE trigger.
+ */
+export const CONFIRM_TEXT = "next";
+
 /** What a question with nothing given says, in place. */
 export const UNANSWERED_NOTE = "pick an option or type an answer";
 
@@ -87,17 +96,10 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
   card.setAttribute("data-state", state.case);
 
   switch (state.case) {
-    case "open": {
+    case "open":
       card.className = "permission pending question";
-      const collectors: QuestionCollector[] = [];
-      u.questions.forEach((item, index) => {
-        const block = drawFeedQuestionItem(item, index, `${PATH}.questions[${index}]`);
-        collectors.push(block.collect);
-        card.append(block.el);
-      });
-      card.append(drawSubmit(rc, collectors));
+      card.append(drawOpenBatch(u, rc));
       return card;
-    }
     case "answered":
       card.className = "permission resolved question";
       card.append(drawFeedQuestionAnswered(state.value, rc, `${PATH}.answered`));
@@ -111,6 +113,130 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
   }
 }
 
+/** One tab's live handle: its selector button and the panel it shows. */
+interface QuestionTab {
+  /** The tab strip button that reveals this question. */
+  tab: HTMLButtonElement;
+  /** The `.q-block` panel this tab reveals; hidden while another is active. */
+  block: HTMLElement;
+  /** Reports whether this question currently carries an answer. */
+  collect: QuestionCollector;
+}
+
+/**
+ * THE OPEN BATCH, DRAWN AS TABS: one tab per question, one panel shown at a
+ * time, and the batch's single submit below.
+ *
+ * The layout is the only thing that changed. Every question is still drawn and
+ * VALIDATED up front (a malformed question in tab three must refuse the card,
+ * not wait to be clicked), every collector is still gathered, and the one
+ * submit still answers the whole batch in ONE verb — the wire contract is
+ * untouched.
+ *
+ * AUTO-ADVANCE: answering a question moves to the next UNANSWERED tab. A
+ * single-select commits the moment a radio is picked; a multi-select commits
+ * only when its explicit `CONFIRM_TEXT` button is pressed (see the item). A
+ * DESELECT is not a commit and never advances — it returns the question to
+ * pending. When every question is answered the reader stays put and submits.
+ */
+function drawOpenBatch(u: FeedQuestion, rc: RowContext): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "q-tabbed";
+
+  const strip = document.createElement("div");
+  strip.className = "q-tabs";
+  strip.setAttribute("role", "tablist");
+  strip.setAttribute("data-question-tabs", "");
+
+  const panels = document.createElement("div");
+  panels.className = "q-panels";
+
+  const tabs: QuestionTab[] = [];
+  const collectors: QuestionCollector[] = [];
+
+  // The answered/pending marker on every tab tracks LIVE content, so a mere
+  // tick — or a deselect that empties the question — updates the strip at once,
+  // even before a multi-select's commit button is pressed.
+  function refreshMarkers(): void {
+    for (const t of tabs) {
+      const answered = t.collect().answer !== undefined;
+      t.tab.classList.toggle("answered", answered);
+      t.tab.setAttribute("data-answered", answered ? "true" : "false");
+      const marker = t.tab.querySelector(".q-tab-marker");
+      if (marker !== null) marker.textContent = answered ? "✓" : "";
+    }
+  }
+
+  // Show one panel, hide the rest. Clicking any tab routes here, which is what
+  // lets the reader step BACK to an earlier question to change its answer.
+  function activate(index: number): void {
+    tabs.forEach((t, i) => {
+      const active = i === index;
+      t.tab.classList.toggle("active", active);
+      t.tab.setAttribute("aria-selected", active ? "true" : "false");
+      t.block.hidden = !active;
+    });
+  }
+
+  // The next UNANSWERED tab after this one, wrapping to the front; if every
+  // question is answered, stay put so the reader can submit the batch.
+  function advanceFrom(index: number): void {
+    const n = tabs.length;
+    for (let step = 1; step <= n; step += 1) {
+      const i = (index + step) % n;
+      if (tabs[i]?.collect().answer === undefined) {
+        activate(i);
+        return;
+      }
+    }
+  }
+
+  u.questions.forEach((item, index) => {
+    const block = drawFeedQuestionItem(item, index, `${PATH}.questions[${index}]`, {
+      // COMMIT POINT: a single-select radio pick or a multi-select's confirm
+      // press lands here and moves to the next unanswered tab.
+      onCommit: () => {
+        refreshMarkers();
+        advanceFrom(index);
+      },
+      // Any input change (a tick, a keystroke, a deselect) refreshes the strip
+      // markers but never advances.
+      onInput: refreshMarkers,
+    });
+    collectors.push(block.collect);
+
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "q-tab";
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("data-question-tab", String(index));
+    const marker = document.createElement("span");
+    marker.className = "q-tab-marker";
+    marker.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "q-tab-label";
+    label.textContent = block.header;
+    tab.append(marker, label);
+    tab.addEventListener("click", () => activate(index));
+    strip.append(tab);
+
+    block.el.classList.add("q-panel");
+    block.el.setAttribute("data-question-panel", String(index));
+    panels.append(block.el);
+
+    tabs.push({ tab, block: block.el, collect: block.collect });
+  });
+
+  wrap.append(strip, panels);
+  if (tabs.length > 0) activate(0);
+  refreshMarkers();
+
+  // A blocked submit reveals the FIRST unanswered tab, so the note it drops
+  // beside the missing question is on the panel the reader is looking at.
+  wrap.append(drawSubmit(rc, collectors, activate));
+  return wrap;
+}
+
 /** How one question's block reports what the reader gave it. */
 export type QuestionCollector = () => {
   /** The answer, when anything was given. */
@@ -119,18 +245,36 @@ export type QuestionCollector = () => {
   note: HTMLElement;
 };
 
+/** How one question's block reports interaction back to the batch's tabs. */
+export interface QuestionItemHooks {
+  /**
+   * The COMMIT POINT: fired when this question's answer is finished — a
+   * single-select radio pick, or a multi-select's confirm press. This is what
+   * drives AUTO-ADVANCE. A deselect is not a commit and never fires it.
+   */
+  onCommit?: () => void;
+  /** Any input change (tick, keystroke, deselect); refreshes markers only. */
+  onInput?: () => void;
+}
+
 /**
  * One question: chip, text, its options in the served order, and the free-text
  * escape.
  *
  * INDEX names the radio group, so two single-selects in one batch cannot share
  * a group and steal each other's selection. It is used for nothing else.
+ *
+ * SELECTIONS TOGGLE. Clicking a chosen option CLEARS it — for radios (which the
+ * DOM would otherwise leave stuck on) this is done by hand, and for checkboxes
+ * it is the native toggle. Clearing the last choice returns the question to
+ * pending without advancing; an empty question sends no selection.
  */
 export function drawFeedQuestionItem(
   u: FeedQuestionItem,
   index: number,
   path: string,
-): { el: HTMLElement; collect: QuestionCollector } {
+  hooks: QuestionItemHooks = {},
+): { el: HTMLElement; collect: QuestionCollector; header: string } {
   const options = requireCase(u.options, `${path}.options`);
   const text = requireMessage(u.text, `${path}.text`);
   log.debug("drawing a question item", {
@@ -142,9 +286,8 @@ export function drawFeedQuestionItem(
   el.className = "q-block";
   el.setAttribute("data-question", String(index));
 
-  el.append(
-    drawFeedQuestionHeader(requireMessage(u.header, `${path}.header`), `${path}.header`),
-  );
+  const header = requireMessage(u.header, `${path}.header`);
+  el.append(drawFeedQuestionHeader(header, `${path}.header`));
   el.append(drawFeedQuestionText(text, `${path}.text`));
 
   // THE ARM PICKS THE INPUT TYPE. Checked before anything is drawn from it, so
@@ -171,6 +314,32 @@ export function drawFeedQuestionItem(
   });
   el.append(list);
 
+  // The radio the group currently holds, tracked by hand so a second click on
+  // it can DESELECT it — the DOM leaves a checked radio checked otherwise.
+  let selectedRadio: HTMLInputElement | null = null;
+  inputs.forEach((input) => {
+    input.addEventListener("click", () => {
+      if (single) {
+        if (selectedRadio === input) {
+          // A second click on the held radio clears it: back to pending, no
+          // commit, so a deselect never advances.
+          input.checked = false;
+          selectedRadio = null;
+          hooks.onInput?.();
+          return;
+        }
+        // A fresh pick: the DOM has already checked it and cleared its siblings.
+        selectedRadio = input;
+        hooks.onInput?.();
+        hooks.onCommit?.();
+        return;
+      }
+      // Multi-select: the checkbox toggled natively (select OR deselect). Either
+      // way it only refreshes markers; the CONFIRM button is the commit point.
+      hooks.onInput?.();
+    });
+  });
+
   // ALWAYS DRAWN — see the file header. It is a field, not an "other" option,
   // so it can carry a note beside a chosen label as easily as an answer instead
   // of one.
@@ -179,7 +348,24 @@ export function drawFeedQuestionItem(
   other.className = "q-other";
   other.setAttribute("data-question-other", "");
   other.placeholder = "something else";
+  other.addEventListener("input", () => hooks.onInput?.());
   el.append(other);
+
+  // MULTI-SELECT'S COMMIT POINT. A single-select advances on its pick, so it
+  // gets no button; a multi-select has no natural "the pick is finished"
+  // moment, so the reader presses this to commit and advance.
+  if (!single) {
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "q-confirm";
+    confirm.setAttribute("data-question-confirm", "");
+    confirm.textContent = CONFIRM_TEXT;
+    confirm.addEventListener("click", () => {
+      hooks.onInput?.();
+      hooks.onCommit?.();
+    });
+    el.append(confirm);
+  }
 
   const note = document.createElement("div");
   note.className = "q-note";
@@ -204,7 +390,7 @@ export function drawFeedQuestionItem(
       },
     };
   };
-  return { el, collect };
+  return { el, collect, header: header.text };
 }
 
 /** The question's short chip label, verbatim. */
@@ -346,8 +532,17 @@ export function drawFeedQuestionExpired(
   return el;
 }
 
-/** The batch's one submit button. */
-function drawSubmit(rc: RowContext, collectors: readonly QuestionCollector[]): HTMLElement {
+/**
+ * The batch's one submit button.
+ *
+ * `reveal` steps the tab strip to a given question; a blocked submit uses it to
+ * bring the first unanswered question into view beside its note.
+ */
+function drawSubmit(
+  rc: RowContext,
+  collectors: readonly QuestionCollector[],
+  reveal?: (index: number) => void,
+): HTMLElement {
   const actions = document.createElement("div");
   actions.className = "perm-actions";
 
@@ -359,7 +554,7 @@ function drawSubmit(rc: RowContext, collectors: readonly QuestionCollector[]): H
   actions.append(submit);
 
   submit.addEventListener("click", () => {
-    void send(rc, actions, submit, collectors);
+    void send(rc, actions, submit, collectors, reveal);
   });
   return actions;
 }
@@ -370,6 +565,7 @@ async function send(
   actions: HTMLElement,
   submit: HTMLButtonElement,
   collectors: readonly QuestionCollector[],
+  reveal?: (index: number) => void,
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearRefusals(actions);
@@ -379,6 +575,10 @@ async function send(
   const missing = collected.filter((one) => one.answer === undefined);
   if (missing.length > 0) {
     for (const one of missing) one.note.hidden = false;
+    // Bring the first unanswered question into view, so its note is on the panel
+    // the reader is looking at rather than on a hidden tab.
+    const firstMissing = collected.findIndex((one) => one.answer === undefined);
+    if (firstMissing >= 0) reveal?.(firstMissing);
     log.info("a question batch was submitted with unanswered questions", {
       operation: "feed.asks.question.incomplete",
       context: { row: id.value, missing: missing.length, of: collected.length },
