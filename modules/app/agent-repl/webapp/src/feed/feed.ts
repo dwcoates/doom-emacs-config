@@ -185,6 +185,15 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       schema: WatchFeedResponseSchema,
       open: (client, signal) => openAndTail(client, signal),
       onPush: (response) => {
+        // A frame carries EITHER a row upsert OR a response-selection push,
+        // never both (endpoint_watch_feed.proto). A selection frame carries no
+        // row, so it must be routed BEFORE `requireMessage(response.row)`,
+        // which would otherwise reject a well-formed selection as a malformed
+        // row. A frame with neither still fails loudly there, as before.
+        if (response.selection !== undefined) {
+          root.applySelection(response.selection);
+          return;
+        }
         root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
       },
     });
