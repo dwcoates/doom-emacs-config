@@ -664,6 +664,28 @@ without a keyword here fails this test instead of failing a send."
                      (agent-repl-test-wire-common--parse "{\"why\":\"x\"}"))))
                  '("SessionFaultSessionAbsent" why "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-common-double-present-is-a-number ()
+  "protojson carries a double as a JSON number, decoded as a float."
+  (let ((object (agent-repl-test-wire-common--parse "{\"scale\":1.5}")))
+    (should (equal (agent-repl-wire--decode-double "M" 'scale object) 1.5))))
+
+(ert-deftest agent-repl-test-wire-common-double-accepts-a-decimal-string ()
+  "protojson also accepts the decimal-string spelling of a double."
+  (let ((object (agent-repl-test-wire-common--parse "{\"scale\":\"1.5\"}")))
+    (should (equal (agent-repl-wire--decode-double "M" 'scale object) 1.5))))
+
+(ert-deftest agent-repl-test-wire-common-double-absent-is-zero ()
+  "An absent non-optional double is the proto3 default protojson omits."
+  (should (equal (agent-repl-wire--decode-double "M" 'scale nil) 0.0)))
+
+(ert-deftest agent-repl-test-wire-common-double-refuses-a-non-number ()
+  "A non-numeric spelling in a double field is a contract breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-double
+                     "M" 'scale (agent-repl-test-wire-common--parse "{\"scale\":\"NaN\"}"))))
+                 '("M" scale "expected a double"))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here
