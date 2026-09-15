@@ -86,10 +86,12 @@ import type {
   FooterTokensCellVerdict,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import {
+  STATUS_GRADIENT_CLASS,
   STATUS_WAVE_ATTRIBUTE,
   STATUS_WAVE_LETTER_CLASS,
   STATUS_WAVE_PROGRESS,
   STATUS_WAVE_WORD_CLASS,
+  statusGradientStyle,
   statusWaveStyle,
   statusWordWaves,
 } from "../breathing.js";
@@ -345,7 +347,12 @@ function drawStatusWord(word: HTMLElement, armCase: string): void {
   }
   word.setAttribute(STATUS_WAVE_ATTRIBUTE, STATUS_WAVE_PROGRESS);
   const holder = document.createElement("span");
-  holder.className = STATUS_WAVE_WORD_CLASS;
+  // ONE span, two effects: it holds the split letters (the scale bulge) and it
+  // is the gradient's own fill, sweeping across the whole word. The gradient's
+  // phase is emitted inline off the same epoch the letters use, so a push that
+  // rewrites this subtree mid-sweep continues it rather than snapping it home.
+  holder.className = `${STATUS_WAVE_WORD_CLASS} ${STATUS_GRADIENT_CLASS}`;
+  holder.setAttribute("style", statusGradientStyle());
   [...text].forEach((character, index) => {
     if (character === " ") {
       holder.appendChild(document.createTextNode(" "));
