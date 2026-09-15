@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -681,5 +682,116 @@ func TestNewRefusesASurplusFooterAllowanceRow(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("New accepted a footer_allowance row naming no FooterAllowance.status arm")
+	}
+}
+
+// ---- Prime: the per-workspace footer topic re-primes on reconnect ----------
+
+// TestPrimePublishesAViewWithoutAnyLiveFact is the idle-session-after-restart
+// case: a daemon restart rebuilds the resolver empty, and an idle session
+// produces no fresh live edge, so without a register-time prime the footer
+// topic would hold nothing. Prime alone must publish a current view.
+func TestPrimePublishesAViewWithoutAnyLiveFact(t *testing.T) {
+	// Arrange: a workspace bound at registration but with no session fact yet.
+	h := newHarness(t)
+	if _, ok := h.r.Topic(testWS).Latest(); ok {
+		t.Fatalf("a view stood before Prime; the arrange assumed an empty topic")
+	}
+
+	// Act.
+	h.r.Prime(testWS)
+
+	// Assert: the topic now holds a current, idle view for a subscriber to replay.
+	if h.status(t) != "idle" {
+		t.Fatalf("primed status = %q, want idle for a workspace with no session fact", h.status(t))
+	}
+}
+
+// TestPrimedViewIsAReconnectingSubscribersFirstDelivery proves the reconnect
+// case end to end: a subscriber that arrives after the prime — the client that
+// reconnected to the daemon — receives the primed view as its first delivery
+// rather than staying quiet.
+func TestPrimedViewIsAReconnectingSubscribersFirstDelivery(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.r.Prime(testWS)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	got := <-h.r.Topic(testWS).Subscribe(ctx)
+
+	// Assert.
+	if got.GetStrip().GetStatus().GetStatus() == nil {
+		t.Fatalf("a reconnecting subscriber's first delivery carried no status arm")
+	}
+}
+
+// TestPrimedViewIsComplete pins the completeness contract for a view primed
+// from an empty accumulation: nothing partial is shipped even when no session
+// fact has been observed.
+func TestPrimedViewIsComplete(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.r.Prime(testWS)
+
+	// Assert.
+	view := h.view(t)
+	strip := view.GetStrip()
+	switch {
+	case strip.GetStatus().GetStatus() == nil:
+		t.Fatalf("the primed status carries no arm")
+	case strip.GetTokens().GetInput() == nil:
+		t.Fatalf("the primed tokens cell is unpopulated")
+	case view.GetExpanded().GetTokens() == nil || view.GetExpanded().GetCrons() == nil:
+		t.Fatalf("the primed view is missing a panel")
+	}
+}
+
+// TestPrimeReflectsAccumulatedFactsRatherThanIdle is the idle-session-WITH-its-
+// facts case: when the resolver already holds live facts, a prime republishes
+// the CURRENT view built from them, never a blank or default one.
+func TestPrimeReflectsAccumulatedFactsRatherThanIdle(t *testing.T) {
+	// Arrange: a turn in flight is a fact idle would erase if Prime rebuilt
+	// from scratch.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: h.clock.Now(), Act: ActPrompt})
+	if h.status(t) != "thinking" {
+		t.Fatalf("arrange status = %q, want thinking", h.status(t))
+	}
+
+	// Act.
+	h.r.Prime(testWS)
+
+	// Assert: the prime kept the accumulated status rather than resetting it.
+	if h.status(t) != "thinking" {
+		t.Fatalf("primed status = %q, want the accumulated thinking view", h.status(t))
+	}
+}
+
+// TestPrimeOnALiveFooterIsDeduplicated guards against a spurious repaint: a
+// prime that renders the same view the topic already holds must not reach a
+// subscriber a second time (the topic's value dedup drops it).
+func TestPrimeOnALiveFooterIsDeduplicated(t *testing.T) {
+	// Arrange: a standing view, then a subscriber caught up to it.
+	h := newHarness(t)
+	connected(h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := h.r.Topic(testWS).Subscribe(ctx)
+	<-sub // the latest replayed on subscribe
+
+	// Act: prime with no state change.
+	h.r.Prime(testWS)
+
+	// Assert: nothing new is delivered — a second, identical view would be a
+	// spurious repaint.
+	select {
+	case extra := <-sub:
+		t.Fatalf("Prime delivered a duplicate view %+v; an identical re-render must dedup", extra)
+	default:
 	}
 }

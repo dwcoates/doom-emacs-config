@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -735,4 +736,28 @@ func TestRegisterAnswersWhileTheRevivalIsStillStarting(t *testing.T) {
 		t.Fatalf("Register answered %q, want the known workspace %q", answered.ID, record.ID)
 	}
 	<-entered
+}
+
+// TestRegisterPrimesTheFooter pins the reconnect fix's wiring: registration —
+// the edge every workspace passes through when the client reconnects (Emacs
+// re-announces every workspace it holds) — primes the per-workspace footer
+// topic, so a reconnecting subscriber replays a current view even for an idle
+// session that produces no fresh live edge. Unlike the global roster, the
+// footer topic is per-workspace and empty after a daemon restart, so this
+// prime is what keeps it current.
+func TestRegisterPrimesTheFooter(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+
+	// Act.
+	record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if !slices.Contains(f.footer.primed, record.ID) {
+		t.Fatalf("footer was not primed for %q at registration; primed = %v", record.ID, f.footer.primed)
+	}
 }
