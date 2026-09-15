@@ -359,8 +359,8 @@ describe("the footer status wave's stylesheet contract", () => {
     // Arrange / Act
     const keyframes = /@keyframes pfooter-status-wave \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1];
 
-    // Assert
-    expect(keyframes).toMatch(/transform:\s*scale\(1\.15\)/);
+    // Assert — 1.18, nudged up from 1.15 (owner ruling, 2026-09-14).
+    expect(keyframes).toMatch(/transform:\s*scale\(1\.18\)/);
   });
 
   it("never touches font-size, which would re-lay the whole strip out", () => {
@@ -406,6 +406,62 @@ describe("the footer status wave's stylesheet contract", () => {
   it("stops the wave outright under prefers-reduced-motion", () => {
     // Arrange / Act
     const declarations = ruleFor(reducedMotionBlock(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/animation:\s*none/);
+  });
+
+  it("clips the gradient to the word's own text, not its box", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/background-clip:\s*text/);
+  });
+
+  it("makes the text fill transparent so the clipped gradient shows through", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+
+    // Assert — text-fill, not color, so currentColor still gives the arm tone.
+    expect(declarations).toMatch(/-webkit-text-fill-color:\s*transparent/);
+  });
+
+  it("paints the gradient as a linear-gradient background image", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+
+    // Assert
+    expect(declarations).toMatch(/background-image:\s*linear-gradient/);
+  });
+
+  it("runs the sweep at the scale wave's exact period, so their motion is locked", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+
+    // Assert — same 2.6s, same alternate, as pfooter-status-wave.
+    expect(declarations).toMatch(/animation:\s*pfooter-status-gradient 2\.6s ease-in-out infinite alternate/);
+  });
+
+  it("animates background-position, a paint rather than a re-layout", () => {
+    // Arrange / Act
+    const keyframes = /@keyframes pfooter-status-gradient \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1];
+
+    // Assert
+    expect(keyframes).toMatch(/background-position:\s*100% 50%/);
+  });
+
+  it("declares no animation-delay, which the word overrides inline", () => {
+    // Arrange / Act
+    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/animation-delay/);
+  });
+
+  it("stops the gradient outright under prefers-reduced-motion", () => {
+    // Arrange / Act
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-status-gradient") ?? "";
 
     // Assert
     expect(declarations).toMatch(/animation:\s*none/);
