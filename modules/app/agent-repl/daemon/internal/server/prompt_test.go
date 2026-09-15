@@ -46,6 +46,130 @@ func TestSubmitPromptAnswersTheMintedTurn(t *testing.T) {
 	}
 }
 
+// promptText flattens a said's text blocks the way the daemon delivers them.
+func promptText(s *conversationv1.UserSaid) string {
+	var parts []string
+	for _, block := range s.GetContent().GetBlocks() {
+		if text := block.GetText(); text != nil {
+			parts = append(parts, text.GetText())
+		}
+	}
+	return join(parts)
+}
+
+// join concatenates with newlines, mirroring the daemon's own flattening.
+func join(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += "\n"
+		}
+		out += p
+	}
+	return out
+}
+
+// TestSubmitPromptPrependsTheReferencedResponse pins the exact reply-preamble
+// wording: the referenced response's markdown between the two ⟢ markers,
+// followed by the user's own words, delivered as one prompt to the shim.
+func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.markdown = map[string]string{"resp-1": "The capital is Paris."}
+	h.Prompts.outcome = prompthandler.Outcome{
+		Recognition: prompthandler.RecognizedNone,
+		Turn:        "turn-9",
+		Disposition: promptqueue.Disposition{Delivered: true},
+	}
+	req := submitRequest()
+	req.Said = said("And its population?")
+	req.ReferenceResponseFeedid = &frontendv1.FeedId{Value: "resp-1"}
+
+	// Act.
+	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req)); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	want := "⟢ Replying to an earlier response of yours:\n\n" +
+		"The capital is Paris." +
+		"\n\n⟢ My message:\n\n" +
+		"And its population?"
+	if got := promptText(h.Prompts.lastSaid); got != want {
+		t.Fatalf("delivered prompt =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestSubmitPromptRefusesAnUnresolvableReference pins that a reference the
+// daemon cannot resolve is REFUSED, never silently dropped: the user's message
+// is not delivered shorn of the reply they asked for.
+func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.markdown = map[string]string{} // resolves nothing
+	req := submitRequest()
+	req.ReferenceResponseFeedid = &frontendv1.FeedId{Value: "resp-gone"}
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req))
+
+	// Assert: no landed arm carries this refusal, so it surfaces loudly as a
+	// Connect error rather than an answer — and the prompt never reached the
+	// handler.
+	if connectCode(t, err) != connect.CodeNotFound {
+		t.Fatalf("code = %v, want NotFound for an unresolvable reference", connectCode(t, err))
+	}
+	if h.Prompts.lastSaid != nil {
+		t.Fatalf("the prompt was delivered despite the unresolvable reference: %v", h.Prompts.lastSaid)
+	}
+}
+
+// TestSubmitPromptClearsTheSelectionAfterConsumingTheReference pins that a
+// successful reply-consuming submit drops the daemon's selection cursor. The
+// two-row set makes the clear observable: with the most recent seeded, a later
+// NEXT restarts at the most recent when cleared, but would WRAP to the oldest
+// if the cursor had survived.
+func TestSubmitPromptClearsTheSelectionAfterConsumingTheReference(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-old", "resp-new")
+	h.Feed.markdown = map[string]string{"resp-new": "prior answer"}
+	h.Prompts.outcome = prompthandler.Outcome{
+		Recognition: prompthandler.RecognizedNone,
+		Turn:        "turn-10",
+		Disposition: promptqueue.Disposition{Delivered: true},
+	}
+	// Seed the cursor at the most recent (NEXT from none).
+	if _, err := h.Client.SelectResponse(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectResponseRequest{
+			Workspace: ref(),
+			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
+		})); err != nil {
+		t.Fatalf("seed selection: %v", err)
+	}
+	req := submitRequest()
+	req.ReferenceResponseFeedid = &frontendv1.FeedId{Value: "resp-new"}
+
+	// Act.
+	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req)); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert: a NEXT now restarts at the most recent (cleared), rather than
+	// wrapping to the oldest (which a surviving cursor would do).
+	resp, err := h.Client.SelectResponse(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectResponseRequest{
+			Workspace: ref(),
+			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
+		}))
+	if err != nil {
+		t.Fatalf("SelectResponse: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetValue(); got != "resp-new" {
+		t.Fatalf("selected = %q, want resp-new (a cleared cursor restarts at the most recent)", got)
+	}
+}
+
 // TestSubmitPromptAnswersAHeldPromptWithItsTurn pins that A HOLD IS AN ANSWER:
 // the composer still learns the turn it must match its own row against.
 func TestSubmitPromptAnswersAHeldPromptWithItsTurn(t *testing.T) {

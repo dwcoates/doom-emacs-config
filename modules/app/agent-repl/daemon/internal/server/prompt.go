@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -59,7 +60,30 @@ func (s *server) SubmitPrompt(
 		target = &ref
 	}
 
-	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, req.Msg.GetSaid(),
+	// REPLY-TO-A-PAST-RESPONSE: when the submission names an earlier
+	// final-response row, the DAEMON prepends a copy of that response plus a
+	// note BEFORE the prompt reaches the shim, so the agent knows the new
+	// message refers to it. Emacs sends only the feedid. A feedid the daemon
+	// cannot resolve to a selectable final response is REFUSED, never dropped:
+	// delivering the user's message shorn of the reference they asked for would
+	// silently change what they said.
+	said := req.Msg.GetSaid()
+	consumedReference := false
+	if ref := req.Msg.GetReferenceResponseFeedid(); ref != nil {
+		markdown, ok := s.deps.Feed.ResponseMarkdown(subject.Record.ID, ref)
+		if !ok {
+			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(s.fill(refusal{
+				Arm: "reference_response_unresolvable",
+				Reason: fmt.Sprintf("the referenced response %q is not a selectable final response of this workspace",
+					ref.GetValue()),
+				NotFound: true,
+			}))))
+		}
+		said = prependReferencedResponse(said, markdown)
+		consumedReference = true
+	}
+
+	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
@@ -67,8 +91,55 @@ func (s *server) SubmitPrompt(
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
-	return answer(resp, s.encodeSubmitOutcome(subject.Log, resp, outcome))
+	cerr := s.encodeSubmitOutcome(subject.Log, resp, outcome)
+	// The selection is dropped once the reference has actually been delivered
+	// (a genuine success — a minted turn, a hold, a command answer — never a
+	// refusal arm or a transport error). Emacs also sends a CLEAR from its own
+	// escape/consume path; both are idempotent, so this double-clear pushes the
+	// cleared FeedSelection at most once (clearSelection no-ops when there is
+	// nothing to clear).
+	if consumedReference && cerr == nil && resp.GetError() == nil {
+		s.clearSelection(subject.Record.ID)
+	}
+	return answer(resp, cerr)
 }
+
+// prependReferencedResponse builds the outgoing prompt for a
+// reply-to-a-past-response submission: a single leading text block carrying the
+// exact reply preamble — the referenced response's markdown between the two
+// ⟢ markers, then the user's own words — followed by every non-text block the
+// user attached, preserved in order. The user's text blocks are flattened into
+// the preamble, so the shim receives one prompt reading exactly as specified.
+func prependReferencedResponse(said *conversationv1.UserSaid, markdown string) *conversationv1.UserSaid {
+	var userText []string
+	var attachments []*conversationv1.UserContentBlock
+	for _, block := range said.GetContent().GetBlocks() {
+		if text := block.GetText(); text != nil {
+			userText = append(userText, text.GetText())
+			continue
+		}
+		attachments = append(attachments, block)
+	}
+
+	combined := replyPrefixOpening + markdown + replyPrefixMessage + strings.Join(userText, "\n")
+
+	blocks := make([]*conversationv1.UserContentBlock, 0, len(attachments)+1)
+	blocks = append(blocks, &conversationv1.UserContentBlock{
+		Block: &conversationv1.UserContentBlock_Text{
+			Text: &conversationv1.TextBlock{Text: combined},
+		},
+	})
+	blocks = append(blocks, attachments...)
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
+}
+
+// The reply preamble, split at the two ⟢ markers. Kept verbatim: the exact
+// wording is the contract with the agent (and asserted character-for-character
+// by the tests), so a change here is a change to what the model is told.
+const (
+	replyPrefixOpening = "⟢ Replying to an earlier response of yours:\n\n"
+	replyPrefixMessage = "\n\n⟢ My message:\n\n"
+)
 
 // encodeSubmitOutcome renders the handler's outcome as SubmitPromptSuccess.
 //
