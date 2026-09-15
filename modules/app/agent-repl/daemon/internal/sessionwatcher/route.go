@@ -60,6 +60,12 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 			"arm": sessionArm(update),
 		})
 		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		// THE VENDOR STATING A TITLE STOPS OUR SYNTHESIS. Its ai-title always
+		// wins, so once it exists the daemon spends no more on a title of its
+		// own.
+		if _, isTitle := update.GetUpdate().(*conversationv1.SessionUpdate_Title); isTitle && w.sinks.Title != nil {
+			w.sinks.Title.OnVendorTitle(w.ws)
+		}
 
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged:
@@ -331,6 +337,13 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), at, w.addr)
 		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
 		w.sinks.Topbar.OnContextCut(w.ws, agent, update.GetContextCut())
+		// A CLEAR OR A COMPLETED COMPACTION moves the digest boundary, so the
+		// synthesizer resets its hash and re-synthesizes on the next trigger. A
+		// FAILED compaction cut nothing, so the digest is unchanged and the
+		// synthesizer is left alone.
+		if cut := update.GetContextCut(); w.sinks.Title != nil && (cut.GetCleared() != nil || cut.GetCompacted() != nil) {
+			w.sinks.Title.OnContextReset(w.ws)
+		}
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
