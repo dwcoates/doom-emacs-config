@@ -51,7 +51,7 @@ func normalizeDir(dir string) (string, error) {
 
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, merged_at, spawned_shim_pid, created_at`
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -62,11 +62,12 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		priority sql.NullInt64
 		task     sql.NullString
 		selected sql.NullInt64
+		activity sql.NullInt64
 		merged   sql.NullInt64
 		spawned  sql.NullInt64
 		created  int64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &merged, &spawned, &created); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created); err != nil {
 		return Workspace{}, err
 	}
 	if spawned.Valid {
@@ -96,6 +97,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		ws.Task = &id
 	}
 	ws.LastSelectedAt = optTime(selected)
+	ws.LastActivityAt = optTime(activity)
 	ws.MergedAt = optTime(merged)
 	ws.CreatedAt = fromNanos(created)
 	return ws, nil

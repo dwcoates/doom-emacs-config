@@ -66,6 +66,14 @@ type Workspace struct {
 	Task *TaskID
 	// LastSelectedAt is when the user last selected the workspace.
 	LastSelectedAt *time.Time
+	// LastActivityAt is when the workspace LAST DID REAL WORK: the most recent
+	// turn start or turn close, stamped at the genuine activity edge inside the
+	// turn writes (PutTurn/CloseTurn), never at compose or select time. Nil
+	// when the workspace has never taken a turn. It is the roster when-column's
+	// source — distinct from LastSelectedAt, which times VIEWING recency and
+	// must never drive that column — so the column stays stable across mere
+	// selection and navigation.
+	LastActivityAt *time.Time
 	// MergedAt is when the workspace's merge landed, nil when it has not.
 	MergedAt *time.Time
 	// CreatedAt is when the record was minted.

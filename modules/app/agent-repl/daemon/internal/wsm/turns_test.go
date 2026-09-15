@@ -670,3 +670,82 @@ func TestASecondClaimOfTheSameDisplacedTurnAnswersFalse(t *testing.T) {
 		t.Fatalf("the second claim = (%v, %v), want (false, nil): one owner per record", claimed, err)
 	}
 }
+
+// THE WORKSPACE'S LAST-ACTIVITY STAMP. A turn write IS activity, and the turn
+// writes advance the workspace's last_activity_at in the same transaction so
+// the roster when-column reflects when the workspace last did real work — and
+// so the column can never be stamped at compose or select time.
+
+func TestPutTurnStampsTheWorkspacesLastActivity(t *testing.T) {
+	// Arrange — a workspace that has never taken a turn.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act — a turn lands.
+	if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: ws.ID, Text: "go", Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Assert — last activity is the turn's start.
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.LastActivityAt == nil || !got.LastActivityAt.Equal(instant) {
+		t.Fatalf("last activity = %v, want the turn's start %v", got.LastActivityAt, instant)
+	}
+}
+
+func TestCloseTurnStampsTheWorkspacesLastActivity(t *testing.T) {
+	// Arrange — a turn open since `instant`.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := NewTurnID()
+	if err := s.PutTurn(context.Background(), Turn{ID: turn, Workspace: ws.ID, Text: "go", Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+	settled := instant.Add(time.Hour)
+
+	// Act — the response settles an hour later.
+	if err := s.CloseTurn(context.Background(), turn, settled, CloseCompleted); err != nil {
+		t.Fatalf("CloseTurn: %v", err)
+	}
+
+	// Assert — last activity advanced to the close instant.
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.LastActivityAt == nil || !got.LastActivityAt.Equal(settled) {
+		t.Fatalf("last activity = %v, want the close instant %v", got.LastActivityAt, settled)
+	}
+}
+
+// TestPutTurnDoesNotPullLastActivityBackward pins the MONOTONIC guard: a fleet
+// rollout re-PUTs an in-flight turn to mark it displaced, carrying the turn's
+// ORIGINAL (older) start. That re-put must not drag the stamp back to a past
+// instant and mis-report a handover as fresh activity.
+func TestPutTurnDoesNotPullLastActivityBackward(t *testing.T) {
+	// Arrange — a recent turn set the stamp.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	recent := NewTurnID()
+	newer := instant.Add(time.Hour)
+	if err := s.PutTurn(context.Background(), Turn{ID: recent, Workspace: ws.ID, Text: "recent", Origin: "emacs", StartedAt: newer}); err != nil {
+		t.Fatalf("PutTurn recent: %v", err)
+	}
+
+	// Act — an older turn is re-PUT (as a displacement mark would).
+	if err := s.PutTurn(context.Background(), Turn{ID: NewTurnID(), Workspace: ws.ID, Text: "old", Origin: "emacs", StartedAt: instant, Displaced: true}); err != nil {
+		t.Fatalf("PutTurn old: %v", err)
+	}
+
+	// Assert — the stamp stayed at the newer instant.
+	got, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.LastActivityAt == nil || !got.LastActivityAt.Equal(newer) {
+		t.Fatalf("last activity = %v, want it to stay at the newer instant %v", got.LastActivityAt, newer)
+	}
+}
