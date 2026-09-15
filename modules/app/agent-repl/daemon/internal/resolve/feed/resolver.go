@@ -87,6 +87,11 @@ type wsState struct {
 	units map[string]*unitState
 	// responses is the prose fold, keyed by activity id.
 	responses map[string]*proseState
+	// thinking is the reasoning fold, keyed by activity id. Kept SEPARATE from
+	// responses so the response-only logic (directive suppression, answer-row
+	// filing) can never reach a thinking fold: a thinking bubble is never the
+	// turn's answer and is never suppressed as a directive's empty prose.
+	thinking map[string]*proseState
 	// plans is the agent's current plan episode, keyed by agent id. It is the
 	// OPEN one, or the last one once that has settled.
 	plans map[string]*planState
@@ -431,6 +436,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		readers:              map[ReaderID]*walk{},
 		units:                map[string]*unitState{},
 		responses:            map[string]*proseState{},
+		thinking:             map[string]*proseState{},
 		plans:                map[string]*planState{},
 		planUnits:            map[string]*planState{},
 		shells:               map[string]*shellState{},
