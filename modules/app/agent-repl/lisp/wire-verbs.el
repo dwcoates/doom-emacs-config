@@ -59,6 +59,7 @@
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-double "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-repository-ref "agent-repl-wire-common" (ref))
@@ -2843,6 +2844,44 @@ this codec does not know is refused as an unknown field."
    "SelectResponseResponse" json
    #'agent-repl-wire-decode-select-response-response-success
    #'agent-repl-wire-decode-select-response-response-error))
+
+;; AdjustFeedTextScale — the feed text zoom nudge. The request is a bare
+;; DIRECTION (the scale is daemon-global, so there is no workspace ref); the
+;; response is a bare `scale' double (no result oneof, because the preference
+;; has no per-workspace ownership to refuse on). See
+;; endpoint_adjust_feed_text_scale.proto.
+
+(defconst agent-repl-wire-adjust-feed-text-scale-directions
+  '((:increase . "ADJUST_FEED_TEXT_SCALE_DIRECTION_INCREASE")
+    (:decrease . "ADJUST_FEED_TEXT_SCALE_DIRECTION_DECREASE"))
+  "Map an AdjustFeedTextScaleDirection keyword to its protojson enum name.
+`:unspecified' is deliberately ABSENT: it is never a legitimate nudge, so
+a request carrying it is refused before it reaches the wire.")
+
+(defun agent-repl-wire-encode-adjust-feed-text-scale-direction (value)
+  "Encode the AdjustFeedTextScaleDirection keyword VALUE as its enum name.
+The vocabulary is closed; an unknown keyword — `:unspecified' in
+particular — is refused rather than sent."
+  (let ((name (cdr (assq value agent-repl-wire-adjust-feed-text-scale-directions))))
+    (unless name
+      (agent-repl-wire-verbs--fail "AdjustFeedTextScaleRequest" "direction" "unknown direction"))
+    name))
+
+(defun agent-repl-wire-encode-adjust-feed-text-scale-request (request)
+  "Encode AdjustFeedTextScaleRequest from plist REQUEST (:direction K).
+The direction is required; an incomplete request errors here rather than
+reaching the wire."
+  (let ((message "AdjustFeedTextScaleRequest"))
+    (list (cons 'direction
+                (agent-repl-wire-encode-adjust-feed-text-scale-direction
+                 (agent-repl-wire-verbs--require message "direction"
+                                                 (plist-get request :direction)))))))
+
+(defun agent-repl-wire-decode-adjust-feed-text-scale-response (json)
+  "Decode AdjustFeedTextScaleResponse from JSON into (:scale FLOAT).
+There is no result oneof to unwrap: the response is the clamped scale now
+in force, which the caller may echo."
+  (list :scale (agent-repl-wire--decode-double "AdjustFeedTextScaleResponse" 'scale json)))
 
 (provide 'agent-repl-wire-verbs)
 

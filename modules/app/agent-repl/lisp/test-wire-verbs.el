@@ -2792,3 +2792,46 @@ always registers the main worktree, so an answer without it is not one."
                         "RegisterRepositoryError")
                        #'string<)
                  '("notInARepository" "unreadablePath"))))
+
+;;;; ---- AdjustFeedTextScale ---------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-direction-increase ()
+  "The increase keyword encodes to its protojson enum name."
+  (should (equal (agent-repl-wire-encode-adjust-feed-text-scale-direction :increase)
+                 "ADJUST_FEED_TEXT_SCALE_DIRECTION_INCREASE")))
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-direction-decrease ()
+  "The decrease keyword encodes to its protojson enum name."
+  (should (equal (agent-repl-wire-encode-adjust-feed-text-scale-direction :decrease)
+                 "ADJUST_FEED_TEXT_SCALE_DIRECTION_DECREASE")))
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-direction-refuses-unspecified ()
+  "UNSPECIFIED is never a legitimate nudge, so it is refused before the wire."
+  (should-error (agent-repl-wire-encode-adjust-feed-text-scale-direction :unspecified)
+                :type 'agent-repl-wire-error))
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-vocabulary-pinned ()
+  "The direction vocabulary is every generated enum name except UNSPECIFIED."
+  (should (equal
+           (sort (mapcar #'cdr agent-repl-wire-adjust-feed-text-scale-directions) #'string<)
+           (sort (remove "ADJUST_FEED_TEXT_SCALE_DIRECTION_UNSPECIFIED"
+                         (agent-repl-test--generated-enum-names
+                          "agentrepl/v1/endpoint_adjust_feed_text_scale.pb.go"
+                          "ADJUST_FEED_TEXT_SCALE_DIRECTION_"))
+                 #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-request-shape ()
+  "A nudge carries only the chosen direction (the scale is daemon-global)."
+  (should (equal (agent-repl-wire-encode-adjust-feed-text-scale-request '(:direction :increase))
+                 '((direction . "ADJUST_FEED_TEXT_SCALE_DIRECTION_INCREASE")))))
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-missing-direction-refused ()
+  "The direction is REQUIRED, so a nudge without one never reaches the wire."
+  (should-error (agent-repl-wire-encode-adjust-feed-text-scale-request '())
+                :type 'agent-repl-wire-error))
+
+(ert-deftest agent-repl-test-wire-verbs-adjust-feed-text-scale-response-scale ()
+  "The response decodes the clamped scale now in force as a float."
+  (should (equal (agent-repl-wire-decode-adjust-feed-text-scale-response
+                  (agent-repl-test-wire-verbs--parse "{\"scale\":1.02}"))
+                 '(:scale 1.02))))

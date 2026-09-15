@@ -82,6 +82,8 @@
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-select-response-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-select-response-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-adjust-feed-text-scale-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-interrupt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-shutdown-schedule-request "wire-verbs" (request))
@@ -327,6 +329,18 @@ The request carries only the workspace ref and a DIRECTION (`:prev',
 computes the newly selected feedid (both directions start at the most
 recent and wrap at each end) and pushes it to the webapp, then acks the
 selected feedid — or NONE — here for Emacs's own state tracking.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-adjust-feed-text-scale
+  "AdjustFeedTextScale"
+  agent-repl-wire-encode-adjust-feed-text-scale-request
+  agent-repl-wire-decode-adjust-feed-text-scale-response
+  "Nudge the feed text zoom one small step up or down.
+The request carries only a DIRECTION (`:increase' or `:decrease'): the
+scale is a single daemon-global preference, so there is no workspace ref
+and no error arms.  The daemon applies a fixed small step, clamps the
+result, persists it, and pushes it to every open feed's watch; the
+response carries the clamped `:scale' now in force for the caller to
+echo.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-interrupt
   "Interrupt"
