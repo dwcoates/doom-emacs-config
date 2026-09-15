@@ -2092,9 +2092,20 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    leading its own text actually renders at, so 25 lines means 25 of ITS
    lines. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
-.bubble > .bubble-scroll,
 .fold-fixed > .agent-panel {
   max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
+}
+/* FIX1 (owner ruling, 2026-09-15: "the clicked/expanded view is smaller than the
+   unexpanded form; it should be just as large"). The COLLAPSED bubble caps at the
+   27.5-line budget BUT NEVER above the same 50vh ceiling the `.expanded` rule
+   caps at — the two are expressed against one 50vh so they stay coordinated. This
+   makes expanding monotone in height: expanded is always 50vh, collapsed is
+   min(27.5 lines, 50vh) <= 50vh, so expanding can only keep the height (tall
+   content, now scrollable) or grow it (a short window where 27.5 lines exceeds
+   50vh) — it can never SHRINK the bubble. Before this, on a short window 50vh was
+   below the 27.5-line height, so clicking to expand shrank the bubble. */
+.bubble > .bubble-scroll {
+  max-height: min(calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px)), 50vh);
 }
 /* COLLAPSED = NO SCROLL (owner ruling, 2026-09-15: "remove the scroll from the
    collapsed bubble views ... only when expanded ... is the scroll bar/
@@ -2194,6 +2205,53 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   max-height: 50vh;
   overflow-y: auto;
   cursor: zoom-out;
+}
+/* FIX2 "MORE BELOW" (owner ruling, 2026-09-15: "a signal that there's more to
+   reveal"). A COLLAPSED response or prompt bubble whose content overruns its cap
+   wears `has-more` (bubble-more.ts measures the overflow and toggles the class);
+   this draws the signal from that class and nothing else. The affordance is
+   SCOPED to `.bubble.assistant` and `.bubble.user` scroll boxes ONLY — never a
+   tool-call section — and each fades into its OWN bubble background (assistant
+   purple / user blue) so the last line dissolves rather than being hard-clipped.
+   Both pseudo-elements are absolutely positioned against the box, which the cap
+   holds still while collapsed (overflow-y: hidden), so bottom:0 is the visible
+   fold. `pointer-events: none` keeps a click on either one falling through to
+   click-to-expand. */
+.bubble.assistant > .bubble-scroll.has-more,
+.bubble.user > .bubble-scroll.has-more {
+  position: relative;
+}
+/* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
+.bubble.assistant > .bubble-scroll.has-more::after,
+.bubble.user > .bubble-scroll.has-more::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.5em;
+  pointer-events: none;
+}
+.bubble.assistant > .bubble-scroll.has-more::after {
+  background: linear-gradient(to bottom, transparent, var(--assistant));
+}
+.bubble.user > .bubble-scroll.has-more::after {
+  background: linear-gradient(to bottom, transparent, var(--user));
+}
+/* The chevron, centered on the bottom edge over the fade. Generated content is
+   not selectable, so it needs no user-select carve-out. */
+.bubble.assistant > .bubble-scroll.has-more::before,
+.bubble.user > .bubble-scroll.has-more::before {
+  content: "\2304";
+  position: absolute;
+  left: 50%;
+  bottom: 0.05em;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+  font-size: 1.05em;
+  line-height: 1;
+  color: var(--muted);
 }
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
