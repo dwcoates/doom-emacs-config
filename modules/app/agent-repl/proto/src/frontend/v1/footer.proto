@@ -936,6 +936,20 @@ message FooterStatusActivityRateLimited {
   // and this cell is what lets the client say the figures are stale rather
   // than silently implying they are fresh.
   FooterAllowanceSample sample = 3;
+  // The instant the figures above were last successfully READ off an account
+  // usage sample, epoch ms — the ORIGINAL instant, so the client ticks the
+  // reading's age from it ("session 41% … 10m 30s ago") per the clock
+  // convention (an instant is shipped, a duration is drawn).
+  //
+  // UNSET means no read instant exists: the figures on hand came from a
+  // rate-limit EVENT rather than a sample (an event carries no observation
+  // instant), or no figure has ever been read at all. The client then draws
+  // the figures with no age rather than inventing one.
+  //
+  // STAMPED ON A READABLE SAMPLE AND NEVER ON AN UNREADABLE ATTEMPT: the age
+  // is the age of the last successful reading, so an unreadable sample that
+  // leaves the figures standing does not make them look freshly read.
+  optional int64 figures_read_at_ms = 5;
 }
 
 // The newest account-usage sample's outcome, BY NAME. THE ARM IS WHETHER A

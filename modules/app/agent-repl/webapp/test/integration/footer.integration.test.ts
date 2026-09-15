@@ -1132,11 +1132,12 @@ describe("a jump whose target is not drawn", () => {
 
 describe("the usage line the strip cannot fit", () => {
   /**
-   * The state a real page shows: both windows figured, the newest usage
-   * sample unreadable, so the caveat rides beside figures the daemon will not
-   * clear. On the strip that is more line than the dock's one row can hold.
+   * The state a real page shows: both windows figured, the figures read a
+   * moment ago. On the strip that is more line than the dock's one row can
+   * hold, so the sheet carries the window the strip cuts. The figures were
+   * READ at 1 s absolute, so at the harness epoch (10 s) they read "9s ago".
    */
-  const UNREAD_RATE_LIMITED = {
+  const FIGURED_RATE_LIMITED = {
     session: {
       newsworthy: true,
       utilization: 0.82,
@@ -1149,42 +1150,52 @@ describe("the usage line the strip cannot fit", () => {
       resetsAtS: 9_000n,
       status: { case: "allowed", value: {} },
     },
-    sample: { outcome: { case: "serviceUnavailable", value: {} } },
+    figuresReadAtMs: 1_000n,
   };
 
   /** Boot with that line standing. */
-  async function withUnreadRateLine(): Promise<void> {
+  async function withFiguredRateLine(): Promise<void> {
     await withFooter({
       status: "idle",
       activity: "rateLimited",
-      activityOverride: UNREAD_RATE_LIMITED,
+      activityOverride: FIGURED_RATE_LIMITED,
     });
   }
 
-  it("condenses the caveat to a marker on the strip", async () => {
+  it("renders the age of the last usage reading on the strip", async () => {
     // Arrange / Act
-    await withUnreadRateLine();
-    // Assert: two words beside a figure, not a clause the cell would cut.
-    expect(harness.text(".footer-strip .footer-allowance-unread")).toBe("usage unread");
+    await withFiguredRateLine();
+    // Assert: read at 1 s, drawn at the 10 s epoch, so nine seconds ago.
+    // (harness.text trims the leading separator space.)
+    expect(harness.text(".footer-strip .footer-rate-age")).toBe("· 9s ago");
   });
 
-  it("keeps the marker out of the part the strip ellipsizes", async () => {
+  it("ticks the usage read-age on the shared clock", async () => {
+    // Arrange
+    await withFiguredRateLine();
+    // Act
+    await harness.tick(1_000);
+    // Assert
+    expect(harness.text(".footer-strip .footer-rate-age")).toBe("· 10s ago");
+  });
+
+  it("draws no usage-unread cell any more", async () => {
     // Arrange / Act
-    await withUnreadRateLine();
-    // Assert: the figures are the elastic child; the marker is its sibling.
-    expect(harness.$(".footer-rate-figures .footer-allowance-unread")).toBeNull();
+    await withFiguredRateLine();
+    // Assert
+    expect(harness.$(".footer-strip .footer-allowance-unread")).toBeNull();
   });
 
   it("leads the strip's figures with the newsworthy window", async () => {
     // Arrange / Act
-    await withUnreadRateLine();
+    await withFiguredRateLine();
     // Assert
     expect(harness.$(".footer-rate-figures [data-allowance]")?.dataset.allowance).toBe("session");
   });
 
   it("titles the activity cell with the whole line", async () => {
     // Arrange / Act
-    await withUnreadRateLine();
+    await withFiguredRateLine();
     // Assert
     expect(harness.$(".footer-activity")?.title).toBe(
       harness.text(".footer-activity-rate-limited"),
@@ -1193,7 +1204,7 @@ describe("the usage line the strip cannot fit", () => {
 
   it("carries the weekly window into the tokens sheet", async () => {
     // Arrange
-    await withUnreadRateLine();
+    await withFiguredRateLine();
     // Act
     await harness.click(".footer-tokens");
     // Assert
@@ -1201,18 +1212,6 @@ describe("the usage line the strip cannot fit", () => {
       harness.text('.footer-expanded[data-panel="tokens"] [data-usage-allowance="weekly"]'),
     ).toContain("weekly 63%");
   });
-
-  it("carries the unread caveat into the tokens sheet in full", async () => {
-    // Arrange
-    await withUnreadRateLine();
-    // Act
-    await harness.click(".footer-tokens");
-    // Assert
-    expect(harness.text('.footer-expanded[data-panel="tokens"] [data-usage="unread"]')).toBe(
-      "usage unread — the usage service did not answer",
-    );
-  });
-
   it("carries the context-budget sentence into the tokens sheet in full", async () => {
     // Arrange
     await withFooter({
