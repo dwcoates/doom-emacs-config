@@ -141,6 +141,44 @@ does not write to the durable sink."
                      (agent-repl-test-wire-common--parse "{\"id\":\"turn-42\"}"))))
                  '("TurnId" id "unknown field"))))
 
+;;;; ---- FeedId ----
+
+(ert-deftest agent-repl-test-wire-common-feed-id-decodes-its-opaque-token ()
+  "A FeedId decodes to its opaque value, echoed and never parsed."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-feed-id "{\"value\":\"feed-9\"}")
+                 '(:value "feed-9"))))
+
+(ert-deftest agent-repl-test-wire-common-feed-id-refuses-an-unknown-field ()
+  "An unknown field on FeedId is a schema the consumer does not hold."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-feed-id
+                     (agent-repl-test-wire-common--parse "{\"id\":\"feed-9\"}"))))
+                 '("FeedId" id "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-common-feed-id-encodes-verbatim ()
+  "The id is an echo token: its opaque value travels back unchanged."
+  (should (equal (agent-repl-test-wire-common--quiet
+                   (agent-repl-wire-encode-feed-id '(:value "feed-9")))
+                 '((value . "feed-9")))))
+
+(ert-deftest agent-repl-test-wire-common-feed-id-round-trips ()
+  "A FeedId survives encode, serialize, parse and decode unchanged."
+  (let* ((feedid '(:value "feed-9"))
+         (json (agent-repl-test-wire-common--quiet
+                 (json-serialize (agent-repl-wire-encode-feed-id feedid)))))
+    (should (equal (agent-repl-test-wire-common--decode
+                    #'agent-repl-wire-decode-feed-id json)
+                   feedid))))
+
+(ert-deftest agent-repl-test-wire-common-feed-id-refuses-a-non-string-value ()
+  "A non-string echo value is refused rather than sent for the daemon to reject."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-encode-feed-id '(:value 9))))
+                 '("FeedId" value "expected a string"))))
+
 ;;;; ---- Shared scalar primitives ----
 
 (ert-deftest agent-repl-test-wire-common-int64-accepts-the-emitted-string ()

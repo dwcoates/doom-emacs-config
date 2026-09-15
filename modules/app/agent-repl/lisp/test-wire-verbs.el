@@ -68,6 +68,10 @@ logging rung that never signals, so the stub is a no-op: the typed
               (lambda (priority) (list (cons 'level (format "%s" (plist-get priority :arm))))))
              ((symbol-function 'agent-repl-wire-decode-turn-id)
               (lambda (json) (list :value (cdr (assq 'value json)))))
+             ((symbol-function 'agent-repl-wire-encode-feed-id)
+              (lambda (feedid) (list (cons 'value (plist-get feedid :value)))))
+             ((symbol-function 'agent-repl-wire-decode-feed-id)
+              (lambda (json) (list :value (cdr (assq 'value json)))))
              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
      ,@body))
@@ -613,6 +617,29 @@ wire."
                    (list :workspace agent-repl-test-wire-verbs--ref
                          :idempotency-key "k-1" :origin :user-sent))
                   :type 'agent-repl-wire-error)))
+
+
+(ert-deftest agent-repl-test-wire-verbs-submit-omits-reference-when-absent ()
+  "An ordinary prompt spells no `referenceResponseFeedid': absence is the fact."
+  (agent-repl-test-wire-verbs--with-common
+    (should-not (assq 'referenceResponseFeedid
+                      (agent-repl-wire-encode-submit-prompt-request
+                       (list :workspace agent-repl-test-wire-verbs--ref
+                             :said '(:text "hi") :idempotency-key "k-1"
+                             :origin :user-sent))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-carries-reference-when-set ()
+  "A reply-to-a-past-response submit rides the selected FeedId ALONGSIDE said."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((encoded (agent-repl-wire-encode-submit-prompt-request
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :said '(:text "hi") :idempotency-key "k-1"
+                          :origin :user-sent
+                          :reference-response-feedid '(:value "feed-9")))))
+      (should (equal (cdr (assq 'referenceResponseFeedid encoded))
+                     '((value . "feed-9"))))
+      ;; It is carried ALONGSIDE the prompt, never in place of it.
+      (should (equal (cdr (assq 'said encoded)) '((said . "hi")))))))
 
 
 ;;;; ---- SubmitPromptResponse --------------------------------------------
@@ -2502,6 +2529,133 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached'."
                              "transferringAway" "notYetAdopted" "notDetachedWork"
                              "noSession" "shimRefused")
                        #'string<))))
+
+;;;; ---- SelectResponseRequest -------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-direction-prev ()
+  "The PREV direction encodes to its protojson enum name."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-select-response-direction :prev)
+                   "SELECT_RESPONSE_DIRECTION_PREV"))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-direction-next ()
+  "The NEXT direction encodes to its protojson enum name."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-select-response-direction :next)
+                   "SELECT_RESPONSE_DIRECTION_NEXT"))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-direction-clear ()
+  "The CLEAR direction encodes to its protojson enum name."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-select-response-direction :clear)
+                   "SELECT_RESPONSE_DIRECTION_CLEAR"))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-direction-refuses-unspecified ()
+  "UNSPECIFIED has no elisp spelling, so an unknown keyword is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-select-response-direction :unspecified)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-direction-vocabulary-pinned ()
+  "The direction vocabulary is every generated enum name except UNSPECIFIED."
+  (should (equal
+           (sort (mapcar #'cdr agent-repl-wire-select-response-directions) #'string<)
+           (sort (remove "SELECT_RESPONSE_DIRECTION_UNSPECIFIED"
+                         (agent-repl-test--generated-enum-names
+                          "agentrepl/v1/endpoint_select_response.pb.go"
+                          "SELECT_RESPONSE_DIRECTION_"))
+                 #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-request-shape ()
+  "A nav carries the echoed workspace ref and the chosen direction."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-select-response-request
+                    (list :workspace agent-repl-test-wire-verbs--ref :direction :prev))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (direction . "SELECT_RESPONSE_DIRECTION_PREV"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-missing-workspace-refused ()
+  "The workspace is REQUIRED, so a nav without one never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-select-response-request '(:direction :prev))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-missing-direction-refused ()
+  "The direction is REQUIRED, so a nav without one never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-select-response-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+;;;; ---- SelectResponseResponse ------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-success-selected ()
+  "A moved cursor acks the newly selected FeedId through the FeedId codec."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-response-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"selected\":{\"value\":\"feed-9\"}}}"))
+                   '(:arm :success :value (:selected (:value "feed-9")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-success-none ()
+  "An unset `selected' is NONE — a CLEAR, or no selectable rows — and is nil."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-response-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value (:selected nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-success-refuses-unknown-field ()
+  "An unknown field on the success is a schema the consumer does not hold."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-select-response-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"selectedRow\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-error-unknown-workspace ()
+  "The unknown-workspace refusal decodes as an empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-response-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"unknownWorkspace\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :unknown-workspace :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-error-workspace-ref-mismatch ()
+  "The ref-mismatch refusal carries the registry's dir for this id."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-response-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w/real\"}}}"))
+                   '(:arm :error
+                     :value (:cause (:arm :workspace-ref-mismatch
+                                     :value (:registry-dir "/w/real"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-error-transferring-away ()
+  "The transferring-away refusal carries the successor's address."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-response-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}"))
+                   '(:arm :error
+                     :value (:cause (:arm :transferring-away
+                                     :value (:address "127.0.0.1:9"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-error-not-yet-adopted ()
+  "The not-yet-adopted refusal decodes as an empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-select-response-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"notYetAdopted\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-response-error-cause-arms-pinned ()
+  "SelectResponseError's cause oneof has exactly the arms this codec decodes."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_select_response.pb.go"
+                        "SelectResponseError")
+                       #'string<)
+                 '("notYetAdopted" "transferringAway"
+                   "unknownWorkspace" "workspaceRefMismatch"))))
 
 (provide 'test-wire-verbs)
 
