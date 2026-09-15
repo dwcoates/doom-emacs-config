@@ -17,7 +17,6 @@ import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
-  FILL_CAP_CLASS,
   REVEALED_ATTRIBUTE,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
@@ -781,31 +780,31 @@ describe("the wrapped tree a settled response carries", () => {
     );
   });
 
-  it("marks a settled tree bubble to fill its width cap, so it does not shrink narrow", () => {
+  it("does not pin a settled tree bubble to the cap; it shrinks to fit", () => {
     // Arrange / Act — a settled response that drew a metaprompt tree.
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
-    // Assert — the bubble is stamped to fill the cap (the stylesheet turns the
-    // class into `width: <cap>`), so `fit-content` cannot collapse the wrapped
-    // tree below its 77% cap.
+    // Assert — the tree drew, but the bubble carries NO full-cap width pin
+    // (owner ruling 2026-09-15, reversing the fill-cap): it stays fit-content
+    // so it shrinks to its widest wrapped line, capped at 77%.
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("leaves a plain-prose bubble at fit-content, so a short answer may still shrink", () => {
+  it("leaves a plain-prose bubble unpinned too, so a short answer may still shrink", () => {
     // Arrange / Act — prose with no tree.
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
       rowContext(),
     );
-    // Assert — no fill-cap marker: the invariant fills only content that WRAPS.
+    // Assert — no full-cap pin: every response bubble is fit-content capped.
     expect(el.querySelector(".mp-tree")).toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(false);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("marks a cut-short (error) bubble that drew a tree to fill the cap too", () => {
+  it("does not pin a cut-short (error) tree bubble to the cap", () => {
     // Arrange / Act — the error arm also paints through paintWhole.
     const el = drawFeedResponse(
       response({ result: { case: "error", value: { prose: { markdown: SHOWCASE_TREE } } } }),
@@ -813,10 +812,10 @@ describe("the wrapped tree a settled response carries", () => {
     );
     // Assert
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("marks an arriving (update) tree bubble to fill the cap as the tree streams in", () => {
+  it("does not pin an arriving (update) tree bubble to the cap as it streams in", () => {
     // Arrange — no animation frames, so the arriving draw paints the whole prose
     // at once (the same trick the streaming/settled-identical test uses).
     vi.stubGlobal("requestAnimationFrame", undefined);
@@ -827,10 +826,10 @@ describe("the wrapped tree a settled response carries", () => {
     );
     // Assert
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("resolves a fill-cap tree bubble's width to the cap, beating fit-content in the cascade", () => {
+  it("resolves a tree bubble's width to fit-content, capped at 77%, never a full-cap pin", () => {
     // Arrange — the real stylesheet installed, a settled tree bubble attached so
     // getComputedStyle resolves the cascade against it.
     const teardown = installStylesheet();
@@ -840,12 +839,13 @@ describe("the wrapped tree a settled response carries", () => {
         rowContext(),
       );
       document.body.appendChild(el);
-      // Act — the winning `width` (a literal 77%, so it resolves as-is).
+      // Act — the winning `width` and the ceiling.
       const width = cascadedValue(el, "width");
-      // Assert — the cap, never the base rule's `fit-content`.
-      expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
-      expect(width).toBe("77%");
-      expect(width).not.toBe("fit-content");
+      const maxWidth = cascadedValue(el, "max-width");
+      // Assert — fit-content up to the 77% cap, never pinned at the cap width.
+      expect(width).toBe("fit-content");
+      expect(width).not.toBe("77%");
+      expect(maxWidth).toBe("77%");
       el.remove();
     } finally {
       teardown();
@@ -1168,6 +1168,28 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     // Assert — the measured width did not move, so `reflowOnResize` sees the same
     // integer column count and cannot re-wrap: the flicker cascade has no source.
     expect(after).toBe(before);
+  });
+
+  it("keeps the column budget cap-derived when the pin is gone and the bubble shrinks to fit", () => {
+    // Arrange — the shrink-to-fit change (owner ruling 2026-09-15): with the
+    // `bubble-fill-cap` width pin removed, a tree bubble now collapses to its
+    // widest wrapped line, far below the 77% cap. The tree budget must still be
+    // measured from the CAP (the containing block), never the shrunk width, or
+    // the shrink would feed a re-wrap and oscillate.
+    const body = stage({ maxWidth: "77%", containingWidth: 1000, bubbleOuter: 760, bodyClientWidth: 750 });
+    const atCap = measureTreeCols(body);
+    // Act — the bubble collapses hard to its widest line (a genuine fit-content
+    // shrink the pin used to prevent); measure a SECOND time.
+    const bubble = body.closest<HTMLElement>(".bubble");
+    if (bubble === null) throw new Error("no bubble");
+    bubble.getBoundingClientRect = () => rect(300);
+    Object.defineProperty(body, "clientWidth", { value: 290, configurable: true });
+    const afterShrink = measureTreeCols(body);
+    // Assert — the second measure equals the first: the budget is cap-derived
+    // (77% of the 1000px containing block, minus the constant chrome insets),
+    // so shrinking the bubble cannot change the column count and nothing
+    // oscillates.
+    expect(afterShrink).toBe(atCap);
   });
 
   it("does not re-wrap a settled tree when only the bubble's own fit-content width changes", () => {

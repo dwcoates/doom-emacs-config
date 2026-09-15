@@ -361,33 +361,34 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
 });
 
 /**
- * THE WIDTH INVARIANT (owner ruling, 2026-09-15).
+ * SHRINK-TO-FIT, CAPPED AT THE MAX (owner ruling, 2026-09-15, reversing the
+ * fill-cap pin of the same date).
  *
- * A bubble whose content WRAPS must render AT its max-width cap, not shrink below
- * it. `response.ts` stamps `bubble-fill-cap` on a bubble that drew a metaprompt
- * tree (`white-space: pre` content pre-wrapped to the cap's column budget); the
- * stylesheet then pins its width to the cap so `fit-content` can no longer
- * collapse it to its longest wrapped line. The fill width MUST equal the two
- * bubble max-width caps, guarded here against drift.
+ * Every response/prompt bubble sizes to its widest RENDERED line via
+ * `width: fit-content`, capped at the `max-width: 77%` ceiling — for ALL
+ * bubbles, including those whose body drew a metaprompt tree. The old
+ * `.bubble.bubble-fill-cap { width: 77% }` pin that stopped tree bubbles from
+ * shrinking is gone, so no rule may pin any bubble's `width` to the cap.
  */
-describe("the width invariant: a wrapped bubble fills its cap", () => {
-  it("pins a fill-cap bubble's width to the cap fraction", () => {
+describe("the shrink-to-fit width: bubbles fit their content, capped at the max", () => {
+  it("carries no `.bubble.bubble-fill-cap` rule: the full-cap width pin is gone", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.bubble-fill-cap");
 
-    // Assert — 77%, the same fraction the two bubble max-width caps use.
-    expect(rule).toMatch(/width:\s*77%/);
+    // Assert — the pin was removed with `markFillCap`; nothing pins width to cap.
+    expect(rule).toBeUndefined();
   });
 
-  it("fills to exactly the bubble max-width caps, so the two cannot drift apart", () => {
-    // Arrange / Act — the assistant and prompt caps, and the fill width.
-    const assistantMax = /max-width:\s*(\d+(?:\.\d+)?%)/.exec(declarationsOf(".bubble.assistant") ?? "")?.[1];
-    const userMax = /max-width:\s*(\d+(?:\.\d+)?%)/.exec(declarationsOf(".bubble.user") ?? "")?.[1];
-    const fillWidth = /width:\s*(\d+(?:\.\d+)?%)/.exec(declarationsOf(".bubble.bubble-fill-cap") ?? "")?.[1];
+  it("sizes both response and prompt bubbles to fit-content, capped at 77%", () => {
+    // Arrange / Act — the assistant and prompt bubble rules.
+    const assistant = declarationsOf(".bubble.assistant") ?? "";
+    const user = declarationsOf(".bubble.user") ?? "";
 
-    // Assert
-    expect(fillWidth).toBe(assistantMax);
-    expect(fillWidth).toBe(userMax);
+    // Assert — fit-content up to the shared 77% cap, for both.
+    expect(assistant).toMatch(/width:\s*fit-content/);
+    expect(assistant).toMatch(/max-width:\s*77%/);
+    expect(user).toMatch(/width:\s*fit-content/);
+    expect(user).toMatch(/max-width:\s*77%/);
   });
 });
 
