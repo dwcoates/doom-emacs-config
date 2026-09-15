@@ -247,6 +247,13 @@ func (r *resolver) title(s *wsState) string {
 	// fact, and the rule about when it is worth showing is unchanged.
 	name := s.sessionTitle
 	if name == "" {
+		// THE DAEMON'S OWN SUMMARY is the fallback when the vendor wrote no
+		// ai-title (owner-requested feature). The vendor's title above always
+		// wins, so a future CLI that emits ai-title transparently supersedes
+		// ours; ours in turn always beats the bare workspace name below.
+		name = s.synthesizedTitle
+	}
+	if name == "" {
 		name = s.naming.Title
 	}
 	if name == "" {
@@ -526,6 +533,17 @@ func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 			s.naming = naming
 			s.namingSet = true
 		})
+}
+
+// SetSynthesizedTitle installs the daemon's OWN one-line summary of the
+// conversation. It is the middle precedence in the title: shown only while the
+// vendor has stated no ai-title, and always in preference to the workspace
+// name. An empty text retracts it (the title falls back to the name), which is
+// how the synthesizer drops a stale title after a /clear.
+func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
+	r.mutate(ws, "daemon.topbar.set_synthesized_title", "the topbar took a synthesized title",
+		dlog.Context{"present": title != ""},
+		func(s *wsState) { s.synthesizedTitle = title })
 }
 
 // SetModelCatalog installs the switchable model set.
