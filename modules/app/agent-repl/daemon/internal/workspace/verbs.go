@@ -139,7 +139,12 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 		return
 	}
 	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current))
-	log.Debug(operation, "republished the roster registry", dlog.Context{
+	// THE ROSTER REPUBLISH STANDS AT INFO. Every verb that reaches here has
+	// just changed the roster clients read — a select above all, whose switch
+	// otherwise left no trace in an info-level log. It is one concise line per
+	// discrete roster mutation, never a per-frame push, so it informs without
+	// spamming.
+	log.Info(operation, "republished the roster registry", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
 		"sessions": len(sessions),
 	})
