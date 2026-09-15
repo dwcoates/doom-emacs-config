@@ -26,6 +26,7 @@ import "google/protobuf/struct.proto";
 
 import "conversation/v1/agent.proto";
 import "conversation/v1/agent_activity.proto";
+import "conversation/v1/peer.proto";
 import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
 
@@ -89,6 +90,10 @@ message StoreAgentItem {
   oneof item {
     conversation.v1.AgentPrompt agent_prompt = 1;
     conversation.v1.AgentFrame agent_frame = 2;
+    // A message another Claude session sent into this agent's conversation
+    // (an inter-session peer message or a subagent hand-back). Servable and
+    // paged like a prompt; routed to the recipient's book by `peer_message.agent`.
+    conversation.v1.PeerMessage peer_message = 3;
   }
 }
 
