@@ -286,7 +286,6 @@ export function drawFeedResponseUpdate(
     operation: "feed.cards.response.update",
     context: { path, length: markdown.length, resumed },
   });
-  body.appendChild(arrivingIndicator());
   animate(bubble, body, markdown, resumed, rc);
   return markdown.length;
 }
@@ -689,14 +688,6 @@ export function revealedSoFar(previous: HTMLElement | undefined, length: number)
   return Math.min(parsed, length);
 }
 
-/** The "still arriving" indicator: the animated ellipsis every live face wears. */
-function arrivingIndicator(): HTMLElement {
-  const dots = document.createElement("span");
-  dots.className = "animated-ellipsis response-arriving";
-  dots.setAttribute("aria-hidden", "true");
-  return dots;
-}
-
 /** The broken bubble's marker. The WHY is the turn's terminal row. */
 function cutShortMarker(): HTMLElement {
   const marker = document.createElement("span");
@@ -729,9 +720,10 @@ function cutShortMarker(): HTMLElement {
  * result is byte-identical to a fresh `proseHtml(slice, cols)` — the same string
  * `paintWhole` writes in one shot.
  *
- * TAIL, when given, is a node kept as PARENT's last child (the arriving
- * indicator): it is never matched against the target and never removed, so the
- * prose reconciles ahead of it and it stays put.
+ * TAIL, when given, is a node kept as PARENT's last child: it is never matched
+ * against the target and never removed, so the prose reconciles ahead of it and
+ * it stays put. The streaming reveal passes `null` (no trailing node), and the
+ * in-place tree line-diff (`patchNode`) does too.
  */
 export function reconcileChildren(parent: Node, target: Node, tail: Node | null): void {
   const goal = Array.from(target.childNodes);
@@ -837,11 +829,6 @@ function animate(
       cols,
     );
   };
-  // The arriving indicator is a STABLE node kept as the body's last child across
-  // every frame (drawFeedResponseUpdate appended it before this ran). Reusing
-  // the one node — never minting a fresh ellipsis per frame — keeps its CSS
-  // animation running unbroken and keeps it out of the prose reconciliation.
-  const indicator = body.querySelector<HTMLElement>(".response-arriving") ?? arrivingIndicator();
   const paint = (shown: number): void => {
     lastShown = shown;
     // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
@@ -860,8 +847,7 @@ function animate(
     // frame. This is a watch flag, not a lock.
     const target = document.createElement("div");
     target.innerHTML = proseHtml(markdown.slice(0, shown), cols);
-    reconcileChildren(body, target, indicator);
-    if (indicator.parentNode !== body || body.lastChild !== indicator) body.appendChild(indicator);
+    reconcileChildren(body, target, null);
     // Fill the cap the moment the arriving prose has wrapped a tree, so a
     // streaming tree bubble fills its cap frame-by-frame rather than snapping
     // to it only at settle.
