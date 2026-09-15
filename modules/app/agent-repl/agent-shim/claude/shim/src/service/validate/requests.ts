@@ -206,6 +206,16 @@ export function validateDetachForegroundRequest(request: shimv1.DetachForeground
   }
 }
 
+/**
+ * `shim.v1.GatherTitleDigestRequest` — the request carries no fields (the shim
+ * resolves its own transcript), so there is nothing to reject. The validator
+ * exists so `routes.ts` treats this verb exactly like every other: validate,
+ * then delegate.
+ */
+export function validateGatherTitleDigestRequest(_request: shimv1.GatherTitleDigestRequest): void {
+  // Intentionally empty: an empty message has no illegal shape.
+}
+
 /** `shim.v1.ReadHistoryRequest` — whose history, how much, and from where. */
 export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): void {
   try {
