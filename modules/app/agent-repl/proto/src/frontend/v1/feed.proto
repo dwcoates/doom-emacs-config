@@ -156,8 +156,19 @@ message FeedRow {
     // second drawing — so a foreground→detached transition retires the running
     // tool card and redraws THIS bubble in its place.
     FeedShell shell_head = 17;
+    // A ROW REMOVAL — the DUAL of an upsert, delivered on the live tail so an
+    // already-open feed drops a row the daemon retired (a foreground Bash that
+    // detached, its running tool card retired in favor of the shell bubble).
+    // The row carries ONLY its `id`; the client removes the row that id keys
+    // and draws nothing. A fresh page never carries this arm — a removed row
+    // is simply omitted from the page — so it exists solely as a tail event.
+    FeedRowRemoved removed = 18;
   }
 }
+
+// The row-removal marker. Empty: the FeedRow's own `id` names what to drop,
+// and the arm's presence is the whole instruction — remove that row.
+message FeedRowRemoved {}
 
 // A recognized command's resolved panel, as a feed row. THE ARM IS WHICH
 // COMMAND was recognized; a new programmatically handled command is a new
