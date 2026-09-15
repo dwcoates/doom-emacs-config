@@ -838,6 +838,85 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     // Assert — more rendered lines than the four source branches: it wrapped.
     expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
   });
+
+  it("measures the cap even when the body is EMPTY, so the first paint is at the final width", () => {
+    // Arrange — an EMPTY body (no children yet), but a laid-out bubble: the
+    // chrome (insets) is present regardless of content, so the cap-based measure
+    // holds before anything is drawn. bubbleOuter 40 around a 20px body = 20px of
+    // chrome even with nothing inside.
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 40, bodyClientWidth: 20 });
+    expect(body.children.length).toBe(0);
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — 681.25px content at the cap, floor(/8)=85; NOT the default width,
+    // so an empty first-paint body does not fall to DEFAULT_TREE_COLS.
+    expect(cols).toBe(85);
+    expect(cols).not.toBe(DEFAULT_TREE_COLS);
+  });
+
+  it("returns the SAME cols after a content-only fit-content change, so nothing can oscillate", () => {
+    // Arrange — the settle transition: the bubble's fit-content shrinks (the
+    // streaming ellipsis removed, the final-answer border recolored) while the
+    // feed column (the cap's containing block) is unchanged.
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    const before = measureTreeCols(body);
+    // Act — both the bubble border box and the body content shrink together (the
+    // chrome between them is constant), the shape a content-driven change takes.
+    const bubble = body.closest<HTMLElement>(".bubble");
+    if (bubble === null) throw new Error("no bubble");
+    bubble.getBoundingClientRect = () => rect(180);
+    Object.defineProperty(body, "clientWidth", { value: 160, configurable: true });
+    const after = measureTreeCols(body);
+    // Assert — the measured width did not move, so `reflowOnResize` sees the same
+    // integer column count and cannot re-wrap: the flicker cascade has no source.
+    expect(after).toBe(before);
+  });
+
+  it("does not re-wrap a settled tree when only the bubble's own fit-content width changes", () => {
+    // Arrange — a settled response with a tree; its reflow observer is wired at
+    // draw (when the bubble is still detached, so it starts at the default
+    // width). getComputedStyle is keyed by class because the elements are minted
+    // inside the draw.
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+      if (el.classList.contains("bubble")) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
+      return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
+    });
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    // Attach under a sized containing block and stage the bubble's real box.
+    const parent = document.createElement("div");
+    Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+    el.getBoundingClientRect = () => rect(220);
+    Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
+    const treeInitial = body.querySelector(".mp-tree");
+
+    // Act 1 — the mount correction: the observer's first measurement moves from
+    // the detached default width to the real cap, so the tree is repainted ONCE.
+    fireResize(body);
+    vi.runOnlyPendingTimers();
+    const treeAfterMount = body.querySelector(".mp-tree");
+
+    // Act 2 — a content-only fit-content shrink (the settle transition), column
+    // unchanged: the bubble box and body content shrink together.
+    el.getBoundingClientRect = () => rect(180);
+    Object.defineProperty(body, "clientWidth", { value: 160, configurable: true });
+    fireResize(body);
+    vi.runOnlyPendingTimers();
+    const treeAfterShrink = body.querySelector(".mp-tree");
+
+    // Assert — the mount correction repainted (a new tree node), but the
+    // content-only change did NOT: the tree node is the very same one, so no
+    // re-wrap fired and there is no cascade.
+    expect(treeAfterMount).not.toBe(treeInitial);
+    expect(treeAfterShrink).toBe(treeAfterMount);
+    stopTicking(el);
+  });
 });
 
 describe("the record of the drawn response", () => {
