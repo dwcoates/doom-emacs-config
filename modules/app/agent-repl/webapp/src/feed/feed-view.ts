@@ -576,6 +576,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
           "FeedRow.row.detached_subagent",
           "a bubble row reached the ordinary row path",
         );
+      case "shellHead":
+        throw new MalformedView(
+          "FeedRow.row.shell_head",
+          "a bubble row reached the ordinary row path",
+        );
       default:
         return unreachableArm("FeedRow.row", armName(arm));
     }
@@ -878,6 +883,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
 /** Whether this row's arm is a bubble — a sub-feed with a collapsed head. */
 export function isBubbleRow(row: FeedRow): boolean {
   if (row.row.case === "detachedSubagent") return true;
+  // A detached shell HEAD is a canonical bubble: its spool streams on the
+  // sub-feed its FeedId addresses (the detached_shell BODY row rides there).
+  if (row.row.case === "shellHead") return true;
   if (row.row.case !== "activity") return false;
   return row.row.value.unit.case === "subagent" || row.row.value.unit.case === "merge";
 }
