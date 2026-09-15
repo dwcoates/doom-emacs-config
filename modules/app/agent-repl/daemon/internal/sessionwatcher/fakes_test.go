@@ -885,6 +885,17 @@ func pageFrame(entries ...*conversationv1.HistoryEntryAt) *shimv1.WatchAgentResp
 	}}
 }
 
+// frameEntryAt is one page entry carrying an agent frame, for opening-page
+// assertions.
+func frameEntryAt(pointer string, frame *conversationv1.AgentFrame) *conversationv1.HistoryEntryAt {
+	return &conversationv1.HistoryEntryAt{
+		At: &conversationv1.HistoryPointer{Value: pointer},
+		Entry: &conversationv1.HistoryEntry{
+			Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: frame},
+		},
+	}
+}
+
 // promptEntry is one page entry carrying a prompt.
 func promptEntry(pointer, turn, agent string) *conversationv1.HistoryEntryAt {
 	return &conversationv1.HistoryEntryAt{
