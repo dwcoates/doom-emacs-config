@@ -486,6 +486,45 @@ function responseFailureReason(
 }
 
 /**
+ * A response terminal's settle instant, taken from THE RECORD'S OWN timestamp.
+ *
+ * TIME COMES FROM THE RECORD, NOT THE WALL CLOCK. This is the same invariant the
+ * sidecar file plane already holds (`shim-claude-sidecar/internal/convert/
+ * instants.go`, `settledAt(env.timestampMs)` off the transcript record's
+ * `timestamp`): a settle instant stamped from `context.nowMs()` at conversion
+ * time is NOT replay-stable, so the stream plane's frame and the file plane's
+ * frame for one response carried DIFFERENT instants, and the corner's "N ago"
+ * jumped whenever the surviving row switched planes (the sidecar's file-plane
+ * row supersedes the shim's stream-plane row on catch-up) or a re-compose
+ * re-stamped emit time. Reading the SDK record's own `timestamp` makes both
+ * planes agree by construction, so the daemon's `stampSettled` receives the one
+ * true settle instant on live, on replay, and on every re-resolve.
+ *
+ * REGRESSION WATCH (2026-09-15): do NOT revert this to `settledAt(context.
+ * nowMs())`. The wall clock is the LAST RESORT ONLY — kept for a record that
+ * carried no parseable timestamp, because at live settle `nowMs()` genuinely IS
+ * the settle instant and dropping it would push the daemon onto its own
+ * compose-time `Now()` on every later replay, which is the very reset this
+ * avoids. The SDK stamps a `timestamp` on every real assistant/system record
+ * (`testdata/corpus/stream/assistant.jsonl`), so the fallback is exercised only
+ * by a genuinely timestamp-less record.
+ */
+function recordSettledAt(
+  message: SdkMessage,
+  context: FoldContext,
+): conversationv1.AgentActivitySettledAt {
+  // Observed shapes beat declared types: every real record carries a top-level
+  // `timestamp` (see synthesizedSubject, which reads the record the same way),
+  // but the SDK's own union does not declare it on every arm.
+  const raw = (message as unknown as { readonly timestamp?: unknown }).timestamp;
+  if (typeof raw === "string" && raw !== "") {
+    const ms = Date.parse(raw);
+    if (!Number.isNaN(ms)) return settledAt(ms);
+  }
+  return settledAt(context.nowMs());
+}
+
+/**
  * One `assistant` message: every block's settled unit, and every tool call's start.
  *
  * The usage rides the unit whose block index is 0 and no other.
@@ -553,11 +592,12 @@ export function convertAssistantMessage(
                             value: create(conversationv1.AgentResponseFromModelSchema, {}),
                           }
                         : { case: "synthesizedNotice", value: notice },
-                    // THE SETTLE INSTANT RIDES THE FRAME, stamped once from the
-                    // settling event's own time so a re-compose reproduces the
-                    // same "N ago" corner rather than the daemon's clock, exactly
-                    // as every other activity terminal carries settled_at.
-                    settledAt: settledAt(context.nowMs()),
+                    // THE SETTLE INSTANT RIDES THE FRAME, from the RECORD's own
+                    // timestamp so a re-compose — or the file plane's later row
+                    // for the same unit — reproduces the same "N ago" corner
+                    // rather than the wall clock at conversion time. See
+                    // recordSettledAt.
+                    settledAt: recordSettledAt(message, context),
                   }),
                 }
               : {
@@ -565,7 +605,7 @@ export function convertAssistantMessage(
                   value: create(conversationv1.AgentResponseFailureSchema, {
                     prose: prose(block.text),
                     reason: failure,
-                    settledAt: settledAt(context.nowMs()),
+                    settledAt: recordSettledAt(message, context),
                   }),
                 },
         }),
@@ -711,6 +751,11 @@ export function convertModelRefusal(
                   }),
                 },
               }),
+              // A refusal is a settled response like any other and carries its
+              // settle instant, from the record's own timestamp — without it the
+              // daemon fell back to compose-time Now() and the refusal bubble's
+              // age reset on every re-resolve. See recordSettledAt.
+              settledAt: recordSettledAt(message, context),
             }),
           },
         }),
