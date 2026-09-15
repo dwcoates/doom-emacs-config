@@ -85,6 +85,21 @@ describe("drawFeedTurnEnded: the final answer", () => {
     expect(bubble.classList.contains("final-response")).toBe(true);
   });
 
+  it("never puts the green class on a thinking bubble in the named row", () => {
+    // Arrange — a row whose only assistant bubble is a thinking bubble.
+    const row = document.createElement("article");
+    const bubble = document.createElement("div");
+    bubble.className = "bubble assistant thinking-bubble";
+    row.append(bubble);
+    // Act
+    drawFeedTurnEnded(
+      ended({ case: "concluded", value: { answer: feedId("r1") } }),
+      contextWithRow(row),
+    );
+    // Assert — the green final-answer class lands on no thinking bubble.
+    expect(bubble.classList.contains("final-response")).toBe(false);
+  });
+
   it("marks nothing when the turn concluded with no answering prose", () => {
     const row = document.createElement("article");
     drawFeedTurnEnded(ended({ case: "concluded", value: {} }), contextWithRow(row));

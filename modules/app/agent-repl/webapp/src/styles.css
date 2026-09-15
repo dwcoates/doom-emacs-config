@@ -1566,8 +1566,20 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   margin-right: auto;
 }
 /* The answer the turn landed on, as against the commentary above it. Only
-   the border color changes, so the 0.3px the base reserved stays laid out. */
-.bubble.assistant.final-response { border-color: var(--final-response); }
+   the border color changes, so the 0.3px the base reserved stays laid out.
+   `:not(.thinking-bubble)` keeps the GREEN reserved for a concluded answer:
+   a thinking bubble reuses `.bubble.assistant` for its purple fill but is
+   intermediate reasoning, never the answer, so the green border can NEVER
+   land on it — the structural half is that the daemon never names a thinking
+   row as the answer, and this selector is the second guard. */
+.bubble.assistant.final-response:not(.thinking-bubble) { border-color: var(--final-response); }
+/* THE THINKING BUBBLE: the agent's intermediate reasoning, one bubble per
+   reasoning block. Purple fill (the same --assistant wash the response bubble
+   wears) and explicitly NON-BORDERED — the base bubble's 0.3px stays
+   transparent, and the green final-answer border is excluded above — so it
+   reads as a quiet in-progress purple card distinct from the answer. Nothing
+   else about the response bubble changes. */
+.bubble.assistant.thinking-bubble { border-color: transparent; }
 /* The SELECTED final response (reply-to-a-past-response mode): blue in place of
    the green. Declared after the green rule and at higher specificity (it adds
    `.response-selected`), so the selected bubble reads blue while selected and

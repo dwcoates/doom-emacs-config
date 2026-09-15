@@ -627,6 +627,24 @@ describe("the prompt bubble's in-flight border", () => {
   });
 });
 
+describe("the thinking bubble", () => {
+  it("draws the thinking bubble non-bordered", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.assistant.thinking-bubble");
+
+    // Assert — the border is explicitly transparent, never a state color.
+    expect(rule).toMatch(/border-color:\s*transparent/);
+  });
+
+  it("excludes the thinking bubble from the green final-answer rule", () => {
+    // Arrange / Act — the green rule's own selector carries the exclusion.
+    const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+
+    // Assert — the green declaration exists and applies only to non-thinking.
+    expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
+  });
+});
+
 describe("the selected-response border (reply-to-a-past-response)", () => {
   it("recolors the selected final-response bubble with the blue selection token", () => {
     // Arrange / Act
@@ -650,7 +668,10 @@ describe("the selected-response border (reply-to-a-past-response)", () => {
     // Arrange — the green rule reserves the border and the blue rule replaces it;
     // equal specificity is broken by source order, so blue must come later.
     const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
-    const green = css.indexOf(".bubble.assistant.final-response {");
+    // The green rule excludes thinking bubbles (`:not(.thinking-bubble)`), so
+    // the concluded answer's border can never land on an intermediate reasoning
+    // bubble that reuses `.bubble.assistant`.
+    const green = css.indexOf(".bubble.assistant.final-response:not(.thinking-bubble) {");
     const blue = css.indexOf(".bubble.assistant.final-response.response-selected");
 
     // Assert
