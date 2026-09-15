@@ -4,14 +4,22 @@ package convert
 // person's prompt, a tool's result the vendor filed under the user, the
 // harness's own compaction summary, and the expanded `/clear` envelope.
 //
-// R15: A FILE-PLANE USER PROMPT IS NEVER A PAGE LINE. AgentPrompt carries a
-// TurnId and a PromptOrigin, both DAEMON-MINTED — a file reader holds neither
-// and inventing them would put a fabricated turn identity on the wire. The
-// shim's AgentPrompt is the one served form; here the prompt is classified as
-// vendor_specific so the record is durable and investigable without ever
-// regrowing a fake prompt bubble in a history page.
+// R15: AGENT-REPL'S OWN FILE-PLANE PROMPT IS NEVER A PAGE LINE. Its AgentPrompt
+// carries a TurnId and a PromptOrigin, both DAEMON-MINTED — the daemon drew the
+// bubble live and the shim's stream-plane AgentPrompt is the one served form —
+// so the file-plane copy is classified as vendor_specific: durable and
+// investigable without regrowing the bubble a second time. Such a prompt is
+// recognized by `entrypoint == "sdk-cli"`.
+//
+// AN ADOPTED EXTERNAL PROMPT IS EMITTED (owner-approved R15 crossing). A prompt
+// typed in interactive Claude Code (any non-sdk-cli entrypoint, e.g. "cli") was
+// never submitted through agent-repl, so the daemon never minted or drew it;
+// withholding it left an adopted conversation showing answers with no prompts.
+// It is emitted here as a real prompt page line on a STABLE identity derived
+// from the record's own uuid, so replay is idempotent. See humanPrompt.
 
 import (
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -62,10 +70,139 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 			LogVerbose("harness-injected user record withheld as vendor_specific")
 		return append(out, VendorSpecificEntry(at, "user/meta", record))
 	default:
+		// A GENUINE HUMAN PROMPT — not a summary, clear, skill, tool-result
+		// carrier, or meta record. The keep-alive bit is read from it either
+		// way, before the withhold/emit decision, because the marker is the
+		// prompt's own and opens the turn whose records are never served.
 		c.noteKeepalive(message, at)
+		return append(out, c.humanPrompt(record, message, at, env, agent))
+	}
+}
+
+// sdkEntrypoint is the `entrypoint` agent-repl's OWN SDK sessions stamp on every
+// prompt they submit. Interactive Claude Code stamps `"cli"`; the discriminator
+// is the same field that tells an SDK transcript from an interactive one.
+const sdkEntrypoint = "sdk-cli"
+
+// humanPrompt decides what becomes of a genuine human file-plane prompt.
+//
+// THE RULE IS "A TOP-LEVEL PROMPT THE DAEMON NEVER DREW IS EMITTED; every other
+// prompt is withheld." R15 withholds because the daemon already draws the
+// prompt, and it draws two kinds:
+//
+//   - AGENT-REPL'S OWN PROMPTS carry `entrypoint == "sdk-cli"`: the daemon
+//     minted the TurnId and PromptOrigin and drew the bubble live, and the shim's
+//     stream-plane AgentPrompt is the served form. Withheld to avoid a
+//     double-render, whatever plane it is read on. New prompts typed after
+//     adoption are agent-repl's own and stay sdk-cli, so they remain withheld.
+//   - A SUBAGENT COMMISSION is the opening user message of a sidechain
+//     transcript — an agent-addressed prompt the daemon draws at BOTH ends
+//     (sender's feed and recipient's). It carries `entrypoint == "cli"` like an
+//     interactive prompt, so `isSidechain` is what tells the two apart. Withheld
+//     for the same double-render reason.
+//
+// A TOP-LEVEL prompt with any non-sdk entrypoint (`"cli"`, or a future non-sdk
+// value) was typed in an EXTERNAL interactive session and adopted into a
+// workspace — never submitted through agent-repl, so the daemon never minted or
+// drew it. Withholding it is why an adopted conversation showed the assistant's
+// answers with no prompts above them. It is emitted here as a real prompt page
+// line on a STABLE identity derived from the record's own uuid (externalPrompt),
+// so a re-ingest supersedes its own row rather than growing a second bubble.
+func (c *Converter) humanPrompt(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
+	if str(record["entrypoint"]) == sdkEntrypoint {
 		c.log.With(at.ctxFor("user-prompt")).
-			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: TurnId and PromptOrigin are daemon-minted)")
-		return append(out, VendorSpecificEntry(at, "user_prompt", record))
+			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: agent-repl's own sdk-cli prompt is daemon-minted and drawn live)")
+		return VendorSpecificEntry(at, "user_prompt", record)
+	}
+	if boolean(record["isSidechain"]) {
+		c.log.With(at.ctxFor("user-prompt")).
+			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: a sidechain's opening commission is an agent-addressed prompt the daemon draws at both ends)")
+		return VendorSpecificEntry(at, "user_prompt", record)
+	}
+	return c.externalPrompt(record, message, at, env, agent)
+}
+
+// externalPrompt emits an adopted external transcript's human prompt as a served
+// prompt page line, MINTING A STABLE IDENTITY for it from the record's uuid.
+//
+// THE UUID IS THE IDENTITY, AND THAT IS WHY REPLAY IS IDEMPOTENT. These historic
+// prompts have no daemon-minted TurnId, so one is derived from the vendor's own
+// per-record uuid — stable and unique per record — and spelled into both the
+// turn id and the upsert key (PromptKey, the shim's own space). Re-ingesting the
+// same record mints the identical turn id, the identical upsert key and the
+// identical write id, so it supersedes its own row instead of appending a
+// second bubble. The recipient is the frame's agent (the main agent for a
+// session transcript), which the store requires to match the book.
+//
+// THE ORIGIN IS LEFT UNSPECIFIED, which the daemon draws as the plain "You"
+// author label — the same bubble a person's own prompt gets. The closed
+// PromptOrigin vocabulary has no send site for an externally-typed prompt (each
+// value names exactly one agent-repl send site), and inventing one is a proto
+// design decision left to the owner; UNSPECIFIED is the honest "not from an
+// agent-repl send site" and renders identically to a human prompt.
+func (c *Converter) externalPrompt(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
+	turn := env.uuid
+	prompt := &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: turn},
+		Agent:  agentID(agent),
+		Said:   userSaid(message),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+	}
+	c.log.With(at.ctxFor("user-prompt")).With(logging.Context{UpsertKey: PromptKey(turn)}).
+		LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own sdk-cli)", str(record["entrypoint"]))
+	return c.landPrompt(at, agent, PromptKey(turn), "agent_prompt", prompt)
+}
+
+// userSaid builds the one canonical prompt form from a vendor user message: its
+// text and images as UserContent blocks, in the order the person composed them.
+//
+// A block kind this schema does not model is kept WHOLE on the unsupported arm
+// rather than dropped, so nothing a person sent vanishes and the decision to not
+// model it stays reversible from stored data.
+func userSaid(message map[string]any) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: userContentBlocks(message)}}
+}
+
+// userContentBlocks renders a user message's content into UserContentBlocks. The
+// vendor writes content either as a bare string or as a block list; both are
+// carried here, and a string becomes one text block.
+func userContentBlocks(message map[string]any) []*conversationv1.UserContentBlock {
+	switch content := message["content"].(type) {
+	case string:
+		return []*conversationv1.UserContentBlock{textContentBlock(content)}
+	case []any:
+		blocks := make([]*conversationv1.UserContentBlock, 0, len(content))
+		for _, raw := range content {
+			block := obj(raw)
+			if block == nil {
+				continue
+			}
+			switch str(block["type"]) {
+			case "text":
+				blocks = append(blocks, textContentBlock(str(block["text"])))
+			case "image":
+				blocks = append(blocks, &conversationv1.UserContentBlock{
+					Block: &conversationv1.UserContentBlock_Image{Image: imageBlock(block)},
+				})
+			default:
+				blocks = append(blocks, &conversationv1.UserContentBlock{
+					Block: &conversationv1.UserContentBlock_Unsupported{Unsupported: &conversationv1.UnsupportedBlock{
+						Kind: str(block["type"]),
+						Raw:  rawStruct(block),
+					}},
+				})
+			}
+		}
+		return blocks
+	default:
+		return nil
+	}
+}
+
+// textContentBlock wraps words a person typed as a text UserContentBlock.
+func textContentBlock(text string) *conversationv1.UserContentBlock {
+	return &conversationv1.UserContentBlock{
+		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
 	}
 }
 
