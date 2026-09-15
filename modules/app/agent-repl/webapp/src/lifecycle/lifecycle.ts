@@ -69,7 +69,7 @@ import { bindLogContext, log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { registerWorkspaceMoved } from "../rpc/moved.js";
-import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { msOf, requireCase, requireMessage, unreachableArm, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
 
@@ -174,7 +174,9 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
           return;
         default: {
           const other: { case: string } = push;
-          return unreachableArm("WatchWebWorkspaceResponse.push", other.case);
+          // A TOP-LEVEL push arm this build cannot draw is forward-compat skew,
+          // not a contract violation: skipped quietly by the stream pipeline.
+          return unreachablePushArm("WatchWebWorkspaceResponse.push", other.case);
         }
       }
     },
@@ -198,7 +200,9 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
           return;
         default: {
           const other: { case: string } = push;
-          return unreachableArm("WatchDaemonResponse.push", other.case);
+          // A TOP-LEVEL push arm this build cannot draw is forward-compat skew,
+          // not a contract violation: skipped quietly by the stream pipeline.
+          return unreachablePushArm("WatchDaemonResponse.push", other.case);
         }
       }
     },

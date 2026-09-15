@@ -8,13 +8,14 @@ import {
   FooterExpandedAgentsSchema,
   FooterViewSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { MalformedView } from "../../src/rpc/malformed.js";
+import { MalformedView, UnknownPushArm, isUnknownPushArm } from "../../src/rpc/malformed.js";
 import {
   assertNoUnknownFields,
   msOf,
   requireCase,
   requireMessage,
   unreachableArm,
+  unreachablePushArm,
 } from "../../src/rpc/strict.js";
 
 /** One unknown field, as protobuf-es preserves it off the wire. */
@@ -201,6 +202,32 @@ describe("unreachableArm", () => {
     } catch (err) {
       expect((err as MalformedView).detail).toContain("somethingNew");
     }
+  });
+
+  it("throws a plain MalformedView, NOT the forward-compat skew subtype", () => {
+    try {
+      unreachableArm("R.result", "somethingNew");
+    } catch (err) {
+      expect(isUnknownPushArm(err)).toBe(false);
+    }
+  });
+});
+
+describe("unreachablePushArm", () => {
+  it("throws UnknownPushArm, so the stream can recognize forward-compat skew by type", () => {
+    expect(() => unreachablePushArm("R.push", "somethingNew")).toThrow(UnknownPushArm);
+  });
+
+  it("names the arm it could not draw", () => {
+    try {
+      unreachablePushArm("R.push", "somethingNew");
+    } catch (err) {
+      expect((err as UnknownPushArm).arm).toBe("somethingNew");
+    }
+  });
+
+  it("is still a MalformedView, so an unguarded catch treats it as the refusal", () => {
+    expect(() => unreachablePushArm("R.push", "somethingNew")).toThrow(MalformedView);
   });
 });
 

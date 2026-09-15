@@ -20,7 +20,7 @@
  */
 import type { DescField, DescMessage, Message } from "@bufbuild/protobuf";
 import { reflect, type ReflectMessage } from "@bufbuild/protobuf/reflect";
-import { MalformedView } from "./malformed.js";
+import { MalformedView, UnknownPushArm } from "./malformed.js";
 
 /**
  * Refuse MSG when it, or anything reachable from it, carries a field this
@@ -135,6 +135,23 @@ export function requireCase<T extends { case?: string | undefined }>(
  */
 export function unreachableArm(path: string, arm: string): never {
   throw new MalformedView(path, `arm '${String(arm)}' is not one this build can draw`);
+}
+
+/**
+ * The `default:` of a PUSH ENVELOPE's TOP-LEVEL oneof switch — an arm a newer
+ * daemon set on a push frame that this bundle's draw switch has no case for.
+ *
+ * This is the ONE unknown-arm case that is benign forward-compat skew rather
+ * than a contract violation: right after a deploy that adds a push arm, a
+ * webview still on the old bundle receives a frame carrying it. It throws
+ * `UnknownPushArm` — a MalformedView subtype — so the stream pipeline can
+ * recognize the skew by TYPE and skip the one frame quietly, while every OTHER
+ * unknown arm (a nested component's oneof) keeps using `unreachableArm` and
+ * stays loud. Reserve this strictly for a push response's top-level oneof; a
+ * nested arm is a real malformation and must not be quietened.
+ */
+export function unreachablePushArm(path: string, arm: string): never {
+  throw new UnknownPushArm(path, String(arm));
 }
 
 /**
