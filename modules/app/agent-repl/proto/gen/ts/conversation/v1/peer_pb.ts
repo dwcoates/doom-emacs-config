@@ -65,10 +65,11 @@ export type PeerMessage = Message<"conversation.v1.PeerMessage"> & {
   body: string;
 
   /**
-   * A stable, opaque identity for this message: the driving turn id on the
-   * live plane, or the record's own uuid on the adopted plane. The daemon
-   * mints the feed row's id from it, so re-ingesting the same record supersedes
-   * its own row rather than drawing a second bubble. Echoed, never parsed.
+   * A stable, opaque identity for this message: the vendor RECORD UUID, which
+   * BOTH planes spell identically (the SDK streams the record and writes it to
+   * the transcript under one uuid). The daemon mints the feed row's id from it,
+   * so the live row and the adopted row for one message supersede each other on
+   * ONE bubble rather than drawing two. Echoed, never parsed.
    *
    * @generated from field: string id = 4;
    */
