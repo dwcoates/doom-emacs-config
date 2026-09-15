@@ -4954,7 +4954,14 @@ body.draining #composer-input::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.footer-activity-rate-limited > .footer-allowance-unread { flex: 0 0 auto; }
+/* THE READ-AGE (src/footer/strip.ts drawFiguresReadAge). It rides beside the
+   allowance figures, saying how long ago they were read; it is a caveat about
+   freshness, not a figure, so it stays un-cut (the figures ellipsize, not it)
+   and takes a caveat's muted weight. */
+.footer-activity-rate-limited > .footer-rate-age {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
 
 /* THE STOP CONTROLS (src/footer/stop.ts). A quiet square that only exists
    while there is something to stop — never a disabled control, and never a
@@ -6319,15 +6326,6 @@ body.draining #composer-input::placeholder {
 .topbar-fast[data-fast-mode="cooldown"] {
   font-style: italic;
   opacity: 0.7;
-}
-
-/* THE UNREAD-USAGE CELL. It rides beside the allowance figures it is a
-   caveat about, so it takes the muted weight of a caveat rather than the
-   paint of a verdict — the figures keep their own colors, and this says only
-   that they are the last ones read. */
-.footer-allowance-unread {
-  color: var(--muted);
-  font-style: italic;
 }
 
 /* ---- bubble scrollbars (src/styles.css) --------------------------------- */

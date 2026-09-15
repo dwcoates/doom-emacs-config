@@ -78,12 +78,12 @@ function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
   return panel;
 }
 
-/** The rate-limit activity D33 photographs: both windows, the sample unread. */
+/** The rate-limit activity the sheet photographs: both windows figured. */
 function rateLimited(): FooterActivity {
   return activity("rateLimited", {
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
     weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
-    sample: { outcome: { case: "serviceUnavailable", value: {} } },
+    figuresReadAtMs: BigInt(NOW - 630_000),
   });
 }
 
@@ -93,7 +93,7 @@ function rateLimitedWithOverage(): FooterActivity {
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
     weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
     overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
-    sample: { outcome: { case: "serviceUnavailable", value: {} } },
+    figuresReadAtMs: BigInt(NOW - 630_000),
   });
 }
 
@@ -105,15 +105,6 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
     expect(
       panel.querySelector('[data-usage-allowance="weekly"]')?.textContent,
     ).toContain("weekly 63%");
-  });
-
-  // THE CAVEAT IN FULL. The strip has room for the marker only, so its reason
-  // has exactly one drawn home and this is it.
-  it("carries the unread caveat in full", () => {
-    const panel = drawTokensPanelWith(rateLimited());
-    expect(panel.querySelector('[data-usage="unread"]')?.textContent).toBe(
-      "usage unread — the usage service did not answer",
-    );
   });
 
   it("carries the reset countdown of the newsworthy window", () => {

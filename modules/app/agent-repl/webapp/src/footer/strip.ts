@@ -55,7 +55,6 @@ import type {
   FooterStatusActivityNotification,
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
-  FooterAllowanceSample,
   FooterStatusActivityRateLimited,
   FooterStatusActivityRetrying,
   FooterStatusActivityStartFailed,
@@ -754,25 +753,19 @@ export function drawFooterStatusActivityWakeup(
 /**
  * The rate-limit rung: BOTH allowances where both were read, because the
  * newsworthy percentage is meaningless without knowing which window it belongs
- * to — plus the sample outcome when the last read FAILED.
+ * to — plus the AGE of the last successful reading, "· 10m 30s ago".
  *
  * AN ALLOWANCE THE PRODUCER LEFT UNSET IS DRAWN ABSENT, never required. The
  * contract says so in as many words ("an unset weekly is representable, and
- * stating a figure nobody reported would be worse than stating none"), and the
- * line is now reachable with NEITHER window figured — a session whose very
- * first usage sample failed has read nothing yet and still has an unread to
- * state.
+ * stating a figure nobody reported would be worse than stating none").
  *
- * THE NEWSWORTHY WINDOW LEADS, AND THE UNREAD MARKER IS NOT PART OF WHAT THE
- * STRIP CUTS. The dock is one line capped at the response bubble's width, so
- * this line is routinely wider than the cell holding it; the cut used to fall
- * wherever the DOM order happened to put it, which at 1280 left the second
- * window and the whole caveat off the glass. So the figures ride in ONE
- * ELASTIC child that ellipsizes, ordered with the newsworthy window first —
- * it is the figure that changes what the reader does — and the marker rides
- * in a RIGID child beside it, which is what makes it un-cuttable rather than
- * merely early. The sentence the marker condenses is drawn in full in the
- * tokens sheet (expanded.ts), and stands as the marker's own title.
+ * THE STRIP DRAWS THE FIGURES LAST READ AND THE AGE OF THAT READING, never a
+ * "usage unread" caveat (owner ruling of 2026-09-15). The dock is one line
+ * capped at the response bubble's width, so it is routinely wider than the
+ * cell holding it; the figures ride in ONE ELASTIC child that ellipsizes,
+ * ordered with the newsworthy window first — it is the figure that changes
+ * what the reader does — and the read-age (`drawFiguresReadAge`) rides beside
+ * them, ticking live from the shipped instant.
  */
 export function drawFooterStatusActivityRateLimited(
   u: FooterStatusActivityRateLimited,
@@ -793,12 +786,38 @@ export function drawFooterStatusActivityRateLimited(
   });
   if (ordered.length > 0) line.appendChild(figures);
 
-  const marker = drawFooterAllowanceSample(u.sample, `${path}.sample`);
-  if (marker !== null) {
-    if (ordered.length > 0) line.appendChild(document.createTextNode(" | "));
-    line.appendChild(marker);
-  }
+  const age = drawFiguresReadAge(u, deps, path);
+  if (age !== null) line.appendChild(age);
   return line;
+}
+
+/**
+ * The age of the last successful usage READING, "· 10m 30s ago", ticking from
+ * the shipped instant — the same live-duration mechanism the turn clock and
+ * the activity age already use (`tick` + `formatTickedAge`), so how stale the
+ * figures look never depends on push cadence.
+ *
+ * NULL when the figures carry no read instant: they came from a rate-limit
+ * EVENT rather than a sample, or none was ever read, so there is no reading to
+ * date. The line then draws the figures with no age rather than inventing one.
+ * An unreadable sample that leaves the figures standing leaves this instant
+ * standing too (the daemon never re-stamps it), so the age stays anchored to
+ * the last read rather than jumping to the failed attempt.
+ */
+export function drawFiguresReadAge(
+  u: FooterStatusActivityRateLimited,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement | null {
+  if (u.figuresReadAtMs === undefined) return null;
+  const readAtMs = msOf(u.figuresReadAtMs, `${path}.figures_read_at_ms`);
+  const age = document.createElement("span");
+  age.className = "footer-rate-age";
+  age.setAttribute("data-age", "");
+  tick(age, deps.ctx.ticker, (nowMs) => {
+    age.textContent = ` · ${formatTickedAge(nowMs - readAtMs)} ago`;
+  });
+  return age;
 }
 
 /** One drawable allowance, under the label the strip and the sheet both use. */
@@ -868,85 +887,6 @@ function newsworthyFirst(present: LabelledAllowance[]): LabelledAllowance[] {
     ...present.filter((a) => a.value.newsworthy),
     ...present.filter((a) => !a.value.newsworthy),
   ];
-}
-
-/** The sentence each unread outcome draws. */
-const ALLOWANCE_UNREAD_SENTENCES = {
-  serviceUnavailable: "the usage service did not answer",
-  windowUnavailable: "no five-hour window was reported",
-  utilizationUnavailable: "no utilization figure was reported",
-} as const;
-
-/** What the strip's marker condenses: the caveat, whole, in one sentence. */
-export const ALLOWANCE_UNREAD_MARKER = "usage unread";
-
-/**
- * THE CAVEAT IN FULL, or null when the last read managed a figure.
- *
- * One composition serving two surfaces: the strip's marker wears it as a
- * title and the tokens sheet draws it as a row, so the words a reader hovers
- * and the words they open the sheet to find can never drift apart.
- */
-export function allowanceUnreadSentence(
-  u: FooterAllowanceSample | undefined,
-  path: string,
-): string | null {
-  const outcome = u?.outcome;
-  if (outcome === undefined || outcome.case === undefined) return null;
-  if (outcome.case === "available") return null;
-  switch (outcome.case) {
-    case "serviceUnavailable":
-    case "windowUnavailable":
-    case "utilizationUnavailable":
-      return `${ALLOWANCE_UNREAD_MARKER} — ${ALLOWANCE_UNREAD_SENTENCES[outcome.case]}`;
-    case "samplingFailure":
-      // THE SHIM'S CAUSE VERBATIM where it stated one; the fixed half of the
-      // sentence carries the meaning when it did not.
-      return outcome.value.cause === ""
-        ? `${ALLOWANCE_UNREAD_MARKER} — the sampling failed`
-        : `${ALLOWANCE_UNREAD_MARKER} — the sampling failed: ${outcome.value.cause}`;
-    default: {
-      const other: { case: string } = outcome;
-      return unreachableArm(path, other.case);
-    }
-  }
-}
-
-/**
- * WHAT THE LAST USAGE SAMPLE MANAGED TO READ, drawn only when it read NOTHING.
- *
- * The figures beside this cell are the last ones READ, not the last ones
- * ATTEMPTED, and a failed read leaves them standing on purpose — the daemon
- * never clears a figure it cannot replace. Without this cell a reader cannot
- * tell a fresh 41% from one the vendor stopped answering about an hour ago,
- * which is exactly the sentence the cell says.
- *
- * `available` DRAWS NOTHING. It is the unremarkable outcome — the figures are
- * as fresh as the sample — and a strip cell saying so would crowd the line to
- * report that nothing is wrong. Unset draws nothing either: no sample has been
- * attempted at all, so there is no read to report on.
- *
- * ON THE STRIP IT IS A MARKER, NOT THE SENTENCE. The strip has room for two
- * words beside a figure and not for a clause, and a caveat that is cut off is
- * a caveat nobody reads. So the cell says `usage unread` and nothing else; the
- * reason rides as its title and as a row of the tokens sheet, and the ARM is
- * still on the cell for anyone querying the drawn surface.
- */
-export function drawFooterAllowanceSample(
-  u: FooterAllowanceSample | undefined,
-  path: string,
-): HTMLElement | null {
-  const outcome = u?.outcome;
-  if (outcome === undefined || outcome.case === undefined) return null;
-  const sentence = allowanceUnreadSentence(u, path);
-  if (sentence === null) return null;
-
-  const cell = document.createElement("span");
-  cell.className = "footer-allowance-unread";
-  cell.setAttribute("data-sample", outcome.case);
-  cell.textContent = ALLOWANCE_UNREAD_MARKER;
-  cell.title = `${sentence} — the figures beside this were the last ones read, and may be stale`;
-  return cell;
 }
 
 /**
