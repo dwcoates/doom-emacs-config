@@ -1105,16 +1105,34 @@ func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 
 // fakeBrowser is an externalbrowser.Opener.
 type fakeBrowser struct {
-	opened []string
-	err    error
+	opened         []string
+	openedProfiles []string
+	err            error
+	// profileByEmail is the routing ProfileForAccount answers with; an email
+	// it does not hold takes defaultProfile, exactly as an unmatched account
+	// falls back to the pinned default.
+	profileByEmail map[string]string
+	defaultProfile string
+	// askedEmails records every email ProfileForAccount was asked to route, in
+	// order, so a test can assert the verb routes by the session's account.
+	askedEmails []string
 }
 
-func (b *fakeBrowser) Open(_ context.Context, url string) error {
+func (b *fakeBrowser) Open(_ context.Context, url, profile string) error {
 	if b.err != nil {
 		return b.err
 	}
 	b.opened = append(b.opened, url)
+	b.openedProfiles = append(b.openedProfiles, profile)
 	return nil
+}
+
+func (b *fakeBrowser) ProfileForAccount(email string) string {
+	b.askedEmails = append(b.askedEmails, email)
+	if p, ok := b.profileByEmail[email]; ok {
+		return p
+	}
+	return b.defaultProfile
 }
 
 // fakeOwnership answers one standing for every workspace.
