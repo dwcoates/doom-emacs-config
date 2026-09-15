@@ -356,6 +356,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   /** One live upsert: replace in place if seen, append if new. */
   function upsert(row: FeedRow): void {
     const id = requireMessage(row.id, "FeedRow.id").value;
+    // A REMOVAL is the DUAL of an upsert, delivered on the same tail: the
+    // daemon retired the row it keys, so drop it live rather than replace it.
+    if (row.row.case === "removed") {
+      remove(id);
+      announce();
+      return;
+    }
     const known = states.has(id);
     log.debug(`${known ? "replacing" : "appending"} feed row ${id}`, {
       operation: known ? "feed.row-replaced" : "feed.row-appended",
@@ -364,6 +371,36 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     adopt(row, known ? -1 : order.length);
     truncateAtSeparation(row, id);
     announce();
+  }
+
+  /**
+   * Drop one row on a live removal: dispose its bubble, stop its clocks,
+   * detach its element, and forget it — the same teardown a row dropped above
+   * a separation gets, so nothing keeps ticking or leaks after the daemon
+   * retired the row. A removal for a row this feed never held is a no-op.
+   */
+  function remove(id: string): void {
+    const at = order.indexOf(id);
+    if (at < 0) {
+      log.debug(`a removal named a row this feed does not hold: ${id}`, {
+        operation: "feed.row-removed-absent",
+        context: { feed: feedName(), row: id },
+      });
+      return;
+    }
+    const state = states.get(id);
+    if (state !== undefined) {
+      if (state.row.row.case === "turnEnded") forgetSettled();
+      state.bubble?.dispose();
+      stopTicking(state.element);
+      state.element.remove();
+      states.delete(id);
+    }
+    order.splice(at, 1);
+    log.info(`removed feed row ${id}`, {
+      operation: "feed.row-removed",
+      context: { feed: feedName(), row: id },
+    });
   }
 
   /**
