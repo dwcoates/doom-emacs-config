@@ -71,6 +71,11 @@ describe("drawFeedSubagent: the head's parts", () => {
     expect(el.querySelector(".subagent-tokens")).toBeNull();
   });
 
+  it("wears the shared token-count hue class on the token figure", () => {
+    const { el } = drawRow(subagentRow("b1", { tokens: "12.4k tok" }));
+    expect(el.querySelector(".subagent-tokens")?.classList.contains("token-count")).toBe(true);
+  });
+
   it("refuses a head with no label", () => {
     const { ctx } = harness();
     const row = subagentRow("b1");
