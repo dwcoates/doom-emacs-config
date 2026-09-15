@@ -177,6 +177,28 @@ func TestRegisterWorkspaceLeavesTheParentUnsetWhenNoneIsNamed(t *testing.T) {
 	}
 }
 
+func TestRegisterWorkspaceLeavesLastActivityUnset(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	dir := t.TempDir()
+
+	// Act — a freshly registered workspace has taken no turn yet.
+	ws, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{Branch: "b", RepoDir: dir})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	loaded, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert — nil last activity, which the when-column reads as "fall back to
+	// created", never a zero instant.
+	if loaded.LastActivityAt != nil {
+		t.Fatalf("last activity = %v, want none for a never-active workspace", loaded.LastActivityAt)
+	}
+}
+
 func TestRegisterWorkspaceIsIdempotentAcrossDirSpellings(t *testing.T) {
 	base := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(base, "sub"), 0o755); err != nil {

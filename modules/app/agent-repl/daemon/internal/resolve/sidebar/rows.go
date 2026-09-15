@@ -84,19 +84,35 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 	return session != nil && session.Terminal != nil && session.Terminal.Kind == "killed"
 }
 
-// when resolves the when-column's ONE value. MERGED WINS over last selected
-// when both exist: that the workspace is done is the more interesting fact,
-// and the client applies no precedence of its own. Neither leaves the oneof
-// unset, which draws an empty column rather than "0ms ago".
+// when resolves the when-column's ONE value.
+//
+// THE COLUMN IS LAST-ACTIVITY, NOT LAST-VIEWED — and that distinction is the
+// whole point of this function. It once showed LastSelectedAt, which the daemon
+// stamps on EVERY SelectWorkspace, so the column was really a viewing-recency
+// timer that reset whenever the user switched to the workspace: the age beside
+// a row jumped on mere navigation and read as broken. The column must reflect
+// when the workspace last DID REAL WORK, which is stable across selection, so
+// this reads LastActivityAt (stamped at the turn edge in wsm) and NEVER
+// LastSelectedAt. LastSelectedAt lives on for ordering and attention-clear; it
+// just must not drive this column again — reintroducing it here is the exact
+// regression the sidebar tests lock.
+//
+// Precedence: MERGED WINS (that the workspace is done is the more interesting
+// fact), else the last activity, else the creation time. The last arm never
+// leaves the oneof unset for a registered workspace — every one has a creation
+// time — so the column falls back to "created" rather than drawing empty.
 func when(rec wsm.Workspace) *frontendv1.RosterRowWhen {
 	out := &frontendv1.RosterRowWhen{}
 	switch {
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
-	case rec.LastSelectedAt != nil:
-		out.Shown = &frontendv1.RosterRowWhen_LastSelected{
-			LastSelected: &frontendv1.RosterRowWhenLastSelected{AtMs: rec.LastSelectedAt.UnixMilli()}}
+	case rec.LastActivityAt != nil:
+		out.Shown = &frontendv1.RosterRowWhen_Active{
+			Active: &frontendv1.RosterRowWhenActive{AtMs: rec.LastActivityAt.UnixMilli()}}
+	case !rec.CreatedAt.IsZero():
+		out.Shown = &frontendv1.RosterRowWhen_Created{
+			Created: &frontendv1.RosterRowWhenCreated{AtMs: rec.CreatedAt.UnixMilli()}}
 	}
 	return out
 }
