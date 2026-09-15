@@ -315,6 +315,29 @@ The ref is a daemon-minted echo token: both halves travel back verbatim."
      "TurnId"
      (list :value (agent-repl-wire--decode-string "TurnId" 'value object)))))
 
+;;;; ---- frontend.v1.FeedId ----
+
+(defun agent-repl-wire-decode-feed-id (value)
+  "Decode VALUE as a `frontend.v1.FeedId' plist `(:value)'.
+The daemon-minted opaque row identity: clients echo it (navigation,
+parenting, a footer jump target, the reply-to-a-past-response cursor) and
+never parse it, so the codec keeps the value verbatim."
+  (let ((object (agent-repl-wire--object "FeedId" value)))
+    (agent-repl-wire--check-keys "FeedId" object '(value))
+    (agent-repl-wire--decoded
+     "FeedId"
+     (list :value (agent-repl-wire--decode-string "FeedId" 'value object)))))
+
+(defun agent-repl-wire-encode-feed-id (value)
+  "Encode the FeedId plist VALUE `(:value)' as a protojson alist.
+The id is an ECHO TOKEN: the opaque value the daemon minted travels back
+verbatim, never one Emacs builds itself.  A non-string value is refused
+here rather than sent for the daemon to reject."
+  (agent-repl-wire--encoded
+   "FeedId"
+   (list (cons 'value (agent-repl-wire--encode-string
+                       "FeedId" 'value (plist-get value :value))))))
+
 ;;;; ---- conversation.v1 user content (ENCODE only) ----
 ;;
 ;; Emacs PRODUCES a user message and never consumes one: the feed is the
