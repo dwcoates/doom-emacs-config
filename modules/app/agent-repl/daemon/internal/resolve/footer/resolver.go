@@ -495,7 +495,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		// the rate-limit event carries the verdict.
 		return "account_usage", func(s *wsState) {
 			r.logSessionArm(ws, s, "account_usage")
-			r.observeAccountUsage(s, u.AccountUsage)
+			r.observeAccountUsage(ws, s, u.AccountUsage)
 		}
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(s *wsState) {
@@ -567,22 +567,20 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 // standing, and a sample whose seven_day window the vendor omitted leaves the
 // weekly allowance unfigured, which draws it absent rather than invented.
 //
-// EVERY sample, readable or not, files its OUTCOME. That is the whole point
-// of the outcome cell: a failed read left no trace at all before, so the strip
-// went on drawing the last percentage as though it were the current one, and
-// nothing on the wire could say otherwise.
-func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.SessionAccountUsage) {
+// A READABLE SAMPLE STAMPS `figuresReadAt`, an unreadable one does not. The
+// strip renders the figures LAST READ and the age of that reading; an
+// unreadable attempt therefore leaves both the figures and their read-instant
+// standing, so the age stays anchored to the last successful read rather than
+// jumping to the failed attempt. The strip no longer draws a "usage unread"
+// line (owner ruling), but the unreadable outcome is still surfaced to the
+// logs here so a read that keeps failing does not vanish silently.
+func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionAccountUsage) {
 	if usage == nil {
 		return
 	}
-	if sample := allowanceSample(usage); sample != nil {
-		_, unavailable := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Unavailable)
-		s.rate.sample = sample
-		s.rate.sampleUnread = unavailable
-		s.rate.at = r.opts.clock.Now()
-	}
 	available, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Available)
 	if !ok {
+		r.logUnreadableSample(ws, s, usage)
 		return
 	}
 	at := usage.GetObservedAtMs()
@@ -594,56 +592,48 @@ func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.Session
 		moved = s.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
 	}
 	if moved {
-		s.rate.at = r.opts.clock.Now()
+		now := r.opts.clock.Now()
+		s.rate.at = now
+		// The figures were just READ off this sample, so this is the instant
+		// the strip ticks their age from. Only a readable sample reaches here,
+		// which is exactly the "stamp on a readable sample, never on an
+		// unreadable attempt" the contract asks for.
+		s.rate.figuresReadAt = now
 	}
 }
 
-// allowanceSample names the sample's outcome for the strip, arm for arm with
-// SessionAccountUsage's own oneof. A sample whose outcome oneof is UNSET
-// states nothing — the producer chose no arm — so it files nothing rather
-// than retiring an outcome that is still the newest one anybody stated.
-func allowanceSample(usage *conversationv1.SessionAccountUsage) *frontendv1.FooterAllowanceSample {
-	switch outcome := usage.GetOutcome().(type) {
-	case *conversationv1.SessionAccountUsage_Available:
-		return &frontendv1.FooterAllowanceSample{
-			Outcome: &frontendv1.FooterAllowanceSample_Available{
-				Available: &frontendv1.FooterAllowanceSampleAvailable{},
-			},
-		}
-	case *conversationv1.SessionAccountUsage_Unavailable:
-		return unavailableSample(outcome.Unavailable)
-	default:
-		return nil
+// logUnreadableSample surfaces a usage sample that read NO figure. It drives
+// no strip cell any more, so this Debug breadcrumb is the one place a
+// persistently failing read stays visible; it never clears the figures on
+// hand (the caller returns without touching them).
+func (r *resolver) logUnreadableSample(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionAccountUsage) {
+	unavailable, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Unavailable)
+	if !ok {
+		// No outcome arm at all: nothing was stated, so there is nothing to
+		// report and nothing was read.
+		return
 	}
+	r.logOf(ws, s).Debug("daemon.footer.usage_sample_unreadable",
+		"an account-usage sample read no figure; the figures on hand stand",
+		dlog.Context{"reason": unavailableReason(unavailable.Unavailable)})
 }
 
-// unavailableSample names WHY no figure was read. An unavailable arm whose
-// own reason oneof is UNSET is still an unavailability — the sample failed —
-// so it files the sample with no reason arm rather than being dropped, which
-// would draw it as a success.
-func unavailableSample(unavailable *conversationv1.SessionAccountUsageUnavailable) *frontendv1.FooterAllowanceSample {
-	sample := &frontendv1.FooterAllowanceSample{}
-	switch reason := unavailable.GetReason().(type) {
+// unavailableReason names an unavailable sample's reason arm for the logs. An
+// unavailable arm whose own reason oneof is UNSET is still an unavailability,
+// reported as such rather than dropped.
+func unavailableReason(unavailable *conversationv1.SessionAccountUsageUnavailable) string {
+	switch unavailable.GetReason().(type) {
 	case *conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable:
-		sample.Outcome = &frontendv1.FooterAllowanceSample_ServiceUnavailable{
-			ServiceUnavailable: &frontendv1.FooterAllowanceSampleServiceUnavailable{},
-		}
+		return "service_unavailable"
 	case *conversationv1.SessionAccountUsageUnavailable_WindowUnavailable:
-		sample.Outcome = &frontendv1.FooterAllowanceSample_WindowUnavailable{
-			WindowUnavailable: &frontendv1.FooterAllowanceSampleWindowUnavailable{},
-		}
+		return "window_unavailable"
 	case *conversationv1.SessionAccountUsageUnavailable_UtilizationUnavailable:
-		sample.Outcome = &frontendv1.FooterAllowanceSample_UtilizationUnavailable{
-			UtilizationUnavailable: &frontendv1.FooterAllowanceSampleUtilizationUnavailable{},
-		}
+		return "utilization_unavailable"
 	case *conversationv1.SessionAccountUsageUnavailable_SamplingFailure:
-		sample.Outcome = &frontendv1.FooterAllowanceSample_SamplingFailure{
-			SamplingFailure: &frontendv1.FooterAllowanceSampleSamplingFailure{
-				Cause: reason.SamplingFailure.GetCause(),
-			},
-		}
+		return "sampling_failure"
+	default:
+		return "unspecified"
 	}
-	return sample
 }
 
 // observeRateLimitStatus takes one rate-limit event and files it under the

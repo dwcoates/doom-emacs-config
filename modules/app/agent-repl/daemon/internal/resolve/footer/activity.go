@@ -42,19 +42,20 @@ func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivity
 	return &frontendv1.FooterStatusActivityNotification{Text: s.notification.text}
 }
 
-// rateLine is the standing rate-limit report, or nil. The line draws as soon
-// as a USAGE SAMPLE exists — figures come from account_usage and are complete
-// from the first sample — and at least one allowance is newsworthy: an
-// unremarkable allowance is not news and would crowd out the lines that are.
-// The verdict arm joins each allowance later, when a rate-limit event for
-// that window arrives.
+// rateLine is the standing rate-limit report, or nil. The line draws when a
+// figure has been observed AND at least one allowance is newsworthy: figures
+// come from account_usage (complete from the first sample) or a rate-limit
+// event, and an unremarkable allowance is not news and would crowd out the
+// lines that are. The verdict arm joins each allowance later, when a
+// rate-limit event for that window arrives.
 //
-// A SAMPLE THAT READ NOTHING IS THE SECOND THING THAT MAKES THE LINE NEWS,
-// whatever the figures say. An unremarkable allowance is not news, but an
-// allowance nobody could read IS: the figures drawn beside it are whatever
-// survived the failed read, and a reader who is never told cannot tell a
-// fresh 41% from one the vendor stopped answering about an hour ago. The
-// figures still stand — the outcome joins them, it never clears them.
+// AN UNREADABLE SAMPLE NO LONGER OPENS THE LINE (owner ruling): the strip
+// renders the figures LAST READ and the age of that reading, never a "usage
+// unread" caveat. A failed read still leaves the figures on hand standing
+// (`observeAccountUsage`), so a below-threshold session that only ever failed
+// to re-read simply keeps drawing nothing — the same no-figures behavior as
+// before, minus the caveat. The outcome stays visible in the logs
+// (`logUnreadableSample`).
 //
 // WHEN THE SAMPLE CARRIES NO SEVEN-DAY WINDOW (an account with no weekly
 // allowance, or a vendor that reported none) the weekly allowance is drawn
@@ -68,19 +69,26 @@ func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimi
 	session := r.allowance(&s.rate.session)
 	weekly := r.allowance(&s.rate.weekly)
 	overage := r.allowance(&s.rate.overage)
-	unreadable := s.rate.sampleUnread
-	if session == nil && weekly == nil && overage == nil && !unreadable {
+	if session == nil && weekly == nil && overage == nil {
 		return nil
 	}
-	if !session.GetNewsworthy() && !weekly.GetNewsworthy() && !overage.GetNewsworthy() && !unreadable {
+	if !session.GetNewsworthy() && !weekly.GetNewsworthy() && !overage.GetNewsworthy() {
 		return nil
 	}
-	return &frontendv1.FooterStatusActivityRateLimited{
+	line := &frontendv1.FooterStatusActivityRateLimited{
 		Session: session,
 		Weekly:  weekly,
 		Overage: overage,
-		Sample:  s.rate.sample,
 	}
+	// The instant the figures were last READ off a sample, so the client can
+	// tick the reading's age ("… 10m 30s ago"). Left UNSET when the figures
+	// came from a rate-limit EVENT alone (no read instant), in which case the
+	// client draws them with no age.
+	if !s.rate.figuresReadAt.IsZero() {
+		readAt := epochMs(s.rate.figuresReadAt)
+		line.FiguresReadAtMs = &readAt
+	}
+	return line
 }
 
 // allowance projects one window's evidence onto the drawn allowance, or nil

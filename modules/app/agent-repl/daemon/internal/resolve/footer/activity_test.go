@@ -624,85 +624,78 @@ func TestAStatusNamingNoWindowIsDropped(t *testing.T) {
 	}
 }
 
-// AMENDED BY LANDING 13, deliberately. This test used to assert that an
-// unavailable sample drew NOTHING, which is the product gap the landing
-// closes: a failed read left no trace, so the strip went on drawing the last
-// percentage as though it were current and nothing on the wire could say
-// otherwise. The line now draws to STATE THE UNREAD, and it still draws no
-// FIGURE, because none was ever read.
-func TestAnUnavailableUsageSampleDrawsItsOutcomeAndNoFigure(t *testing.T) {
+// THE UNREAD MESSAGE IS GONE. An unavailable sample with NO figure ever read
+// draws no line at all — the strip falls back to its no-figures behavior
+// rather than a "usage unread" caveat (owner ruling of 2026-09-15).
+func TestAnUnreadableSampleWithNoPriorFiguresDrawsNoLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
-	// Act: a sample that could read no figure.
+	// Act: a sample that could read no figure, with nothing read before it.
 	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.UnixMilli()))
 
 	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
-	if _, ok := line.GetSample().GetOutcome().(*frontendv1.FooterAllowanceSample_ServiceUnavailable); !ok {
-		t.Fatalf("outcome = %+v, want the unread named", line.GetSample().GetOutcome())
-	}
-	if line.GetSession() != nil || line.GetWeekly() != nil {
-		t.Fatalf("session = %+v weekly = %+v, want no figure invented for a read that never happened",
-			line.GetSession(), line.GetWeekly())
-	}
-}
-
-// The gate: an unremarkable allowance is not news, but an allowance NOBODY
-// COULD READ is — otherwise the outcome cell would be unreachable from every
-// session whose figures sit below the newsworthiness threshold.
-func TestAnUnreadableSampleOpensTheLineBelowTheNewsworthinessGate(t *testing.T) {
-	// Arrange: figures well under the 0.8 threshold, so nothing is news yet.
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionUpdate(testWS, usageSample(41, 63, instant.UnixMilli()))
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
-		t.Fatal("an unremarkable allowance drew a line before the unread")
-	}
-
-	// Act
-	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
-
-	// Assert
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited() == nil {
-		t.Fatal("an unread sample drew no line, so nothing can say the figures are stale")
-	}
-}
-
-// THE STANDING CONTRACT, restated at the drawn surface: an unavailable
-// outcome joins the figures on hand, it never clears them.
-func TestAnUnreadableSampleKeepsTheStandingFiguresDrawn(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionUpdate(testWS, usageSample(41, 63, instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
-
-	// Assert
-	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
-	if line.GetSession().GetUtilization() != 0.41 || line.GetWeekly().GetUtilization() != 0.63 {
-		t.Fatalf("allowances = %+v, want the figures on hand left standing beside the unread", line)
-	}
-}
-
-// An available sample RETIRES a standing unread: the figures beside it are
-// fresh again, so the line stops saying they are not.
-func TestAReadableSampleRetiresTheStandingUnread(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.OnSessionUpdate(testWS, usageSample(41, 63, instant.UnixMilli()))
-	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(41, 63, instant.Add(2*time.Minute).UnixMilli()))
-
-	// Assert: unremarkable AND readable is not news at all.
 	if got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity(); got != nil {
-		t.Fatalf("activity = %+v, want the unread retired and the line with it", got.GetKind())
+		t.Fatalf("activity = %+v, want no line for an unread with no figures on hand", got.GetKind())
+	}
+}
+
+// A readable sample stamps the instant the figures were READ, which the strip
+// ticks the reading's age from.
+func TestAReadableSampleStampsTheFiguresReadInstant(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	readAt := h.clock.Now()
+
+	// Act: a newsworthy sample, so the line draws and exposes the instant.
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetFiguresReadAtMs() != readAt.UnixMilli() {
+		t.Fatalf("figures_read_at_ms = %d, want the readable sample's read instant %d",
+			line.GetFiguresReadAtMs(), readAt.UnixMilli())
+	}
+}
+
+// An unreadable sample leaves the read instant standing — the age stays
+// anchored to the last SUCCESSFUL read, never the failed attempt.
+func TestAnUnreadableSampleDoesNotRestampTheFiguresReadInstant(t *testing.T) {
+	// Arrange: a readable sample fixes the read instant.
+	h := newHarness(t)
+	connected(h)
+	readAt := h.clock.Now()
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Act: the clock moves on and a later sample reads nothing.
+	h.clock.Advance(time.Minute)
+	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
+
+	// Assert: the instant is still the readable sample's, not the failed one's.
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetFiguresReadAtMs() != readAt.UnixMilli() {
+		t.Fatalf("figures_read_at_ms = %d, want the last successful read %d left standing",
+			line.GetFiguresReadAtMs(), readAt.UnixMilli())
+	}
+}
+
+// THE STANDING CONTRACT, restated at the drawn surface: an unreadable sample
+// leaves the figures on hand standing, it never clears them. (Regression lock.)
+func TestAnUnreadableSampleKeepsTheStandingFiguresDrawn(t *testing.T) {
+	// Arrange: newsworthy figures, so the line draws.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetUtilization() != 0.90 {
+		t.Fatalf("allowances = %+v, want the figures on hand left standing after an unreadable sample", line)
 	}
 }
 
