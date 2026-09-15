@@ -61,6 +61,12 @@ describe("isCappedSection", () => {
     expect(isCappedSection(section("diff", "diff-output").classList)).toBe(true);
   });
 
+  it("accepts a response bubble's scroll box, now that bubbles are click-to-expand", () => {
+    // Owner ruling, 2026-09-15: a collapsed bubble no longer scrolls; a click
+    // expands it. So its scroll box is a capped, expandable section.
+    expect(isCappedSection(section("bubble-scroll").classList)).toBe(true);
+  });
+
   it("rejects an uncapped element such as an assistant bubble", () => {
     // Arrange + Act + Assert
     expect(isCappedSection(section("bubble", "assistant", "md").classList)).toBe(false);
@@ -106,6 +112,17 @@ describe("cappedSectionAt", () => {
     const feed = node("feed", null);
     // Act + Assert
     expect(cappedSectionAt(null, feed)).toBeNull();
+  });
+
+  it("resolves a click inside a response bubble to its scroll box, so bubbles expand", () => {
+    // Arrange — a response bubble as drawFeedResponse lays it out: the body sits
+    // inside the .bubble-scroll box, and a click lands in the body.
+    const feed = node("feed", null);
+    const bubble = node("bubble", feed, "bubble", "assistant", "md");
+    const scroll = node("scroll", bubble, "bubble-scroll");
+    const body = node("body", scroll, "bubble-body");
+    // Act + Assert — the innermost capped section is the scroll box, not the body.
+    expect(cappedSectionAt(body, feed)?.name).toBe("scroll");
   });
 
   it("resolves a click on a subagent description to the box holding its folded JSON", () => {

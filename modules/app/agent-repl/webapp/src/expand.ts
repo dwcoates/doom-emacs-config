@@ -44,6 +44,12 @@ export const CAPPED_CLASSES = [
   "skill-content",
   "tool-input",
   "tool-output",
+  // The response/prompt bubble's own scroll box (bubble-scroll.ts). Owner
+  // ruling, 2026-09-15: a collapsed bubble no longer scrolls; clicking it
+  // expands it to at most 50vh, and only then is its scroll revealed — so the
+  // bubble must be click-to-expand like every other capped section. Last in the
+  // list, so `primaryClass` never keys a tool section by it.
+  "bubble-scroll",
 ] as const;
 
 /** Selector matching every capped section (an element may carry several). */
