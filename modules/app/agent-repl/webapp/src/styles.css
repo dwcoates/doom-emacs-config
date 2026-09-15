@@ -2772,6 +2772,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   .pfooter-wave-letter {
     animation: none;
   }
+  /* The status word's colour sweep STOPS too, for the same reason and the same
+     way as the letter wave: it is decoration on a fact the strip already spells
+     out, so a reader in this mode loses nothing by the gradient holding still.
+     Stopping the animation leaves the fill at its rest position; the word keeps
+     its arm tone. */
+  .pfooter-status-gradient {
+    animation: none;
+  }
   /* Per-animation durations, in the order the base rule declares them: the
      slowed rotation, then the unchanged fade-in (whose 1s delay, declared
      in the shorthand, survives this override). */
@@ -3200,9 +3208,11 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    so the waving word occupies exactly the width its resting letters do.
    `display: inline-block` is what makes a transform apply at all.
 
-   SCALE 1.15, AND NO LAYER PROMOTION. The strip is `font-size: 0.78rem` (12.48px
-   at the default root), so the bulge peaks at 14.35px — visible at a glance and
-   still unmistakably the same word. There is deliberately no `will-change`, no
+   SCALE 1.18, AND NO LAYER PROMOTION. The strip is `font-size: 0.78rem` (12.48px
+   at the default root), so the bulge peaks at 14.73px — a shade more prominent
+   than the 1.15 it grew from (owner ruling, 2026-09-14: nudge the bulge up a
+   little, not a lot), visible at a glance and still unmistakably the same word.
+   There is deliberately no `will-change`, no
    `translateZ(0)` and no `backface-visibility` here: any of them promotes the
    letter to its own layer, and WebKit then rasterises the glyph ONCE at 1x and
    scales that bitmap, which is precisely how a scaled word goes blurry. Left
@@ -3231,7 +3241,56 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 }
 @keyframes pfooter-status-wave {
   from { transform: scale(1); }
-  to { transform: scale(1.15); }
+  to { transform: scale(1.18); }
+}
+
+/* ---- footer status colour gradient (src/footer/strip.ts, src/breathing.ts) ----
+
+   THE PROGRESS STATUS WORD'S GRADIENT (owner's idea, 2026-09-14): the status
+   word carries a soft, slow colour gradient that sweeps across it left→right,
+   then right→left, forever — ADDITIONAL to the travelling scale bulge above, on
+   the very same waving word.
+
+   SUB-CHARACTER, NOT STEPPED. The gradient is one fill painted on the WHOLE word
+   span and clipped to its text (`background-clip: text` + a transparent text
+   fill), so the ramp rolls smoothly through every glyph rather than stepping per
+   letter. The fill is built from `currentColor` — the arm's own tone, inherited
+   from `.pfooter-phase` — with a soft lighter band at its centre, so the word
+   still reads in its status colour (orange for `thinking`) and the sweep is a
+   highlight travelling across it, not a recolouring. `-webkit-text-fill-color`
+   (not `color`) is what goes transparent, precisely so `currentColor` keeps
+   resolving to the arm tone for the gradient stops; the letter spans inherit the
+   transparent fill and so never paint over the clipped gradient.
+
+   LOCKED TO THE SCALE WAVE. Same 2.6s duration, same `ease-in-out`, same
+   `alternate` as `pfooter-status-wave` above — the sweep and the bulge share one
+   period (STATUS_GRADIENT_* === STATUS_WAVE_* in breathing.ts) so their motion
+   never drifts, and the two-period true repeat is why the inline delay is
+   reduced modulo STATUS_GRADIENT_CYCLE_MS.
+
+   The `background-size` overflows the box so a whole highlight band has room to
+   cross it, and `background-position` is what the keyframes animate — a paint,
+   not a re-layout.
+
+   NO `animation-delay` HERE, on purpose: the word renders its own negative one
+   inline, carrying the sweep's phase across a footer push, and a delay declared
+   here would be the value that inline style exists to override. */
+.pfooter-status-gradient {
+  background-image: linear-gradient(
+    90deg,
+    currentColor 0%,
+    color-mix(in srgb, currentColor 45%, #ffffff) 50%,
+    currentColor 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: pfooter-status-gradient 2.6s ease-in-out infinite alternate;
+}
+@keyframes pfooter-status-gradient {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 /* The turn clock and token cells: tabular figures so a ticking digit never
