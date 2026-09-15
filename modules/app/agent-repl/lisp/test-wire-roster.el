@@ -203,6 +203,22 @@ arriving as an unknown field on some later push."
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
                  '(:arm :last-selected :value (:at-ms 1756400000000)))))
 
+(ert-deftest agent-repl-test-wire-roster-when-active-carries-its-instant ()
+  "Regression: the daemon added a `active' (last-activity) arm to the when
+column (2026-09-15); the strict decoder must accept it or it rejects the whole
+WatchWorkspaceRoster push and every tab falls back to a stale blue status."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"active\":{\"atMs\":\"1756400000000\"}}")
+                 '(:arm :active :value (:at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-created-carries-its-instant ()
+  "Regression: the `created' fallback arm must decode too (see `active')."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"created\":{\"atMs\":\"1756400000000\"}}")
+                 '(:arm :created :value (:at-ms 1756400000000)))))
+
 (ert-deftest agent-repl-test-wire-roster-when-merged-accepts-a-numeric-instant ()
   "protojson accepts a number for int64, and the merged instant is one."
   (should (equal (agent-repl-test-wire-roster--decode

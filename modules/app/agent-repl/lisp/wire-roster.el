@@ -113,6 +113,13 @@ spelled, and an empty message decodes to nil everywhere else."
   t)
 
 ;;;; ---- The when column ----
+;;
+;; REGRESSION WATCH (2026-09-15): this strict decoder rejects the whole
+;; WatchWorkspaceRoster push on an unknown `shown' arm, which blanks the roster
+;; and drops every tab to a stale blue status.  When the daemon adds a `when'
+;; arm (it added `active' and `created' here), it MUST be added to both the
+;; oneof list and the check-keys allow-list below in the same change, or the
+;; tab bar goes dark.  Watch for a new arm outrunning this file again.
 
 (defun agent-repl-wire-decode-roster-row-when-last-selected (value)
   "Decode VALUE as `RosterRowWhenLastSelected', a plist `(:at-ms)'.
@@ -133,20 +140,42 @@ Epoch MILLISECONDS; the client renders the relative age and ticks locally."
      (list :at-ms (agent-repl-wire--decode-int64
                    "RosterRowWhenMerged" 'atMs object)))))
 
+(defun agent-repl-wire-decode-roster-row-when-active (value)
+  "Decode VALUE as `RosterRowWhenActive', a plist `(:at-ms)'.
+The workspace's last-activity instant; the client renders the age and ticks."
+  (let ((object (agent-repl-wire--object "RosterRowWhenActive" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenActive" object '(atMs))
+    (agent-repl-wire--decoded
+     "RosterRowWhenActive"
+     (list :at-ms (agent-repl-wire--decode-int64
+                   "RosterRowWhenActive" 'atMs object)))))
+
+(defun agent-repl-wire-decode-roster-row-when-created (value)
+  "Decode VALUE as `RosterRowWhenCreated', a plist `(:at-ms)'."
+  (let ((object (agent-repl-wire--object "RosterRowWhenCreated" value)))
+    (agent-repl-wire--check-keys "RosterRowWhenCreated" object '(atMs))
+    (agent-repl-wire--decoded
+     "RosterRowWhenCreated"
+     (list :at-ms (agent-repl-wire--decode-int64
+                   "RosterRowWhenCreated" 'atMs object)))))
+
 (defun agent-repl-wire-decode-roster-row-when-shown (value)
   "Decode `RosterRowWhen''s `shown' oneof from the object VALUE.
-UNSET IS LEGAL and means nothing to show — never selected, not merged —
-so the column is empty rather than \"0ms ago\"."
+UNSET IS LEGAL and means nothing to show — never active, not created, not
+merged — so the column is empty rather than \"0ms ago\"."
   (agent-repl-wire--decode-oneof
    "RosterRowWhen" 'shown value
    '((lastSelected :last-selected agent-repl-wire-decode-roster-row-when-last-selected)
+     (active :active agent-repl-wire-decode-roster-row-when-active)
+     (created :created agent-repl-wire-decode-roster-row-when-created)
      (merged :merged agent-repl-wire-decode-roster-row-when-merged))
    t))
 
 (defun agent-repl-wire-decode-roster-row-when (value)
   "Decode VALUE as `RosterRowWhen': the oneof plist, or nil when unset."
   (let ((object (agent-repl-wire--object "RosterRowWhen" value)))
-    (agent-repl-wire--check-keys "RosterRowWhen" object '(lastSelected merged))
+    (agent-repl-wire--check-keys "RosterRowWhen" object
+                                 '(lastSelected active created merged))
     (agent-repl-wire--decoded
      "RosterRowWhen" (agent-repl-wire-decode-roster-row-when-shown object))))
 
