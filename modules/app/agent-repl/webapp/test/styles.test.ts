@@ -547,3 +547,82 @@ describe("the cost corner's hover hit area", () => {
     expect(bubbleFocus).toMatch(/max-width:\s*8rem/);
   });
 })
+
+/**
+ * THE PROMPT BUBBLE'S IN-FLIGHT BORDER (owner ruling, 2026-09-15).
+ *
+ * The border must appear exactly when the thinking glimmer starts and
+ * disappear exactly when it ends, so it is keyed on the SAME
+ * `data-wave="working"` attribute the glimmer itself reads (see
+ * `startPromptWave` / `markPromptWave` in breathing.ts / feed-view.ts) —
+ * never a separate class or a second JS toggle, since two independent
+ * togglers is exactly what could drift apart.
+ */
+describe("the prompt bubble's in-flight border", () => {
+  /** The raw text of the `@media (prefers-color-scheme: dark)` block, found
+   * by balancing braces from its opening `{` — `rulesOf`'s flat scan cannot
+   * tell a media block's own `:root` apart from the top-level one, so a dark
+   * -theme override is asserted against this substring instead. */
+  function darkThemeBlock(): string {
+    const start = stylesheet.indexOf("@media (prefers-color-scheme: dark)");
+    if (start === -1) throw new Error("no dark-theme media query found");
+    const openBrace = stylesheet.indexOf("{", start);
+    let depth = 0;
+    let i = openBrace;
+    for (; i < stylesheet.length; i++) {
+      if (stylesheet[i] === "{") depth++;
+      else if (stylesheet[i] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return stylesheet.slice(openBrace + 1, i);
+  }
+
+  it("reserves a 0.3px transparent border on every bubble, prompt included", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/border:\s*0\.3px solid transparent/);
+  });
+
+  it("defines the light-purple token in the light theme", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root");
+
+    // Assert
+    expect(root).toMatch(/--prompt-live-border:\s*#[0-9a-fA-F]{3,6}/);
+  });
+
+  it("redefines the token for the dark theme", () => {
+    // Arrange / Act
+    const dark = darkThemeBlock();
+
+    // Assert
+    expect(dark).toMatch(/--prompt-live-border:\s*#[0-9a-fA-F]{3,6}/);
+  });
+
+  it("colors the border with the token only while data-wave is working", () => {
+    // Arrange / Act — the wave gradient and the border-color live in separate
+    // rules on the same selector, so every rule on it is checked rather than
+    // just the first `rulesOf` finds.
+    const waving = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes('.bubble.user[data-wave="working"]'),
+    );
+
+    // Assert
+    expect(
+      waving.some((rule) => /border-color:\s*var\(--prompt-live-border\)/.test(rule.declarations)),
+    ).toBe(true);
+  });
+
+  it("sets no border-color on the settled (non-waving) prompt bubble", () => {
+    // Arrange / Act — the settled bubble only gets the base rule's
+    // transparent reservation; nothing recolors it back to --prompt-live-border.
+    const settled = declarationsOf(".bubble.user");
+
+    // Assert
+    expect(settled).not.toMatch(/border-color/);
+  });
+});
