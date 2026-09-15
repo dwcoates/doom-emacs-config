@@ -44,23 +44,25 @@ const DefaultLaunchWindow = 2 * time.Second
 
 // opener is the Opener.
 type opener struct {
-	launcherCmd  string
-	defaultBin   string
-	activateBin  string
-	profile      string
-	launchWindow time.Duration
-	log          dlog.Logger
+	launcherCmd    string
+	defaultBin     string
+	activateBin    string
+	profile        string
+	localStatePath string
+	launchWindow   time.Duration
+	log            dlog.Logger
 }
 
 // newOpener resolves every default and builds the opener.
 func newOpener(cfg Config) *opener {
 	o := &opener{
-		launcherCmd:  cfg.LauncherCmd,
-		defaultBin:   cfg.DefaultLauncherBin,
-		activateBin:  cfg.ActivateBin,
-		profile:      cfg.Profile,
-		launchWindow: cfg.LaunchWindow,
-		log:          cfg.Logger,
+		launcherCmd:    cfg.LauncherCmd,
+		defaultBin:     cfg.DefaultLauncherBin,
+		activateBin:    cfg.ActivateBin,
+		profile:        cfg.Profile,
+		localStatePath: cfg.LocalStatePath,
+		launchWindow:   cfg.LaunchWindow,
+		log:            cfg.Logger,
 	}
 	if o.launcherCmd == "" {
 		o.launcherCmd = os.Getenv(EnvBrowserCmd)
@@ -73,6 +75,9 @@ func newOpener(cfg Config) *opener {
 	}
 	if o.profile == "" {
 		o.profile = DefaultProfileDirectory
+	}
+	if o.localStatePath == "" {
+		o.localStatePath = DefaultLocalStatePath()
 	}
 	if o.launchWindow <= 0 {
 		o.launchWindow = DefaultLaunchWindow
@@ -123,7 +128,7 @@ func ActivateArgv(app string) []string {
 }
 
 // Open implements Opener.
-func (o *opener) Open(ctx context.Context, url string) error {
+func (o *opener) Open(ctx context.Context, url, profile string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -138,7 +143,64 @@ func (o *opener) Open(ctx context.Context, url string) error {
 	if o.launcherCmd != "" {
 		return o.openOverridden(ctx, url)
 	}
-	return o.openDefault(ctx, url)
+	if profile == "" {
+		profile = o.profile
+	}
+	return o.openDefault(ctx, url, profile)
+}
+
+// ProfileForAccount implements Opener.
+//
+// FALLBACK IS LOUD, NEVER SILENT. A blank email is the logged-out state — an
+// answer, not a fault — so it routes to the pinned default at DEBUG. A
+// non-empty email that Chrome's Local State cannot be read for, or that no
+// profile claims, routes to the pinned default at WARN naming the email: the
+// account is real but its Chrome window could not be found, and a link that
+// quietly landed in the wrong profile is exactly the confusion this exists to
+// prevent.
+func (o *opener) ProfileForAccount(email string) string {
+	if strings.TrimSpace(email) == "" {
+		o.log.Debug("daemon.externalbrowser.profile_for_account", "no account email; routing to the pinned default profile", dlog.Context{
+			"profile": o.profile,
+			"branch":  "logged-out",
+		})
+		return o.profile
+	}
+	if o.localStatePath == "" {
+		o.log.Warn("daemon.externalbrowser.profile_for_account", "no Chrome Local State path; routing the account to the pinned default profile", dlog.Context{
+			"email":   email,
+			"profile": o.profile,
+			"branch":  "no-local-state-path",
+		})
+		return o.profile
+	}
+	data, err := os.ReadFile(o.localStatePath) //nolint:gosec // daemon-derived Chrome path, never client input
+	if err != nil {
+		o.log.Warn("daemon.externalbrowser.profile_for_account", "could not read Chrome Local State; routing the account to the pinned default profile", dlog.Context{
+			"email":            email,
+			"profile":          o.profile,
+			"local_state_path": o.localStatePath,
+			"branch":           "local-state-unreadable",
+			"error":            err.Error(),
+		})
+		return o.profile
+	}
+	profile, matched := ProfileForEmail(data, email)
+	if !matched {
+		o.log.Warn("daemon.externalbrowser.profile_for_account", "no Chrome profile matches the account; routing to the pinned default profile", dlog.Context{
+			"email":            email,
+			"profile":          o.profile,
+			"local_state_path": o.localStatePath,
+			"branch":           "no-profile-match",
+		})
+		return o.profile
+	}
+	o.log.Debug("daemon.externalbrowser.profile_for_account", "routed the account to its Chrome profile", dlog.Context{
+		"email":   email,
+		"profile": profile,
+		"branch":  "matched",
+	})
+	return profile
 }
 
 // openOverridden hands the url to the configured launcher and nothing else. An
@@ -174,7 +236,7 @@ func (o *opener) openOverridden(ctx context.Context, url string) error {
 //
 // A failed raise and a failed hand-off are distinct errors: a link the user
 // clicked that silently went nowhere is worse than a loud failure.
-func (o *opener) openDefault(ctx context.Context, url string) error {
+func (o *opener) openDefault(ctx context.Context, url, profile string) error {
 	if err := o.run(ctx, o.activateBin, ActivateArgv(DefaultApp)); err != nil {
 		wrapped := fmt.Errorf("externalbrowser: raising %q before opening %s: %w", DefaultApp, url, err)
 		o.log.Error("daemon.externalbrowser.open", "could not raise the external browser", dlog.Context{
@@ -185,11 +247,11 @@ func (o *opener) openDefault(ctx context.Context, url string) error {
 		})
 		return wrapped
 	}
-	if err := o.run(ctx, o.defaultBin, LaunchArgv(o.profile, url)); err != nil {
-		wrapped := fmt.Errorf("externalbrowser: opening %s in profile %q: %w", url, o.profile, err)
+	if err := o.run(ctx, o.defaultBin, LaunchArgv(profile, url)); err != nil {
+		wrapped := fmt.Errorf("externalbrowser: opening %s in profile %q: %w", url, profile, err)
 		o.log.Error("daemon.externalbrowser.open", "external link launch failed", dlog.Context{
 			"url":     url,
-			"profile": o.profile,
+			"profile": profile,
 			"branch":  "launch-failed",
 			"error":   wrapped.Error(),
 		})
@@ -197,7 +259,7 @@ func (o *opener) openDefault(ctx context.Context, url string) error {
 	}
 	o.log.Debug("daemon.externalbrowser.open", "external link handed to the pinned profile", dlog.Context{
 		"url":     url,
-		"profile": o.profile,
+		"profile": profile,
 		"branch":  "default",
 	})
 	return nil
