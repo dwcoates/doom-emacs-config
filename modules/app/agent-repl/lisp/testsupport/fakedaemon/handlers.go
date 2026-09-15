@@ -19,6 +19,14 @@ func (s *fakeServer) SubmitPrompt(ctx context.Context, req *connect.Request[v1.S
 	return handleUnary[v1.SubmitPromptRequest, v1.SubmitPromptResponse](ctx, s, "SubmitPrompt", req.Msg)
 }
 
+func (s *fakeServer) SelectResponse(ctx context.Context, req *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
+	return handleUnary[v1.SelectResponseRequest, v1.SelectResponseResponse](ctx, s, "SelectResponse", req.Msg)
+}
+
+func (s *fakeServer) AdjustFeedTextScale(ctx context.Context, req *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {
+	return handleUnary[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse](ctx, s, "AdjustFeedTextScale", req.Msg)
+}
+
 func (s *fakeServer) RequestCommandSupport(ctx context.Context, req *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error) {
 	return handleUnary[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse](ctx, s, "RequestCommandSupport", req.Msg)
 }
