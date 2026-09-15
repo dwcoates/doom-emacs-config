@@ -72,6 +72,34 @@ func (c *Converter) landFrame(at Attribution, agent, upsertKey, discriminator st
 	return PageLine(at, discriminator, upsertKey, agent, frame)
 }
 
+// landPrompt is landFrame's counterpart for a PROMPT: the one place an
+// AgentPrompt becomes an entry, respecting the same keep-alive and
+// names-no-book invariants a frame does.
+//
+// A KEEP-ALIVE TURN'S PROMPT IS NEVER A PAGE LINE, exactly as its frames are
+// not: it lands on the keepalive arm, structurally unable to appear in any
+// page. A prompt naming no book is residue, loudly — the store reads the book
+// from the prompt's recipient and never invents one.
+func (c *Converter) landPrompt(at Attribution, agent, upsertKey, discriminator string, prompt *conversationv1.AgentPrompt) *storev1.StoreEntry {
+	if c.keepalive {
+		c.log.With(at.ctxFor("keepalive")).With(logging.Context{UpsertKey: upsertKey}).
+			LogVerbose("converted while the keep-alive bit is set; landing the prompt as a never-served item")
+		return Keepalive(at, discriminator, upsertKey, agent, &storev1.StoreAgentItem{
+			Item: &storev1.StoreAgentItem_AgentPrompt{AgentPrompt: prompt},
+		})
+	}
+	if agent == "" {
+		c.log.With(at.ctxError("attribution")).With(logging.Context{UpsertKey: upsertKey}).
+			Log("prompt names no recipient; the record has no book and is stored as unknown residue")
+		return UnknownEntry(at, "unattributed_prompt", "agent_id", map[string]any{
+			"upsert_key": upsertKey,
+			"path":       at.Path,
+			"offset":     float64(at.Offset),
+		})
+	}
+	return PromptLine(at, discriminator, upsertKey, agent, prompt)
+}
+
 // ---------------------------------------------------------------------------
 // keep-alive
 // ---------------------------------------------------------------------------

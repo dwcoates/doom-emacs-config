@@ -109,6 +109,18 @@ func ResidueKey(at Attribution) string {
 // it — a context cut, a mid-turn api error.
 func SessionKey(arm, recordUUID string) string { return "session:" + arm + ":" + recordUUID }
 
+// PromptKey names one served prompt row by its turn id, IN THE SAME SPELLING THE
+// STREAM PLANE MINTS.
+//
+// THE SHIM OWNS THIS KEY SPACE. `agent-shim/claude/shim/src/store/keys.ts`
+// spells a stream-plane prompt `prompt:<turn.value>`; a file-plane prompt this
+// reader emits (an ADOPTED external transcript's, whose turn id is derived from
+// the record uuid) uses the identical spelling so the two planes would collapse
+// onto ONE row if they ever named the same turn. They do not for an adopted
+// prompt — agent-repl's own prompts are still withheld here and drawn live —
+// but the key stays in the one space so a producer that does mint both agrees.
+func PromptKey(turn string) string { return "prompt:" + turn }
+
 // BlockActivityID is the unit identity of a content block that has no vendor
 // call id of its own: the response's message id and the block's 0-based index
 // within message.content.

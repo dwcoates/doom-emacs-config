@@ -5,9 +5,11 @@ package convert
 
 import "testing"
 
+// promptLine builds agent-repl's OWN prompt: entrypoint "sdk-cli", so it is
+// withheld (R15). The keep-alive tests use it because the keep-alive mechanism
+// is agent-repl's own, riding sdk-cli prompts.
 func promptLine(uuid, text string) string {
-	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"timestamp":"` + ts1 +
-		`","message":{"role":"user","content":[{"type":"text","text":` + quote(text) + `}]}}`
+	return sdkPromptLine(uuid, text)
 }
 
 func TestKeepaliveTurnsRecordsAreNeverServed(t *testing.T) {
