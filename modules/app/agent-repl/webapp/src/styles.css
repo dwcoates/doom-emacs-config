@@ -62,6 +62,11 @@
   --accent: #2563eb;
   --ok: #16a34a;
   --err: #dc2626;
+  /* Token figures wear ONE colour wherever a token count is drawn, so a reader
+     learns the hue means "tokens" once. Yellow for now, defined here so every
+     `.token-count` site (the subagent head's figure is the first) shares it. A
+     readable amber-yellow on the light ground; the dark block lifts it. */
+  --token-yellow: #ca8a04;
   /* Agent boot: the same blue the Emacs tab-bar paints the :init state
      (`agent-repl--color-init-blue'), so a starting workspace reads as one
      state across both renderers instead of red in one and blue in the other. */
@@ -320,6 +325,9 @@
     --prompt-live-border: #d8b4fe;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
+    /* Brighter token yellow for the dark theme, so the figure reads on the
+       deep ground the same way the light one does on white. */
+    --token-yellow: #eab308;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
     --hibernated: #2dd4bf;
     /* The gate stays a SOLID yellow card in the dark theme too, but a deep
@@ -4320,13 +4328,17 @@ body.draining #composer-input::placeholder {
   min-width: 0;
 }
 .subagent-description,
-.subagent-tokens,
 .subagent-clock,
 .subagent-quiet,
 .subagent-outcome {
   color: var(--muted);
   font-size: 0.7rem;
 }
+/* THE ONE TOKEN HUE. Every token figure wears `.token-count`, so a count reads
+   as a count wherever it is drawn; the subagent head's figure is the first to
+   adopt it. Yellow for now (var(--token-yellow)). */
+.token-count { color: var(--token-yellow); }
+.subagent-tokens { font-size: 0.7rem; }
 .subagent-description {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -71,6 +71,11 @@ describe("drawFeedSubagent: the head's parts", () => {
     expect(el.querySelector(".subagent-tokens")).toBeNull();
   });
 
+  it("wears the shared token-count hue class on the token figure", () => {
+    const { el } = drawRow(subagentRow("b1", { tokens: "12.4k tok" }));
+    expect(el.querySelector(".subagent-tokens")?.classList.contains("token-count")).toBe(true);
+  });
+
   it("refuses a head with no label", () => {
     const { ctx } = harness();
     const row = subagentRow("b1");
@@ -167,6 +172,25 @@ describe("drawFeedSubagent: the settled arms", () => {
       expect(el.getAttribute("data-state")).toBe(outcome);
     },
   );
+
+  it('draws "done" as a green ok badge, the same shape the tool-call verdict draws', () => {
+    const { el } = drawRow(
+      subagentRow("b1", { settled: { endedAtMs: 1_000_000n, outcome: "succeeded" } }),
+    );
+    const word = el.querySelector(".subagent-outcome");
+    expect(word?.textContent).toBe("done");
+    expect(word?.classList.contains("badge")).toBe(true);
+    expect(word?.classList.contains("ok")).toBe(true);
+  });
+
+  it("draws a failure as an err badge", () => {
+    const { el } = drawRow(
+      subagentRow("b1", { settled: { endedAtMs: 1_000_000n, outcome: "failed" } }),
+    );
+    const word = el.querySelector(".subagent-outcome");
+    expect(word?.classList.contains("badge")).toBe(true);
+    expect(word?.classList.contains("err")).toBe(true);
+  });
 
   it("never draws `lost` as a failure", () => {
     const lost = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "lost" } })).el;

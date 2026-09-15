@@ -74,6 +74,22 @@ const SETTLED_WORDS = {
 } as const satisfies Record<string, string>;
 
 /**
+ * The badge each settled outcome wears — the SAME `badge` shape and colours the
+ * tool-call verdicts draw (tool-call.ts: "done" is `badge ok`, "error" is
+ * `badge err`), so a settled subagent reads as consistently as a settled tool
+ * call. `done` is green, a failure is red; a stop and a lost sight are NEITHER
+ * (a person's stop is not a fault, and losing sight is not failure), so they
+ * take the muted badge rather than the error one — the dot already carries each
+ * one's distinct signal.
+ */
+const SETTLED_BADGES = {
+  succeeded: "badge ok",
+  failed: "badge err",
+  cancelled: "badge muted",
+  lost: "badge muted",
+} as const satisfies Record<string, string>;
+
+/**
  * The cause each `lost` arm names — the sidecar's staleness ruling, said in
  * words rather than left as the bare "lost sight of". Still not a failure: the
  * clause says WHICH lost it was, never that the work went wrong.
@@ -144,7 +160,10 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
 
   if (msg.tokens !== undefined) {
     const tokens = document.createElement("span");
-    tokens.className = "subagent-tokens";
+    // `token-count` is the ONE token hue (yellow for now); `subagent-tokens`
+    // sizes it to the head's other figures. Every token figure wears
+    // `token-count` so a count reads as a count wherever it is drawn.
+    tokens.className = "subagent-tokens token-count";
     tokens.textContent = msg.tokens.text;
     el.append(tokens);
   }
@@ -167,7 +186,7 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       dot.classList.add(SETTLED_DOTS[outcome.case]);
       el.append(drawSettledClock(runtime, state.value));
       const word = document.createElement("span");
-      word.className = "subagent-outcome";
+      word.className = `subagent-outcome ${SETTLED_BADGES[outcome.case]}`;
       word.textContent =
         outcome.case === "lost"
           ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
