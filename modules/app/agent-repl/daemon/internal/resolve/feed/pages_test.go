@@ -668,6 +668,54 @@ func TestALateHistoryRowAboveAClearDividerIsKeptOffThePush(t *testing.T) {
 	}
 }
 
+// TestADetachedShellsSpoolIsNotPushedToARootTailThatNeverOpenedTheBubble pins
+// the lazy streaming the fold rests on: the shell's spool BODY lands on the
+// shell's own sub-feed, so a reader following only the ROOT feed — one that
+// never opened the bubble — receives the HEAD but never a byte of the spool.
+// Mirrors TestALateHistoryRowAboveAClearDividerIsKeptOffThePush: a row that
+// must not reach the wire is proven absent by a sentinel that must.
+func TestADetachedShellsSpoolIsNotPushedToARootTailThatNeverOpenedTheBubble(t *testing.T) {
+	// Arrange: a reader following the ROOT feed's tail. It never opens the
+	// shell's sub-feed.
+	h := newHarness(t)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+
+	// Act: a born-detached shell with output — HEAD on the root feed, spool
+	// BODY on the shell's own sub-feed — then a sentinel root prompt.
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.deliverPrompt("turn-new", "sentinel")
+
+	// Assert: the spool BODY row id never reaches the root tail; the sentinel
+	// (guaranteed a root push) does — and drives the read so the assertion never
+	// blocks.
+	bodyID := testEncode(feedid.Ref{
+		WS:   testWorkspace,
+		Feed: shellSubFeed("work-1"),
+		Row:  feedid.RowKey{Kind: feedid.KindDetachedShell, ID: "work-1"},
+	}).GetValue()
+	sentinel := h.promptRowID("turn-new")
+	for {
+		id := (<-rows).GetId().GetValue()
+		if id == bodyID {
+			t.Fatalf("the spool body row was pushed to a root tail that never opened the bubble")
+		}
+		if id == sentinel {
+			break
+		}
+	}
+}
+
 func TestAWithheldRowStaysStoredForPaging(t *testing.T) {
 	// Arrange: a /clear divider, then a history row replayed above it.
 	h := newHarness(t)

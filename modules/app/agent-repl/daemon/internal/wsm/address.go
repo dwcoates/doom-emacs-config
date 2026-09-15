@@ -21,6 +21,9 @@ type storedFeed struct {
 	Agent *string `json:"agent,omitempty"`
 	// Merge is the merge sub-feed's owning lease, nil when the feed is not one.
 	Merge *string `json:"merge,omitempty"`
+	// Shell is the detached shell sub-feed's owning work id, nil when the feed
+	// is not one.
+	Shell *string `json:"shell,omitempty"`
 }
 
 // storedRow is a row key's persisted form.
@@ -68,8 +71,13 @@ func toStoredFeed(f feedid.Feed) (storedFeed, error) {
 		v := string(*f.Merge)
 		out.Merge = &v
 	}
+	if f.Shell != nil {
+		arms++
+		v := string(*f.Shell)
+		out.Shell = &v
+	}
 	if arms != 1 {
-		return storedFeed{}, fmt.Errorf("wsm: a feed address names exactly one of root, agent or merge, got %d", arms)
+		return storedFeed{}, fmt.Errorf("wsm: a feed address names exactly one of root, agent, merge or shell, got %d", arms)
 	}
 	return out, nil
 }
@@ -91,8 +99,13 @@ func fromStoredFeed(table, row string, s storedFeed) (feedid.Feed, error) {
 		lease := LeaseID(*s.Merge)
 		out.Merge = &lease
 	}
+	if s.Shell != nil {
+		arms++
+		shell := feedid.ShellID(*s.Shell)
+		out.Shell = &shell
+	}
 	if arms != 1 {
-		return feedid.Feed{}, &DecodeError{Table: table, Row: row, Field: "feed", Err: fmt.Errorf("a feed address names exactly one of root, agent or merge, got %d", arms)}
+		return feedid.Feed{}, &DecodeError{Table: table, Row: row, Field: "feed", Err: fmt.Errorf("a feed address names exactly one of root, agent, merge or shell, got %d", arms)}
 	}
 	return out, nil
 }
@@ -141,6 +154,7 @@ var rowKinds = map[feedid.RowKind]struct{}{
 	feedid.KindMergeTab:         {},
 	feedid.KindDetachedSubagent: {},
 	feedid.KindDetachedShell:    {},
+	feedid.KindShellHead:        {},
 	feedid.KindSynth:            {},
 }
 

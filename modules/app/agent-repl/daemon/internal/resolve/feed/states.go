@@ -33,17 +33,17 @@ type unitState struct {
 	// re-minting the card needs the name the unit already drew under.
 	name string
 	// moved records that this call's WORK LEFT for the background, so no later
-	// frame ever redraws it as running or as returned.
+	// frame ever redraws it.
 	//
-	// A MOVE IS NOT AN ENDING, and it is not the card's ending either: the
-	// command went on running under a detached shell row of its own, and that
-	// row is where the run reports. Kept for the same reason `denied` and
-	// `sendDelivery` are kept -- the producer restates the unit's own frames
-	// after the move (the vendor's receipt for the launch, a replay from the
-	// other plane, the next turn's live-work reconciliation), and none of them
-	// says the work moved. Drawn from the frame alone the card sat on
-	// `running` forever above a detached row already reporting `exit 0`
-	// (observed 2026-09-09).
+	// A MOVE IS NOT AN ENDING. The foreground running card is RETIRED when the
+	// work detaches, and the run's head becomes its detached shell bubble
+	// (KindShellHead) — a canonical, expandable bubble whose spool streams on
+	// its own sub-feed. Kept for the same reason `denied` and `sendDelivery` are
+	// kept: the producer restates the unit's own frames after the move (the
+	// vendor's receipt for the launch, a replay from the other plane, the next
+	// turn's live-work reconciliation), and none of them says the work moved, so
+	// drawn from the frame alone a second, stale card drew beside the bubble.
+	// A moved unit draws nothing.
 	moved bool
 	// diagnostics are the IDE findings raised against this change, composed.
 	diagnostics []string

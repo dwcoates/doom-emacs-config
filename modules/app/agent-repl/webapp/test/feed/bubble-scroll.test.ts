@@ -26,7 +26,7 @@ import {
 import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
 import { agenticBubble } from "../../src/feed/cards/controls.js";
 import { drawFeedResponse } from "../../src/feed/cards/response.js";
-import { drawFeedShell } from "../../src/feed/cards/shell.js";
+import { drawFeedShellBody } from "../../src/feed/cards/shell.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { drawFeedAgentPrompt } from "../../src/feed/rows/agent-prompt.js";
 import { mountBubble } from "../../src/feed/bubble.js";
@@ -99,22 +99,21 @@ const KINDS: readonly Kind[] = [
     siblings: true,
   },
   {
-    name: "a detached shell",
+    name: "a detached shell's spool body",
     draw: () =>
-      drawFeedShell(
+      // The shell's HEAD (command, clock) and its spool BODY are now separate
+      // bubble rows; the scroll box lives on the body. The truncation count is
+      // the strip above it — outside the box, so it stays put while the box
+      // scrolls.
+      drawFeedShellBody(
         create(FeedShellSchema, {
-          command: { text: "npm run build" },
-          runtime: { startedAtMs: 0n },
-          spool: { text: "line\n" },
-          state: { case: "live", value: {} },
+          spool: { text: "line\n", omitted: { text: "3 earlier lines not shown" } },
         }),
         rc("shell-1"),
       ),
-    meta: ".shell-head",
+    meta: ".shell-omitted",
     scroll: ".shell-tail",
-    // The spool wraps the tail, because the truncation count sits above the box
-    // and outside it. The ORDER is what the ruling is about, not the depth.
-    siblings: false,
+    siblings: true,
   },
 ];
 

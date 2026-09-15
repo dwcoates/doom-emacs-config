@@ -63,31 +63,6 @@ func runningOutcome(u *unitState) toolOutcome {
 	}
 }
 
-// movedOutcome is the arm for a call whose WORK MOVED to the background: no
-// verdict, no output, no runtime.
-//
-// THE CARD IS NOT WHERE THIS FINISHES. A backgrounded command is still running,
-// under a detached shell row of its own, and that row alone settles it. Saying
-// `returned` here would state an ending that has not happened; leaving it on
-// `running` states one that never will.
-func movedOutcome() toolOutcome {
-	return func(card *frontendv1.FeedSimpleToolCall) {
-		card.Outcome = &frontendv1.FeedSimpleToolCall_Moved{Moved: &frontendv1.FeedToolCallMoved{}}
-	}
-}
-
-// withMove keeps a MOVED call moved. Every frame of the unit that arrives after
-// its work left -- the vendor's receipt for the launch, the other plane's
-// replay, the next turn's live-work reconciliation -- restates the call and
-// never the move, so the outcome is decided from the unit's memory rather than
-// from the frame in hand.
-func withMove(u *unitState, outcome toolOutcome) toolOutcome {
-	if !u.moved {
-		return outcome
-	}
-	return movedOutcome()
-}
-
 // returnedOutcome builds the returned arm: the verdict badge, the output's
 // drawn form, the settled clock and any diagnostics raised against it.
 func returnedOutcome(u *unitState, ok bool, form returnedForm, settledAtMs int64) toolOutcome {
@@ -689,6 +664,17 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	unitID := act.GetActivityId().GetValue()
 	u := s.unit(unitID)
 
+	// THE WORK LEFT FOR THE BACKGROUND. Once this call detached, its head is the
+	// shell bubble (KindShellHead) that detachForegroundShell drew in place of
+	// the retired running card. Every later frame of this unit — the vendor's
+	// launch receipt, the other plane's replay, the next turn's live-work
+	// reconciliation — restates the CALL and never the move, so drawing one here
+	// would put a second, stale card beside the bubble.
+	if u.moved {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.moved"})
+		return nil, errNotARow
+	}
+
 	switch state := bash.GetResult().(type) {
 	case *conversationv1.AgentBash_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Start"})
@@ -699,11 +685,11 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Bash", deniedOutcome()), nil
 		}
-		return r.toolRow(s, at, unitID, "Bash", withMove(u, runningOutcome(u))), nil
+		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
 	case *conversationv1.AgentBash_Progress:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
-		return r.toolRow(s, at, unitID, "Bash", withMove(u, runningOutcome(u))), nil
+		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
 	case *conversationv1.AgentBash_Update:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Update"})
 		// A foreground call reports no growth; an update here belongs to the
@@ -720,13 +706,13 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		// number, so the reader was told the command went wrong and never told
 		// how. The two sites must stay parallel; see FeedToolCallReturned.exit.
 		return r.toolRow(s, at, unitID, "Bash",
-			withMove(u, withExit(returnedOutcome(u, ok, form, state.Success.GetSettledAt().GetAtMs()),
-				bashExit(state.Success)))), nil
+			withExit(returnedOutcome(u, ok, form, state.Success.GetSettledAt().GetAtMs()),
+				bashExit(state.Success))), nil
 	case *conversationv1.AgentBash_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
 		return r.toolRow(s, at, unitID, "Bash",
-			withMove(u, returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError())))), nil
+			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
+				failureSettledMs(state.Failure.GetError()))), nil
 	}
 	return nil, errNotARow
 }

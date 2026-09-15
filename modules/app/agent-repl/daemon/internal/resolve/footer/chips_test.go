@@ -567,8 +567,8 @@ func TestADetachedShellRaisesTheShellsChip(t *testing.T) {
 	if rows[0].GetCommand().GetText() != "npm test" {
 		t.Fatalf("command = %q, want the announced command line", rows[0].GetCommand().GetText())
 	}
-	if got := rows[0].GetTarget().GetValue(); got != "detached_shell|work-1|" {
-		t.Fatalf("target = %q, want the shell bubble keyed by the work handle", got)
+	if got := rows[0].GetTarget().GetValue(); got != "shell_head|work-1|" {
+		t.Fatalf("target = %q, want the shell HEAD bubble keyed by the work handle", got)
 	}
 }
 

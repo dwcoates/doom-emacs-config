@@ -132,6 +132,24 @@ describe("isBubbleRow", () => {
   it("does not mistake an ordinary activity for a bubble", () => {
     expect(isBubbleRow(responseRow("r"))).toBe(false);
   });
+
+  it("recognizes a detached shell head", () => {
+    const row = create(FeedRowSchema, {
+      id: feedId("s"),
+      row: { case: "shellHead", value: { command: { text: "npm run dev" } } },
+    });
+    expect(isBubbleRow(row)).toBe(true);
+  });
+
+  it("does not mistake a shell's spool body for a bubble", () => {
+    // The spool BODY (detached_shell) rides the sub-feed as an ordinary row; only
+    // the HEAD (shell_head) is the expandable bubble.
+    const row = create(FeedRowSchema, {
+      id: feedId("s"),
+      row: { case: "detachedShell", value: { shell: {} } },
+    });
+    expect(isBubbleRow(row)).toBe(false);
+  });
 });
 
 describe("createFeedController: painting a page", () => {
