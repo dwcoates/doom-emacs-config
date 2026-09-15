@@ -296,20 +296,57 @@ reads distinctly from :idle orange and :thinking red."
       (should-not (agent-repl--ws-display-state "ws1"))
       (should (eq (agent-repl--ws-bracket-state "ws1") :ready)))))
 
-(ert-deftest agent-repl-test-display-state-full-for-a-long-viewed-ready-workspace ()
-  "A `:ready' workspace the user has stood in for ages still draws FULL.
-The dwell fade made this case partial with the panels open, which the
-IF AND ONLY IF forbids."
+(ert-deftest agent-repl-test-display-state-full-when-panels-open-and-not-view-demoted ()
+  "A panels-open workspace with no view-dwell latch draws FULL.
+Demotion is LATCH-driven (`agent-repl--tab-dwell-demoted'), not a raw
+comparison against `:last-viewed-at' inside the hot redisplay path, so a
+stale `:last-viewed-at' does not by itself demote — only the dwell timer
+setting the latch does."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/w/1")
-    (agent-repl--ws-put "ws1" :last-viewed-at (time-subtract (current-time) 3600))
-    (cl-letf (((symbol-function 'agent-repl--ws-render-status)
-               (lambda (_ws) :ready))
-              ((symbol-function 'agent-repl--ws-agent-open-p)
-               (lambda (_ws) t)))
-      ;; Act / Assert
-      (should (eq (agent-repl--ws-display-state "ws1") :ready)))))
+    (let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)))
+      (agent-repl--ws-put "ws1" :project-dir "/w/1")
+      (agent-repl--ws-put "ws1" :last-viewed-at (time-subtract (current-time) 3600))
+      (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+                 (lambda (_ws) :ready))
+                ((symbol-function 'agent-repl--ws-agent-open-p)
+                 (lambda (_ws) t)))
+        ;; Act / Assert
+        (should (eq (agent-repl--ws-display-state "ws1") :ready))))))
+
+(ert-deftest agent-repl-test-display-state-partial-after-view-dwell-demotion ()
+  "A panels-open workspace whose dwell latch is set draws PARTIAL.
+The status still shows on the bracket (`agent-repl--ws-bracket-state'),
+so this is the demotion, not a removal of the status."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)))
+      (agent-repl--ws-put "ws1" :project-dir "/w/1")
+      (puthash "ws1" t agent-repl--tab-dwell-demoted)
+      (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+                 (lambda (_ws) :ready))
+                ((symbol-function 'agent-repl--ws-agent-open-p)
+                 (lambda (_ws) t)))
+        ;; Act / Assert
+        (should-not (agent-repl--ws-display-state "ws1"))
+        (should (eq (agent-repl--ws-bracket-state "ws1") :ready))))))
+
+(ert-deftest agent-repl-test-display-state-partial-when-panels-closed-ignores-dwell ()
+  "A panels-CLOSED workspace draws PARTIAL regardless of the dwell latch.
+The panels-closed suppression short-circuits before the dwell branch, so
+the latch cannot change a closed tab's already-partial extent."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)))
+      (agent-repl--ws-put "ws1" :project-dir "/w/1")
+      (puthash "ws1" t agent-repl--tab-dwell-demoted)
+      (cl-letf (((symbol-function 'agent-repl--ws-render-status)
+                 (lambda (_ws) :ready))
+                ((symbol-function 'agent-repl--ws-agent-open-p)
+                 (lambda (_ws) nil)))
+        ;; Act / Assert
+        (should-not (agent-repl--ws-display-state "ws1"))
+        (should (eq (agent-repl--ws-bracket-state "ws1") :ready))))))
 
 (ert-deftest agent-repl-test-ready-view-fade-apparatus-is-gone ()
   "The ready-view latch no longer exists: the extent rule is panels alone."
@@ -385,6 +422,195 @@ IF AND ONLY IF forbids."
   "The repaint runs as a window-configuration subscriber, not an ad hoc call."
   (should (memq #'agent-repl--repaint-tab-on-panel-change
                 window-configuration-change-hook)))
+
+;;;; ---- Tests: the view-dwell demotion (full -> partial after 5s) ----
+;;
+;; Owner ruling (2026-09-15): after a workspace's panels have been viewed for
+;; at least `agent-repl-tab-dwell-demote-seconds', its tab demotes from FULL
+;; to PARTIAL even with the panels open, and resets to FULL on the next status
+;; update.  The clock is injected (`agent-repl--tab-dwell-note' takes NOW), so
+;; nothing sleeps.
+
+(defmacro agent-repl-test--with-dwell-state (&rest body)
+  "Run BODY with fresh view-dwell hashes and a no-op demotion timer.
+`run-with-timer' is stubbed so arming schedules nothing real, and the
+logging + repaint sinks are silenced/counted-free by default."
+  (declare (indent 0))
+  `(let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal))
+         (agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal))
+         (agent-repl--tab-dwell-last-arm (make-hash-table :test 'equal))
+         (agent-repl--tab-dwell-timer nil))
+     (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) 'stub-timer))
+               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-tab-dwell-demote-seconds-is-five ()
+  "The dwell threshold is the owner-specified five seconds."
+  (should (equal agent-repl-tab-dwell-demote-seconds 5)))
+
+(ert-deftest agent-repl-test-tab-dwell-note-holds-full-before-deadline ()
+  "A workspace viewed less than the dwell stays undemoted (draws FULL)."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((base (current-time)))
+      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
+      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act
+        (let ((demoted (agent-repl--tab-dwell-note
+                        "ws1" (time-add base (seconds-to-time 4)))))
+          ;; Assert
+          (should-not demoted)
+          (should-not (agent-repl--tab-dwell-demoted-p "ws1")))))))
+
+(ert-deftest agent-repl-test-tab-dwell-note-demotes-at-deadline ()
+  "A workspace viewed at least the dwell demotes and repaints."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((base (current-time))
+          (repainted 0))
+      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
+      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw)
+                 (lambda () (cl-incf repainted))))
+        ;; Act
+        (let ((demoted (agent-repl--tab-dwell-note
+                        "ws1" (time-add base (seconds-to-time 5)))))
+          ;; Assert
+          (should demoted)
+          (should (agent-repl--tab-dwell-demoted-p "ws1"))
+          (should (equal repainted 1)))))))
+
+(ert-deftest agent-repl-test-tab-dwell-note-does-not-demote-when-panels-closed ()
+  "Panels closed: the dwell never demotes (a closed tab is PARTIAL already)."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((base (current-time)))
+      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
+      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act / Assert
+        (should-not (agent-repl--tab-dwell-note
+                     "ws1" (time-add base (seconds-to-time 30))))
+        (should-not (agent-repl--tab-dwell-demoted-p "ws1"))))))
+
+(ert-deftest agent-repl-test-tab-dwell-note-does-not-demote-a-background-workspace ()
+  "Only the currently-viewed workspace dwells: a background one never demotes."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((base (current-time)))
+      (puthash "ws1" base agent-repl--tab-dwell-armed-at)
+      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws2"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        ;; Act / Assert
+        (should-not (agent-repl--tab-dwell-note
+                     "ws1" (time-add base (seconds-to-time 30))))
+        (should-not (agent-repl--tab-dwell-demoted-p "ws1"))))))
+
+(ert-deftest agent-repl-test-tab-dwell-reset-clears-latch-and-rearms ()
+  "A reset clears the demotion (back to FULL) and restarts the 5s clock."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((t0 (current-time)))
+      (puthash "ws1" t agent-repl--tab-dwell-demoted)
+      (puthash "ws1" t0 agent-repl--tab-dwell-armed-at)
+      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+        (let ((t1 (time-add t0 (seconds-to-time 100))))
+          ;; Act: status update at t1 resets
+          (agent-repl--tab-dwell-reset "ws1" t1)
+          ;; Assert: back to FULL, and the clock re-armed to t1
+          (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
+          (should (equal (gethash "ws1" agent-repl--tab-dwell-armed-at) t1))
+          ;; A note before the NEW deadline still holds full
+          (should-not (agent-repl--tab-dwell-note
+                       "ws1" (time-add t1 (seconds-to-time 4))))
+          ;; ...and demotes again once the re-armed dwell elapses
+          (should (agent-repl--tab-dwell-note
+                   "ws1" (time-add t1 (seconds-to-time 5))))
+          (should (agent-repl--tab-dwell-demoted-p "ws1")))))))
+
+(ert-deftest agent-repl-test-tab-dwell-reset-on-status-change-resets-on-new-arm ()
+  "A roster push carrying a CHANGED arm resets that workspace's dwell."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (puthash "ws1" t agent-repl--tab-dwell-demoted)
+    (puthash "ws1" :ready agent-repl--tab-dwell-last-arm)
+    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+              ((symbol-function 'agent-repl-roster-walk)
+               (lambda (_r) (list (list :row 'row1))))
+              ((symbol-function 'agent-repl-roster-row-id) (lambda (_row) "id1"))
+              ((symbol-function 'agent-repl-roster-row-status) (lambda (_row) :thinking))
+              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "ws1")))
+      ;; Act
+      (agent-repl--tab-dwell-reset-on-status-change 'roster)
+      ;; Assert
+      (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
+      (should (eq (gethash "ws1" agent-repl--tab-dwell-last-arm) :thinking)))))
+
+(ert-deftest agent-repl-test-tab-dwell-reset-on-status-change-keeps-latch-on-same-arm ()
+  "A re-push restating the SAME arm is not new activity: the latch holds."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (puthash "ws1" t agent-repl--tab-dwell-demoted)
+    (puthash "ws1" :ready agent-repl--tab-dwell-last-arm)
+    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+              ((symbol-function 'agent-repl-roster-walk)
+               (lambda (_r) (list (list :row 'row1))))
+              ((symbol-function 'agent-repl-roster-row-id) (lambda (_row) "id1"))
+              ((symbol-function 'agent-repl-roster-row-status) (lambda (_row) :ready))
+              ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "ws1")))
+      ;; Act
+      (agent-repl--tab-dwell-reset-on-status-change 'roster)
+      ;; Assert
+      (should (agent-repl--tab-dwell-demoted-p "ws1")))))
+
+(ert-deftest agent-repl-test-tab-dwell-reset-on-status-change-hook-is-registered ()
+  "Reset-on-status-update runs as a roster-push subscriber."
+  (should (memq #'agent-repl--tab-dwell-reset-on-status-change
+                agent-repl-roster-update-functions)))
+
+(ert-deftest agent-repl-test-tab-dwell-on-activation-arms-the-clock ()
+  "Activating a workspace stamps its armed-at so its dwell can begin."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      ;; Act
+      (agent-repl--tab-dwell-on-activation)
+      ;; Assert
+      (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
+
+(ert-deftest agent-repl-test-tab-dwell-on-activation-does-not-undemote ()
+  "Switching INTO an already-demoted workspace does not un-demote it.
+Only a status update resets; a plain activation just restarts the clock."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (puthash "ws1" t agent-repl--tab-dwell-demoted)
+    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      ;; Act
+      (agent-repl--tab-dwell-on-activation)
+      ;; Assert
+      (should (agent-repl--tab-dwell-demoted-p "ws1")))))
 
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
