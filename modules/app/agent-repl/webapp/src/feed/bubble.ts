@@ -93,20 +93,23 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   el.className = "tool-card bubble-fold";
 
   // The collapsed head reads as a tool-call card's head row (`.tool-head`),
-  // not the old async pill: the caret and the kind's head line sit on it.
+  // not the old async pill: the whole head IS the fold's toggle now (owner
+  // ruling, 2026-09-15). The chevron is gone; clicking anywhere on the head
+  // that is not itself an interactive control expands or collapses the bubble.
+  // The head is therefore the accessible toggle in its own right — `role`,
+  // `tabIndex`, `aria-expanded` and Enter/Space activation all ride it, the
+  // affordance the removed `<button>` used to carry.
   const headLine = document.createElement("div");
   headLine.className = "tool-head bubble-head";
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "bubble-toggle agent-caret";
-  toggle.setAttribute("data-expand", id.value);
-  toggle.setAttribute("aria-expanded", "false");
+  headLine.setAttribute("data-expand", id.value);
+  headLine.setAttribute("role", "button");
+  headLine.tabIndex = 0;
+  headLine.setAttribute("aria-expanded", "false");
 
   const headSlot = document.createElement("span");
   headSlot.className = "bubble-head-slot";
 
-  headLine.append(toggle, headSlot);
+  headLine.append(headSlot);
 
   const panel = document.createElement("div");
   panel.className = "agent-panel bubble-subfeed";
@@ -125,22 +128,24 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   drawHead();
   applyExpanded(false);
 
-  toggle.addEventListener("click", () => {
-    clearRefusal();
-    if (expanded) {
-      // A COLLAPSE NEVER MOVES THE VIEW. It removes content from below the
-      // reader's eyes; nothing they are looking at changed place, and moving
-      // them anyway would be the yank in the other direction.
-      collapse();
-      return;
-    }
-    // SAMPLED BEFORE THE OPEN, not after: the open paints a page of rows into
-    // the panel, and asking afterwards would ask about a feed the expansion
-    // itself has already grown.
-    const following = opts.scroll?.isFollowing() ?? false;
-    void expand().then((opened) => {
-      if (opened) settleView(following);
-    });
+  // CLICKING THE HEAD IS THE TOGGLE. A click that lands on an interactive
+  // control the head carries — the stop button (`data-interrupt`), a link — is
+  // that control's own act and never the fold's, so those are ignored here and
+  // do their own thing.
+  headLine.addEventListener("click", (event) => {
+    if (isInteractiveTarget(event.target)) return;
+    toggleFold();
+  });
+  // KEYBOARD PARITY WITH THE REMOVED BUTTON: the head is focusable, so Enter
+  // and Space activate it exactly as they did the chevron `<button>`. A key
+  // pressed while an inner control holds focus belongs to that control.
+  headLine.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+    if (isInteractiveTarget(event.target)) return;
+    // Space would otherwise scroll the page; Enter would submit nothing here,
+    // but both are the toggle's activation now, so the default is suppressed.
+    event.preventDefault();
+    toggleFold();
   });
 
   // The wire's fold is the INITIAL state, so an unfolded merge bubble opens
@@ -192,7 +197,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     else el.setAttribute("data-state", state);
   }
 
-  /** Show or hide the sub-feed, and say so on the element and the toggle. */
+  /** Show or hide the sub-feed, and say so on the element and the head. */
   function applyExpanded(next: boolean): void {
     expanded = next;
     el.setAttribute("data-expanded", next ? "true" : "false");
@@ -202,9 +207,44 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     // before the bubble is mounted; the feed copies the attribute up when it
     // adopts the row, and this keeps the two agreeing on every toggle after.)
     el.closest("[data-feed-row]")?.setAttribute("data-expanded", next ? "true" : "false");
-    toggle.setAttribute("aria-expanded", next ? "true" : "false");
-    toggle.textContent = next ? "▾" : "▸";
+    // `aria-expanded` rides the head now that the head is the toggle.
+    headLine.setAttribute("aria-expanded", next ? "true" : "false");
     panel.hidden = !next;
+  }
+
+  /**
+   * The fold's one activation, shared by a head click and Enter/Space on the
+   * focused head.
+   */
+  function toggleFold(): void {
+    clearRefusal();
+    if (expanded) {
+      // A COLLAPSE NEVER MOVES THE VIEW. It removes content from below the
+      // reader's eyes; nothing they are looking at changed place, and moving
+      // them anyway would be the yank in the other direction.
+      collapse();
+      return;
+    }
+    // SAMPLED BEFORE THE OPEN, not after: the open paints a page of rows into
+    // the panel, and asking afterwards would ask about a feed the expansion
+    // itself has already grown.
+    const following = opts.scroll?.isFollowing() ?? false;
+    void expand().then((opened) => {
+      if (opened) settleView(following);
+    });
+  }
+
+  /**
+   * Whether an event's target is an interactive control the head carries (the
+   * stop button, a link), which owns the event rather than the fold. The head
+   * itself is a `<div>` and matches none of these, so a bare head click always
+   * falls through to the toggle.
+   */
+  function isInteractiveTarget(target: EventTarget | null): boolean {
+    return (
+      target instanceof Element &&
+      target.closest("button, a[href], input, select, textarea, [data-interrupt]") !== null
+    );
   }
 
   /**
@@ -400,7 +440,8 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     el2.className = "refusal";
     el2.setAttribute("data-arm", arm);
     el2.textContent = text;
-    toggle.after(el2);
+    // The refusal marks the head, which is the control the reader clicked.
+    headLine.append(el2);
   }
 
   function clearRefusal(): void {

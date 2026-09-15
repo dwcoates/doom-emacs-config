@@ -96,9 +96,25 @@ describe("mountBubble: the collapsed head", () => {
     expect(bubble.element.querySelector(".stub-head")).not.toBeNull();
   });
 
-  it("offers the fold toggle as the expansion control", () => {
+  it("offers the head row itself as the expansion control", () => {
     const { bubble } = mount(subagentRow("b1"));
-    expect(bubble.element.querySelector("[data-expand]")?.getAttribute("data-expand")).toBe("b1");
+    const control = bubble.element.querySelector("[data-expand]");
+    expect(control?.getAttribute("data-expand")).toBe("b1");
+    expect(control?.classList.contains("bubble-head")).toBe(true);
+  });
+
+  it("renders no chevron toggle button, the head being the toggle now", () => {
+    const { bubble } = mount(subagentRow("b1"));
+    expect(bubble.element.querySelector(".bubble-toggle")).toBeNull();
+    expect(bubble.element.querySelector(".agent-caret")).toBeNull();
+  });
+
+  it("makes the head an accessible button, focusable and collapsed", () => {
+    const { bubble } = mount(subagentRow("b1"));
+    const head = bubble.element.querySelector<HTMLElement>(".bubble-head");
+    expect(head?.getAttribute("role")).toBe("button");
+    expect(head?.tabIndex).toBe(0);
+    expect(head?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("hosts its sub-feed in the marked panel", () => {
@@ -267,6 +283,92 @@ describe("mountBubble: collapse", () => {
     await bubble.expand();
     await settle();
     expect(h.calls.watchFeed).toHaveLength(2);
+  });
+});
+
+describe("mountBubble: clicking the head is the toggle", () => {
+  /** The head row of a mounted bubble. */
+  function headOf(bubble: { element: HTMLElement }): HTMLElement {
+    const head = bubble.element.querySelector<HTMLElement>(".bubble-head");
+    if (head === null) throw new Error("the bubble mounted no head");
+    return head;
+  }
+
+  it("expands the bubble on a click anywhere on the head", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    headOf(bubble).click();
+    await settle();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("opens the sub-feed on the first head click", async () => {
+    const { bubble, h } = mount(subagentRow("b1"));
+    headOf(bubble).click();
+    await settle();
+    expect(h.calls.openFeed[0]?.feed?.value).toBe("b1");
+  });
+
+  it("collapses again on a second head click", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    headOf(bubble).click();
+    await settle();
+    headOf(bubble).click();
+    await settle();
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("updates aria-expanded on the head when the fold toggles", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    headOf(bubble).click();
+    await settle();
+    expect(headOf(bubble).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("does NOT toggle when the click lands on a control inside the head", async () => {
+    // Arrange: a stop-style control the head carries, as the subagent head's
+    // `data-interrupt` button is.
+    const { bubble } = mount(subagentRow("b1"));
+    const head = headOf(bubble);
+    const stop = document.createElement("button");
+    stop.setAttribute("data-interrupt", "b1");
+    head.append(stop);
+    // Act: the control's own click, which bubbles up to the head listener.
+    stop.click();
+    await settle();
+    // Assert: the fold stayed shut; the control did its own thing.
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("toggles on Enter while the head is focused", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    headOf(bubble).dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await settle();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("toggles on Space while the head is focused", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    headOf(bubble).dispatchEvent(
+      new KeyboardEvent("keydown", { key: " ", bubbles: true }),
+    );
+    await settle();
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("ignores a key press that arose from a control inside the head", async () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"));
+    const head = headOf(bubble);
+    const stop = document.createElement("button");
+    stop.setAttribute("data-interrupt", "b1");
+    head.append(stop);
+    // Act: Enter pressed with the inner control as the event's target.
+    stop.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(false);
   });
 });
 

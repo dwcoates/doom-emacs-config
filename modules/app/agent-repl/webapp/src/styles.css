@@ -4267,14 +4267,10 @@ body.draining #composer-input::placeholder {
    used to say "the cursor is here", so the two read as one vocabulary. */
 .row-revealed { box-shadow: inset 3px 0 0 var(--accent); border-radius: 4px; }
 
-/* THE BUBBLE'S FOLD TOGGLE — a caret, not an icon font: ▸ collapsed, ▾ open. */
-.bubble-toggle {
-  background: none;
-  border: none;
-  padding: 0;
-  margin-right: 0.25rem;
-  font: inherit;
-  color: inherit;
+/* THE BUBBLE'S FOLD TOGGLE IS THE WHOLE HEAD (owner ruling, 2026-09-15) — no
+   chevron; clicking anywhere on the head row that is not an inner control
+   expands or collapses the fold, so the head shows a pointer to signal it. */
+.bubble-head {
   cursor: pointer;
 }
 
