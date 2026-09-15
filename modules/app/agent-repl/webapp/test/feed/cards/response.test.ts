@@ -20,9 +20,11 @@ import {
   REVEALED_ATTRIBUTE,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
+  measureTreeCols,
   proseHtml,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
+import { DEFAULT_TREE_COLS } from "../../../src/metaprompt-tree.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
@@ -679,6 +681,162 @@ describe("the wrapped tree a settled response carries", () => {
     // And discarding the bubble disconnects the observer.
     stopTicking(el);
     expect(() => fireResize(body)).toThrow();
+  });
+});
+
+/**
+ * `measureTreeCols` reports the columns the tree wraps to. The regression it
+ * guards: it once measured `body.clientWidth` — the bubble's ALREADY-shrunk
+ * fit-content width — so a tree wrapped to whatever narrow width its shortest
+ * line produced, prematurely. It now measures the MAX width the bubble may
+ * occupy (its resolved `max-width` cap), so a line wraps only when it truly
+ * exceeds the cap. jsdom does no layout, so each case stages the layout the
+ * measure reads: a monospace char width (the internal probe), the bubble's cap
+ * (`getComputedStyle().maxWidth`), its containing-block width and current
+ * border box, and the body's shrunk `clientWidth`.
+ */
+describe("the columns the tree wraps to are measured against the bubble cap", () => {
+  const CHAR_PX = 8;
+  const rect = (width: number): DOMRect =>
+    ({ width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) });
+
+  let protoRect: typeof Element.prototype.getBoundingClientRect;
+
+  beforeEach(() => {
+    // The internal probe (a `.mp-tree` div of 100 zeros) is created inside the
+    // measure and cannot be reached to stub directly, so the char width is
+    // staged on the prototype, keyed on the probe's class.
+    // Captured to be ASSIGNED back in afterEach, never called off the reference.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
+    protoRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
+      if (this.className === "mp-tree") return rect(CHAR_PX * 100);
+      return rect(0);
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = protoRect;
+    vi.restoreAllMocks();
+  });
+
+  /** A staged bubble/body pair with the geometry the measure reads. */
+  function stage(opts: {
+    maxWidth: string;
+    containingWidth: number;
+    bubbleOuter: number;
+    bodyClientWidth: number;
+    bodyPad?: number;
+  }): HTMLElement {
+    const pad = opts.bodyPad ?? 0;
+    const parent = document.createElement("div");
+    Object.defineProperty(parent, "clientWidth", { value: opts.containingWidth, configurable: true });
+    const bubble = document.createElement("div");
+    bubble.className = "bubble assistant md";
+    // The bubble's current (fit-content) border box, an own property so it wins
+    // over the prototype stub that serves the probe.
+    bubble.getBoundingClientRect = () => rect(opts.bubbleOuter);
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    Object.defineProperty(body, "clientWidth", { value: opts.bodyClientWidth, configurable: true });
+    bubble.appendChild(body);
+    parent.appendChild(bubble);
+    document.body.appendChild(parent);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+      if (el === bubble) return { maxWidth: opts.maxWidth } as unknown as CSSStyleDeclaration;
+      return {
+        maxWidth: "none",
+        paddingLeft: `${pad}px`,
+        paddingRight: `${pad}px`,
+      } as unknown as CSSStyleDeclaration;
+    });
+    return body;
+  }
+
+  it("measures the max-width cap, not the shrunk fit-content clientWidth", () => {
+    // Arrange — cap 70.125% of a 1000px column = 701.25px; the bubble currently
+    // renders at 220px (outer) around a 200px body, so the fixed insets are 20px
+    // and the body's content at the cap is 681.25px.
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — floor(681.25 / 8) = 85, the cap-based count, NOT floor(200/8)=25.
+    expect(cols).toBe(85);
+  });
+
+  it("does not let the shrunk clientWidth drag the column count down", () => {
+    // Arrange — same cap, but an even narrower current bubble; the cap-based
+    // count must not follow the shrink.
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 90, bodyClientWidth: 72 });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — insets 18px, body at cap 683.25px, floor(/8)=85; clientWidth would give floor(72/8)=9.
+    expect(cols).toBe(85);
+    expect(cols).toBeGreaterThan(9);
+  });
+
+  it("honors a px max-width cap directly", () => {
+    // Arrange — a browser that resolves the cap to px hands it back as px.
+    const body = stage({ maxWidth: "560px", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — insets 20px, 540px content, floor(540/8)=67.
+    expect(cols).toBe(67);
+  });
+
+  it("resolves the percentage cap against the containing block, so a wider column yields more columns", () => {
+    // Arrange — the same bubble in two feed-column widths.
+    const narrow = stage({ maxWidth: "70.125%", containingWidth: 600, bubbleOuter: 220, bodyClientWidth: 200 });
+    const narrowCols = measureTreeCols(narrow);
+    vi.restoreAllMocks();
+    const wide = stage({ maxWidth: "70.125%", containingWidth: 1400, bubbleOuter: 220, bodyClientWidth: 200 });
+    // Act
+    const wideCols = measureTreeCols(wide);
+    // Assert
+    expect(wideCols).toBeGreaterThan(narrowCols);
+  });
+
+  it("falls back to the default width when there is no resolvable cap and no layout", () => {
+    // Arrange — no cap (`none`) and a zero-width body: no measurement at all.
+    const body = stage({ maxWidth: "none", containingWidth: 1000, bubbleOuter: 0, bodyClientWidth: 0 });
+    // Act + Assert
+    expect(measureTreeCols(body)).toBe(DEFAULT_TREE_COLS);
+  });
+
+  it("falls back to the clientWidth measure when a laid-out bubble has no cap", () => {
+    // Arrange — layout exists but no cap resolves, so the legacy clientWidth
+    // measure still applies.
+    const body = stage({ maxWidth: "none", containingWidth: 1000, bubbleOuter: 420, bodyClientWidth: 400 });
+    // Act + Assert — floor(400/8)=50.
+    expect(measureTreeCols(body)).toBe(50);
+  });
+
+  it("does not wrap a tree whose longest line fits under the cap though the bubble renders narrower", () => {
+    // Arrange — cap-based cols is 85; a tree whose longest branch is ~60 columns
+    // fits under the cap but would wrap at the shrunk clientWidth (25 cols).
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    const tree = [
+      "1 🌳 A tree whose longest branch is comfortably under the cap.",
+      "├── 1.1 A branch of about sixty rendered columns, fitting the cap.",
+      "└── 1.2 Another branch, also short enough to stand on one line.",
+    ].join("\n");
+    // Act
+    const cols = measureTreeCols(body);
+    const host = document.createElement("div");
+    host.innerHTML = proseHtml(tree, cols);
+    // Assert — one line per branch: nothing wrapped.
+    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBe(3);
+  });
+
+  it("still wraps a tree whose line genuinely exceeds the cap", () => {
+    // Arrange — cap-based cols is 85; a branch far past it must still wrap.
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    // Act
+    const cols = measureTreeCols(body);
+    const host = document.createElement("div");
+    host.innerHTML = proseHtml(SHOWCASE_TREE, cols);
+    // Assert — more rendered lines than the four source branches: it wrapped.
+    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
   });
 });
 
