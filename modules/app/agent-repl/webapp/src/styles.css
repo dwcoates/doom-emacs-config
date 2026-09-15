@@ -217,6 +217,15 @@
      leaves a sliver of the next one showing, which is itself the signal that
      the box scrolls. */
   --feed-cap-lines: 27.5;
+  /* THE FEED TEXT ZOOM. A single multiplier the daemon owns, persists and
+     pushes (frontend.v1.FeedTextScale); the webapp writes the pushed value
+     onto this property on the document element (feed/feed-text-scale.ts). It
+     multiplies into EVERY feed-scroll font-size as
+     `calc(<base> * var(--feed-text-scale))`, so all feed text scales together
+     and every relative size is preserved. It is referenced ONLY by feed-scroll
+     rules — never the sidebar, topbar, footer or composer — which is what keeps
+     the zoom scoped to the feed. Default 1 = 100%. */
+  --feed-text-scale: 1;
   --async-border: #4fb8a8;
   /* The Merge status card (a merge-failure remediation turn): an amber wash,
      kin to --remediation, so it reads as "needs resolving" and stays distinct
@@ -1216,6 +1225,15 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  /* THE FEED TEXT ZOOM base. `1em` is the inherited body size, so at the
+     default scale of 1 this is exactly what the feed showed before; the
+     multiplier then scales any feed text that has NO explicit font-size of its
+     own (plain inherited text) proportionally with the rest. Descendants that
+     set their own size in `rem` are root-relative and carry the multiplier
+     themselves (see every feed `font-size: calc(<base>rem * var(...))`), so
+     this never double-scales them; `em`-based descendants inherit the scale
+     from their nearest scaled ancestor exactly once. */
+  font-size: calc(1em * var(--feed-text-scale));
   /* There is no second, narrower card cap here any more: every feed card —
      grey tool card, permission prompt, thinking fold, status chip, failure
      card, system note — shares the ONE `--agent-bubble-cap` the response
@@ -1228,7 +1246,7 @@ pre {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--feed-text-scale));
 }
 
 /* The feed is framed by ONE centered column, the `--agent-bubble-cap`
@@ -1440,7 +1458,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    child margin resets keep a leading or trailing code card flush with the
    bubble edge, matching the .md bubble-body rules. */
 .bubble.user pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
-.bubble.user pre.md-code code { background: none; padding: 0; font-size: 0.85rem; }
+.bubble.user pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 .bubble.user .bubble-body > :first-child { margin-top: 0; }
 .bubble.user .bubble-body > :last-child { margin-bottom: 0; }
 /* The bubble's top-right corner: a flex column stacking a final response's
@@ -1460,7 +1478,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   flex-direction: column;
   align-items: flex-end;
   gap: 0.15rem;
-  font-size: 0.65rem;
+  font-size: calc(0.65rem * var(--feed-text-scale));
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1500,7 +1518,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    font and size as each other, just slightly smaller than the corner's dating
    text. Scoped to the stats wrapper (not `.turn-meta`) so the hover timestamp
    beneath keeps the larger 0.65rem corner size. */
-.turn-meta .turn-stats { font-size: 0.6rem; }
+.turn-meta .turn-stats { font-size: calc(0.6rem * var(--feed-text-scale)); }
 /* The timestamp is hover-only now: a muted grey stamp (pushed toward --fg so
    it reads a shade more present) that drops in under the stats only while the
    reader hovers that top-right corner, so a settled feed is not littered with
@@ -1594,25 +1612,25 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 /* Markdown-rendered assistant text. The leading is a token because the
    response bubble's 25-line height cap is measured in these lines (see
    --cap-line-h), so the two must never drift apart. */
-.md { font-size: 0.9rem; --md-line-h: 1.5; line-height: var(--md-line-h); }
+.md { font-size: calc(0.9rem * var(--feed-text-scale)); --md-line-h: 1.5; line-height: var(--md-line-h); }
 /* The markdown lives one level in, inside the bubble's body column, so the
    flush-with-the-bubble-edge rules reach through it. */
 .md .bubble-body > :first-child { margin-top: 0; }
 .md .bubble-body > :last-child { margin-bottom: 0; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 0.6em 0 0.3em; line-height: 1.25; }
-.md h1 { font-size: 1.3rem; } .md h2 { font-size: 1.15rem; } .md h3 { font-size: 1.05rem; }
+.md h1 { font-size: calc(1.3rem * var(--feed-text-scale)); } .md h2 { font-size: calc(1.15rem * var(--feed-text-scale)); } .md h3 { font-size: calc(1.05rem * var(--feed-text-scale)); }
 .md p { margin: 0.4em 0; }
 .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
 .md li { margin: 0.15em 0; }
 .md blockquote { margin: 0.4em 0; padding: 0.1em 0.8em; border-left: 3px solid var(--accent); color: var(--muted); }
 .md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
-.md pre.md-code code { background: none; padding: 0; font-size: 0.85rem; }
+.md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 .md a { color: var(--accent); }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
 /* GFM tables: bordered and compact, scrolling horizontally when wider than
    the bubble instead of forcing the bubble to grow. */
-.md table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.85rem; display: block; width: max-content; max-width: 100%; overflow-x: auto; }
+.md table { border-collapse: collapse; margin: 0.5em 0; font-size: calc(0.85rem * var(--feed-text-scale)); display: block; width: max-content; max-width: 100%; overflow-x: auto; }
 .md th, .md td { border: 1px solid var(--border); padding: 0.3em 0.6em; text-align: left; }
 .md th { background: color-mix(in srgb, var(--fg) 6%, transparent); font-weight: 600; }
 /* GFM images: never overflow the bubble's width. */
@@ -1630,7 +1648,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    soft-wrap, no width reasoning left to CSS. overflow-x guards only the
    degenerate case of an unsplittable word wider than the whole bubble,
    which is served wider rather than truncated. */
-.mp-tree { font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.45; white-space: pre; overflow-x: auto; }
+.mp-tree { font-family: ui-monospace, monospace; font-size: calc(0.85rem * var(--feed-text-scale)); line-height: 1.45; white-space: pre; overflow-x: auto; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-prefix, .mp-content { white-space: pre; }
 .mp-blank { height: 0.7em; }
@@ -1639,7 +1657,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border-left: 3px solid var(--border);
   padding: 0.25rem 0.75rem;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--feed-text-scale));
 }
 /* The fold keeps its click-to-toggle, and its TEXT stays selectable: the
    summary line is the only label the folded thinking has, so a reader
@@ -1653,7 +1671,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border-radius: 8px;
   background: var(--card);
   padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--feed-text-scale));
 }
 /* RETIRED (owner ruling, 2026-09-14): the shared async teal wash the skill,
    agent and task cards used to wear (`background: var(--async-card);
@@ -1671,7 +1689,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 }
 .tool-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem; }
 .tool-name { font-weight: 600; color: var(--tool-title); }
-.badge { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
+.badge { font-size: calc(0.7rem * var(--feed-text-scale)); padding: 0.05rem 0.4rem; border-radius: 99px; border: 1px solid var(--border); }
 .badge.ok { color: var(--ok); }
 .badge.err { color: var(--err); }
 /* In-flight badge: the same orange the thinking indicator uses, so a call still
@@ -1741,7 +1759,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   align-items: center;
   gap: 0.3rem;
   max-width: 100%;
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
   padding: 0.1rem 0.6rem;
   border-radius: 99px;
   border: 1px solid var(--border);
@@ -1761,7 +1779,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   align-items: flex-start;
   gap: 0.35rem;
   margin-top: 0.3rem;
-  font-size: 0.8rem;
+  font-size: calc(0.8rem * var(--feed-text-scale));
   color: var(--muted);
 }
 .async-typing-text {
@@ -1865,7 +1883,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem * var(--feed-text-scale));
   padding: 0.15rem 0;
 }
 .stream-detail {
@@ -1881,7 +1899,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 /* What a bounded fold left out. A cap that says nothing reads as "this is
    the whole stream", which is the one thing it is not. */
 .stream-dropped {
-  font-size: 0.72rem;
+  font-size: calc(0.72rem * var(--feed-text-scale));
   color: var(--muted);
   font-style: italic;
   padding-bottom: 0.25rem;
@@ -1892,9 +1910,9 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    top-right rather than the panel bottom; its tooltip owns the
    prompt-mediated caveat, keeping the label bare. */
 .face-side { margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem; }
-.face-elapsed { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.face-elapsed { font-size: calc(0.75rem * var(--feed-text-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .face-stop {
-  font-size: 0.72rem;
+  font-size: calc(0.72rem * var(--feed-text-scale));
   padding: 0.1rem 0.55rem;
   border-radius: 99px;
   border: 1px solid var(--err);
@@ -1927,7 +1945,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
   padding: 0.1rem 0.6rem;
   border-radius: 99px;
   border: 1px solid var(--async);
@@ -1962,7 +1980,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
   padding: 0.1rem 0.6rem;
   border-radius: 99px;
   border: 1px solid var(--border);
@@ -2083,7 +2101,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    turn, queued like any prompt) and its label owns that. The stop verb
    moved to the face's top-right .face-stop above. */
 .task-msg {
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
   cursor: pointer;
   background: var(--card);
   border: 1px solid var(--border);
@@ -2093,7 +2111,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 }
 /* The freeform composer for a live background agent. */
 .agent-msg { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
-.agent-msg-input { flex: 1; min-width: 0; font-size: 0.8rem; }
+.agent-msg-input { flex: 1; min-width: 0; font-size: calc(0.8rem * var(--feed-text-scale)); }
 .stderr { color: var(--err); }
 
 .diff .add { color: var(--ok); }
@@ -2104,7 +2122,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border: 1px solid var(--accent);
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
-  font-size: 0.9rem;
+  font-size: calc(0.9rem * var(--feed-text-scale));
 }
 .permission.resolved { border-color: var(--border); color: var(--muted); }
 .perm-head { font-weight: 600; margin-bottom: 0.35rem; }
@@ -2112,7 +2130,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .perm-actions button { cursor: pointer; }
 
 .result {
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 99px;
@@ -2148,7 +2166,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 
 .compact-divider, .system-note {
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
 }
 
 /* The compaction-in-progress banner (#compact-progress-slot): an INDETERMINATE
@@ -2160,7 +2178,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   align-items: center;
   gap: 0.75rem;
   padding: 0.4rem 0.9rem;
-  font-size: 0.8rem;
+  font-size: calc(0.8rem * var(--feed-text-scale));
   color: var(--info-tokens);
   background: var(--card);
   border-bottom: 1px solid var(--border);
@@ -2238,7 +2256,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    whose usage was unavailable prints no cost half at all. */
 .compaction-summary-meta {
   margin-top: 0.25rem;
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--feed-text-scale));
   color: var(--muted);
 }
 /* The three context-boundary separators — the red rule a clear draws, the
@@ -2283,7 +2301,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border-radius: 999px;
   color: var(--muted);
   font-family: ui-monospace, monospace;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem * var(--feed-text-scale));
   line-height: 1.5;
 }
 
@@ -2304,7 +2322,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border-left-width: 3px;
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--feed-text-scale));
 }
 
 /* INTERNAL — agent-repl's own machinery: shim down, store outage, a refused
@@ -2340,7 +2358,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   margin-top: 0.25rem;
   color: var(--muted);
   font-family: var(--mono, ui-monospace, monospace);
-  font-size: 0.75rem;
+  font-size: calc(0.75rem * var(--feed-text-scale));
   overflow-wrap: anywhere;
 }
 
@@ -2356,7 +2374,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 
 .failure-resolved {
   margin-top: 0.25rem;
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--feed-text-scale));
   color: var(--muted);
 }
 
@@ -2379,7 +2397,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   background: var(--card);
   padding: 0.5rem 0.75rem;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.8;
 }
 .queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
@@ -2388,7 +2406,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    of the app uses for "the model is about to act", since that verdict is
    the one that preempts the running turn. */
 .queued-badge {
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--feed-text-scale));
   padding: 0.05rem 0.5rem;
   border-radius: 99px;
   border: 1px solid var(--border);
@@ -2408,7 +2426,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    chrome is around them, not on them. */
 .queued-content { color: var(--fg); }
 /* The classifier's one-line reason reads as an aside: muted and italic. */
-.queued-reason { margin-top: 0.3rem; font-size: 0.8rem; font-style: italic; }
+.queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .queued-actions button { cursor: pointer; font: inherit; }
 /* A release the holding arm is likely to refuse: offered, because the daemon
@@ -2442,7 +2460,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 }
 /* The standing explanation of the hold. Not italic like `.queued-reason`:
    that is the classifier quoting itself, this is the app stating a rule. */
-.lease-reason { margin-top: 0.3rem; font-size: 0.8rem; color: var(--fg); }
+.lease-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); color: var(--fg); }
 
 /* --- The keep-alive hold bubble (render.ts `KeepAliveHeldCard`) ----------
    A prompt parked behind an in-flight cache keep-alive ping. It borrows the

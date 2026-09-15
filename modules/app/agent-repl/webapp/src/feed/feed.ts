@@ -19,6 +19,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
+import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
   feedReveal,
@@ -185,11 +186,16 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       schema: WatchFeedResponseSchema,
       open: (client, signal) => openAndTail(client, signal),
       onPush: (response) => {
-        // A frame carries EITHER a row upsert OR a response-selection push,
-        // never both (endpoint_watch_feed.proto). A selection frame carries no
-        // row, so it must be routed BEFORE `requireMessage(response.row)`,
-        // which would otherwise reject a well-formed selection as a malformed
-        // row. A frame with neither still fails loudly there, as before.
+        // A frame carries EXACTLY ONE of a row upsert, a response-selection
+        // push, or a feed-text-scale push (endpoint_watch_feed.proto). The two
+        // non-row frames carry no row, so they must be routed BEFORE
+        // `requireMessage(response.row)`, which would otherwise reject a
+        // well-formed push as a malformed row. A frame with none still fails
+        // loudly there, as before.
+        if (response.feedTextScale !== undefined) {
+          applyFeedTextScale(response.feedTextScale.scale);
+          return;
+        }
         if (response.selection !== undefined) {
           root.applySelection(response.selection);
           return;
