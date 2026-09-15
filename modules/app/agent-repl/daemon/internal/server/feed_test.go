@@ -191,3 +191,112 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 		t.Fatalf("row = %q, want row-1", got)
 	}
 }
+
+// openRootWatch opens the root feed and its watch, returning the live stream —
+// the shared arrange step for the selection-push tests.
+func openRootWatch(t *testing.T, h *harness, ctx context.Context) *connect.ServerStreamForClient[agentreplv1.WatchFeedResponse] {
+	t.Helper()
+	h.Feed.page = page()
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.tail = &fakeTail{rows: make(chan *frontendv1.FeedRow, 1), token: h.Feed.token}
+	if _, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	stream, err := h.Client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{
+		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1"},
+	}))
+	if err != nil {
+		t.Fatalf("WatchFeed: %v", err)
+	}
+	return stream
+}
+
+// receiveSelection reads the watch stream until a selection frame arrives,
+// skipping any row frames.
+func receiveSelection(
+	t *testing.T,
+	stream *connect.ServerStreamForClient[agentreplv1.WatchFeedResponse],
+) *frontendv1.FeedSelection {
+	t.Helper()
+	for stream.Receive() {
+		if sel := stream.Msg().GetSelection(); sel != nil {
+			return sel
+		}
+	}
+	t.Fatalf("the watch stream ended before a selection arrived: %v", stream.Err())
+	return nil
+}
+
+// TestWatchFeedPushesTheSelectionOnTheRootFeed pins that a SelectResponse move
+// reaches the root feed's watch as a FeedSelection frame carrying the selected
+// row, active, and the row to center.
+func TestWatchFeedPushesTheSelectionOnTheRootFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+
+	// Act.
+	if _, err := h.Client.SelectResponse(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectResponseRequest{
+			Workspace: ref(),
+			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
+		})); err != nil {
+		t.Fatalf("SelectResponse: %v", err)
+	}
+	sel := receiveSelection(t, stream)
+
+	// Assert.
+	if !sel.GetActive() {
+		t.Fatalf("active = false, want true while a selection stands")
+	}
+	if got := sel.GetSelected().GetValue(); got != "c" {
+		t.Fatalf("selected = %q, want the most recent c", got)
+	}
+	if got := sel.GetCenter().GetValue(); got != "c" {
+		t.Fatalf("center = %q, want c", got)
+	}
+}
+
+// TestWatchFeedPushesTheClearedSelection pins that CLEAR pushes a frame with
+// active=false and no selected row, which is what returns the webapp to the
+// feed bottom.
+func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("a", "b", "c")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	if _, err := h.Client.SelectResponse(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectResponseRequest{
+			Workspace: ref(),
+			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_NEXT,
+		})); err != nil {
+		t.Fatalf("seed selection: %v", err)
+	}
+	if got := receiveSelection(t, stream).GetSelected().GetValue(); got != "c" {
+		t.Fatalf("seed selection = %q, want c", got)
+	}
+
+	// Act.
+	if _, err := h.Client.SelectResponse(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectResponseRequest{
+			Workspace: ref(),
+			Direction: agentreplv1.SelectResponseDirection_SELECT_RESPONSE_DIRECTION_CLEAR,
+		})); err != nil {
+		t.Fatalf("SelectResponse clear: %v", err)
+	}
+	sel := receiveSelection(t, stream)
+
+	// Assert.
+	if sel.GetActive() {
+		t.Fatalf("active = true, want false after a clear")
+	}
+	if sel.Selected != nil {
+		t.Fatalf("selected = %v, want none after a clear", sel.GetSelected())
+	}
+}

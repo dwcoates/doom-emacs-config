@@ -19,6 +19,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/dlog"
@@ -233,6 +234,18 @@ type server struct {
 	// now is the clock, injected in tests so the transient-versus-defect
 	// escalation can be exercised without waiting real seconds.
 	now func() time.Time
+
+	// selections is the per-workspace response-selection cursor
+	// (reply-to-a-past-response mode): the currently selected final-response
+	// FeedId, or ABSENT for "none". The daemon owns this state because Emacs
+	// drives it (SelectResponse) and the webapp renders it (the FeedSelection
+	// push), and both must agree. Guarded by mu.
+	selections map[ids.WorkspaceID]*frontendv1.FeedId
+	// selectionTopics is one FeedSelection push topic per workspace, subscribed
+	// by the ROOT feed's WatchFeed so a selection change reaches every open
+	// webview. A publish.Topic replays its latest value, so a webview that
+	// attaches mid-selection is handed the current selection at once.
+	selectionTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]
 }
 
 // hostIdentityDescribeBound is how long a session record may carry no host
@@ -315,6 +328,8 @@ func New(deps Deps) (Server, error) {
 		pages:               make(map[string]*pageStream),
 		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),
 		now:                 time.Now,
+		selections:          make(map[ids.WorkspaceID]*frontendv1.FeedId),
+		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]),
 	}
 
 	mux := http.NewServeMux()
