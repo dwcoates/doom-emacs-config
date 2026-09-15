@@ -56,9 +56,12 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 			log.Error(opSelect, "could not record the selection", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("select %q: %w", ws, err)
 		}
-		log.Debug(opSelect, "selected the workspace", dlog.Context{"at": at.UTC()})
+		// A WORKSPACE SWITCH IS A PRODUCTION-VISIBLE ACTION, so its receipt
+		// stands at info: an info-level log that carried no trace of a switch
+		// left the roster/tab-bar divergence bug with nothing to read.
+		log.Info(opSelect, "selected the workspace", dlog.Context{"at": at.UTC()})
 	} else {
-		log.Debug(opSelect, "the workspace was already current; the selection instant stands", nil)
+		log.Info(opSelect, "the workspace was already current; the selection instant stands", nil)
 	}
 	if err := v.deps.DB.SetAttention(ctx, ws, false); err != nil {
 		log.Error(opSelect, "could not clear the attention marker", dlog.Context{"cause": err.Error()})
