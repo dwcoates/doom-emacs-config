@@ -129,8 +129,10 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - RegisterWorkspace on a dir that is not a git worktree answers the
   intended-arm refusal (Connect error naming `RegisterWorkspaceError.<arm>`)
   and logs the arm at WARNING
-- SelectWorkspace stamps `current` on the roster push and the row's
-  last_selected; re-selecting is success and produces no duplicate push
+- SelectWorkspace stamps `current` on the roster push, and does NOT drive the
+  when-column (which shows last activity, not last viewing): a never-active
+  selected workspace's when falls back to `created`, never `last_selected`;
+  re-selecting is success and produces no duplicate push
 - a per-workspace rpc with an unknown WorkspaceRef answers NotFound naming
   the intended arm; a ref whose `dir` disagrees with the registry for its
   `id` is refused (workspace_ref_mismatch)
