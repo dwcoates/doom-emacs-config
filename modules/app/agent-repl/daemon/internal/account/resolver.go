@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
+
 	"claude-repld/internal/dlog"
 )
 
@@ -65,7 +67,7 @@ func (r *resolver) ConfigDirFor(workspaceDir string) string {
 	dir := r.canonical(workspaceDir, "config_dir_for.workspace_dir")
 	root := r.canonical(r.roots.MultiRepoRoot, "config_dir_for.multi_repo_root")
 
-	if underDir(root, dir) {
+	if r.underDir(root, dir) {
 		r.log.Debug("daemon.account.config_dir_for", "workspace is under the multi-repo root", dlog.Context{
 			"workspace_dir":   workspaceDir,
 			"resolved_dir":    dir,
@@ -118,12 +120,92 @@ func (r *resolver) canonical(path, site string) string {
 
 // underDir reports whether dir lies at or under root.
 //
-// The comparison is per path SEGMENT, not per byte: `/home/user/multi-other`
+// BREADCRUMB (account routing regression fix): this test used to be a
+// byte-wise, case-sensitive `strings.HasPrefix` on the two canonicalized
+// paths. That mis-routed a workspace opened through a differently-cased or
+// differently-normalized path on a case-insensitive, normalization-insensitive
+// filesystem (APFS on macOS): `EvalSymlinks` does NOT fold case, so a real,
+// valid workspace path like `.../chesscom/...` failed `HasPrefix` against a
+// root recorded as `.../ChessCom/`, routing a WORK workspace to the PERSONAL
+// account. The fix asks the filesystem for identity instead of comparing
+// bytes: for the parts of `dir` that EXIST it walks upward and compares each
+// ancestor to root by inode with `os.SameFile`, which is immune to case and
+// normalization skew because both spellings resolve to the same inode. The
+// per-SEGMENT string check survives only as a fallback for the still-missing
+// leading segments of a path the daemon is ABOUT TO CREATE, and even that
+// fallback is now case-folded and NFC-normalized so it too survives the skew
+// that the old byte compare did not.
+//
+// The comparison stays per path SEGMENT, not per byte: `/home/user/multi-other`
 // is not under `/home/user/multi`, and a root that merely CONTAINS a
 // repository (`/home/user` asked about `/home`) is not under it either.
-func underDir(root, dir string) bool {
+func (r *resolver) underDir(root, dir string) bool {
 	root = strings.TrimSuffix(filepath.Clean(root), string(filepath.Separator))
 	dir = strings.TrimSuffix(filepath.Clean(dir), string(filepath.Separator))
+	if root == "" || dir == "" {
+		return false
+	}
+
+	// Inode identity for the parts that exist. If root itself cannot be
+	// stat'd, there is no inode to compare against, so the normalized string
+	// check is the only answer available.
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			r.log.Warn("daemon.account.under_dir", "could not stat the multi-repo root; falling back to a normalized path check", dlog.Context{
+				"root":  root,
+				"dir":   dir,
+				"error": err.Error(),
+			})
+		}
+		return underDirNormalized(root, dir)
+	}
+
+	// Walk dir upward through its ancestors. The first EXISTING ancestor that
+	// is the same file as root proves dir is at or under root — this is what
+	// makes a differently-cased or differently-normalized spelling of a real
+	// directory route correctly. A missing ancestor is expected (an
+	// about-to-be-created workspace) and is the trigger to keep climbing, not
+	// an error to surface.
+	for p := dir; ; {
+		info, err := os.Stat(p)
+		switch {
+		case err == nil:
+			if os.SameFile(rootInfo, info) {
+				return true
+			}
+		case !errors.Is(err, fs.ErrNotExist):
+			r.log.Warn("daemon.account.under_dir", "could not stat a workspace-path ancestor; treating it as missing", dlog.Context{
+				"root":     root,
+				"dir":      dir,
+				"ancestor": p,
+				"error":    err.Error(),
+			})
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			break // reached the volume root; nothing above it to compare
+		}
+		p = parent
+	}
+
+	// No existing ancestor shares root's inode. Either dir is genuinely
+	// outside root, or its still-missing leading segments name a path under a
+	// root that itself exists but was not reached by an inode match (only when
+	// none of dir's existing ancestors is root). Decide with a normalized
+	// prefix check so the fallback survives case and normalization skew too.
+	return underDirNormalized(root, dir)
+}
+
+// underDirNormalized is the string fallback for path segments that do not yet
+// exist on disk, so cannot be compared by inode. It is case-folded and
+// NFC-normalized so a differently-cased or differently-composed spelling of an
+// about-to-be-created path still routes like the path it names, unlike the
+// byte-wise compare this replaced. Segment boundaries are still honored, so a
+// sibling whose name merely starts with the root's is not under it.
+func underDirNormalized(root, dir string) bool {
+	root = normalizePathForCompare(root)
+	dir = normalizePathForCompare(dir)
 	if root == "" || dir == "" {
 		return false
 	}
@@ -131,6 +213,13 @@ func underDir(root, dir string) bool {
 		return true
 	}
 	return strings.HasPrefix(dir, root+string(filepath.Separator))
+}
+
+// normalizePathForCompare folds case and applies Unicode NFC so two spellings
+// of the same path compare equal. Separators are unaffected by either, so
+// normalizing the whole string keeps the per-segment prefix check intact.
+func normalizePathForCompare(p string) string {
+	return strings.ToLower(norm.NFC.String(p))
 }
 
 // Read implements Resolver.

@@ -381,6 +381,10 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - proto/daemon: `CreateWorkspaceError.spawn_failed` lands, so the one refusal both a create and an open raise is answered in band by both instead of out of band by one.
 - proto/daemon: `ForgetWorkspace` lands whole — endpoint, rpc and handler — for a verb whose refusals and command-file route were already built with no wire to answer on; `server.setArm` learned repeated fields so `has_children` names the children instead of dropping them.
 
+## Account routing (case-insensitive filesystems), 2026-09-15
+
+- daemon/account: a workspace opened through a differently-cased or Unicode-normalized path to a real directory under `$MULTI_REPO_ROOT` now routes to the work account, not the personal one — `underDir` decides "at or under root" by walking the workspace path's existing ancestors and comparing each to the root by inode with `os.SameFile` (immune to case/normalization skew, unlike the old byte-wise `strings.HasPrefix`); still-missing leading segments of an about-to-be-created path fall back to a case-folded, NFC-normalized per-segment prefix check via the already-present `golang.org/x/text` dep (`resolver.go`, observed: root `.../ChessCom`, dir `.../chesscom/...` mis-routed to personal).
+
 ## Standing measurements to protect
 
 - Cold start 1.826s-2.7s from spawn to usable across the current (2026-09-12) regime, historical high 3.479s from an early cold-cache run; every phase measured (n=26).
