@@ -60,6 +60,9 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	case *conversationv1.AgentActivity_Response:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Response"})
 		row, err = r.drawResponse(s, at, agent, act, item.Response)
+	case *conversationv1.AgentActivity_Thinking:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Thinking"})
+		row, err = r.drawThinking(s, at, act, item.Thinking)
 	case *conversationv1.AgentActivity_Read:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Read"})
 		row, err = r.drawRead(s, at, act, item.Read)
@@ -113,8 +116,9 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	default:
 		// An unmodeled tool is NOT a failure and NEVER a feed row: its home is
 		// the topbar's warning dropdown. Every other kind that draws nowhere
-		// (thinking, task acts, monitors, wakeups, cron, notifications,
-		// injected context) answers the same way.
+		// (task acts, monitors, wakeups, cron, notifications, injected context)
+		// answers the same way. THINKING now draws its own bubble above, so it
+		// is no longer in this list.
 		//
 		// THE KIND IS RECORDED, because a detachment naming this unit has to
 		// be able to tell "nothing has drawn it YET" from "nothing will ever
