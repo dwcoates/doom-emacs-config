@@ -242,8 +242,11 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		log.Info(opInterrupt, "stopped a detached agent", fields)
 		return InterruptOutcome{DetachedCount: 1}, nil
-	case ref.Row.Kind == feedid.KindDetachedShell:
-		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindDetachedShell"})
+	case ref.Row.Kind == feedid.KindShellHead:
+		// THE STOP LIVES ON THE HEAD. A detached shell's stop button is drawn on
+		// its bubble HEAD (KindShellHead), whose ID is the run's own work id; the
+		// spool BODY row (KindDetachedShell) on the sub-feed carries no control.
+		log.Debug("daemon.workspace.transition_decision", "selected a workspace transition branch", dlog.Context{"function": "workspace", "branch": "case ref.Row.Kind == feedid.KindShellHead"})
 		work := &conversationv1.DetachedWorkId{Value: ref.Row.ID}
 		if err := shim.StopBash(ctx, work); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {

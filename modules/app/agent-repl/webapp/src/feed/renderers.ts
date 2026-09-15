@@ -24,7 +24,7 @@ import { drawFeedFindings } from "./cards/findings.js";
 import { drawFeedHook } from "./cards/hook.js";
 import { drawFeedPlan } from "./cards/plan.js";
 import { drawFeedResponse } from "./cards/response.js";
-import { drawFeedShell } from "./cards/shell.js";
+import { drawFeedShellBody, drawFeedShellHead } from "./cards/shell.js";
 import { drawFeedSkill } from "./cards/skill.js";
 import { drawFeedSimpleToolCall } from "./cards/tool-call.js";
 import { drawFeedColdGate } from "./asks/cold-gate.js";
@@ -97,7 +97,10 @@ export interface RowRenderers {
   artifact(unit: FeedArtifact, rc: RowContext): HTMLElement;
   plan(unit: FeedPlan, rc: RowContext): HTMLElement;
   findings(unit: FeedFindings, rc: RowContext): HTMLElement;
+  /** The detached shell bubble's spool BODY (on its sub-feed); the head is `shellHead`. */
   shell(unit: FeedShell, rc: RowContext): HTMLElement;
+  /** The detached shell bubble's collapsed HEAD line; its body is `shell`. */
+  shellHead(unit: FeedShell, rc: RowContext): HTMLElement;
   permission(unit: FeedPermission, rc: RowContext): HTMLElement;
   question(unit: FeedQuestion, rc: RowContext): HTMLElement;
   coldGate(unit: FeedColdGate, rc: RowContext): HTMLElement;
@@ -170,7 +173,8 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     artifact: drawFeedArtifact,
     plan: drawFeedPlan,
     findings: drawFeedFindings,
-    shell: drawFeedShell,
+    shell: drawFeedShellBody,
+    shellHead: drawFeedShellHead,
     permission: drawFeedPermission,
     question: drawFeedQuestion,
     coldGate: drawFeedColdGate,

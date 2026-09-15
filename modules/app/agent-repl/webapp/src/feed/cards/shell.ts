@@ -1,10 +1,11 @@
 /**
- * shell — THE DETACHED SHELL BUBBLE'S BODY: a background command and its spool.
- *
- * A SHELL IS NOT A FEED. It has no rows, only output, so unlike a subagent
- * bubble there is nothing to open as a sub-feed: the body rides the row itself
- * and the whole of it is drawn here. That asymmetry is the schema's, and it is
- * why this renderer sits among the cards rather than among the bubbles.
+ * shell — THE DETACHED SHELL BUBBLE, in two halves. Ruled 2026-09-14: a
+ * detached shell is a CANONICAL BUBBLE, exactly like a subagent's. The HEAD
+ * (drawFeedShellHead) carries the command, the clock and — while live — the
+ * stop, on the parent feed; the BODY (drawFeedShellBody) is the spool alone,
+ * streamed on the shell's OWN sub-feed the head's FeedId addresses. THE BUBBLE
+ * IS A FEED: the head opens the sub-feed on expand, and a collapsed bubble
+ * streams nothing.
  *
  * THE SPOOL IS A SNAPSHOT, REPLACED WHOLE. The daemon caps the tail and pushes
  * what it now stands at; this end appends nothing, splices nothing and
@@ -108,12 +109,17 @@ function lostCauseClause(lost: FeedShellLost): string {
 /** Every settled outcome this build draws, for the suite to hold to the schema. */
 export const SHELL_SETTLED_ARMS: readonly string[] = Object.keys(SETTLED_WORDS);
 
-/** The shell bubble's body. */
-export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
+/**
+ * THE SHELL BUBBLE'S HEAD: command, clock, and — while live — the stop; no
+ * spool (the spool is the body, on the sub-feed). This is the collapsed head
+ * the parent feed carries, drawn by the bubble machinery exactly like a
+ * subagent's head.
+ */
+export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log.debug("drawing a shell bubble", {
-    operation: "feed.cards.shell",
-    context: { state: state.case, spool: u.spool !== undefined },
+  log.debug("drawing a shell bubble head", {
+    operation: "feed.cards.shell.head",
+    context: { state: state.case },
   });
 
   const el = document.createElement("div");
@@ -174,6 +180,24 @@ export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
       return unreachableArm(`${PATH}.state`, armName(state));
   }
 
+  return el;
+}
+
+/**
+ * THE SHELL BUBBLE'S BODY: the spool alone, on the shell's own sub-feed. The
+ * command, clock and stop live on the head; drawing them here too would
+ * duplicate them, so this reads ONLY the spool (feed.proto: FeedDetachedShell
+ * is the spool BODY row). A body with no spool draws an empty box rather than
+ * failing — the daemon publishes a body row only once there is output, so this
+ * is the defensive case, not the ordinary one.
+ */
+export function drawFeedShellBody(u: FeedShell, _rc: RowContext): HTMLElement {
+  log.debug("drawing a shell bubble body", {
+    operation: "feed.cards.shell.body",
+    context: { spool: u.spool !== undefined },
+  });
+  const el = document.createElement("div");
+  el.className = "shell-bubble-body";
   if (u.spool !== undefined) {
     el.append(drawFeedShellSpool(u.spool, `${PATH}.spool`));
   }
