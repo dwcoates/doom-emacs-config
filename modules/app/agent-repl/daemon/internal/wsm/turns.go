@@ -52,6 +52,27 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 	return t, nil
 }
 
+// bumpLastActivity advances a workspace's last-activity stamp to at, in the
+// caller's transaction, so a turn write and the activity it represents commit
+// together and a turn can never be recorded without the stamp moving.
+//
+// IT ONLY EVER MOVES FORWARD. `MAX(existing, at)` means an out-of-order write —
+// a fleet rollout re-PUTTING an in-flight turn to mark it displaced, which
+// carries the turn's ORIGINAL (older) start — cannot pull the stamp back to a
+// past instant and mis-report a handover as fresh activity. A NULL existing
+// stamp (the workspace has never taken a turn) reads as 0 through COALESCE, so
+// the first real turn always wins.
+//
+// A write that matched no workspace is NOT an error here: the turn write the
+// caller already guarded is the id's existence check, and a turn whose
+// workspace vanished under the same transaction is that guard's to catch.
+func bumpLastActivity(ctx context.Context, tx *sql.Tx, id WorkspaceID, at time.Time) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE workspaces SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?) WHERE id = ?`,
+		nanos(at), id)
+	return err
+}
+
 // PutTurn records a turn's durable origin and address.
 func (s *store) PutTurn(ctx context.Context, t Turn) error {
 	const op = "daemon.wsm.put_turn"
@@ -84,7 +105,13 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 			   address = excluded.address, displaced = excluded.displaced, started_at = excluded.started_at,
 			   closed_at = excluded.closed_at, close_kind = excluded.close_kind`,
 			t.ID, t.Workspace, t.Text, t.Origin, address, t.Displaced, nanos(t.StartedAt), nullNanos(t.ClosedAt), kind)
-		return err
+		if err != nil {
+			return err
+		}
+		// A recorded turn IS activity: stamp the workspace's last-activity edge
+		// in the same transaction so it advances with the turn, never at
+		// compose or select time.
+		return bumpLastActivity(ctx, tx, t.Workspace, t.StartedAt)
 	})
 }
 
@@ -98,11 +125,24 @@ func (s *store) CloseTurn(ctx context.Context, turn TurnID, at time.Time, how Tu
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var ws WorkspaceID
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM turns WHERE id = ?`, turn).Scan(&ws); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("wsm: turn %s: %w", turn, ErrNotFound)
+			}
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE turns SET closed_at = ?, close_kind = ? WHERE id = ?`, nanos(at), int(how), turn)
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: turn %s", turn))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: turn %s", turn)); err != nil {
+			return err
+		}
+		// A turn closing IS activity — a response settled — so the workspace's
+		// last-activity edge advances to the close instant in the same
+		// transaction.
+		return bumpLastActivity(ctx, tx, ws, at)
 	})
 }
 

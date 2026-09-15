@@ -556,3 +556,49 @@ func TestTheMigratedRowsCarryNoOutstandingSpawn(t *testing.T) {
 		t.Fatalf("%d migrated workspace rows carry a spawned pid, want none", got)
 	}
 }
+
+// TestTheMigrationAddsTheLastActivityAtColumn pins the layout-9 step: a file
+// written before a workspace's last-activity edge was durable carries the
+// column afterwards.
+func TestTheMigrationAddsTheLastActivityAtColumn(t *testing.T) {
+	// Arrange — a file written before last_activity_at existed.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM pragma_table_info('workspaces') WHERE name = 'last_activity_at'`)
+	if got != 1 {
+		t.Fatalf("workspaces.last_activity_at exists %d times after the migration, want 1", got)
+	}
+}
+
+// TestTheMigratedRowsCarryNoActivity pins what the new column means for a row
+// that predates it: NULL, which the when-column reads as "never active, fall
+// back to created" rather than a zero instant beside the row.
+func TestTheMigratedRowsCarryNoActivity(t *testing.T) {
+	// Arrange
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s,
+		`SELECT count(*) FROM workspaces WHERE last_activity_at IS NOT NULL`)
+	if got != 0 {
+		t.Fatalf("%d migrated workspace rows carry a last-activity instant, want none", got)
+	}
+}
