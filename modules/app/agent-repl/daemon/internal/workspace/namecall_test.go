@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -471,30 +470,5 @@ func TestCreateDoesNotDisambiguateASuppliedName(t *testing.T) {
 	}
 }
 
-func TestCauseOfReadsAHeadlessFailure(t *testing.T) {
-	// Arrange.
-	err := &headless.Error{Cause: headless.CauseTimeout, Detail: "killed"}
-
-	// Act.
-	got := causeOf(err)
-
-	// Assert.
-	if got != headless.CauseTimeout {
-		t.Fatalf("causeOf() = %q, want %q", got, headless.CauseTimeout)
-	}
-}
-
-// TestCauseOfNamesSomethingForAnUnknownFailure pins that the arm's `cause`
-// field is never empty: a client renders it.
-func TestCauseOfNamesSomethingForAnUnknownFailure(t *testing.T) {
-	// Arrange.
-	err := errors.New("something else entirely")
-
-	// Act.
-	got := causeOf(err)
-
-	// Assert.
-	if got == "" {
-		t.Fatal("causeOf() = \"\", want a named cause")
-	}
-}
+// The headless-failure cause helper moved to the headless package as
+// headless.CauseOf; its tests live in internal/headless/api_test.go.
