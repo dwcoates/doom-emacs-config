@@ -19,7 +19,13 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
-import { TailFollow, feedReveal, observeScrollBox, revealNode } from "../scroll.js";
+import {
+  TailFollow,
+  feedReveal,
+  installIntentScroll,
+  observeScrollBox,
+  revealNode,
+} from "../scroll.js";
 import {
   OpenFeedResponseSchema,
   type OpenFeedResponse,
@@ -97,6 +103,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // docked footer settling after a render shrinks this box, and a tail parked
   // before that shrink is left below the fold with the last bubble clipped.
   const unobserve = scrollBox === null || tail === null ? null : observeScrollBox(scrollBox, tail);
+  // INTENT-ARMED INNER SCROLLING, on the same box. A capped section keeps the
+  // wheel only while the reader has deliberately entered it; otherwise the
+  // wheel redirects to the feed. Without it, a section the feed scrolled under
+  // a still cursor captures the next gesture and scrolling gets stuck in the
+  // bubble (scroll.ts's installIntentScroll). No box, no sections to gate.
+  const uninstallIntentScroll = scrollBox === null ? null : installIntentScroll(scrollBox);
   // The caret's view rule, bound ONCE for the whole universe of feeds: every
   // bubble in it -- root-level, nested, merge or subagent -- is built by
   // `bubbleFor` below, so they all obey the same one.
@@ -425,6 +437,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     disposed = true;
     watch?.cancel();
     unobserve?.();
+    uninstallIntentScroll?.();
     overscan?.dispose();
     root.dispose();
   }

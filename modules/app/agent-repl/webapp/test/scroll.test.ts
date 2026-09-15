@@ -4,24 +4,23 @@
 // one DOM-facing thing in it: it subscribes a real element's scroll events and
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
-  EDGE_PX,
   PIN_PX,
+  armedWheelAction,
   captureFeedAnchor,
   feedTopChanged,
+  installIntentScroll,
   restoreFeedAnchor,
   type AnchorBox,
-  inEdgeZone,
   innerScrollerAt,
   TailFollow,
   isPinnedToBottom,
   isScrollBox,
   parkAtTail,
   type ReanchorBox,
-  redirectsToFeed,
   sectionFor,
-  wheelAction,
+  sectionTakesWheel,
   wheelDeltaPx,
   type RevealBlock,
   type RevealTarget,
@@ -84,67 +83,77 @@ describe("isScrollBox", () => {
   });
 });
 
-describe("inEdgeZone", () => {
-  const box = { left: 100, right: 500 };
-
-  it("hits inside the left gutter", () => {
-    // Arrange + Act + Assert
-    expect(inEdgeZone(box, 110, 32)).toBe(true);
+describe("sectionTakesWheel", () => {
+  it("keeps the wheel when the armed box is the one under it", () => {
+    // Arrange — the reader deliberately entered this box, so it owns the wheel.
+    const box = { name: "armed" };
+    // Act + Assert
+    expect(sectionTakesWheel(box, box)).toBe(true);
   });
 
-  it("hits inside the right gutter", () => {
-    // Arrange + Act + Assert
-    expect(inEdgeZone(box, 490, 32)).toBe(true);
+  it("hands the wheel off when a DIFFERENT box is armed", () => {
+    // Arrange — the wheel landed over a box the reader never entered.
+    const armed = { name: "armed" };
+    const under = { name: "other" };
+    // Act + Assert
+    expect(sectionTakesWheel(armed, under)).toBe(false);
   });
 
-  it("hits exactly on the gutter boundary", () => {
-    // Arrange + Act + Assert
-    expect(inEdgeZone(box, 132, 32)).toBe(true);
+  it("hands the wheel off when nothing is armed", () => {
+    // Arrange — a box the FEED scrolled under a still cursor is never armed.
+    const under = { name: "scrolled-into" };
+    // Act + Assert
+    expect(sectionTakesWheel(null, under)).toBe(false);
   });
 
-  it("misses one pixel past the gutter boundary", () => {
-    // Arrange + Act + Assert
-    expect(inEdgeZone(box, 133, 32)).toBe(false);
-  });
-
-  it("misses in the middle of the box", () => {
-    // Arrange + Act + Assert
-    expect(inEdgeZone(box, 300, 32)).toBe(false);
-  });
-
-  it("defaults the gutter width to EDGE_PX", () => {
-    // Arrange + Act + Assert
-    expect(inEdgeZone(box, box.left + EDGE_PX)).toBe(true);
+  it("keeps nothing when the wheel is over no box at all", () => {
+    // Arrange — over bare feed there is no section to keep the wheel.
+    const armed = { name: "armed" };
+    // Act + Assert
+    expect(sectionTakesWheel(armed, null)).toBe(false);
   });
 });
 
-describe("redirectsToFeed", () => {
-  const scroller = { left: 100, right: 500 };
+describe("armedWheelAction", () => {
+  const base = {
+    armed: { name: "armed" },
+    wheelScroller: { name: "other" } as { name: string } | null,
+    feedScrollable: true,
+    deltaY: 40,
+    deltaMode: 0,
+    feedHeight: 600,
+  };
 
-  it("redirects a wheel over a section's middle", () => {
+  it("redirects a wheel over a non-armed box to the feed", () => {
     // Arrange + Act + Assert
-    expect(redirectsToFeed({ scroller, clientX: 300, feedScrollable: true, edgePx: 32 })).toBe(true);
+    expect(armedWheelAction(base)).toBe(40);
   });
 
-  it("leaves a wheel over a section's gutter to the section", () => {
-    // Arrange + Act + Assert
-    expect(redirectsToFeed({ scroller, clientX: 110, feedScrollable: true, edgePx: 32 })).toBe(
-      false,
-    );
+  it("leaves a wheel over the armed box to the browser", () => {
+    // Arrange — the armed box keeps its own wheel.
+    const armed = { name: "armed" };
+    // Act + Assert
+    expect(armedWheelAction({ ...base, armed, wheelScroller: armed })).toBeNull();
   });
 
-  it("leaves a wheel over no section alone", () => {
+  it("leaves a wheel over no box to the browser", () => {
     // Arrange + Act + Assert
-    expect(
-      redirectsToFeed({ scroller: null, clientX: 300, feedScrollable: true, edgePx: 32 }),
-    ).toBe(false);
+    expect(armedWheelAction({ ...base, wheelScroller: null })).toBeNull();
   });
 
-  it("leaves the section scrollable when the feed itself cannot scroll", () => {
+  it("leaves a purely horizontal wheel to the browser", () => {
     // Arrange + Act + Assert
-    expect(redirectsToFeed({ scroller, clientX: 300, feedScrollable: false, edgePx: 32 })).toBe(
-      false,
-    );
+    expect(armedWheelAction({ ...base, deltaY: 0 })).toBeNull();
+  });
+
+  it("leaves the box alone when the feed itself cannot scroll", () => {
+    // Arrange + Act + Assert
+    expect(armedWheelAction({ ...base, feedScrollable: false })).toBeNull();
+  });
+
+  it("converts the delta to pixels before handing it to the feed", () => {
+    // Arrange + Act + Assert — line-mode delta 2 at LINE_PX 16.
+    expect(armedWheelAction({ ...base, deltaY: 2, deltaMode: 1 })).toBe(32);
   });
 });
 
@@ -162,38 +171,6 @@ describe("wheelDeltaPx", () => {
   it("scales a page-mode delta by the viewport height", () => {
     // Arrange + Act + Assert
     expect(wheelDeltaPx({ deltaY: -1, deltaMode: 2 }, 600)).toBe(-600);
-  });
-});
-
-describe("wheelAction", () => {
-  const base = {
-    scroller: { left: 100, right: 500 },
-    clientX: 300,
-    deltaY: 40,
-    deltaMode: 0,
-    feedScrollable: true,
-    feedHeight: 600,
-    edgePx: 32,
-  };
-
-  it("returns the feed delta for a wheel over a section's middle", () => {
-    // Arrange + Act + Assert
-    expect(wheelAction(base)).toBe(40);
-  });
-
-  it("returns null for a wheel over a section's gutter", () => {
-    // Arrange + Act + Assert
-    expect(wheelAction({ ...base, clientX: 110 })).toBeNull();
-  });
-
-  it("returns null for a purely horizontal wheel", () => {
-    // Arrange + Act + Assert
-    expect(wheelAction({ ...base, deltaY: 0 })).toBeNull();
-  });
-
-  it("converts the delta to pixels before handing it to the feed", () => {
-    // Arrange + Act + Assert
-    expect(wheelAction({ ...base, deltaY: 2, deltaMode: 1 })).toBe(32);
   });
 });
 
@@ -1013,39 +990,6 @@ describe("a load-more prepend does not jump the viewport", () => {
   });
 });
 
-describe("redirectsToFeed default gutter", () => {
-  it("falls back to EDGE_PX when the caller names no gutter width", () => {
-    // Arrange — a pointer one px inside the default gutter, with edgePx omitted
-    // so only the `?? EDGE_PX` fallback can decide the answer.
-    const scroller = { left: 100, right: 500 };
-    // Act
-    const redirected = redirectsToFeed({
-      scroller,
-      clientX: 100 + EDGE_PX - 1,
-      feedScrollable: true,
-    });
-    // Assert — the pointer is in the gutter, so the section keeps the wheel.
-    expect(redirected).toBe(false);
-  });
-});
-
-describe("wheelAction default gutter", () => {
-  it("falls back to EDGE_PX when the caller names no gutter width", () => {
-    // Arrange — a pointer well clear of the default gutters, edgePx omitted.
-    // Act
-    const delta = wheelAction({
-      scroller: { left: 100, right: 500 },
-      clientX: 300,
-      deltaY: 7,
-      deltaMode: 0,
-      feedScrollable: true,
-      feedHeight: 600,
-    });
-    // Assert — redirected to the feed, carrying the pixel delta verbatim.
-    expect(delta).toBe(7);
-  });
-});
-
 describe("sectionFor detached box", () => {
   it("falls back to the box when the chain runs out before reaching the feed", () => {
     // Arrange — a box whose ancestors end at a root that is NOT the feed, the
@@ -1450,5 +1394,178 @@ describe("revealInBox", () => {
     const w = writer();
     revealInBox(at(0, 300), at(100, 100), w);
     expect(w.released()).toBe(1);
+  });
+});
+
+describe("installIntentScroll", () => {
+  // The intent-arm gate on a real feed: only the section the reader
+  // deliberately entered keeps the wheel; every other one — including a
+  // section the feed scrolled under a still cursor — redirects to the feed.
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  /** A feed region that reports itself scrollable and stores its scrollTop. */
+  function makeFeed(): HTMLElement {
+    const feed = document.createElement("div");
+    Object.defineProperty(feed, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(feed, "clientHeight", { value: 300, configurable: true });
+    let top = 0;
+    Object.defineProperty(feed, "scrollTop", {
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+      configurable: true,
+    });
+    document.body.append(feed);
+    return feed;
+  }
+
+  /** An inner scroll box `innerScrollerAt` will recognize as a section. */
+  function makeSection(feed: HTMLElement): HTMLElement {
+    const box = document.createElement("div");
+    box.style.overflowY = "auto";
+    Object.defineProperty(box, "scrollHeight", { value: 400, configurable: true });
+    Object.defineProperty(box, "clientHeight", { value: 100, configurable: true });
+    feed.append(box);
+    return box;
+  }
+
+  /** Dispatch a vertical wheel at `target`; return it so its default can be read. */
+  function wheelAt(target: HTMLElement, deltaY = 40): WheelEvent {
+    const e = new Event("wheel", { bubbles: true, cancelable: true }) as WheelEvent;
+    Object.defineProperty(e, "deltaY", { value: deltaY });
+    Object.defineProperty(e, "deltaMode", { value: 0 });
+    target.dispatchEvent(e);
+    return e;
+  }
+
+  /** Dispatch a bubbling pointer/mouse event at `target`. */
+  function pointerAt(type: string, target: HTMLElement): void {
+    target.dispatchEvent(new Event(type, { bubbles: true }));
+  }
+
+  it("redirects a wheel over a non-armed section to the feed", () => {
+    // Arrange — a section nobody entered.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    // Act
+    wheelAt(box, 40);
+    // Assert — the feed took the delta instead of the box.
+    expect(feed.scrollTop).toBe(40);
+  });
+
+  it("prevents the browser default when it redirects", () => {
+    // Arrange — the redirect must stop the browser scrolling the section too.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    // Act
+    const e = wheelAt(box, 40);
+    // Assert
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it("lets the armed section keep its own wheel", () => {
+    // Arrange — the reader moved the pointer INTO the box, arming it.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    pointerAt("pointermove", box);
+    // Act
+    wheelAt(box, 40);
+    // Assert — the feed did not move; the box keeps the wheel.
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("arms a section on a pointerdown inside it", () => {
+    // Arrange — a click inside a box is a deliberate entry.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    pointerAt("pointerdown", box);
+    // Act
+    wheelAt(box, 40);
+    // Assert
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("does NOT arm a section the feed scrolled under a still cursor", () => {
+    // Arrange — the browser fires mouseenter/mouseover but no pointermove when
+    // the feed slides a box under a stationary pointer, so the box stays unarmed.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    pointerAt("mouseenter", box);
+    pointerAt("mouseover", box);
+    // Act
+    wheelAt(box, 40);
+    // Assert — the wheel redirects; scrolling is not stuck in the bubble.
+    expect(feed.scrollTop).toBe(40);
+  });
+
+  it("re-arms to a different section on a pointermove into it", () => {
+    // Arrange — the reader armed one box, then moved the pointer into another.
+    const feed = makeFeed();
+    const first = makeSection(feed);
+    const second = makeSection(feed);
+    installIntentScroll(feed);
+    pointerAt("pointermove", first);
+    pointerAt("pointermove", second);
+    // Act
+    wheelAt(second, 40);
+    // Assert — the newly entered box keeps the wheel.
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("disarms the previous section when the pointer moves to another", () => {
+    // Arrange — same re-arm, seen from the box the pointer LEFT.
+    const feed = makeFeed();
+    const first = makeSection(feed);
+    const second = makeSection(feed);
+    installIntentScroll(feed);
+    pointerAt("pointermove", first);
+    pointerAt("pointermove", second);
+    // Act — a wheel back over the box the reader left.
+    wheelAt(first, 40);
+    // Assert — it no longer keeps the wheel; the feed does.
+    expect(feed.scrollTop).toBe(40);
+  });
+
+  it("arms nothing over bare feed, so a wheel over a section is the feed's", () => {
+    // Arrange — the pointer sits over the feed itself, not any section.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    pointerAt("pointermove", feed);
+    // Act
+    wheelAt(box, 40);
+    // Assert — nothing armed, so the section hands the wheel to the feed.
+    expect(feed.scrollTop).toBe(40);
+  });
+
+  it("leaves a purely horizontal wheel to the browser", () => {
+    // Arrange — a wide code block inside a section must still pan.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    installIntentScroll(feed);
+    // Act — a wheel with no vertical component.
+    wheelAt(box, 0);
+    // Assert — the feed is untouched; the browser owns the horizontal pan.
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("stops redirecting once its unsubscriber is called", () => {
+    // Arrange
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    const uninstall = installIntentScroll(feed);
+    // Act
+    uninstall();
+    wheelAt(box, 40);
+    // Assert — a released mount leaves no wheel listener on the element.
+    expect(feed.scrollTop).toBe(0);
   });
 });
