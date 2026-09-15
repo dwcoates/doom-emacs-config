@@ -72,6 +72,7 @@ export interface PersistEntry {
   /** What this row says. The arm decides the store arm it lands in. */
   readonly item:
     | { readonly kind: "prompt"; readonly prompt: conversationv1.AgentPrompt }
+    | { readonly kind: "peer"; readonly peer: conversationv1.PeerMessage }
     | { readonly kind: "frame"; readonly frame: conversationv1.AgentFrame }
     | { readonly kind: "session_update"; readonly update: conversationv1.SessionUpdate }
     | {

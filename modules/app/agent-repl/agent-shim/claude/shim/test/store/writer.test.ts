@@ -57,6 +57,24 @@ describe("PersistEntry → StoreEntry routing", () => {
     expect((update.agentInfo.value as storev1.StorePageLine).pageAgentId?.value).toBe("book-1");
   });
 
+  it("routes a peer message to a servable page line of the recipient's book", () => {
+    const entry = toStoreEntry(PRODUCER, {
+      agentId: BOOK,
+      upsertKey: "peer:u1",
+      source: { vendorUuid: "u1", discriminator: "peer_message" },
+      keepalive: false,
+      item: {
+        kind: "peer",
+        peer: create(conversationv1.PeerMessageSchema, { agent: BOOK, sender: "Explore", body: "hi", id: "u1" }),
+      },
+    });
+
+    const update = entry.entry.value as storev1.StoreAgentUpdate;
+    expect(update.agentInfo.case).toBe("serveableFrame");
+    const item = (update.agentInfo.value as storev1.StorePageLine).agentItem;
+    expect(item?.item.case).toBe("peerMessage");
+  });
+
   it("routes a keep-alive turn's frame to the unserved keepalive arm", () => {
     const entry = toStoreEntry(PRODUCER, readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true }));
 

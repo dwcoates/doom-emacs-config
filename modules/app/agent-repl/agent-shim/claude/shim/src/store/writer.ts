@@ -83,6 +83,12 @@ function agentItem(entry: PersistEntry): storev1.StoreAgentItem | undefined {
       return create(storev1.StoreAgentItemSchema, {
         item: { case: "agentPrompt", value: entry.item.prompt },
       });
+    case "peer":
+      // A peer message is a servable page line in the recipient's book, exactly
+      // like a prompt — never the agent's own words, never a turn terminal.
+      return create(storev1.StoreAgentItemSchema, {
+        item: { case: "peerMessage", value: entry.item.peer },
+      });
     case "frame":
       return create(storev1.StoreAgentItemSchema, {
         item: { case: "agentFrame", value: entry.item.frame },
