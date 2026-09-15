@@ -679,3 +679,77 @@ describe("the selected-response border (reply-to-a-past-response)", () => {
     expect(blue).toBeGreaterThan(green);
   });
 });
+
+/**
+ * THE FEED TEXT ZOOM SCOPING (owner-requested, RPC-driven).
+ *
+ * The daemon-owned zoom rides ONE custom property, `--feed-text-scale`, which
+ * multiplies into every feed-scroll font-size as `calc(<base> * var(...))`.
+ * jsdom does not resolve calc()/var(), so these read the file's TEXT: the proof
+ * that "only the feed, only text" scales is that the property is referenced
+ * ONLY inside font-size declarations, and NEVER by the sidebar, topbar, footer,
+ * composer or login chrome.
+ */
+const FEED_SCALE_VAR = "var(--feed-text-scale)";
+
+/** The forbidden chrome: no selector containing any of these may reference the var. */
+const FORBIDDEN_CHROME: readonly string[] = [
+  "#composer",
+  "#footer",
+  ".pfooter",
+  "#ws-sidebar",
+  "#topbar",
+  "#login",
+];
+
+describe("the feed text zoom scoping", () => {
+  it("defines the scale property once, at :root, with a unity default", () => {
+    // Arrange / Act
+    const root = rulesOf(stylesheet).find((rule) => rule.selectors.includes(":root"));
+
+    // Assert
+    expect(root?.declarations).toMatch(/--feed-text-scale\s*:\s*1\b/);
+  });
+
+  it("references the scale only inside font-size declarations, never layout", () => {
+    // Arrange / Act: every declaration in the sheet that mentions the var.
+    const offenders: string[] = [];
+    for (const rule of rulesOf(stylesheet)) {
+      for (const decl of rule.declarations.split(";")) {
+        if (!decl.includes(FEED_SCALE_VAR)) continue;
+        if (!/^\s*font-size\s*:/.test(decl)) offenders.push(decl.trim());
+      }
+    }
+
+    // Assert
+    expect(offenders).toEqual([]);
+  });
+
+  it("never scales the sidebar, topbar, footer, composer or login chrome", () => {
+    // Arrange / Act
+    const leaks: string[] = [];
+    for (const rule of rulesOf(stylesheet)) {
+      if (!rule.declarations.includes(FEED_SCALE_VAR)) continue;
+      for (const selector of rule.selectors) {
+        if (FORBIDDEN_CHROME.some((chrome) => selector.includes(chrome))) leaks.push(selector);
+      }
+    }
+
+    // Assert
+    expect(leaks).toEqual([]);
+  });
+
+  it("does scale the core feed text: the bubble, markdown and tool cards", () => {
+    // Arrange / Act
+    const scaled = new Set<string>();
+    for (const rule of rulesOf(stylesheet)) {
+      if (!rule.declarations.includes(FEED_SCALE_VAR)) continue;
+      for (const selector of rule.selectors) scaled.add(selector);
+    }
+
+    // Assert: the feed's spine carries the scale.
+    expect(scaled.has("#feed")).toBe(true);
+    expect(scaled.has(".md")).toBe(true);
+    expect(scaled.has(".tool-card")).toBe(true);
+  });
+});

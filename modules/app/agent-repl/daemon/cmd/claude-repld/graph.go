@@ -772,7 +772,21 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			if err := verbs.PublishRegistry(ctx); err != nil {
 				return err
 			}
-			return drainController.Republish(ctx)
+			if err := drainController.Republish(ctx); err != nil {
+				return err
+			}
+			// THE FEED TEXT ZOOM COMES BACK the same way a standing drain does:
+			// the feed watch topic replays only this process's own latest
+			// value, so a zoom persisted across a bounce has to be published
+			// again by the process that inherited it — after the surface is
+			// bound and before anything is served. The push rides the bound
+			// server forwarder, exactly as the drain's republish does.
+			scale, err := p.DB.FeedTextScale(ctx)
+			if err != nil {
+				return err
+			}
+			pushes.SeedFeedTextScale(scale)
+			return nil
 		},
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)

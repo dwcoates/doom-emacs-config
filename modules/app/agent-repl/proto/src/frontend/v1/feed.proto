@@ -98,6 +98,19 @@ message FeedSelection {
   optional FeedId center = 3;
 }
 
+// THE FEED TEXT SCALE (zoom). A SINGLE daemon-global multiplier applied to the
+// webapp's feed text and nothing else — not the sidebar, topbar, footer or
+// composer. The daemon owns it (AdjustFeedTextScale applies a fixed small step
+// and clamps it), persists it across restarts, and pushes it on every open
+// feed's watch so the webapp re-scales its feed text proportionally. The webapp
+// maps `scale` onto the `--feed-text-scale` CSS custom property; every feed
+// font-size is `calc(<base> * var(--feed-text-scale))`, so relative sizes are
+// preserved and only the feed changes.
+message FeedTextScale {
+  // The scale multiplier in force (e.g. 1.0 = 100%). Clamped by the daemon.
+  double scale = 1;
+}
+
 // One row of the feed. THE ARM IS THE KIND — see the file header for the
 // taxonomy.
 message FeedRow {

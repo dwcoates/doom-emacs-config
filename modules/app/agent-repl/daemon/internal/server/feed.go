@@ -170,6 +170,13 @@ func (s *server) watchFeed(
 		selections = s.selectionTopic(target.WS).Subscribe(streamCtx)
 	}
 
+	// THE FEED TEXT ZOOM RIDES EVERY FEED'S WATCH. Unlike the selection push,
+	// the scale is daemon-global and applies to all feed text, so a sub-feed's
+	// watch subscribes too. The topic replays its latest value, so this delivers
+	// the current zoom the instant the tail is accepted (Prime seeded it before
+	// serving), then every later change.
+	scales := s.feedTextScaleTopic.Subscribe(streamCtx)
+
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a feed tail", dlog.Context{"token": token.GetValue()})
 	for {
@@ -203,6 +210,21 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{Selection: sel}); err != nil {
+				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		case sc, ok := <-scales:
+			if !ok {
+				// The scale subscription closes only on streamCtx cancellation,
+				// which the Done case handles; loop and let it end cleanly.
+				scales = nil
+				continue
+			}
+			if sc == nil {
+				log.Error(rpc, "the feed-text-scale topic raised an empty scale; it was not sent", nil)
+				continue
+			}
+			if err := out.Send(&agentreplv1.WatchFeedResponse{FeedTextScale: sc}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

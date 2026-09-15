@@ -108,6 +108,9 @@ would abort the very branch a test is asserting."
     ("SelectResponse" agent-repl-rpc-select-response
      agent-repl-wire-encode-select-response-request
      agent-repl-wire-decode-select-response-response)
+    ("AdjustFeedTextScale" agent-repl-rpc-adjust-feed-text-scale
+     agent-repl-wire-encode-adjust-feed-text-scale-request
+     agent-repl-wire-decode-adjust-feed-text-scale-response)
     ("UpdateShutdownSchedule" agent-repl-rpc-update-shutdown-schedule
      agent-repl-wire-encode-update-shutdown-schedule-request
      agent-repl-wire-decode-update-shutdown-schedule-response)

@@ -47,6 +47,7 @@ type serverPushTarget interface {
 	ShutdownAnnounced(push *agentreplv1.DaemonShutdownAnnounced)
 	DrainScheduled(push *agentreplv1.DaemonDrainScheduled)
 	DrainCancelled(push *agentreplv1.DaemonDrainCancelled)
+	SeedFeedTextScale(scale float64)
 }
 
 // bind installs the real server. It is called once, immediately after
@@ -115,6 +116,12 @@ func (f *serverForwarder) DrainScheduled(push *agentreplv1.DaemonDrainScheduled)
 func (f *serverForwarder) DrainCancelled(push *agentreplv1.DaemonDrainCancelled) {
 	if target, ok := f.bound(); ok {
 		target.DrainCancelled(push)
+	}
+}
+
+func (f *serverForwarder) SeedFeedTextScale(scale float64) {
+	if target, ok := f.bound(); ok {
+		target.SeedFeedTextScale(scale)
 	}
 }
 

@@ -187,6 +187,17 @@ func validateSelectResponseRequest(req *agentreplv1.SelectResponseRequest) *conn
 	return nil
 }
 
+// validateAdjustFeedTextScaleRequest is AdjustFeedTextScaleRequest's base
+// function. The scale is daemon-global, so unlike the per-workspace verbs there
+// is no workspace ref to validate — only the direction, whose UNSPECIFIED value
+// is never a legitimate nudge.
+func validateAdjustFeedTextScaleRequest(req *agentreplv1.AdjustFeedTextScaleRequest) *connect.Error {
+	if req.GetDirection() == agentreplv1.AdjustFeedTextScaleDirection_ADJUST_FEED_TEXT_SCALE_DIRECTION_UNSPECIFIED {
+		return invalid("direction", "a feed-text-scale direction is required")
+	}
+	return nil
+}
+
 // validateRequestCommandSupportRequest is RequestCommandSupportRequest's base
 // function.
 func validateRequestCommandSupportRequest(req *agentreplv1.RequestCommandSupportRequest) *connect.Error {
