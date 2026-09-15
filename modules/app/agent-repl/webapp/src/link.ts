@@ -136,6 +136,91 @@ export function renderEditorLink(ctx: AppContext, spec: EditorLinkSpec): HTMLEle
 }
 
 /**
+ * Route a clicked PROSE link — a markdown anchor in a feed bubble or the hold
+ * tray — through the SAME two verbs the structured links use, so a link in
+ * model prose never navigates the webview either.
+ *
+ * ONE DELEGATED INTERCEPTOR, hung at the feed/markdown seam (`feed-scroll`,
+ * which holds every bubble and the hold tray) rather than on each rendered
+ * anchor: the markdown is injected as innerHTML with no per-anchor handler, so
+ * a single capture-phase listener is the whole of it. It runs in CAPTURE so it
+ * beats a bubble's own click affordances, and cancels the click BEFORE it can
+ * become a WebKit navigation.
+ *
+ * IT LEAVES STRUCTURED LINKS ALONE. `renderExternalLink`'s anchor carries
+ * `data-external-link` and already routes itself; a prose anchor carries
+ * neither hook. Skipping the marked ones — WITHOUT cancelling, so their own
+ * bubble-phase handler still runs — is what keeps this from double-firing the
+ * rpc a structured link makes. `renderEditorLink`'s anchor has no `href` at
+ * all, so `a[href]` never selects it.
+ *
+ * FILE vs WEB IS THE SCHEME. http(s) is a web link and opens externally;
+ * `file://` or a filesystem path is a local file and opens in the editor. A
+ * scheme that is neither is left untouched (markdown emits only http(s)
+ * anchors, so this is a guard, not a path).
+ */
+export function installProseLinkRouting(ctx: AppContext, root: HTMLElement): () => void {
+  const onClick = (event: MouseEvent): void => routeProseLinkClick(ctx, event);
+  root.addEventListener("click", onClick, true);
+  return () => root.removeEventListener("click", onClick, true);
+}
+
+function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const anchor = target.closest("a[href]");
+  if (!(anchor instanceof HTMLElement)) return;
+  // The structured links own their own click; never handle them twice, and
+  // never cancel here — their bubble-phase handler still has to fire.
+  if (anchor.hasAttribute("data-external-link") || anchor.hasAttribute("data-editor-link")) return;
+  if (!claimsClick(event)) return;
+
+  // The RAW href, exactly as the markdown carried it: the resolved `.href`
+  // would have turned a relative or `file://` path into a page-origin url.
+  const href = anchor.getAttribute("href") ?? "";
+  if (LINKABLE_SCHEME.test(href)) {
+    // Cancel FIRST — a navigation would destroy the page a refusal draws on.
+    event.preventDefault();
+    event.stopPropagation();
+    void openExternal(ctx, anchor, href);
+    return;
+  }
+  const path = localFilePath(href);
+  if (path !== null) {
+    event.preventDefault();
+    event.stopPropagation();
+    void openInEditor(ctx, anchor, { text: anchor.textContent ?? "", path });
+    return;
+  }
+  // Neither web nor local file. Markdown restricts anchors to http/https, so
+  // this is unreachable from rendered prose; it is logged rather than silently
+  // cancelled so a scheme that ever does slip through is visible, not dead.
+  log.warn(`ignoring a prose link with an unroutable scheme`, {
+    operation: "link.prose-unroutable-scheme",
+    context: { href },
+  });
+}
+
+/**
+ * The filesystem path a prose href names, or null when it is not a local file.
+ *
+ * A `file://` url's path is its decoded pathname; a bare absolute path (`/…`)
+ * or a home path (`~/…`) is itself. Everything else — including a relative
+ * fragment or a query — is not a file this can open.
+ */
+function localFilePath(href: string): string | null {
+  if (/^file:\/\//i.test(href)) {
+    try {
+      return decodeURIComponent(new URL(href).pathname);
+    } catch {
+      return null;
+    }
+  }
+  if (href.startsWith("/") || href.startsWith("~/")) return href;
+  return null;
+}
+
+/**
  * Whether this component takes the click.
  *
  * A modified or non-primary click is the user asking their own platform to do
