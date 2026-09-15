@@ -87,6 +87,7 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-response "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-adjust-feed-text-scale "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
 (declare-function agent-repl-interrupt-turn "agent-repl-verbs" (&optional ws))
 (declare-function agent-repl-prompt-queue-offer "agent-repl-prompt-queue"
@@ -487,6 +488,54 @@ Composer command mode only.  From no selection it starts at the most
 recent final response; past the newest it wraps to the oldest."
   (interactive)
   (agent-repl--input-response-select (agent-repl--ws-current-name) :next))
+
+;; FEED TEXT ZOOM (`C-+' / `C--').  The daemon owns and persists a single
+;; global feed text scale; Emacs only sends a DIRECTION per keypress and the
+;; daemon applies a fixed small step, clamps it, and pushes the result to the
+;; webapp.  These commands NEVER touch Emacs's own font or `text-scale' — they
+;; only nudge the webapp feed — which is why they replace Doom's global
+;; `C-+'/`C--' text-scale bindings in the composer rather than wrapping them.
+;; They are PLAIN commands with no debounce: holding the key down lets Emacs
+;; key auto-repeat re-invoke the command, which is exactly the continuous
+;; fine-adjustment the feature wants.
+
+(defun agent-repl--feed-text-scale-adjust (direction)
+  "Send an AdjustFeedTextScale nudge in DIRECTION (`:increase' or `:decrease').
+The feed text zoom is daemon-global, so the request carries no workspace
+ref; the current workspace only supplies the daemon connection and the
+log scope.  A missing connection is surfaced through the log rather than
+silently dropped."
+  (let* ((ws (agent-repl--ws-current-name))
+         (conn (or (and ws (agent-repl-host-conn ws)) (agent-repl-link-primary))))
+    (if (null conn)
+        (agent-repl--warn ws "elisp.input.feed-text-scale-no-conn dir=%S" direction)
+      (agent-repl--info ws "elisp.input.feed-text-scale dir=%S" direction)
+      (agent-repl-rpc-adjust-feed-text-scale
+       conn (list :direction direction)
+       :on-response
+       (lambda (response)
+         (agent-repl--info ws "elisp.input.feed-text-scaled dir=%S scale=%s"
+                           direction (plist-get response :scale)))
+       :on-failure
+       (lambda (detail)
+         (agent-repl--warn ws "elisp.input.feed-text-scale-failure dir=%S detail=%S"
+                           direction detail))))))
+
+(defun agent-repl-feed-text-scale-increase ()
+  "Zoom the webapp FEED text IN one small step (daemon-owned, persisted).
+Bound to `C-+' in the composer, overriding Doom's global text-scale
+binding there.  It NEVER changes Emacs's own font — only the webapp feed
+text — and holding the key auto-repeats the nudge for fine adjustment."
+  (interactive)
+  (agent-repl--feed-text-scale-adjust :increase))
+
+(defun agent-repl-feed-text-scale-decrease ()
+  "Zoom the webapp FEED text OUT one small step (daemon-owned, persisted).
+Bound to `C--' in the composer, overriding Doom's global text-scale
+binding there.  It NEVER changes Emacs's own font — only the webapp feed
+text — and holding the key auto-repeats the nudge for fine adjustment."
+  (interactive)
+  (agent-repl--feed-text-scale-adjust :decrease))
 
 (defun agent-repl--input-escape-default ()
   "Run escape's ORDINARY meaning in the composer.
@@ -1272,6 +1321,16 @@ sits behind a harness re-read."
 ;; on the mode map is live in both normal and insert state exactly as the
 ;; old `:ni' entry was.
 (define-key agent-repl-input-mode-map (kbd "C-c C-k") #'agent-repl-interrupt-turn)
+
+;; FEED TEXT ZOOM.  Bound with `define-key' rather than through the `map!' form
+;; above for the same reasons `C-c C-k' is: the binding is OBSERVABLE under
+;; `emacs -Q' (where `map!' is a no-op stub) so the keybinding suite can assert
+;; it, and it lives in BOTH evil states so the zoom works while typing.  These
+;; SHADOW Doom's global `C-+'/`C--' text-scale bindings inside the composer,
+;; which is the intended override -- the agent-repl commands send the daemon
+;; RPC and never change Emacs's own font.
+(define-key agent-repl-input-mode-map (kbd "C-+") #'agent-repl-feed-text-scale-increase)
+(define-key agent-repl-input-mode-map (kbd "C--") #'agent-repl-feed-text-scale-decrease)
 
 (provide 'input)
 
