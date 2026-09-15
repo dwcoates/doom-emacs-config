@@ -753,6 +753,103 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     return body;
   }
 
+  /**
+   * A DETACHED bubble (built but never attached, the shape at synchronous first
+   * paint) plus an optional attached `#feed` reference of known content width.
+   * The chrome insets are staged on the body's padding — the styles path reads
+   * them when there is no geometry to measure. When `feedContentWidth` is
+   * omitted, no feed is attached, so nothing can resolve the cap.
+   */
+  function stageDetached(opts: { maxWidth: string; feedContentWidth?: number; bodyPad?: number }): HTMLElement {
+    const pad = opts.bodyPad ?? 0;
+    if (opts.feedContentWidth !== undefined) {
+      const feed = document.createElement("main");
+      feed.id = "feed";
+      Object.defineProperty(feed, "clientWidth", { value: opts.feedContentWidth, configurable: true });
+      document.body.appendChild(feed);
+    }
+    // The bubble is NEVER appended: it stays detached, so every rect reads 0.
+    const bubble = document.createElement("div");
+    bubble.className = "bubble assistant md";
+    const scroll = document.createElement("div");
+    scroll.className = "bubble-scroll";
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    scroll.appendChild(body);
+    bubble.appendChild(scroll);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+      if (el === bubble) {
+        return { maxWidth: opts.maxWidth, paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
+      }
+      if (el === body) {
+        return {
+          maxWidth: "none",
+          paddingLeft: `${pad}px`,
+          paddingRight: `${pad}px`,
+        } as unknown as CSSStyleDeclaration;
+      }
+      // The scroll wrapper and #feed: no padding, no border.
+      return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
+    });
+    return body;
+  }
+
+  it("resolves the cap against the attached feed reference when the bubble is DETACHED at first paint", () => {
+    // Arrange — the bubble is built but not yet attached (drawFeedResponse paints
+    // before feed-view attaches the row); the root feed column is attached at a
+    // known content width, standing in for the containing block the row lands in.
+    const body = stageDetached({ maxWidth: "70.125%", feedContentWidth: 1000, bodyPad: 10 });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — cap 701.25px, insets 20px (body padding), 681.25px content,
+    // floor(/8)=85: the cap-based count, NOT the detached fallback default.
+    expect(cols).toBe(85);
+    expect(cols).not.toBe(DEFAULT_TREE_COLS);
+  });
+
+  it("falls back to the default width when nothing is attached to resolve the cap against", () => {
+    // Arrange — a detached bubble AND no feed in the document: no reference at all.
+    const body = stageDetached({ maxWidth: "70.125%", bodyPad: 10 });
+    // Act + Assert — no throw, the genuine no-layout fallback.
+    expect(measureTreeCols(body)).toBe(DEFAULT_TREE_COLS);
+  });
+
+  it("uses the bubble's OWN containing block, not the feed reference, when it is attached", () => {
+    // Arrange — a wide #feed also sits in the document, but the bubble is
+    // attached under a NARROWER parent; the measure must follow the bubble's own
+    // parent so the feed reference never leaks into a laid-out bubble.
+    const feed = document.createElement("main");
+    feed.id = "feed";
+    Object.defineProperty(feed, "clientWidth", { value: 4000, configurable: true });
+    document.body.appendChild(feed);
+    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — 85, from the 1000px own parent, not the ~350 a 4000px feed cap
+    // would give.
+    expect(cols).toBe(85);
+  });
+
+  it("wraps a detached first-paint tree to the SAME cap the attached bubble uses, so it does not overflow", () => {
+    // Arrange — the live reproduction shape: a settled tree measured while
+    // detached, with the feed reference attached; the attached equivalent wraps
+    // at the cap, and the detached first paint must match it, not overflow at the
+    // 105-column default.
+    const detached = stageDetached({ maxWidth: "70.125%", feedContentWidth: 1000, bodyPad: 10 });
+    const detachedCols = measureTreeCols(detached);
+    vi.restoreAllMocks();
+    const attached = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
+    const attachedCols = measureTreeCols(attached);
+    // Act — wrap the showcase tree at the detached first-paint cap.
+    const host = document.createElement("div");
+    host.innerHTML = proseHtml(SHOWCASE_TREE, detachedCols);
+    // Assert — the detached first paint wraps at the cap, identical to attached,
+    // and never at the overflowing default; the tree actually wrapped.
+    expect(detachedCols).toBe(attachedCols);
+    expect(detachedCols).not.toBe(DEFAULT_TREE_COLS);
+    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
+  });
+
   it("measures the max-width cap, not the shrunk fit-content clientWidth", () => {
     // Arrange — cap 70.125% of a 1000px column = 701.25px; the bubble currently
     // renders at 220px (outer) around a 200px body, so the fixed insets are 20px
