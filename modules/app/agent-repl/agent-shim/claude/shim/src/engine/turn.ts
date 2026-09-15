@@ -205,6 +205,16 @@ export function textSaid(text: string): conversationv1.UserSaid {
   });
 }
 
+/**
+ * A PEER MESSAGE IS NOT A PROMPT AND IS NOT BUILT HERE. A message another
+ * Claude session sent in (origin.kind "peer" — inter-session peer or subagent
+ * hand-back) arrives on the vendor's stream as a user-role record, not as a
+ * daemon-submitted StartTurn, so it never reaches this path. It is recognized
+ * and emitted as its own peer-message row in `convert/peer.ts`
+ * (convertPeerMessage), so a resumed session's peer messages draw as the
+ * abbreviated purple bubble rather than a "You" prompt this function would make.
+ */
+
 /** The prompt as delivered: the daemon's id adopted, the recipient resolved. */
 export function buildPrompt(
   turn: conversationv1.TurnId,
