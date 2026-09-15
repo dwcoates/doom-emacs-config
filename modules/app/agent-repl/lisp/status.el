@@ -17,6 +17,7 @@
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--register-timer "core")
+(declare-function agent-repl--ws-add-activated-hook "workspace")
 (declare-function agent-repl--ws-after-system-load "workspace")
 (declare-function agent-repl--ws-by-ref-id "workspace")
 (declare-function agent-repl--ws-current-log-name "workspace")
@@ -32,6 +33,7 @@
 (declare-function agent-repl-roster-row-attention-p "roster")
 (declare-function agent-repl-roster-row-id "roster")
 (declare-function agent-repl-roster-row-priority-label "roster")
+(declare-function agent-repl-roster-row-status "roster")
 (declare-function agent-repl-roster-walk "roster")
 
 (defun agent-repl--status-log-scope (central-reason)
@@ -1481,11 +1483,76 @@ went to and which fact decided it."
        ws "tab-background: ws=%s mode=%s previous=%s reason=%s"
        ws mode previous reason))))
 
+;;; The view-dwell demotion --------------------------------------------------
+;;
+;; RE-INTRODUCED, GENERALIZED, from the ready-view dwell latch removed in
+;; commit abc0ee3c3 ("the tab background extent is the panels-open fact, and
+;; only that").  That latch demoted ONLY a `:ready' workspace's tab from full
+;; to bracket-only after a couple of seconds of viewing, and owner ruling 5
+;; (2026-09-13) struck it because green-into-green changed a color without
+;; changing anything true.  Owner's NEW ruling (2026-09-15) reinstates the
+;; demotion for EVERY state, as a plain "you've seen it" signal: once a
+;; workspace's panels have been VIEWED for at least
+;; `agent-repl-tab-dwell-demote-seconds', its tab drops from FULL to PARTIAL
+;; (only `[N]' keeps the status color) even with the panels open.  It is NOT
+;; the status going away — the bracket still carries it — and it RESETS to
+;; FULL on the next STATUS UPDATE for that workspace (new activity), which
+;; re-arms the dwell.
+;;
+;; Unlike the old apparatus, demotion is a LATCH (a per-workspace flag), not
+;; a time comparison performed inside `agent-repl--ws-display-state': that
+;; function runs on the hottest redisplay path (see
+;; `agent-repl--note-tab-background-mode'), so it reads a boolean and never
+;; calls the clock.  The clock lives in `agent-repl--tab-dwell-note', which
+;; the dwell timer (and the repaint heartbeat) call to SET the latch once the
+;; armed-at stamp is old enough.
+
+(defconst agent-repl-tab-dwell-demote-seconds 5
+  "Seconds a workspace's panels must be VIEWED before its tab demotes.
+After this much continuous viewing of a panels-open, currently-viewed
+workspace, `agent-repl--ws-display-state' draws it PARTIAL (only the
+`[N]' bracket keeps the status color) instead of FULL — the \"you've
+seen it\" demotion.  The next status update for the workspace clears the
+demotion and re-arms this dwell.")
+
+(defvar agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)
+  "Workspace -> t once its tab has been demoted by the view dwell.
+The dwell-satisfied latch `agent-repl--ws-display-state' reads to draw a
+panels-open workspace PARTIAL.  Set by `agent-repl--tab-dwell-note' when
+the armed-at stamp is `agent-repl-tab-dwell-demote-seconds' old; cleared
+by `agent-repl--tab-dwell-reset' on the next status update.")
+
+(defvar agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal)
+  "Workspace -> the time its current 5-second view dwell was armed.
+Stamped when the workspace is activated (viewing begins) and re-stamped
+when a status update resets the demotion.  `agent-repl--tab-dwell-note'
+measures the dwell from here.")
+
+(defvar agent-repl--tab-dwell-last-arm (make-hash-table :test 'equal)
+  "Workspace -> the render arm last seen for it on a roster push.
+`agent-repl--tab-dwell-reset-on-status-change' compares each push's arm
+against this to tell a genuine status update (new activity, which resets
+the demotion) apart from a re-push that merely restates the same arm —
+without the guard every push would reset every workspace and nothing
+would ever demote.")
+
+(defvar agent-repl--tab-dwell-timer nil
+  "The single pending one-shot timer that demotes the current workspace.
+Only the currently-viewed workspace accrues a dwell, so one timer
+suffices: (re)arming cancels the previous one.  It fires at the dwell
+deadline so the demotion repaints then, rather than waiting for the next
+heartbeat tick.")
+
+(defun agent-repl--tab-dwell-demoted-p (ws)
+  "Return non-nil when WS's tab has been view-demoted to PARTIAL.
+Reads the `agent-repl--tab-dwell-demoted' latch."
+  (and (gethash ws agent-repl--tab-dwell-demoted) t))
+
 (defun agent-repl--ws-display-state (ws)
   "Return the palette display key for WS.
 Delegates to `agent-repl--ws-render-status' (the single source of
 truth for visual state across the tab-bar and project picker), then
-layers exactly ONE suppression on top, which hands the tab to the
+layers TWO suppressions on top, each of which hands the tab to the
 bracket-only appearance (`agent-repl--tab-spec-bracket-only' plus the
 default name face):
 
@@ -1495,12 +1562,19 @@ default name face):
   state, suppressing the full-tab color for a workspace whose panels
   the user has dismissed.
 
-THE EXTENT RULE IS AN IF AND ONLY IF (owner ruling 5, 2026-09-13): the
-tab is FULL — the whole `[N] <name>' entry carries the status color —
-exactly when the panels are open, and PARTIAL — only `[N]' carries it —
-exactly when they are not.  Nothing else may suppress here.  A local
-ready-view dwell latch used to, which made a panels-OPEN `:ready'
-workspace draw partial; it is gone.
+- View dwell — when the panels ARE open but the workspace has been
+  view-demoted (`agent-repl--tab-dwell-demoted-p'), returns nil so the
+  tab draws PARTIAL: the \"you've seen it\" demotion that fires after
+  `agent-repl-tab-dwell-demote-seconds' of viewing and resets to FULL on
+  the next status update.  See the view-dwell section above.
+
+THE PANEL-VISIBILITY EXTENT RULE IS AN IF AND ONLY IF (owner ruling 5,
+2026-09-13): a panels-CLOSED tab is always PARTIAL and a panels-OPEN tab
+is FULL unless the view dwell has demoted it (owner ruling, 2026-09-15).
+The ORIGINAL ready-view dwell latch that ruling 5 removed demoted only a
+panels-OPEN `:ready' workspace; the dwell here is its generalized
+successor — it applies to every state and is reset by new activity
+rather than by a state transition.
 
 `:agent-state' is preserved on the plist so the original color
 reappears the next time the user reopens panels.  The nil-state
@@ -1526,6 +1600,9 @@ the bracket keeps its color when panels are closed."
        ((null state) nil)
        ((not (agent-repl--ws-agent-open-p ws))
         (agent-repl--note-tab-background-mode ws :partial "panels-closed")
+        nil)
+       ((agent-repl--tab-dwell-demoted-p ws)
+        (agent-repl--note-tab-background-mode ws :partial "dwell-demoted")
         nil)
        (t
         (agent-repl--note-tab-background-mode ws :full "panels-open")
@@ -2804,11 +2881,123 @@ For background workspaces, inspects the saved persp window configuration."
 ;; view, no ticks), so a local re-derivation could only ever be a second,
 ;; drifting answer to a question already answered.
 ;;
-;; ONE local clock survives, and it drives nothing but a repaint: the
-;; ready-shout-then-fade dwell is a LOCAL PRESENTATION modifier (blessed as
-;; such), and a dwell measured in seconds needs something to notice that the
-;; seconds passed.  It reads no state, forks nothing, and touches no
-;; workspace plist beyond the latch the dwell itself owns.
+;; TWO local clocks survive, and neither derives lifecycle: the heartbeat
+;; below repaints the tab bar on a fixed cadence, and the view-dwell timer
+;; (`agent-repl--tab-dwell-timer', armed in the view-dwell section above)
+;; fires once at the demotion deadline to repaint the "you've seen it" flip.
+;; Both are LOCAL PRESENTATION modifiers (blessed as such): they read no
+;; daemon state, fork nothing, and touch no workspace plist.
+
+;;; The view-dwell mechanism (timers, arming, reset) ------------------------
+;;
+;; Declared here, alongside the heartbeat, because both are the module's
+;; local presentation clocks; the latch and its reader live in the
+;; view-dwell section next to `agent-repl--ws-display-state', which is the
+;; one place that reads them.
+
+(defun agent-repl--tab-dwell-cancel-timer ()
+  "Cancel the pending view-dwell demotion timer, if any."
+  (when (timerp agent-repl--tab-dwell-timer)
+    (cancel-timer agent-repl--tab-dwell-timer))
+  (setq agent-repl--tab-dwell-timer nil))
+
+(defun agent-repl--tab-dwell-eligible-p (ws)
+  "Return non-nil when WS can still accrue a view dwell.
+That is: WS is the currently-viewed workspace, its panels are open, and
+it has not already been demoted.  A workspace nobody is looking at is not
+being viewed, and a panels-closed tab is PARTIAL already, so neither
+dwells."
+  (and ws
+       (agent-repl--ws-known-p ws)
+       (equal ws (agent-repl--ws-current-name))
+       (agent-repl--ws-agent-open-p ws)
+       (not (agent-repl--tab-dwell-demoted-p ws))))
+
+(defun agent-repl--tab-dwell-note (ws now)
+  "Demote WS's tab if its view dwell has elapsed as of NOW.
+NOW is a time value (`current-time' in production; injected in tests).
+Sets the `agent-repl--tab-dwell-demoted' latch and repaints the tab bar
+when WS is still eligible (`agent-repl--tab-dwell-eligible-p') and its
+armed-at stamp is at least `agent-repl-tab-dwell-demote-seconds' old.
+Returns non-nil when it demoted.
+
+This is the testable core: it reads the injected clock, never
+`current-time', so the dwell can be exercised without sleeping."
+  (let ((armed-at (gethash ws agent-repl--tab-dwell-armed-at)))
+    (when (and (agent-repl--tab-dwell-eligible-p ws)
+               armed-at
+               (>= (float-time (time-subtract now armed-at))
+                   agent-repl-tab-dwell-demote-seconds))
+      (puthash ws t agent-repl--tab-dwell-demoted)
+      (agent-repl--log
+       ws
+       "tab-dwell: demoted ws=%s dwell>=%ss — tab name falls back to default, [N] keeps the status color"
+       ws agent-repl-tab-dwell-demote-seconds)
+      (agent-repl--force-tab-bar-redraw)
+      t)))
+
+(defun agent-repl--tab-dwell-fire (ws)
+  "Timer callback: try to demote WS now that its dwell deadline arrived."
+  (agent-repl--tab-dwell-note ws (current-time)))
+
+(defun agent-repl--tab-dwell-arm (ws now)
+  "Arm WS's view dwell as of NOW: stamp armed-at and schedule the demotion.
+Stamps `agent-repl--tab-dwell-armed-at' and, when WS is still eligible,
+(re)schedules the single one-shot demotion timer for
+`agent-repl-tab-dwell-demote-seconds' out so the flip repaints at the
+deadline.  Does NOT clear the demotion latch — only a status update does
+that (`agent-repl--tab-dwell-reset').  A workspace already demoted, or
+whose panels are closed, or that is not current, gets its stamp but no
+timer."
+  (puthash ws now agent-repl--tab-dwell-armed-at)
+  (agent-repl--tab-dwell-cancel-timer)
+  (when (agent-repl--tab-dwell-eligible-p ws)
+    (setq agent-repl--tab-dwell-timer
+          (run-with-timer agent-repl-tab-dwell-demote-seconds nil
+                          #'agent-repl--tab-dwell-fire ws))))
+
+(defun agent-repl--tab-dwell-reset (ws now)
+  "Reset WS's view dwell on a status update as of NOW.
+Clears the demotion latch so the tab draws FULL again, then re-arms the
+dwell (`agent-repl--tab-dwell-arm') so the 5-second clock restarts from
+the new activity.  This is the RESET-ON-STATUS-UPDATE half the owner's
+ruling requires; the old ready-view latch instead cleared on a state
+TRANSITION away from `:ready', which this generalizes to any new arm."
+  (remhash ws agent-repl--tab-dwell-demoted)
+  (agent-repl--tab-dwell-arm ws now))
+
+(defun agent-repl--tab-dwell-on-activation ()
+  "Arm the view dwell for the workspace just activated.
+Registered on the persp activation hook, alongside
+`agent-repl--record-workspace-history' (which stamps `:last-viewed-at').
+Switching INTO a workspace restarts the continuous-viewing clock; it does
+not un-demote a workspace that was already demoted with no new activity."
+  (let ((ws (agent-repl--ws-current-name)))
+    (when (and ws (agent-repl--ws-known-p ws))
+      (agent-repl--tab-dwell-arm ws (current-time)))))
+
+(agent-repl--ws-add-activated-hook #'agent-repl--tab-dwell-on-activation)
+
+(defun agent-repl--tab-dwell-reset-on-status-change (roster)
+  "Reset the view dwell for every workspace whose arm changed in ROSTER.
+Registered on `agent-repl-roster-update-functions'.  The roster push is
+the whole view, so this compares each row's arm against the arm last seen
+\(`agent-repl--tab-dwell-last-arm') and resets the dwell only for the ones
+that actually changed — new activity.  Without the arm guard every push
+would re-arm every workspace and the demotion could never land."
+  (let ((now (current-time)))
+    (dolist (entry (agent-repl-roster-walk roster))
+      (let* ((row (plist-get entry :row))
+             (ws (agent-repl--ws-by-ref-id (agent-repl-roster-row-id row))))
+        (when ws
+          (let ((arm (agent-repl-roster-row-status row))
+                (previous (gethash ws agent-repl--tab-dwell-last-arm 'unset)))
+            (unless (eq previous arm)
+              (puthash ws arm agent-repl--tab-dwell-last-arm)
+              (agent-repl--tab-dwell-reset ws now))))))))
+
+(add-hook 'agent-repl-roster-update-functions
+          #'agent-repl--tab-dwell-reset-on-status-change)
 
 (defun agent-repl--arm-state-poll-timer ()
   "Arm the tab-bar repaint heartbeat under the `:state-poll' key.
