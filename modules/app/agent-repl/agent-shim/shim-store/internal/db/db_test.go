@@ -180,6 +180,15 @@ func frameItem(frame *conversationv1.AgentFrame) *storev1.StoreAgentItem {
 	return &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_AgentFrame{AgentFrame: frame}}
 }
 
+func peerItem(agentID string) *storev1.StoreAgentItem {
+	return &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_PeerMessage{PeerMessage: &conversationv1.PeerMessage{
+		Agent:  &conversationv1.AgentId{Value: agentID},
+		Sender: "Explore",
+		Body:   "hi",
+		Id:     "u1",
+	}}}
+}
+
 func promptItem(agentID string) *storev1.StoreAgentItem {
 	return &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_AgentPrompt{AgentPrompt: &conversationv1.AgentPrompt{
 		Id:    &conversationv1.TurnId{Value: "turn-1"},

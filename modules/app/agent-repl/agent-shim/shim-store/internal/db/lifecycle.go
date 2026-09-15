@@ -42,6 +42,11 @@ func (d *DB) applyServeableFrameLifecycle(ctx context.Context, tx *sql.Tx, r rou
 		// A prompt is the first thing the store may ever hear about an agent
 		// addressed directly, so it is a first-sight for the agent row.
 		return d.ensureAgent(ctx, tx, item.AgentPrompt.GetAgent().GetValue(), now)
+	case *storev1.StoreAgentItem_PeerMessage:
+		// A peer message can likewise be a first-sight of the recipient agent
+		// (a resumed session's first served line), so it ensures the agent row
+		// exactly as a prompt does. It ends no turn and announces no work.
+		return d.ensureAgent(ctx, tx, item.PeerMessage.GetAgent().GetValue(), now)
 	case *storev1.StoreAgentItem_AgentFrame:
 		frame := item.AgentFrame
 		agentID := frame.GetAgentId().GetValue()

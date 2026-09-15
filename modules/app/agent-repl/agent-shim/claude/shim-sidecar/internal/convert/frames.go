@@ -100,6 +100,25 @@ func (c *Converter) landPrompt(at Attribution, agent, upsertKey, discriminator s
 	return PromptLine(at, discriminator, upsertKey, agent, prompt)
 }
 
+// landPeerMessage is landPrompt's counterpart for a PEER MESSAGE: the one place
+// a PeerMessage becomes an entry, respecting the same names-no-book invariant.
+//
+// A peer message is never a keep-alive turn's own record — it does not open a
+// turn — so there is no keepalive arm here; a message naming no book is residue,
+// loudly, exactly as a prompt naming no recipient is.
+func (c *Converter) landPeerMessage(at Attribution, agent, upsertKey, discriminator string, peer *conversationv1.PeerMessage) *storev1.StoreEntry {
+	if agent == "" {
+		c.log.With(at.ctxError("attribution")).With(logging.Context{UpsertKey: upsertKey}).
+			Log("peer message names no recipient; the record has no book and is stored as unknown residue")
+		return UnknownEntry(at, "unattributed_peer", "agent_id", map[string]any{
+			"upsert_key": upsertKey,
+			"path":       at.Path,
+			"offset":     float64(at.Offset),
+		})
+	}
+	return PeerLine(at, discriminator, upsertKey, agent, peer)
+}
+
 // ---------------------------------------------------------------------------
 // keep-alive
 // ---------------------------------------------------------------------------

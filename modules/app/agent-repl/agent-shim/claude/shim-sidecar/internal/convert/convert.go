@@ -333,16 +333,35 @@ type envelope struct {
 	// quoted record is told from a produced one; empty on records the vendor
 	// does not attribute (a session transcript's, a non-sidechain's).
 	attributionAgent string
+	// originKind is the vendor's `origin.kind` — "peer" for a message another
+	// Claude session sent in (an inter-session peer, or a subagent hand-back
+	// with `origin.handback` set). Empty on records with no origin.
+	originKind string
+	// peerSender is the sender label of a peer message: `origin.from`, or
+	// `origin.senderTaskId` when `from` is absent. Empty on non-peer records.
+	peerSender string
+	// peerBody is the vendor-stated body of a peer message (`origin.body`).
+	// Empty when the vendor states none, in which case the record's own text is
+	// the body instead.
+	peerBody string
 }
 
-func readEnvelope(obj map[string]any) envelope {
+func readEnvelope(rec map[string]any) envelope {
+	origin := obj(rec["origin"])
+	sender := str(origin["from"])
+	if sender == "" {
+		sender = str(origin["senderTaskId"])
+	}
 	return envelope{
-		uuid:             str(obj["uuid"]),
-		isMeta:           boolean(obj["isMeta"]),
-		isSummary:        boolean(obj["isCompactSummary"]),
-		sourceTool:       str(obj["sourceToolUseID"]),
-		timestampMs:      parseInstant(str(obj["timestamp"])),
-		attributionAgent: str(obj["attributionAgent"]),
+		uuid:             str(rec["uuid"]),
+		isMeta:           boolean(rec["isMeta"]),
+		isSummary:        boolean(rec["isCompactSummary"]),
+		sourceTool:       str(rec["sourceToolUseID"]),
+		timestampMs:      parseInstant(str(rec["timestamp"])),
+		attributionAgent: str(rec["attributionAgent"]),
+		originKind:       str(origin["kind"]),
+		peerSender:       sender,
+		peerBody:         str(origin["body"]),
 	}
 }
 

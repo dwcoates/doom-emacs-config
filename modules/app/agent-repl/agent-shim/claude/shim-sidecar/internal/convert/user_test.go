@@ -164,3 +164,140 @@ func TestKeepaliveBitIsReadFromThePromptEvenThoughItIsWithheld(t *testing.T) {
 		t.Fatal("the keep-alive bit must be set by the marker even though the prompt is withheld")
 	}
 }
+
+func TestPeerMessageIsEmittedAsAPeerPageLine(t *testing.T) {
+	// Arrange. A message another Claude session sent in carries origin.kind
+	// "peer" and isMeta:true. It must be recognized before the isMeta withhold,
+	// or an adopted conversation loses it entirely.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Explore", "found it", "Another Claude session sent a message", false))
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	peer := peerLineOf(entries[0])
+	if peer == nil {
+		t.Fatal("a peer message must be a served peer page line, not withheld as meta")
+	}
+}
+
+func TestPeerMessageIsNotWithheldAsMeta(t *testing.T) {
+	// Arrange. Regression: the isMeta branch would have swallowed a peer record.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Explore", "hi", "envelope", false))
+
+	// Assert.
+	if got := vendorKindOf(entries[0]); got == "user/meta" {
+		t.Fatal("a peer message must not be withheld as a meta record")
+	}
+}
+
+func TestPeerMessageSenderIsTheOriginFrom(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Plan", "the body", "envelope", false))
+
+	// Assert.
+	if got := peerLineOf(entries[0]).GetSender(); got != "Plan" {
+		t.Fatalf("sender = %q, want Plan", got)
+	}
+}
+
+func TestPeerMessagePrefersOriginBody(t *testing.T) {
+	// Arrange. The vendor states origin.body; it wins over the record text.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Plan", "the real body", "the envelope text", false))
+
+	// Assert.
+	if got := peerLineOf(entries[0]).GetBody(); got != "the real body" {
+		t.Fatalf("body = %q, want the vendor-stated origin.body", got)
+	}
+}
+
+func TestPeerMessageFallsBackToRecordTextForBody(t *testing.T) {
+	// Arrange. No origin.body, so the record's own text is the body.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Plan", "", "the envelope text", false))
+
+	// Assert.
+	if got := peerLineOf(entries[0]).GetBody(); got != "the envelope text" {
+		t.Fatalf("body = %q, want the record text fallback", got)
+	}
+}
+
+func TestSubagentHandbackIsAPeerMessageToo(t *testing.T) {
+	// Arrange. A hand-back sets origin.handback but is still origin.kind "peer",
+	// so it renders as the same peer bubble.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "child", "done", "envelope", true))
+
+	// Assert.
+	if peerLineOf(entries[0]) == nil {
+		t.Fatal("a subagent hand-back must be a served peer page line")
+	}
+}
+
+func TestPeerMessageIdentityIsDerivedFromTheRecordUUID(t *testing.T) {
+	// Arrange. The stream and file planes both key the same vendor record
+	// peer:<uuid> and spell the uuid into PeerMessage.id, so their rows collapse.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("rec-uuid-77", "Explore", "hi", "envelope", false))
+
+	// Assert.
+	if got := peerLineOf(entries[0]).GetId(); got != "rec-uuid-77" {
+		t.Fatalf("id = %q, want the record uuid rec-uuid-77", got)
+	}
+	if got := entries[0].GetUpsertKey(); got != PeerKey("rec-uuid-77") {
+		t.Fatalf("upsert key = %q, want %q", got, PeerKey("rec-uuid-77"))
+	}
+}
+
+func TestPeerMessageRecipientMatchesItsBook(t *testing.T) {
+	// Arrange. The store refuses a page line whose page_agent_id disagrees with
+	// the peer message's recipient, so they must be equal — the session's main
+	// agent.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, peerMessageLine("u1", "Explore", "hi", "envelope", false))
+
+	// Assert.
+	line := pageLine(entries[0])
+	book := line.GetPageAgentId().GetValue()
+	recipient := peerLineOf(entries[0]).GetAgent().GetValue()
+	if book == "" || book != recipient {
+		t.Fatalf("book = %q, recipient = %q; the store requires them equal", book, recipient)
+	}
+}
+
+func TestGenuineHumanPromptStillEmittedNotAsPeer(t *testing.T) {
+	// Arrange. Regression: an adopted human prompt (no peer origin) still emits
+	// as a prompt page line, unaffected by the peer branch.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, externalPromptLine("u1", "cli", "where were we?"))
+
+	// Assert.
+	if pageLine(entries[0]).GetAgentItem().GetAgentPrompt() == nil {
+		t.Fatal("a genuine human prompt must still be an AgentPrompt page line")
+	}
+	if peerLineOf(entries[0]) != nil {
+		t.Fatal("a genuine human prompt must not become a peer message")
+	}
+}
