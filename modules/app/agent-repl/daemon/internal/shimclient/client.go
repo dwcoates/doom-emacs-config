@@ -1376,6 +1376,11 @@ func (c *client) ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest
 	return unary(ctx, c, "read_history", req, validateReadHistoryRequest, c.rpc.ReadHistory)
 }
 
+// GatherTitleDigest reads the transcript for a synthesized title's material.
+func (c *client) GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error) {
+	return unary(ctx, c, "gather_title_digest", req, validateGatherTitleDigestRequest, c.rpc.GatherTitleDigest)
+}
+
 // unary is every unary verb's body: validate through the message's base
 // function, log the branch, call the generated client, log the outcome.
 func unary[Req any, Resp any](

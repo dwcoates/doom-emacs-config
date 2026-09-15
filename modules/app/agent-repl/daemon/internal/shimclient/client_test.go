@@ -330,6 +330,27 @@ func TestUnaryVerbReachesTheShim(t *testing.T) {
 	}
 }
 
+// TestGatherTitleDigestReachesTheShim asserts the new unary verb dials the
+// shim like every other, so the daemon can ask for a synthesized title's
+// material.
+func TestGatherTitleDigestReachesTheShim(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.GatherTitleDigest(context.Background(), &shimv1.GatherTitleDigestRequest{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GatherTitleDigest() error = %v", err)
+	}
+	if got := f.count("GatherTitleDigest"); got != 1 {
+		t.Fatalf("GatherTitleDigest calls = %d, want 1", got)
+	}
+}
+
 // TestInvalidRequestNeverReachesTheShim asserts base-function validation
 // refuses before the wire.
 func TestInvalidRequestNeverReachesTheShim(t *testing.T) {
