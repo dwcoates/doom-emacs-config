@@ -14,6 +14,7 @@ package headless
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -102,6 +103,19 @@ type Error struct {
 }
 
 func (e *Error) Error() string { return e.Cause + ": " + e.Detail }
+
+// CauseOf reads a failed run's closed-set cause. A failure that is not this
+// package's own *Error is reported as CauseExitStatus rather than becoming an
+// empty cause, so a caller's `cause` field always names something. Every
+// caller that surfaces a headless failure's cause reads it here, so no two
+// spell the fallback differently.
+func CauseOf(err error) string {
+	var hErr *Error
+	if errors.As(err, &hErr) {
+		return hErr.Cause
+	}
+	return CauseExitStatus
+}
 
 // ResolveBin answers the vendor binary a headless run execs: the configured
 // one, else $AGENT_REPL_CLAUDE_BIN, else DefaultBin. It never answers empty,

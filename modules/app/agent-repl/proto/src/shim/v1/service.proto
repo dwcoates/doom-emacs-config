@@ -9,6 +9,7 @@ syntax = "proto3";
 package shim.v1;
 
 import "shim/v1/endpoint_detach_foreground.proto";
+import "shim/v1/endpoint_gather_title_digest.proto";
 import "shim/v1/endpoint_hibernate.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
@@ -112,4 +113,12 @@ service Shim {
   // a page already received. Serves cold open, scroll-back, and the daemon's
   // own catch-up after a restart alike.
   rpc ReadHistory(ReadHistoryRequest) returns (ReadHistoryResponse);
+
+  // ---- Title digest: the material for a synthesized workspace title ----
+
+  // The prompts (and, after a /compact, the compaction summary) the daemon
+  // summarizes into a workspace title of its own when the vendor has written
+  // no ai-title. Reads the transcript the shim owns; produces nothing and ends
+  // nothing.
+  rpc GatherTitleDigest(GatherTitleDigestRequest) returns (GatherTitleDigestResponse);
 }

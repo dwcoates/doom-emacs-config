@@ -44,6 +44,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/titlesynth"
 	"claude-repld/internal/vocab"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -398,6 +399,21 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	healthRef := &healthForwarder{}
 	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, log: log}
 
+	// The title synthesizer rides the fleet's OWN session-watch sinks, so it is
+	// built before the fleet and its digest call reaches back through a
+	// late-bound forwarder (like verbsRef/healthRef). It installs the daemon's
+	// synthesized title into the topbar, and its cheap headless call bills the
+	// workspace's own account via the daemon's one workspace-dir lookup.
+	digestRef := &digestForwarder{}
+	titleSynth := titlesynth.New(titlesynth.Deps{
+		Digester:   digestRef,
+		Headless:   headlessClient,
+		ConfigDirs: titleConfigDirs{workspaceDir: workspaceDir, accounts: accounts, log: log},
+		Titles:     topbarResolver,
+		PromptsDir: paths.PromptsDir,
+		Log:        log,
+	})
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
@@ -410,6 +426,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Sidebar:   sidebarResolver,
 			Holds:     holdsResolver,
 			Lifecycle: lifecycle,
+			Title:     titleSynth,
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,
@@ -427,6 +444,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the session fleet: %w", err)
 	}
+	// The synthesizer's digest call reaches the shim through the fleet, now that
+	// it exists.
+	digestRef.bind(fleet)
 
 	// ---- the prompt queue ----
 

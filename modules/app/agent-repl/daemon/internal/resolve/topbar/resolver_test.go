@@ -1306,6 +1306,50 @@ func TestASummaryTheVendorRestatesReplacesTheOneBeforeIt(t *testing.T) {
 	}
 }
 
+func TestTheTitleIsTheDaemonsSynthesisWhenTheVendorHasStatedNone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+
+	// Assert: the daemon's own summary beats the bare workspace name.
+	if got, want := h.view(t).GetTitle().GetText(), "Wire up the reconnect backoff"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
+func TestTheVendorsSummaryOutranksTheDaemonsSynthesis(t *testing.T) {
+	// Arrange: both are present.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSynthesizedTitle(testWS, "the daemon's guess")
+
+	// Act
+	h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
+
+	// Assert: a future CLI that emits ai-title must transparently supersede ours.
+	if got, want := h.view(t).GetTitle().GetText(), "the vendor's own summary"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
+func TestAnEmptySynthesizedTitleFallsBackToTheWorkspaceName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSynthesizedTitle(testWS, "a title to be retracted")
+
+	// Act: retract it, as the synthesizer does after a /clear.
+	h.r.SetSynthesizedTitle(testWS, "")
+
+	// Assert
+	if got, want := h.view(t).GetTitle().GetText(), "fix-flaky-reconnect"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
 // parkedLine is the park's sentence as a reader on this machine reads it: a
 // LOCAL wall clock, because the daemon and the reader share one.
 func parkedLine() string {
