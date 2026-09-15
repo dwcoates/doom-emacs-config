@@ -4436,17 +4436,48 @@ body.draining #composer-input::placeholder {
      the shared ancestor, so neither rule below carries its own copy of
      the number. */
   --usage-ago-font-size: 0.85em;
+  /* THE ONE SHARED SLIDE DISTANCE (owner ruling, 2026-09-15: restoring the
+     original synchronized slide on top of the reserved-footprint layout).
+     Both `.usage-stamp` and `.usage-ago` translate by exactly this same
+     `translateX` value collapsed, and both to `translateX(0)` revealed, so
+     the two are never independent animations that merely LOOK aligned — they
+     are the identical declared distance, moving as one rigid pair: the token
+     shifts right by this amount while the duration is pushed off-screen by
+     the same amount, and the reveal is that same shift run in reverse for
+     both at once. It is a fixed length (not a measured one — CSS cannot read
+     the duration string's actual rendered width) sized to roughly the
+     duration's typical content ("5m 30s ago", "23h 59m ago") at
+     `--usage-ago-font-size`, so the collapsed token lands CLOSE TO the
+     bubble's right edge rather than flush against it — deliberately
+     conservative so a shorter duration string never pushes the token past the
+     corner's actual right edge and clips it. This is purely a paint-time
+     `transform`; the corner's reserved LAYOUT width (see `.usage-ago` below)
+     never reads this variable, so the no-reflow invariant is untouched by
+     whatever this number is. */
+  --usage-slide-distance: 4.5em;
 }
 /* The cost corner's figure, drawn verbatim in the token amber the footer's
    token cell wears, so the same idea reads the same color wherever it appears.
    Its size matches the revealed duration's (`--usage-ago-font-size`, set on
    the shared `.usage-corner` ancestor) rather than a second copy of the same
    number, so the two stay in lockstep if that size ever moves (owner ruling,
-   2026-09-15: the two must render at the same size). */
+   2026-09-15: the two must render at the same size).
+
+   COLLAPSED, IT SITS CLOSE TO THE BUBBLE'S RIGHT EDGE: shifted right by the
+   shared `--usage-slide-distance` (below), the same distance the duration is
+   pushed off-screen by. On reveal it slides back to its natural (leftmost)
+   position over the identical `transform 0.5s ease` transition the duration
+   uses, so the two read as one synchronized slide rather than two
+   independently-timed animations (owner ruling, 2026-09-15, restoring the
+   original synchronized reveal). This is a `transform` only — the token's
+   LAYOUT position (and so the corner's reserved floated width) never moves,
+   so the first prose line still never reflows. */
 .usage-stamp {
   color: var(--info-tokens);
   font-variant-numeric: tabular-nums;
   font-size: var(--usage-ago-font-size);
+  transform: translateX(var(--usage-slide-distance));
+  transition: transform 0.5s ease;
 }
 /* THE HOVER TIMESTAMP: the response's settled time, relative and live
    ("5m 30s ago"). Grey (the shared muted token), and — per the owner ruling
@@ -4457,18 +4488,20 @@ body.draining #composer-input::placeholder {
    whether or not it is exposed, so the corner's floated footprint is the FULL
    token+duration width the whole time and exposing the duration NEVER reflows
    the first prose line that wrapped around the float. Collapsed, it is merely
-   invisible — pushed off the right edge (`translateX(100%)`, clipped by the
-   corner's `overflow: hidden`) and faded out (`opacity: 0`) — never resized. So
-   the reveal animates opacity and offset ONLY, in one continuous 0.5s
-   transition that mouse-leave runs backwards for free; no width or margin
-   animates, because neither ever changes. */
+   invisible — pushed off the right edge by the shared `--usage-slide-distance`
+   (the SAME distance `.usage-stamp` is pushed toward that edge by, above —
+   this is the synchronized slide, not two independent animations), clipped by
+   the corner's `overflow: hidden`, and faded out (`opacity: 0`) — never
+   resized. So the reveal animates opacity and offset ONLY, in one continuous
+   0.5s transition that mouse-leave runs backwards for free; no width or
+   margin animates, because neither ever changes. */
 .usage-ago {
   color: var(--muted);
   font-size: var(--usage-ago-font-size);
   white-space: nowrap;
   margin-left: 0.35rem;
   opacity: 0;
-  transform: translateX(100%);
+  transform: translateX(var(--usage-slide-distance));
   transition:
     opacity 0.5s ease,
     transform 0.5s ease;
@@ -4479,7 +4512,14 @@ body.draining #composer-input::placeholder {
    bubble reveals the same timestamp with the cursor nowhere near it. The
    corner's own `:hover`/`:focus-within` stay too, since the corner sits inside
    the bubble and a mouse arriving there (or tabbing to it) should still
-   trigger the reveal on the way toward it (owner ruling, 2026-09-14). */
+   trigger the reveal on the way toward it (owner ruling, 2026-09-14).
+
+   `.usage-stamp` rides the SAME trigger list in the next rule (owner ruling,
+   2026-09-15): it resolves to `translateX(0)` under the identical set of
+   selectors, so the token's leftward slide and the duration's reveal fire
+   off the same triggers at the same instant — kept as a separate rule
+   (rather than folded into this one) only so this rule's declarations stay
+   exactly what they were, `.usage-ago`'s opacity and transform together. */
 .bubble.assistant:hover .usage-ago,
 .bubble.assistant:focus-within .usage-ago,
 .usage-corner:hover .usage-ago,
@@ -4488,8 +4528,17 @@ body.draining #composer-input::placeholder {
   opacity: 1;
   transform: translateX(0);
 }
-/* Reduced motion: reveal and hide the timestamp with no slide. */
+.bubble.assistant:hover .usage-stamp,
+.bubble.assistant:focus-within .usage-stamp,
+.usage-corner:hover .usage-stamp,
+.usage-corner:focus-within .usage-stamp,
+.usage-corner.usage-corner--revealed .usage-stamp {
+  transform: translateX(0);
+}
+/* Reduced motion: reveal and hide the timestamp — and slide the token — with
+   no slide. */
 @media (prefers-reduced-motion: reduce) {
+  .usage-stamp,
   .usage-ago {
     transition: none;
   }
