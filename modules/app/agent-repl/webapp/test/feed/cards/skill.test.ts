@@ -10,6 +10,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedSkill, SKILL_OUTCOME_ARMS } from "../../../src/feed/cards/skill.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { harness, rowContext } from "../harness.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 /**
  * The oneof as an INIT shape rather than a built message: the fixtures below
@@ -52,10 +53,27 @@ afterEach(() => {
 });
 
 describe("drawFeedSkill", () => {
-  it("wears the teal skill card's own classes", () => {
+  it("wears the skill card's own classes", () => {
     expect(drawFeedSkill(skill({ case: "running", value: {} }), rc()).className).toBe(
       "tool-card tool-skill",
     );
+  });
+
+  // The async teal wash is RETIRED (owner ruling, 2026-09-14): a skill card is
+  // an ordinary grey tool card now. The `tool-skill` class stays (it still
+  // marks the row's `data-unit` for nested work), but the sheet no longer
+  // paints it `--async-card` -- it takes the shared `--card` fill instead.
+  it("no longer paints the async teal wash, taking the grey card fill", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const card = drawFeedSkill(skill({ case: "running", value: {} }), rc());
+      document.body.replaceChildren(card);
+      // Act / Assert: the shared card fill, never the retired async teal.
+      expect(cascadedValue(card, "background")).toBe("var(--card)");
+    } finally {
+      remove();
+    }
   });
 
   it("draws the invocation line verbatim as the head", () => {

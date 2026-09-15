@@ -5,6 +5,7 @@ import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
 import { mountBubble } from "../../src/feed/bubble.js";
+import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { installStylesheet } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
@@ -684,12 +685,14 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     expect(sets.indexOf(guards[guards.length - 1])).toBe(sets.length - 1);
   });
 
-  // AND IT STACKS. The bubble wears `.bubble` for the card's fill, border and
-  // lift, and `.bubble` is a flex ROW -- so the head line and the whole
-  // sub-feed were laid out SIDE BY SIDE, half the bubble left empty under the
-  // head and every nested row squeezed into the other half. Photographed by
-  // the G49 playbook the first time a subagent bubble was opened in the real
-  // webview. jsdom resolves the cascade for this one, so it is asked here.
+  // AND IT STACKS. The bubble is now a `.tool-card` (owner ruling,
+  // 2026-09-14), and `.tool-card` sets no `display`, so `.tool-card.bubble-fold`
+  // states `display: flex; flex-direction: column` explicitly -- without it the
+  // head line and the whole sub-feed would fall back to default block flow
+  // rather than the pinned flex-column siblings the fold and reveal walk both
+  // rely on. The old `.bubble` flex-ROW failure this replaces (head and
+  // sub-feed side by side) was photographed by the G49 playbook. jsdom resolves
+  // the cascade for this one, so it is asked here.
   it("lays the sub-feed BENEATH the head rather than beside it", () => {
     // Arrange
     const remove = installStylesheet();
@@ -727,6 +730,155 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     await settle();
     // Assert
     expect(panelOf(bubble).hidden).toBe(true);
+  });
+
+  // FLUSH INTERIOR (owner ruling, 2026-09-14): the recursive sub-feed sits
+  // DIRECTLY in the tool card, not inside a second bordered `.agent-panel` box.
+  // The fill and the corner radius are read from jsdom's resolved cascade (a
+  // `background` shorthand and `border-radius` it parses). The BORDER is not
+  // measurable here -- the base `.agent-panel { border: 1px solid var(--…) }`
+  // shorthand is one jsdom cannot parse into longhands (see the outer-card note
+  // above), so its computed border-style stays `none` whether or not the flush
+  // override lands -- so the border removal is asserted from the sheet's own
+  // source order, scoped to the rules that ACTUALLY match the panel element
+  // (`.matches`, so `.fold-fixed > .agent-panel` and the scrollbar
+  // pseudo-element rules that merely mention `.agent-panel` are excluded).
+
+  /** The panel-matching rules that set PROP, in the sheet's source order. */
+  function panelSetters(bubble: { element: HTMLElement }, prop: string): { selector: string; body: string }[] {
+    const panel = panelOf(bubble);
+    return rules().filter(
+      (rule) =>
+        new RegExp(`(^|[;\\s])${prop}\\s*:`).test(rule.body) &&
+        // `rules()` captures the preceding `/* … */` comment into the selector,
+        // so it is stripped before the split -- otherwise every group is an
+        // invalid selector `.matches` throws on.
+        rule.selector
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .split(",")
+          .some((group) => {
+            const bare = group.trim().replace(/::[a-z-]+$/i, "");
+            if (bare === "") return false;
+            try {
+              return panel.matches(bare);
+            } catch {
+              return false;
+            }
+          }),
+    );
+  }
+
+  it("drops the inner box border so the sub-feed is not a card-within-a-card", () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"));
+    // Act: the last word the cascade gives the panel's border.
+    const setters = panelSetters(bubble, "border");
+    const last = setters[setters.length - 1];
+    // Assert: the flush `.bubble-subfeed` rule wins, removing the border.
+    expect(setters.length).toBeGreaterThan(0);
+    expect(last.selector).toContain(".bubble-subfeed");
+    expect(last.body).toMatch(/(^|[;\s])border\s*:\s*none/);
+  });
+
+  it("drops the inner box fill so the interior reads on the card grey", () => {
+    // Arrange: the base panel fills with `var(--bg)`; the flush override clears
+    // it, which jsdom resolves to a transparent computed background.
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: no fill of its own, so the card grey shows through.
+      expect(window.getComputedStyle(panelOf(bubble)).background).toBe("rgba(0, 0, 0, 0)");
+    } finally {
+      remove();
+    }
+  });
+
+  it("squares the inner box corners so no nested panel radius shows", () => {
+    // Arrange: jsdom parses `border-radius` reliably, so this one is measured.
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: the flush override squares the corners.
+      expect(window.getComputedStyle(panelOf(bubble)).borderRadius).toBe("0px");
+    } finally {
+      remove();
+    }
+  });
+});
+
+// THE DETACHED/SUBAGENT BUBBLE IS FRAMED AS A NORMAL TOOL-CALL CARD (owner
+// ruling, 2026-09-14): the outer wears `.tool-card` so it takes the ordinary
+// grey card chrome and the shared track cap, NOT the old full-width async
+// spread, teal wash, or dashed fold separator. These replace the assertions
+// that used to pin the `.async-fold`/`.bubble` async treatment.
+describe("mountBubble: the tool-card framing", () => {
+  it("frames the outer as a tool card, not the old async fold", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    // Assert
+    expect(bubble.element.classList.contains("tool-card")).toBe(true);
+    expect(bubble.element.classList.contains("bubble-fold")).toBe(true);
+  });
+
+  it("drops the async-fold class the old spread was keyed on", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    // Assert
+    expect(bubble.element.classList.contains("async-fold")).toBe(false);
+  });
+
+  it("drops the prompt-bubble class so it takes no `.bubble` lift", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    // Assert
+    expect(bubble.element.classList.contains("bubble")).toBe(false);
+  });
+
+  it("draws the collapsed head as a tool-call head row, not an async pill", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    const head = bubble.element.querySelector(".bubble-head");
+    // Assert
+    expect(head?.classList.contains("tool-head")).toBe(true);
+    expect(head?.classList.contains("async-ticker")).toBe(false);
+  });
+
+  it("takes the shared track cap rather than the full feed-area width", () => {
+    // Arrange: the cap rule is `.feed-item > .tool-card`, so the outer must sit
+    // as a direct child of a feed item exactly as the feed mounts it.
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      const item = document.createElement("article");
+      item.className = "feed-item";
+      item.append(bubble.element);
+      document.body.replaceChildren(item);
+      // Act / Assert: the shared column cap, never 100%.
+      expect(window.getComputedStyle(bubble.element).maxWidth).toBe(
+        "var(--agent-bubble-cap)",
+      );
+    } finally {
+      remove();
+    }
+  });
+
+  it("drops the dashed fold separator the async fold drew above it", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: the `.async-fold` dashed top rule no longer reaches this
+      // element -- it is a tool card now. (jsdom cannot parse the `.tool-card`
+      // `border: 1px solid var(--…)` shorthand into its longhands, so the
+      // positive `solid` is asserted in the real webview; what is checkable
+      // here is that the dashed separator is gone.)
+      expect(window.getComputedStyle(bubble.element).borderTopStyle).not.toBe("dashed");
+    } finally {
+      remove();
+    }
   });
 });
 
@@ -847,5 +999,76 @@ describe("mountBubble: the caret's own view rule", () => {
     // Assert -- a collapse takes content from BELOW the reader and moves them
     // nowhere.
     expect(view.top()).toBe(settled);
+  });
+});
+
+// THE TOKEN COUNT RIDES THE HEAD (owner ruling, 2026-09-14). The subagent head
+// carries the daemon's running/settled token sum, and the head is what the
+// bubble draws ABOVE its sub-feed in EVERY fold state -- collapse hides the
+// panel, never the head -- so the figure stands whether the bubble is collapsed
+// or expanded, and a re-push redraws the head with the grown total. These mount
+// the REAL subagent head (not the stub the other suites use) to hold that.
+describe("mountBubble: the head carries the subagent's token count", () => {
+  /** The FeedSubagent inside a fixture subagent row. */
+  function subagentOf(row: FeedRow) {
+    if (row.row.case === "activity" && row.row.value.unit.case === "subagent") {
+      return row.row.value.unit.value;
+    }
+    throw new Error("fixture is not a synchronous subagent row");
+  }
+
+  /** Mount a bubble whose head is the real subagent head. */
+  function mountReal(row: FeedRow, h: Harness = harness()) {
+    const bubble = mountBubble({
+      ctx: h.ctx,
+      row,
+      rc: rowContext(h.ctx, row),
+      head: (r, rc) => drawFeedSubagent(subagentOf(r), rc),
+      body: defaultBubbleBody,
+      renderers: stubRenderers(),
+      revealRow: async () => false,
+      bubble: () => {
+        throw new Error("no nested bubble in this fixture");
+      },
+      initialFolded: true,
+    });
+    document.body.replaceChildren(bubble.element);
+    return { bubble, h };
+  }
+
+  /** The panel the sub-feed opens into. */
+  function panelOf(bubble: { element: HTMLElement }): HTMLElement {
+    const panel = bubble.element.querySelector<HTMLElement>("[data-subfeed]");
+    if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
+    return panel;
+  }
+
+  it("shows the token count while the bubble is collapsed", () => {
+    // Arrange / Act: a fresh bubble starts collapsed.
+    const { bubble } = mountReal(subagentRow("b1", { tokens: "12.4k tok" }));
+    // Assert: the head carries the figure with the panel still shut.
+    expect(bubble.isExpanded()).toBe(false);
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("12.4k tok");
+  });
+
+  it("keeps the token count on the head once the bubble is expanded", async () => {
+    // Arrange
+    const { bubble } = mountReal(subagentRow("b1", { tokens: "12.4k tok" }));
+    // Act: open the sub-feed.
+    await bubble.expand();
+    await settle();
+    // Assert: the head -- above the now-shown panel -- still carries the figure.
+    expect(panelOf(bubble).hidden).toBe(false);
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("12.4k tok");
+  });
+
+  it("redraws the head with the grown total on a re-push", () => {
+    // Arrange: a live head at one total.
+    const { bubble } = mountReal(subagentRow("b1", { tokens: "1.0k tok" }));
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("1.0k tok");
+    // Act: the same subagent re-pushed with a larger total.
+    bubble.update(subagentRow("b1", { tokens: "9.9k tok" }));
+    // Assert: the head shows the new figure, not the stale one.
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("9.9k tok");
   });
 });

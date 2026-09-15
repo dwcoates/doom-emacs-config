@@ -83,11 +83,19 @@ export interface BubbleOptions {
 export function mountBubble(opts: BubbleOptions): BubbleLike {
   const id = requireMessage(opts.row.id, "FeedRow.id");
 
+  // A DETACHED/SUBAGENT BUBBLE IS FRAMED AS A NORMAL TOOL-CALL CARD (owner
+  // ruling, 2026-09-14). The outer wears `.tool-card`, so it takes the SAME
+  // chrome (border, radius, `--card` fill) and the SAME track cap every other
+  // feed tool card takes (`.feed-item > .tool-card`) rather than the old
+  // full-width async spread. `.bubble-fold` adds only the head-over-sub-feed
+  // stacking; the teal wash and the dashed fold separator are gone.
   const el = document.createElement("div");
-  el.className = "async-fold bubble";
+  el.className = "tool-card bubble-fold";
 
+  // The collapsed head reads as a tool-call card's head row (`.tool-head`),
+  // not the old async pill: the caret and the kind's head line sit on it.
   const headLine = document.createElement("div");
-  headLine.className = "async-ticker bubble-head";
+  headLine.className = "tool-head bubble-head";
 
   const toggle = document.createElement("button");
   toggle.type = "button";
