@@ -284,3 +284,49 @@ func TestSelectFailsWhenTheRevivalFails(t *testing.T) {
 		t.Fatal("Select() answered no error for a failed revival")
 	}
 }
+
+// recordLevel returns the level of the first captured record whose message
+// equals want, or "" when none matches.
+func recordLevel(f *fixture, want string) string {
+	for _, r := range f.log.logger.Records() {
+		if r.Message == want {
+			return r.Level
+		}
+	}
+	return ""
+}
+
+func TestSelectLogsTheSwitchReceiptAtInfo(t *testing.T) {
+	// Arrange: a switch to a workspace that is not already current.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert: a switch must leave an info-level trace in production logs.
+	if got := recordLevel(f, "selected the workspace"); got != "info" {
+		t.Fatalf("the select receipt is %q, want info", got)
+	}
+}
+
+func TestSelectLogsTheReselectionReceiptAtInfo(t *testing.T) {
+	// Arrange: the workspace is already current, so the next select re-selects it.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("first Select: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("second Select: %v", err)
+	}
+
+	// Assert.
+	if got := recordLevel(f, "the workspace was already current; the selection instant stands"); got != "info" {
+		t.Fatalf("the reselection receipt is %q, want info", got)
+	}
+}
