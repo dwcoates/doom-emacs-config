@@ -13,19 +13,23 @@
  * before the scroll box in document order and must not be inside it — a strip
  * inside the box scrolls away with the text, and a strip beside it puts the bar
  * alongside the token figure instead of under it.
+ *
+ * THE AGENT'S RESPONSE IS THE ONE EXCEPTION (owner ruling, 2026-09-15): its
+ * cost corner is deliberately moved INSIDE the scroll box, floated top-right
+ * before the body, so the prose's first line wraps around it. Its nesting is
+ * therefore asserted in `test/feed/cards/response.test.ts` ("the usage corner's
+ * first-line float"), not by the strip-above table below.
  */
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedAgentPromptSchema,
-  FeedResponseSchema,
   FeedRowSchema,
   FeedShellSchema,
   FeedSimpleToolCallSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
 import { agenticBubble } from "../../src/feed/cards/controls.js";
-import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { drawFeedShellBody } from "../../src/feed/cards/shell.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { drawFeedAgentPrompt } from "../../src/feed/rows/agent-prompt.js";
@@ -52,20 +56,11 @@ interface Kind {
 }
 
 const KINDS: readonly Kind[] = [
-  {
-    name: "the agent's response",
-    draw: () =>
-      drawFeedResponse(
-        create(FeedResponseSchema, {
-          usage: { text: "2.1k" },
-          result: { case: "success", value: { prose: { markdown: "hello" } } },
-        }),
-        rc("response-1"),
-      ),
-    meta: ".turn-meta",
-    scroll: `.${BUBBLE_SCROLL_CLASS}`,
-    siblings: true,
-  },
+  // The agent's response is NOT one of these kinds: its cost corner floats
+  // INSIDE the scroll box (owner ruling, 2026-09-15), so it does not obey the
+  // strip-above contract this table asserts — its nesting is covered in
+  // `test/feed/cards/response.test.ts` instead.
+  //
   // A person's own prompt is NOT one of these kinds: it carries no metadata
   // strip at all (no "You" label, no other attribution) since the owner ruled
   // it gone (2026-09-14), so there is no meta/scroll nesting for this table to

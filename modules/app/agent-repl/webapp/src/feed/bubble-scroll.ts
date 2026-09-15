@@ -9,12 +9,14 @@
  * Two facts about the DOM are what deliver that, and neither of them is
  * expressible in the stylesheet alone:
  *
- *   - THE SCROLL BOX IS A SIBLING BELOW THE METADATA STRIP. A bubble's corner
- *     stamp (`.turn-meta`), a prompt's author line and a notice's heading are
- *     appended BEFORE this element, so the strip spans the bubble's full width
- *     and the bar underneath it starts where the strip ends. While the stamp
- *     held its own flex column beside the body, the bar necessarily ran the
- *     whole height of the bubble alongside it.
+ *   - THE SCROLL BOX IS A SIBLING BELOW THE METADATA STRIP. A prompt's author
+ *     line and a notice's heading are appended BEFORE this element, so the strip
+ *     spans the bubble's full width and the bar underneath it starts where the
+ *     strip ends. (The response's cost corner is the exception — owner ruling,
+ *     2026-09-15: it lives INSIDE this box, floated top-right before the body,
+ *     so the prose's first line wraps around it; see `drawFeedResponse`.) While
+ *     the stamp held its own flex column beside the body, the bar necessarily
+ *     ran the whole height of the bubble alongside it.
  *   - THE SCROLL BOX IS NOT THE CONTENT WRAPPER. The body (`.bubble-body`)
  *     keeps every rule written against it — the markdown resets, the flush
  *     first/last child margins, the prose repaints that rewrite it whole — and
