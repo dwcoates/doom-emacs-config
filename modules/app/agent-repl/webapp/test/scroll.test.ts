@@ -27,6 +27,7 @@ import {
   type RevealTarget,
   revealNode,
   revealDelta,
+  centerDelta,
   revealInBox,
   observeScrollBox,
 } from "../src/scroll.js";
@@ -1412,6 +1413,42 @@ describe("revealDelta", () => {
 
   it("counts a panel ending exactly at the fold as visible", () => {
     expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 200 })).toBe(0);
+  });
+});
+
+describe("centerDelta", () => {
+  /** A 300px viewport over a 1000px feed, currently scrolled to the top. */
+  const box = { clientHeight: 300, scrollHeight: 1000, scrollTop: 0 };
+
+  it("centers a row with room on both sides", () => {
+    // Arrange — a 100px row whose top sits at 500 in the feed.
+    // Act / Assert — its center (550) lands on the viewport center (150 from
+    // the box top), so the target scrollTop is 500 - (300 - 100)/2 = 400.
+    expect(centerDelta({ ...box, nodeOffsetTop: 500, nodeHeight: 100 })).toBe(400);
+  });
+
+  it("clamps at the feed start when centering would scroll above the top", () => {
+    // Arrange — a row so near the start there is not room above to center it.
+    // Act / Assert — the ideal top is negative, so it is clamped to scrollTop
+    // 0 and the delta is 0 (already at the top).
+    expect(centerDelta({ ...box, nodeOffsetTop: 20, nodeHeight: 100 })).toBe(0);
+  });
+
+  it("clamps at the feed end when centering would scroll past the bottom", () => {
+    // Arrange — a row at the very end of a feed scrolled to its top; the last
+    // reachable position is scrollHeight - clientHeight = 700.
+    // Act / Assert — centering would ask for 900 - 100 = 800, past 700, so it
+    // is clamped and the delta is 700.
+    expect(centerDelta({ ...box, nodeOffsetTop: 900, nodeHeight: 100 })).toBe(700);
+  });
+
+  it("moves nothing when the row is already centered", () => {
+    // Arrange — the box is already scrolled so the row's center is on the
+    // viewport center (scrollTop 400 for a row-top of 500).
+    // Act / Assert — the delta is zero.
+    expect(
+      centerDelta({ clientHeight: 300, scrollHeight: 1000, scrollTop: 400, nodeOffsetTop: 500, nodeHeight: 100 }),
+    ).toBe(0);
   });
 });
 
