@@ -143,6 +143,16 @@ describe("prose", () => {
     expect(success.authorship.case).toBe("fromModel");
   });
 
+  it("carries the settle instant on a settled prose block", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(streamMessage("assistant"), foldContext({ nowMs: 4242 }));
+
+    const response = activityOf(output.entries[0])?.item.value as conversationv1.AgentResponse;
+    const success = response.result.value as conversationv1.AgentResponseSuccess;
+    expect(success.settledAt?.atMs).toBe(4242n);
+  });
+
   it("draws a vendor-synthesized notice as a notice, never as the agent's answer", () => {
     const fold = createFold();
 
@@ -185,6 +195,21 @@ describe("prose", () => {
     const response = activityOf(output.entries[0])?.item.value as conversationv1.AgentResponse;
     const failure = response.result.value as conversationv1.AgentResponseFailure;
     expect(failure.reason?.reason.case).toBe("aborted");
+  });
+
+  it("carries the settle instant on a failed prose block", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(
+      assistant("msg-cut", [{ type: "text", text: "half a sen" }], {
+        message: { stop_reason: "max_tokens" },
+      }),
+      foldContext({ nowMs: 4242 }),
+    );
+
+    const response = activityOf(output.entries[0])?.item.value as conversationv1.AgentResponse;
+    const failure = response.result.value as conversationv1.AgentResponseFailure;
+    expect(failure.settledAt?.atMs).toBe(4242n);
   });
 });
 
