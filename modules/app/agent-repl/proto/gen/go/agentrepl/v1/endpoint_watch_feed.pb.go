@@ -88,23 +88,29 @@ func (x *WatchFeedRequest) GetWatch() *FeedWatchToken {
 // one already shown (a growing response's re-push, a settled tool card, a
 // task bubble another act touched). The client upserts by FeedRow.id.
 //
-// A frame carries EITHER a row upsert (`row`) OR a response-selection push
-// (`selection`), never both. The selection push is the daemon's per-workspace
+// A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
+// push (`selection`), or a feed-text-scale push (`feed_text_scale`), never more
+// than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
-// active. Row upserts still travel with their own feedids (FeedRow.id), so a
-// selection frame naming feedids of ROWS keeps the stream's "the connection
-// is the placement" invariant intact — it names rows within this feed, not a
-// second feed.
+// active. The feed-text-scale push is the daemon-global zoom (frontend.v1.FeedTextScale),
+// pushed on EVERY open feed's watch — root and expanded subagent sub-feeds
+// alike, since all of them draw feed text — so the webapp re-scales it. Row
+// upserts still travel with their own feedids (FeedRow.id), so a selection
+// frame naming feedids of ROWS keeps the stream's "the connection is the
+// placement" invariant intact — it names rows within this feed, not a second
+// feed.
 type WatchFeedResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The upserted row, whole. Set on a row-upsert frame; unset on a selection
-	// frame.
+	// The upserted row, whole. Set on a row-upsert frame; unset otherwise.
 	Row *v1.FeedRow `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
-	// The response-selection state, whole. Set on a selection frame; unset on a
-	// row-upsert frame. Pushed on the root feed's watch only.
-	Selection     *v1.FeedSelection `protobuf:"bytes,2,opt,name=selection,proto3,oneof" json:"selection,omitempty"`
+	// The response-selection state, whole. Set on a selection frame; unset
+	// otherwise. Pushed on the root feed's watch only.
+	Selection *v1.FeedSelection `protobuf:"bytes,2,opt,name=selection,proto3,oneof" json:"selection,omitempty"`
+	// The feed text scale (zoom), whole. Set on a feed-text-scale frame; unset
+	// otherwise. Pushed on every open feed's watch, root and sub-feed alike.
+	FeedTextScale *v1.FeedTextScale `protobuf:"bytes,3,opt,name=feed_text_scale,json=feedTextScale,proto3,oneof" json:"feed_text_scale,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -153,18 +159,27 @@ func (x *WatchFeedResponse) GetSelection() *v1.FeedSelection {
 	return nil
 }
 
+func (x *WatchFeedResponse) GetFeedTextScale() *v1.FeedTextScale {
+	if x != nil {
+		return x.FeedTextScale
+	}
+	return nil
+}
+
 var File_agentrepl_v1_endpoint_watch_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\n" +
 	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
 	"\x10WatchFeedRequest\x122\n" +
-	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\x88\x01\n" +
+	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xe5\x01\n" +
 	"\x11WatchFeedResponse\x12&\n" +
 	"\x03row\x18\x01 \x01(\v2\x14.frontend.v1.FeedRowR\x03row\x12=\n" +
-	"\tselection\x18\x02 \x01(\v2\x1a.frontend.v1.FeedSelectionH\x00R\tselection\x88\x01\x01B\f\n" +
+	"\tselection\x18\x02 \x01(\v2\x1a.frontend.v1.FeedSelectionH\x00R\tselection\x88\x01\x01\x12G\n" +
+	"\x0ffeed_text_scale\x18\x03 \x01(\v2\x1a.frontend.v1.FeedTextScaleH\x01R\rfeedTextScale\x88\x01\x01B\f\n" +
 	"\n" +
-	"_selectionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"_selectionB\x12\n" +
+	"\x10_feed_text_scaleB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_feed_proto_rawDescOnce sync.Once
@@ -185,16 +200,18 @@ var file_agentrepl_v1_endpoint_watch_feed_proto_goTypes = []any{
 	(*FeedWatchToken)(nil),    // 2: agentrepl.v1.FeedWatchToken
 	(*v1.FeedRow)(nil),        // 3: frontend.v1.FeedRow
 	(*v1.FeedSelection)(nil),  // 4: frontend.v1.FeedSelection
+	(*v1.FeedTextScale)(nil),  // 5: frontend.v1.FeedTextScale
 }
 var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
 	3, // 1: agentrepl.v1.WatchFeedResponse.row:type_name -> frontend.v1.FeedRow
 	4, // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5, // 3: agentrepl.v1.WatchFeedResponse.feed_text_scale:type_name -> frontend.v1.FeedTextScale
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_feed_proto_init() }
