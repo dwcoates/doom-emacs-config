@@ -170,6 +170,73 @@ func TestOneStreamServesEveryWebview(t *testing.T) {
 	}
 }
 
+// TestAReopeningSubscriberReplaysTheCurrentSelection is the reopen/reconnect
+// regression: a webview whose roster stream ended (a daemon bounce, a
+// producer_ended) reopens AFTER the selection was published, and its FIRST
+// delivery must carry the correct current row — not a stale highlight it holds
+// until a full reload. The topic retains its latest value, so a subscription
+// opened after the publish replays it at once.
+func TestAReopeningSubscriberReplaysTheCurrentSelection(t *testing.T) {
+	// Arrange: a selection is published while no subscriber is attached.
+	r, _ := newResolver(t)
+	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+	r.SetSelected(ids.WorkspaceID("w2"))
+
+	// Act: the reopened stream subscribes only now.
+	roster := <-subscribe(t, r)
+
+	// Assert: the first delivery already states w2 as the current row.
+	if !rowFor(repoRows(t, roster), "w2").GetCurrent().GetCurrent() {
+		t.Fatal("the reopened subscriber's first roster did not mark w2 current")
+	}
+	if rowFor(repoRows(t, roster), "w1").GetCurrent().GetCurrent() {
+		t.Fatal("the reopened subscriber's first roster marked the stale row current")
+	}
+}
+
+// TestAReopeningSubscriberReplaysABootRestoredSelection is the (b) guard: a
+// daemon that just rebuilt its resolver has published nothing from a live
+// change, only the boot prime's registry snapshot (PublishRegistry ->
+// SetRegistry carrying the durable Current). A reopening subscriber must still
+// replay that restored selection, so the topic holds a publishable current
+// roster with no live change behind it.
+func TestAReopeningSubscriberReplaysABootRestoredSelection(t *testing.T) {
+	// Arrange: the boot prime's registry snapshot is the ONLY publish.
+	r, _ := newResolver(t)
+	reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+	restored := ids.WorkspaceID("w2")
+	reg.Current = &restored
+	r.SetRegistry(reg)
+
+	// Act: a webview reopens against the rebuilt resolver.
+	roster := <-subscribe(t, r)
+
+	// Assert.
+	if !rowFor(repoRows(t, roster), "w2").GetCurrent().GetCurrent() {
+		t.Fatal("the reopened subscriber did not replay the boot-restored selection")
+	}
+}
+
+// TestALiveSelectionReachesAnAlreadyOpenSubscriber is the no-regression guard:
+// serving a reopened subscriber its retained latest must not cost an
+// already-open subscriber the later publishes. A selection made after the
+// subscription still arrives on the wire.
+func TestALiveSelectionReachesAnAlreadyOpenSubscriber(t *testing.T) {
+	// Arrange: an open subscription drains the opening registry.
+	r, _ := newResolver(t)
+	ch := subscribe(t, r)
+	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+	<-ch
+
+	// Act.
+	r.SetSelected(ids.WorkspaceID("w2"))
+
+	// Assert.
+	if !rowFor(repoRows(t, <-ch), "w2").GetCurrent().GetCurrent() {
+		t.Fatal("a live selection did not reach the already-open subscriber")
+	}
+}
+
 func TestANukedWorkspaceLeavesTheRoster(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
