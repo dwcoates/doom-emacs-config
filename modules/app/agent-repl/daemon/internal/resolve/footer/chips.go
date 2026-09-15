@@ -833,7 +833,9 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 			Target: r.opts.encodeFeedID(feedid.Ref{
 				WS:   ws,
 				Feed: feedid.Feed{Root: true},
-				Row:  feedid.RowKey{Kind: feedid.KindDetachedShell, ID: row.work},
+				// The jump lands on the shell bubble's HEAD (KindShellHead), the
+				// row a reader expands — not the spool BODY on the sub-feed.
+				Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: row.work},
 			}),
 			Command: &frontendv1.FooterShellRowCommand{Text: row.command},
 			Runtime: &frontendv1.FooterShellRowRuntime{StartedAtMs: epochMs(row.startedAt)},

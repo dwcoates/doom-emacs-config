@@ -215,6 +215,8 @@ func testFeedValue(feed feedid.Feed) string {
 		return "merge:" + string(*feed.Merge)
 	case feed.Agent != nil:
 		return "agent:" + feed.Agent.GetValue()
+	case feed.Shell != nil:
+		return "shell:" + string(*feed.Shell)
 	default:
 		return "root"
 	}

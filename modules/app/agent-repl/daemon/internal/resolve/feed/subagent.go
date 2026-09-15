@@ -497,49 +497,35 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 }
 
 // detachForegroundShell turns an already-drawn foreground shell into its
-// detached bubble, answering whether there was one to turn.
+// canonical detached bubble, answering whether there was one to turn.
+//
+// RETIRE THEN REDRAW. The foreground call drew a running tool card
+// (KindActivity); its work has now moved to the background, where the shell
+// bubble is its head. The head's kind (KindShellHead) differs from the card's,
+// so the card cannot simply change arm under one identity the way a subagent
+// bubble does — it is RETIRED, and the KindShellHead bubble is drawn in its
+// place. The unit is marked moved so every later frame of it (the vendor's
+// launch receipt, the other plane's replay, the next turn's live-work
+// reconciliation) draws nothing rather than a second, stale card beside the
+// bubble.
 func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workID string) bool {
 	u, ok := s.units[unitID]
 	if !ok || u.input == "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok || u.input == \"\""})
 		return false
 	}
+	cardID := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID})
+	retired := r.retire(s, at.feed, cardID.GetValue())
+	u.moved = true
 	sh := s.shell(workID)
 	sh.command = u.input
 	sh.startedAtMs = u.startedAtMs
 	sh.feed = at
 	r.publishShell(s, workID, sh, nil)
-	r.moveToolCard(s, at, unitID, u)
 	r.logger(s.id).Debug("daemon.feed.detached_shell",
-		"a foreground shell became a detached shell bubble",
-		dlog.Context{"unit": unitID, "work": workID})
+		"a foreground shell's running card was retired and redrawn as its detached shell bubble",
+		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired})
 	return true
-}
-
-// moveToolCard restates the card of a call whose WORK MOVED to the background,
-// on the `moved` arm.
-//
-// TWO ROWS, ONE RUN, AND ONLY ONE OF THEM SETTLES. The detached shell bubble
-// published just above is where the command reports from here on; the card
-// above it is the record that the agent made the call, and it has no ending of
-// its own to state. Left alone it kept the `running` arm it drew with and never
-// left it -- no later frame of the unit says the work moved, and the detached
-// run's terminal is addressed to the shell row -- so a backgrounded command drew
-// a card spinning forever above a row already reporting `exit 0` (observed
-// 2026-09-09).
-func (r *resolver) moveToolCard(s *wsState, at placement, unitID string, u *unitState) {
-	u.moved = true
-	if u.name == "" {
-		// NOTHING HAS DRAWN THIS UNIT'S CARD, so there is none to restate. The
-		// mark still stands, so the card draws moved the moment it does draw.
-		r.logger(s.id).Debug("daemon.feed.moved_card_undrawn",
-			"a detachment named a unit with no drawn card; the move is remembered for when it draws",
-			dlog.Context{"unit": unitID})
-		return
-	}
-	row := r.toolRow(s, at, unitID, u.name, movedOutcome())
-	r.stampTurn(s, row, nil)
-	r.upsert(s, at, row, true)
 }
 
 // applyHeldDetachment completes a detachment that was announced BEFORE the
@@ -695,9 +681,6 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	}
 
 	r.publishShell(s, workID, sh, settled)
-	log.Debug("daemon.feed.detached_shell_row",
-		"a detached shell's bubble was upserted",
-		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": sh.settled != nil})
 }
 
 // shellStart answers the instant a run's clock counts from. The authoritative
@@ -720,22 +703,21 @@ func (r *resolver) shellStart(sh *shellState) int64 {
 // a long command from costing more than running it.
 const spoolCap = 16 * 1024
 
-// publishShell renders and upserts a shell bubble.
+// shellSubFeed is the sub-feed a detached shell's spool BODY rides — the feed
+// the head's FeedId resolves to, keyed by the run's own work id.
+func shellSubFeed(workID string) feedid.Feed {
+	id := feedid.ShellID(workID)
+	return feedid.Feed{Shell: &id}
+}
+
+// publishShell renders and upserts a detached shell's CANONICAL BUBBLE: a
+// spool-less HEAD on the parent feed (command + clock + stop), and — once there
+// is output — a spool-only BODY row on the shell's own sub-feed. This mirrors
+// the subagent bubble: the head is carried on the parent's one connection, and
+// the head's FeedId IS the sub-feed's address, so an expand's OpenFeed resolves
+// and the spool streams LAZILY — a collapsed bubble tails nothing, because only
+// a reader that opened the sub-feed subscribes to it.
 func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settled *frontendv1.FeedShellSettled) {
-	shell := &frontendv1.FeedShell{
-		Command: &frontendv1.FeedShellCommand{Text: sh.command},
-		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: r.shellStart(sh)},
-	}
-	if sh.spool != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.spool != \"\""})
-		tail, omittedLines := capSpool(sh.spool)
-		spool := &frontendv1.FeedShellSpool{Text: tail}
-		if omittedLines > 0 {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "omittedLines > 0"})
-			spool.Omitted = &frontendv1.FeedShellOmitted{Text: formatEarlierLines(omittedLines)}
-		}
-		shell.Spool = spool
-	}
 	// A SETTLED RUN STAYS SETTLED. The ending is remembered on the run rather
 	// than read off the frame in hand, because every push after the terminal —
 	// a replayed announcement, the other plane's spool replay, a beat — carries
@@ -744,26 +726,70 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "settled != nil"})
 		sh.settled = settled
 	}
+
+	head := &frontendv1.FeedShell{
+		Command: &frontendv1.FeedShellCommand{Text: sh.command},
+		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: r.shellStart(sh)},
+	}
 	if sh.settled != nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.settled != nil"})
-		shell.State = &frontendv1.FeedShell_Settled{Settled: sh.settled}
+		head.State = &frontendv1.FeedShell_Settled{Settled: sh.settled}
 	} else {
 		live := &frontendv1.FeedShellLive{}
 		if sh.lastProgressMs > 0 {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.lastProgressMs > 0"})
 			live.LastProgress = &frontendv1.FeedShellLastProgress{AtMs: sh.lastProgressMs}
 		}
-		shell.State = &frontendv1.FeedShell_Live{Live: live}
+		head.State = &frontendv1.FeedShell_Live{Live: live}
 	}
 
-	id := r.rowID(s.id, sh.feed.feed, feedid.RowKey{Kind: feedid.KindDetachedShell, ID: workID})
-	sh.row = id
-	row := &frontendv1.FeedRow{
-		Id:  id,
-		Row: &frontendv1.FeedRow_DetachedShell{DetachedShell: &frontendv1.FeedDetachedShell{Shell: shell}},
+	// THE HEAD, on the parent feed. NO SPOOL: the command, clock and stop live
+	// here; the spool is the body, on the sub-feed.
+	headID := r.rowID(s.id, sh.feed.feed, feedid.RowKey{Kind: feedid.KindShellHead, ID: workID})
+	sh.row = headID
+	headRow := &frontendv1.FeedRow{
+		Id:  headID,
+		Row: &frontendv1.FeedRow_ShellHead{ShellHead: head},
 	}
-	r.stampTurn(s, row, nil)
-	r.upsert(s, sh.feed, row, true)
+	r.stampTurn(s, headRow, nil)
+	r.upsert(s, sh.feed, headRow, true)
+
+	// The head's own FeedId IS the sub-feed's address; recording it is what
+	// makes an expand's OpenFeed resolve and the body's crumbs draw. Minted
+	// after the head is upserted so the parent feed is known.
+	sub := shellSubFeed(workID)
+	r.mintSubFeed(s, headID, sub, sh.command)
+
+	// THE BODY: the spool tail, on the shell's own sub-feed, present from the
+	// first output. Snapshot semantics — capped and replaced whole on every
+	// push. Nothing is pushed to a tail that has not opened this sub-feed.
+	if sh.spool == "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.spool == \"\""})
+		r.logger(s.id).Debug("daemon.feed.detached_shell_row",
+			"a detached shell's head was upserted with no spool body yet",
+			dlog.Context{"work": workID, "settled": sh.settled != nil})
+		return
+	}
+	tail, omittedLines := capSpool(sh.spool)
+	spool := &frontendv1.FeedShellSpool{Text: tail}
+	if omittedLines > 0 {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "omittedLines > 0"})
+		spool.Omitted = &frontendv1.FeedShellOmitted{Text: formatEarlierLines(omittedLines)}
+	}
+	// THE BODY IS SPOOL-ONLY. The command, clock and state live on the head;
+	// carrying them here too would duplicate them, so the body FeedShell sets
+	// only its spool (feed.proto: FeedDetachedShell is the spool BODY row).
+	body := &frontendv1.FeedShell{Spool: spool}
+	bodyID := r.rowID(s.id, sub, feedid.RowKey{Kind: feedid.KindDetachedShell, ID: workID})
+	bodyRow := &frontendv1.FeedRow{
+		Id:  bodyID,
+		Row: &frontendv1.FeedRow_DetachedShell{DetachedShell: &frontendv1.FeedDetachedShell{Shell: body}},
+	}
+	r.stampTurn(s, bodyRow, nil)
+	r.upsert(s, placement{feed: sub}, bodyRow, true)
+	r.logger(s.id).Debug("daemon.feed.detached_shell_row",
+		"a detached shell's head and spool body were upserted",
+		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": sh.settled != nil})
 }
 
 // capSpool keeps the spool's TAIL and reports how many earlier lines it drops.

@@ -275,6 +275,23 @@ func (h *harness) activityRow(unit string) *frontendv1.FeedRow {
 	return nil
 }
 
+// hasActivityRow reports whether the root feed still carries the activity row
+// for one unit — false once the row is retired.
+func (h *harness) hasActivityRow(unit string) bool {
+	h.t.Helper()
+	want := testEncode(feedid.Ref{
+		WS:   testWorkspace,
+		Feed: rootFeed(),
+		Row:  feedid.RowKey{Kind: feedid.KindActivity, ID: unit},
+	}).GetValue()
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestARowOwedByADeadTurnKeepsThatTurnsStamp covers the rows a query death
 // OWES: the gate's stand-down denies every pending permission ask, and those
 // denials are drawn AFTER the death's terminal row. They belong to the turn
