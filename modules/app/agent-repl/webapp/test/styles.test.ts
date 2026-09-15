@@ -644,8 +644,8 @@ describe("the cost corner's hover hit area", () => {
     // whole bubble means most hover positions never sit near the duration.
     const bubbleWide = declarationsOf(".bubble.assistant:hover .usage-ago");
 
-    // Assert
-    expect(bubbleWide).toMatch(/max-width:\s*8rem/);
+    // Assert — the reveal is opacity/offset only (see the constant-width test
+    // below); it makes the already-reserved duration visible, it does not size it.
     expect(bubbleWide).toMatch(/opacity:\s*1/);
   });
 
@@ -654,7 +654,46 @@ describe("the cost corner's hover hit area", () => {
     const bubbleFocus = declarationsOf(".bubble.assistant:focus-within .usage-ago");
 
     // Assert
-    expect(bubbleFocus).toMatch(/max-width:\s*8rem/);
+    expect(bubbleFocus).toMatch(/opacity:\s*1/);
+  });
+
+  it("floats the corner top-right so the prose's first line wraps beside it", () => {
+    // Arrange / Act — the one-line-tall corner floats right inside the prose
+    // body, so the FIRST prose line flows to its left and every line below it
+    // (past the corner's single-row height) runs the bubble's full width.
+    const corner = declarationsOf(".usage-corner");
+
+    // Assert
+    expect(corner).toMatch(/float:\s*right/);
+  });
+
+  it("reserves the duration's width even while it is collapsed, so it never sizes on reveal", () => {
+    // Arrange / Act — the base rule keeps the duration's layout gap
+    // (`margin-left`) whether or not it is exposed, and animates only opacity
+    // and offset, so its footprint is constant and the first line cannot reflow.
+    const base = declarationsOf(".usage-ago") ?? "";
+
+    // Assert — the reserved gap is present in the base state, and no width or
+    // margin is ever transitioned (the reveal touches neither).
+    expect(base).toMatch(/margin-left:\s*0\.35rem/);
+    expect(base).not.toMatch(/max-width/);
+    expect(base).toMatch(/transition:[^;]*opacity[^;]*transform/s);
+    expect(base).not.toMatch(/transition:[^;]*(?:max-width|margin)/s);
+  });
+
+  it("sizes the duration slot identically whether or not the corner is revealed", () => {
+    // Arrange — the base declarations and the declarations the reveal adds.
+    const base = declarationsOf(".usage-ago") ?? "";
+    const revealed = declarationsOf(".usage-corner.usage-corner--revealed .usage-ago") ?? "";
+
+    // Assert — neither state touches a width/margin property, so the corner's
+    // reserved footprint is byte-for-byte the same collapsed and revealed and
+    // exposing the duration cannot reflow the first prose line.
+    for (const decls of [base, revealed]) {
+      expect(decls).not.toMatch(/(?:^|[\s;])max-width\s*:/);
+      expect(decls).not.toMatch(/(?:^|[\s;])width\s*:/);
+    }
+    expect(revealed).not.toMatch(/(?:^|[\s;])margin-left\s*:/);
   });
 })
 
