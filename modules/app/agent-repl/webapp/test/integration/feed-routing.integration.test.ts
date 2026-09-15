@@ -298,12 +298,13 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     expect(harness.fake.calls("openFeed").length).toBe(opensBefore + 1);
   });
 
-  // A SUB-FEED HANGS BENEATH ITS HEAD. The bubble wears `.bubble` for the
-  // card's fill and lift, and `.bubble` is a flex ROW, so the head line and the
-  // whole sub-feed were laid out side by side -- half the bubble empty under
-  // the head and every nested row squeezed into the other half. Photographed by
-  // the G49 playbook. The cascade is installed here because a class assertion
-  // alone passed the entire time.
+  // A SUB-FEED HANGS BENEATH ITS HEAD. The bubble is a `.tool-card` now (owner
+  // ruling, 2026-09-14), and `.tool-card.bubble-fold` states `display: flex;
+  // flex-direction: column` explicitly, so the head line and the whole sub-feed
+  // stack rather than falling to a side-by-side row. The old `.bubble` flex-ROW
+  // failure this replaces (head and sub-feed side by side, half the bubble empty
+  // under the head) was photographed by the G49 playbook. The cascade is
+  // installed here because a class assertion alone passed the entire time.
   // Real stylesheet installation plus a socket-backed expansion is the bound;
   // it reached 1635ms under concurrent integration load.
   it("stacks its sub-feed under its head, under the real stylesheet", async () => {
@@ -312,7 +313,7 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     const remove = installStylesheet();
     try {
       await harness.click('[data-feed-row="bubble"] [data-expand]');
-      const bubble = harness.row("bubble")?.querySelector(".bubble");
+      const bubble = harness.row("bubble")?.querySelector(".bubble-fold");
       // Act / Assert
       expect(bubble).not.toBeNull();
       expect(window.getComputedStyle(bubble as Element).flexDirection).toBe("column");

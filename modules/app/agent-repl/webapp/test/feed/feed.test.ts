@@ -537,12 +537,12 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
     const { h, channel } = withTail(subagentRow("b1"));
     const { host } = mount(h);
     await settle();
-    const before = host.querySelector('[data-feed-row="b1"] .bubble');
+    const before = host.querySelector('[data-feed-row="b1"] .bubble-fold');
     // Act
     channel.push(push(subagentRow("b1", { detached: true })));
     await settle();
     // Assert: the same element, so an open sub-feed survives the move.
-    expect(host.querySelector('[data-feed-row="b1"] .bubble')).toBe(before);
+    expect(host.querySelector('[data-feed-row="b1"] .bubble-fold')).toBe(before);
   });
 
   it.each(KINDS)("keeps %s's drawn head rather than tearing the feed down", async (_n, row) => {
@@ -554,7 +554,7 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
     channel.push(push(responseRow("b1")));
     await settle();
     // Assert: the bubble the reader was looking at is still there.
-    expect(host.querySelector('[data-feed-row="b1"] .bubble')).not.toBeNull();
+    expect(host.querySelector('[data-feed-row="b1"] .bubble-fold')).not.toBeNull();
   });
 });
 

@@ -684,12 +684,14 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     expect(sets.indexOf(guards[guards.length - 1])).toBe(sets.length - 1);
   });
 
-  // AND IT STACKS. The bubble wears `.bubble` for the card's fill, border and
-  // lift, and `.bubble` is a flex ROW -- so the head line and the whole
-  // sub-feed were laid out SIDE BY SIDE, half the bubble left empty under the
-  // head and every nested row squeezed into the other half. Photographed by
-  // the G49 playbook the first time a subagent bubble was opened in the real
-  // webview. jsdom resolves the cascade for this one, so it is asked here.
+  // AND IT STACKS. The bubble is now a `.tool-card` (owner ruling,
+  // 2026-09-14), and `.tool-card` sets no `display`, so `.tool-card.bubble-fold`
+  // states `display: flex; flex-direction: column` explicitly -- without it the
+  // head line and the whole sub-feed would fall back to default block flow
+  // rather than the pinned flex-column siblings the fold and reveal walk both
+  // rely on. The old `.bubble` flex-ROW failure this replaces (head and
+  // sub-feed side by side) was photographed by the G49 playbook. jsdom resolves
+  // the cascade for this one, so it is asked here.
   it("lays the sub-feed BENEATH the head rather than beside it", () => {
     // Arrange
     const remove = installStylesheet();
@@ -727,6 +729,80 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     await settle();
     // Assert
     expect(panelOf(bubble).hidden).toBe(true);
+  });
+});
+
+// THE DETACHED/SUBAGENT BUBBLE IS FRAMED AS A NORMAL TOOL-CALL CARD (owner
+// ruling, 2026-09-14): the outer wears `.tool-card` so it takes the ordinary
+// grey card chrome and the shared track cap, NOT the old full-width async
+// spread, teal wash, or dashed fold separator. These replace the assertions
+// that used to pin the `.async-fold`/`.bubble` async treatment.
+describe("mountBubble: the tool-card framing", () => {
+  it("frames the outer as a tool card, not the old async fold", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    // Assert
+    expect(bubble.element.classList.contains("tool-card")).toBe(true);
+    expect(bubble.element.classList.contains("bubble-fold")).toBe(true);
+  });
+
+  it("drops the async-fold class the old spread was keyed on", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    // Assert
+    expect(bubble.element.classList.contains("async-fold")).toBe(false);
+  });
+
+  it("drops the prompt-bubble class so it takes no `.bubble` lift", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    // Assert
+    expect(bubble.element.classList.contains("bubble")).toBe(false);
+  });
+
+  it("draws the collapsed head as a tool-call head row, not an async pill", () => {
+    // Arrange / Act
+    const { bubble } = mount(subagentRow("b1"));
+    const head = bubble.element.querySelector(".bubble-head");
+    // Assert
+    expect(head?.classList.contains("tool-head")).toBe(true);
+    expect(head?.classList.contains("async-ticker")).toBe(false);
+  });
+
+  it("takes the shared track cap rather than the full feed-area width", () => {
+    // Arrange: the cap rule is `.feed-item > .tool-card`, so the outer must sit
+    // as a direct child of a feed item exactly as the feed mounts it.
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      const item = document.createElement("article");
+      item.className = "feed-item";
+      item.append(bubble.element);
+      document.body.replaceChildren(item);
+      // Act / Assert: the shared column cap, never 100%.
+      expect(window.getComputedStyle(bubble.element).maxWidth).toBe(
+        "var(--agent-bubble-cap)",
+      );
+    } finally {
+      remove();
+    }
+  });
+
+  it("drops the dashed fold separator the async fold drew above it", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: the `.async-fold` dashed top rule no longer reaches this
+      // element -- it is a tool card now. (jsdom cannot parse the `.tool-card`
+      // `border: 1px solid var(--…)` shorthand into its longhands, so the
+      // positive `solid` is asserted in the real webview; what is checkable
+      // here is that the dashed separator is gone.)
+      expect(window.getComputedStyle(bubble.element).borderTopStyle).not.toBe("dashed");
+    } finally {
+      remove();
+    }
   });
 });
 

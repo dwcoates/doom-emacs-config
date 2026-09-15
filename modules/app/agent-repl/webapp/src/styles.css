@@ -1606,16 +1606,13 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
 }
-/* The async wash: a skill handoff and a spawned subagent are each a whole
-   conversation of their own, not one more file read, and the one shared teal
-   makes them findable in a long feed of grey tool cards. Depth no longer
-   tells the two apart — the card's own content does. */
-.tool-card.tool-skill,
-.tool-card.tool-agent,
-.tool-card.tool-task {
-  background: var(--async-card);
-  border-color: var(--async-border);
-}
+/* RETIRED (owner ruling, 2026-09-14): the shared async teal wash the skill,
+   agent and task cards used to wear (`background: var(--async-card);
+   border-color: var(--async-border)`). Detached/async work now reads as an
+   ordinary grey tool card — a skill handoff and a spawned subagent are drawn
+   with the same chrome as any other call, findable by their own content rather
+   than by a special color. The `--async-card`/`--async-border` tokens survive
+   only for the in-bubble catalog badges and the merge amber's siblings. */
 /* The Merge status card borrows the tool-card shell but wears its own amber
    wash (see --merge-card): a merge-failure remediation turn, distinct from the
    teal async cards above and the grey tool cards. */
@@ -1734,13 +1731,13 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border-color: var(--merge-border);
   color: var(--merge-border);
 }
-/* The child-feed panel is itself a bubble laid on the main-GUI background,
-   NOT on the card's async teal: the nested response bubbles (assistant
-   purple, user blue, tool grey) sit on --bg exactly as they do at the top
-   feed level, so none of them clashes with the teal beneath the card. Its
-   padding mirrors the card's own (0.5rem 0.75rem), so the nested bubbles
-   keep the same border distance they had to the card — now to this wrapper
-   — and shrink commensurately to make room for it. */
+/* The child-feed panel is itself a box laid on the main-GUI background, inside
+   the bubble's grey tool card: the nested response bubbles (assistant purple,
+   user blue, tool grey) sit on --bg exactly as they do at the top feed level,
+   so the interior reads as the ordinary recursive feed rather than as anything
+   special. Its padding mirrors the card's own (0.5rem 0.75rem), so the nested
+   rows keep the same border distance they had to the card — now to this
+   wrapper — and shrink commensurately to make room for it. */
 .agent-panel {
   display: flex;
   flex-direction: column;
@@ -1763,24 +1760,25 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .agent-panel[hidden] { display: none; }
 /* A SUB-FEED BUBBLE STACKS: the collapsed head line, and the sub-feed beneath
    it. `bubble.ts` appends exactly those two children in that order, and every
-   other rule here is written for that shape -- `.async-fold`'s dashed rule
-   above the fold, the panel's own padding mirroring the card's, the fixed
-   panel's N-line cap and scroller.
-   IT DID NOT STACK. The element wears `.bubble` for the card's fill, border
-   and lift, and `.bubble` is a flex ROW -- that row exists to put a bubble's
-   body beside the turn's time stamp -- so the head pill and the whole sub-feed
-   became SIDE-BY-SIDE columns: half the bubble's width left empty under the
-   head, and every nested row squeezed into the other half. Photographed by the
-   G49 playbook the first time a subagent bubble was opened in the real
-   webview.
-   The panel stretches and the ticker does not, because the ticker is a pill
-   that hugs its own text (see .async-ticker) and a stretched one would draw
-   a full-width bar. */
-.async-fold.bubble {
+   other rule here is written for that shape -- the panel's own padding
+   mirroring the card's, the fixed panel's N-line cap and scroller.
+   THE OUTER IS A `.tool-card` (owner ruling, 2026-09-14): it takes the card's
+   `--card` fill, 1px border and radius from `.tool-card`, and the `--agent-
+   bubble-cap` track width from the shared `.feed-item > .tool-card` rule --
+   NOT the old full-width async spread and NOT the `.bubble` lift. `.tool-card`
+   does not set `display`, so the column stacking is stated here.
+   IT MUST STACK. Without an explicit `display: flex; flex-direction: column`,
+   the head line and the whole sub-feed would fall to the card's default block
+   flow -- which happens to stack, but the reader-toggled fold and the reveal
+   walk both depend on the head and panel being flex siblings that stretch to
+   the card's width, so the shape is pinned rather than left to the default.
+   The G49 playbook photographed the old `.bubble` flex-ROW failure that this
+   replaces (head and sub-feed laid out side by side). */
+.tool-card.bubble-fold {
+  display: flex;
   flex-direction: column;
   align-items: stretch;
 }
-.async-fold.bubble > .async-ticker { align-self: flex-start; }
 /* The fixed panel a teal card's fold drops (see .fold-fixed above), capped at
    the SAME visible-line budget a response or prompt bubble stops at
    (--feed-cap-lines) and measured in the shared default line box, which is the
@@ -5140,16 +5138,18 @@ body.draining #composer-input::placeholder {
   font-size: 0.8rem;
 }
 /* WORK NESTED UNDER A SKILL. The slot is the feed core's (a direct child of the
-   row chrome), and this is the register it renders in: the teal card's
-   always-open nested section — no toggle, the SHARED line budget, and SCROLLED
-   rather than clipped, exactly the three guarantees AGENTS.md states for the
-   async teal wash. Keyed off the row's own `data-unit`, so the card body and
-   the slot cannot disagree about which row they belong to. */
+   row chrome), and this is the register it renders in: the card's always-open
+   nested section — no toggle, the SHARED line budget, and SCROLLED rather than
+   clipped. Keyed off the row's own `data-unit`, so the card body and the slot
+   cannot disagree about which row they belong to. The rail takes the neutral
+   `--border` now that the async teal is retired (owner ruling, 2026-09-14): a
+   skill card is an ordinary grey tool card, so its nested work is set off by
+   the same neutral rule every other nesting slot uses. */
 [data-row-kind="activity"][data-unit="skill"] > [data-nest] {
   --cap-lines: var(--feed-cap-lines);
   overflow-y: auto;
   max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
-  border-left: 2px solid var(--async-card);
+  border-left: 2px solid var(--border);
   padding-left: 0.5rem;
   margin-top: 0.35rem;
 }
