@@ -53,6 +53,7 @@ var migrations = []migration{
 	{To: 7, Name: "sessions_selected_config_dir", DDL: sessionsSelectedConfigDirDDL},
 	{To: 8, Name: "workspaces_spawned_shim_pid", DDL: spawnedShimPidDDL},
 	{To: 9, Name: "workspaces_last_activity_at", DDL: lastActivityAtDDL},
+	{To: 10, Name: "feed_text_scale", DDL: feedTextScaleDDL},
 }
 
 // lastActivityAtDDL adds when a workspace LAST DID REAL WORK — the roster
