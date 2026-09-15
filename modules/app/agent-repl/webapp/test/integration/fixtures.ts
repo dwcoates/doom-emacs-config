@@ -2229,21 +2229,27 @@ function panelValue(arm: CommandPanelArm | FeedCommandPanelArm): PanelArm {
       return {
         case: "context",
         value: {
-          header: "context usage",
-          categories: [{ label: "system prompt", figure: "12.0k", color: "blue" }],
-          memoryFiles: [{ label: "CLAUDE.md", figure: "3.1k" }],
-          mcpTools: [{ label: "weather", figure: "900" }],
-          deferredBuiltinTools: [{ label: "WebFetch", figure: "120" }],
-          systemTools: [{ label: "Bash", figure: "400" }],
-          systemPromptSections: [{ label: "identity", figure: "1.2k" }],
-          agents: [{ label: "reviewer", figure: "800" }],
-          slashCommands: { line: "42 commands, 6.1k" },
-          skills: { line: "8 skills, 2.2k", skills: [{ label: "graphify", figure: "700" }] },
-          messageBreakdown: {
-            planes: [{ label: "prompts", figure: "8.0k" }],
-            toolCalls: [{ label: "Bash", figure: "22.0k" }],
-            attachments: [{ label: "images", figure: "1.0k" }],
-          },
+          header: { used: "142.3k", total: "200k", percent: 71, model: "claude-opus-5" },
+          sections: [
+            {
+              label: "System prompt",
+              figure: "12.0k · 6%",
+              items: [{ label: "identity", figure: "1.2k" }],
+            },
+            {
+              label: "Messages",
+              figure: "38.1k · 19%",
+              items: [{ label: "assistant messages", figure: "8.0k" }],
+              sections: [
+                {
+                  label: "tool calls",
+                  items: [{ label: "Bash", figure: "call 3.4k · result 22.0k" }],
+                },
+                { label: "attachments", items: [{ label: "images", figure: "1.0k" }] },
+              ],
+            },
+            { label: "Free space", figure: "57.7k · 29%" },
+          ],
           autoCompactLine: "auto-compact at 90%",
         },
       };
