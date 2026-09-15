@@ -806,3 +806,60 @@ func TestTheReadPoolRefusesAWrite(t *testing.T) {
 		})
 	}
 }
+
+// ---- the settle instant survives persistence and replay ----
+
+// A settled response's settle instant is CONVERSATION CONTENT the store carries
+// opaque inside the frame blob — it is never a column the store projects — so it
+// must read back byte-identical after a write → read round trip. This is the
+// invariant behind the response bubble's "N ago" corner: the daemon stamps the
+// corner from the terminal's carried settled_at, and a re-resolved feed (a
+// workspace re-opened, the daemon restarted, a page reconnected) reads the frame
+// back from here. Were the instant lost in persistence, every re-resolve would
+// fall back to the daemon's compose-time Now() and the age would reset to
+// "seconds ago" for a response that settled long before — the bug this locks
+// against. The store persists the whole StoreEntry proto, so the field survives
+// for free; this test is the guard that it stays that way.
+func TestASettledResponsesSettleInstantSurvivesReplay(t *testing.T) {
+	// Arrange: a settled response carrying a real settle instant, written once.
+	d, _ := newStore(t)
+	const settled = int64(1_700_000_000_000)
+	writeOK(t, d, pageEntry("w-settle", "u-settle", "agent-1",
+		frameItem(activityFrame("agent-1", "act-settle", proseSettledAt("done", settled)))))
+
+	// Act: replay the page, exactly as a re-resolved feed reads it back.
+	opened, err := d.OpenPage(ctx(), "agent-1", 1, nil)
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+
+	// Assert: the carried instant read back unchanged, so the daemon stamps it
+	// and never falls back to Now().
+	got := opened.Page.GetLines()[0].GetLine().GetAgentItem().GetAgentFrame().
+		GetUpdate().GetActivity().GetResponse().GetSuccess().GetSettledAt().GetAtMs()
+	if got != settled {
+		t.Fatalf("replayed settled_at = %d, want the original settle instant %d", got, settled)
+	}
+}
+
+// The genuine "no instant observed" case must read back UNSET, not defaulted to
+// some instant: it is the ONE case the daemon's Now() fallback legitimately
+// serves, and defaulting it here would hide a producer that carried none.
+func TestAResponseWithNoSettleInstantReadsBackUnset(t *testing.T) {
+	// Arrange: a settled response the producer carried no instant for.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w-none", "u-none", "agent-1",
+		frameItem(activityFrame("agent-1", "act-none", proseSettledAt("done", 0)))))
+
+	// Act.
+	opened, err := d.OpenPage(ctx(), "agent-1", 1, nil)
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+
+	// Assert: settled_at reads back unset, leaving Now() as the genuine last resort.
+	if got := opened.Page.GetLines()[0].GetLine().GetAgentItem().GetAgentFrame().
+		GetUpdate().GetActivity().GetResponse().GetSuccess().GetSettledAt(); got != nil {
+		t.Fatalf("replayed settled_at = %v, want unset", got)
+	}
+}
