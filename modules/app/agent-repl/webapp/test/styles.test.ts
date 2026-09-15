@@ -132,6 +132,26 @@ const SCROLL_BOXES: readonly string[] = [
   ".fold-fixed > .agent-panel",
 ];
 
+/**
+ * The boxes that CLIP while collapsed (owner ruling, 2026-09-15: "remove the
+ * scroll from the collapsed bubble views"). Every click-to-expand capped section
+ * and the response/prompt bubble's scroll box: no inner scroll while collapsed,
+ * scroll revealed only once expanded. The nested subagent panel
+ * (`.fold-fixed > .agent-panel`) is deliberately absent — it stays a fixed,
+ * scrollable window, outside the collapse/expand model.
+ */
+const COLLAPSED_BOXES: readonly string[] = [
+  ".bubble > .bubble-scroll",
+  ".tool-input",
+  ".tool-output",
+  ".tool-read-output",
+  ".bash-input",
+  ".bash-output",
+  ".diff-output",
+  ".skill-input",
+  ".skill-content",
+];
+
 describe("the bubble geometry: the two caps", () => {
   it("widens the agent column cap by exactly ten percent, 75% to 82.5%", () => {
     // Arrange / Act
@@ -260,10 +280,23 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
 });
 
 describe("the bubble geometry: a scrollbar that is there whenever it can scroll", () => {
-  it.each(SCROLL_BOXES)("keeps %s on overflow-y: auto, never scroll", (selector) => {
-    // Arrange / Act
+  it.each(COLLAPSED_BOXES)("clips %s while collapsed, so it shows no inner scroll", (selector) => {
+    // Arrange / Act — owner ruling, 2026-09-15: a collapsed section/bubble has
+    // no inner scrollbar; the first overflow-y rule on the selector is the clip.
     const capping = rulesOf(stylesheet).find(
       (rule) => rule.selectors.includes(selector) && /overflow-y/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(capping?.declarations).toMatch(/overflow-y:\s*hidden\s*;/);
+  });
+
+  it("keeps the nested subagent panel scrollable, outside the collapse model", () => {
+    // Arrange / Act — the fixed subagent activity panel is not click-to-expand,
+    // so it stays a scrollable N-line window rather than a collapsed clip.
+    const capping = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".fold-fixed > .agent-panel") && /overflow-y/.test(rule.declarations),
     );
 
     // Assert
@@ -303,6 +336,83 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
   it("never parks a dead channel on a box that fits, which overflow-y: scroll would", () => {
     // Arrange / Act / Assert
     expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/overflow-y:\s*scroll/);
+  });
+});
+
+/**
+ * THE WIDTH INVARIANT (owner ruling, 2026-09-15).
+ *
+ * A bubble whose content WRAPS must render AT its max-width cap, not shrink below
+ * it. `response.ts` stamps `bubble-fill-cap` on a bubble that drew a metaprompt
+ * tree (`white-space: pre` content pre-wrapped to the cap's column budget); the
+ * stylesheet then pins its width to the cap so `fit-content` can no longer
+ * collapse it to its longest wrapped line. The fill width MUST equal the two
+ * bubble max-width caps, guarded here against drift.
+ */
+describe("the width invariant: a wrapped bubble fills its cap", () => {
+  it("pins a fill-cap bubble's width to the cap fraction", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.bubble-fill-cap");
+
+    // Assert — 77%, the same fraction the two bubble max-width caps use.
+    expect(rule).toMatch(/width:\s*77%/);
+  });
+
+  it("fills to exactly the bubble max-width caps, so the two cannot drift apart", () => {
+    // Arrange / Act — the assistant and prompt caps, and the fill width.
+    const assistantMax = /max-width:\s*(\d+(?:\.\d+)?%)/.exec(declarationsOf(".bubble.assistant") ?? "")?.[1];
+    const userMax = /max-width:\s*(\d+(?:\.\d+)?%)/.exec(declarationsOf(".bubble.user") ?? "")?.[1];
+    const fillWidth = /width:\s*(\d+(?:\.\d+)?%)/.exec(declarationsOf(".bubble.bubble-fill-cap") ?? "")?.[1];
+
+    // Assert
+    expect(fillWidth).toBe(assistantMax);
+    expect(fillWidth).toBe(userMax);
+  });
+});
+
+/**
+ * THE COLLAPSE / EXPAND HEIGHT MODEL (owner ruling, 2026-09-15).
+ *
+ * "remove the scroll from the collapsed bubble views. clicking bubbles to expand
+ * them ... will only expand to a max size (half the height of the window), and
+ * only when expanded ... is the scroll bar/scrollability revealed." So a
+ * collapsed box clips (asserted in the scrollbar suite above), and `.expanded`
+ * grows to at most 50vh and only then turns overflow back on.
+ */
+describe("the collapse/expand height model", () => {
+  it("expands a capped section to at most half the viewport height", () => {
+    // Arrange / Act
+    const expanded = declarationsOf(".expanded");
+
+    // Assert
+    expect(expanded).toMatch(/max-height:\s*50vh/);
+  });
+
+  it("reveals scrolling only once expanded, via overflow-y auto", () => {
+    // Arrange / Act
+    const expanded = declarationsOf(".expanded");
+
+    // Assert
+    expect(expanded).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("retires the old expand-to-full-length model, which never revealed a bar", () => {
+    // Arrange / Act
+    const expanded = declarationsOf(".expanded");
+
+    // Assert — no `max-height: none` and no `overflow-y: visible` on expand.
+    expect(expanded).not.toMatch(/max-height:\s*none/);
+    expect(expanded).not.toMatch(/overflow-y:\s*visible/);
+  });
+
+  it("caps an expanded response bubble at 50vh too, outranking its own cap", () => {
+    // Arrange / Act — the bumped-specificity variant that beats the bubble scroll
+    // box's own (0,2,0) cap and clip rules.
+    const rule = declarationsOf(".bubble > .bubble-scroll.expanded");
+
+    // Assert
+    expect(rule).toMatch(/max-height:\s*50vh/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
   });
 });
 

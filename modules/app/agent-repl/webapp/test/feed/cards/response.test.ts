@@ -17,6 +17,7 @@ import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
+  FILL_CAP_CLASS,
   REVEALED_ATTRIBUTE,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
@@ -29,6 +30,7 @@ import { DEFAULT_TREE_COLS, visibleWidth } from "../../../src/metaprompt-tree.js
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -684,6 +686,77 @@ describe("the wrapped tree a settled response carries", () => {
     );
   });
 
+  it("marks a settled tree bubble to fill its width cap, so it does not shrink narrow", () => {
+    // Arrange / Act — a settled response that drew a metaprompt tree.
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    // Assert — the bubble is stamped to fill the cap (the stylesheet turns the
+    // class into `width: <cap>`), so `fit-content` cannot collapse the wrapped
+    // tree below its 77% cap.
+    expect(el.querySelector(".mp-tree")).not.toBeNull();
+    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+  });
+
+  it("leaves a plain-prose bubble at fit-content, so a short answer may still shrink", () => {
+    // Arrange / Act — prose with no tree.
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
+      rowContext(),
+    );
+    // Assert — no fill-cap marker: the invariant fills only content that WRAPS.
+    expect(el.querySelector(".mp-tree")).toBeNull();
+    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(false);
+  });
+
+  it("marks a cut-short (error) bubble that drew a tree to fill the cap too", () => {
+    // Arrange / Act — the error arm also paints through paintWhole.
+    const el = drawFeedResponse(
+      response({ result: { case: "error", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(".mp-tree")).not.toBeNull();
+    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+  });
+
+  it("marks an arriving (update) tree bubble to fill the cap as the tree streams in", () => {
+    // Arrange — no animation frames, so the arriving draw paints the whole prose
+    // at once (the same trick the streaming/settled-identical test uses).
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    // Act
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(".mp-tree")).not.toBeNull();
+    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+  });
+
+  it("resolves a fill-cap tree bubble's width to the cap, beating fit-content in the cascade", () => {
+    // Arrange — the real stylesheet installed, a settled tree bubble attached so
+    // getComputedStyle resolves the cascade against it.
+    const teardown = installStylesheet();
+    try {
+      const el = drawFeedResponse(
+        response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+        rowContext(),
+      );
+      document.body.appendChild(el);
+      // Act — the winning `width` (a literal 77%, so it resolves as-is).
+      const width = cascadedValue(el, "width");
+      // Assert — the cap, never the base rule's `fit-content`.
+      expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+      expect(width).toBe("77%");
+      expect(width).not.toBe("fit-content");
+      el.remove();
+    } finally {
+      teardown();
+    }
+  });
+
   it("subscribes a resize observer to the bubble body and tears it down with it", () => {
     // Arrange
     const el = drawFeedResponse(
@@ -822,6 +895,21 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     // Assert — cap 701.25px, insets 20px (body padding), 681.25px content,
     // floor(/8)=85: the cap-based count, NOT the detached fallback default.
     expect(cols).toBe(85);
+    expect(cols).not.toBe(DEFAULT_TREE_COLS);
+  });
+
+  it("resolves the TRUE 77%-of-feed cap at synchronous first paint (detached), never the default", () => {
+    // Arrange — the real cap fraction the stylesheet uses (77%), staged against
+    // an attached feed of known content width while the bubble is still DETACHED
+    // (the shape at first paint, before feed-view attaches the row). This is the
+    // Part A(a) regression guard: the percentage cap must resolve to feed-based
+    // px, not fall back to DEFAULT_TREE_COLS.
+    const body = stageDetached({ maxWidth: "77%", feedContentWidth: 1000, bodyPad: 10 });
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — cap 770px, insets 20px (body padding) → 750px content,
+    // floor(750/8)=93: the feed-based count, NOT the detached fallback default.
+    expect(cols).toBe(93);
     expect(cols).not.toBe(DEFAULT_TREE_COLS);
   });
 
