@@ -5693,6 +5693,61 @@ body.draining #composer-input::placeholder {
   color: var(--thinking);
   font-size: 0.8rem;
 }
+
+/* ---- feed asks: the question batch as TABS (src/feed/asks/question.ts) ---
+   A batch is drawn one question per TAB: a wrapping strip of tab buttons, then
+   one visible `.q-panel` at a time. Answering a question auto-advances to the
+   next unanswered tab; the strip marks answered tabs with a check. */
+.q-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
+  margin-bottom: 0.55em;
+}
+.q-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--q-opt-bg);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.2em 0.75em;
+}
+.q-tab:hover { border-color: var(--accent); }
+/* The active tab is the panel on show: accent ring, accent text. */
+.q-tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+/* An answered tab wears a green check; a pending tab's marker is empty. */
+.q-tab.answered .q-tab-marker { color: var(--ok); }
+.q-tab-marker {
+  width: 0.9em;
+  text-align: center;
+  font-weight: 700;
+}
+/* Only the active panel shows; a class rule so it outranks nothing that would
+   force it visible, and the UA `[hidden]` rule keeps the rest collapsed. */
+.q-panel[hidden] { display: none; }
+/* The multi-select's commit button: it advances the tab, so it reads as a
+   forward action rather than the batch's final submit. */
+.q-confirm {
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  margin-top: 0.45em;
+  border: 1px solid var(--border);
+  background: var(--q-opt-bg);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 0.2em 0.75em;
+}
+.q-confirm:hover { border-color: var(--accent); }
 .q-verdicts {
   font-size: 0.85rem;
 }
