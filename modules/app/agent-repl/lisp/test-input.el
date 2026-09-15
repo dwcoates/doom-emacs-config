@@ -234,6 +234,106 @@ fake would not exercise them."
     ;; Assert
     (should (equal (agent-repl-test-input--composer-text) "my draft"))))
 
+;;;; ---- The optimistic clear (owner ruling) ----
+
+(ert-deftest agent-repl-input-a-composer-send-clears-before-the-daemon-answers ()
+  "A from-buffer submit erases the composer at dispatch, not on the ack."
+  (agent-repl-test-input--with
+    ;; Arrange -- the wire records the request but NEVER answers.
+    (agent-repl-test-input--type "my draft")
+    (cl-letf (((symbol-function 'agent-repl-rpc-submit-prompt)
+               (lambda (_conn request &rest _keys)
+                 (push request agent-repl-test-input--submitted))))
+      ;; Act
+      (agent-repl--send :user-sent)
+      ;; Assert -- cleared even though no callback ever fired.
+      (should (equal (agent-repl-test-input--composer-text) "")))))
+
+(ert-deftest agent-repl-input-a-composer-send-pushes-history-before-the-daemon-answers ()
+  "A from-buffer submit records RAW at dispatch, not on the ack."
+  (agent-repl-test-input--with
+    ;; Arrange -- capture pushes; the wire never answers.
+    (agent-repl-test-input--type "my draft")
+    (let ((pushed nil))
+      (cl-letf (((symbol-function 'agent-repl--history-push)
+                 (lambda (&optional text) (push text pushed)))
+                ((symbol-function 'agent-repl-rpc-submit-prompt)
+                 (lambda (_conn request &rest _keys)
+                   (push request agent-repl-test-input--submitted))))
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert -- RAW is on the ring before any response.
+      (should (equal pushed '("my draft"))))))
+
+(ert-deftest agent-repl-input-a-composer-send-success-ack-does-not-double-push-history ()
+  "The optimistic clear already recorded RAW, so the success ack must not re-push."
+  (agent-repl-test-input--with
+    ;; Arrange -- the default answer is a minted-turn success.
+    (agent-repl-test-input--type "my draft")
+    (let ((pushed nil))
+      (cl-letf (((symbol-function 'agent-repl--history-push)
+                 (lambda (&optional text) (push text pushed))))
+        ;; Act -- dispatch AND the synchronous success ack both run.
+        (agent-repl--send :user-sent))
+      ;; Assert -- exactly one push across the whole submission.
+      (should (equal pushed '("my draft"))))))
+
+(ert-deftest agent-repl-input-a-composer-send-success-ack-does-not-error-on-empty-composer ()
+  "The success ack runs against an already-emptied composer without erroring."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act -- dispatch clears; the synchronous success ack follows.
+    (agent-repl--send :user-sent)
+    ;; Assert -- still empty, no error was raised reaching this point.
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-input-a-composer-send-transport-failure-queues-said-and-raw ()
+  "The erased draft is not lost: the outage queue carries said+raw for re-drive."
+  (agent-repl-test-input--with
+    ;; Arrange -- the wire fails.
+    (agent-repl-test-input--type "my draft")
+    (setq agent-repl-test-input--answer
+          (list :failure (list :kind :transport :message "no daemon")))
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert -- one queued entry carrying the full said and the raw text.
+    (should (equal (length agent-repl-test-input--queued) 1))
+    (pcase-let ((`(,_ws ,said ,_origin ,raw ,_key)
+                 (car agent-repl-test-input--queued)))
+      (should (equal raw "my draft"))
+      (should (equal (plist-get (plist-get (car (plist-get (plist-get said :content) :blocks))
+                                           :value)
+                                :text)
+                     "my draft")))))
+
+(ert-deftest agent-repl-input-a-canned-send-does-not-erase-the-draft-before-the-ack ()
+  "A canned command never clears the composer optimistically (audit-3 #51 guard)."
+  (agent-repl-test-input--with
+    ;; Arrange -- an unrelated draft; the wire never answers.
+    (agent-repl-test-input--type "my draft")
+    (cl-letf (((symbol-function 'agent-repl-rpc-submit-prompt)
+               (lambda (_conn request &rest _keys)
+                 (push request agent-repl-test-input--submitted))))
+      ;; Act
+      (agent-repl--send :command-update-pr "update the pr")
+      ;; Assert -- the draft survives dispatch untouched.
+      (should (equal (agent-repl-test-input--composer-text) "my draft")))))
+
+(ert-deftest agent-repl-input-a-whitespace-only-send-does-not-clear-or-record ()
+  "An empty submission clears nothing and records nothing -- there was no prompt."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "   \n\t ")
+    (let ((pushed nil))
+      (cl-letf (((symbol-function 'agent-repl--history-push)
+                 (lambda (&optional text) (push text pushed))))
+        ;; Act
+        (should-not (agent-repl--send :user-sent)))
+      ;; Assert -- composer intact, nothing pushed.
+      (should (equal (agent-repl-test-input--composer-text) "   \n\t "))
+      (should (null pushed)))))
+
 ;;;; ---- The uuid ----
 
 (ert-deftest agent-repl-input-uuid-has-the-rfc-4122-shape ()
@@ -620,14 +720,16 @@ input clears."
       (agent-repl--send :user-sent)
       (should-not ran))))
 
-(ert-deftest agent-repl-input-duplicate-submission-keeps-the-text ()
-  "The key was already accepted, but nothing here landed: the text stays."
+(ert-deftest agent-repl-input-duplicate-submission-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch; the RAW text is
+recoverable from the history ring even though this refusal is not queued
+(owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :duplicate-submission :value nil)))))
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-duplicate-submission-holds-nothing ()
   "A duplicate key is an ANSWER, not an outage: nothing is queued for resend."
@@ -657,14 +759,16 @@ input clears."
     (agent-repl--send :user-sent)
     (should-not agent-repl-test-input--refusals)))
 
-(ert-deftest agent-repl-input-bubble-refused-keeps-the-text ()
-  "The shim refused this agent; nothing landed, so the draft stays put."
+(ert-deftest agent-repl-input-bubble-refused-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch; the RAW text is
+recoverable from the history ring even though this refusal is not queued
+(owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :not-deliverable :value nil)))))))
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-bubble-refused-holds-nothing ()
   "A re-drive would meet the same refusal, so nothing is queued."
@@ -725,14 +829,16 @@ input clears."
     (should-not (seq-some (lambda (text) (string-match-p "()" text))
                           agent-repl-test-input--messages))))
 
-(ert-deftest agent-repl-input-merging-error-keeps-the-text ()
-  "The merging refusal KEEPS the text: the user resubmits after the merge."
+(ert-deftest agent-repl-input-merging-error-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch; the RAW text is
+recoverable from the history ring, so the user resubmits after the merge from
+history-prev (owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-merging-error-flashes-the-refusal ()
   "The merging refusal draws its own mode-line flash."
@@ -768,8 +874,10 @@ input clears."
     (should (equal (nth 1 (car agent-repl-test-input--refusals))
                    '(:arm :transferring-away :value (:address "127.0.0.1:9100"))))))
 
-(ert-deftest agent-repl-input-transferring-away-keeps-the-text ()
-  "Nothing says the prompt landed, so the user keeps seeing what they wrote."
+(ert-deftest agent-repl-input-transferring-away-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch, before this
+handover refusal; the handover re-drives the prompt itself, and the RAW text
+also sits in the history ring (owner ruling overrides the old contract)."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer
@@ -779,7 +887,7 @@ input clears."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-transferring-away-draws-no-refusal-message ()
   "The one rollout that is supposed to be invisible must stay invisible."
@@ -835,8 +943,10 @@ input clears."
     (should (equal (nth 1 (car agent-repl-test-input--refusals))
                    '(:arm :not-yet-adopted :value nil)))))
 
-(ert-deftest agent-repl-input-not-yet-adopted-keeps-the-text ()
-  "Nothing is wrong and nothing landed: the text stays in the composer."
+(ert-deftest agent-repl-input-not-yet-adopted-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch, before this
+handover refusal; the prompt is held for re-drive and also sits in the
+history ring (owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer
@@ -845,7 +955,7 @@ input clears."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-not-yet-adopted-holds-the-prompt ()
   "Held until the successor owns the workspace, then re-driven."
@@ -872,8 +982,10 @@ input clears."
     (should-not (seq-some (lambda (text) (string-match-p "refused" text))
                           agent-repl-test-input--messages))))
 
-(ert-deftest agent-repl-input-no-session-error-keeps-the-text ()
-  "A non-handover refusal keeps its current treatment: the text is kept."
+(ert-deftest agent-repl-input-no-session-error-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch; the RAW text is
+recoverable from the history ring for a resubmit once the session is up
+(owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer
@@ -882,7 +994,7 @@ input clears."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-no-session-error-routes-to-no-handover ()
   "Only the two handover arms reach host.el; every other arm is a refusal."
@@ -921,13 +1033,15 @@ input clears."
     (should (seq-some (lambda (text) (string-match-p "feed-undecodable" text))
                       agent-repl-test-input--messages))))
 
-(ert-deftest agent-repl-input-transport-failure-keeps-the-text ()
-  "Nobody answered, so nothing is known: the composer keeps its text."
+(ert-deftest agent-repl-input-transport-failure-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch; nothing is lost
+because the outage queue holds said+raw AND the RAW text sits in the history
+ring (owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone")))
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-transport-failure-offers-to-the-queue ()
   "A transport failure hands the prompt to the hold queue for link-up."
@@ -1067,8 +1181,11 @@ input clears."
     (agent-repl--send :user-sent)
     (should-not (agent-repl-input-attachments "ws-one"))))
 
-(ert-deftest agent-repl-input-attachments-survive-a-refusal ()
-  "A refused submission may not silently discard an attachment."
+(ert-deftest agent-repl-input-a-from-buffer-refusal-clears-attachments ()
+  "A from-buffer submit clears its attachments optimistically at dispatch, the
+same instant it clears the composer text (owner ruling): the attachments rode
+into the submitted `said', so leaving them behind would re-send them on the
+next prompt.  This overrides the old survive-a-refusal contract."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
@@ -1076,7 +1193,7 @@ input clears."
       (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
     (agent-repl-test-input--type "look")
     (agent-repl--send :user-sent)
-    (should (equal (length (agent-repl-input-attachments "ws-one")) 1))))
+    (should (equal (length (agent-repl-input-attachments "ws-one")) 0))))
 
 (ert-deftest agent-repl-input-image-only-submission-carries-no-text-block ()
   "An image alone is a legitimate thing to say; an empty TextBlock is not."
@@ -1431,8 +1548,10 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
     ;; Assert
     (should-not agent-repl-test-input--queued)))
 
-(ert-deftest agent-repl-input-cold-gate-keeps-the-text ()
-  "Nothing landed, so the user keeps every word they wrote."
+(ert-deftest agent-repl-input-cold-gate-clears-the-composer ()
+  "A from-buffer submit was cleared optimistically at dispatch; the RAW text is
+recoverable from the history ring for a resubmit once the gate is answered
+(owner ruling overrides the old keep-the-text contract)."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer
@@ -1442,7 +1561,7 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+    (should (equal (agent-repl-test-input--composer-text) ""))))
 
 (ert-deftest agent-repl-input-no-session-flashes-the-bring-up-sentence ()
   "The daemon owns the bring-up, so the flash says so rather than refusing."
