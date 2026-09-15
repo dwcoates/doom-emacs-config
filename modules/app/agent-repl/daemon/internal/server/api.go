@@ -154,6 +154,13 @@ type Server interface {
 	// graceful rollout's stand-down announcement. It serves Emacs AND every
 	// webview alike (R3).
 	Daemon(push any)
+
+	// SeedFeedTextScale publishes the persisted feed text zoom onto the feed
+	// watch topic. Prime calls it at boot, after the surface is bound and
+	// before anything is served, so a feed opened before the first nudge shows
+	// the zoom the user last chose. It is the feed-zoom sibling of the drain
+	// controller's Republish.
+	SeedFeedTextScale(scale float64)
 	// Close ends every open stream.
 	Close() error
 }
@@ -246,6 +253,23 @@ type server struct {
 	// webview. A publish.Topic replays its latest value, so a webview that
 	// attaches mid-selection is handed the current selection at once.
 	selectionTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]
+
+	// feedTextScaleMu guards the feed text zoom below. It is SEPARATE from mu so
+	// an AdjustFeedTextScale that persists to the state store never blocks a
+	// feed watch, a host push, or any other rpc that takes mu.
+	feedTextScaleMu sync.Mutex
+	// feedTextScale is the single daemon-global feed text zoom multiplier — one
+	// value for every feed, not per-workspace, because "the feed text size" is
+	// one setting. Seeded from the state store at boot (SeedFeedTextScale) and
+	// moved by AdjustFeedTextScale, which persists each change. Guarded by
+	// feedTextScaleMu.
+	feedTextScale float64
+	// feedTextScaleTopic is the one global FeedTextScale push topic. EVERY open
+	// feed's watch subscribes to it — root and expanded sub-feeds alike, since
+	// all of them draw feed text — so a zoom change reaches every open webview.
+	// A publish.Topic replays its latest value, so a feed opened mid-session is
+	// handed the current zoom the instant it attaches.
+	feedTextScaleTopic publish.Topic[*frontendv1.FeedTextScale]
 }
 
 // hostIdentityDescribeBound is how long a session record may carry no host
@@ -330,6 +354,9 @@ func New(deps Deps) (Server, error) {
 		now:                 time.Now,
 		selections:          make(map[ids.WorkspaceID]*frontendv1.FeedId),
 		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedSelection]),
+		// The zoom starts at the persistence default; Prime seeds the stored
+		// value onto the topic before anything is served.
+		feedTextScale: wsm.DefaultFeedTextScale,
 	}
 
 	mux := http.NewServeMux()
