@@ -4675,15 +4675,39 @@ body.draining #composer-input::placeholder {
   font-weight: 700;
   padding-bottom: 0.35rem;
 }
-.context-categories > * { padding: 0.18rem 0; }
-.context-section-heading {
-  margin-top: 0.5rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  text-transform: lowercase;
+/* Only the percent is colored — on the pressure gradient minted in
+   `context-colors`, applied inline — so its hue reads as how full the window
+   is. The weight comes from `.context-header`; the color is the span's own. */
+.context-header-percent { font-weight: inherit; }
+
+/* Each top-level category is a collapsible fold, CLOSED by default, its label
+   and figure both painted the section's palette hue (inline) so the eye tracks
+   one to the other. The native disclosure marker is suppressed in favor of the
+   caret span, which flips with the open state. */
+.context-section { margin: 0; }
+.context-section-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.22rem 0;
+  cursor: pointer;
+  list-style: none;
 }
-.context-rollup { margin-top: 0.5rem; color: var(--muted); }
+.context-section-summary::-webkit-details-marker { display: none; }
+.context-section-summary::marker { content: ""; }
+.context-section-summary .panel-row-value { margin-left: auto; }
+.context-section-caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.8em;
+}
+/* A childless section is a bare row with no chevron: it aligns with the folds
+   above by the same left inset the caret would occupy. */
+.context-section-leaf { padding-left: calc(0.8em + 0.4rem); }
+/* The detail under a fold is indented and drawn UNCOLORED — the color belongs
+   to the top-level row, not the drill-down. */
+.context-section-body { padding-left: 1rem; }
+
 .context-auto-compact {
   margin-top: 0.6rem;
   padding-top: 0.35rem;
@@ -4691,20 +4715,6 @@ body.draining #composer-input::placeholder {
   color: var(--muted);
   font-size: 0.78rem;
 }
-/* The tool-call section: the longest and the least often wanted, so it ships
-   FOLDED with its own toggle and a caret that announces the state. */
-.context-fold { margin-top: 0.5rem; }
-.context-fold-toggle {
-  font: inherit;
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-.context-fold-caret { margin-right: 0.3rem; }
 
 /* ---- sidebar (src/sidebar) --------------------------------------------- */
 
