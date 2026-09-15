@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
 )
 
 // THE BUBBLE IS A FEED, and sync-vs-detached is PLACEMENT rather than a second
@@ -2161,5 +2162,98 @@ func TestABeatBeforeAnyOutputLeavesTheShellsLastProgressUnset(t *testing.T) {
 	// one out of a producer's stamp for a different fact.
 	if h.shellHead().GetLive().GetLastProgress() != nil {
 		t.Fatalf("last_progress = %v, want unset before the first byte", h.shellHead().GetLive().GetLastProgress())
+	}
+}
+
+// settleSubagentOnly delivers a SETTLED-ONLY success — the shape a replayed
+// history carries, with no start frame ever arriving — naming the created agent
+// on the success itself so the bubble is addressable.
+func (h *harness) settleSubagentOnly(unit string, created *conversationv1.AgentId, totals *conversationv1.AgentSubagentTotals, endedAtMs int64) {
+	h.t.Helper()
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Report:         &conversationv1.AgentSubagentReport{},
+				Totals:         totals,
+				SettledAt:      &conversationv1.AgentActivitySettledAt{AtMs: endedAtMs},
+			}},
+		}},
+	})
+}
+
+// TestASettledFullTotalCountsEveryTokenIncludingCacheReads locks the head's
+// figure to the RUN'S TOTAL — every token, cache reads included — rather than
+// the expensive-input-plus-output partial it once drew, which understated the
+// total by the cached context a subagent reads.
+func TestASettledFullTotalCountsEveryTokenIncludingCacheReads(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: a sync run's full billed breakdown, cache reads dominating.
+	h.settleSubagentOnly("spawn-1", created, &conversationv1.AgentSubagentTotals{
+		Usage: &conversationv1.AgentSubagentTotals_Full{Full: &conversationv1.TokenUsage{
+			InputHits:    &conversationv1.TokenCacheHits{Read: 470_000},
+			InputMisses:  &conversationv1.TokenCacheMisses{Written: 3_000, Unwritten: 1_000},
+			OutputTokens: 1_000,
+		}},
+	}, 9_000)
+
+	// Assert: 470k + 3k + 1k + 1k = 475k, never the 5k the old sum drew.
+	want := figures.Tokens(475_000) + " tok"
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != want {
+		t.Fatalf("tokens = %q, want %q (the run's total, cache reads included)", got, want)
+	}
+}
+
+// TestASettledOnlyReplayReconstructsTheClockFromItsDuration locks the fix for
+// the absurd clock: a settled bubble delivered with no start frame reconstructs
+// its start as end − duration, so the settled clock shows the run's real span
+// rather than the whole age of the epoch.
+func TestASettledOnlyReplayReconstructsTheClockFromItsDuration(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: a settled-only delivery whose totals state the run took 540s.
+	const endedAtMs, durationMs = int64(1_700_000_009_000), uint64(540_000)
+	h.settleSubagentOnly("spawn-1", created, &conversationv1.AgentSubagentTotals{
+		DurationMs: durationMs,
+	}, endedAtMs)
+
+	// Assert: start = end − duration, never zero.
+	got := bubbleOf(h.bubbleRow("spawn-1", created)).GetRuntime().GetStartedAtMs()
+	if got != endedAtMs-int64(durationMs) {
+		t.Fatalf("started_at_ms = %d, want end − duration %d (never the epoch)", got, endedAtMs-int64(durationMs))
+	}
+}
+
+// TestALiveSpawnWithNoStartInstantCountsFromFirstObserved locks the live-path
+// fallback: a start that named no instant leaves the clock at zero, so the
+// bubble is stamped with the first-observed instant rather than counting up
+// from the epoch.
+func TestALiveSpawnWithNoStartInstantCountsFromFirstObserved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: a start that names the agent but carries no started_at instant.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+			}},
+		}},
+	})
+
+	// Assert: the first-observed instant (the injected clock), never zero.
+	got := bubbleOf(h.bubbleRow("spawn-1", created)).GetRuntime().GetStartedAtMs()
+	if got != h.nowMs {
+		t.Fatalf("started_at_ms = %d, want the first-observed instant %d (never zero)", got, h.nowMs)
 	}
 }

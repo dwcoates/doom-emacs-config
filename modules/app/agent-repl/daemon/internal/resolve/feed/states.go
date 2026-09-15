@@ -287,6 +287,22 @@ type subagentState struct {
 	created *conversationv1.AgentId
 	// bubble is the head as last drawn.
 	bubble *frontendv1.FeedSubagent
+	// firstObservedMs is the daemon-clock instant this bubble was FIRST
+	// composed, kept only as the LIVE clock's fallback when no authoritative
+	// start has arrived. It mirrors shellState.firstObservedMs and exists for
+	// the same reason: two producers write one spawn under one key (the shim's
+	// stream and the sidecar's file tail), so a reconnect or replay can deliver
+	// an update BEFORE the re-announced start. Drawn from a zero start that
+	// window stamped the runtime at the epoch and the live clock counted up from
+	// it (the reported ~492762h). Stamped ONCE, off the daemon clock, so the
+	// clock counts from a sane instant until the real start lands and takes over.
+	firstObservedMs int64
+	// durationMs is the settled run's own wall-clock span, from
+	// AgentSubagentTotals.duration_ms. It reconstructs a SETTLED-ONLY bubble's
+	// start (end − duration) when no start frame was ever delivered — a replayed
+	// history is exactly that — so the settled clock shows the run's real
+	// elapsed rather than the whole age of the epoch.
+	durationMs uint64
 	// detached records that the bubble is drawn through the detached wrapper.
 	detached bool
 	// feed is where the bubble landed.
