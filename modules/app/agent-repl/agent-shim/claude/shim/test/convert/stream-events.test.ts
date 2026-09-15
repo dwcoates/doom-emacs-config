@@ -211,6 +211,38 @@ describe("a model refusal with no fallback", () => {
 
     expect(entries[0]?.upsertKey).toBe("activity:u-refusal");
   });
+
+  it("carries the record's own timestamp as the settle instant", () => {
+    // A refusal is a settled response and carries its settle instant; without it
+    // the daemon fell back to compose-time Now() and the bubble's age reset on
+    // every re-resolve. The record's timestamp wins over the wall clock.
+    const entries = [
+      ...createFold()
+        .onSdkMessage(
+          refusalMessage({ timestamp: "2026-07-23T17:42:47.752Z" }),
+          foldContext({ nowMs: 4242 }),
+        )
+        .entries,
+    ];
+
+    const response = activityOf(entries[0])?.item;
+    const result = response?.case === "response" ? response.value.result : undefined;
+    const settledAt =
+      result?.case === "failure" ? result.value.settledAt?.atMs : undefined;
+    expect(settledAt).toBe(1784828567752n);
+  });
+
+  it("falls back to the live clock when the refusal record has no timestamp", () => {
+    const entries = [
+      ...createFold().onSdkMessage(refusalMessage(), foldContext({ nowMs: 4242 })).entries,
+    ];
+
+    const response = activityOf(entries[0])?.item;
+    const result = response?.case === "response" ? response.value.result : undefined;
+    const settledAt =
+      result?.case === "failure" ? result.value.settledAt?.atMs : undefined;
+    expect(settledAt).toBe(4242n);
+  });
 });
 
 // ---------------------------------------------------------------------------

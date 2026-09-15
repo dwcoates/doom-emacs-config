@@ -226,6 +226,23 @@ func proseSaying(markdown string) *conversationv1.AgentResponse {
 	}
 }
 
+// proseSettledAt is a SETTLED response carrying its settle instant, so a test
+// can assert the instant survives the store's write → read round trip. atMs of
+// 0 leaves settled_at UNSET, the genuine "the producer observed no instant"
+// case the daemon legitimately falls back to Now() for.
+func proseSettledAt(markdown string, atMs int64) *conversationv1.AgentResponse {
+	success := &conversationv1.AgentResponseSuccess{
+		Prose:      &conversationv1.AgentResponseProse{Markdown: markdown},
+		Authorship: &conversationv1.AgentResponseSuccess_FromModel{FromModel: &conversationv1.AgentResponseFromModel{}},
+	}
+	if atMs != 0 {
+		success.SettledAt = &conversationv1.AgentActivitySettledAt{AtMs: atMs}
+	}
+	return &conversationv1.AgentResponse{
+		Result: &conversationv1.AgentResponse_Success{Success: success},
+	}
+}
+
 func successFrame(agentID string) *conversationv1.AgentFrame {
 	return &conversationv1.AgentFrame{
 		AgentId: &conversationv1.AgentId{Value: agentID},
