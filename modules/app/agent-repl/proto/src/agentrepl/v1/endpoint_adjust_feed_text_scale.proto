@@ -1,0 +1,51 @@
+// endpoint_adjust_feed_text_scale.proto — AdjustFeedTextScale: nudge the feed
+// text zoom one small step up or down. FEED section.
+//
+// The user zooms the FEED TEXT (and only the feed text) with `C-+` / `C--` in
+// Emacs, held down for continuous fine adjustment. Each press sends ONE nudge;
+// the DAEMON owns the scale — it applies a fixed small step, clamps it to a
+// sane range, and PERSISTS it so the zoom survives a daemon restart. The
+// resulting scale is PUSHED to every open feed's watch (frontend.v1.FeedTextScale)
+// so the webapp re-scales its feed text, and is ACKED here so the caller can
+// echo it.
+//
+// The scale is a SINGLE DAEMON-GLOBAL preference applied to every feed, not a
+// per-workspace one: "the feed text size" is one setting, and the simplest
+// match for that is one value. The request therefore carries NO WorkspaceRef —
+// there is no per-workspace ownership to refuse on, which is why the response
+// has no error arms (unlike SetModel / SelectResponse). The client sends only a
+// DIRECTION; the daemon is the source of truth for the step and the clamp,
+// exactly as it is for the response-selection cursor.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Which way to nudge the feed text scale.
+enum AdjustFeedTextScaleDirection {
+  // Never sent: a request carrying it is refused as InvalidArgument.
+  ADJUST_FEED_TEXT_SCALE_DIRECTION_UNSPECIFIED = 0;
+  // One step LARGER (`C-+`).
+  ADJUST_FEED_TEXT_SCALE_DIRECTION_INCREASE = 1;
+  // One step SMALLER (`C--`).
+  ADJUST_FEED_TEXT_SCALE_DIRECTION_DECREASE = 2;
+}
+
+message AdjustFeedTextScaleRequest {
+  // Which way to nudge the scale. Required; UNSPECIFIED is InvalidArgument.
+  AdjustFeedTextScaleDirection direction = 1;
+}
+
+// The scale in force AFTER applying the step (already clamped). There are NO
+// refusal arms: the preference is daemon-global with no per-workspace ownership
+// to refuse on, an already-clamped nudge that changes nothing still answers the
+// current value, and an UNSPECIFIED direction is a Connect InvalidArgument
+// rather than an arm. The webapp learns the same value on the feed watch's
+// FeedTextScale push; this response is the caller's own echo.
+message AdjustFeedTextScaleResponse {
+  // The feed text scale multiplier now in force (e.g. 1.0 = 100%). Bounded to
+  // the daemon's clamp range.
+  double scale = 1;
+}
