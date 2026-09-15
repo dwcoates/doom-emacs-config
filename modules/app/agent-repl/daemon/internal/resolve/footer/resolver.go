@@ -63,6 +63,31 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	}, nil
 }
 
+// Prime publishes the workspace's current footer view at registration.
+//
+// THE FOOTER PER-WORKSPACE TOPIC MUST RE-PRIME ON RECONNECT, UNLIKE THE GLOBAL
+// ROSTER. The roster topic is editor-global and always holds a current value,
+// so a reconnecting subscriber replays it at once; the footer topic is
+// per-workspace and is empty after a daemon restart rebuilds the resolver. An
+// idle session produces no fresh live edge to drive a first publish, so without
+// this prime serveTopic and the adoption Republish would have nothing to hand a
+// reconnecting subscriber and the footer would stay blank. Registration is the
+// one edge every workspace passes through on a reconnect, so priming here keeps
+// the topic current — mirroring the topbar's SetNaming prime.
+//
+// It renders from the ACCUMULATED state, not a fresh one, and publishes through
+// the same single site every other fact does. The render is always complete
+// (the status bottoms out at idle, the tokens cell and every panel are always
+// populated), so the completeness contract holds even for a workspace with no
+// session fact yet. On a live daemon whose footer already stands, the prime
+// renders the same view and the topic's value dedup drops it, so it never
+// regresses a live footer to idle.
+func (r *resolver) Prime(ws ids.WorkspaceID) {
+	r.mutate(ws, "daemon.footer.prime",
+		"the footer primed the workspace's view at registration so a reconnecting subscriber replays it",
+		nil, func(*wsState) {})
+}
+
 // Topic is the workspace's footer publication. It exists before the first view
 // does: a subscriber that arrives early receives the first view ever published
 // rather than an empty one.
