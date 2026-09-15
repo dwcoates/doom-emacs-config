@@ -52,7 +52,25 @@ var migrations = []migration{
 	{To: 6, Name: "creation_jobs_drop_one_shot_finish", DDL: creationJobsDropOneShotFinishDDL},
 	{To: 7, Name: "sessions_selected_config_dir", DDL: sessionsSelectedConfigDirDDL},
 	{To: 8, Name: "workspaces_spawned_shim_pid", DDL: spawnedShimPidDDL},
+	{To: 9, Name: "workspaces_last_activity_at", DDL: lastActivityAtDDL},
 }
+
+// lastActivityAtDDL adds when a workspace LAST DID REAL WORK — the roster
+// when-column's new source, stamped inside the turn writes at the genuine
+// activity edge. Every existing row is NULL, which reads exactly as "this
+// workspace has never taken a turn": the when-column falls back to the
+// creation time for such a row, and the first turn it takes stamps a real
+// instant. It is a WORKSPACE fact, not a session one — a registered workspace
+// that has never had a session still has a creation time and can still take a
+// turn — so it is a workspace column beside last_selected_at and merged_at.
+//
+// Like the other column-add steps this ALTER cannot reuse the fresh-file DDL:
+// the fresh-file table declares the column inline in schema.go. One meaning,
+// two spellings that must not drift, which is why both name the same column
+// with the same type.
+const lastActivityAtDDL = `
+ALTER TABLE workspaces ADD COLUMN last_activity_at INTEGER;
+`
 
 // spawnedShimPidDDL adds the pid of the shim a daemon SPAWNED for a workspace.
 //

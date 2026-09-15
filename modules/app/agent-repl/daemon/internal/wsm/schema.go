@@ -52,6 +52,14 @@ CREATE TABLE workspaces (
   task_id          TEXT REFERENCES tasks(id) ON DELETE SET NULL,
   is_current       INTEGER NOT NULL,
   last_selected_at INTEGER,
+  -- When the workspace LAST DID REAL WORK: the most recent turn start or turn
+  -- close, stamped inside the turn writes (PutTurn/CloseTurn) at the genuine
+  -- activity edge. NULL until the workspace takes its first turn. It is the
+  -- roster when-column's source and is NOT last_selected_at, which times
+  -- VIEWING recency: the column must be stable across selection, so it never
+  -- reads the selection stamp. See lastActivityAtDDL and resolve/sidebar's
+  -- when().
+  last_activity_at INTEGER,
   merged_at        INTEGER,
   serving_instance TEXT,
   -- The pid of a shim a daemon SPAWNED for this workspace, written at the

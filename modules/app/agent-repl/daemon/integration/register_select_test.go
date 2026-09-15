@@ -128,8 +128,14 @@ func TestSelectWorkspaceStampsCurrentOnTheRoster(t *testing.T) {
 	if !row.GetCurrent().GetCurrent() {
 		t.Fatalf("row.current = false for the selected workspace, want true")
 	}
-	if row.GetWhen().GetLastSelected().GetAtMs() == 0 {
-		t.Fatalf("row.when.last_selected = %v, want the selection instant stamped", row.GetWhen())
+	// SELECTING DOES NOT DRIVE THE WHEN-COLUMN. The column shows last activity,
+	// never last viewing, so a freshly-selected workspace that has taken no turn
+	// falls back to its creation time — never a last_selected stamp.
+	if row.GetWhen().GetLastSelected() != nil {
+		t.Fatalf("row.when = %v, want no last_selected arm: selecting must not drive the column", row.GetWhen())
+	}
+	if row.GetWhen().GetCreated().GetAtMs() == 0 {
+		t.Fatalf("row.when.created = %v, want the creation instant for a never-active workspace", row.GetWhen())
 	}
 }
 

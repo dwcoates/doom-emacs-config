@@ -182,27 +182,51 @@ func TestSelectingAWorkspaceLeavesAnotherRowsAttentionMarker(t *testing.T) {
 	}
 }
 
-func TestRowShowsWhenItWasLastSelected(t *testing.T) {
+func TestRowShowsWhenItWasLastActive(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	ws := workspace("w1", "one")
-	ws.LastSelectedAt = at(time.Hour)
+	ws.LastActivityAt = at(time.Hour)
 
 	// Act.
 	r.SetRegistry(registry(ws))
 
 	// Assert.
-	got := onlyRow(t, r).GetWhen().GetLastSelected().GetAtMs()
+	got := onlyRow(t, r).GetWhen().GetActive().GetAtMs()
 	if got != epoch.Add(time.Hour).UnixMilli() {
-		t.Fatalf("when = %d, want the selection instant in millis", got)
+		t.Fatalf("when = %d, want the last-activity instant in millis", got)
 	}
 }
 
-func TestMergedBeatsLastSelectedInTheWhenColumn(t *testing.T) {
+// TestTheWhenColumnIgnoresLastSelected is the REGRESSION LOCK: the column once
+// showed LastSelectedAt, which reset on every SelectWorkspace and made the age
+// jump on mere navigation. A row that was selected AFTER its last activity must
+// still show the activity instant, never the (later) selection instant.
+func TestTheWhenColumnIgnoresLastSelected(t *testing.T) {
+	// Arrange — activity an hour in, then a LATER selection.
+	r, _ := newResolver(t)
+	ws := workspace("w1", "one")
+	ws.LastActivityAt = at(time.Hour)
+	ws.LastSelectedAt = at(2 * time.Hour)
+
+	// Act.
+	r.SetRegistry(registry(ws))
+
+	// Assert — the active arm, at the activity instant, not the selection one.
+	row := onlyRow(t, r)
+	if row.GetWhen().GetLastSelected() != nil {
+		t.Fatalf("when = %v, want no last-selected arm", row.GetWhen())
+	}
+	if got := row.GetWhen().GetActive().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
+		t.Fatalf("when = %d, want the last-activity instant, never the later selection", got)
+	}
+}
+
+func TestMergedBeatsLastActiveInTheWhenColumn(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	ws := workspace("w1", "one")
-	ws.LastSelectedAt = at(0)
+	ws.LastActivityAt = at(0)
 	ws.MergedAt = at(time.Hour)
 
 	// Act.
@@ -215,10 +239,28 @@ func TestMergedBeatsLastSelectedInTheWhenColumn(t *testing.T) {
 	}
 }
 
-func TestTheWhenColumnIsEmptyWithNothingToShow(t *testing.T) {
-	// Arrange, Act.
+func TestTheWhenColumnFallsBackToCreatedForANeverActiveWorkspace(t *testing.T) {
+	// Arrange — never merged, never active, but a registered workspace always
+	// has a creation time.
 	r, _ := newResolver(t)
 	r.SetRegistry(registry(workspace("w1", "one")))
+
+	// Assert.
+	got := onlyRow(t, r).GetWhen().GetCreated().GetAtMs()
+	if got != epoch.UnixMilli() {
+		t.Fatalf("when = %d, want the creation instant", got)
+	}
+}
+
+func TestTheWhenColumnIsEmptyWithGenuinelyNoTimeToShow(t *testing.T) {
+	// Arrange — a record with no merge, no activity and no creation time: the
+	// one case an empty column is correct.
+	r, _ := newResolver(t)
+	ws := workspace("w1", "one")
+	ws.CreatedAt = time.Time{}
+
+	// Act.
+	r.SetRegistry(registry(ws))
 
 	// Assert: an unset oneof is an empty column, never "0ms ago".
 	if got := onlyRow(t, r).GetWhen().GetShown(); got != nil {
