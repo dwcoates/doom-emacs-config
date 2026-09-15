@@ -1804,6 +1804,44 @@ left the workspace's tab on the bar."
         ;; Assert
         (should-not retired)))))
 
+(ert-deftest agent-repl-test-ws-retire-persp-windows-skips-a-foreign-buffer ()
+  "A foreign-owned buffer drifted into the persp is not passed to window deletion."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((foreign (generate-new-buffer " *retire-foreign*"))
+          (retired nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                    ((symbol-function 'agent-repl--ws-buffers) (lambda (_persp) (list foreign)))
+                    ((symbol-function 'agent-repl--foreign-owned-buffer-p)
+                     (lambda (buf _ws) (eq buf foreign)))
+                    ((symbol-function 'agent-repl--buffer-owner) (lambda (_buf) "neighbor"))
+                    ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                     (lambda (buf &rest _) (push buf retired))))
+            ;; Act
+            (agent-repl--ws-retire-persp-windows "doomed")
+            ;; Assert
+            (should-not retired))
+        (kill-buffer foreign)))))
+
+(ert-deftest agent-repl-test-ws-retire-persp-windows-retires-an-owned-buffer ()
+  "An owned buffer is passed to window deletion even when the foreign-skip check runs."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((owned (generate-new-buffer " *retire-owned*"))
+          (retired nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'persp))
+                    ((symbol-function 'agent-repl--ws-buffers) (lambda (_persp) (list owned)))
+                    ((symbol-function 'agent-repl--foreign-owned-buffer-p) (lambda (_buf _ws) nil))
+                    ((symbol-function 'agent-repl-window--delete-buffer-windows)
+                     (lambda (buf &rest _) (push buf retired))))
+            ;; Act
+            (agent-repl--ws-retire-persp-windows "doomed")
+            ;; Assert
+            (should (equal retired (list owned))))
+        (kill-buffer owned)))))
+
 ;;;; ---- Tests: --ws-remove-buffer ----
 
 (ert-deftest agent-repl-test-ws-remove-buffer-delegates-when-bound ()
