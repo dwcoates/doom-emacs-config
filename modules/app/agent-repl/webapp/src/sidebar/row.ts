@@ -14,10 +14,13 @@
  * navigation is the host's to perform; the rail only says which workspace the
  * user picked, and the roster's new `current` arrives on the stream.
  *
- * WHAT TICKS AND WHAT DOES NOT. `last_selected` and `merged` ship INSTANTS,
- * so the age beside a row is animated here off the shared ticker — never a
- * `setInterval` of this module's own. An unset `shown` oneof means there is
- * nothing to show: the column is empty, not "0ms ago".
+ * WHAT TICKS AND WHAT DOES NOT. Every when-column arm ships an INSTANT
+ * (`active` = last activity, `created` = the never-active fallback, `merged`,
+ * and the retired `last_selected`), so the age beside a row is animated here
+ * off the shared ticker — never a `setInterval` of this module's own. An unset
+ * `shown` oneof means there is nothing to show: the column is empty, not
+ * "0ms ago". The column reflects last ACTIVITY, never last VIEWING, so it does
+ * not jump when the user selects the workspace.
  */
 import type {
   RosterRow,
@@ -31,6 +34,8 @@ import type {
   RosterRowName,
   RosterRowPriorityBadge,
   RosterRowWhen,
+  RosterRowWhenActive,
+  RosterRowWhenCreated,
   RosterRowWhenLastSelected,
   RosterRowWhenMerged,
   RosterRowWorkspace,
@@ -281,7 +286,24 @@ export function drawRosterRowWhen(
   const shown = requireCase(u.shown, `${path}.shown`);
   when.setAttribute("data-when", shown.case);
   switch (shown.case) {
+    case "active":
+      tickAge(
+        when,
+        sc,
+        drawRosterRowWhenActive(shown.value, `${path}.active`),
+        (age) => age,
+      );
+      return when;
+    case "created":
+      tickAge(when, sc, drawRosterRowWhenCreated(shown.value, `${path}.created`), (age) =>
+        `created ${age}`,
+      );
+      return when;
     case "lastSelected":
+      // RETIRED: this build's daemon never sends it (the when-column shows last
+      // activity, not last viewing). Kept for an older daemon during rollout —
+      // rendered like `active`, a bare age — so version skew never trips the
+      // unreachable-arm guard below.
       tickAge(
         when,
         sc,
@@ -301,7 +323,17 @@ export function drawRosterRowWhen(
   }
 }
 
-/** When the user last selected the workspace, as an epoch instant. */
+/** When the workspace last did real work, as an epoch instant. */
+export function drawRosterRowWhenActive(u: RosterRowWhenActive, path: string): number {
+  return msOf(u.atMs, `${path}.at_ms`);
+}
+
+/** When the workspace was created — the never-active fallback — as an instant. */
+export function drawRosterRowWhenCreated(u: RosterRowWhenCreated, path: string): number {
+  return msOf(u.atMs, `${path}.at_ms`);
+}
+
+/** When the user last selected the workspace, as an epoch instant. RETIRED. */
 export function drawRosterRowWhenLastSelected(
   u: RosterRowWhenLastSelected,
   path: string,
