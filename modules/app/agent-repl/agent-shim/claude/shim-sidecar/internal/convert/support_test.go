@@ -145,6 +145,25 @@ func vendorKindOf(e *storev1.StoreEntry) string {
 
 // ---- record builders, so each test states only what it is about ----
 
+// promptOriginUnspecified is the origin an adopted external prompt carries — the
+// daemon draws it as the plain "You" author label.
+const promptOriginUnspecified = conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
+
+// sdkPromptLine builds a prompt agent-repl submitted through its own SDK
+// (entrypoint "sdk-cli"), which is withheld as vendor_specific (R15).
+func sdkPromptLine(uuid, text string) string {
+	return externalPromptLine(uuid, "sdk-cli", text)
+}
+
+// externalPromptLine builds a genuine human prompt stamped with a given
+// entrypoint: "sdk-cli" for agent-repl's own, "cli" for an adopted interactive
+// session.
+func externalPromptLine(uuid, entrypoint, text string) string {
+	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"entrypoint":"` + entrypoint +
+		`","timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":` + quote(text) + `}]}}`
+}
+
 // assistantWith builds an assistant line carrying the given content blocks.
 func assistantWith(uuid, messageID, timestamp, blocks string) string {
 	return `{"type":"assistant","uuid":"` + uuid + `","isSidechain":false,"timestamp":"` + timestamp +
