@@ -32,6 +32,8 @@ import {
   TOOL_CALL_VERDICT_ARMS,
   drawFeedSimpleToolCall,
 } from "../../../src/feed/cards/tool-call.js";
+import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -1141,5 +1143,130 @@ describe("the returned card's exit chip (landing 16)", () => {
       rowContext(),
     );
     expect(el.querySelector(".shell-exit")).toBeNull();
+  });
+});
+
+/**
+ * THE CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool card is ONE
+ * click-to-expand unit: collapsed it shows the head (the title in full) and its
+ * input line (capped at two rows), its output section HIDDEN — no preview —
+ * until the whole card is `.expanded`, at which point the section is revealed
+ * (scrolling at 50vh) and the input line's two-row cap is lifted.
+ */
+describe("the card-level fold", () => {
+  /** A returned Bash card: a command input line and a text output section. */
+  function bashCard() {
+    return drawFeedSimpleToolCall(
+      card({
+        name: { text: "Bash" },
+        input: { text: "go test ./...", form: { case: "command", value: {} } },
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "ok\nok\nok" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+  }
+
+  it("marks the whole card one fold, collapsed by default", () => {
+    // Arrange / Act
+    const el = bashCard();
+    // Assert — the card is the capped section, and it starts closed.
+    expect(el.classList.contains("tool-fold")).toBe(true);
+    expect(el.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("shows NO output-section preview while collapsed", () => {
+    // Arrange — the real stylesheet, so the collapse rule can win the cascade.
+    const remove = installStylesheet();
+    try {
+      const el = bashCard();
+      document.body.replaceChildren(el);
+      // Act / Assert — the section is hidden entirely, not a height-capped peek.
+      expect(cascadedValue(el.querySelector(".tool-output") as Element, "display")).toBe("none");
+    } finally {
+      remove();
+    }
+  });
+
+  it("caps the collapsed header's input line at two rows", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const el = bashCard();
+      document.body.replaceChildren(el);
+      // Act / Assert — the non-title header content is clamped to two text rows.
+      expect(cascadedValue(el.querySelector(".bash-input") as Element, "-webkit-line-clamp")).toBe(
+        "2",
+      );
+    } finally {
+      remove();
+    }
+  });
+
+  it("never caps the TITLE, which the two-row header cap excludes", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const el = bashCard();
+      document.body.replaceChildren(el);
+      // Act / Assert — the title (`.tool-name`, in `.tool-head`) is not line-clamped.
+      expect(cascadedValue(el.querySelector(".tool-name") as Element, "-webkit-line-clamp")).not.toBe(
+        "2",
+      );
+    } finally {
+      remove();
+    }
+  });
+
+  it("expands the whole card when the reader clicks the head", () => {
+    // Arrange — the feed-wide click-to-expand, armed over the card.
+    const el = bashCard();
+    const feed = document.createElement("div");
+    feed.append(el);
+    document.body.replaceChildren(feed);
+    installClickExpand(feed, () => "");
+    // Act — a click on the head, the collapsed face.
+    (el.querySelector(".tool-head") as HTMLElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    // Assert
+    expect(el.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("reveals the section, scrolling at 50vh, once expanded", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const el = bashCard();
+      el.classList.add(EXPANDED_CLASS);
+      document.body.replaceChildren(el);
+      const out = el.querySelector(".tool-output") as Element;
+      // Act / Assert
+      expect(cascadedValue(out, "display")).toBe("block");
+      expect(cascadedValue(out, "max-height")).toBe("50vh");
+    } finally {
+      remove();
+    }
+  });
+
+  it("lifts the header's two-row cap once expanded", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const el = bashCard();
+      el.classList.add(EXPANDED_CLASS);
+      document.body.replaceChildren(el);
+      // Act / Assert — the full input line shows alongside the revealed section.
+      expect(cascadedValue(el.querySelector(".bash-input") as Element, "-webkit-line-clamp")).toBe(
+        "none",
+      );
+    } finally {
+      remove();
+    }
   });
 });

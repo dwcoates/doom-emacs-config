@@ -40,12 +40,8 @@ import { renderMarkdown } from "../../markdown.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { foldSection } from "./controls.js";
 
 const PATH = "FeedSkill";
-
-/** The fold name the document section carries, so a redraw finds its state. */
-export const SKILL_DOCUMENT_FOLD = "skill-document";
 
 /** The badge each outcome wears, and the word it says. */
 const OUTCOME_BADGES = {
@@ -59,7 +55,7 @@ const OUTCOME_BADGES = {
 export const SKILL_OUTCOME_ARMS: readonly string[] = Object.keys(OUTCOME_BADGES);
 
 /** The skill card. */
-export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
+export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
   const outcome = requireCase(u.outcome, `${PATH}.outcome`);
   log.debug("drawing a skill card", {
     operation: "feed.cards.skill",
@@ -84,19 +80,18 @@ export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
     case "loaded": {
       head.append(badge("loaded"));
       const loaded = outcome.value;
+      // CARD-LEVEL FOLD (owner ruling, 2026-09-15): the whole card is the
+      // toggle (`.tool-fold`, CAPPED_CLASSES in expand.ts), so the SKILL.md
+      // document is HIDDEN — no preview — until the reader clicks the card open,
+      // then revealed scrolling at 50vh. A SKILL.md is a long document and the
+      // reader asked for a skill to run rather than to be read to, so the card
+      // starts collapsed (its default: `.tool-fold` without `.expanded`).
+      card.classList.add("tool-fold");
       card.append(
-        foldSection({
-          name: SKILL_DOCUMENT_FOLD,
-          label: "document",
-          body: drawFeedSkillDocument(
-            requireMessage(loaded.document, `${PATH}.loaded.document`),
-            `${PATH}.loaded.document`,
-          ),
-          // FOLDED BY DEFAULT: a SKILL.md is a long document, and the reader
-          // asked for a skill to run rather than to be read to.
-          folded: true,
-          rc,
-        }),
+        drawFeedSkillDocument(
+          requireMessage(loaded.document, `${PATH}.loaded.document`),
+          `${PATH}.loaded.document`,
+        ),
       );
       if (loaded.allowances !== undefined) {
         card.append(
@@ -135,9 +130,10 @@ export function drawFeedSkillInvocation(
 /**
  * The skill's SKILL.md, rendered as the markdown document it is.
  *
- * IT WEARS `.skill-content`, which is the shared capped box: the section
- * SCROLLS at its budget rather than being clipped, and the budget is the one
- * the stylesheet states for a skill body — not a second literal here.
+ * IT WEARS `.tool-output skill-content`, which is what the card-level fold
+ * hides while the card is collapsed and reveals — scrolling at 50vh — once the
+ * card is `.expanded` (the `.tool-fold` rules in styles.css). The reader never
+ * sees a preview of it on a collapsed card.
  */
 export function drawFeedSkillDocument(u: FeedSkillDocument, path: string): HTMLElement {
   log.debug("drawing a skill document", {
