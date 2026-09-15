@@ -153,8 +153,8 @@ describe("the bubble geometry: the two caps", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble.assistant");
 
-    // Assert — 82.5% * 0.85; the margin still biases off the unscaled cap.
-    expect(bubble).toMatch(/max-width:\s*calc\(var\(--agent-bubble-cap\)\s*\*\s*0\.85\)/);
+    // Assert — 77% (owner ruling 2026-09-15); margin still biases off the unscaled cap.
+    expect(bubble).toMatch(/max-width:\s*77%/);
     expect(bubble).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
   });
 
@@ -162,8 +162,8 @@ describe("the bubble geometry: the two caps", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble.user");
 
-    // Assert — 60% * 0.85 = 51%; the margin still biases off the unscaled cap.
-    expect(bubble).toMatch(/max-width:\s*51%/);
+    // Assert — 77% (owner ruling 2026-09-15); margin still biases off the unscaled cap.
+    expect(bubble).toMatch(/max-width:\s*77%/);
     expect(bubble).toMatch(/margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
   });
 
