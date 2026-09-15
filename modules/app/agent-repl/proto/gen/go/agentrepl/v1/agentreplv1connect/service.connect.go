@@ -44,6 +44,9 @@ const (
 const (
 	// AgentReplSubmitPromptProcedure is the fully-qualified name of the AgentRepl's SubmitPrompt RPC.
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
+	// AgentReplSelectResponseProcedure is the fully-qualified name of the AgentRepl's SelectResponse
+	// RPC.
+	AgentReplSelectResponseProcedure = "/agentrepl.v1.AgentRepl/SelectResponse"
 	// AgentReplRequestCommandSupportProcedure is the fully-qualified name of the AgentRepl's
 	// RequestCommandSupport RPC.
 	AgentReplRequestCommandSupportProcedure = "/agentrepl.v1.AgentRepl/RequestCommandSupport"
@@ -180,6 +183,7 @@ const (
 var (
 	agentReplServiceDescriptor                      = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
+	agentReplSelectResponseMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SelectResponse")
 	agentReplRequestCommandSupportMethodDescriptor  = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
 	agentReplWatchFeedMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
@@ -238,6 +242,11 @@ type AgentReplClient interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
+	// Move or clear the response-selection cursor (reply-to-a-past-response):
+	// the daemon computes the newly selected final-response feedid from its
+	// ordered rows, pushes it to the webapp on the feed watch, and acks it
+	// here. See endpoint_select_response.proto.
+	SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error)
 	// The refusal card's "engineer support for it" offer: spawn a support
 	// workspace with a daemon-composed brief. See
 	// endpoint_request_command_support.proto.
@@ -399,6 +408,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSubmitPromptProcedure,
 			connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		selectResponse: connect.NewClient[v1.SelectResponseRequest, v1.SelectResponseResponse](
+			httpClient,
+			baseURL+AgentReplSelectResponseProcedure,
+			connect.WithSchema(agentReplSelectResponseMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		requestCommandSupport: connect.NewClient[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse](
@@ -713,6 +728,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 // agentReplClient implements AgentReplClient.
 type agentReplClient struct {
 	submitPrompt           *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
+	selectResponse         *connect.Client[v1.SelectResponseRequest, v1.SelectResponseResponse]
 	requestCommandSupport  *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed               *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
 	watchFeed              *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
@@ -769,6 +785,11 @@ type agentReplClient struct {
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
 func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error) {
 	return c.submitPrompt.CallUnary(ctx, req)
+}
+
+// SelectResponse calls agentrepl.v1.AgentRepl.SelectResponse.
+func (c *agentReplClient) SelectResponse(ctx context.Context, req *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
+	return c.selectResponse.CallUnary(ctx, req)
 }
 
 // RequestCommandSupport calls agentrepl.v1.AgentRepl.RequestCommandSupport.
@@ -1031,6 +1052,11 @@ type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
 	// handled commands transparently. See endpoint_submit_prompt.proto.
 	SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error)
+	// Move or clear the response-selection cursor (reply-to-a-past-response):
+	// the daemon computes the newly selected final-response feedid from its
+	// ordered rows, pushes it to the webapp on the feed watch, and acks it
+	// here. See endpoint_select_response.proto.
+	SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error)
 	// The refusal card's "engineer support for it" offer: spawn a support
 	// workspace with a daemon-composed brief. See
 	// endpoint_request_command_support.proto.
@@ -1188,6 +1214,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSubmitPromptProcedure,
 		svc.SubmitPrompt,
 		connect.WithSchema(agentReplSubmitPromptMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSelectResponseHandler := connect.NewUnaryHandler(
+		AgentReplSelectResponseProcedure,
+		svc.SelectResponse,
+		connect.WithSchema(agentReplSelectResponseMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplRequestCommandSupportHandler := connect.NewUnaryHandler(
@@ -1500,6 +1532,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
+		case AgentReplSelectResponseProcedure:
+			agentReplSelectResponseHandler.ServeHTTP(w, r)
 		case AgentReplRequestCommandSupportProcedure:
 			agentReplRequestCommandSupportHandler.ServeHTTP(w, r)
 		case AgentReplOpenFeedProcedure:
@@ -1613,6 +1647,10 @@ type UnimplementedAgentReplHandler struct{}
 
 func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Request[v1.SubmitPromptRequest]) (*connect.Response[v1.SubmitPromptResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubmitPrompt is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SelectResponse(context.Context, *connect.Request[v1.SelectResponseRequest]) (*connect.Response[v1.SelectResponseResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectResponse is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RequestCommandSupport(context.Context, *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error) {
