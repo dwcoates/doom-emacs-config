@@ -4,7 +4,6 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/sessionwatcher"
@@ -118,25 +117,15 @@ type rateState struct {
 	overage allowanceWindow
 	// at is when the newest evidence for either window was observed.
 	at time.Time
-	// sample is the newest account-usage SAMPLE's outcome, arm for arm from
-	// conversation.v1 SessionAccountUsage, nil until a sample has been
-	// observed. It says what the last ATTEMPT read; the windows above say
-	// what was last READ, and an unreadable attempt never clears them.
-	//
-	// ORDERED BY ARRIVAL, like the figures and for the same reason
-	// (`fileFigures`): every account_usage arm rides ONE SessionUpdate
-	// stream from ONE shim, routed to this sink serially, so the outcome
-	// that arrives last is the outcome the shim stated last. The sample
-	// guard in `observeSampledFigures` does not apply here — it exists to
-	// stop an older READING overwriting a newer one, and an outcome carries
-	// no reading.
-	sample *frontendv1.FooterAllowanceSample
-	// sampleUnread reports whether that newest sample read NO figure. It is
-	// kept beside the sample rather than sniffed back out of its drawn arm,
-	// because an unavailable sample whose own reason oneof the producer left
-	// UNSET is still an unavailability, and reading the arm would call it a
-	// success.
-	sampleUnread bool
+	// figuresReadAt is when the figures on hand were last successfully READ
+	// off an account-usage sample, zero before any readable sample. It is
+	// STAMPED ONLY BY A READABLE SAMPLE and never by an unreadable attempt or
+	// a rate-limit event, so the age the client ticks from it is the age of
+	// the last successful reading — an unreadable sample leaves the figures
+	// (and this instant) standing rather than making them look freshly read.
+	// A figure sourced from an EVENT alone leaves it zero, which the client
+	// reads as "no read instant" and draws the figures with no age.
+	figuresReadAt time.Time
 }
 
 // hookState is a hook running right now.

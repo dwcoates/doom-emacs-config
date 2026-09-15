@@ -60,7 +60,6 @@ import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
-  allowanceUnreadSentence,
   drawFooterAllowance,
   orderedSheetAllowances,
   remainingLabel,
@@ -304,9 +303,9 @@ export function drawFooterTokensLineVerdict(
  * THE USAGE CONTENT THE STRIP CANNOT FIT, drawn in full.
  *
  * The strip is one line capped at the response bubble's width and its rate
- * line is routinely wider than that, so the second allowance window, the
- * unread caveat's reason and the tail of a context-budget warning were in the
- * DOM and never on the glass. They belong somewhere a reader can reach them,
+ * line is routinely wider than that, so the second allowance window and the
+ * tail of a context-budget warning were in the DOM and never on the glass.
+ * They belong somewhere a reader can reach them,
  * and this sheet -- the one the tokens cell opens, already the sheet about
  * what the account is spending -- is that place.
  *
@@ -337,14 +336,6 @@ export function drawFooterUsageRows(
       row.appendChild(
         drawFooterAllowance(allowance.value, allowance.label, { ctx }, `${path}.${allowance.label}`),
       );
-      rows.push(row);
-    }
-    const sentence = allowanceUnreadSentence(kind.value.sample, `${path}.sample`);
-    if (sentence !== null) {
-      const row = usageRow("unread");
-      const outcome = kind.value.sample?.outcome;
-      if (outcome?.case !== undefined) row.setAttribute("data-sample", outcome.case);
-      row.textContent = sentence;
       rows.push(row);
     }
     return rows;

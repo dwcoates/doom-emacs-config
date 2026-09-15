@@ -516,109 +516,47 @@ describe("the ticking activity figures", () => {
     return row;
   }
 
-  // ---- The sample outcome: what the LAST READ managed, beside the figures it
-  // did not clear. One test per arm.
+  // ---- The last-read age: the strip renders the figures LAST READ and how
+  // long ago they were read, and no longer a "usage unread" caveat.
 
-  /** One rate-limit line whose sample OUTCOME stands at `outcome`. */
-  function sampleRow(outcome: { case: string; value: unknown }): HTMLElement {
+  /** One rate-limit line whose figures were read `agoMs` ago. */
+  function ageLine(agoMs: number | null): HTMLElement {
     const { row } = drawStrip({
       status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: false, utilization: 0.41, resetsAtS: BigInt(NOW / 1000) },
-        sample: { outcome: outcome as never },
+        session: { newsworthy: true, utilization: 0.41, resetsAtS: BigInt((NOW + 3_900_000) / 1000) },
+        ...(agoMs === null ? {} : { figuresReadAtMs: BigInt(NOW - agoMs) }),
       }),
     });
     return row;
   }
 
-  /** The unread cell's text, or undefined when the line drew none. */
-  function unreadText(row: HTMLElement): string | undefined {
-    return row.querySelector(".footer-allowance-unread")?.textContent ?? undefined;
-  }
-
-  /** The unread cell's title — the caveat in full — or undefined. */
-  function unreadTitle(row: HTMLElement): string | undefined {
-    return row.querySelector<HTMLElement>(".footer-allowance-unread")?.title;
-  }
-
-  // THE STRIP CARRIES A MARKER, NOT THE SENTENCE. The words themselves are in
-  // the tokens sheet and in this cell's title; the strip has room for two.
-  it("condenses the caveat to a marker on the strip", () => {
-    expect(unreadText(sampleRow({ case: "serviceUnavailable", value: {} }))).toBe("usage unread");
+  // THE OWNER'S SHAPE: "<usage figures> 10m 30s ago", ticking from the shipped
+  // read instant.
+  it("renders the age of the last usage reading beside the figures", () => {
+    expect(ageLine(630_000).querySelector(".footer-rate-age")?.textContent).toBe(" · 10m 30s ago");
   });
 
-  it("names a service-unavailable read in the marker's title", () => {
-    expect(unreadTitle(sampleRow({ case: "serviceUnavailable", value: {} }))).toContain(
-      "usage unread — the usage service did not answer",
+  // IT TICKS ON THE SHARED CLOCK, like every other footer duration.
+  it("re-reads the usage read-age on the shared tick", () => {
+    const row = ageLine(630_000);
+    vi.advanceTimersByTime(1000);
+    expect(row.querySelector(".footer-rate-age")?.textContent).toBe(" · 10m 31s ago");
+  });
+
+  // NO READ INSTANT, NO AGE: figures from a rate-limit event carry none, and
+  // the strip draws them with no age rather than inventing one.
+  it("draws no read-age when the figures carry no read instant", () => {
+    expect(ageLine(null).querySelector(".footer-rate-age")).toBeNull();
+  });
+
+  // THE UNREAD MESSAGE IS GONE: no sample outcome ever draws a cell now.
+  it("draws no usage-unread cell any more", () => {
+    const row = ageLine(630_000);
+    expect(row.querySelector(".footer-allowance-unread")).toBeNull();
+    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).not.toContain(
+      "usage unread",
     );
   });
-
-  it("names a window-unavailable read in the marker's title", () => {
-    expect(unreadTitle(sampleRow({ case: "windowUnavailable", value: {} }))).toContain(
-      "usage unread — no five-hour window was reported",
-    );
-  });
-
-  it("names a utilization-unavailable read in the marker's title", () => {
-    expect(unreadTitle(sampleRow({ case: "utilizationUnavailable", value: {} }))).toContain(
-      "usage unread — no utilization figure was reported",
-    );
-  });
-
-  it("keeps the shim's sampling-failure cause verbatim", () => {
-    const row = sampleRow({ case: "samplingFailure", value: { cause: "socket hang up" } });
-    expect(unreadTitle(row)).toContain("usage unread — the sampling failed: socket hang up");
-  });
-
-  it("says the sampling failed even when the shim named no cause", () => {
-    expect(unreadTitle(sampleRow({ case: "samplingFailure", value: { cause: "" } }))).toContain(
-      "usage unread — the sampling failed",
-    );
-  });
-
-  it.each(["serviceUnavailable", "windowUnavailable", "utilizationUnavailable", "samplingFailure"])(
-    "draws the %s unread arm distinctly on the cell",
-    (arm) => {
-      const row = sampleRow({ case: arm, value: { cause: "" } });
-      expect(row.querySelector(".footer-allowance-unread")?.getAttribute("data-sample")).toBe(arm);
-    },
-  );
-
-  // AVAILABLE IS NOT NEWS. The figures are as fresh as the sample, and a cell
-  // saying so would crowd the line to report that nothing is wrong.
-  it("draws no unread cell for an available sample", () => {
-    expect(sampleRow({ case: "available", value: {} }).querySelector(".footer-allowance-unread")).toBeNull();
-  });
-
-  // THE STANDING CONTRACT AT THE DRAWN SURFACE: an unread joins the figures,
-  // it never replaces them.
-  it("leaves the standing figures drawn beside an unread sample", () => {
-    const row = sampleRow({ case: "serviceUnavailable", value: {} });
-    expect(row.querySelector('[data-allowance="session"]')?.textContent).toContain("session 41%");
-  });
-
-  // A session whose very first sample failed has read nothing yet, so the line
-  // is reachable with NO allowance at all.
-  it("draws the marker alone when no figure has ever been read", () => {
-    const { row } = drawStrip({
-      status: withActivity("idle", null, "rateLimited", {
-        sample: { outcome: { case: "serviceUnavailable", value: {} } as never },
-      }),
-    });
-    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe("usage unread");
-  });
-
-  // ---- What the strip cuts, and what it must not.
-
-  // THE MARKER IS BEFORE THE CUT: the figures are the line's one elastic part
-  // and the marker rides outside them, so a tightening strip eats a window and
-  // never the caveat.
-  it("keeps the unread marker out of the ellipsizing figures", () => {
-    const row = sampleRow({ case: "serviceUnavailable", value: {} });
-    const line = row.querySelector(".footer-activity-rate-limited");
-    expect(line?.querySelector(".footer-rate-figures .footer-allowance-unread")).toBeNull();
-    expect(line?.lastElementChild?.className).toBe("footer-allowance-unread");
-  });
-
   // THE NEWSWORTHY WINDOW LEADS: it is the figure that changes what the reader
   // does, so it is the half of the line that survives the cut.
   it("draws the newsworthy window first even when it is the weekly one", () => {
@@ -640,7 +578,7 @@ describe("the ticking activity figures", () => {
       status: withActivity("idle", null, "rateLimited", {
         session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
         weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
-        sample: { outcome: { case: "serviceUnavailable", value: {} } as never },
+        figuresReadAtMs: BigInt(NOW - 630_000),
       }),
     });
     const cell = row.querySelector<HTMLElement>(".footer-activity");
