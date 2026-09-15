@@ -1522,6 +1522,204 @@ used to interrupt before the overhaul."
   "The chord's target is a real interactive command, not a dead symbol."
   (should (commandp #'agent-repl-interrupt-turn)))
 
+;;;; ---- Response selection (reply to a past response) -------------------
+
+(defun agent-repl-test-input--selection ()
+  "Return the composer's buffer-local reply-to-a-past-response selection."
+  (buffer-local-value 'agent-repl--input-response-selection
+                      agent-repl-test-input--buffer))
+
+(defun agent-repl-test-input--set-selection (feedid)
+  "Force FEEDID as the composer's active reply target."
+  (with-current-buffer agent-repl-test-input--buffer
+    (setq agent-repl--input-response-selection feedid)))
+
+(ert-deftest agent-repl-test-input-response-select-prev-is-a-command ()
+  "The `C-p' nav target is a real interactive command."
+  (should (commandp #'agent-repl-response-select-prev)))
+
+(ert-deftest agent-repl-test-input-response-select-next-is-a-command ()
+  "The `C-n' nav target is a real interactive command."
+  (should (commandp #'agent-repl-response-select-next)))
+
+(ert-deftest agent-repl-test-input-response-selection-escape-is-a-command ()
+  "The command-mode escape target is a real interactive command."
+  (should (commandp #'agent-repl-input-response-selection-escape)))
+
+(ert-deftest agent-repl-test-input-response-select-prev-sends-prev ()
+  "`C-p' asks the daemon for the PREVIOUS final-response row."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (requests)
+      (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+                 (lambda (_conn request &rest keys)
+                   (push request requests)
+                   (funcall (plist-get keys :on-response)
+                            '(:arm :success :value (:selected (:value "feed-9")))))))
+        ;; Act
+        (agent-repl-response-select-prev))
+      ;; Assert
+      (should (eq (plist-get (car requests) :direction) :prev)))))
+
+(ert-deftest agent-repl-test-input-response-select-next-sends-next ()
+  "`C-n' asks the daemon for the NEXT final-response row."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (requests)
+      (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+                 (lambda (_conn request &rest keys)
+                   (push request requests)
+                   (funcall (plist-get keys :on-response)
+                            '(:arm :success :value (:selected (:value "feed-9")))))))
+        ;; Act
+        (agent-repl-response-select-next))
+      ;; Assert
+      (should (eq (plist-get (car requests) :direction) :next)))))
+
+(ert-deftest agent-repl-test-input-response-select-records-the-acked-feedid ()
+  "The daemon's acked selected feedid becomes the buffer-local selection."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+               (lambda (_conn _request &rest keys)
+                 (funcall (plist-get keys :on-response)
+                          '(:arm :success :value (:selected (:value "feed-9")))))))
+      ;; Act
+      (agent-repl-response-select-prev))
+    ;; Assert
+    (should (equal (agent-repl-test-input--selection) '(:value "feed-9")))))
+
+(ert-deftest agent-repl-test-input-response-select-none-leaves-no-selection ()
+  "A nav that finds no selectable row stores NONE, so nothing is active."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+               (lambda (_conn _request &rest keys)
+                 (funcall (plist-get keys :on-response)
+                          '(:arm :success :value (:selected nil))))))
+      ;; Act
+      (agent-repl-response-select-next))
+    ;; Assert
+    (should-not (agent-repl-test-input--selection))))
+
+(ert-deftest agent-repl-test-input-response-select-refusal-keeps-prior-selection ()
+  "A refused nav never clobbers the selection already held.
+Error-surfacing coverage is not dropped just because the daemon is the
+authority: a refusal leaves the prior reply target intact."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--set-selection '(:value "feed-1"))
+    (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+               (lambda (_conn _request &rest keys)
+                 (funcall (plist-get keys :on-response)
+                          '(:arm :error
+                            :value (:cause (:arm :unknown-workspace :value nil)))))))
+      ;; Act
+      (agent-repl-response-select-prev))
+    ;; Assert
+    (should (equal (agent-repl-test-input--selection) '(:value "feed-1")))))
+
+(ert-deftest agent-repl-test-input-submit-carries-the-selected-feedid ()
+  "With a selection active, the submit rides it as the reply target."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--set-selection '(:value "feed-9"))
+    (agent-repl-test-input--type "reply text")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (plist-get (agent-repl-test-input--request)
+                              :reference-response-feedid)
+                   '(:value "feed-9")))))
+
+(ert-deftest agent-repl-test-input-submit-omits-reference-without-selection ()
+  "An ordinary prompt carries no reply target: absence is the fact."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "plain")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not (plist-member (agent-repl-test-input--request)
+                             :reference-response-feedid))))
+
+(ert-deftest agent-repl-test-input-successful-submit-clears-the-selection ()
+  "An accepted submit drops the reply target so the next prompt is ordinary."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--set-selection '(:value "feed-9"))
+    (agent-repl-test-input--type "reply")
+    ;; Act (harness answers with a minted turn)
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not (agent-repl-test-input--selection))))
+
+(ert-deftest agent-repl-test-input-escape-without-selection-delegates ()
+  "Escape keeps its ordinary meaning when nothing is selected."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let ((defaulted 0) (selects 0))
+      (cl-letf (((symbol-function 'agent-repl--input-escape-default)
+                 (lambda () (cl-incf defaulted)))
+                ((symbol-function 'agent-repl-rpc-select-response)
+                 (lambda (&rest _) (cl-incf selects))))
+        ;; Act
+        (agent-repl-input-response-selection-escape))
+      ;; Assert
+      (should (= defaulted 1))
+      (should (= selects 0)))))
+
+(ert-deftest agent-repl-test-input-first-escape-warns-and-keeps-selection ()
+  "The first command-mode escape only WARNS; the selection stays."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--set-selection '(:value "feed-9"))
+    (let (selects)
+      (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+                 (lambda (_conn request &rest _) (push request selects))))
+        ;; Act -- the preceding command was a nav, not another escape.
+        (let ((last-command 'agent-repl-response-select-prev))
+          (agent-repl-input-response-selection-escape)))
+      ;; Assert
+      (should (null selects))
+      (should (equal (agent-repl-test-input--selection) '(:value "feed-9")))
+      (should (cl-some (lambda (m) (string-match-p "escape again" m))
+                       agent-repl-test-input--messages)))))
+
+(ert-deftest agent-repl-test-input-second-consecutive-escape-clears ()
+  "Two consecutive escapes send CLEAR and drop the local selection."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--set-selection '(:value "feed-9"))
+    (let (selects)
+      (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+                 (lambda (_conn request &rest keys)
+                   (push request selects)
+                   (funcall (plist-get keys :on-response)
+                            '(:arm :success :value (:selected nil))))))
+        ;; Act -- the preceding command was the escape itself.
+        (let ((last-command 'agent-repl-input-response-selection-escape))
+          (agent-repl-input-response-selection-escape)))
+      ;; Assert
+      (should (eq (plist-get (car selects) :direction) :clear))
+      (should-not (agent-repl-test-input--selection)))))
+
+(ert-deftest agent-repl-test-input-non-consecutive-escape-rearms ()
+  "A command-mode key between two escapes resets the consecutive count.
+The second escape is treated as a FIRST again -- it warns, never clears."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--set-selection '(:value "feed-9"))
+    (let (selects)
+      (cl-letf (((symbol-function 'agent-repl-rpc-select-response)
+                 (lambda (_conn request &rest _) (push request selects))))
+        ;; Act -- an intervening command ran as `last-command'.
+        (let ((last-command 'agent-repl-response-select-next))
+          (agent-repl-input-response-selection-escape)))
+      ;; Assert
+      (should (null selects))
+      (should (equal (agent-repl-test-input--selection) '(:value "feed-9"))))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here
