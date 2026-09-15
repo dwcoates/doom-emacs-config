@@ -18,6 +18,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
+  THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
   measureTreeCols,
@@ -1348,5 +1349,70 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     );
     // Assert
     expect(el.querySelector(".response-arriving")).toBeNull();
+  });
+});
+
+describe("the thinking bubble", () => {
+  it("draws a thinking response as a purple assistant bubble marked thinking", () => {
+    // Arrange, Act — a thinking-flagged response.
+    const el = drawFeedResponse(
+      response({ thinking: true, result: { case: "update", value: { prose: { markdown: "weighing" } } } }),
+      rowContext(),
+    );
+    // Assert — the purple assistant bubble also carries the thinking marker.
+    expect(el.classList.contains("assistant")).toBe(true);
+    expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
+  });
+
+  it("leaves an ordinary response bubble unmarked as thinking", () => {
+    // Arrange, Act — no thinking flag.
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "an answer" } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(false);
+  });
+
+  it("keeps the green final-answer rule from matching a thinking bubble", () => {
+    // Arrange — a thinking bubble that has (defensively) been given the
+    // final-response class.
+    const el = drawFeedResponse(
+      response({ thinking: true, result: { case: "success", value: { prose: { markdown: "reasoning" } } } }),
+      rowContext(),
+    );
+    el.classList.add("final-response");
+    // Act, Assert — the stylesheet's green selector excludes thinking bubbles,
+    // so it does not match even with the class present.
+    expect(el.matches(".bubble.assistant.final-response:not(.thinking-bubble)")).toBe(false);
+  });
+
+  it("does match the green rule for a NON-thinking final response", () => {
+    // Arrange — an ordinary final answer wearing the class.
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      rowContext(),
+    );
+    el.classList.add("final-response");
+    // Act, Assert — the green selector matches an ordinary response.
+    expect(el.matches(".bubble.assistant.final-response:not(.thinking-bubble)")).toBe(true);
+  });
+
+  it("draws multiple thinking blocks as separate bubbles", () => {
+    // Arrange, Act — two thinking blocks drawn as two rows.
+    const first = drawFeedResponse(
+      response({ thinking: true, result: { case: "success", value: { prose: { markdown: "block one" } } } }),
+      rowContext(),
+    );
+    const second = drawFeedResponse(
+      response({ thinking: true, result: { case: "success", value: { prose: { markdown: "block two" } } } }),
+      rowContext(),
+    );
+    // Assert — two distinct thinking bubbles, each with its own reasoning.
+    expect(first).not.toBe(second);
+    expect(first.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
+    expect(second.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
+    expect(first.querySelector(".bubble-body")?.textContent).toContain("block one");
+    expect(second.querySelector(".bubble-body")?.textContent).toContain("block two");
   });
 });

@@ -149,7 +149,13 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   // The existing green-border rule keys on the response bubble itself, so the
   // class goes where that rule can see it. A card drawn some other way still
   // carries the row-level marker above.
-  const bubble = row.querySelector(".bubble.assistant");
+  //
+  // A THINKING BUBBLE IS EXCLUDED FROM THE LOOKUP: it reuses `.bubble.assistant`
+  // but is intermediate reasoning, never the answer, so it must never take the
+  // green final-answer class. The daemon never files a thinking row as an
+  // answer, so this branch is not normally reached for one; the `:not` here is
+  // the second guard, matching the stylesheet's own `.final-response` exclusion.
+  const bubble = row.querySelector(".bubble.assistant:not(.thinking-bubble)");
   if (bubble !== null) bubble.classList.add(FINAL_RESPONSE_CLASS);
   log.info("marked the answering row with the final-answer treatment", {
     operation: "feed.final-answer-marked",

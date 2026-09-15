@@ -84,6 +84,18 @@ import type { RowContext } from "./context.js";
 export const REVEALED_ATTRIBUTE = "data-revealed";
 
 /**
+ * The class a THINKING bubble wears: the agent's intermediate reasoning, drawn
+ * purple and NON-BORDERED, one bubble per reasoning block. It reuses the whole
+ * response bubble above (same fragment-fed arms, same markdown reveal) and only
+ * this class changes how it looks. It is ALSO the guard that keeps the green
+ * final-answer treatment off it: the stylesheet's `.final-response` rule and
+ * `turn-ended.ts`'s bubble lookup both exclude `.thinking-bubble`, so a thinking
+ * bubble can never take the green border even were it named the answer (which,
+ * daemon-side, it never is). Set from `FeedResponse.thinking`.
+ */
+export const THINKING_BUBBLE_CLASS = "thinking-bubble";
+
+/**
  * How many prose blocks one response row draws.
  *
  * The daemon folds every fragment of a response into ONE bubble row and
@@ -103,6 +115,15 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const bubble = document.createElement("div");
   bubble.className = "bubble assistant md";
   bubble.setAttribute("data-state", result.case);
+
+  // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
+  // the prose is intermediate reasoning is orthogonal to whether it is still
+  // arriving. The class draws the bubble purple and non-bordered and keeps the
+  // green final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
+  if (u.thinking) {
+    bubble.classList.add(THINKING_BUBBLE_CLASS);
+    bubble.setAttribute("data-thinking", "");
+  }
 
   // THE METADATA STRIP COMES FIRST, and the scroll box under it (owner ruling,
   // 2026-09-14). The corner stamp is a full-width strip above the prose rather

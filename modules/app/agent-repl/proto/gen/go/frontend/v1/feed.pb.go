@@ -3072,7 +3072,19 @@ type FeedResponse struct {
 	// client draws the bubble in the notice register with `heading` above the
 	// prose. UNSET = ordinary agent prose. Daemon-composed; the client holds
 	// no notice vocabulary.
-	Notice        *FeedResponseNotice `protobuf:"bytes,5,opt,name=notice,proto3,oneof" json:"notice,omitempty"`
+	Notice *FeedResponseNotice `protobuf:"bytes,5,opt,name=notice,proto3,oneof" json:"notice,omitempty"`
+	// SET when this bubble is the agent's intermediate THINKING (its
+	// chain-of-thought reasoning on the way to an answer), NOT the answer or the
+	// commentary it says to the user. It reuses the whole prose-bubble machinery
+	// above — the same fragment-fed update/success/error arms, the same markdown
+	// reveal — differing only in HOW IT IS DRAWN: the client renders a thinking
+	// bubble purple and NON-BORDERED, and NEVER applies the green final-answer
+	// border to it. A thinking bubble is never the turn's concluded answer, so
+	// the turn's conclusion can never name it (its row is not filed as an answer
+	// row daemon-side); this flag is the second guard, letting the client's own
+	// green-final-answer rule exclude it structurally. UNSET = an ordinary
+	// response bubble (a partial or a final answer), unchanged.
+	Thinking      bool `protobuf:"varint,6,opt,name=thinking,proto3" json:"thinking,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3153,6 +3165,13 @@ func (x *FeedResponse) GetNotice() *FeedResponseNotice {
 		return x.Notice
 	}
 	return nil
+}
+
+func (x *FeedResponse) GetThinking() bool {
+	if x != nil {
+		return x.Thinking
+	}
+	return false
 }
 
 type isFeedResponse_Result interface {
@@ -16319,13 +16338,14 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0fFeedArtifactUrl\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\"(\n" +
 	"\x12FeedArtifactFailed\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xdc\x02\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xf8\x02\n" +
 	"\fFeedResponse\x12>\n" +
 	"\x05usage\x18\x01 \x01(\v2#.frontend.v1.FeedResponseUsageStampH\x01R\x05usage\x88\x01\x01\x129\n" +
 	"\x06update\x18\x02 \x01(\v2\x1f.frontend.v1.FeedResponseUpdateH\x00R\x06update\x12<\n" +
 	"\asuccess\x18\x03 \x01(\v2 .frontend.v1.FeedResponseSuccessH\x00R\asuccess\x126\n" +
 	"\x05error\x18\x04 \x01(\v2\x1e.frontend.v1.FeedResponseErrorH\x00R\x05error\x12<\n" +
-	"\x06notice\x18\x05 \x01(\v2\x1f.frontend.v1.FeedResponseNoticeH\x02R\x06notice\x88\x01\x01B\b\n" +
+	"\x06notice\x18\x05 \x01(\v2\x1f.frontend.v1.FeedResponseNoticeH\x02R\x06notice\x88\x01\x01\x12\x1a\n" +
+	"\bthinking\x18\x06 \x01(\bR\bthinkingB\b\n" +
 	"\x06resultB\b\n" +
 	"\x06_usageB\t\n" +
 	"\a_notice\".\n" +
