@@ -2902,3 +2902,206 @@ from memory -- is what this now pins, plus the rejoin that follows it."
                (lambda (&rest _) (error "persp gone"))))
       ;; Act / Assert
       (should-not (agent-repl--restore-focus "caller-ws" nil nil)))))
+
+;;;; ---- Tests: --pseudo-perspective-killable-p ----
+
+(ert-deftest agent-repl-test-pseudo-killable-main-is-killable ()
+  "Doom's initial \"main\" is a normal perspective and IS killable."
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          (+workspaces-main "main"))
+      (should (agent-repl--pseudo-perspective-killable-p "main")))))
+
+(ert-deftest agent-repl-test-pseudo-killable-none-is-not-killable ()
+  "persp-mode's nil perspective \"none\" is NOT killable."
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          (+workspaces-main "main"))
+      (should-not (agent-repl--pseudo-perspective-killable-p "none")))))
+
+(ert-deftest agent-repl-test-pseudo-killable-real-workspace-is-not-a-pseudo ()
+  "A real workspace name is not a pseudo, so it is not a kill candidate here."
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          (+workspaces-main "main"))
+      (should-not (agent-repl--pseudo-perspective-killable-p "doom")))))
+
+;;;; ---- Tests: --delete-pseudo-perspectives ----
+
+(ert-deftest agent-repl-test-delete-pseudos-kills-main-once-a-real-exists ()
+  "With a real workspace present, the killable pseudo \"main\" is killed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (error "should not switch: already in a real ws")))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should (equal killed '("main")))))))
+
+(ert-deftest agent-repl-test-delete-pseudos-never-kills-none ()
+  "persp-nil \"none\" is skipped, never handed to the kill wrapper."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should-not (member "none" killed))))))
+
+(ert-deftest agent-repl-test-delete-pseudos-noop-when-no-real-workspace ()
+  "It does NOT fire before a real workspace perspective exists."
+  (agent-repl-test--with-clean-state
+    ;; Arrange -- only the pseudos are in the cache
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert -- nothing killed, one-shot not consumed
+        (should-not killed)
+        (should-not agent-repl--pseudo-perspectives-deleted)))))
+
+(ert-deftest agent-repl-test-delete-pseudos-is-idempotent ()
+  "It does not fire twice: a set one-shot flag suppresses the kill."
+  (agent-repl-test--with-clean-state
+    ;; Arrange -- flag already set from a prior pass
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted t)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should-not killed)))))
+
+(ert-deftest agent-repl-test-delete-pseudos-sets-the-one-shot-flag ()
+  "A successful deletion consumes the one-shot so a later pass is a no-op."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-persp-kill) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should agent-repl--pseudo-perspectives-deleted)))))
+
+(ert-deftest agent-repl-test-delete-pseudos-vacates-a-pseudo-current-first ()
+  "Standing IN a pseudo, the frame is switched to a real workspace first."
+  (agent-repl-test--with-clean-state
+    ;; Arrange -- current is the pseudo "main"
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (events nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (push (cons :switch ws) events)))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push (cons :kill ws) events)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert -- switch to the real "doom" precedes any kill
+        (setq events (nreverse events))
+        (should (equal (car events) '(:switch . "doom")))
+        (should (member '(:kill . "main") events))))))
+
+(ert-deftest agent-repl-test-delete-pseudos-noop-when-persp-mode-off ()
+  "With persp-mode unavailable the deletion never touches the kill wrapper."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode nil)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (killed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "doom"))
+                ((symbol-function 'agent-repl--ws-switch) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (ws) (push ws killed)))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should-not killed)))))
+
+;;;; ---- Tests: --delete-pseudos-on-bringup (the seam) ----
+
+(ert-deftest agent-repl-test-delete-pseudos-on-bringup-fires-on-finished ()
+  "A finished pass that opened a tab drives the deletion."
+  (agent-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'agent-repl--delete-pseudo-perspectives)
+                 (lambda () (setq called t))))
+        ;; Act -- finished pass, one tab opened
+        (agent-repl--delete-pseudos-on-bringup 1 1 t)
+        ;; Assert
+        (should called)))))
+
+(ert-deftest agent-repl-test-delete-pseudos-on-bringup-skips-unfinished ()
+  "A mid-pass (FINISHED nil) call does not drive the deletion."
+  (agent-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'agent-repl--delete-pseudo-perspectives)
+                 (lambda () (setq called t))))
+        ;; Act -- not finished
+        (agent-repl--delete-pseudos-on-bringup 1 2 nil)
+        ;; Assert
+        (should-not called)))))
+
+(ert-deftest agent-repl-test-delete-pseudos-on-bringup-skips-zero-opened ()
+  "A finished pass that opened no tab does not drive the deletion."
+  (agent-repl-test--with-clean-state
+    (let ((called nil))
+      (cl-letf (((symbol-function 'agent-repl--delete-pseudo-perspectives)
+                 (lambda () (setq called t))))
+        ;; Act -- finished but opened=0
+        (agent-repl--delete-pseudos-on-bringup 0 0 t)
+        ;; Assert
+        (should-not called)))))
