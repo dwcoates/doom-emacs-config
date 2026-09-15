@@ -215,6 +215,21 @@ CREATE TABLE drain_schedule (
   deadline INTEGER NOT NULL,
   set_at   INTEGER NOT NULL
 );
+` + feedTextScaleDDL
+
+// feedTextScaleDDL is the layout-10 addition — the single daemon-global feed
+// text zoom (frontend.v1.FeedTextScale), persisted so the zoom survives a
+// daemon restart. It is a SINGLETON like drain_schedule: the CHECK (id = 1)
+// makes "one preference" structural rather than conventional. Kept apart from
+// the rest of the schema for the reason portedPromptsDDL is: TWO paths write it
+// — a fresh file gets it as part of schemaDDL, a layout-9 file gets it from the
+// 9 -> 10 migration — so one text keeps a migrated file and a created one from
+// drifting into two shapes. An absent row reads as the default scale (1.0).
+const feedTextScaleDDL = `
+CREATE TABLE feed_text_scale (
+  id    INTEGER PRIMARY KEY CHECK (id = 1),
+  scale REAL NOT NULL
+);
 `
 
 // portedPromptsDDL is the layout-4 addition, kept apart from the rest of the
