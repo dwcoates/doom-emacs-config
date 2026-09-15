@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"claude-repld/internal/dlog"
@@ -74,8 +75,18 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) e
 		Detail: "KillWorkspace",
 		At:     at,
 	}); err != nil {
-		log.Error(opKill, "could not record the session terminal", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("kill %q: record the terminal: %w", ws, err)
+		// A registered workspace may have no session: a freshly-opened one
+		// whose bring-up never ran has no session row, so there is no terminal
+		// to record. Killing it must not require one -- that specific absence
+		// is benign, and the rest of the teardown below still runs so the
+		// workspace is actually gone. Every OTHER terminal-recording failure --
+		// a real error for a session that DOES exist -- still fails the kill.
+		if errors.Is(err, wsm.ErrNotFound) {
+			log.Debug(opKill, "no session to record a terminal for", dlog.Context{"cause": err.Error()})
+		} else {
+			log.Error(opKill, "could not record the session terminal", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("kill %q: record the terminal: %w", ws, err)
+		}
 	}
 
 	// A killed workspace's roster row carries closed = true: Emacs derives its

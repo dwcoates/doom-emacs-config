@@ -102,6 +102,10 @@ type fakeDB struct {
 	forgetReport wsm.ForgetReport
 	forgetErr    error
 	terminals    map[ids.WorkspaceID]wsm.SessionTerminal
+	// setTerminalErr fails the terminal write, which the fake's own map cannot.
+	// A workspace with no session row surfaces wsm.ErrNotFound here, and any
+	// other error stands for a real terminal-recording failure.
+	setTerminalErr error
 	orphanReport wsm.OrphanReport
 	createdTasks []string
 	taskChanges  map[ids.TaskID]wsm.TaskChange
@@ -331,6 +335,9 @@ func (d *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bo
 }
 
 func (d *fakeDB) SetSessionTerminal(_ context.Context, id ids.WorkspaceID, t wsm.SessionTerminal) error {
+	if d.setTerminalErr != nil {
+		return d.setTerminalErr
+	}
 	d.terminals[id] = t
 	return nil
 }
