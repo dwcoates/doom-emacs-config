@@ -125,6 +125,9 @@ func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry 
 	case *conversationv1.HistoryEntry_AgentFrame:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_AgentFrame"})
 		r.replayFrame(s, arm.AgentFrame, at)
+	case *conversationv1.HistoryEntry_PeerMessage:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "case *conversationv1.HistoryEntry_PeerMessage"})
+		r.drawPeerMessage(s, arm.PeerMessage)
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayEntry", "branch": "default"})
 		r.logger(s.id).Warn("daemon.feed.history_entry_unset",
