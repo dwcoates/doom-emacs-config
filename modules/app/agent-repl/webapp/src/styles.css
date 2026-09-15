@@ -3203,11 +3203,13 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    holder span and set `-webkit-text-fill-color: transparent`, which inherited
    into the split letters and rendered the whole word BLANK (the glyphs live in
    the child letter spans, so there was no text on the holder to clip the
-   gradient to). Here each letter simply animates its OWN `color` between the arm
-   tone (`currentColor`, so it stays legible) and a slightly lighter band, on the
-   SAME staggered negative `animation-delay` the bulge uses — so a soft highlight
-   travels along the letters exactly in step with the bulge, and a letter can
-   never go transparent because its rest colour is always the arm tone.
+   gradient to). Here each letter simply animates its OWN `color` from the arm
+   tone (`currentColor`, so it stays legible) THROUGH THE FULL SPECTRUM — a
+   rainbow hue cycle (red, orange, yellow, green, cyan, blue, violet) and back to
+   the arm tone — on the SAME staggered negative `animation-delay` the bulge uses,
+   so a travelling rainbow band crosses the letters exactly in step with the
+   bulge. A letter can never go transparent because every keyframe stop is a
+   fully opaque colour and its rest colour is always the arm tone.
 
    `transform: scale` and NEVER `font-size`, exactly as `.pfooter-breath` above:
    a font-size oscillation re-measures the word every frame and shoves the whole
@@ -3258,13 +3260,29 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 /* The colour sweep, PER LETTER (never a `background-clip: text` gradient — see
    the block comment above for why that blanked the word). The letter rests at
    its arm tone (`currentColor`, which resolves to the inherited arm colour, so
-   the letter is always legible and NEVER transparent) and brightens toward a
-   lighter band; run staggered by the same per-letter delay as the bulge and
-   `alternate`d the same way, the bright point travels along the word and back in
-   lockstep with the bulge. */
+   the letter is always legible and NEVER transparent) and rides the FULL colour
+   spectrum while it runs (owner ruling, 2026-09-14): a rainbow hue cycle — red,
+   orange, yellow, green, cyan, blue, violet — rather than the arm tone merely
+   brightening. Run staggered by the same per-letter delay as the bulge and
+   `alternate`d the same way, the bright band travels along the word and back in
+   lockstep with the bulge.
+
+   EVERY STOP IS A FULLY OPAQUE COLOUR, and the from-stop is `currentColor`: so
+   a letter caught at rest (the animation stopped under reduced motion, or seeked
+   to 0%) shows the LEGIBLE ARM TONE, never a mid-spectrum hue and never
+   transparent — only the running animation shows the spectrum. The 0% and 100%
+   stops are both `currentColor` so each `alternate` pass departs from and
+   returns to the arm tone rather than snapping between two random hues. */
 @keyframes pfooter-status-color {
-  from { color: currentColor; }
-  to { color: color-mix(in srgb, currentColor 45%, #ffffff); }
+  0% { color: currentColor; }
+  8% { color: hsl(0 85% 60%); }
+  22% { color: hsl(35 90% 55%); }
+  36% { color: hsl(58 85% 52%); }
+  50% { color: hsl(140 68% 48%); }
+  64% { color: hsl(190 75% 50%); }
+  78% { color: hsl(232 78% 62%); }
+  92% { color: hsl(288 70% 62%); }
+  100% { color: currentColor; }
 }
 
 /* The turn clock and token cells: tabular figures so a ticking digit never
