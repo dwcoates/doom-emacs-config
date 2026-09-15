@@ -340,24 +340,6 @@ export class StatusWave {
     const elapsed = this.epoch.elapsedMs(nowMs) + index * STATUS_WAVE_LETTER_OFFSET_MS;
     return elapsed % STATUS_WAVE_CYCLE_MS;
   }
-
-  /**
-   * The WHOLE-WORD gradient's offset into the cycle, in
-   * `[0, STATUS_WAVE_CYCLE_MS)`.
-   *
-   * It reads THE SAME `epoch` the letter wave does — deliberately the one clock,
-   * so the gradient sweep and the scale bulge can never drift out of step — and
-   * folds it modulo the SAME two-period cycle for the SAME reason: the
-   * `pfooter-status-gradient` rule runs `animation-direction: alternate`, so a
-   * one-period modulus would land every redraw on a forward iteration and flip a
-   * receding sweep into an advancing one. There is no per-letter stagger here:
-   * the gradient is one continuous ramp across the whole string, not a bulge
-   * that travels letter to letter, so the word takes one phase, not one per
-   * glyph.
-   */
-  gradientDelayMs(nowMs: number): number {
-    return this.epoch.elapsedMs(nowMs) % STATUS_WAVE_CYCLE_MS;
-  }
 }
 
 /** The one wave the footer draws against, so a redraw continues it. */
@@ -406,48 +388,4 @@ export function statusWordWaves(armCase: string): boolean {
  */
 export function statusWaveStyle(index: number, nowMs: number = Date.now()): string {
   return `animation-delay:-${Math.round(statusWave.delayMs(nowMs, index))}ms`;
-}
-
-/**
- * The footer status word's COLOUR GRADIENT: a soft highlight band that sweeps
- * across the whole word left→right, then right→left, forever — a ping-pong that
- * reverses at each end rather than snapping back to the start.
- *
- * Owner's idea, 2026-09-14: the "thinking" status (the STATUS word itself, never
- * its substatus) carries a slow moving gradient IN ADDITION to the travelling
- * scale bulge above. The two coexist on the same waving word: the scale wave is
- * a per-letter `transform` and this is a whole-word `background-position`
- * animation on a `background-clip: text` fill, so neither touches what the other
- * paints. Both must move at THE EXACT SAME SPEED, which is why the gradient's
- * period and cycle are not new numbers but the letter wave's own.
- */
-export const STATUS_GRADIENT_PERIOD_MS = STATUS_WAVE_PERIOD_MS;
-
-/**
- * The gradient's full ping-pong: one sweep out and one sweep back. Identical to
- * {@link STATUS_WAVE_CYCLE_MS} by construction, not by coincidence — the sweep
- * and the bulge share one period so their motion is locked, and the negative
- * delay is reduced modulo this two-period cycle so `alternate` never lands a
- * redraw on a reset.
- */
-export const STATUS_GRADIENT_CYCLE_MS = STATUS_WAVE_CYCLE_MS;
-
-/**
- * The class the status WORD span wears to carry the gradient; the
- * `pfooter-status-gradient` rule keys on it. It sits on the SAME span that holds
- * the split letters ({@link STATUS_WAVE_WORD_CLASS}), so the one word is both
- * the gradient's fill and the letters' container.
- */
-export const STATUS_GRADIENT_CLASS = "pfooter-status-gradient";
-
-/**
- * The inline style the status word renders the gradient with, as the whole style
- * value.
- *
- * A negative `animation-delay` off the shared epoch, exactly like the letters'
- * — without it the sweep seeks to 0% and restarts at the word's head on every
- * footer push, the very stutter the epoch exists to remove.
- */
-export function statusGradientStyle(nowMs: number = Date.now()): string {
-  return `animation-delay:-${Math.round(statusWave.gradientDelayMs(nowMs))}ms`;
 }
