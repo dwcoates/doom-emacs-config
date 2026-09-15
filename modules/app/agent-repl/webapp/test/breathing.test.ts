@@ -18,12 +18,15 @@ import {
   bubbleWaveStyle,
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
+  STATUS_GRADIENT_CYCLE_MS,
+  STATUS_GRADIENT_PERIOD_MS,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
   STATUS_WAVE_PERIOD_MS,
   StatusWave,
   WAVING_STATUS_ARMS,
   startPromptWave,
+  statusGradientStyle,
   statusWordWaves,
 } from "../src/breathing.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
@@ -574,6 +577,71 @@ describe("StatusWave: the footer status word's travelling letter bulge", () => {
 
     // Assert
     expect(got).toBe(0);
+  });
+});
+
+describe("StatusWave gradient: the footer status word's colour sweep", () => {
+  it("shares the scale wave's exact period, so the two move at one speed", () => {
+    // Arrange / Act / Assert
+    expect(STATUS_GRADIENT_PERIOD_MS).toBe(STATUS_WAVE_PERIOD_MS);
+  });
+
+  it("shares the scale wave's exact cycle, so the full sweeps line up", () => {
+    // Arrange / Act / Assert
+    expect(STATUS_GRADIENT_CYCLE_MS).toBe(STATUS_WAVE_CYCLE_MS);
+  });
+
+  it("carries the elapsed time into the sweep, so a redraw continues it", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.gradientDelayMs(NOW);
+
+    // Act
+    const got = wave.gradientDelayMs(NOW + 900);
+
+    // Assert — 900ms further along the same cycle, not back at 0.
+    expect(got).toBe(900);
+  });
+
+  it("wraps at the end of the two-period cycle, because the rule alternates", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.gradientDelayMs(NOW);
+
+    // Act
+    const got = wave.gradientDelayMs(NOW + STATUS_GRADIENT_CYCLE_MS);
+
+    // Assert
+    expect(got).toBe(0);
+  });
+
+  it("floors the sweep at zero when the clock goes backwards", () => {
+    // Arrange
+    const wave = new StatusWave();
+    wave.gradientDelayMs(NOW);
+
+    // Act
+    const got = wave.gradientDelayMs(NOW - 5000);
+
+    // Assert
+    expect(got).toBe(0);
+  });
+
+  it("reads the SAME epoch as the letter wave, so sweep and bulge never drift", () => {
+    // Arrange — one wave, its epoch stamped by a letter read.
+    const wave = new StatusWave();
+    wave.delayMs(NOW, 0);
+
+    // Act — the gradient, read later, measures against that same stamp.
+    const got = wave.gradientDelayMs(NOW + 700);
+
+    // Assert
+    expect(got).toBe(700);
+  });
+
+  it("emits the sweep's phase as a negative animation-delay", () => {
+    // Arrange / Act / Assert
+    expect(statusGradientStyle(NOW)).toBe("animation-delay:-0ms");
   });
 });
 

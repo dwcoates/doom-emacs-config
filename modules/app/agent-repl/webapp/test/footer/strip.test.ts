@@ -24,6 +24,7 @@ import {
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
 import {
+  STATUS_GRADIENT_CYCLE_MS,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
   WAVING_STATUS_ARMS,
@@ -1165,5 +1166,77 @@ describe("the footer status word's letter wave", () => {
 
     // Assert
     expect(row.querySelectorAll(".pfooter-wave-letter")).toHaveLength(0);
+  });
+});
+
+// ---- the status word's colour gradient ------------------------------------
+
+describe("the footer status word's colour gradient", () => {
+  /** The gradient word span of the drawn status, or null when there is none. */
+  function gradientWord(row: HTMLElement): HTMLElement | null {
+    return row.querySelector(".footer-status .pfooter-status-gradient");
+  }
+
+  /** The negative delay the drawn gradient word renders with, in ms. */
+  function gradientDelay(row: HTMLElement): number {
+    const word = gradientWord(row);
+    if (word === null) throw new Error("no gradient word in the row");
+    const got = /animation-delay:\s*-(\d+)ms/.exec(word.getAttribute("style") ?? "");
+    if (got === null) throw new Error(`no negative delay on ${word.outerHTML}`);
+    return Number(got[1]);
+  }
+
+  it("carries the gradient class on the thinking status word", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert
+    expect(gradientWord(row)).not.toBeNull();
+  });
+
+  it("clips the gradient to the word that reads exactly as the arm", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert — the gradient rides the same span that holds the letters.
+    expect(gradientWord(row)?.textContent).toBe("thinking");
+  });
+
+  it("continues the sweep's phase across a redraw rather than restarting at zero", () => {
+    // Arrange
+    const before = gradientDelay(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+    vi.setSystemTime(NOW + 900);
+
+    // Act
+    const after = gradientDelay(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+
+    // Assert — 900ms further along the same cycle, not back at 0.
+    expect(after).toBe((before + 900) % STATUS_GRADIENT_CYCLE_MS);
+  });
+
+  it("keeps the redrawn sweep off the cycle's start, so no push reads as a jump", () => {
+    // Arrange
+    drawStrip({ status: withSubStatus("thinking", "thinking") });
+    vi.setSystemTime(NOW + 900);
+
+    // Act
+    const after = gradientDelay(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
+
+    // Assert
+    expect(after).not.toBe(0);
+  });
+
+  it("draws no gradient word for a non-waving arm", () => {
+    // Arrange — a settled status stands still and carries no gradient span.
+    const arm = FOOTER_STATUS_CASES.find((one) => !WAVING_STATUS_ARMS.has(one));
+    if (arm === undefined) throw new Error("no non-waving arm to test");
+    const sub = SUBSTATUS_PAIRS.find(([statusCase]) => statusCase === arm)?.[1];
+    const armStatus = sub === undefined ? status(arm, {}) : withSubStatus(arm, sub);
+
+    // Act
+    const { row } = drawStrip({ status: armStatus });
+
+    // Assert
+    expect(gradientWord(row)).toBeNull();
   });
 });
