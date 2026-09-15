@@ -149,6 +149,12 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* The border around the response the reader has SELECTED to reply to
+     (reply-to-a-past-response mode): blue, distinct from the green a final
+     answer wears at rest, so the one bubble the next prompt will quote is
+     unmistakable among the green answers around it. Only a final-response
+     bubble is ever selected, so this is only ever seen replacing the green. */
+  --selected-response: #2563eb;
   /* The prompt bubble's own in-flight border: light purple, worn ONLY while
      `data-wave="working"` is on the bubble (see `.bubble.user[data-wave=
      "working"]` below and `startPromptWave` / `markPromptWave` in
@@ -320,6 +326,9 @@
     --compact-rule: #f97316;
     --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
+    /* Brighter blue for the dark theme, as the other state borders lift, so
+       the selected-response hairline still reads against the dark bubble. */
+    --selected-response: #60a5fa;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
     --prompt-live-border: #d8b4fe;
@@ -1559,6 +1568,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 /* The answer the turn landed on, as against the commentary above it. Only
    the border color changes, so the 0.3px the base reserved stays laid out. */
 .bubble.assistant.final-response { border-color: var(--final-response); }
+/* The SELECTED final response (reply-to-a-past-response mode): blue in place of
+   the green. Declared after the green rule and at higher specificity (it adds
+   `.response-selected`), so the selected bubble reads blue while selected and
+   falls back to green the moment the selection clears — only the border color
+   changes, so the reserved 0.3px stays laid out and there is no reflow. */
+.bubble.assistant.final-response.response-selected {
+  border-color: var(--selected-response);
+}
 /* Async quiescence: a bubble whose LIVE background work is enumerated inside
    it (see AsyncCatalog) wears the amber async border — "the answer is landed
    but its detached work is not". Amber outranks the green final-response (it

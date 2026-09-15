@@ -626,3 +626,35 @@ describe("the prompt bubble's in-flight border", () => {
     expect(settled).not.toMatch(/border-color/);
   });
 });
+
+describe("the selected-response border (reply-to-a-past-response)", () => {
+  it("recolors the selected final-response bubble with the blue selection token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.assistant.final-response.response-selected");
+
+    // Assert
+    expect(rule).toMatch(/border-color:\s*var\(--selected-response\)/);
+  });
+
+  it("defines the --selected-response token so the blue rule resolves", () => {
+    // Arrange / Act — comments are stripped, so a bare token declaration remains.
+    const declared = /--selected-response:\s*#[0-9a-fA-F]{3,6}/.test(
+      stylesheet.replace(/\/\*[\s\S]*?\*\//g, ""),
+    );
+
+    // Assert
+    expect(declared).toBe(true);
+  });
+
+  it("declares the blue rule AFTER the green one, so the selection outranks the answer", () => {
+    // Arrange — the green rule reserves the border and the blue rule replaces it;
+    // equal specificity is broken by source order, so blue must come later.
+    const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+    const green = css.indexOf(".bubble.assistant.final-response {");
+    const blue = css.indexOf(".bubble.assistant.final-response.response-selected");
+
+    // Assert
+    expect(green).toBeGreaterThanOrEqual(0);
+    expect(blue).toBeGreaterThan(green);
+  });
+});

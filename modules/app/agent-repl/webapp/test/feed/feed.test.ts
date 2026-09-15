@@ -22,6 +22,7 @@ import {
   openSuccess,
   page,
   push,
+  pushSelection,
   responseRow,
   stubRenderers,
   subagentRow,
@@ -95,6 +96,46 @@ describe("mountFeed: opening the root feed", () => {
     channel.push(push(responseRow("r1")));
     await settle();
     expect(host.querySelector('[data-feed-row="r1"]')).not.toBeNull();
+  });
+
+  it("routes a selection frame to the feed rather than reading it as a row", async () => {
+    // Arrange — a live tail carrying a drawn response.
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    const { host } = mount(h);
+    await settle();
+    channel.push(push(responseRow("r1")));
+    await settle();
+    // Act — a selection frame naming that row (no row of its own).
+    channel.push(pushSelection({ selected: "r1", active: true, center: "r1" }));
+    await settle();
+    // Assert — the row wears the selection mark, so the frame reached
+    // applySelection rather than being rejected as a malformed row.
+    expect(host.querySelector('[data-feed-row="r1"]')?.getAttribute("data-selected-response")).toBe(
+      "true",
+    );
+  });
+
+  it("clears the selection mark when a clear frame arrives", async () => {
+    // Arrange — a row selected on the live tail.
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    const { host } = mount(h);
+    await settle();
+    channel.push(push(responseRow("r1")));
+    channel.push(pushSelection({ selected: "r1", active: true, center: "r1" }));
+    await settle();
+    // Act — the clear frame (double-escape).
+    channel.push(pushSelection({ active: false }));
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-feed-row="r1"]')?.hasAttribute("data-selected-response")).toBe(
+      false,
+    );
   });
 
   it("draws nothing but stays alive when the daemon refuses the open", async () => {

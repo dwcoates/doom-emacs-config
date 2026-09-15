@@ -35,6 +35,7 @@ import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
 import {
   captureFeedAnchor,
+  centerDelta,
   restoreFeedAnchor,
   type AnchorBox,
   type FeedAnchor,
@@ -46,6 +47,7 @@ import type {
   FeedId,
   FeedPage,
   FeedPageError,
+  FeedSelection,
   FeedTurnActivity,
   FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -140,6 +142,12 @@ export interface FeedController extends Handle {
   applyPage(page: FeedPage, placement: "replace" | "prepend"): void;
   /** One live upsert. */
   upsert(row: FeedRow): void;
+  /**
+   * Apply the daemon's reply-to-a-past-response selection state: recolor the
+   * selected final-response bubble, center-scroll it, and suppress tail-follow
+   * while a selection is active — returning to the bottom when it clears.
+   */
+  applySelection(selection: FeedSelection): void;
   rows(): readonly FeedRow[];
   breadcrumbs(): readonly FeedBreadcrumb[];
   onChange(fn: () => void): () => void;
@@ -150,6 +158,23 @@ export interface FeedController extends Handle {
   /** The view a body renderer draws from. */
   view(): SubfeedView;
 }
+
+/**
+ * THE MARK A SELECTED FINAL-RESPONSE ROW WEARS, on its chrome — the dual of
+ * FINAL_ANSWER_ATTRIBUTE. The reply-to-a-past-response selection is the
+ * daemon's per-workspace state, and this is the feed's own record of which row
+ * carries it, spelled once so a re-push naming a different row can strip it
+ * from every other row by this same name.
+ */
+export const SELECTED_RESPONSE_ATTRIBUTE = "data-selected-response";
+
+/**
+ * The class the selected final-response bubble wears so the stylesheet paints
+ * its border BLUE instead of the green final-answer border. It goes on the same
+ * `.bubble.assistant` element the green `.final-response` rule keys on, so the
+ * two are one hierarchy of rules rather than two competing places.
+ */
+export const SELECTED_RESPONSE_CLASS = "response-selected";
 
 /** Build a controller for ONE feed and draw its shell into the host. */
 export function createFeedController(opts: FeedControllerOptions): FeedController {
@@ -188,6 +213,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     element: opts.host,
     applyPage,
     upsert,
+    applySelection,
     rows,
     breadcrumbs: () => crumbs,
     onChange,
@@ -381,6 +407,95 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     adopt(row, known ? -1 : order.length);
     truncateAtSeparation(row, id);
     announce();
+  }
+
+  /**
+   * Apply the daemon's reply-to-a-past-response selection state.
+   *
+   * THREE EFFECTS, in the order the reader experiences them:
+   *  - the BLUE border moves to the selected final-response bubble and off
+   *    every other row's — a re-push (C-p/C-n) recolors one row and clears the
+   *    rest, and a cleared selection (`selected` unset) clears them all;
+   *  - while a selection is ACTIVE the tail is released, so `followTail` below
+   *    becomes a no-op and new rows append without pulling the viewport off the
+   *    centered selection (the daemon still sends them; the feed still draws
+   *    them). When the selection clears, the tail is re-parked, which is what
+   *    returns the reader to the bottom;
+   *  - the `center` row is scrolled to the middle of the viewport, clamped at
+   *    the feed edges.
+   */
+  function applySelection(selection: FeedSelection): void {
+    markSelectedResponse(selection.selected);
+    if (!selection.active) {
+      // Cleared: return to the bottom and resume following the tail.
+      opts.scroll?.tail.park();
+      return;
+    }
+    // A selection is pending. Release the tail so streaming rows do not yank
+    // the reader off the centered bubble. OVERSCAN IS UNAFFECTED: it watches
+    // rows by intersection with the scroll box, independent of the follow
+    // decision, so rows around wherever the centered selection lands still
+    // pre-render — the release only stops the auto-scroll-to-bottom, not the
+    // pre-render band.
+    opts.scroll?.tail.release();
+    if (selection.center !== undefined) centerOnRow(selection.center);
+  }
+
+  /**
+   * Put the BLUE selected-response mark on the named row and strip it from
+   * every other row of this feed. An unset id clears the mark everywhere, which
+   * is the cleared-selection case. A named row this feed has not drawn (a page
+   * not walked back to) is reported and nothing is marked — the same tolerance
+   * `markFinalAnswer` has, since guessing which row to recolor is worse than
+   * none.
+   */
+  function markSelectedResponse(selected: FeedId | undefined): void {
+    const target = selected === undefined ? null : findRowElement(selected);
+    if (selected !== undefined && target === null) {
+      log.debug("the selection names a row this feed has not drawn", {
+        operation: "feed.selection-row-absent",
+        context: { feed: feedName(), row: selected.value },
+      });
+    }
+    for (const state of states.values()) {
+      const chosen = state.element === target;
+      if (chosen) state.element.setAttribute(SELECTED_RESPONSE_ATTRIBUTE, "true");
+      else state.element.removeAttribute(SELECTED_RESPONSE_ATTRIBUTE);
+      // The blue-border rule keys on the response bubble itself, the same place
+      // the green `.final-response` rule reads, so the class goes there.
+      const bubble = state.element.querySelector(".bubble.assistant");
+      if (bubble !== null) bubble.classList.toggle(SELECTED_RESPONSE_CLASS, chosen);
+    }
+  }
+
+  /**
+   * Scroll the box so the CENTER row sits in the middle of the viewport,
+   * clamped at the feed's edges (see `centerDelta`). Read in the box's own
+   * scroll coordinates through `offsetTop`, the same units `restoreFeedAnchor`
+   * works in, so the delta is a scroll position with nothing to reconstruct;
+   * the shift goes through the tail owner rather than a bare `scrollTop` write,
+   * because a second writer of the scroll position is what `TailFollow` exists
+   * to prevent.
+   */
+  function centerOnRow(center: FeedId): void {
+    if (opts.scroll === undefined) return;
+    const node = findRowElement(center);
+    if (node === null) {
+      log.debug("the selection centers a row this feed has not drawn", {
+        operation: "feed.selection-center-absent",
+        context: { feed: feedName(), row: center.value },
+      });
+      return;
+    }
+    const box = opts.scroll.box;
+    const delta = centerDelta({
+      nodeOffsetTop: node.offsetTop,
+      nodeHeight: node.offsetHeight,
+      clientHeight: box.clientHeight,
+      scrollHeight: box.scrollHeight,
+      scrollTop: box.scrollTop,
+    });
+    if (delta !== 0) opts.scroll.tail.shift(delta);
   }
 
   /**

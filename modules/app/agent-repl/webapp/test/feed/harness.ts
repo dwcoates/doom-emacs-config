@@ -40,6 +40,7 @@ import {
   FeedMergeSchema,
   FeedPageSchema,
   FeedRowSchema,
+  FeedSelectionSchema,
   FeedSessionSeparationSchema,
   FeedSubagentSchema,
   FeedTurnEndedSchema,
@@ -528,6 +529,22 @@ export function mergeTabRow(id: string, label = "queue"): FeedRow {
 /** A tail push carrying ROW. */
 export function push(row: FeedRow): WatchFeedResponse {
   return create(WatchFeedResponseSchema, { row });
+}
+
+/**
+ * A tail push carrying the reply-to-a-past-response SELECTION state (and no
+ * row): the daemon's per-workspace selection, pushed on the root feed's watch.
+ */
+export function pushSelection(
+  selection: { selected?: string; active: boolean; center?: string },
+): WatchFeedResponse {
+  return create(WatchFeedResponseSchema, {
+    selection: create(FeedSelectionSchema, {
+      selected: selection.selected === undefined ? undefined : feedId(selection.selected),
+      active: selection.active,
+      center: selection.center === undefined ? undefined : feedId(selection.center),
+    }),
+  });
 }
 
 /** Stub renderers: each draws a marked element naming the arm it was given. */
