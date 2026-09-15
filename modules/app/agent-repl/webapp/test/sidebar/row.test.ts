@@ -203,6 +203,33 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("5s");
   });
 
+  it("states the arm the daemon chose for last activity", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 180_000) } } }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".when")?.getAttribute("data-when")).toBe("active");
+  });
+
+  it("draws last activity as a relative age", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 180_000) } } }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".when")?.textContent).toBe("3m");
+  });
+
+  it("names a never-active workspace's creation time in its own words", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "created", value: { atMs: BigInt(NOW - 3_600_000) } } }),
+      sidebarContext(),
+      "R",
+    );
+    expect(drawn.querySelector(".when")?.textContent).toBe("created 1h");
+  });
+
   it("names a settled merge in its own words", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "merged", value: { atMs: BigInt(NOW - 3_600_000) } } }),
