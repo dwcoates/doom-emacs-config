@@ -69,6 +69,7 @@ const CH_DOT = 0x2e; // .
 const CH_ZERO = 0x30;
 const CH_NINE = 0x39;
 const CH_BACKTICK = 0x60;
+const CH_BACKSLASH = 0x5c;
 // Floor of the Unicode symbol/arrow/emoji range. Every metaprompt root emoji
 // sits at or above it (✅ U+2705, ✏️ U+270F, 🔧/👀 as surrogate pairs from
 // U+D83D…), while ASCII prose after a bare number (e.g. `1 first point`)
@@ -857,27 +858,116 @@ function toPieces(atoms: Atom[], width: number): Piece[] {
 }
 
 /**
+ * The markdown inline-code state carried across a branch's pieces: whether a
+ * backtick code span is currently open and, if so, the length of its opening
+ * backtick run (a span closes only on a run of exactly that length, per
+ * CommonMark). The wrapper text is RAW MARKDOWN — the branch body is later run
+ * through the `inline()` markdown pass (see renderTreeHtml) — so backtick spans
+ * are plain characters to the tag-aware machinery and must be balanced here.
+ */
+interface CodeState {
+  open: boolean;
+  delim: number;
+}
+
+const CODE_CLOSED: CodeState = { open: false, delim: 0 };
+
+/**
+ * scan_code: advance the inline-code state across RAW. Outside a span, a
+ * backslash-escaped backtick (`\``) is a literal, not a delimiter; any other
+ * backtick run opens a span of that run's length. Inside a span, a backtick run
+ * of the SAME length closes it (a different-length run is literal content, and
+ * backslash is not special inside code per CommonMark). Whitespace never joins
+ * two backtick runs, so scanning a piece's raw in isolation and carrying the
+ * result to the next piece matches scanning the whole body.
+ */
+function scanCode(raw: string, state: CodeState): CodeState {
+  let { open, delim } = state;
+  let i = 0;
+  const n = raw.length;
+  while (i < n) {
+    const c = raw.charCodeAt(i);
+    if (!open && c === CH_BACKSLASH && raw.charCodeAt(i + 1) === CH_BACKTICK) {
+      i += 2;
+      continue;
+    }
+    if (c === CH_BACKTICK) {
+      let k = 1;
+      while (raw.charCodeAt(i + k) === CH_BACKTICK) k++;
+      if (!open) {
+        open = true;
+        delim = k;
+      } else if (k === delim) {
+        open = false;
+        delim = 0;
+      }
+      i += k;
+      continue;
+    }
+    i++;
+  }
+  return { open, delim };
+}
+
+/**
  * pack: greedily pack PIECES into lines of at most WIDTH rendered columns. It
  * returns the packed lines plus every word that could not be made to fit, which
  * the caller surfaces rather than silently truncating.
+ *
+ * REGRESSION WATCH (a wrap break inside an inline-code span must stay BALANCED):
+ * the branch body is RAW MARKDOWN and is rendered through the `inline()` pass, so
+ * a backtick-delimited code span split across two wrapped lines would otherwise
+ * leave the first line with an unclosed span and the continuation with a dangling
+ * backtick — `inline()` then renders broken markdown (styling bleeds, a literal
+ * backtick shows). So when a break falls while a code span is open, this closes
+ * the span at the end of the wrapped line (append the delimiter run) and reopens
+ * it at the start of the continuation (prepend the same run), making every
+ * emitted line a self-contained, balanced inline-code span. The delimiter
+ * backticks count toward a line's rendered width (`visibleWidth`/`textWidth`
+ * measure the RAW body, backticks included — consistent with how the branch's
+ * own backticks are already measured), so a line reserves room for its closing
+ * backticks (`closeW`) and its leading reopen backticks (`reopenW`) and never
+ * itself overflows. Triple-backtick FENCED blocks are handled opaquely elsewhere
+ * (splitTreeSegments / renderFenceBlock) and never reach here.
  */
 function pack(pieces: Piece[], width: number): { lines: string[]; overflows: string[] } {
   const lines: string[] = [];
   const overflows: string[] = [];
+  // The inline-code state entering and leaving each piece. `before[i]` is the
+  // state at the end of the current line when a break falls before piece i;
+  // `after[i]` says whether the line ending with piece i is left open (needs a
+  // closing run).
+  const before: CodeState[] = [];
+  const after: CodeState[] = [];
+  let state = CODE_CLOSED;
+  for (const piece of pieces) {
+    before.push(state);
+    state = scanCode(piece.raw, state);
+    after.push(state);
+  }
   let current = "";
   let currentWidth = 0;
   let placed = false;
-  for (const piece of pieces) {
-    if (placed && currentWidth + 1 + piece.width > width) {
-      lines.push(current + piece.breakSuffix);
-      current = piece.breakPrefix;
-      currentWidth = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    const piece = pieces[i];
+    // Room a line must keep for balancing backticks: `reopenW` if this piece
+    // begins a continuation line inside an open span, `closeW` if the line
+    // ending with this piece is left open and must be closed.
+    const reopenW = before[i].open ? before[i].delim : 0;
+    const closeW = after[i].open ? after[i].delim : 0;
+    if (placed && currentWidth + 1 + piece.width + closeW > width) {
+      // Break: close the current line's open span, then reopen it on the next.
+      const closing = before[i].open ? "`".repeat(before[i].delim) : "";
+      lines.push(current + piece.breakSuffix + closing);
+      const reopen = before[i].open ? "`".repeat(before[i].delim) : "";
+      current = piece.breakPrefix + reopen;
+      currentWidth = reopen.length;
       placed = false;
     }
     if (placed) {
       current += " ";
       currentWidth++;
-    } else if (piece.width > width) {
+    } else if (piece.width + reopenW + closeW > width) {
       overflows.push(stripTags(piece.raw));
     }
     current += piece.raw;

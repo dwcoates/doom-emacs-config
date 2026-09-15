@@ -276,6 +276,95 @@ describe("wrap engine — the daemon algorithm, ported", () => {
   });
 });
 
+// --- Inline-code balancing across a wrap break ---
+//
+// The branch body is RAW MARKDOWN rendered later through the `inline()` pass, so
+// a backtick code span split across two wrapped lines must be closed at the end
+// of one line and reopened at the start of the next, leaving every line a
+// self-contained, balanced inline-code span.
+
+/** The count of unescaped backticks in S (a `\`` is a literal, not counted). */
+function unescapedBackticks(s: string): number {
+  let count = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (s[i] === "`") count++;
+  }
+  return count;
+}
+
+describe("wrap engine — inline-code balancing", () => {
+  it("wraps a long inline-code branch into lines that are each balanced", () => {
+    // Arrange — the owner's example: one long inline-code span on a root branch.
+    const body = "1. `i am longer than one line after 'one'`";
+    // Act
+    const lines = formatTree([body], 24).lines.map(lineText);
+    // Assert — it wrapped, and every wrapped line has even (balanced) backticks.
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.every((l) => unescapedBackticks(l) % 2 === 0)).toBe(true);
+  });
+
+  it("closes and reopens the span at a break that falls mid-code-span", () => {
+    // Arrange — width 13 leaves a 10-column field; the span breaks twice.
+    // Act + Assert — each line is its own valid `code` span, none unbalanced.
+    expect(wrapBody("1. `alpha beta gamma`", 13)).toBe("1. `alpha`\n   `beta`\n   `gamma`");
+  });
+
+  it("leaves a code span that fits on one line untouched", () => {
+    // Arrange — the whole branch fits, so no backtick is added or moved.
+    const body = "├── 1.1 see `short code` here";
+    // Act + Assert
+    expect(wrapBody(body, 100)).toBe(body);
+  });
+
+  it("balances the code span in a branch mixing plain text and code", () => {
+    // Arrange — plain words surround a code span that must break across lines.
+    const body = "└── 1.2 run `alpha beta gamma delta` now";
+    // Act
+    const lines = formatTree([body], 20).lines.map(lineText);
+    // Assert — it wrapped and no line carries an odd/unbalanced backtick.
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.every((l) => unescapedBackticks(l) % 2 === 0)).toBe(true);
+    // The plain trailing word rejoins prose, carrying no open span across it.
+    expect(lines.some((l) => l.includes("now") && unescapedBackticks(l) % 2 === 0)).toBe(true);
+  });
+
+  it("never itself overflows the width with the added balancing backticks", () => {
+    // Arrange — a wide code span at a tight width; balancing must not spill.
+    const body = "1. `aaaa bbbb cccc dddd eeee ffff`";
+    // Act
+    const lines = formatTree([body], 12).lines.map(lineText);
+    // Assert — every emitted line, backticks included, stays within the limit.
+    expect(lines.every((l) => visibleWidth(l) <= 12)).toBe(true);
+  });
+
+  it("treats a backslash-escaped backtick as a literal, not a delimiter", () => {
+    // Arrange — the escaped backtick opens no span, so no balancing is added.
+    const body = "1. a \\` b c d e f g h i j k";
+    // Act — it must wrap without throwing and keep the literal escaped backtick.
+    const lines = formatTree([body], 12).lines.map(lineText);
+    // Assert — the escaped backtick survives and only it is present (odd count,
+    // because it is a literal the wrapper never balanced).
+    const joined = lines.join("\n");
+    expect(joined).toContain("\\`");
+    expect(unescapedBackticks(joined)).toBe(0);
+  });
+
+  it("renders each wrapped code line as a <code> element, not a stray backtick", () => {
+    // Arrange — a minimal inline pass that turns `x` spans into <code>x</code>.
+    const inlineCode = (s: string): string => s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    // Act
+    const html = renderTreeHtml("1. `alpha beta gamma`", inlineCode, 13);
+    // Assert — every content span became a <code>, and no bare backtick leaks.
+    const contents = [...html.matchAll(/<span class="mp-content">(.*?)<\/span>/g)].map((m) => m[1]);
+    expect(contents.length).toBeGreaterThan(1);
+    expect(contents.every((c) => c.includes("<code>") && !c.includes("`"))).toBe(true);
+  });
+});
+
 describe("renderTreeHtml", () => {
   it("renders a fitting branch as a prefix/content pair with real connectors", () => {
     // Act
