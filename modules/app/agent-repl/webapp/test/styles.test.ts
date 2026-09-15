@@ -1172,3 +1172,159 @@ describe("the feed text zoom scoping", () => {
     expect(scaled.has(".tool-card")).toBe(true);
   });
 });
+
+/**
+ * THE CARD-LEVEL TOOL FOLD (owner ruling, 2026-09-15).
+ *
+ * A tool-call and a skill card are ONE click-to-expand unit: collapsed shows
+ * the head (the title in full) and the input line (capped at two rows), with the
+ * output section HIDDEN — no preview — until the whole `.tool-fold` card is
+ * `.expanded`. These pin that model to the file, and — the load-bearing part —
+ * that it never reaches the response/prompt bubble.
+ */
+describe("the card-level tool fold", () => {
+  it("hides a collapsed card's output section entirely, showing no preview", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold:not(.expanded) > .tool-output");
+
+    // Assert — the section is removed from layout while collapsed, not capped.
+    expect(rule).toMatch(/display:\s*none/);
+  });
+
+  it("reveals the section, scrolling at 50vh, once the card is expanded", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded > .tool-output");
+
+    // Assert
+    expect(rule).toMatch(/max-height:\s*50vh/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("caps a collapsed card's input line at two text rows", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold:not(.expanded) > .bash-input");
+
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*2/);
+  });
+
+  it("applies that two-row cap to every input-line form, not just Bash", () => {
+    // Arrange / Act — the one rule that clamps the collapsed header body.
+    const clamp = rulesOf(stylesheet).find(
+      (r) =>
+        r.selectors.includes(".tool-fold:not(.expanded) > .bash-input") &&
+        /-webkit-line-clamp:\s*2/.test(r.declarations),
+    );
+
+    // Assert — plain input, command, path and query all get the same cap.
+    expect(clamp?.selectors).toEqual(
+      expect.arrayContaining([
+        ".tool-fold:not(.expanded) > .tool-input",
+        ".tool-fold:not(.expanded) > .bash-input",
+        ".tool-fold:not(.expanded) > .file-path",
+        ".tool-fold:not(.expanded) > .tool-query",
+      ]),
+    );
+  });
+
+  it("excludes the TITLE from the two-row cap: the head is never clamped", () => {
+    // Arrange / Act — every rule that clamps to two rows.
+    const clamps = rulesOf(stylesheet).filter((r) => /-webkit-line-clamp:\s*2/.test(r.declarations));
+
+    // Assert — none of them names the head or the title.
+    expect(clamps.length).toBeGreaterThan(0);
+    for (const rule of clamps) {
+      for (const sel of rule.selectors) {
+        expect(sel.includes(".tool-head")).toBe(false);
+        expect(sel.includes(".tool-name")).toBe(false);
+      }
+    }
+  });
+
+  it("lifts the two-row header cap once the card is expanded", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded > .bash-input");
+
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*none/);
+  });
+
+  it("never caps the card itself, so only the section scrolls at 50vh", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded");
+
+    // Assert — the card grows to hold its 50vh section rather than clipping.
+    expect(rule).toMatch(/max-height:\s*none/);
+  });
+
+  it("scopes the whole fold model to tool cards, never to a bubble", () => {
+    // Arrange / Act — every rule that mentions the card fold.
+    const foldRules = rulesOf(stylesheet).filter((r) =>
+      r.selectors.some((sel) => sel.includes("tool-fold")),
+    );
+
+    // Assert — not one of them reaches a response/prompt/peer bubble.
+    expect(foldRules.length).toBeGreaterThan(0);
+    for (const rule of foldRules) {
+      for (const sel of rule.selectors) expect(sel.includes("bubble")).toBe(false);
+    }
+  });
+});
+
+/**
+ * REGRESSION GUARD: the response/prompt bubble collapse model is UNCHANGED by
+ * the card-level tool fold. The bubble's scroll box must still cap-and-clip
+ * exactly as it did, and the tool cards' hide-while-collapsed model must NOT
+ * have leaked onto the response/prompt bubble (which shows a capped preview, not
+ * a hidden body — only the PEER bubble hides its body while collapsed).
+ */
+describe("regression: the response/prompt bubble collapse model", () => {
+  it("still caps the bubble scroll box at min(the line budget, 50vh)", () => {
+    // Arrange / Act
+    const capped = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes(".bubble > .bubble-scroll"),
+    );
+
+    // Assert — the same min(calc(...), 50vh) cap FIX1 established.
+    expect(
+      capped.some((rule) =>
+        /max-height:\s*min\(calc\(var\(--cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
+      ),
+    ).toBe(true);
+  });
+
+  it("still clips the collapsed bubble scroll box, revealing scroll only on expand", () => {
+    // Arrange / Act — the first overflow-y rule on the box is the collapsed clip.
+    const clip = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /overflow-y/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(clip?.declarations).toMatch(/overflow-y:\s*hidden\s*;/);
+  });
+
+  it("keeps hide-while-collapsed to the PEER bubble alone", () => {
+    // Arrange / Act — the only bubble whose body is hidden (not capped) while
+    // collapsed is the peer bubble, unchanged by this work.
+    const peer = declarationsOf(".bubble.peer > .bubble-scroll:not(.expanded)");
+
+    // Assert
+    expect(peer).toMatch(/display:\s*none/);
+  });
+
+  it("never hides a response or prompt bubble's body while collapsed", () => {
+    // Arrange / Act — every rule that removes an element from layout.
+    const hiders = rulesOf(stylesheet).filter((rule) => /display:\s*none/.test(rule.declarations));
+
+    // Assert — none of them collapses an assistant/user bubble's scroll box, so
+    // the response/prompt bubble keeps its capped-preview model, not the tool
+    // cards' hidden-section one.
+    for (const rule of hiders) {
+      for (const sel of rule.selectors) {
+        expect(/\.bubble\.assistant\s*>\s*\.bubble-scroll/.test(sel)).toBe(false);
+        expect(/\.bubble\.user\s*>\s*\.bubble-scroll/.test(sel)).toBe(false);
+      }
+    }
+  });
+});
