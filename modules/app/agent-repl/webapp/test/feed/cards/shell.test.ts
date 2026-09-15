@@ -16,7 +16,8 @@ import { createTicker } from "../../../src/clock.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
-  drawFeedShell,
+  drawFeedShellBody,
+  drawFeedShellHead,
   PROMPT_CHROME,
   SHELL_LOST_CAUSE_ARMS,
   SHELL_SETTLED_ARMS,
@@ -113,36 +114,56 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("drawFeedShell head", () => {
+describe("drawFeedShellHead head", () => {
   it("draws the client's own $ chrome", () => {
-    const el = drawFeedShell(shell(), ctxFor().rc);
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
     expect(el.querySelector(".shell-prompt")?.textContent).toBe(PROMPT_CHROME);
   });
 
   it("draws the command verbatim", () => {
-    const el = drawFeedShell(shell(), ctxFor().rc);
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
     expect(el.querySelector(".shell-command-text")?.textContent).toBe(COMMAND);
   });
 
   it("carries live as the bubble's state while the command runs", () => {
-    expect(drawFeedShell(shell(), ctxFor().rc).getAttribute("data-state")).toBe("live");
+    expect(drawFeedShellHead(shell(), ctxFor().rc).getAttribute("data-state")).toBe("live");
   });
 
   it("breathes the dot while the command runs", () => {
-    const el = drawFeedShell(shell(), ctxFor().rc);
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
     expect(el.querySelector(".agent-dot")?.classList.contains("agent-running")).toBe(true);
+  });
+
+  it("draws no spool on the head — the spool is the body", () => {
+    const el = drawFeedShellHead(shell({ spool: { text: "line one\n" } }), ctxFor().rc);
+    expect(el.querySelector(".shell-spool")).toBeNull();
   });
 });
 
-describe("drawFeedShell clocks", () => {
+describe("drawFeedShellBody is spool-only", () => {
+  it("draws neither the command nor the clock — they live on the head", () => {
+    const el = drawFeedShellBody(shell({ spool: { text: "line one\n" } }), ctxFor().rc);
+    expect([el.querySelector(".shell-command"), el.querySelector(".shell-clock")]).toEqual([
+      null,
+      null,
+    ]);
+  });
+
+  it("offers no stop control — the stop lives on the head", () => {
+    const el = drawFeedShellBody(shell({ spool: { text: "line one\n" } }), ctxFor().rc);
+    expect(el.querySelector("[data-interrupt]")).toBeNull();
+  });
+});
+
+describe("drawFeedShellHead clocks", () => {
   it("counts up from the original start while live", () => {
     vi.setSystemTime(45_000);
-    const el = drawFeedShell(shell({ startedAtMs: 0n }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ startedAtMs: 0n }), ctxFor().rc);
     expect(el.querySelector(".shell-clock")?.textContent).toBe("45s");
   });
 
   it("ticks the live clock forward", async () => {
-    const el = drawFeedShell(shell({ startedAtMs: 0n }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ startedAtMs: 0n }), ctxFor().rc);
     document.body.append(el);
     await vi.advanceTimersByTimeAsync(3000);
     expect(el.querySelector(".shell-clock")?.textContent).toBe("3s");
@@ -151,14 +172,14 @@ describe("drawFeedShell clocks", () => {
   it("reads the live clock's nearest second when a tick samples just short of one", () => {
     // Arrange + Act: the start does not share the shared ticker's phase.
     vi.setSystemTime(4920);
-    const el = drawFeedShell(shell({ startedAtMs: 0n }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ startedAtMs: 0n }), ctxFor().rc);
     // Assert: five real seconds of running reads 5s, not the lagging 4s.
     expect(el.querySelector(".shell-clock")?.textContent).toBe("5s");
   });
 
   it("stops the clock at the settled instant", () => {
     vi.setSystemTime(999_999);
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ startedAtMs: 0n, settled: { endedAtMs: 12_000n, outcome: "completed" } }),
       ctxFor().rc,
     );
@@ -174,7 +195,7 @@ describe("drawFeedShell clocks", () => {
       row: { case: "detachedShell", value: { shell: {} } },
     });
     // Act: the terminal frame.
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ startedAtMs: 0n, settled: { endedAtMs: 12_000n, outcome: "completed" } }),
       rowContext(h.ctx, row),
     );
@@ -186,7 +207,7 @@ describe("drawFeedShell clocks", () => {
 
   it("freezes the settled figure at the message's own duration, not the wall clock", () => {
     vi.setSystemTime(999_999);
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ startedAtMs: 1000n, settled: { endedAtMs: 8000n, outcome: "completed" } }),
       ctxFor().rc,
     );
@@ -197,7 +218,7 @@ describe("drawFeedShell clocks", () => {
   });
 
   it("clears the marker a live draw left, so the settled element reads as stopped", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ startedAtMs: 0n, settled: { endedAtMs: 12_000n, outcome: "completed" } }),
       ctxFor().rc,
     );
@@ -206,45 +227,45 @@ describe("drawFeedShell clocks", () => {
 
   it("draws the quiet-for reading from the last observed append", () => {
     vi.setSystemTime(20_000);
-    const el = drawFeedShell(shell({ lastProgressMs: 8000n }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ lastProgressMs: 8000n }), ctxFor().rc);
     expect(el.querySelector(".shell-quiet")?.textContent).toBe("quiet for 12s");
   });
 
   it("reads the quiet-for's nearest second when a tick samples just short of one", () => {
     // Arrange + Act: the last append does not share the shared ticker's phase.
     vi.setSystemTime(12_920);
-    const el = drawFeedShell(shell({ lastProgressMs: 8000n }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ lastProgressMs: 8000n }), ctxFor().rc);
     // Assert: five real seconds of silence reads 5s, not the lagging 4s.
     expect(el.querySelector(".shell-quiet")?.textContent).toBe("quiet for 5s");
   });
 
   it("draws no quiet-for reading before the first byte", () => {
-    const el = drawFeedShell(shell(), ctxFor().rc);
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
     expect(el.querySelector(".shell-quiet")).toBeNull();
   });
 });
 
-describe("drawFeedShell spool", () => {
+describe("drawFeedShellBody spool", () => {
   it("draws the tail verbatim", () => {
-    const el = drawFeedShell(shell({ spool: { text: "line one\nline two" } }), ctxFor().rc);
+    const el = drawFeedShellBody(shell({ spool: { text: "line one\nline two" } }), ctxFor().rc);
     expect(el.querySelector(".shell-tail")?.textContent).toBe("line one\nline two");
   });
 
   it("wears the shared capped output box, so the tail scrolls rather than clips", () => {
-    const el = drawFeedShell(shell({ spool: { text: "x" } }), ctxFor().rc);
+    const el = drawFeedShellBody(shell({ spool: { text: "x" } }), ctxFor().rc);
     expect(el.querySelector(".shell-tail")?.className).toBe(
       "tool-output bash-output shell-tail",
     );
   });
 
   it("follows the tail, so a redraw shows the newest output", () => {
-    const el = drawFeedShell(shell({ spool: { text: "x" } }), ctxFor().rc);
+    const el = drawFeedShellBody(shell({ spool: { text: "x" } }), ctxFor().rc);
     const box = el.querySelector<HTMLElement>(".shell-tail");
     expect(box?.scrollTop).toBe(box?.scrollHeight);
   });
 
   it("draws the omitted line above the box when the daemon capped", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellBody(
       shell({ spool: { text: "x", omitted: "1,204 earlier lines not shown" } }),
       ctxFor().rc,
     );
@@ -254,7 +275,7 @@ describe("drawFeedShell spool", () => {
   });
 
   it("draws the omitted line OUTSIDE the box, so the count stays put", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellBody(
       shell({ spool: { text: "x", omitted: "1 earlier line not shown" } }),
       ctxFor().rc,
     );
@@ -262,16 +283,16 @@ describe("drawFeedShell spool", () => {
   });
 
   it("draws no omitted line when nothing was capped", () => {
-    const el = drawFeedShell(shell({ spool: { text: "x" } }), ctxFor().rc);
+    const el = drawFeedShellBody(shell({ spool: { text: "x" } }), ctxFor().rc);
     expect(el.querySelector(".shell-omitted")).toBeNull();
   });
 
   it("draws no spool box while the command has produced nothing", () => {
-    expect(drawFeedShell(shell(), ctxFor().rc).querySelector(".shell-spool")).toBeNull();
+    expect(drawFeedShellBody(shell(), ctxFor().rc).querySelector(".shell-spool")).toBeNull();
   });
 });
 
-describe("drawFeedShell settled", () => {
+describe("drawFeedShellHead settled", () => {
   const outcomes = [
     { arm: "completed", word: "completed", dot: "agent-done" },
     { arm: "cancelled", word: "stopped", dot: "agent-done" },
@@ -280,7 +301,7 @@ describe("drawFeedShell settled", () => {
 
   for (const c of outcomes) {
     it(`says "${c.word}" for the ${c.arm} arm`, () => {
-      const el = drawFeedShell(
+      const el = drawFeedShellHead(
         shell({ settled: { endedAtMs: 1n, outcome: c.arm } }),
         ctxFor().rc,
       );
@@ -288,7 +309,7 @@ describe("drawFeedShell settled", () => {
     });
 
     it(`carries ${c.arm} as the bubble's state`, () => {
-      const el = drawFeedShell(
+      const el = drawFeedShellHead(
         shell({ settled: { endedAtMs: 1n, outcome: c.arm } }),
         ctxFor().rc,
       );
@@ -296,7 +317,7 @@ describe("drawFeedShell settled", () => {
     });
 
     it(`dots the ${c.arm} arm as ${c.dot}`, () => {
-      const el = drawFeedShell(
+      const el = drawFeedShellHead(
         shell({ settled: { endedAtMs: 1n, outcome: c.arm } }),
         ctxFor().rc,
       );
@@ -305,7 +326,7 @@ describe("drawFeedShell settled", () => {
   }
 
   it('says "file vanished" as the lost cause when the file went away', () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "lost", lostHow: "fileVanished" } }),
       ctxFor().rc,
     );
@@ -313,7 +334,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it('says "went silent" as the lost cause when the run produced nothing', () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "lost", lostHow: "wentSilent" } }),
       ctxFor().rc,
     );
@@ -321,7 +342,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it('says "swept up at boot" as the lost cause when a boot sweep closed it', () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "lost", lostHow: "sweptUp" } }),
       ctxFor().rc,
     );
@@ -329,7 +350,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("says the plain word when an older daemon ruled no cause", () => {
-    const el = drawFeedShell(shell({ settled: { endedAtMs: 1n, outcome: "lost" } }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ settled: { endedAtMs: 1n, outcome: "lost" } }), ctxFor().rc);
     expect(el.querySelector(".shell-outcome")?.textContent).toBe("lost sight of");
   });
 
@@ -341,7 +362,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("never draws a lost shell in the error register", () => {
-    const el = drawFeedShell(shell({ settled: { endedAtMs: 1n, outcome: "lost" } }), ctxFor().rc);
+    const el = drawFeedShellHead(shell({ settled: { endedAtMs: 1n, outcome: "lost" } }), ctxFor().rc);
     expect(el.querySelector(".shell-outcome")?.classList.contains("shell-outcome-lost")).toBe(true);
   });
 
@@ -350,7 +371,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("draws the exit chip when the terminator carried a code", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "completed", exit: 1 } }),
       ctxFor().rc,
     );
@@ -358,7 +379,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("draws a zero exit in the success tone", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "completed", exit: 0 } }),
       ctxFor().rc,
     );
@@ -366,7 +387,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("draws a non-zero exit in the error tone", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "completed", exit: 2 } }),
       ctxFor().rc,
     );
@@ -374,7 +395,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("draws no exit chip when no code was carried, never a zero", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "lost" } }),
       ctxFor().rc,
     );
@@ -382,7 +403,7 @@ describe("drawFeedShell settled", () => {
   });
 
   it("offers no stop control on a settled shell", () => {
-    const el = drawFeedShell(
+    const el = drawFeedShellHead(
       shell({ settled: { endedAtMs: 1n, outcome: "completed" } }),
       ctxFor().rc,
     );
@@ -392,13 +413,13 @@ describe("drawFeedShell settled", () => {
 
 describe("the stop control", () => {
   it("names this row as its interrupt target", () => {
-    const el = drawFeedShell(shell(), ctxFor().rc);
+    const el = drawFeedShellHead(shell(), ctxFor().rc);
     expect(el.querySelector("[data-interrupt]")?.getAttribute("data-interrupt")).toBe(ROW);
   });
 
   it("interrupts the detached target by this row's own id", async () => {
     const { h, rc } = ctxFor();
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
     expect(h.calls.interrupt.map((r) => r.target.value)).toEqual([feedId(ROW)]);
@@ -406,7 +427,7 @@ describe("the stop control", () => {
 
   it("echoes the workspace on the interrupt", async () => {
     const { h, rc } = ctxFor();
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
     expect(h.calls.interrupt[0]?.workspace).toEqual(WORKSPACE);
@@ -414,7 +435,7 @@ describe("the stop control", () => {
 
   it("draws the success outcome at the control", async () => {
     const { rc } = ctxFor(interruptedDetached(1n));
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
     expect(el.querySelector(".shell-stop-outcome")?.textContent).toBe("stopped 1");
@@ -426,7 +447,7 @@ describe("the stop control", () => {
         result: { case: "success", value: { outcome: { case: "nothingRunning", value: {} } } },
       }),
     );
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
     expect(el.querySelector(".refusal")).toBeNull();
@@ -434,7 +455,7 @@ describe("the stop control", () => {
 
   it("clears the outcome once it has been readable long enough", async () => {
     const { rc } = ctxFor(interruptedDetached(1n));
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     document.body.append(el);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
@@ -444,7 +465,7 @@ describe("the stop control", () => {
 
   it("latches the button inert while the stop is in flight", () => {
     const { rc } = ctxFor();
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
     button?.click();
     expect(button?.disabled).toBe(true);
@@ -459,7 +480,7 @@ describe("the stop control", () => {
         },
       }),
     );
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
     expect(el.querySelector("[data-interrupt-confirm]")).toBeNull();
@@ -474,7 +495,7 @@ describe("the stop control", () => {
         },
       }),
     );
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
     button?.click();
     await settle();
@@ -485,7 +506,7 @@ describe("the stop control", () => {
     const { rc } = ctxFor(
       create(InterruptResponseSchema, { result: { case: "error", value: {} } }),
     );
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
     // An error with no cause set is a frame this build cannot read, not a
@@ -542,7 +563,7 @@ describe("the stop's typed refusals", () => {
           result: { case: "error", value: { kind: c.kind as never } },
         }),
       );
-      const el = drawFeedShell(shell(), rc);
+      const el = drawFeedShellHead(shell(), rc);
       el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
       await settle();
       const drawn = el.querySelector(".shell-stop .refusal");
@@ -557,22 +578,22 @@ describe("the stop's typed refusals", () => {
   });
 });
 
-describe("drawFeedShell malformed input", () => {
+describe("drawFeedShellHead malformed input", () => {
   it("refuses a bubble whose state oneof is unset", () => {
     const u = create(FeedShellSchema, { command: { text: COMMAND }, runtime: { startedAtMs: 0n } });
-    expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+    expect(() => drawFeedShellHead(u, ctxFor().rc)).toThrow(MalformedView);
   });
 
   it("refuses a bubble with no command", () => {
     const u = shell();
     (u as unknown as { command: undefined }).command = undefined;
-    expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+    expect(() => drawFeedShellHead(u, ctxFor().rc)).toThrow(MalformedView);
   });
 
   it("refuses a bubble with no runtime", () => {
     const u = shell();
     (u as unknown as { runtime: undefined }).runtime = undefined;
-    expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+    expect(() => drawFeedShellHead(u, ctxFor().rc)).toThrow(MalformedView);
   });
 
   it("refuses a settled bubble whose outcome oneof is unset", () => {
@@ -580,7 +601,7 @@ describe("drawFeedShell malformed input", () => {
     (u.state as unknown as { value: { outcome: { case: undefined } } }).value.outcome = {
       case: undefined,
     };
-    expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+    expect(() => drawFeedShellHead(u, ctxFor().rc)).toThrow(MalformedView);
   });
 
   it("refuses a state arm this build does not know", () => {
@@ -589,14 +610,14 @@ describe("drawFeedShell malformed input", () => {
       case: "queued",
       value: {},
     };
-    expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+    expect(() => drawFeedShellHead(u, ctxFor().rc)).toThrow(MalformedView);
   });
 
   it("refuses a settled outcome arm this build does not know", () => {
     const u = shell({ settled: { endedAtMs: 1n, outcome: "completed" } });
     (u.state as unknown as { value: { outcome: { case: string; value: unknown } } }).value.outcome =
       { case: "evicted", value: {} };
-    expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+    expect(() => drawFeedShellHead(u, ctxFor().rc)).toThrow(MalformedView);
   });
 });
 
@@ -648,7 +669,7 @@ describe("the stop's unreadable answers", () => {
     });
     (answer.result.value as { outcome: unknown }).outcome = { case: "quiesced", value: {} };
     const { rc, reported } = ctxAnswering(answer);
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     // Act
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
@@ -671,7 +692,7 @@ describe("the stop's unreadable answers", () => {
     });
     (answer as { result: unknown }).result = { case: "deferred", value: {} };
     const { rc, reported } = ctxAnswering(answer);
-    const el = drawFeedShell(shell(), rc);
+    const el = drawFeedShellHead(shell(), rc);
     // Act
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
