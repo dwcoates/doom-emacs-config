@@ -853,6 +853,34 @@ all -- an image-only submission is a legitimate thing to say, and an empty
                  (list (agent-repl--input-text-block text)))
                (mapcar #'agent-repl--input-image-block attachments)))))
 
+(defun agent-repl--input-optimistic-clear (ws raw)
+  "Clear WS's composer and record RAW the instant a from-buffer prompt is sent.
+Owner ruling: when the user submits from the composer (hits return), Emacs
+ALWAYS clears the input window and records the prompt IMMEDIATELY, whether
+or not the daemon ever acks.  So this runs AT DISPATCH, before the wire
+call, never in an ack callback: a missing, slow, failed or erroring ack no
+longer leaves the composer full.
+
+Nothing is lost by clearing early.  RAW is pushed onto the input history
+ring here, so the user can recall it with history-prev even on a refusal
+that is not queued.  And a transport failure hands the full said+raw to
+the outage queue (see `agent-repl--input-on-failure'), which is
+independent of the composer.  Between the ring and the queue, the erased
+draft is always recoverable.
+
+ATTACHMENTS are cleared too: the submission carried them, so leaving them
+would re-send them on the next prompt.  The ring is persisted once here."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (when buf
+      (with-current-buffer buf
+        (agent-repl--history-push raw)
+        (agent-repl--history-reset)
+        (erase-buffer)))
+    (agent-repl--history-save ws)
+    (agent-repl-input-clear-attachments ws)
+    (agent-repl--log ws "elisp.input.optimistic-clear ws=%s raw-len=%d buffer=%s"
+                     ws (length raw) (and buf t))))
+
 (defun agent-repl--input-accepted (ws raw arm &optional from-buffer)
   "Finish an ACCEPTED submission for WS: keep the record, clear what was sent.
 ARM names which accepted arm answered, for the log.  Applies to every
@@ -861,30 +889,37 @@ recognized-but-unsupported command and a session-acting command the
 daemon acted on are all answers, and none of them leaves the sent text
 owed a resend.
 
-FROM-BUFFER says the submitted text WAS the composer\='s contents.  Only
-then is the composer erased: a canned command send (`agent-repl-update-pr\='
-and every other explicit-TEXT site) composed its own words, and erasing
-an unrelated half-written draft the user never submitted would destroy
-work the daemon was never told about (ruling on audit-3 #51).
+FROM-BUFFER says the submitted text WAS the composer\='s contents.  When
+it is, THIS FUNCTION DOES NOT touch the composer, the history ring, or the
+attachments: `agent-repl--input-optimistic-clear' already erased the
+composer, pushed RAW to history, reset the position, saved the ring and
+cleared the attachments at dispatch time (owner ruling: a from-buffer
+submit clears and records on return regardless of the ack).  Re-doing any
+of it here would double-push history or error on the already-empty
+composer, so the accept path for a from-buffer submission is purely a log.
 
-RAW is pushed onto the input history either way -- the ring is the record
-of what was sent from this workspace, and a canned prompt was sent.  The
-history POSITION is only reset when the composer itself was cleared,
-because a surviving draft keeps whatever navigation state it had.
-
-ATTACHMENTS are cleared either way: the submission carried them, whatever
-composed its text, so leaving them would re-send them on the next prompt."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (when buf
-      (with-current-buffer buf
-        (agent-repl--history-push raw)
-        (when from-buffer
-          (agent-repl--history-reset)
-          (erase-buffer))))
-    (agent-repl--history-save ws)
-    (agent-repl-input-clear-attachments ws)
-    (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d buffer=%s from-buffer=%s"
-                     ws arm (length raw) (and buf t) (and from-buffer t))))
+For a NON-from-buffer accept -- a canned command send
+(`agent-repl-update-pr\=' and every other explicit-TEXT site), a
+metaprompt read, a queue re-drive -- the composer is left alone: those
+compose their own words and erasing an unrelated half-written draft the
+user never submitted would destroy work the daemon was never told about
+(ruling on audit-3 #51, which protected an UNRELATED draft; it never
+reached the from-buffer path, which now clears optimistically instead).
+RAW is still pushed onto the ring -- a canned prompt WAS sent -- but the
+history POSITION is left where it was, because a surviving draft keeps its
+navigation state.  ATTACHMENTS are cleared, since the submission carried
+them."
+  (if from-buffer
+      (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d from-buffer=t (optimistic clear already applied at dispatch)"
+                       ws arm (length raw))
+    (let ((buf (agent-repl--input-buffer ws)))
+      (when buf
+        (with-current-buffer buf
+          (agent-repl--history-push raw)))
+      (agent-repl--history-save ws)
+      (agent-repl-input-clear-attachments ws)
+      (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d buffer=%s from-buffer=nil"
+                       ws arm (length raw) (and buf t)))))
 
 (defun agent-repl--input-on-success (ws raw origin success &optional from-buffer)
   "Handle a `SubmitPromptSuccess' for WS.  ORIGIN and RAW name the send.
@@ -977,7 +1012,16 @@ up.  Nothing is owed by the user and nothing is owed by this composer, so
 the sentence states the fact and the prompt is neither held nor lost.")
 
 (defun agent-repl--input-on-error (ws said origin raw error key)
-  "Handle a `SubmitPromptError' for WS.  The composer KEEPS its text.
+  "Handle a `SubmitPromptError' for WS.
+This path never touches the composer.  A from-buffer submission was
+already cleared and recorded to history at dispatch, so a refusal that is
+NOT queued (`duplicate_submission', `cold_gate', `no_session',
+`bubble_refused') is still lossless: the user recalls the text with
+history-prev.  A canned/metaprompt/re-drive send composed its own text and
+left the user's draft in place, so there is nothing here to keep or erase
+either.  Wherever a docstring below says \"the text stays where it is\" it
+means this path adds no erase and no restore; the recovery is the ring for
+a from-buffer send and the untouched draft for a canned one.
 ERROR is the decoded error message.  Its `merging' arm means the prompt
 arrived after a merge began and would be orphaned, so the user resubmits
 once the merge resolves.  Its two HANDOVER arms are not failures at all
@@ -1053,8 +1097,11 @@ refusal can re-drive the very prompt that was refused."
 (defun agent-repl--input-on-failure (ws said origin raw detail key)
   "Handle a TRANSPORT failure for WS's submission.
 The daemon never answered, so nothing is known about whether the prompt
-landed.  The composer KEEPS its text and the prompt is offered to the
-hold queue, which sends it for real once the link is back.
+landed.  The full SAID and RAW are offered to the hold queue, which sends
+them for real once the link is back -- the queue entry is independent of
+the composer, so a from-buffer submission that was optimistically cleared
+at dispatch loses nothing: its words ride the queue AND sit in the history
+ring.  This path adds no erase and no restore of the composer.
 
 KEY is THIS attempt\='s idempotency key and rides into the queue: the
 re-drive is a RETRY of this submission, not a second turn, so it goes
@@ -1172,10 +1219,17 @@ the history push alike read the composer through."
   "Submit PROMPT (or the input buffer's contents) to workspace WS.
 ORIGIN is this send site's own `PromptOrigin' keyword and is REQUIRED --
 it rides the wire and the daemon persists it onto the turn's durable
-record.  When PROMPT is nil the text comes from the input buffer, which
-is cleared only once the daemon has ACCEPTED the submission.  When WS is
-nil the current workspace is used.  FORCE-METAPROMPT prepends the
-on-demand read-directive.
+record.  When PROMPT is nil the text comes from the input buffer, and
+that from-buffer submission is cleared OPTIMISTICALLY -- the composer is
+erased and the prompt recorded the instant the user hits return, before
+the wire call and regardless of whether the daemon ever acks (owner
+ruling; the history ring and the outage queue are what keep the erased
+draft recoverable, so nothing is lost).  When PROMPT is supplied the text
+was composed by the caller (a canned command, a metaprompt, a queue
+re-drive), and the user's own draft is left untouched -- those sites
+record their prompt on the ack instead.  When WS is nil the current
+workspace is used.  FORCE-METAPROMPT prepends the on-demand
+read-directive.
 
 Returns the submission's idempotency key, or nil when nothing was sent."
   (interactive (list :user-sent))
@@ -1196,13 +1250,19 @@ Returns the submission's idempotency key, or nil when nothing was sent."
             (agent-repl--info ws "elisp.input.send-empty ws=%s origin=%S -- nothing to send"
                               ws origin)
             nil)
-        (let* ((text (agent-repl--prepare-input ws raw force-metaprompt))
+        (let* ((from-buffer (null prompt))
+               (text (agent-repl--prepare-input ws raw force-metaprompt))
                (said (agent-repl--input-said text attachments)))
           (agent-repl--kickoff-prompt-summary ws raw)
           ;; `(null prompt)' is the one fact that says the words came out
-          ;; of the composer, and it is the only thing that entitles the
-          ;; acceptance to erase it.
-          (agent-repl--input-submit ws said origin raw nil (null prompt)))))))
+          ;; of the composer.  A from-buffer submission clears the composer
+          ;; and records RAW HERE, at dispatch, so a missing or failed ack
+          ;; can never leave the composer full (owner ruling).  `said' and
+          ;; `attachments' were already captured above, so the clear costs
+          ;; the submission nothing.
+          (when from-buffer
+            (agent-repl--input-optimistic-clear ws raw))
+          (agent-repl--input-submit ws said origin raw nil from-buffer))))))
 
 ;;;; ---- The send sites --------------------------------------------------
 ;;
