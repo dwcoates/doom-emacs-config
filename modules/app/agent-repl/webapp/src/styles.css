@@ -2226,6 +2226,68 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   overflow-y: auto;
   cursor: zoom-out;
 }
+
+/* THE CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool-call and a skill card
+   are ONE click-to-expand unit: `.tool-fold` is the whole card, the feed-wide
+   handler toggles `.expanded` on IT (CAPPED_CLASSES in expand.ts), and these
+   rules — NOT any per-section cap — decide what a collapsed card shows.
+
+   These rules are the ONLY collapse model the tool-call/skill cards obey; the
+   response/prompt/peer bubble (`.bubble > .bubble-scroll`), the detached shell
+   tail (`.shell-tail`) and the hook card's box (`.hook-output`) keep their own
+   models, untouched. Everything here is scoped under `.tool-fold`, so none of
+   it reaches those.
+
+   The card itself must never take the bare `.expanded` 50vh cap — the SECTION
+   scrolls at 50vh, the card grows to hold it — so the (0,2,0) `.tool-fold.expanded`
+   outranks the (0,1,0) `.expanded` and turns the card's own cap back off. */
+.tool-fold { cursor: zoom-in; }
+.tool-fold.expanded { max-height: none; overflow: visible; cursor: zoom-out; }
+
+/* COLLAPSED = NO SECTION PREVIEW. A collapsed card hides its output section
+   entirely rather than showing a height-capped peek of it — collapsed is the
+   header alone. (The `.tool-diagnostics` block is part of that section.) */
+.tool-fold:not(.expanded) > .tool-output,
+.tool-fold:not(.expanded) > .tool-diagnostics {
+  display: none;
+}
+/* EXPANDED reveals the section, scrolling at 50vh — the same ceiling every
+   expanded box caps at. Outranks each output's own single-class preview cap
+   (`.tool-read-output`, `.skill-content`, …, all 0,1,0) so the reveal is 50vh,
+   not the old 10-line budget. */
+.tool-fold.expanded > .tool-output {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+/* THE HEADER'S NON-TITLE CONTENT — the one input line (a command, a path, a
+   query, or plain input) — is capped at TWO ROWS while collapsed and clipped
+   beyond that. The TITLE lives in `.tool-head` and is never matched here, so it
+   is always shown in full and never counts toward the two rows. `line-clamp`
+   caps by text rows and `max-height: none` drops each line's own preview cap so
+   the two-row clamp is the only limit. */
+.tool-fold:not(.expanded) > .tool-input,
+.tool-fold:not(.expanded) > .bash-input,
+.tool-fold:not(.expanded) > .file-path,
+.tool-fold:not(.expanded) > .tool-query {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: none;
+}
+/* EXPANDING LIFTS THE HEADER CAP TOO: the full input line shows alongside the
+   revealed section. */
+.tool-fold.expanded > .tool-input,
+.tool-fold.expanded > .bash-input,
+.tool-fold.expanded > .file-path,
+.tool-fold.expanded > .tool-query {
+  display: block;
+  -webkit-line-clamp: none;
+  overflow: visible;
+  max-height: none;
+}
+
 /* FIX2 "MORE BELOW" (owner ruling, 2026-09-15: "a signal that there's more to
    reveal"). A COLLAPSED response or prompt bubble whose content overruns its cap
    wears `has-more` (bubble-more.ts measures the overflow and toggles the class);

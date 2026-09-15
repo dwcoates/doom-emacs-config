@@ -162,7 +162,12 @@ export function drawFeedHookBlocked(u: FeedHookBlocked, path: string): HTMLEleme
     context: { path },
   });
   const reason = document.createElement("div");
-  reason.className = "tool-output bash-output hook-reason";
+  // `.hook-output` is the class the hook card's box is click-to-expand BY
+  // (CAPPED_CLASSES in expand.ts). It keeps the hook card's own per-section
+  // fold after the tool-call/skill cards moved to a card-level fold — the box
+  // still caps, clips and scrolls through its `.tool-output`/`.bash-output`
+  // rules exactly as it did before.
+  reason.className = "tool-output bash-output hook-reason hook-output";
   reason.textContent = u.reason;
   return reason;
 }
@@ -200,7 +205,10 @@ export function drawFeedHookOutput(u: FeedHookOutput, path: string): HTMLElement
     context: { path },
   });
   const output = document.createElement("pre");
-  output.className = "tool-output bash-output";
+  // `.hook-output`: the hook card keeps its own per-section click-to-expand
+  // (CAPPED_CLASSES in expand.ts), unchanged by the card-level fold the
+  // tool-call/skill cards adopted.
+  output.className = "tool-output bash-output hook-output";
   output.textContent = u.text;
   return output;
 }
