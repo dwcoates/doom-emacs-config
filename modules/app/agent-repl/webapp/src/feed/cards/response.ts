@@ -642,6 +642,100 @@ function cutShortMarker(): HTMLElement {
 }
 
 /**
+ * Reconcile PARENT's children in place so they match TARGET's, preserving the
+ * identity of every node that did not change.
+ *
+ * This is the whole anti-flicker mechanism. The reveal renders the authoritative
+ * `proseHtml(slice, cols)` into a DETACHED target each frame; rather than swap
+ * the live subtree for it (which destroys and recreates every settled node under
+ * the reader), this walks the two child lists in order and, position by
+ * position:
+ *
+ *   - a node that `isEqualNode` the target's is left exactly as it is — a stable
+ *     prose paragraph or a final tree line keeps its identity and never repaints;
+ *   - a node that only changed inside (same tag and attributes, or a text node)
+ *     is PATCHED in place recursively — a growing paragraph's text node gets its
+ *     data updated, a `.mp-tree` is descended into and line-diffed, the one tail
+ *     line whose wrap can still change is patched — so the node stays put and
+ *     only its altered interior moves;
+ *   - anything else is replaced, extra target nodes are appended, and trailing
+ *     nodes the target no longer has are removed.
+ *
+ * Because every position ends structurally equal to the target, the reconciled
+ * result is byte-identical to a fresh `proseHtml(slice, cols)` — the same string
+ * `paintWhole` writes in one shot.
+ *
+ * TAIL, when given, is a node kept as PARENT's last child (the arriving
+ * indicator): it is never matched against the target and never removed, so the
+ * prose reconciles ahead of it and it stays put.
+ */
+export function reconcileChildren(parent: Node, target: Node, tail: Node | null): void {
+  const goal = Array.from(target.childNodes);
+  let i = 0;
+  for (; i < goal.length; i++) {
+    const want = goal[i];
+    // `.item` returns null past the end at run time even where the DOM lib types
+    // it non-null, so the range check below is real, not dead.
+    let existing: ChildNode | null = parent.childNodes.item(i);
+    // Reaching the preserved tail means the prose ran out: the rest is new and
+    // is inserted ahead of the tail rather than matched against it.
+    if (existing === tail) existing = null;
+    if (existing === null) {
+      parent.insertBefore(want, tail);
+      continue;
+    }
+    if (existing.isEqualNode(want)) continue;
+    if (patchable(existing, want)) {
+      patchNode(existing, want);
+      continue;
+    }
+    parent.replaceChild(want, existing);
+  }
+  // Drop any prose nodes the target no longer carries, without touching the tail.
+  let extra: ChildNode | null = parent.childNodes.item(i);
+  while (extra !== null && extra !== tail) {
+    parent.removeChild(extra);
+    extra = parent.childNodes.item(i);
+  }
+}
+
+/**
+ * Whether EXISTING can be patched into WANT in place (keeping EXISTING's node
+ * identity) rather than replaced wholesale: two text nodes, or two elements of
+ * the same tag carrying the same attributes. A tag or attribute difference means
+ * the node genuinely changed shape and is replaced instead.
+ */
+function patchable(existing: Node, want: Node): boolean {
+  if (existing.nodeType !== want.nodeType) return false;
+  if (existing.nodeType === Node.TEXT_NODE) return true;
+  if (existing.nodeType !== Node.ELEMENT_NODE) return false;
+  const a = existing as Element;
+  const b = want as Element;
+  return a.tagName === b.tagName && sameAttributes(a, b);
+}
+
+/** Whether two elements carry the same attribute set, name for name and value. */
+function sameAttributes(a: Element, b: Element): boolean {
+  if (a.attributes.length !== b.attributes.length) return false;
+  for (const attr of Array.from(a.attributes)) {
+    if (b.getAttribute(attr.name) !== attr.value) return false;
+  }
+  return true;
+}
+
+/** Patch EXISTING to match WANT in place: text data for a text node, otherwise
+ * recurse so the element's own children reconcile the same way. */
+function patchNode(existing: Node, want: Node): void {
+  if (existing.nodeType === Node.TEXT_NODE) {
+    const from = existing as Text;
+    const to = want as Text;
+    if (from.data !== to.data) from.data = to.data;
+    return;
+  }
+  reconcileChildren(existing, want, null);
+}
+
+/**
  * Pace the visible growth from RESUMED up to the whole arrived prose.
  *
  * THE FRAME IS AN ANIMATION FRAME, not the app ticker: the shared ticker steps
@@ -679,11 +773,31 @@ function animate(
       cols,
     );
   };
+  // The arriving indicator is a STABLE node kept as the body's last child across
+  // every frame (drawFeedResponseUpdate appended it before this ran). Reusing
+  // the one node — never minting a fresh ellipsis per frame — keeps its CSS
+  // animation running unbroken and keeps it out of the prose reconciliation.
+  const indicator = body.querySelector<HTMLElement>(".response-arriving") ?? arrivingIndicator();
   const paint = (shown: number): void => {
     lastShown = shown;
-    const prose = document.createElement("div");
-    prose.innerHTML = proseHtml(markdown.slice(0, shown), cols);
-    body.replaceChildren(...prose.childNodes, arrivingIndicator());
+    // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
+    // `body.replaceChildren(...proseHtml(slice).childNodes, freshIndicator())`
+    // on EVERY animation frame — a full teardown and rebuild of the whole prose
+    // subtree ~60 times a second, so every settled line was destroyed and
+    // recreated under the reader and the bubble flickered. It now renders the
+    // authoritative `proseHtml(slice, cols)` into a DETACHED target and
+    // RECONCILES the live body against it (reconcileChildren): unchanged leading
+    // nodes — stable prose paragraphs, final tree lines — keep their identity and
+    // are never touched, and only the growing tail (and, inside a tree, the one
+    // last line whose wrap can still change) is patched or appended. The
+    // reconciled result is byte-identical to a fresh `proseHtml(slice, cols)`,
+    // the same whole render `paintWhole` writes at settle, so the reveal never
+    // diverges from the oracle. Do NOT reintroduce a whole-subtree rebuild per
+    // frame. This is a watch flag, not a lock.
+    const target = document.createElement("div");
+    target.innerHTML = proseHtml(markdown.slice(0, shown), cols);
+    reconcileChildren(body, target, indicator);
+    if (indicator.parentNode !== body || body.lastChild !== indicator) body.appendChild(indicator);
     markRevealed(bubble, shown);
     wireReflow();
   };
