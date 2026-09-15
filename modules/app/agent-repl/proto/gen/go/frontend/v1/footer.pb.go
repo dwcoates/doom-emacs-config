@@ -5917,9 +5917,23 @@ type FooterStatusActivityRateLimited struct {
 	// leaves the figures on hand standing (the daemon's own sourcing rule),
 	// and this cell is what lets the client say the figures are stale rather
 	// than silently implying they are fresh.
-	Sample        *FooterAllowanceSample `protobuf:"bytes,3,opt,name=sample,proto3" json:"sample,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Sample *FooterAllowanceSample `protobuf:"bytes,3,opt,name=sample,proto3" json:"sample,omitempty"`
+	// The instant the figures above were last successfully READ off an account
+	// usage sample, epoch ms — the ORIGINAL instant, so the client ticks the
+	// reading's age from it ("session 41% … 10m 30s ago") per the clock
+	// convention (an instant is shipped, a duration is drawn).
+	//
+	// UNSET means no read instant exists: the figures on hand came from a
+	// rate-limit EVENT rather than a sample (an event carries no observation
+	// instant), or no figure has ever been read at all. The client then draws
+	// the figures with no age rather than inventing one.
+	//
+	// STAMPED ON A READABLE SAMPLE AND NEVER ON AN UNREADABLE ATTEMPT: the age
+	// is the age of the last successful reading, so an unreadable sample that
+	// leaves the figures standing does not make them look freshly read.
+	FiguresReadAtMs *int64 `protobuf:"varint,5,opt,name=figures_read_at_ms,json=figuresReadAtMs,proto3,oneof" json:"figures_read_at_ms,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *FooterStatusActivityRateLimited) Reset() {
@@ -5978,6 +5992,13 @@ func (x *FooterStatusActivityRateLimited) GetSample() *FooterAllowanceSample {
 		return x.Sample
 	}
 	return nil
+}
+
+func (x *FooterStatusActivityRateLimited) GetFiguresReadAtMs() int64 {
+	if x != nil && x.FiguresReadAtMs != nil {
+		return *x.FiguresReadAtMs
+	}
+	return 0
 }
 
 // The newest account-usage sample's outcome, BY NAME. THE ARM IS WHETHER A
@@ -10018,12 +10039,14 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\"FooterStatusActivityAuthenticating\x12\x12\n" +
 	"\x04line\x18\x01 \x01(\tR\x04line\";\n" +
 	"!FooterStatusActivityBlockedOnUser\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x83\x02\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xcc\x02\n" +
 	"\x1fFooterStatusActivityRateLimited\x126\n" +
 	"\asession\x18\x01 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\asession\x124\n" +
 	"\x06weekly\x18\x02 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\x06weekly\x126\n" +
 	"\aoverage\x18\x04 \x01(\v2\x1c.frontend.v1.FooterAllowanceR\aoverage\x12:\n" +
-	"\x06sample\x18\x03 \x01(\v2\".frontend.v1.FooterAllowanceSampleR\x06sample\"\x93\x04\n" +
+	"\x06sample\x18\x03 \x01(\v2\".frontend.v1.FooterAllowanceSampleR\x06sample\x120\n" +
+	"\x12figures_read_at_ms\x18\x05 \x01(\x03H\x00R\x0ffiguresReadAtMs\x88\x01\x01B\x15\n" +
+	"\x13_figures_read_at_ms\"\x93\x04\n" +
 	"\x15FooterAllowanceSample\x12K\n" +
 	"\tavailable\x18\x01 \x01(\v2+.frontend.v1.FooterAllowanceSampleAvailableH\x00R\tavailable\x12g\n" +
 	"\x13service_unavailable\x18\x02 \x01(\v24.frontend.v1.FooterAllowanceSampleServiceUnavailableH\x00R\x12serviceUnavailable\x12d\n" +
@@ -10767,6 +10790,7 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatusLoadingActivity_Fault)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[74].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[81].OneofWrappers = []any{}
 	file_frontend_v1_footer_proto_msgTypes[82].OneofWrappers = []any{
 		(*FooterAllowanceSample_Available)(nil),
 		(*FooterAllowanceSample_ServiceUnavailable)(nil),
