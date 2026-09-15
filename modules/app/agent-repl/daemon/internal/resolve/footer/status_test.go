@@ -79,6 +79,25 @@ func TestIdleIsDoneAfterATurnConcluded(t *testing.T) {
 	}
 }
 
+func TestTheArmIsThinkingFromSubmitBeforeAnyActivity(t *testing.T) {
+	// The status word's footer wave gates on the `thinking` ARM. The daemon
+	// publishes the turn on receipt (deliver.go), before the shim answers, so the
+	// arm must already read `thinking` during submitting — the wave starts on
+	// submit, not once the first activity or response arrives.
+
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Assert
+	if got := h.status(t); got != "thinking" {
+		t.Fatalf("status = %q, want thinking during the submitting phase", got)
+	}
+}
+
 func TestThinkingIsSubmittingUntilTheFirstActivity(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
