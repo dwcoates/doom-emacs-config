@@ -249,6 +249,10 @@ func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntr
 		w.routeAgentFrameLocked(a, frame, at.GetAt())
 		return
 	}
+	if peer := entry.GetPeerMessage(); peer != nil {
+		w.routePeerMessageLocked(a, peer)
+		return
+	}
 	w.log.Warn("daemon.sessionwatcher.entry_unrouted", "a history entry carried no arm", dlog.Context{
 		"agent_id": a.id.GetValue(),
 	})
@@ -275,6 +279,23 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
 	})
 	w.sinks.Feed.OnPrompt(w.ws, prompt.GetAgent(), prompt, w.addr)
+}
+
+// routePeerMessageLocked routes a message another Claude session sent into the
+// watched agent's conversation. Unlike a live prompt it never opens a turn — it
+// is not this agent's own work and drives no response of its own — so it is
+// simply handed to the feed to draw as the peer bubble.
+func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.PeerMessage) {
+	if a.id == nil {
+		// A peer message names its recipient (the main agent for a session), so
+		// on a not-yet-adopted watch it is the same first-sight of the main
+		// agent a live prompt is.
+		w.adoptMainAgentLocked(peer.GetAgent(), "live_peer_message")
+	}
+	w.log.Debug("daemon.sessionwatcher.peer_message", "peer message routed to the feed", dlog.Context{
+		"agent_id": peer.GetAgent().GetValue(), "sender": peer.GetSender(), "peer_id": peer.GetId(),
+	})
+	w.sinks.Feed.OnPeerMessage(w.ws, peer, w.addr)
 }
 
 // routeAgentFrameLocked routes one AgentFrame by its arm. THE UNIT UPSERTED IS

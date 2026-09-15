@@ -178,6 +178,19 @@ func TestWriteBatchRefusesAPromptWhoseBookDisagreesWithItsRecipient(t *testing.T
 	}
 }
 
+func TestWriteBatchRefusesAPeerMessageWhoseBookDisagreesWithItsRecipient(t *testing.T) {
+	// Arrange: a peer message's book IS its one recipient, exactly like a prompt.
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "producer", batch(pageEntry("w1", "u1", "agent-1", peerItem("agent-2"))), nil)
+
+	// Assert
+	if got := RefusalSite(err); got != SitePageBookMismatch {
+		t.Fatalf("site = %q (error: %v), want %q", got, err, SitePageBookMismatch)
+	}
+}
+
 func TestAMismatchedPageLineCommitsNothing(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)

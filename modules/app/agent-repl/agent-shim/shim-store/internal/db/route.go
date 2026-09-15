@@ -268,6 +268,17 @@ func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (r
 		r.book = sql.NullString{String: book, Valid: true}
 		r.pageLine = line
 		return r, nil
+	case *storev1.StoreAgentItem_PeerMessage:
+		if err := validatePeerMessage(arm.PeerMessage, index); err != nil {
+			return routed{}, err
+		}
+		if err := requireBookMatchesFrame(book, arm.PeerMessage.GetAgent().GetValue(), "peer_message.agent", index); err != nil {
+			return routed{}, err
+		}
+		r.kind = kindPageLine
+		r.book = sql.NullString{String: book, Valid: true}
+		r.pageLine = line
+		return r, nil
 	case *storev1.StoreAgentItem_AgentFrame:
 		return classifyAgentFrame(r, line, arm.AgentFrame, index)
 	default:
@@ -303,6 +314,19 @@ func validateAgentPrompt(prompt *conversationv1.AgentPrompt, index int) error {
 	}
 	if prompt.GetAgent().GetValue() == "" {
 		return invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item.agent_prompt.agent"), "entries[%d].agent_prompt.agent is unset or empty — a prompt always has exactly one recipient", index)
+	}
+	return nil
+}
+
+// validatePeerMessage is the base function for conversation.v1.PeerMessage at
+// the store's depth: the recipient is what the store routes on, exactly as an
+// AgentPrompt's is, and a peer message always names one.
+func validatePeerMessage(peer *conversationv1.PeerMessage, index int) error {
+	if peer == nil {
+		return invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item.peer_message"), "entries[%d] carries a nil peer_message", index)
+	}
+	if peer.GetAgent().GetValue() == "" {
+		return invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item.peer_message.agent"), "entries[%d].peer_message.agent is unset or empty — a peer message always names one recipient", index)
 	}
 	return nil
 }

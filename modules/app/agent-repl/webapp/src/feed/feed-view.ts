@@ -68,6 +68,7 @@ import { replaceTicking, stopTicking } from "./ticking.js";
 import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
+import { drawFeedPeerMessage } from "./rows/peer-message.js";
 import { FINAL_ANSWER_ATTRIBUTE, drawFeedTurnEnded } from "./rows/turn-ended.js";
 import {
   drawFeedSessionSeparation,
@@ -713,6 +714,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         return drawFeedUserPrompt(arm.value);
       case "agentPrompt":
         return drawFeedAgentPrompt(arm.value);
+      case "peerMessage":
+        return drawFeedPeerMessage(arm.value);
       case "turnEnded":
         return drawFeedTurnEnded(arm.value, rc);
       case "separation":

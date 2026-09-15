@@ -63,6 +63,14 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// results under the user's role; emitting an empty prompt beside them
 		// would put words in a person's mouth.
 		return out
+	case env.originKind == "peer":
+		// A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message or a
+		// subagent hand-back (`origin.handback` set). It carries `isMeta:true`,
+		// so it MUST be recognized BEFORE the isMeta withhold below, which would
+		// otherwise make it vanish from an adopted conversation. Emitted as the
+		// one peer-message page line on the record's own uuid — the same uuid the
+		// live stream keys on, so the two planes' rows collapse to one.
+		return append(out, c.peerMessage(record, message, at, env, agent))
 	case env.isMeta:
 		// A harness-injected user record: a system reminder, an attachment
 		// carrier. Not something a person said.
@@ -151,6 +159,35 @@ func (c *Converter) externalPrompt(record, message map[string]any, at Attributio
 	c.log.With(at.ctxFor("user-prompt")).With(logging.Context{UpsertKey: PromptKey(turn)}).
 		LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own sdk-cli)", str(record["entrypoint"]))
 	return c.landPrompt(at, agent, PromptKey(turn), "agent_prompt", prompt)
+}
+
+// peerMessage emits a message another Claude session sent into this
+// conversation (an inter-session peer, or a subagent hand-back) as a served peer
+// page line, keyed on the record's own uuid.
+//
+// THE UUID IS THE IDENTITY, AND IT IS THE CROSS-PLANE KEY. The live stream keys
+// the very same vendor record `peer:<uuid>` and spells the uuid into
+// PeerMessage.id, so a running session that already drew this message and this
+// adopted copy supersede each other on one row rather than drawing two. The
+// sender is `origin.from`/`origin.senderTaskId`; the body is `origin.body` when
+// the vendor states it, else the record's own text (envelope and all), so
+// nothing the sender wrote is lost. The recipient is the frame's agent — the
+// main agent for a session transcript — which the store requires to match the
+// book.
+func (c *Converter) peerMessage(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
+	body := env.peerBody
+	if body == "" {
+		body = firstText(message)
+	}
+	peer := &conversationv1.PeerMessage{
+		Agent:  agentID(agent),
+		Sender: env.peerSender,
+		Body:   body,
+		Id:     env.uuid,
+	}
+	c.log.With(at.ctxFor("peer-message")).With(logging.Context{UpsertKey: PeerKey(env.uuid)}).
+		LogVerbose("a peer message (origin.kind=peer, sender=%q) emitted as a page line on the record uuid", env.peerSender)
+	return c.landPeerMessage(at, agent, PeerKey(env.uuid), "peer_message", peer)
 }
 
 // userSaid builds the one canonical prompt form from a vendor user message: its

@@ -25,6 +25,15 @@ func (r *resolver) OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, p
 	r.drawAgentPrompt(s, agent, prompt)
 }
 
+// OnPeerMessage draws a message another Claude session sent into this
+// conversation as the abbreviated peer bubble on the recipient's feed.
+func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawPeerMessage(s, peer)
+}
+
 // OnActivity draws one unit of a turn's synchronous progress.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()

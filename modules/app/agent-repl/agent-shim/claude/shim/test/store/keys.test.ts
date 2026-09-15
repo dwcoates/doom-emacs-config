@@ -64,6 +64,16 @@ describe("promptUpsertKey", () => {
   });
 });
 
+describe("peerUpsertKey", () => {
+  it("keys a peer message by the vendor record uuid (the cross-plane contract)", () => {
+    // Arrange, Act.
+    const key = keys.peerUpsertKey("uuid-XYZ");
+
+    // Assert.
+    expect(key).toBe("peer:uuid-XYZ");
+  });
+});
+
 describe("questionUpsertKey", () => {
   it("keys a question by the AskUserQuestion call's own tool_use_id", () => {
     // Arrange.

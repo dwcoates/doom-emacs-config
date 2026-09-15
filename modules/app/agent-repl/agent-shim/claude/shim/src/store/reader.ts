@@ -65,6 +65,10 @@ export function toHistoryEntry(line: storev1.StorePageLine): conversationv1.Hist
       return create(conversationv1.HistoryEntrySchema, {
         entry: { case: "agentFrame", value: item.value },
       });
+    case "peerMessage":
+      return create(conversationv1.HistoryEntrySchema, {
+        entry: { case: "peerMessage", value: item.value },
+      });
     default:
       // AN UNSET ONEOF IS ILLEGAL AT THE CONSUMER, loudly: a line that is
       // neither a prompt nor a frame cannot be drawn, and forwarding it as an

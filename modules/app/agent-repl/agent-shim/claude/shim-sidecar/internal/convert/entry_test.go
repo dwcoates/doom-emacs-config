@@ -204,6 +204,7 @@ func TestUpsertKeySpellingsTable(t *testing.T) {
 		{name: "a detached run's delta is keyed by its call and its offset", got: BashDeltaKey("toolu_run", 512), want: "bash:toolu_run:512"},
 		{name: "a detached run's terminal has one key however often it is restated", got: BashTerminalKey("toolu_run"), want: "bash:toolu_run:terminal"},
 		{name: "a detached run's start row is its own key", got: BashStartKey("toolu_run"), want: "bash:toolu_run:start"},
+		{name: "a peer message is keyed by the vendor record uuid", got: PeerKey("uuid-p"), want: "peer:uuid-p"},
 		{name: "a session fact names its arm", got: SessionKey("context_cut", "uuid-3"), want: "session:context_cut:uuid-3"},
 		{name: "an api error names its arm", got: SessionKey("api_error", "uuid-4"), want: "session:api_error:uuid-4"},
 	}

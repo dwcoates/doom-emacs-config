@@ -197,12 +197,35 @@ message FeedRow {
     // and draws nothing. A fresh page never carries this arm — a removed row
     // is simply omitted from the page — so it exists solely as a tail event.
     FeedRowRemoved removed = 18;
+    // A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message or a
+    // subagent hand-back. It is NOT a prompt: it is a low-priority,
+    // abbreviated aside, drawn RIGHT-ALIGNED (the prompt side) but PURPLE
+    // rather than the blue prompt fill, COLLAPSED to the sender's label and a
+    // chevron, and expandable to reveal the body. See FeedPeerMessage.
+    FeedPeerMessage peer_message = 19;
   }
 }
 
 // The row-removal marker. Empty: the FeedRow's own `id` names what to drop,
 // and the arm's presence is the whole instruction — remove that row.
 message FeedRowRemoved {}
+
+// A message another Claude session sent into this conversation: an
+// inter-session peer message, or a returning subagent's hand-back. The client
+// draws it as a distinct, abbreviated, expandable bubble — right-aligned like a
+// prompt but purple, not blue — whose COLLAPSED form is just the sender label
+// and a chevron (no body), and whose EXPANDED form reveals the body via the
+// shared 50vh bubble-scroll model. Never the turn's concluded answer, never
+// green.
+message FeedPeerMessage {
+  // The display label naming the sender, drawn verbatim in the collapsed
+  // bubble (e.g. "agent Explore"). Daemon-composed from the record's sender
+  // id/name; the client draws what it is handed.
+  string sender = 1;
+  // The message body as markdown, drawn only when the bubble is EXPANDED.
+  // Rendered with the same markdown machinery a response bubble uses.
+  string body = 2;
+}
 
 // A recognized command's resolved panel, as a feed row. THE ARM IS WHICH
 // COMMAND was recognized; a new programmatically handled command is a new

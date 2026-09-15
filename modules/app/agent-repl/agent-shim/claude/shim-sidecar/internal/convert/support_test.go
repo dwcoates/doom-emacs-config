@@ -164,6 +164,28 @@ func externalPromptLine(uuid, entrypoint, text string) string {
 		`","message":{"role":"user","content":[{"type":"text","text":` + quote(text) + `}]}}`
 }
 
+// peerLineOf reads the PeerMessage arm of a served page line.
+func peerLineOf(e *storev1.StoreEntry) *conversationv1.PeerMessage {
+	return pageLine(e).GetAgentItem().GetPeerMessage()
+}
+
+// peerMessageLine builds a message another Claude session sent in: a user record
+// whose origin.kind is "peer". `from` is the sender; `body`, when non-empty, is
+// the vendor-stated origin.body (else the record text is the body). `handback`
+// marks a subagent hand-back, which is a peer message all the same.
+func peerMessageLine(uuid, from, body, text string, handback bool) string {
+	origin := `"kind":"peer","from":` + quote(from) + `,"senderTaskId":` + quote(from)
+	if body != "" {
+		origin += `,"body":` + quote(body)
+	}
+	if handback {
+		origin += `,"handback":true`
+	}
+	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"isMeta":true,"promptSource":"system",` +
+		`"origin":{` + origin + `},"timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":` + quote(text) + `}]}}`
+}
+
 // assistantWith builds an assistant line carrying the given content blocks.
 func assistantWith(uuid, messageID, timestamp, blocks string) string {
 	return `{"type":"assistant","uuid":"` + uuid + `","isSidechain":false,"timestamp":"` + timestamp +

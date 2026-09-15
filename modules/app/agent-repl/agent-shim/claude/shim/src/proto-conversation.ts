@@ -9,6 +9,7 @@ export * from "../../../../proto/gen/ts/conversation/v1/api_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/content_blocks_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/detached_work_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/history_pb.js";
+export * from "../../../../proto/gen/ts/conversation/v1/peer_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/permission_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/prompt_origin_pb.js";
 export * from "../../../../proto/gen/ts/conversation/v1/question_pb.js";

@@ -609,6 +609,20 @@ describe("failure translation", () => {
     expect(() => toHistoryEntry(line)).toThrow(PersistenceError);
   });
 
+  it("renders a peer_message page line as a peerMessage history entry", () => {
+    const line = create(storev1.StorePageLineSchema, {
+      pageAgentId: BOOK,
+      agentItem: create(storev1.StoreAgentItemSchema, {
+        item: {
+          case: "peerMessage",
+          value: create(conversationv1.PeerMessageSchema, { agent: BOOK, sender: "Explore", body: "hi", id: "u1" }),
+        },
+      }),
+    });
+
+    expect(toHistoryEntry(line).entry.case).toBe("peerMessage");
+  });
+
   it("transportFailure passes an existing PersistenceError through unchanged", () => {
     const original = new PersistenceError("stale_pointer", "already classified");
 

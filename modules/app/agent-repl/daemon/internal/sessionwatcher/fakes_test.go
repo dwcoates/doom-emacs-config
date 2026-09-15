@@ -459,6 +459,10 @@ func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, pr
 	s.rec.emit(event{sink: "feed", method: "OnPrompt", agent: agent.GetValue(), detail: prompt.GetId().GetValue()})
 }
 
+func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ OutputAddress) {
+	s.rec.emit(event{sink: "feed", method: "OnPeerMessage", agent: peer.GetAgent().GetValue(), detail: peer.GetId()})
+}
+
 func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
 }
@@ -876,6 +880,22 @@ func entryPrompt(turn, agent string) *shimv1.WatchAgentResponse {
 				Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
 					Id:    &conversationv1.TurnId{Value: turn},
 					Agent: agentID(agent),
+				}},
+			},
+		},
+	}}
+}
+
+// entryPeer wraps a peer message as one live history entry.
+func entryPeer(id, agent, sender string) *shimv1.WatchAgentResponse {
+	return &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Entry{
+		Entry: &conversationv1.HistoryEntryAt{
+			At: &conversationv1.HistoryPointer{Value: "ptr-" + id},
+			Entry: &conversationv1.HistoryEntry{
+				Entry: &conversationv1.HistoryEntry_PeerMessage{PeerMessage: &conversationv1.PeerMessage{
+					Agent:  agentID(agent),
+					Sender: sender,
+					Id:     id,
 				}},
 			},
 		},
