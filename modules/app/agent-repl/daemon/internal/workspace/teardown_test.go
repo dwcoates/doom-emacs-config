@@ -3,8 +3,11 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"claude-repld/internal/wsm"
 )
 
 func TestKillForcesTheSessionDeath(t *testing.T) {
@@ -104,6 +107,76 @@ func TestKillWithNoLiveSessionStillStopsTheShim(t *testing.T) {
 	// Assert.
 	if len(f.shim.killedSession) != 0 {
 		t.Fatalf("KillSession calls = %v, want none without a live session", f.shim.killedSession)
+	}
+}
+
+// TestKillWithoutASessionRowSucceedsAndTearsDown covers the freshly-opened
+// workspace whose session bring-up never ran: it has a roster row but no
+// session, so recording a terminal answers wsm.ErrNotFound. Killing it must
+// still succeed and tear the workspace down -- there is no session to
+// terminate.
+func TestKillWithoutASessionRowSucceedsAndTearsDown(t *testing.T) {
+	// Arrange: no session row, so the terminal write answers the wsm not-found
+	// sentinel exactly as the store does.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setTerminalErr = fmt.Errorf("wsm: session for workspace %s: %w", "w1", wsm.ErrNotFound)
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert: the teardown still ran -- the roster row is closed, no terminal
+	// was recorded for a session that never existed, and the record survives.
+	if !f.db.closedFlags["w1"] {
+		t.Fatal("Kill() did not mark the roster row closed for a session-less workspace")
+	}
+	if _, ok := f.db.terminals["w1"]; ok {
+		t.Fatalf("terminal recorded = %+v, want none for a session-less workspace", f.db.terminals["w1"])
+	}
+	if len(f.db.forgotten) != 0 {
+		t.Fatalf("forgotten workspaces = %v, want none", f.db.forgotten)
+	}
+}
+
+// TestKillWithASessionRecordsTheTerminal is the regression lock: a workspace
+// that HAS a session still records its killed terminal exactly as before.
+func TestKillWithASessionRecordsTheTerminal(t *testing.T) {
+	// Arrange: the default fixture has a session and no terminal-write failure.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert.
+	terminal, ok := f.db.terminals["w1"]
+	if !ok || terminal.Kind != "killed" {
+		t.Fatalf("session terminal = %+v, want a killed terminal recorded", terminal)
+	}
+}
+
+// TestKillFailsWhenTheTerminalWriteFailsForAnExistingSession locks the error
+// handling: only the not-found sentinel is benign. A real failure recording a
+// terminal for a session that DOES exist still fails the kill.
+func TestKillFailsWhenTheTerminalWriteFailsForAnExistingSession(t *testing.T) {
+	// Arrange: a non-not-found failure from the terminal write.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setTerminalErr = errFake
+
+	// Act.
+	err := f.verbs.Kill(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Kill() = nil error, want the terminal-write failure surfaced")
+	}
+	if !strings.Contains(err.Error(), "record the terminal") {
+		t.Fatalf("Kill() error = %v, want it to name the terminal record failure", err)
 	}
 }
 
