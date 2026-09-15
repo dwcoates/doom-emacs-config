@@ -40,6 +40,7 @@ import { mountFooter } from "./footer/footer.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { mountLoginOverlay } from "./login/login.js";
 import { drawCommandPanel } from "./panels/panels.js";
+import { createPromptWaveDriver } from "./prompt-wave-driver.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
 import { mountHoldTray } from "./tray/tray.js";
@@ -247,6 +248,13 @@ export async function boot(): Promise<void> {
     });
 
     mountHoldTray(shell.holdTray, ctx);
+
+    // KEEP THE PROMPT WAVE RUNNING WHILE THE WEBVIEW IS HIDDEN. WebKit suspends
+    // the wave's compositor animation whenever the xwidget reports itself
+    // hidden (Emacs not frontmost), so a JS timer hand-paints it then. Page-
+    // global, started once the feed that holds the bubbles is mounted; see
+    // prompt-wave-driver.ts for the whole account.
+    createPromptWaveDriver().start();
 
     const footer = mountFooter(shell.footer, ctx, { revealRow: (id) => feed.revealRow(id) });
     // THE GATE IS THE FOOTER'S OWN WORD (R7). A composer closes while the

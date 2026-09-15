@@ -166,6 +166,15 @@ export class BreathingTicker {
  *
  * WHICH bubbles wave is not this class's business: the epoch is a phase, and
  * the feed decides who is in flight (`PROMPT_WAVE_ATTRIBUTE`).
+ *
+ * THE SAME PHASE PAINTS TWO WAYS, both reading THIS epoch, so they never
+ * disagree:
+ *  - VISIBLE, the compositor runs the `bubble-wave` CSS animation and
+ *    `delayMs` seeks a rebuilt node to the right frame (a negative
+ *    `animation-delay`);
+ *  - HIDDEN, WebKit SUSPENDS that compositor animation (see
+ *    `prompt-wave-driver.ts`), so a JS timer paints `background-position-x`
+ *    itself, and `positionX` is where along the pass to paint it.
  */
 export class BubbleWave {
   private epoch = new AnimationEpoch();
@@ -174,7 +183,35 @@ export class BubbleWave {
   delayMs(nowMs: number): number {
     return this.epoch.elapsedMs(nowMs) % BUBBLE_WAVE_PERIOD_MS;
   }
+
+  /**
+   * The `background-position-x` percentage the band sits at RIGHT NOW, for the
+   * JS driver that paints the wave while the compositor animation is suspended.
+   *
+   * It is the exact position the `bubble-wave` keyframes hold at this phase, so
+   * the compositor pass and the hand-painted pass are one wave seen two ways: a
+   * linear walk from {@link BUBBLE_WAVE_FROM_PCT} at the pass's start to
+   * {@link BUBBLE_WAVE_TO_PCT} at its end, over one {@link BUBBLE_WAVE_PERIOD_MS}.
+   * Reading the SAME epoch as `delayMs` is what keeps the hand-off between the
+   * two — hiding, and coming back — free of any jump.
+   */
+  positionX(nowMs: number): number {
+    const fraction = this.delayMs(nowMs) / BUBBLE_WAVE_PERIOD_MS;
+    return BUBBLE_WAVE_FROM_PCT + (BUBBLE_WAVE_TO_PCT - BUBBLE_WAVE_FROM_PCT) * fraction;
+  }
 }
+
+/**
+ * The `background-position-x` the pass starts and ends at, DUPLICATED from the
+ * `bubble-wave` keyframes in `styles.css` (`from`/`to`) for the same reason the
+ * period is: the JS driver's hand-painted pass and the compositor's keyframe
+ * pass must trace the identical travel or the wave would jump at the moment one
+ * takes over from the other. The larger percentage is the LEFTMOST position
+ * (the band enters off the left), so the pass runs from 200% DOWN to -100% —
+ * see the keyframes' own note.
+ */
+export const BUBBLE_WAVE_FROM_PCT = 200;
+export const BUBBLE_WAVE_TO_PCT = -100;
 
 /** The page-global wave every prompt bubble renders against. */
 export const bubbleWave = new BubbleWave();
