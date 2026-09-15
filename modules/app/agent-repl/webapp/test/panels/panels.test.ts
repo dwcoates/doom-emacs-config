@@ -8,6 +8,7 @@ import {
   type SubmitPromptCommandPanel,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import {
+  ContextPanelHeaderSchema,
   ContextPanelViewSchema,
   type ContextPanelView,
 } from "../../../proto/gen/ts/frontend/v1/context_panel_pb";
@@ -67,7 +68,7 @@ describe("drawCommandPanel routing", () => {
     { name: "mcp", panel: panel({ case: "mcp", value: { rows: [] } }) },
     {
       name: "context",
-      panel: panel({ case: "context", value: { header: "142k of 200k", autoCompactLine: "off" } }),
+      panel: panel({ case: "context", value: { header: { used: "142k", total: "200k", percent: 71, model: "claude" }, autoCompactLine: "off" } }),
     },
     { name: "help", panel: panel({ case: "help", value: { rows: [] } }) },
   ];
@@ -94,7 +95,7 @@ describe("drawFeedCommandPanel routing", () => {
       name: "context",
       panel: feedPanel({
         case: "context",
-        value: { header: "142k of 200k", autoCompactLine: "off" },
+        value: { header: { used: "142k", total: "200k", percent: 71, model: "claude" }, autoCompactLine: "off" },
       }),
     },
   ];
@@ -279,12 +280,17 @@ describe("the /help panel", () => {
   });
 });
 
-/** A context panel carrying only its two required composed lines. */
+/** A context panel carrying only its header and auto-compact line. */
 const contextView = (
   overrides: MessageInitShape<typeof ContextPanelViewSchema> = {},
 ): ContextPanelView =>
   create(ContextPanelViewSchema, {
-    header: "142k of 200k (71%)",
+    header: create(ContextPanelHeaderSchema, {
+      used: "142.3k",
+      total: "200k",
+      percent: 71,
+      model: "claude-opus-5",
+    }),
     autoCompactLine: "auto-compact at 160k",
     ...overrides,
   });
@@ -292,11 +298,32 @@ const contextView = (
 const drawContext = (view: ContextPanelView): HTMLElement =>
   drawCommandPanel(panel({ case: "context", value: view }), appContext());
 
-describe("the /context panel", () => {
-  it("leads with the resolver-composed header", () => {
+describe("the /context panel header", () => {
+  it("composes the one-line header from the daemon's parts", () => {
     expect(drawContext(contextView()).querySelector(".context-header")?.textContent).toBe(
-      "142k of 200k (71%)",
+      "142.3k of 200k (71%) · claude-opus-5",
     );
+  });
+
+  it("colors only the percent span, not the rest of the header", () => {
+    const header = drawContext(contextView()).querySelector<HTMLElement>(".context-header");
+    const percent = header?.querySelector<HTMLElement>(".context-header-percent");
+    expect(percent?.textContent).toBe("71%");
+    expect(percent?.style.color).not.toBe("");
+    // The header element itself carries no inline color — only its percent span.
+    expect(header?.style.color).toBe("");
+  });
+
+  it("omits the model when the daemon stated none", () => {
+    const drawn = drawContext(
+      contextView({ header: { used: "1k", total: "200k", percent: 1, model: "" } }),
+    );
+    expect(drawn.querySelector(".context-header")?.textContent).toBe("1k of 200k (1%)");
+  });
+
+  it("draws an empty header when the daemon omitted it", () => {
+    const drawn = drawContext(contextView({ header: undefined }));
+    expect(drawn.querySelector(".context-header")?.textContent).toBe("");
   });
 
   it("closes with the auto-compact line", () => {
@@ -304,138 +331,116 @@ describe("the /context panel", () => {
       "auto-compact at 160k",
     );
   });
+});
 
-  it("draws a category's composed figure", () => {
-    const drawn = drawContext(
-      contextView({ categories: [{ label: "Messages", figure: "38.1k · 19%", color: "red" }] }),
-    );
-    expect(drawn.querySelector(".context-category .panel-row-value")?.textContent).toBe(
-      "38.1k · 19%",
-    );
-  });
-
-  it("applies a vendor color the platform can read", () => {
-    const drawn = drawContext(
-      contextView({ categories: [{ label: "Messages", figure: "1k", color: "red" }] }),
-    );
-    expect(drawn.querySelector<HTMLElement>(".context-category")?.style.color).toBe("red");
-  });
-
-  it("ignores a vendor color that does not parse", () => {
-    const drawn = drawContext(
-      contextView({ categories: [{ label: "Messages", figure: "1k", color: "not-a-color" }] }),
-    );
-    expect(drawn.querySelector<HTMLElement>(".context-category")?.style.color).toBe("");
-  });
-
-  it("draws a section only when it has rows", () => {
-    const drawn = drawContext(contextView());
-    expect(drawn.querySelector(".context-section-heading")).toBeNull();
-  });
-
-  it("draws the memory files section when it has rows", () => {
-    const drawn = drawContext(
-      contextView({ memoryFiles: [{ label: "CLAUDE.md", figure: "2.1k" }] }),
-    );
-    expect(drawn.querySelector(".context-section-heading")?.textContent).toBe("memory files");
-  });
-
-  it("draws the slash-command roll-up when present", () => {
-    const drawn = drawContext(
-      contextView({ slashCommands: { line: "12 of 31 commands · 4.2k" } }),
-    );
-    expect(drawn.querySelector('[data-rollup="slashCommands"]')?.textContent).toBe(
-      "12 of 31 commands · 4.2k",
-    );
-  });
-
-  it("draws no slash-command roll-up when the fact was absent", () => {
-    expect(drawContext(contextView()).querySelector('[data-rollup="slashCommands"]')).toBeNull();
-  });
-
-  it("draws the skills roll-up and its rows", () => {
-    const drawn = drawContext(
+describe("the /context section tree", () => {
+  const withOne = (): HTMLElement =>
+    drawContext(
       contextView({
-        skills: { line: "8 of 19 skills · 6.4k", skills: [{ label: "graphify", figure: "1k" }] },
+        sections: [
+          { label: "Messages", figure: "38.1k · 19%", items: [{ label: "assistant", figure: "9k" }] },
+        ],
       }),
     );
-    expect(drawn.querySelector('[data-rollup="skills"]')?.textContent).toBe(
-      "8 of 19 skills · 6.4k",
-    );
-    expect(drawn.querySelectorAll(".context-skills .context-item")).toHaveLength(1);
+
+  it("renders a section with children as a chevron, closed by default", () => {
+    const details = withOne().querySelector<HTMLDetailsElement>("details.context-section");
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector(".context-section-caret")?.textContent).toBe("▸");
   });
 
-  it("draws the message planes when a breakdown is present", () => {
+  it("gives each top-level section a distinct palette color", () => {
     const drawn = drawContext(
-      contextView({ messageBreakdown: { planes: [{ label: "assistant", figure: "9k" }] } }),
+      contextView({
+        sections: [
+          { label: "A", figure: "1k", items: [{ label: "x", figure: "1" }] },
+          { label: "B", figure: "2k", items: [{ label: "y", figure: "2" }] },
+        ],
+      }),
     );
-    expect(drawn.querySelector(".context-breakdown .context-item")?.textContent).toContain(
-      "assistant",
-    );
+    const summaries = drawn.querySelectorAll<HTMLElement>("details.context-section > summary");
+    const colorA = summaries[0].querySelector<HTMLElement>(".panel-row-label")?.style.color;
+    const colorB = summaries[1].querySelector<HTMLElement>(".panel-row-label")?.style.color;
+    expect(colorA).not.toBe("");
+    expect(colorB).not.toBe("");
+    expect(colorA).not.toBe(colorB);
   });
 
-  it("draws no breakdown when the fact was absent", () => {
-    expect(drawContext(contextView()).querySelector(".context-breakdown")).toBeNull();
+  it("paints a section's label and figure the same color", () => {
+    const summary = withOne().querySelector<HTMLElement>("details.context-section > summary");
+    const label = summary?.querySelector<HTMLElement>(".panel-row-label")?.style.color;
+    const figure = summary?.querySelector<HTMLElement>(".panel-row-value")?.style.color;
+    expect(label).not.toBe("");
+    expect(figure).toBe(label);
+  });
+
+  it("draws detail rows uncolored", () => {
+    const item = withOne().querySelector<HTMLElement>(".context-item .panel-row-label");
+    expect(item?.style.color).toBe("");
+  });
+
+  it("draws a childless section as a bare row with no chevron", () => {
+    const drawn = drawContext(contextView({ sections: [{ label: "Free space", figure: "57.7k · 29%" }] }));
+    expect(drawn.querySelector("details.context-section")).toBeNull();
+    const leaf = drawn.querySelector<HTMLElement>(".context-section-leaf");
+    expect(leaf?.querySelector(".panel-row-label")?.textContent).toBe("Free space");
+    expect(leaf?.querySelector(".context-section-caret")).toBeNull();
+  });
+
+  it("colors a childless top-level section's row", () => {
+    const drawn = drawContext(contextView({ sections: [{ label: "Free space", figure: "57.7k" }] }));
+    const label = drawn.querySelector<HTMLElement>(".context-section-leaf .panel-row-label");
+    expect(label?.style.color).not.toBe("");
+  });
+
+  it("flips the caret when a section opens", () => {
+    const details = withOne().querySelector<HTMLDetailsElement>("details.context-section");
+    if (details === null) throw new Error("no section rendered");
+    details.open = true;
+    details.dispatchEvent(new Event("toggle"));
+    expect(details.querySelector(".context-section-caret")?.textContent).toBe("▾");
   });
 });
 
-describe("the /context tool-call fold", () => {
-  const withToolCalls = (): HTMLElement =>
+describe("the /context nested sub-folds", () => {
+  const withNested = (): HTMLElement =>
     drawContext(
       contextView({
-        messageBreakdown: {
-          planes: [],
-          toolCalls: [{ label: "Bash", figure: "3k / 8k" }],
-          attachments: [],
-        },
+        sections: [
+          {
+            label: "Messages",
+            figure: "38.1k",
+            items: [{ label: "assistant", figure: "9k" }],
+            sections: [
+              {
+                label: "tool calls",
+                items: [{ label: "Bash", figure: "call 1.2k · result 3.4k" }],
+              },
+            ],
+          },
+        ],
       }),
     );
 
-  it("ships folded", () => {
-    expect(withToolCalls().querySelector("[data-fold]")?.getAttribute("data-folded")).toBe("true");
+  it("nests a sub-section as its own collapsible fold", () => {
+    // One top-level Messages fold plus one nested tool-calls fold.
+    expect(withNested().querySelectorAll("details.context-section")).toHaveLength(2);
   });
 
-  it("hides its rows while folded", () => {
-    const body = withToolCalls().querySelector<HTMLElement>(".context-fold-body");
-    expect(body?.hidden).toBe(true);
-  });
-
-  it("opens on the toggle", () => {
-    const drawn = withToolCalls();
-    drawn.querySelector<HTMLButtonElement>(".context-fold-toggle")?.click();
-    expect(drawn.querySelector("[data-fold]")?.getAttribute("data-folded")).toBe("false");
-  });
-
-  it("shows its rows once opened", () => {
-    const drawn = withToolCalls();
-    drawn.querySelector<HTMLButtonElement>(".context-fold-toggle")?.click();
-    expect(drawn.querySelector<HTMLElement>(".context-fold-body")?.hidden).toBe(false);
-  });
-
-  it("folds again on a second toggle", () => {
-    const drawn = withToolCalls();
-    const toggle = drawn.querySelector<HTMLButtonElement>(".context-fold-toggle");
-    toggle?.click();
-    toggle?.click();
-    expect(drawn.querySelector("[data-fold]")?.getAttribute("data-folded")).toBe("true");
-  });
-
-  it("draws no fold when there are no tool calls", () => {
-    const drawn = drawContext(
-      contextView({ messageBreakdown: { planes: [{ label: "user", figure: "1k" }] } }),
+  it("closes a nested sub-fold by default", () => {
+    const nested = withNested().querySelector<HTMLDetailsElement>(
+      ".context-section-body details.context-section",
     );
-    expect(drawn.querySelector("[data-fold]")).toBeNull();
+    expect(nested?.open).toBe(false);
   });
 
-  it("draws the attachments section when it has rows", () => {
-    const drawn = drawContext(
-      contextView({
-        messageBreakdown: { planes: [], toolCalls: [], attachments: [{ label: "image", figure: "1k" }] },
-      }),
+  it("draws a nested sub-fold uncolored", () => {
+    const nested = withNested().querySelector<HTMLDetailsElement>(
+      ".context-section-body details.context-section",
     );
-    expect(drawn.querySelector(".context-breakdown .context-section-heading")?.textContent).toBe(
-      "attachments",
-    );
+    const label = nested?.querySelector<HTMLElement>("summary .panel-row-label");
+    expect(label?.style.color).toBe("");
   });
 });
 
@@ -477,16 +482,5 @@ describe("an arm this build has no case for", () => {
     expect(() => drawCommandPanel(panel({ case: "mcp", value: view }), appContext())).toThrow(
       MalformedView,
     );
-  });
-});
-
-describe("the /context category color", () => {
-  it("writes no color at all when the vendor sent none", () => {
-    // ARRANGE / ACT
-    const drawn = drawContext(
-      contextView({ categories: [{ label: "Messages", figure: "1k", color: "" }] }),
-    );
-    // ASSERT
-    expect(drawn.querySelector(".context-category")?.hasAttribute("data-color")).toBe(false);
   });
 });

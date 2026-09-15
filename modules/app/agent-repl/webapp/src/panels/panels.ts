@@ -27,11 +27,9 @@ import type {
   AgentsPanelView,
 } from "../../../proto/gen/ts/frontend/v1/agents_panel_pb";
 import type {
-  ContextPanelCategory,
+  ContextPanelHeader,
   ContextPanelItem,
-  ContextPanelMessageBreakdown,
-  ContextPanelRollup,
-  ContextPanelSkills,
+  ContextPanelSection,
   ContextPanelView,
 } from "../../../proto/gen/ts/frontend/v1/context_panel_pb";
 import type { FeedCommandPanel } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -49,6 +47,7 @@ import type { RowContext } from "../feed/cards/context.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
+import { contextPercentColor, contextSectionColor } from "./context-colors.js";
 
 /**
  * The panel a submission answered with, drawn.
@@ -401,15 +400,17 @@ export function drawHelpPanelRow(u: HelpPanelRow, path: string): HTMLElement {
 /**
  * The /context panel — the one panel whose presentation is this end's.
  *
- * The schema is a resolver-composed TREE of sections, and printing it as a
- * flat list of forty rows would bury the two facts a reader opened it for (how
- * full the window is, and what is filling it). So: the composed header line
- * leads, the category overview follows as the at-a-glance band, and the
- * detailed sections come after as delimited lists, each drawn only when it has
- * rows — an absent section draws nothing rather than an empty heading.
+ * The schema is a resolver-composed TREE of sections, and printing it as a flat
+ * list of forty rows would bury the two facts a reader opened it for (how full
+ * the window is, and what is filling it). So it is drawn as a COLLAPSIBLE
+ * SECTION TREE: the structured header leads with the fill percent colored by
+ * pressure, each top-level category follows as a chevron row — CLOSED by
+ * default, colored a distinct palette hue by its order so the eye tracks label
+ * to figure — and its detail (leaf rows and nested sub-folds like the tool-call
+ * list under Messages) unfolds beneath. The auto-compact line closes the panel.
  *
- * THE TOOL CALLS ARE AUTO-FOLDED, as ruled: it is the longest section by far
- * and the least often wanted, so it ships closed with its own toggle.
+ * THE COLORS ARE THIS END'S. The vendor's category color scheme is not used;
+ * the section palette and the percent gradient are minted in `context-colors`.
  */
 export function drawContextPanelView(
   u: ContextPanelView,
@@ -418,55 +419,14 @@ export function drawContextPanelView(
 ): HTMLElement {
   log.debug("drawing the context panel", {
     operation: "panels.context",
-    context: { path, categories: u.categories.length },
+    context: { path, sections: u.sections.length },
   });
   const panel = panelElement("context");
 
-  const header = document.createElement("div");
-  header.className = "context-header";
-  header.textContent = u.header;
-  panel.appendChild(header);
+  panel.appendChild(drawContextHeader(u.header, `${path}.header`));
 
-  if (u.categories.length > 0) {
-    const overview = document.createElement("div");
-    overview.className = "context-categories list-rows";
-    for (const [index, category] of u.categories.entries()) {
-      overview.appendChild(
-        drawContextPanelCategory(category, `${path}.categories[${index}]`),
-      );
-    }
-    panel.appendChild(overview);
-  }
-
-  appendSection(panel, "memory files", u.memoryFiles, `${path}.memory_files`);
-  appendSection(panel, "mcp tools", u.mcpTools, `${path}.mcp_tools`);
-  appendSection(
-    panel,
-    "deferred builtin tools",
-    u.deferredBuiltinTools,
-    `${path}.deferred_builtin_tools`,
-  );
-  appendSection(panel, "system tools", u.systemTools, `${path}.system_tools`);
-  appendSection(
-    panel,
-    "system prompt sections",
-    u.systemPromptSections,
-    `${path}.system_prompt_sections`,
-  );
-  appendSection(panel, "agents", u.agents, `${path}.agents`);
-
-  if (u.slashCommands !== undefined) {
-    panel.appendChild(
-      drawContextPanelRollup(u.slashCommands, "slashCommands", `${path}.slash_commands`),
-    );
-  }
-  if (u.skills !== undefined) {
-    panel.appendChild(drawContextPanelSkills(u.skills, `${path}.skills`));
-  }
-  if (u.messageBreakdown !== undefined) {
-    panel.appendChild(
-      drawContextPanelMessageBreakdown(u.messageBreakdown, `${path}.message_breakdown`),
-    );
+  for (const [index, section] of u.sections.entries()) {
+    panel.appendChild(drawContextSection(section, index, 0, `${path}.sections[${index}]`));
   }
 
   const autoCompact = document.createElement("div");
@@ -477,72 +437,131 @@ export function drawContextPanelView(
 }
 
 /**
- * One category overview row, in the VENDOR'S color.
+ * The header line, composed here from the daemon's parts.
  *
- * The color arrives as the vendor's own display string, so it is applied only
- * when the platform recognizes it as a color: a value that does not parse is
- * IGNORED with a warning rather than written into the style attribute, where
- * it would silently do nothing and leave a row claiming a hue it never got.
+ * The daemon states used, total, percent and model; this end joins them into
+ * "57.8k of 1M (6%) · claude-opus-5" and colors ONLY the percent, on the
+ * pressure gradient. The percent is the one span with a color because it is the
+ * one fact that turns into a warning as the window fills — everything else is
+ * neutral text.
  */
-export function drawContextPanelCategory(u: ContextPanelCategory, path: string): HTMLElement {
-  const color = cssColor(u.color);
-  if (u.color !== "" && color === null) {
-    log.warn(`the context panel category ${u.label} carried an unusable color`, {
-      operation: "panels.context.category-color",
-      context: { path, color: u.color },
+export function drawContextHeader(u: ContextPanelHeader | undefined, path: string): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "context-header";
+  if (u === undefined) {
+    // The header field is a message, so it CAN be unset; a panel without one
+    // draws an empty header rather than throwing on a fact the daemon omitted.
+    log.warn("the context panel arrived without a header", {
+      operation: "panels.context.header",
+      context: { path },
     });
+    return header;
   }
-  log.debug("drawing a context category", {
-    operation: "panels.context.category",
-    context: { path, label: u.label },
-  });
-  const row = labelValueRow(u.label, u.figure);
-  row.classList.add("context-category");
-  if (color !== null) {
-    row.style.color = color;
-    row.setAttribute("data-color", u.color);
+  header.append(document.createTextNode(`${u.used} of ${u.total} (`));
+  const percent = document.createElement("span");
+  percent.className = "context-header-percent";
+  percent.textContent = `${u.percent}%`;
+  percent.style.color = contextPercentColor(u.percent);
+  percent.setAttribute("data-percent", String(u.percent));
+  header.appendChild(percent);
+  let tail = ")";
+  if (u.model !== "") {
+    tail += ` · ${u.model}`;
   }
-  return row;
+  header.append(document.createTextNode(tail));
+  return header;
 }
 
 /**
- * The color, if the platform can read it.
+ * One section of the tree, drawn as a collapsible fold.
  *
- * Assigning to a style declaration and reading it back is the platform's OWN
- * parser answering — no table of color names here, which would be this end
- * deciding what the vendor's vocabulary is.
+ * A TOP-LEVEL section (depth 0) is colored a distinct palette hue by its order,
+ * applied to BOTH its label and its figure so they read as one row across the
+ * gap; nested sub-folds and all leaf detail are UNCOLORED. A section with no
+ * children draws as a bare colored row with NO chevron — there is nothing to
+ * unfold, so offering a control would lie about it. A section with children
+ * draws as a `<details>` closed by default, its caret following the open state.
  */
-function cssColor(raw: string): string | null {
-  if (raw === "") return null;
-  const probe = document.createElement("span");
-  probe.style.color = raw;
-  return probe.style.color === "" ? null : raw;
-}
-
-/** A titled section of composed label/figure rows, drawn only when non-empty. */
-function appendSection(
-  panel: HTMLElement,
-  title: string,
-  items: readonly ContextPanelItem[],
+export function drawContextSection(
+  u: ContextPanelSection,
+  index: number,
+  depth: number,
   path: string,
-): void {
-  if (items.length === 0) return;
-  panel.appendChild(sectionHeading(title));
-  const list = rowList();
-  for (const [index, item] of items.entries()) {
-    list.appendChild(drawContextPanelItem(item, `${path}[${index}]`));
+): HTMLElement {
+  const color = depth === 0 ? contextSectionColor(index) : null;
+  const hasChildren = u.items.length > 0 || u.sections.length > 0;
+
+  log.debug("drawing a context section", {
+    operation: "panels.context.section",
+    context: { path, label: u.label, depth, children: hasChildren },
+  });
+
+  if (!hasChildren) {
+    const row = labelValueRow(u.label, u.figure);
+    row.classList.add("context-section", "context-section-leaf");
+    row.setAttribute("data-depth", String(depth));
+    if (color !== null) {
+      colorRowSpans(row, color);
+    }
+    return row;
   }
-  panel.appendChild(list);
+
+  const details = document.createElement("details");
+  details.className = "context-section";
+  details.setAttribute("data-depth", String(depth));
+  // Closed by default: the `open` attribute is deliberately never set.
+
+  const summary = document.createElement("summary");
+  summary.className = "context-section-summary";
+  const caret = document.createElement("span");
+  caret.className = "context-section-caret";
+  caret.setAttribute("aria-hidden", "true");
+  caret.textContent = "▸";
+  const label = document.createElement("span");
+  label.className = "panel-row-label";
+  label.textContent = u.label;
+  const figure = document.createElement("span");
+  figure.className = "panel-row-value";
+  figure.textContent = u.figure;
+  if (color !== null) {
+    label.style.color = color;
+    figure.style.color = color;
+  }
+  summary.append(caret, label, figure);
+  details.appendChild(summary);
+
+  const body = document.createElement("div");
+  body.className = "context-section-body";
+  if (u.items.length > 0) {
+    const list = rowList();
+    for (const [i, item] of u.items.entries()) {
+      list.appendChild(drawContextPanelItem(item, `${path}.items[${i}]`));
+    }
+    body.appendChild(list);
+  }
+  for (const [i, sub] of u.sections.entries()) {
+    body.appendChild(drawContextSection(sub, i, depth + 1, `${path}.sections[${i}]`));
+  }
+  details.appendChild(body);
+
+  details.addEventListener("toggle", () => {
+    caret.textContent = details.open ? "▾" : "▸";
+    log.debug(`the context section ${u.label} is ${details.open ? "open" : "closed"}`, {
+      operation: "panels.context.section-toggle",
+      context: { path, open: details.open },
+    });
+  });
+  return details;
 }
 
-function sectionHeading(title: string): HTMLElement {
-  const heading = document.createElement("div");
-  heading.className = "context-section-heading";
-  heading.textContent = title;
-  return heading;
+/** Paint both spans of a label/value row one color, for a colored leaf row. */
+function colorRowSpans(row: HTMLElement, color: string): void {
+  for (const span of row.querySelectorAll<HTMLElement>(".panel-row-label, .panel-row-value")) {
+    span.style.color = color;
+  }
 }
 
-/** One composed label/figure row. */
+/** One composed label/figure detail row, drawn UNCOLORED. */
 export function drawContextPanelItem(u: ContextPanelItem, path: string): HTMLElement {
   log.debug("drawing a context item", {
     operation: "panels.context.item",
@@ -551,140 +570,4 @@ export function drawContextPanelItem(u: ContextPanelItem, path: string): HTMLEle
   const row = labelValueRow(u.label, u.figure);
   row.classList.add("context-item");
   return row;
-}
-
-/** A resolver-composed roll-up line, drawn verbatim. */
-export function drawContextPanelRollup(
-  u: ContextPanelRollup,
-  which: string,
-  path: string,
-): HTMLElement {
-  log.debug("drawing a context roll-up", {
-    operation: "panels.context.rollup",
-    context: { path, which },
-  });
-  const line = document.createElement("div");
-  line.className = "context-rollup";
-  line.setAttribute("data-rollup", which);
-  line.textContent = u.line;
-  return line;
-}
-
-/** The skills roll-up line, plus its per-skill rows. */
-export function drawContextPanelSkills(u: ContextPanelSkills, path: string): HTMLElement {
-  log.debug("drawing the context skills section", {
-    operation: "panels.context.skills",
-    context: { path, skills: u.skills.length },
-  });
-  const section = document.createElement("div");
-  section.className = "context-skills";
-  // The skills line is a bare string field here, not a `ContextPanelRollup`,
-  // so it is drawn directly rather than through that message's function: a
-  // wrapper minted locally would be this end constructing a message the daemon
-  // never sent.
-  const line = document.createElement("div");
-  line.className = "context-rollup";
-  line.setAttribute("data-rollup", "skills");
-  line.textContent = u.line;
-  section.appendChild(line);
-  if (u.skills.length > 0) {
-    const list = rowList();
-    for (const [index, skill] of u.skills.entries()) {
-      list.appendChild(drawContextPanelItem(skill, `${path}.skills[${index}]`));
-    }
-    section.appendChild(list);
-  }
-  return section;
-}
-
-/**
- * The message-plane breakdown, with the tool calls folded away.
- *
- * The planes are the summary a reader wants; the per-tool rows are the detail
- * they occasionally want and never want first, which is exactly what an
- * automatically folded section is for.
- */
-export function drawContextPanelMessageBreakdown(
-  u: ContextPanelMessageBreakdown,
-  path: string,
-): HTMLElement {
-  log.debug("drawing the context message breakdown", {
-    operation: "panels.context.message-breakdown",
-    context: { path, planes: u.planes.length, tool_calls: u.toolCalls.length },
-  });
-  const section = document.createElement("div");
-  section.className = "context-breakdown";
-
-  if (u.planes.length > 0) {
-    section.appendChild(sectionHeading("messages"));
-    const list = rowList();
-    for (const [index, plane] of u.planes.entries()) {
-      list.appendChild(drawContextPanelItem(plane, `${path}.planes[${index}]`));
-    }
-    section.appendChild(list);
-  }
-  if (u.toolCalls.length > 0) {
-    section.appendChild(
-      drawContextToolCallsFold(u.toolCalls, `${path}.tool_calls`),
-    );
-  }
-  if (u.attachments.length > 0) {
-    section.appendChild(sectionHeading("attachments"));
-    const list = rowList();
-    for (const [index, attachment] of u.attachments.entries()) {
-      list.appendChild(drawContextPanelItem(attachment, `${path}.attachments[${index}]`));
-    }
-    section.appendChild(list);
-  }
-  return section;
-}
-
-/**
- * The tool-call rows, FOLDED BY DEFAULT.
- *
- * The fold state lives on the element as `data-folded` — a webview-local
- * preference of the most local kind, nothing the wire knows or should know —
- * and the caret follows it so the control announces its own state.
- */
-export function drawContextToolCallsFold(
-  items: readonly ContextPanelItem[],
-  path: string,
-): HTMLElement {
-  const fold = document.createElement("div");
-  fold.className = "context-fold";
-  fold.setAttribute("data-fold", "toolCalls");
-  fold.setAttribute("data-folded", "true");
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "context-fold-toggle";
-  const caret = document.createElement("span");
-  caret.className = "context-fold-caret";
-  caret.setAttribute("aria-hidden", "true");
-  caret.textContent = "▸";
-  const label = document.createElement("span");
-  label.textContent = `tool calls (${items.length})`;
-  toggle.append(caret, label);
-  fold.appendChild(toggle);
-
-  const body = rowList();
-  body.classList.add("context-fold-body");
-  body.hidden = true;
-  for (const [index, item] of items.entries()) {
-    body.appendChild(drawContextPanelItem(item, `${path}[${index}]`));
-  }
-  fold.appendChild(body);
-
-  toggle.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    const folded = fold.getAttribute("data-folded") !== "false";
-    fold.setAttribute("data-folded", folded ? "false" : "true");
-    body.hidden = !folded;
-    caret.textContent = folded ? "▾" : "▸";
-    log.debug(`the context tool-call fold is ${folded ? "open" : "closed"}`, {
-      operation: "panels.context.tool-calls-fold",
-      context: { open: folded },
-    });
-  });
-  return fold;
 }
