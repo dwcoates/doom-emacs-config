@@ -761,15 +761,19 @@ describe("the footer status wave's stylesheet contract", () => {
 });
 
 describe("the cost corner's hover hit area", () => {
-  it("enlarges the hover region with padding and cancels it with an equal negative margin", () => {
+  it("enlarges the hover region with padding and cancels it on three sides with an equal negative margin", () => {
     // Arrange / Act
     const corner = declarationsOf(".usage-corner");
 
-    // Assert — the padding grows the hoverable box (roughly 2x wide, 2x tall);
-    // the equal, opposite negative margin keeps the token figure in place and
-    // shifts no neighbor.
+    // Assert — the padding grows the hoverable box (roughly 2x wide, 2x tall).
+    // Top/bottom/left cancel it exactly, keeping the token figure in place on
+    // those sides and shifting no neighbor. The right margin is asserted
+    // separately below — it departs from full cancellation on purpose, by
+    // exactly one extra `--bubble-scroll-gap` (the corner-scoped edge gap).
     expect(corner).toMatch(/padding:\s*0\.4rem\s+1\.25rem/);
-    expect(corner).toMatch(/margin:\s*-0\.4rem\s+-1\.25rem/);
+    expect(corner).toMatch(/margin-top:\s*-0\.4rem/);
+    expect(corner).toMatch(/margin-bottom:\s*-0\.4rem/);
+    expect(corner).toMatch(/margin-left:\s*-1\.25rem/);
   });
 
   it("reveals the duration off a hover anywhere in the bubble, not only the small corner", () => {
@@ -828,6 +832,57 @@ describe("the cost corner's hover hit area", () => {
       expect(decls).not.toMatch(/(?:^|[\s;])width\s*:/);
     }
     expect(revealed).not.toMatch(/(?:^|[\s;])margin-left\s*:/);
+  });
+
+  it("renders the token figure at the same size as the revealed duration (owner ruling, 2026-09-15)", () => {
+    // Arrange / Act — both read the one size declared on their shared
+    // `.usage-corner` ancestor rather than each carrying its own number.
+    const corner = declarationsOf(".usage-corner") ?? "";
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+    const ago = declarationsOf(".usage-ago") ?? "";
+
+    // Assert
+    expect(corner).toMatch(/--usage-ago-font-size:\s*0\.85em/);
+    expect(stamp).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
+    expect(ago).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
+  });
+
+  it("doubles the corner's right-edge gap to the bubble border without touching --bubble-scroll-gap itself (owner ruling, 2026-09-15)", () => {
+    // Arrange / Act
+    const mainCol = declarationsOf("#main-col") ?? "";
+    const corner = declarationsOf(".usage-corner") ?? "";
+
+    // Assert — the global scrollbar-inset unit is untouched...
+    expect(mainCol).toMatch(/--bubble-scroll-gap:\s*2px/);
+    // ...the corner names its own edge gap as exactly double that unit...
+    expect(corner).toMatch(/--usage-corner-edge-gap:\s*calc\(\s*2\s*\*\s*var\(--bubble-scroll-gap\)\s*\)/);
+    // ...and the corner's own right margin is the one place that departs
+    // from the padding/margin cancellation (unlike top/bottom/left, asserted
+    // above): it is less negative than the fully-cancelling `-1.25rem` by
+    // exactly one `--bubble-scroll-gap`, which is what pulls the content the
+    // extra, real, un-cancelled distance left of the flush position. Since
+    // `.bubble`'s own right padding already contributes one
+    // `--bubble-scroll-gap`, this second one brings the total gap from the
+    // bubble's true edge to `--usage-corner-edge-gap` (2x).
+    expect(corner).toMatch(
+      /margin-right:\s*calc\(\s*var\(--usage-corner-edge-gap\)\s*-\s*var\(--bubble-scroll-gap\)\s*-\s*1\.25rem\s*\)/,
+    );
+  });
+
+  it("keeps the corner's right-edge gap constant whether or not the duration is revealed", () => {
+    // Arrange / Act — the edge gap must live ONLY on the base `.usage-corner`
+    // rule and never be touched by any rule keyed on the revealed state, so
+    // revealing the duration cannot change it (the no-reflow-on-hover
+    // invariant extends to this gap, not only to the duration's own width).
+    const revealedRules = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes("usage-corner--revealed")),
+    );
+
+    // Assert
+    for (const rule of revealedRules) {
+      expect(rule.declarations).not.toMatch(/margin-right/);
+      expect(rule.declarations).not.toMatch(/--usage-corner-edge-gap/);
+    }
   });
 })
 
