@@ -509,6 +509,16 @@ type fakeAccounts struct {
 	configDir     string
 	transcript    account.Transcript
 	transcriptErr error
+	// newest is the transcript NewestTranscript answers with for the no-record
+	// adoption probe; newestErr is its failure. A zero-valued fake (both unset)
+	// answers ErrNoTranscripts, so a fixture that does not opt into adoption
+	// comes up fresh exactly as a workspace with an empty project dir would.
+	newest    account.AdoptableTranscript
+	newestErr error
+	// newestProbedDir records the workspace dir NewestTranscript was probed for,
+	// so a test can assert the recorded-session path never probes at all.
+	newestProbedDir string
+	newestProbed    bool
 	ported        []portedTranscript
 	portErr       error
 	// mint is the fork mapping PortTranscript answers with; nil takes a
@@ -561,6 +571,21 @@ func (a *fakeAccounts) Roster(ctx context.Context) ([]account.Account, error) {
 
 func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.Transcript, error) {
 	return a.transcript, a.transcriptErr
+}
+
+// NewestTranscript answers the fixture's adoption candidate, recording that it
+// was probed and for which dir. An unset fixture answers ErrNoTranscripts, the
+// nothing-to-adopt arm, so an unprepared test comes up fresh.
+func (a *fakeAccounts) NewestTranscript(_ context.Context, workspaceDir string) (account.AdoptableTranscript, error) {
+	a.newestProbed = true
+	a.newestProbedDir = workspaceDir
+	if a.newestErr != nil {
+		return account.AdoptableTranscript{}, a.newestErr
+	}
+	if a.newest.VendorSessionID == "" {
+		return account.AdoptableTranscript{}, account.ErrNoTranscripts
+	}
+	return a.newest, nil
 }
 
 func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir, vendorSessionID string) (account.RemintedID, error) {

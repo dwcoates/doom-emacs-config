@@ -511,7 +511,16 @@ type source struct {
 func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string, session wsm.Session, exists bool) (source, error) {
 	if !exists {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!exists"})
-		return source{Fresh: true}, nil
+		// NO SESSION RECORD IS THE ONE BRANCH THAT MAY ADOPT. Owner ruling
+		// 2026-09-15: when the workspace has never recorded a session of its
+		// own, an existing on-disk transcript — a conversation begun in the
+		// interactive vendor CLI, say — should be CONTINUED rather than left
+		// behind for an empty new session. This is confined to the no-record
+		// branch on purpose: every branch below has a recorded id whose fate is
+		// already settled (resume it, refuse a deleted one, or come up fresh
+		// for a lost transcript), and re-opening that decision here would change
+		// behavior the owner asked to leave exactly as it is.
+		return f.adoptOrFresh(ctx, log, ws, dir), nil
 	}
 	if session.Terminal != nil && session.Terminal.Kind == "deleted" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "session.Terminal != nil && session.Terminal.Kind == \"deleted\""})
@@ -538,6 +547,67 @@ func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.Work
 		"vendor_session_id": session.VendorSessionID,
 	})
 	return source{VendorSessionID: session.VendorSessionID}, nil
+}
+
+// TranscriptAdoptionIdleWindow is how quiet a transcript must have been on disk
+// before a no-record bring-up will adopt it.
+//
+// THE GUARD EXISTS BECAUSE TWO WRITERS ON ONE TRANSCRIPT CORRUPT IT. A vendor
+// process still holding the file open — an interactive `claude` in the same
+// folder, mid-conversation — writes lines the shim would then interleave its
+// own with, which is exactly the hazard the shim warns of in engine/session.ts.
+// A recent modification is the only signal the daemon has that another writer
+// may be live, so a transcript touched inside this window is treated as in-use
+// and the session comes up FRESH instead; a stale one is safe to continue.
+// ~45s is comfortably longer than the gap between an idle interactive session's
+// own writes while staying short enough that a genuinely finished conversation
+// is adoptable almost immediately after the user walks away.
+const TranscriptAdoptionIdleWindow = 45 * time.Second
+
+// adoptOrFresh decides how a workspace with NO session record of its own comes
+// up: it ADOPTS the newest idle transcript already on disk when there is one,
+// and otherwise starts FRESH.
+//
+// EVERY FAILURE FALLS BACK TO FRESH, LOUDLY. A probe or parse error, or an
+// idle-guard skip, never crashes the bring-up and never mis-routes it — a fresh
+// start is always safe, so the worst case of adoption going wrong is the exact
+// behavior the workspace had before adoption existed. The reason is logged
+// every time so a fresh start is never silent about a transcript it declined.
+func (f *Fleet) adoptOrFresh(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string) source {
+	candidate, err := f.deps.Accounts.NewestTranscript(ctx, dir)
+	if err != nil {
+		if errors.Is(err, account.ErrNoTranscripts) {
+			log.Debug(opBringUp, "no on-disk transcript to adopt; the session comes up FRESH", dlog.Context{
+				"workspace_dir": dir,
+			})
+			return source{Fresh: true}
+		}
+		log.Warn(opBringUp, "could not probe for a transcript to adopt; the session comes up FRESH", dlog.Context{
+			"workspace_dir": dir, "cause": err.Error(),
+		})
+		return source{Fresh: true}
+	}
+
+	if idle := f.now().Sub(candidate.ModTime); idle < TranscriptAdoptionIdleWindow {
+		// TOO FRESH TO ADOPT: another writer may still hold it. See
+		// TranscriptAdoptionIdleWindow — two writers on one transcript corrupt
+		// it, so a recently touched one is left alone and the session comes up
+		// fresh.
+		log.Info(opBringUp, "the newest transcript was modified too recently to adopt safely; the session comes up FRESH", dlog.Context{
+			"workspace_dir":     dir,
+			"vendor_session_id": candidate.VendorSessionID,
+			"idle_ms":           idle.Milliseconds(),
+			"idle_window_ms":    TranscriptAdoptionIdleWindow.Milliseconds(),
+		})
+		return source{Fresh: true}
+	}
+
+	log.Info(opBringUp, "no session record; adopting the newest idle on-disk transcript", dlog.Context{
+		"workspace_dir":     dir,
+		"vendor_session_id": candidate.VendorSessionID,
+		"last_record_at":    candidate.LastRecordAt.Format(time.RFC3339Nano),
+	})
+	return source{VendorSessionID: candidate.VendorSessionID}
 }
 
 // neverEngaged is the PROOF that a missing transcript lost nothing: the

@@ -19,7 +19,9 @@ package account
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -75,6 +77,32 @@ func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("account: no transcript for vendor session %s under %v", e.VendorSessionID, e.Probed)
 }
 
+// AdoptableTranscript is the newest transcript found under a workspace's ROUTED
+// config root: the candidate a no-record bring-up adopts instead of starting a
+// brand-new vendor session, so a conversation begun in the interactive vendor
+// CLI is continued rather than abandoned.
+type AdoptableTranscript struct {
+	Transcript
+	// VendorSessionID is the transcript's own id — its filename stem — and the
+	// id an adoption resumes by.
+	VendorSessionID string
+	// ModTime is the transcript file's modification time, the input to the
+	// caller's idle guard: a file written within the guard's window may still
+	// be held open by a live external process and must NOT be adopted.
+	ModTime time.Time
+	// LastRecordAt is the timestamp of the transcript's last parseable record,
+	// the key the newest transcript was selected by. Zero when no record carried
+	// a parseable timestamp, in which case ModTime was the selection key.
+	LastRecordAt time.Time
+}
+
+// ErrNoTranscripts is NewestTranscript's answer when the routed root holds no
+// transcript for the workspace at all. It is not a failure — a workspace whose
+// folder was never touched by the vendor CLI simply has nothing to adopt — so
+// the caller distinguishes it from a real read error and comes up fresh either
+// way.
+var ErrNoTranscripts = errors.New("account: no transcript to adopt under the routed root")
+
 // RemintedID answers the child's identity for one of the parent's, under a
 // single fork's mapping. It is memoized by the port that produced it: the same
 // old id always answers the same new one, and an id the port never saw is
@@ -101,6 +129,18 @@ type Resolver interface {
 	// the caller can tell a same-account resume from an account switch. A miss
 	// is a *NotFoundError.
 	FindTranscript(ctx context.Context, workspaceDir, vendorSessionID string) (Transcript, error)
+	// NewestTranscript answers the most-recent transcript already on disk for a
+	// workspace, so a bring-up that has NO session record of its own can adopt
+	// and continue it rather than mint an empty new conversation. It probes ONLY
+	// the ROUTED config root — never the other account's root, because adopting
+	// a transcript filed under a different account would run the conversation as
+	// the wrong account — and selects the newest by its LAST-RECORD timestamp
+	// (the last parseable JSON line's `timestamp`), falling back to file mtime
+	// only for a transcript whose records carry no parseable timestamp. It
+	// answers the file's mtime alongside, which is the caller's idle guard input.
+	// A routed root that holds no transcript is ErrNoTranscripts, which is an
+	// answer and not a failure.
+	NewestTranscript(ctx context.Context, workspaceDir string) (AdoptableTranscript, error)
 	// PortTranscript copies a parent's transcript (and its sidecar directory,
 	// when the vendor wrote one) into the child's config root project dir,
 	// which is what makes a forked workspace resumable. The daemon does this

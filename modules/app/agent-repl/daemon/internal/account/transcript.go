@@ -1,7 +1,9 @@
 package account
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/remint"
@@ -189,6 +192,174 @@ func (r *resolver) probeOrder(workspaceDir string) []string {
 // directory sits in the same project dir, named by the uuid with no extension.
 func sidecarDir(transcriptPath string) string {
 	return strings.TrimSuffix(transcriptPath, transcriptExt)
+}
+
+// NewestTranscript implements Resolver.
+//
+// THE ROUTED ROOT IS THE ONLY ROOT PROBED. FindTranscript falls back to the
+// other account's root because it resumes a KNOWN id and a hit there is the
+// account-switch signal; adoption is different — there is no recorded id, so a
+// transcript under the other account's root belongs to a DIFFERENT account and
+// adopting it would run the conversation as the wrong one. So this probes the
+// routed project dir alone.
+func (r *resolver) NewestTranscript(ctx context.Context, workspaceDir string) (AdoptableTranscript, error) {
+	if err := ctx.Err(); err != nil {
+		return AdoptableTranscript{}, err
+	}
+	if workspaceDir == "" {
+		err := errors.New("account: NewestTranscript requires a workspace dir")
+		r.log.Error("daemon.account.newest_transcript", "adoption probe rejected", dlog.Context{
+			"branch": "empty-workspace-dir",
+			"error":  err.Error(),
+		})
+		return AdoptableTranscript{}, err
+	}
+
+	routed := r.ConfigDirFor(workspaceDir)
+	projectDir := ProjectDir(routed, workspaceDir)
+	entries, err := os.ReadDir(projectDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			r.log.Debug("daemon.account.newest_transcript", "no vendor project dir for the workspace; nothing to adopt", dlog.Context{
+				"workspace_dir": workspaceDir,
+				"config_dir":    routed,
+				"project_dir":   projectDir,
+				"branch":        "no-project-dir",
+			})
+			return AdoptableTranscript{}, ErrNoTranscripts
+		}
+		wrapped := fmt.Errorf("account: reading %s: %w", projectDir, err)
+		r.log.Error("daemon.account.newest_transcript", "could not read the vendor project dir", dlog.Context{
+			"workspace_dir": workspaceDir,
+			"config_dir":    routed,
+			"project_dir":   projectDir,
+			"branch":        "readdir-error",
+			"error":         wrapped.Error(),
+		})
+		return AdoptableTranscript{}, wrapped
+	}
+
+	var best AdoptableTranscript
+	var bestKey time.Time
+	found := false
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return AdoptableTranscript{}, err
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), transcriptExt) {
+			continue
+		}
+		path := filepath.Join(projectDir, entry.Name())
+		info, err := os.Stat(path)
+		if err != nil {
+			// A CANDIDATE THAT CANNOT BE STAT'D IS SKIPPED, NOT FATAL. One
+			// unreadable file among many must not deny adoption of the rest, and
+			// a probe that comes up empty falls the caller back to a fresh start
+			// — never a crash. The skip is recorded so it is never silent.
+			r.log.Warn("daemon.account.newest_transcript", "skipping a transcript that could not be stat'd", dlog.Context{
+				"workspace_dir": workspaceDir,
+				"path":          path,
+				"branch":        "candidate-stat-error",
+				"error":         err.Error(),
+			})
+			continue
+		}
+		if info.IsDir() {
+			continue
+		}
+		lastRecordAt := r.lastRecordTimestamp(path)
+		// THE SELECTION KEY IS THE LAST-RECORD TIMESTAMP, and file mtime is the
+		// fallback only when no record carried a parseable one — an empty or
+		// truncated transcript still gets an ordering rather than being dropped.
+		key := lastRecordAt
+		if key.IsZero() {
+			key = info.ModTime()
+		}
+		if !found || key.After(bestKey) {
+			found = true
+			bestKey = key
+			best = AdoptableTranscript{
+				Transcript: Transcript{
+					Path:      path,
+					ConfigDir: routed,
+				},
+				VendorSessionID: strings.TrimSuffix(entry.Name(), transcriptExt),
+				ModTime:         info.ModTime(),
+				LastRecordAt:    lastRecordAt,
+			}
+		}
+	}
+
+	if !found {
+		r.log.Debug("daemon.account.newest_transcript", "the vendor project dir holds no transcript; nothing to adopt", dlog.Context{
+			"workspace_dir": workspaceDir,
+			"config_dir":    routed,
+			"project_dir":   projectDir,
+			"branch":        "no-transcripts",
+		})
+		return AdoptableTranscript{}, ErrNoTranscripts
+	}
+
+	if sidecar := sidecarDir(best.Path); sidecarExists(sidecar) {
+		best.SidecarDir = sidecar
+	}
+	r.log.Debug("daemon.account.newest_transcript", "selected the newest transcript to adopt", dlog.Context{
+		"workspace_dir":     workspaceDir,
+		"config_dir":        routed,
+		"vendor_session_id": best.VendorSessionID,
+		"path":              best.Path,
+		"mod_time":          best.ModTime.Format(time.RFC3339Nano),
+		"last_record_at":    best.LastRecordAt.Format(time.RFC3339Nano),
+		"branch":            "selected",
+	})
+	return best, nil
+}
+
+// sidecarExists reports whether a transcript's sidecar directory is present.
+func sidecarExists(dir string) bool {
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
+}
+
+// lastRecordTimestamp parses the timestamp of a transcript's LAST parseable
+// record. The vendor writes one JSON object per line and stamps each with an
+// RFC3339 `timestamp`; the newest transcript is the one whose conversation
+// most recently spoke, which is that last line's stamp — not the file's mtime,
+// which a mere metadata touch can move.
+//
+// It returns the zero time when the file cannot be read or no line carries a
+// parseable timestamp, and the caller then falls back to mtime. A parse miss is
+// never fatal: adoption is a best effort and a fresh start is always the safe
+// fallback.
+func (r *resolver) lastRecordTimestamp(path string) time.Time {
+	raw, err := os.ReadFile(path) //nolint:gosec // daemon-derived path
+	if err != nil {
+		r.log.Warn("daemon.account.newest_transcript", "could not read a transcript for its last-record timestamp; falling back to mtime", dlog.Context{
+			"path":   path,
+			"branch": "read-error",
+			"error":  err.Error(),
+		})
+		return time.Time{}
+	}
+	lines := bytes.Split(raw, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
+		}
+		var rec struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if err := json.Unmarshal(line, &rec); err != nil || rec.Timestamp == "" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, rec.Timestamp)
+		if err != nil {
+			continue
+		}
+		return ts
+	}
+	return time.Time{}
 }
 
 // PortTranscript implements Resolver: a COPY into the child's root, for a fork.
