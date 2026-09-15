@@ -1096,6 +1096,17 @@ describe("the footer status word's letter wave", () => {
     },
   );
 
+  it("waves from the submitting phase, not only once the first activity lands", () => {
+    // Arrange / Act — the daemon publishes `thinking · submitting` the moment a
+    // prompt is accepted (before the shim answers), so the wave must be present
+    // under the submitting substatus, not deferred to `thinking · thinking`.
+    const { row } = drawStrip({ status: withSubStatus("thinking", "submitting") });
+
+    // Assert — the word is split into waving letters straight away.
+    expect(letterDelays(row).length).toBeGreaterThan(0);
+    expect(row.querySelector(".footer-status")?.getAttribute("data-status-wave")).toBe("progress");
+  });
+
   it("leaves the split word reading exactly as the arm's own word", () => {
     // Arrange / Act
     const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
