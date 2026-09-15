@@ -1167,3 +1167,57 @@ describe("the footer status word's letter wave", () => {
     expect(row.querySelectorAll(".pfooter-wave-letter")).toHaveLength(0);
   });
 });
+
+// ---- the status word's colour sweep (the blanking-bug regression lock) -----
+
+describe("the footer status word's per-letter colour sweep", () => {
+  /** Every drawn `.pfooter-wave-letter` of the status word. */
+  function statusLetters(row: HTMLElement): HTMLElement[] {
+    return [...row.querySelectorAll<HTMLElement>(".footer-status .pfooter-wave-letter")];
+  }
+
+  it("gives each thinking letter a colour that is not transparent", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert — never the transparent fill that blanked the word before.
+    for (const letter of statusLetters(row)) {
+      const colour = getComputedStyle(letter).color;
+      expect(colour).not.toBe("transparent");
+      expect(colour).not.toBe("rgba(0, 0, 0, 0)");
+    }
+  });
+
+  it("sets no clipped-gradient or transparent fill on any thinking letter", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+
+    // Assert — the exact properties whose combination blanked the word.
+    for (const letter of statusLetters(row)) {
+      const style = letter.getAttribute("style") ?? "";
+      expect(style).not.toMatch(/background-clip:\s*text/);
+      expect(style).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+      expect(style).not.toMatch(/color:\s*transparent/);
+    }
+  });
+
+  it("sets no clipped-gradient or transparent fill on the word holder either", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const holder = row.querySelector(".footer-status .pfooter-status-word");
+    const style = holder?.getAttribute("style") ?? "";
+
+    // Assert — the holder is where the reverted gradient rode; it must be clean.
+    expect(style).not.toMatch(/background-clip:\s*text/);
+    expect(style).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+    expect(style).not.toMatch(/color:\s*transparent/);
+  });
+
+  it("carries no colour-swept letters at all under a non-progress arm", () => {
+    // Arrange — a settled status stands still and hosts no colour sweep.
+    const { row } = drawStrip({ status: status("idle", {}) });
+
+    // Assert — the sweep lives only on `.pfooter-wave-letter`, absent here.
+    expect(statusLetters(row)).toHaveLength(0);
+  });
+});
