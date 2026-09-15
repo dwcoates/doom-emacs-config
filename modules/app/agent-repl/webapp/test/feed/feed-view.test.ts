@@ -5,6 +5,7 @@ import {
   FeedBreadcrumbSchema,
   FeedIdSchema,
   FeedPageSchema,
+  FeedRowRemovedSchema,
   FeedRowSchema,
   type FeedId,
   type FeedRow,
@@ -313,6 +314,72 @@ describe("createFeedController: the newest separation bounds the feed", () => {
     const record = await forwardedRecord(capture, "feed.truncated-at-separation");
     expect(record.level.case).toBe("info");
     expect(record.context).toMatchObject({ dropped: 2 });
+  });
+});
+
+// A REMOVAL is the DUAL of an upsert, delivered live on the same tail: the
+// daemon retired a row (a foreground Bash that detached, its running tool card
+// retired in favor of the shell bubble), so an already-open feed must drop it
+// live rather than show it stale until a reload.
+
+/** A removal row: only its id, and the arm that says "drop the row it keys". */
+function removedRow(id: string): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    row: { case: "removed", value: create(FeedRowRemovedSchema, {}) },
+  });
+}
+
+describe("createFeedController: a live removal drops the row", () => {
+  it("drops the removed row's element from the feed", () => {
+    // Arrange.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    // Act.
+    controller.upsert(removedRow("a"));
+    // Assert.
+    expect(drawnIds(host)).toEqual(["b"]);
+  });
+
+  it("disposes the removed row's bubble", () => {
+    // Arrange: a bubble row, its dispose counted.
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([subagentRow("b1")]), "replace");
+    let disposals = 0;
+    const bubble = bubbles.get("b1")!;
+    const inner = bubble.dispose.bind(bubble);
+    bubble.dispose = () => {
+      disposals += 1;
+      inner();
+    };
+    // Act.
+    controller.upsert(removedRow("b1"));
+    // Assert.
+    expect(disposals).toBe(1);
+  });
+
+  it("stops the removed row's clocks", () => {
+    // Arrange: a running tool-call card holding a live clock.
+    const ticker = countingTicker();
+    const { controller } = fixture(harness({ ticker }), {}, {
+      renderers: { simpleToolCall: drawFeedSimpleToolCall },
+    });
+    controller.applyPage(page([toolCallRow("t", "running")]), "replace");
+    expect(ticker.live()).toBe(1);
+    // Act.
+    controller.upsert(removedRow("t"));
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("is a no-op for a row it does not hold", () => {
+    // Arrange.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act.
+    controller.upsert(removedRow("ghost"));
+    // Assert.
+    expect(drawnIds(host)).toEqual(["a"]);
   });
 });
 
