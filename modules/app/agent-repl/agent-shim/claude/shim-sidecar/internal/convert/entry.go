@@ -259,6 +259,28 @@ func PageLine(at Attribution, discriminator, upsertKey, pageAgent string, frame 
 	})
 }
 
+// PromptLine stores a served PROMPT as a line in `pageAgent`'s book — the same
+// StorePageLine envelope PageLine builds, carrying the AgentPrompt arm of the
+// item oneof rather than the AgentFrame arm.
+//
+// THE STORE ALREADY SERVES THIS. route.go routes a page line whose item is an
+// agent_prompt (validating the recipient and that the book matches it), the shim
+// reader maps it to HistoryEntry.userPrompt, and the daemon draws it as a user
+// prompt bubble — so a file-plane prompt reaches the feed by exactly the path a
+// stream-plane prompt does. It is used only for an ADOPTED external transcript,
+// whose prompts were never submitted through agent-repl and so were never minted
+// or drawn by the daemon; agent-repl's own prompts are still withheld (R15).
+func PromptLine(at Attribution, discriminator, upsertKey, pageAgent string, prompt *conversationv1.AgentPrompt) *storev1.StoreEntry {
+	return entry(at, discriminator, upsertKey, pageAgent, func(u *storev1.StoreAgentUpdate) {
+		u.AgentInfo = &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{
+			PageAgentId: agentID(pageAgent),
+			AgentItem: &storev1.StoreAgentItem{
+				Item: &storev1.StoreAgentItem_AgentPrompt{AgentPrompt: prompt},
+			},
+		}}
+	})
+}
+
 // BashRun stores a detached shell run's frame, wrapped with the unit id the
 // spawning stream announced so a reader holding the announcement resolves it.
 // NOT paginatable by construction.

@@ -1,28 +1,114 @@
 package convert
 
-// user_test.go — R15: a file-plane prompt is never a page line.
+// user_test.go — R15 holds for agent-repl's own prompts (sdk-cli, withheld) and
+// is crossed for adopted external prompts (any other entrypoint, emitted).
 
 import "testing"
 
-func TestFilePlaneUserPromptIsNeverAPageLine(t *testing.T) {
-	// Arrange. R15: AgentPrompt carries a TurnId and a PromptOrigin, both
-	// DAEMON-MINTED. A file reader holds neither, and inventing them would put a
-	// fabricated turn identity on the wire — so no history page can regrow a fake
-	// prompt bubble from this producer.
+func TestAgentReplsOwnSdkCliPromptIsStillWithheld(t *testing.T) {
+	// Arrange. R15 regression lock: a prompt agent-repl submitted through its
+	// SDK carries entrypoint "sdk-cli". The daemon minted its TurnId and drew
+	// its bubble live, so the file-plane copy must stay withheld as
+	// vendor_specific — emitting it would draw the bubble twice.
 	c := newTestConverter(t)
 
 	// Act.
-	entries := convertLines(t, c, promptLine("u1", "what does this do?"))
+	entries := convertLines(t, c, sdkPromptLine("u1", "what does this do?"))
 
 	// Assert.
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(entries))
 	}
 	if pageLine(entries[0]) != nil {
-		t.Fatal("a file-plane prompt must never be a page line")
+		t.Fatal("agent-repl's own sdk-cli prompt must never be a page line")
 	}
 	if got := vendorKindOf(entries[0]); got != "user_prompt" {
 		t.Fatalf("kind = %q, want user_prompt", got)
+	}
+}
+
+func TestAdoptedExternalCliPromptIsEmittedAsAPageLine(t *testing.T) {
+	// Arrange. A prompt typed in interactive Claude Code carries entrypoint
+	// "cli". It was never submitted through agent-repl, so the daemon never drew
+	// it — it must be emitted as a real prompt page line, or an adopted
+	// conversation shows answers with no prompts above them.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, externalPromptLine("u1", "cli", "where did we leave off?"))
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	prompt := pageLine(entries[0]).GetAgentItem().GetAgentPrompt()
+	if prompt == nil {
+		t.Fatal("an adopted external prompt must be a served prompt page line")
+	}
+	said := prompt.GetSaid().GetContent().GetBlocks()
+	if len(said) != 1 || said[0].GetText().GetText() != "where did we leave off?" {
+		t.Fatalf("said = %v, want the one text block the person typed", said)
+	}
+	if got := prompt.GetOrigin(); got != promptOriginUnspecified {
+		t.Fatalf("origin = %v, want UNSPECIFIED (drawn as the plain \"You\" author)", got)
+	}
+}
+
+func TestSidechainCommissionIsWithheldEvenWithCliEntrypoint(t *testing.T) {
+	// Arrange. A subagent's opening user message carries entrypoint "cli" like an
+	// interactive prompt, but it is an agent-addressed commission the daemon
+	// draws at both ends. It must stay withheld — isSidechain is what tells it
+	// from a top-level adopted prompt.
+	c := newTestConverter(t)
+	line := `{"type":"user","uuid":"u1","isSidechain":true,"entrypoint":"cli","timestamp":"` + ts1 +
+		`","message":{"role":"user","content":[{"type":"text","text":"do the thing"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, line)
+
+	// Assert.
+	if pageLine(entries[0]) != nil {
+		t.Fatal("a sidechain commission must never be an emitted prompt page line")
+	}
+	if got := vendorKindOf(entries[0]); got != "user_prompt" {
+		t.Fatalf("kind = %q, want user_prompt", got)
+	}
+}
+
+func TestAdoptedExternalPromptIdentityIsDerivedFromTheRecordUUID(t *testing.T) {
+	// Arrange. The prompt has no daemon-minted turn id, so replay must be
+	// idempotent: the identity is derived from the record's own uuid, so a
+	// re-ingest supersedes its own row rather than growing a second bubble.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, externalPromptLine("rec-uuid-42", "cli", "hi"))
+
+	// Assert.
+	prompt := pageLine(entries[0]).GetAgentItem().GetAgentPrompt()
+	if got := prompt.GetId().GetValue(); got != "rec-uuid-42" {
+		t.Fatalf("turn id = %q, want the record uuid rec-uuid-42", got)
+	}
+	if got := entries[0].GetUpsertKey(); got != PromptKey("rec-uuid-42") {
+		t.Fatalf("upsert key = %q, want %q", got, PromptKey("rec-uuid-42"))
+	}
+}
+
+func TestAdoptedExternalPromptRecipientMatchesItsBook(t *testing.T) {
+	// Arrange. The store refuses a page line whose page_agent_id disagrees with
+	// the prompt's recipient, so the emitted prompt's recipient must be the book
+	// it is filed in — the session's main agent.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, externalPromptLine("u1", "cli", "hi"))
+
+	// Assert.
+	line := pageLine(entries[0])
+	book := line.GetPageAgentId().GetValue()
+	recipient := line.GetAgentItem().GetAgentPrompt().GetAgent().GetValue()
+	if book == "" || book != recipient {
+		t.Fatalf("book = %q, recipient = %q; the store requires them equal", book, recipient)
 	}
 }
 
