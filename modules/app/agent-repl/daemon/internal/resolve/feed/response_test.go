@@ -262,8 +262,9 @@ func TestResponseFailureKeepsWhatLandedAndMarksItBroken(t *testing.T) {
 	}
 }
 
-func TestTheUsageStampIsTheCacheMissSumAndNothingElse(t *testing.T) {
-	// Arrange: a response whose cheap bucket dwarfs its expensive ones.
+func TestTheUsageStampIsFreshInputPlusOutputAndExcludesCache(t *testing.T) {
+	// Arrange: a response over a huge cached context — the response bubble is
+	// this turn's work, not the context window (see usage.go).
 	h := newHarness(t)
 	usage := &conversationv1.TokenUsage{
 		InputHits:    &conversationv1.TokenCacheHits{Read: 900_000},
@@ -275,16 +276,17 @@ func TestTheUsageStampIsTheCacheMissSumAndNothingElse(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
 
-	// Assert: both miss buckets, together — the cheap read is not the cost.
-	if got := h.response().GetUsage().GetText(); got != "18.2k" {
-		t.Fatalf("usage stamp = %q, want the cache-miss sum 18.2k", got)
+	// Assert: fresh input (240) + output (5_000) = 5.2k; cache_read and
+	// cache_creation are the context window and are excluded.
+	if got := h.response().GetUsage().GetText(); got != "5.2k" {
+		t.Fatalf("usage stamp = %q, want the turn's 240+5_000 = 5.2k", got)
 	}
 }
 
 func TestTheUsageStampSurvivesLaterFramesThatCarryNone(t *testing.T) {
 	// Arrange: usage is stated when the response opens.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
 
@@ -313,7 +315,7 @@ func TestAResponseWithNoObservedUsageDrawsNoStamp(t *testing.T) {
 func TestTheUsageStampCarriesTheSettledInstant(t *testing.T) {
 	// Arrange: usage stated when the block opens.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
 
@@ -332,7 +334,7 @@ func TestTheUsageStampCarriesTheSettledInstant(t *testing.T) {
 func TestTheUsageStampCarriesNoInstantWhileArriving(t *testing.T) {
 	// Arrange, Act: usage stated when the block opens, still arriving.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
 
@@ -346,7 +348,7 @@ func TestTheUsageStampCarriesNoInstantWhileArriving(t *testing.T) {
 func TestTheSettledInstantIsStampedOnceAcrossReDeliveries(t *testing.T) {
 	// Arrange: the block opens and settles at the first instant.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, usage), noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
@@ -376,7 +378,7 @@ func TestTheSettledInstantIsStampedOnceAcrossReDeliveries(t *testing.T) {
 func TestASettledSuccessStampsTheCarriedInstantNotComposeTime(t *testing.T) {
 	// Arrange: a fresh fold whose replay clock differs from the real settle.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	const carried = 1_700_000_000_000
 	h.nowMs = carried + 5_000
 
@@ -397,7 +399,7 @@ func TestASettledSuccessStampsTheCarriedInstantNotComposeTime(t *testing.T) {
 func TestASettledFailureStampsTheCarriedInstantNotComposeTime(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	const carried = 1_700_000_000_000
 	h.nowMs = carried + 5_000
 
@@ -420,7 +422,7 @@ func TestASettledFailureStampsTheCarriedInstantNotComposeTime(t *testing.T) {
 func TestASettledResponseWithNoCarriedInstantFallsBackToNow(t *testing.T) {
 	// Arrange, Act: a terminal arm with no settled_at.
 	h := newHarness(t)
-	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Written: 2_100}}
+	usage := &conversationv1.TokenUsage{InputMisses: &conversationv1.TokenCacheMisses{Unwritten: 2_100}}
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "done"},
