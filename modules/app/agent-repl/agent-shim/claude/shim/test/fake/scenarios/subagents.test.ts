@@ -162,6 +162,31 @@ describe("a detached subagent", () => {
     );
   });
 
+  it("emits running task_progress beats whose token sum grows toward the settled total", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached"]);
+    const beats = ofType(driven, "system", "task_progress");
+    const settled = ofType(driven, "system", "task_notification")[0];
+
+    // Assert. The running sum only grows, and stays under the settled total.
+    const running = beats.map((b) => (b.usage as { total_tokens: number }).total_tokens);
+    const total = (settled?.usage as { total_tokens: number }).total_tokens;
+    expect(running).toEqual([4_200, 8_600]);
+    expect(running[running.length - 1]).toBeLessThan(total);
+  });
+
+  it("keys each running beat to the SAME spawning call the task started under", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached"]);
+    const beats = ofType(driven, "system", "task_progress");
+    const started = ofType(driven, "system", "task_started")[0];
+
+    // Assert. Every beat names the spawn's own tool-use id, so it advances the
+    // spawn unit rather than being dropped for want of a correlation.
+    const calls = new Set(beats.map((b) => b.tool_use_id));
+    expect([...calls]).toEqual([started?.tool_use_id]);
+  });
+
   it("delivers the agent's own work AFTER the turn ended", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!subagent-detached"]);

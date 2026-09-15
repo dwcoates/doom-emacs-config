@@ -187,6 +187,31 @@ const SUBAGENT_DETACHED = scenario({
       },
     );
     conclude(ctx, "Dispatched the agent to the background.");
+    // RUNNING BEATS WHILE THE DETACHED AGENT WORKS. The vendor emits
+    // `task_progress` messages carrying a RUNNING token sum (with a tool-call
+    // count and elapsed wall-clock) as a backgrounded agent runs. They are the
+    // ONLY account of a detached agent's spend before it settles — its
+    // transcript does not reach this stream — so the footer and its bubble
+    // advance incrementally from them and the settled total below supersedes.
+    // Each beat states a total that only grows, ending under the notification's.
+    await ctx.tick();
+    ctx.systemMessage("task_progress", {
+      task_id: agentId,
+      tool_use_id: call.toolUseId,
+      description,
+      subagent_type: "general-purpose",
+      usage: { total_tokens: 4_200, tool_uses: 1, duration_ms: 500 },
+      last_tool_name: "Bash",
+    });
+    await ctx.tick();
+    ctx.systemMessage("task_progress", {
+      task_id: agentId,
+      tool_use_id: call.toolUseId,
+      description,
+      subagent_type: "general-purpose",
+      usage: { total_tokens: 8_600, tool_uses: 2, duration_ms: 1_000 },
+      last_tool_name: "Read",
+    });
     // The agent's work lands AFTER the turn ended — that is what detached means.
     await ctx.tick();
     ctx.assistant([{ type: "text", text: "Sweep finished." }], {
