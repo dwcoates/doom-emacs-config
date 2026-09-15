@@ -116,10 +116,16 @@ describe("the settled state", () => {
   });
 
   it("re-renders a metaprompt tree as tree lines rather than markdown", () => {
+    // A tree's first paint waits for attach (so the cap resolves), so the row
+    // is mounted and its box reported before the tree is asserted.
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
       rowContext(),
     );
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    document.body.appendChild(el);
+    fireResize(body);
     expect(el.querySelector(".mp-tree")).not.toBeNull();
   });
 });
@@ -650,17 +656,25 @@ describe("the wrapped tree a settled response carries", () => {
   it("renders streaming and settled identically at the same measured width", () => {
     // Arrange — with no animation frames, the arriving draw paints the whole
     // prose at once, so it is comparable to the settled draw of the same text.
+    // A tree defers its first paint to attach, so each row is mounted and its
+    // box reported before the tree is compared.
     vi.stubGlobal("requestAnimationFrame", undefined);
+    const paint = (arm: "success" | "update"): HTMLElement => {
+      const el = drawFeedResponse(
+        response({ result: { case: arm, value: { prose: { markdown: SHOWCASE_TREE } } } }),
+        rowContext(),
+      );
+      const body = el.querySelector<HTMLElement>(".bubble-body");
+      if (body === null) throw new Error("no bubble body");
+      document.body.appendChild(el);
+      fireResize(body);
+      return el;
+    };
     // Act
-    const settled = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
-      rowContext(),
-    );
-    const streaming = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
-      rowContext(),
-    );
-    // Assert — the tree element is byte-for-byte the same on both paths.
+    const settled = paint("success");
+    const streaming = paint("update");
+    // Assert — a tree drew on both paths, byte-for-byte the same.
+    expect(settled.querySelector(".mp-tree")).not.toBeNull();
     expect(streaming.querySelector(".mp-tree")?.outerHTML).toBe(
       settled.querySelector(".mp-tree")?.outerHTML,
     );
@@ -674,8 +688,9 @@ describe("the wrapped tree a settled response carries", () => {
     );
     const body = el.querySelector<HTMLElement>(".bubble-body");
     if (body === null) throw new Error("no bubble body");
-    // Act + Assert — a resize reaches an attached observer (fireResize throws
-    // when nothing observes the element), and the tree survives the re-wrap.
+    // Act + Assert — a resize reaches an observer on the body (fireResize throws
+    // when nothing observes the element): the tree's deferred first paint lands
+    // on it, and the reflow observer it then wires keeps the body watched.
     expect(() => fireResize(body)).not.toThrow();
     expect(el.querySelector(".mp-tree")).not.toBeNull();
     // And discarding the bubble disconnects the observer.
@@ -872,11 +887,11 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     expect(after).toBe(before);
   });
 
-  it("does not re-wrap a settled tree when only the bubble's own fit-content width changes", () => {
-    // Arrange — a settled response with a tree; its reflow observer is wired at
-    // draw (when the bubble is still detached, so it starts at the default
-    // width). getComputedStyle is keyed by class because the elements are minted
-    // inside the draw.
+  it("paints a detached tree only on attach — never at the default while detached", () => {
+    // Arrange — a settled response with a tree, drawn while detached: the cap
+    // cannot resolve (no containing block), so the first paint WAITS for attach
+    // rather than rendering at the default width. getComputedStyle is keyed by
+    // class because the elements are minted inside the draw.
     vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
       if (el.classList.contains("bubble")) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
       return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
@@ -887,22 +902,50 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     );
     const body = el.querySelector<HTMLElement>(".bubble-body");
     if (body === null) throw new Error("no bubble body");
-    // Attach under a sized containing block and stage the bubble's real box.
+    // Assert 1 — nothing painted while detached: no 105-wrapped body ever exists.
+    expect(body.querySelector(".mp-tree")).toBeNull();
+
+    // Act — attach under a sized containing block, stage the bubble's real box,
+    // and deliver the first resize (the frame the row mounts and is laid out).
     const parent = document.createElement("div");
     Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
     parent.appendChild(el);
     document.body.appendChild(parent);
     el.getBoundingClientRect = () => rect(220);
     Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
-    const treeInitial = body.querySelector(".mp-tree");
+    fireResize(body);
+    const treeAfterMount = body.querySelector(".mp-tree");
 
-    // Act 1 — the mount correction: the observer's first measurement moves from
-    // the detached default width to the real cap, so the tree is repainted ONCE.
+    // Assert 2 — the first painted tree lands at the cap (cols floor(681.25/8)=85):
+    // its widest branch wraps, and it is the ONLY tree ever drawn.
+    expect(treeAfterMount).not.toBeNull();
+    expect(body.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
+    stopTicking(el);
+  });
+
+  it("does not re-wrap a settled tree when only the bubble's own fit-content width changes", () => {
+    // Arrange — the same staging, taken past the mount to the first cap paint.
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+      if (el.classList.contains("bubble")) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
+      return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
+    });
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    const parent = document.createElement("div");
+    Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+    el.getBoundingClientRect = () => rect(220);
+    Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
     fireResize(body);
     vi.runOnlyPendingTimers();
     const treeAfterMount = body.querySelector(".mp-tree");
 
-    // Act 2 — a content-only fit-content shrink (the settle transition), column
+    // Act — a content-only fit-content shrink (the settle transition), column
     // unchanged: the bubble box and body content shrink together.
     el.getBoundingClientRect = () => rect(180);
     Object.defineProperty(body, "clientWidth", { value: 160, configurable: true });
@@ -910,12 +953,61 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     vi.runOnlyPendingTimers();
     const treeAfterShrink = body.querySelector(".mp-tree");
 
-    // Assert — the mount correction repainted (a new tree node), but the
-    // content-only change did NOT: the tree node is the very same one, so no
-    // re-wrap fired and there is no cascade.
-    expect(treeAfterMount).not.toBe(treeInitial);
+    // Assert — the content-only change did NOT re-wrap: the tree node is the very
+    // same one `reflowOnResize` painted at the cap, so the flicker cascade has no
+    // source (`cols === lastCols`).
     expect(treeAfterShrink).toBe(treeAfterMount);
     stopTicking(el);
+  });
+
+  it("adds no second wrap once the cap has been used: a repeat mount delivery at the same cap is inert", () => {
+    // Arrange — a settled tree taken through its first cap paint on attach.
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+      if (el.classList.contains("bubble")) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
+      return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
+    });
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    const parent = document.createElement("div");
+    Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+    el.getBoundingClientRect = () => rect(220);
+    Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
+    fireResize(body);
+    vi.runOnlyPendingTimers();
+    const treeAtCap = body.querySelector(".mp-tree");
+    expect(treeAtCap).not.toBeNull();
+
+    // Act — a further mount delivery with the geometry unchanged (the cap was
+    // already used for the paint above).
+    fireResize(body);
+    vi.runOnlyPendingTimers();
+
+    // Assert — nothing re-wrapped: the same tree node stands, so the mount
+    // correction that once flashed 105 -> cap no longer exists.
+    expect(body.querySelector(".mp-tree")).toBe(treeAtCap);
+    stopTicking(el);
+  });
+
+  it("falls back to the default width and never throws for a detached tree with no observer", () => {
+    // Arrange — the genuine no-layout case: no ResizeObserver, so there is no
+    // attach signal to wait for. The tree must still paint, at DEFAULT_TREE_COLS.
+    vi.stubGlobal("ResizeObserver", undefined);
+    // Act
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    // Assert — a tree drew synchronously (no defer possible), wrapped at the
+    // default: SHOWCASE_TREE's widest branch exceeds 105, so it wrapped.
+    expect(body?.querySelector(".mp-tree")).not.toBeNull();
+    expect(body?.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length ?? 0).toBeGreaterThan(4);
   });
 });
 
