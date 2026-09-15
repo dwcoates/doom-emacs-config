@@ -217,9 +217,15 @@ type wsState struct {
 	apiResponseSeq uint64
 	// unitAPIResponse files each unit under the API response it arrived in.
 	unitAPIResponse map[string]uint64
-	// apiResponseUsage is each API response's formatted cost stamp, keyed by
-	// the response's number. Absent means that response stated no usage.
-	apiResponseUsage map[uint64]string
+	// apiResponseTurn records the turn each API response was filed under, so a
+	// response bubble's stamp can sum ONLY its own turn's responses. Keyed by
+	// the response's number; the empty string is "no turn in flight" (units
+	// seen before any prompt).
+	apiResponseTurn map[uint64]string
+	// apiResponseTurnTokens is each API response's TURN-SCOPED token count —
+	// fresh input plus output, cached context excluded (see usage.go) — keyed
+	// by the response's number. Absent means that response stated no usage.
+	apiResponseTurnTokens map[uint64]uint64
 }
 
 // subFeedHead is the bubble row a sub-feed lives inside.
@@ -458,8 +464,9 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		finalAnswerSeen:      map[string]bool{},
 		answerMarkdown:       map[string]string{},
 
-		unitAPIResponse:  map[string]uint64{},
-		apiResponseUsage: map[uint64]string{},
+		unitAPIResponse:       map[string]uint64{},
+		apiResponseTurn:       map[uint64]string{},
+		apiResponseTurnTokens: map[uint64]uint64{},
 
 		plane: planeLive,
 	}
