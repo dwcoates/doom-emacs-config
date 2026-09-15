@@ -103,6 +103,8 @@
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (declare-function doom-fallback-buffer "ext:doom" ())
 (declare-function agent-repl--foreign-owned-buffer-p "agent-repl-core" (buf ws))
+(declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
+(declare-function agent-repl--safe-buffer-name "window" (b))
 ;; Defined by core.el, which loads first; declared special here so this file
 ;; byte-compiles standalone and the binding below is a dynamic one.
 (defvar agent-repl--eager-open-in-progress)
@@ -1888,13 +1890,24 @@ when it is the frame's last, switches it to the fallback buffer.  Either
 way the dying workspace stops being displayed BEFORE persp-mode reaches
 for the window, so the signal is not caught -- it is not raised.
 
+Agent buffers owned by a different workspace (see
+`agent-repl--foreign-owned-buffer-p') are skipped, not retired: persp-mode
+can drift another workspace's live panel into this persp, and retiring it
+here would delete that neighbor's on-screen panel window across all frames
+-- closing a bystander workspace's panels.  This mirrors the same skip in
+`agent-repl--kill-workspace-buffers'.
+
 No-op when persp-mode is not loaded or WS has no live persp."
   (when-let* ((persp (agent-repl--ws-resolve-persp ws))
               (bufs (agent-repl--ws-buffers persp)))
     (agent-repl--log ws "ws-retire-persp-windows: ws=%s buffers=%d" ws (length bufs))
     (dolist (buf bufs)
       (when (buffer-live-p buf)
-        (agent-repl-window--delete-buffer-windows buf :ws ws)))))
+        (if (agent-repl--foreign-owned-buffer-p buf ws)
+            (agent-repl--log ws "ws-retire-persp-windows: SKIP foreign buf=%s owner=%s"
+                              (agent-repl--safe-buffer-name buf)
+                              (agent-repl--buffer-owner buf))
+          (agent-repl-window--delete-buffer-windows buf :ws ws))))))
 
 (defun agent-repl--ws-persp-kill (ws)
   "Kill the perspective named WS via the low-level `persp-kill'.
