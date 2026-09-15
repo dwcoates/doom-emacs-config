@@ -149,6 +149,13 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* The border around a THINKING response bubble: light orange, worn by the
+     agent's intermediate reasoning bubbles (never a final answer, partial or
+     whole). Distinct from the green --final-response an answer wears and from
+     the deep-orange --compact-rule and amber --async, so an in-progress
+     reasoning card reads as its own state. Same 0.3px thickness the base bubble
+     reserves; only the color lands here. */
+  --thinking-border: #fb923c;
   /* The border around the response the reader has SELECTED to reply to
      (reply-to-a-past-response mode): blue, distinct from the green a final
      answer wears at rest, so the one bubble the next prompt will quote is
@@ -335,6 +342,9 @@
     --compact-rule: #f97316;
     --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
+    /* Lighter orange for the dark theme, as the other state borders lift, so
+       the thinking hairline still reads against the dark purple fill. */
+    --thinking-border: #fdba74;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
@@ -1673,11 +1683,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .bubble.assistant.final-response:not(.thinking-bubble) { border-color: var(--final-response); }
 /* THE THINKING BUBBLE: the agent's intermediate reasoning, one bubble per
    reasoning block. Purple fill (the same --assistant wash the response bubble
-   wears) and explicitly NON-BORDERED — the base bubble's 0.3px stays
-   transparent, and the green final-answer border is excluded above — so it
-   reads as a quiet in-progress purple card distinct from the answer. Nothing
-   else about the response bubble changes. */
-.bubble.assistant.thinking-bubble { border-color: transparent; }
+   wears) and always a LIGHT ORANGE border (owner ruling 2026-09-15) at the
+   SAME 0.3px thickness the base bubble reserves — only the border COLOR lands
+   here, so there is no reflow. The green final-answer border is excluded above
+   (`:not(.thinking-bubble)`), so an intermediate reasoning bubble can NEVER
+   wear the green answer border; and a partial-final response (an in-construction
+   answer that is NOT a thinking bubble) never matches this rule, so it stays
+   borderless until it becomes the green final answer. */
+.bubble.assistant.thinking-bubble { border-color: var(--thinking-border); }
 /* The SELECTED final response (reply-to-a-past-response mode): blue in place of
    the green. Declared after the green rule and at higher specificity (it adds
    `.response-selected`), so the selected bubble reads blue while selected and
