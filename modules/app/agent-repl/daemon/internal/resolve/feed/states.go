@@ -141,6 +141,20 @@ func (s *wsState) prose(id string) *proseState {
 	return p
 }
 
+// thinkingProse resolves a reasoning block's fold, creating it on first sight.
+// It reuses proseState — a thinking bubble folds its text deltas exactly as a
+// response does — but is filed in its OWN map so it never crosses paths with a
+// response bubble's fold.
+func (s *wsState) thinkingProse(id string) *proseState {
+	p, ok := s.thinking[id]
+	if ok {
+		return p
+	}
+	p = &proseState{}
+	s.thinking[id] = p
+	return p
+}
+
 // planState is one agent's OPEN plan episode. An agent has at most one at a
 // time, which is the invariant the enter/exit coalescing rests on: both calls
 // key onto the episode's single FeedId.
