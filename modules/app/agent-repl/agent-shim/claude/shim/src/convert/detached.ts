@@ -253,7 +253,15 @@ interface RawTask {
   readonly output_file?: string;
   readonly status?: string;
   readonly summary?: string;
-  readonly usage?: { readonly total_tokens?: number };
+  readonly usage?: {
+    readonly total_tokens?: number;
+    // A RUNNING BEAT'S EXTRA FIGURES. `task_progress` states the tool-call count
+    // and elapsed wall-clock alongside the running token sum (`tool_uses`,
+    // `duration_ms` in the vendor's `usage`); the settled `task_notification`
+    // carries only `total_tokens`, so these two are absent there.
+    readonly tool_uses?: number;
+    readonly duration_ms?: number;
+  };
   readonly patch?: { readonly is_backgrounded?: boolean; readonly status?: string };
 }
 
@@ -296,6 +304,19 @@ export interface TaskKindRegistry {
   /** The cause remembered for a task, or `undefined` if none was stated. */
   causeOf(taskId: string): DetachCause | undefined;
   /**
+   * Remember which spawning call a task's frames belong to.
+   *
+   * THE JOIN A RUNNING BEAT NEEDS. `task_progress` is the only per-task message
+   * a running spawn emits, and the subagent unit it advances is keyed by the
+   * SPAWN's `tool_use_id` (`toolCallActivityId(toolUseId)`). Its earlier
+   * messages (`task_started`) state that id; a later `task_progress` need not
+   * restate it, so it is remembered when first stated and recovered here rather
+   * than dropped for want of a correlation.
+   */
+  rememberToolUse(taskId: string, toolUseId: string): void;
+  /** The spawning call remembered for a task, or `undefined` if none was stated. */
+  toolUseFor(taskId: string): string | undefined;
+  /**
    * Whether a settling task is an AGENT run, and so owns a subagent terminal.
    *
    * A task whose kind was never stated answers `true`: the subagent terminal is
@@ -308,7 +329,7 @@ export interface TaskKindRegistry {
 }
 
 export function createTaskKindRegistry(): TaskKindRegistry {
-  const facts = new Map<string, { kind?: string; cause?: DetachCause }>();
+  const facts = new Map<string, { kind?: string; cause?: DetachCause; toolUseId?: string }>();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
   const reserve = (): void => {
     if (facts.size < TASK_KIND_CAPACITY) return;
@@ -332,6 +353,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     },
     causeOf(taskId) {
       return facts.get(taskId)?.cause;
+    },
+    rememberToolUse(taskId, toolUseId) {
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), toolUseId });
+    },
+    toolUseFor(taskId) {
+      return facts.get(taskId)?.toolUseId;
     },
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
@@ -375,7 +403,14 @@ export function convertDetached(
   }
 
   const known = context.liveTask(taskId);
-  const toolUseId = raw.tool_use_id ?? known?.toolUseId;
+  // A DIRECTLY STATED spawning call is remembered, so a later `task_progress`
+  // that does not restate it can still be joined to its subagent unit; a
+  // message that states none falls back to the remembered join.
+  const statedToolUse = raw.tool_use_id ?? known?.toolUseId;
+  if (statedToolUse !== undefined && statedToolUse !== "") {
+    taskKinds.rememberToolUse(taskId, statedToolUse);
+  }
+  const toolUseId = statedToolUse ?? taskKinds.toolUseFor(taskId);
   const agentId = known?.agentId ?? context.mainAgentId;
 
   switch (raw.subtype) {
@@ -462,12 +497,28 @@ export function convertDetached(
       ];
     }
 
-    case "task_progress":
-      // The vendor's per-task progress is the SUBAGENT unit's `update` arm, and
-      // building one needs the spawn's prompt, which this message does not
-      // carry. Consumed; the unit's own frames are the account.
-      LOGGER.logVerbose({ uuid, task_id: taskId }, "task progress consumed; the unit's frames carry it");
-      return [];
+    case "task_progress": {
+      // A RUNNING BEAT IS THE SUBAGENT UNIT'S `update` ARM. It carries the
+      // running token sum a BACKGROUNDED spawn would otherwise surface nowhere
+      // until it settled — an awaited spawn streams the same figure from its
+      // transcript, but a detached one's transcript does not reach this stream,
+      // so this beat is the only account of what it has spent so far.
+      if (toolUseId === undefined || toolUseId === "") {
+        // NO KNOWN CORRELATION: a beat that arrived before its spawn's own
+        // messages stated the call it belongs to cannot be keyed to a unit, and
+        // guessing one would advance the wrong row. Dropped, as before.
+        LOGGER.logVerbose(
+          { uuid, task_id: taskId },
+          "a task-progress beat names no spawning call and none is remembered; it cannot advance a unit and is dropped",
+        );
+        return [];
+      }
+      LOGGER.logVerbose(
+        { uuid, task_id: taskId, tool_use_id: toolUseId, total_tokens: raw.usage?.total_tokens ?? 0 },
+        "a running beat advances the subagent unit's spend",
+      );
+      return subagentProgressEntries(context, agentId, uuid, toolUseId, raw);
+    }
 
     case "task_notification": {
       const entries: PersistEntry[] = [];
@@ -514,6 +565,71 @@ export function convertDetached(
       );
       return [residueEntry(context, message, residueForMessage(message), `unknown.${String(raw.subtype)}`)];
   }
+}
+
+/**
+ * The spawn unit's running beat, from the task's own progress message.
+ *
+ * A COARSE RUNNING TOTAL, NOT A RECONCILED CHARGE. `AgentSubagentProgress` is
+ * "what a run has spent, while it is still running", superseded by the full
+ * accounting at conclusion — so this carries only the vendor's `total_tokens`
+ * (plus the tool-call count and elapsed wall-clock the beat states), and the
+ * settled `total_only` on the terminal replaces it. The row is keyed by the
+ * spawn unit exactly as the terminal is (`toolCallActivityId(toolUseId)`), so
+ * each successive beat UPSERTS one row rather than appending, and the terminal
+ * upserts the same row.
+ *
+ * THE PROMPT IS NOT RESTATED. `AgentSubagentUpdate.prompt` is repeated on every
+ * frame so a frame can stand alone, but a `task_progress` message carries no
+ * prompt and the ASYNC terminal likewise emits an empty one; a consumer reads
+ * the spawn's own start frame for the label, so an empty prompt here is
+ * consistent rather than a loss.
+ */
+function subagentProgressEntries(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  vendorUuid: string,
+  toolUseId: string,
+  raw: RawTask,
+): readonly PersistEntry[] {
+  const activityId = toolCallActivityId(toolUseId);
+  const totalTokens = raw.usage?.total_tokens;
+  const toolUses = raw.usage?.tool_uses;
+  const durationMs = raw.usage?.duration_ms;
+  return [
+    activityEntry(
+      context,
+      { agentId, vendorUuid, discriminator: "activity.subagent.update" },
+      agentActivity(activityId, {
+        case: "subagent",
+        value: create(conversationv1.AgentSubagentSchema, {
+          result: {
+            case: "update",
+            value: create(conversationv1.AgentSubagentUpdateSchema, {
+              prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "" }),
+              progress: create(conversationv1.AgentSubagentProgressSchema, {
+                totalTokens: nonNegativeBigInt(totalTokens),
+                toolUseCount: nonNegativeInt(toolUses),
+                durationMs: nonNegativeBigInt(durationMs),
+              }),
+            }),
+          },
+        }),
+      }),
+    ),
+  ];
+}
+
+/** A finite non-negative count as a `bigint`, or `0n` when the vendor stated none. */
+function nonNegativeBigInt(value: number | undefined): bigint {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return 0n;
+  return BigInt(Math.trunc(value));
+}
+
+/** A finite non-negative count as a `number`, or `0` when the vendor stated none. */
+function nonNegativeInt(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return 0;
+  return Math.trunc(value);
 }
 
 /**
