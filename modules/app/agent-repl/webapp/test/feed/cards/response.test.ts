@@ -319,12 +319,15 @@ describe("the usage corner's hover timestamp", () => {
   });
 
   it("stops the timestamp's clock when the bubble is disposed", () => {
-    // Arrange: a settled corner whose clock is live.
+    // Arrange: a settled corner whose clock is live. The clock rides `.usage-ago`;
+    // the `data-ticking` attribute is a SHARED teardown channel (a bubble's
+    // "more below" ResizeObserver registers on it too, see bubble-more.ts), so the
+    // clock is checked on its own element rather than by a blanket attribute count.
     const el = drawFeedResponse(settled(1_000n), rowContext());
-    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(1);
-    // Act: whoever discards the bubble stops its clocks.
+    expect(el.querySelector(".usage-ago")?.hasAttribute(TICKING_ATTRIBUTE)).toBe(true);
+    // Act: whoever discards the bubble stops its clocks (and every other hook).
     stopTicking(el);
-    // Assert
+    // Assert: nothing ticks any more.
     expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
   });
 
@@ -337,8 +340,11 @@ describe("the usage corner's hover timestamp", () => {
       }),
       rowContext(),
     );
-    // Assert
-    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
+    // Assert: no timestamp element exists, so no clock subscription was taken.
+    // (A blanket `data-ticking` count would now also see the bubble's "more below"
+    // ResizeObserver hook — a teardown hook, not a clock — so the check is
+    // clock-specific.)
+    expect(el.querySelectorAll(`.usage-ago[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
   });
 
   it("slides the timestamp over one continuous half-second transition", () => {

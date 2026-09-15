@@ -249,10 +249,13 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
       rule.selectors.includes(".bubble > .bubble-scroll"),
     );
 
-    // Assert
-    expect(capped.some((rule) => /max-height:\s*calc\(var\(--cap-lines\)/.test(rule.declarations))).toBe(
-      true,
-    );
+    // Assert — FIX1 (2026-09-15): the cap rides the scroll box, now expressed as
+    // min(the line budget, the 50vh ceiling) rather than the bare calc.
+    expect(
+      capped.some((rule) =>
+        /max-height:\s*min\(calc\(var\(--cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
+      ),
+    ).toBe(true);
   });
 
   it("no longer caps the bubble body, which is now the content wrapper", () => {
@@ -413,6 +416,118 @@ describe("the collapse/expand height model", () => {
     // Assert
     expect(rule).toMatch(/max-height:\s*50vh/);
     expect(rule).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("FIX1: caps the COLLAPSED bubble at min(the line budget, the 50vh ceiling)", () => {
+    // Arrange / Act — the collapsed bubble's max-height rule (several rules carry
+    // the `.bubble > .bubble-scroll` selector; the cap is the one that names it).
+    const capRule = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /max-height/.test(rule.declarations),
+    );
+
+    // Assert — the same 50vh the expanded rule caps at is the ceiling here too,
+    // so expanded (50vh) can never be smaller than collapsed (min(lines, 50vh)).
+    expect(capRule?.declarations).toMatch(
+      /max-height:\s*min\(calc\(var\(--cap-lines\) \* var\(--cap-line-h, 1\.4em\) \+ var\(--cap-extra, 0px\)\),\s*50vh\)/,
+    );
+  });
+
+  it("FIX1: expresses the collapsed and expanded caps against the SAME 50vh, so expanded >= collapsed", () => {
+    // Arrange / Act
+    const collapsedCap = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /max-height/.test(rule.declarations),
+    );
+    const expanded = declarationsOf(".bubble > .bubble-scroll.expanded");
+
+    // Assert — both caps name 50vh: collapsed = min(lines, 50vh) <= 50vh = expanded.
+    expect(collapsedCap?.declarations).toMatch(/50vh/);
+    expect(expanded).toMatch(/max-height:\s*50vh/);
+  });
+});
+
+/**
+ * THE "MORE BELOW" AFFORDANCE (owner ruling, 2026-09-15: "a signal that there's
+ * more to reveal"). FIX2 draws a bottom fade + chevron on a collapsed
+ * response/prompt bubble that overflows its cap, keyed entirely on `has-more`
+ * (bubble-more.ts toggles the class). The signal is SCOPED to the two speaker
+ * bubbles — never a tool-call section — and fades into each bubble's own bg.
+ */
+describe("the 'more below' affordance", () => {
+  it("draws the fade from has-more, over the last 1.5em", () => {
+    // Arrange / Act
+    const fade = declarationsOf(".bubble.assistant > .bubble-scroll.has-more::after");
+
+    // Assert
+    expect(fade).toMatch(/height:\s*1\.5em/);
+    expect(fade).toMatch(/bottom:\s*0/);
+    expect(fade).toMatch(/pointer-events:\s*none/);
+  });
+
+  it("fades the assistant bubble into the assistant background token", () => {
+    // Arrange / Act — the gradient rule (the selector also names a base ::after
+    // rule for geometry, so pick the copy carrying the background).
+    const gradient = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble.assistant > .bubble-scroll.has-more::after") &&
+        /linear-gradient/.test(rule.declarations),
+    );
+
+    // Assert — dissolves into the bubble's OWN purple, not a hard edge.
+    expect(gradient?.declarations).toMatch(
+      /linear-gradient\(to bottom, transparent, var\(--assistant\)\)/,
+    );
+  });
+
+  it("fades the user bubble into the user background token", () => {
+    // Arrange / Act
+    const gradient = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble.user > .bubble-scroll.has-more::after") &&
+        /linear-gradient/.test(rule.declarations),
+    );
+
+    // Assert — dissolves into the bubble's OWN blue.
+    expect(gradient?.declarations).toMatch(/linear-gradient\(to bottom, transparent, var\(--user\)\)/);
+  });
+
+  it("centers a chevron on the bottom edge from has-more", () => {
+    // Arrange / Act
+    const chevron = declarationsOf(".bubble.assistant > .bubble-scroll.has-more::before");
+
+    // Assert — the ⌄ glyph (\2304), horizontally centered, click-through.
+    expect(chevron).toMatch(/content:\s*"\\2304"/);
+    expect(chevron).toMatch(/left:\s*50%/);
+    expect(chevron).toMatch(/transform:\s*translateX\(-50%\)/);
+    expect(chevron).toMatch(/pointer-events:\s*none/);
+  });
+
+  it("never puts the affordance on a tool-call section", () => {
+    // Arrange / Act — every rule that keys on has-more.
+    const withHasMore = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes(".has-more")),
+    );
+
+    // Assert — every such selector is scoped to a response/prompt bubble scroll
+    // box, and none names a tool-call section's capped box.
+    expect(withHasMore.length).toBeGreaterThan(0);
+    const toolBoxes = [
+      ".tool-input",
+      ".tool-output",
+      ".tool-read-output",
+      ".bash-input",
+      ".bash-output",
+      ".diff-output",
+      ".skill-input",
+      ".skill-content",
+    ];
+    for (const rule of withHasMore) {
+      for (const sel of rule.selectors) {
+        expect(sel).toMatch(/\.bubble\.(assistant|user) > \.bubble-scroll\.has-more/);
+        for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
+      }
+    }
   });
 });
 

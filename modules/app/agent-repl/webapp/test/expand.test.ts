@@ -435,4 +435,68 @@ describe("installClickExpand", () => {
     // Assert
     expect(box.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
+
+  /** OBSERVABLE scrollTop on BOX (jsdom's own is a no-op that stays 0). */
+  function observeScrollTop(box: HTMLElement, initial: number): { readonly top: number } {
+    let top = initial;
+    Object.defineProperty(box, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+    return {
+      get top() {
+        return top;
+      },
+    };
+  }
+
+  it("FIX3: resets the section's scrollTop to 0 when it collapses", () => {
+    // Arrange: an expanded box the reader has scrolled partway down.
+    const { feed: el, box } = mountFeed("body text");
+    const scroll = observeScrollTop(box, 0);
+    installClickExpand(el, () => "");
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // expand
+    (box as unknown as { scrollTop: number }).scrollTop = 120;
+    // Act: collapse it.
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert: the next collapsed view starts at the top, not mid-scroll.
+    expect(scroll.top).toBe(0);
+  });
+
+  it("FIX3: leaves scrollTop untouched when the section expands", () => {
+    // Arrange: expanding must not disturb the scroll position.
+    const { feed: el, box } = mountFeed("body text");
+    const scroll = observeScrollTop(box, 37);
+    installClickExpand(el, () => "");
+    // Act: expand.
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(scroll.top).toBe(37);
+  });
+
+  it("hands afterToggle the expanded state on expand", () => {
+    // Arrange
+    const { feed: el, box } = mountFeed("body text");
+    const calls: Array<[HTMLElement, boolean]> = [];
+    installClickExpand(el, () => "", (s, e) => calls.push([s, e]));
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(calls).toEqual([[box, true]]);
+  });
+
+  it("hands afterToggle the collapsed state on collapse", () => {
+    // Arrange
+    const { feed: el, box } = mountFeed("body text");
+    const calls: Array<[HTMLElement, boolean]> = [];
+    installClickExpand(el, () => "", (s, e) => calls.push([s, e]));
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // expand
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // collapse
+    // Assert
+    expect(calls.at(-1)).toEqual([box, false]);
+  });
 });
