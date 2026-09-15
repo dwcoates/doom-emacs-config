@@ -7,6 +7,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 )
 
@@ -593,5 +594,148 @@ func TestASettledArmMatchesTheStreamingDeltaArmForTheSameProse(t *testing.T) {
 	// Assert: both arms carry the identical verbatim prose.
 	if got != delta {
 		t.Fatalf("settled %q does not match streamed %q", got, delta)
+	}
+}
+
+// ---- ONE RESPONSE BLOCK DELIVERED UNDER DIVERGENT ACTIVITY IDS ----
+//
+// A prose block reaches the resolver from two store planes that are supposed to
+// mint the SAME activity id so their frames collapse onto one fold. When they
+// disagree — a stream that re-mints its message id across a resume, or a block
+// index that shifts under a leading thinking block — the block splits: the
+// stream's start+delta updates land under one id and the settling whole under
+// another. Keyed on the activity id alone that drew a settled green whole beside
+// an unsettled fragment that had lost its opening deltas, or a lone streamed
+// bubble that never went green. The settled whole must be the block's ONLY row.
+
+// settledResponseRows answers the settled prose bubbles on the root feed.
+func (h *harness) settledResponseRows() []*frontendv1.FeedRow {
+	h.t.Helper()
+	var out []*frontendv1.FeedRow
+	for _, row := range h.responseRows() {
+		if row.GetActivity().GetResponse().GetSuccess() != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func TestADivergentPlaneSettleLeavesOneSettledRowNotTwo(t *testing.T) {
+	// Arrange: the stream plane pays out start + a partial update that lost its
+	// opening deltas, under one unit.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-stream", &conversationv1.AgentResponseStart{}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+
+	// Act: the settling whole lands under a DIVERGENT unit.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+		}, nil), noAddress())
+
+	// Assert: exactly one response row, and it is the settled whole.
+	rows := h.responseRows()
+	if len(rows) != 1 {
+		t.Fatalf("response rows = %d, want exactly one for a block delivered under two ids", len(rows))
+	}
+	if rows[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "hello world" {
+		t.Fatalf("the surviving row is not the settled whole: %q",
+			rows[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown())
+	}
+}
+
+func TestADivergentPlaneSettleRetiresTheUnsettledPartialsRow(t *testing.T) {
+	// Arrange: the stream partial drew its own row under unit-stream.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+	partialID := testEncode(feedid.Ref{
+		WS: testWorkspace, Feed: rootFeed(),
+		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "unit-stream"},
+	}).GetValue()
+
+	// Act: the whole settles under the divergent unit.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+		}, nil), noAddress())
+
+	// Assert: the partial's row is gone from the feed.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == partialID {
+			t.Fatal("the unsettled partial's row survived beside the settled whole")
+		}
+	}
+}
+
+func TestADivergentPartialArrivingAfterTheSettleDrawsNoRow(t *testing.T) {
+	// Arrange: the whole settled first, under unit-file.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+		}, nil), noAddress())
+
+	// Act: the stream's start + partial deltas arrive AFTER, under the divergent
+	// unit (the plane disorder response.go documents, across two ids).
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-stream", &conversationv1.AgentResponseStart{}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+
+	// Assert: still one settled row; the late fragment drew nothing.
+	if got := len(h.responseRows()); got != 1 {
+		t.Fatalf("response rows = %d, want one settled whole with the late fragment dropped", got)
+	}
+	if got := len(h.settledResponseRows()); got != 1 {
+		t.Fatalf("settled response rows = %d, want the whole to stand", got)
+	}
+}
+
+func TestTwoDistinctProseBlocksOfOneTurnAreBothKept(t *testing.T) {
+	// Arrange, Act: two genuinely different prose blocks in one turn, each
+	// settled under its own unit. Neither is a fragment of the other, so the
+	// divergent-fold reconciliation must not collapse them.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-a", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "first block about cats"},
+		}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-b", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "second block about dogs"},
+		}, nil), noAddress())
+
+	// Assert: both blocks stand.
+	if got := len(h.settledResponseRows()); got != 2 {
+		t.Fatalf("settled response rows = %d, want both distinct blocks kept", got)
+	}
+}
+
+func TestADivergentFragmentOfAnotherTurnIsNotSuppressed(t *testing.T) {
+	// Arrange: turn-1 settles a whole; turn-2 streams a partial whose text is a
+	// suffix of turn-1's whole. Reconciliation is TURN-SCOPED, so a same-text
+	// fragment in a DIFFERENT turn must still draw.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "first")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+		}, nil), noAddress())
+	h.deliverPrompt("turn-2", "second")
+
+	// Act: turn-2's partial happens to read "world".
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-2", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+
+	// Assert: both rows stand — one settled whole, one live partial.
+	if got := len(h.responseRows()); got != 2 {
+		t.Fatalf("response rows = %d, want the two turns' rows both kept", got)
 	}
 }
