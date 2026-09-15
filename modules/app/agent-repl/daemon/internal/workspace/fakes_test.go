@@ -810,6 +810,8 @@ type fakeFooter struct {
 	dirs map[ids.WorkspaceID]string
 	// parked records every park state the verbs installed or lifted, in order.
 	parked []bool
+	// primed records every workspace registration primed the footer for.
+	primed []ids.WorkspaceID
 	// coldAnswers is every cold-gate answer state the footer was handed, in
 	// order, the clearing nil included: the ORDER is the assertion, because
 	// the act has to reach the strip before the shim is dialed.
@@ -818,6 +820,12 @@ type fakeFooter struct {
 
 func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
 	f.parked = append(f.parked, parked)
+}
+
+// Prime records the workspaces registration primed the footer for, in order,
+// which is what the register wiring test asserts.
+func (f *fakeFooter) Prime(ws ids.WorkspaceID) {
+	f.primed = append(f.primed, ws)
 }
 
 func newFakeFooter() *fakeFooter {
