@@ -144,7 +144,10 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
 
   if (msg.tokens !== undefined) {
     const tokens = document.createElement("span");
-    tokens.className = "subagent-tokens";
+    // `token-count` is the ONE token hue (yellow for now); `subagent-tokens`
+    // sizes it to the head's other figures. Every token figure wears
+    // `token-count` so a count reads as a count wherever it is drawn.
+    tokens.className = "subagent-tokens token-count";
     tokens.textContent = msg.tokens.text;
     el.append(tokens);
   }
