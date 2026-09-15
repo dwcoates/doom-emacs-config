@@ -191,10 +191,16 @@ export function ownsSection<
 /**
  * Arm click-to-expand on `feed`: a click on a capped section lifts its
  * height cap, and the next click on it restores the capped preview.
+ *
+ * `afterToggle` runs once per toggle with the section and the state it landed
+ * in, so a caller can keep a class it draws (the bubble's "more below" fade,
+ * bubble-more.ts) in step with an expand/collapse whose height did not change
+ * and so fired no resize.
  */
 export function installClickExpand(
   feed: HTMLElement,
   selection: () => string = () => window.getSelection()?.toString() ?? "",
+  afterToggle?: (section: HTMLElement, expanded: boolean) => void,
 ): void {
   feed.addEventListener("click", (e: MouseEvent) => {
     const target = e.target instanceof HTMLElement ? e.target : null;
@@ -204,6 +210,14 @@ export function installClickExpand(
       selectedText: selection(),
     });
     if (section === null) return;
-    toggleExpanded(section);
+    const expanded = toggleExpanded(section);
+    // FIX3 (owner ruling, 2026-09-15: "unselecting the expanded bubble should
+    // return it to the original state — scrolled to the top, not where you left
+    // it"). Collapsing clips the box (overflow-y: hidden), which keeps whatever
+    // scrollTop the expanded view was left at and shows the box from there. Reset
+    // it so the next collapsed view — and a subsequent re-expand — starts at the
+    // top.
+    if (!expanded) section.scrollTop = 0;
+    afterToggle?.(section, expanded);
   });
 }

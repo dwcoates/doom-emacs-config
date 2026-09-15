@@ -19,6 +19,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
+import { refreshHasMore } from "./bubble-more.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
@@ -126,8 +127,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   let disposed = false;
 
   // Click-to-expand on every capped section the cards draw, armed once for the
-  // whole feed rather than per card — the existing behaviour, kept.
-  installClickExpand(host);
+  // whole feed rather than per card — the existing behaviour, kept. The
+  // afterToggle hook (FIX2) refreshes the bubble's "more below" affordance on an
+  // expand/collapse whose height did not change, which the ResizeObserver in
+  // bubble-more.ts cannot catch; refreshHasMore self-restricts to response/prompt
+  // bubbles, so a click on a tool section does nothing.
+  installClickExpand(host, undefined, (section) => refreshHasMore(section));
 
   const root: FeedController = createFeedController({
     ctx,
