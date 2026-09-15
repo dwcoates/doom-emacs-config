@@ -104,6 +104,11 @@ type FeedSink interface {
 	OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnPrompt is a prompt one agent addressed to another.
 	OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, addr OutputAddress)
+	// OnPeerMessage is a message ANOTHER Claude session sent into this
+	// conversation — an inter-session peer message or a subagent hand-back. It
+	// is never a person's prompt and never this agent's own work; the feed draws
+	// it as the abbreviated, right-aligned, purple, expandable peer bubble.
+	OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, addr OutputAddress)
 	// OnActivity is one unit of a turn's synchronous progress.
 	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, addr OutputAddress)
 	// OnQuestion is the agent blocking on a choice.
