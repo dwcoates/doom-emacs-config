@@ -73,6 +73,13 @@ describe("isScrollBox", () => {
     expect(isScrollBox({ scrollHeight: 400, clientHeight: 160, overflowY: "visible" })).toBe(false);
   });
 
+  it("rejects a collapsed box that clips without scrolling (overflow-y hidden)", () => {
+    // Owner ruling, 2026-09-15: a collapsed bubble/section clips rather than
+    // scrolls, so the intent-arm gate (installIntentScroll) must never arm it —
+    // its wheel always redirects to the feed.
+    expect(isScrollBox({ scrollHeight: 400, clientHeight: 160, overflowY: "hidden" })).toBe(false);
+  });
+
   it("rejects a clipping box whose content fits", () => {
     // Arrange + Act + Assert
     expect(isScrollBox({ scrollHeight: 160, clientHeight: 160, overflowY: "auto" })).toBe(false);
@@ -223,6 +230,37 @@ describe("innerScrollerAt", () => {
     const feed = node("feed", { scrollHeight: 900, clientHeight: 300, overflowY: "auto" });
     // Act + Assert
     expect(innerScrollerAt(feed, feed, metrics)).toBeNull();
+  });
+
+  it("skips a collapsed (clipping) bubble, so its wheel redirects to the feed", () => {
+    // Arrange — a collapsed bubble scroll box (overflow-y hidden) whose content
+    // exceeds it; the intent-arm gate must not treat it as a scroller (owner
+    // ruling, 2026-09-15: collapsed boxes never scroll).
+    const feed = node("feed", { scrollHeight: 900, clientHeight: 300, overflowY: "auto" });
+    const collapsed = node("collapsed", {
+      parentElement: feed,
+      scrollHeight: 400,
+      clientHeight: 160,
+      overflowY: "hidden",
+    });
+    const text = node("text", { parentElement: collapsed });
+    // Act + Assert
+    expect(innerScrollerAt(text, feed, metrics)).toBeNull();
+  });
+
+  it("arms an EXPANDED bubble that still overflows its 50vh cap", () => {
+    // Arrange — an expanded bubble scroll box: overflow-y auto and content past
+    // the 50vh cap, the only shape the intent-arm scroll applies to.
+    const feed = node("feed", { scrollHeight: 900, clientHeight: 300, overflowY: "auto" });
+    const expanded = node("expanded", {
+      parentElement: feed,
+      scrollHeight: 900,
+      clientHeight: 400,
+      overflowY: "auto",
+    });
+    const text = node("text", { parentElement: expanded });
+    // Act + Assert
+    expect(innerScrollerAt(text, feed, metrics)?.name).toBe("expanded");
   });
 
   it("returns null for a wheel with no target element", () => {
