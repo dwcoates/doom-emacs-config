@@ -337,6 +337,24 @@ func TestRouteLivePromptOpensTheTurn(t *testing.T) {
 	}
 }
 
+// TestRouteLivePeerMessageGoesToTheFeedAndOpensNoTurn covers a live peer
+// message: it is routed to the feed as a peer message, and — unlike a prompt —
+// it opens no turn, because it is not this agent's own work.
+func TestRouteLivePeerMessageGoesToTheFeedAndOpensNoTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryPeer("peer-1", "main-1", "Explore"))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnPeerMessage"})
+	if h.w.TurnInFlight() != nil {
+		t.Fatal("a peer message opened a turn; it is not this agent's own work and drives no turn")
+	}
+}
+
 // TestRouteMainTerminalEndsTheTurn covers the turn's close: the three views
 // see the terminal, and the lifecycle edge the prompt queue drains on carries
 // the turn the watcher was tracking.

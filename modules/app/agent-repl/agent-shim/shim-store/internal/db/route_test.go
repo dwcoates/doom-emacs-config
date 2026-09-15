@@ -57,6 +57,12 @@ func TestClassifyRoutesEveryArmToItsKind(t *testing.T) {
 			wantBook: "agent-1",
 		},
 		{
+			name:     "peer message is a page line in its recipient's book",
+			entry:    pageEntry("w", "u", "agent-1", peerItem("agent-1")),
+			wantKind: kindPageLine,
+			wantBook: "agent-1",
+		},
+		{
 			// The handoff is what the book's reader has to see, and the
 			// announcement is the one durable copy of what was announced.
 			name:     "detached work announcement is a page line",
@@ -615,6 +621,12 @@ func TestClassifyRefusesAnArmSetToANilMessage(t *testing.T) {
 		{
 			name:  "agent_frame arm set to nil",
 			entry: pageEntry("w", "u", "agent-1", frameItem(nil)),
+		},
+		{
+			name: "peer_message arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", &storev1.StoreAgentItem{
+				Item: &storev1.StoreAgentItem_PeerMessage{PeerMessage: nil},
+			}),
 		},
 		{
 			name: "agent_frame.update arm set to nil",

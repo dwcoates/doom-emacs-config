@@ -1,0 +1,46 @@
+// peer.proto — A MESSAGE FROM ANOTHER CLAUDE: an inter-session peer message or
+// a subagent hand-back, delivered into this agent's conversation as a
+// user-role record but authored by another agent rather than by a person.
+//
+// WHY IT IS NOT AN AgentPrompt. The vendor injects these as user-role records
+// (`origin.kind == "peer"`, `handback` set for a subagent's return), so before
+// this type they either drove a turn drawn as a person's "You" prompt (live)
+// or vanished under the isMeta withhold (adopted). Neither is what they are:
+// they are a low-priority, abbreviated aside from another agent, and this is
+// the one canonical record of one — produced by the shim (live stream plane)
+// and the sidecar (adopted file plane), persisted by the store, replayed by
+// history, and drawn by the daemon as its own feed row.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A message another Claude session (a peer, or a returning subagent) sent into
+// this agent's conversation.
+message PeerMessage {
+  // The agent whose conversation this message appears in — the recipient's
+  // book. The main agent for a session; never unset, because the store routes
+  // a record to a book by it exactly as it routes an AgentPrompt by its
+  // recipient.
+  AgentId agent = 1;
+  // The display label naming the SENDER — the vendor's `origin.from`, or
+  // `origin.senderTaskId` when `from` is absent. Drawn verbatim as the
+  // collapsed bubble's label (e.g. "agent Explore"); it is the sender's own id
+  // or name, not a person's.
+  string sender = 2;
+  // The message body, as markdown. Drawn only when the abbreviated bubble is
+  // EXPANDED (the collapsed form shows the sender label and nothing else).
+  // Preferred source is the vendor's `origin.body`; failing that, the record's
+  // own text content (envelope and all).
+  string body = 3;
+  // A stable, opaque identity for this message: the vendor RECORD UUID, which
+  // BOTH planes spell identically (the SDK streams the record and writes it to
+  // the transcript under one uuid). The daemon mints the feed row's id from it,
+  // so the live row and the adopted row for one message supersede each other on
+  // ONE bubble rather than drawing two. Echoed, never parsed.
+  string id = 4;
+}

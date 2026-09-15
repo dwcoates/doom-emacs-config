@@ -86,6 +86,22 @@ export function promptUpsertKey(turn: conversationv1.TurnId): string {
 }
 
 /**
+ * A PEER MESSAGE — a message another Claude session sent into this
+ * conversation (an inter-session peer, or a returning subagent's hand-back).
+ *
+ * Keyed by the vendor RECORD UUID, and that is a CROSS-PLANE contract: the
+ * stream plane (this shim) and the file plane (the sidecar) both convert the
+ * SAME vendor `user` record — the SDK streams it and writes it to the
+ * transcript under one uuid — so both mint `peer:<uuid>` and their two rows
+ * collapse into one exactly as a prompt's two planes do. The same uuid is spelled
+ * into PeerMessage.id, so the daemon draws ONE feed row from whichever plane
+ * arrives first.
+ */
+export function peerUpsertKey(vendorRecordUuid: string): string {
+  return `peer:${requireValue(vendorRecordUuid, "the peer record uuid")}`;
+}
+
+/**
  * HOOK ROWS: this key is the ONE served hook row (ruling 2026-09-04).
  *
  * Same shape of ruling as the prompt row above, for the same reason. A hook is

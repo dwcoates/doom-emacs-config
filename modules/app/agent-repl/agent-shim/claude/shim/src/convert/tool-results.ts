@@ -29,6 +29,7 @@ import {
 import { skillDocumentSettle } from "./tools/skill-use.js";
 import { bashDetachmentEntry, type TaskKindRegistry } from "./detached.js";
 import { activityEntry, agentActivity } from "./entries.js";
+import { convertPeerMessage } from "./peer.js";
 import { toolCallActivityId } from "./ids.js";
 
 const LOGGER = bindLog({ component: "shim-convert-results", operation: "shim.convert.results" });
@@ -57,6 +58,14 @@ export function convertUserRecord(
   const record = message as unknown as Record<string, unknown>;
   const skillDocument = skillDocumentEntry(message, context, registry);
   if (skillDocument !== undefined) return skillDocument;
+
+  // A MESSAGE FROM ANOTHER CLAUDE, not a person and not a prompt (origin.kind
+  // "peer" — an inter-session peer or a subagent hand-back). It is recognized
+  // BEFORE the R15 drop below: it carries no tool result, so without this it
+  // would fall through as "the prompt the shim already wrote" and vanish from a
+  // resumed session's feed. Emitted as the ONE peer-message row instead.
+  const peer = convertPeerMessage(message, context);
+  if (peer !== undefined) return [peer];
 
   const content = (message.message as { content?: unknown } | undefined)?.content;
   const blocks = Array.isArray(content) ? (content as RawUserBlock[]) : [];

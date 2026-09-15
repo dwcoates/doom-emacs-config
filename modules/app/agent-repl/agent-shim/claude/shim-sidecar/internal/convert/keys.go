@@ -121,6 +121,15 @@ func SessionKey(arm, recordUUID string) string { return "session:" + arm + ":" +
 // but the key stays in the one space so a producer that does mint both agrees.
 func PromptKey(turn string) string { return "prompt:" + turn }
 
+// PeerKey keys a PEER MESSAGE by the vendor record uuid.
+//
+// THE SHIM OWNS THIS KEY SPACE TOO. `agent-shim/claude/shim/src/store/keys.ts`
+// spells a stream-plane peer message `peer:<uuid>`; this file plane spells the
+// identical key for the SAME vendor record, so the two planes' rows collapse
+// onto one exactly as they must — a peer message the vendor both streams and
+// writes to the transcript is one fact, not two.
+func PeerKey(uuid string) string { return "peer:" + uuid }
+
 // BlockActivityID is the unit identity of a content block that has no vendor
 // call id of its own: the response's message id and the block's 0-based index
 // within message.content.

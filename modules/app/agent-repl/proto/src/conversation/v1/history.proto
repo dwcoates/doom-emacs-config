@@ -10,6 +10,7 @@ syntax = "proto3";
 package conversation.v1;
 
 import "conversation/v1/agent.proto";
+import "conversation/v1/peer.proto";
 import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/conversation/v1;conversationv1";
@@ -52,6 +53,10 @@ message HistoryEntry {
     // or the terminal arm that says how a turn ended. No `start` is replayed:
     // by the upsert rule the settled frame carries the start's facts.
     AgentFrame agent_frame = 2;
+    // A message another Claude session (a peer, or a returning subagent) sent
+    // into this agent's conversation — never a person's prompt, never this
+    // agent's own work.
+    PeerMessage peer_message = 3;
   }
 }
 

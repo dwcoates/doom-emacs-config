@@ -80,6 +80,11 @@ const (
 	// BODY row that rides that sub-feed.
 	KindShellHead RowKind = "shell_head"
 	KindSynth     RowKind = "synth"
+	// KindPeer is a message another Claude session sent into this conversation —
+	// an inter-session peer message or a subagent hand-back. Keyed by the
+	// message's own stable id (the vendor record uuid), so the two planes'
+	// deliveries of one message resolve to one row.
+	KindPeer RowKind = "peer"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -98,6 +103,7 @@ var AllRowKinds = []RowKind{
 	KindDetachedShell,
 	KindShellHead,
 	KindSynth,
+	KindPeer,
 }
 
 func knownKind(k RowKind) bool {
