@@ -53,6 +53,7 @@ import type {
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
 import type { FeedReveal } from "../scroll.js";
+import type { Overscan } from "./overscan.js";
 
 export interface BubbleOptions {
   ctx: AppContext;
@@ -77,6 +78,12 @@ export interface BubbleOptions {
    * box (a fixture rendering the feed on its own). See `FeedReveal`.
    */
   scroll?: FeedReveal;
+  /**
+   * The overscan buffer rooted on the page's scroll box, threaded down so the
+   * rows this bubble's sub-feed holds are pre-rendered by the same instance
+   * that watches the root feed. Absent with the scroll box.
+   */
+  overscan?: Overscan;
 }
 
 /** Build the bubble chrome for one bubble row. */
@@ -328,6 +335,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       bubble: opts.bubble,
       bodyContext: opts.rc,
       composerSlot,
+      overscan: opts.overscan,
     });
     return child;
   }
