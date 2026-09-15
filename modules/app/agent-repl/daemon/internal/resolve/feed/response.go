@@ -35,10 +35,13 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		return nil, errNotARow
 	}
 
-	// THE STAMP IS THE API RESPONSE'S FIGURES, not this unit's: usage rides
-	// exactly one unit per API response and it is usually a sibling (the
-	// thinking block's). Filing is idempotent, so drawing this bubble from a
-	// direct call files what the sink would have filed.
+	// THE STAMP IS THIS TURN'S TOKENS, not this unit's and not the context
+	// window: usage rides exactly one unit per API response (usually a sibling,
+	// the thinking block's), and the bubble draws the SUM of fresh input +
+	// output across every API response of the turn — cache_read/cache_creation
+	// excluded, reset per turn. The topbar's context-window figure is a
+	// different resolver; see usage.go. Filing is idempotent, so drawing this
+	// bubble from a direct call files what the sink would have filed.
 	s.fileAPIResponse(unit, act.GetUsage())
 	if stamp := s.apiResponseStamp(unit); stamp != "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "stamp := s.apiResponseStamp(unit); stamp != \"\""})
