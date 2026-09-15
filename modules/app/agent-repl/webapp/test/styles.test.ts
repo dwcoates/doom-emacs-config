@@ -411,60 +411,66 @@ describe("the footer status wave's stylesheet contract", () => {
     expect(declarations).toMatch(/animation:\s*none/);
   });
 
-  it("clips the gradient to the word's own text, not its box", () => {
+  it("runs a per-letter colour sweep alongside the bulge, on the same letter", () => {
     // Arrange / Act
-    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
 
-    // Assert
-    expect(declarations).toMatch(/background-clip:\s*text/);
+    // Assert — the colour animation rides the SAME shorthand as the bulge.
+    expect(declarations).toMatch(/pfooter-status-color 2\.6s ease-in-out infinite alternate/);
   });
 
-  it("makes the text fill transparent so the clipped gradient shows through", () => {
-    // Arrange / Act
-    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+  it("runs the colour sweep at the scale wave's exact 2.6s period, so the two are locked", () => {
+    // Arrange / Act — both names carry the same duration in the one shorthand.
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+    const durations = [...declarations.matchAll(/pfooter-status-\w+ (\d\.\d+)s/g)].map((m) => m[1]);
 
-    // Assert — text-fill, not color, so currentColor still gives the arm tone.
-    expect(declarations).toMatch(/-webkit-text-fill-color:\s*transparent/);
+    // Assert — the bulge and the sweep share one duration.
+    expect(durations).toEqual(["2.6", "2.6"]);
   });
 
-  it("paints the gradient as a linear-gradient background image", () => {
+  it("rests each letter at its arm tone (currentColor), so a letter is never transparent", () => {
     // Arrange / Act
-    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+    const keyframes = /@keyframes pfooter-status-color \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1] ?? "";
 
-    // Assert
-    expect(declarations).toMatch(/background-image:\s*linear-gradient/);
+    // Assert — the from-stop is the inherited arm colour, legible at rest.
+    expect(keyframes).toMatch(/from\s*\{\s*color:\s*currentColor/);
   });
 
-  it("runs the sweep at the scale wave's exact period, so their motion is locked", () => {
+  it("brightens toward a lighter band, never toward transparent", () => {
     // Arrange / Act
-    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
+    const keyframes = /@keyframes pfooter-status-color \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1] ?? "";
 
-    // Assert — same 2.6s, same alternate, as pfooter-status-wave.
-    expect(declarations).toMatch(/animation:\s*pfooter-status-gradient 2\.6s ease-in-out infinite alternate/);
+    // Assert — the to-stop mixes currentColor with white, an opaque colour.
+    expect(keyframes).toMatch(/to\s*\{\s*color:\s*color-mix\(in srgb, currentColor .+ #ffffff\)/);
   });
 
-  it("animates background-position, a paint rather than a re-layout", () => {
-    // Arrange / Act
-    const keyframes = /@keyframes pfooter-status-gradient \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1];
+  it("never clips a gradient to the word's text on the status-word path (the bug that shipped)", () => {
+    // Arrange / Act — the whole letter/word path, base and reduced-motion alike.
+    const word = ruleFor(stylesheet, ".pfooter-status-word") ?? "";
+    const letter = ruleFor(stylesheet, ".pfooter-wave-letter") ?? "";
+    const colorKeyframes =
+      /@keyframes pfooter-status-color \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1] ?? "";
 
-    // Assert
-    expect(keyframes).toMatch(/background-position:\s*100% 50%/);
+    // Assert — none of background-clip:text, transparent text-fill, or color:transparent.
+    for (const path of [word, letter, colorKeyframes]) {
+      expect(path).not.toMatch(/background-clip:\s*text/);
+      expect(path).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+      expect(path).not.toMatch(/color:\s*transparent/);
+    }
   });
 
-  it("declares no animation-delay, which the word overrides inline", () => {
-    // Arrange / Act
-    const declarations = ruleFor(baseSheet(), ".pfooter-status-gradient") ?? "";
-
-    // Assert
-    expect(declarations).not.toMatch(/animation-delay/);
+  it("carries no whole-word gradient class at all, so the blanking bug cannot recur", () => {
+    // Arrange / Act / Assert — the reverted approach's class must not exist.
+    expect(stylesheet).not.toMatch(/pfooter-status-gradient/);
   });
 
-  it("stops the gradient outright under prefers-reduced-motion", () => {
+  it("leaves the letter its legible arm colour under reduced motion, not a transparent fill", () => {
     // Arrange / Act
-    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-status-gradient") ?? "";
+    const declarations = ruleFor(reducedMotionBlock(), ".pfooter-wave-letter") ?? "";
 
-    // Assert
-    expect(declarations).toMatch(/animation:\s*none/);
+    // Assert — stopping the animation must not park a transparent colour.
+    expect(declarations).not.toMatch(/color:\s*transparent/);
+    expect(declarations).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
   });
 });
 

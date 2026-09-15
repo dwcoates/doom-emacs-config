@@ -2766,16 +2766,11 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
      agent is working" motion this query keeps. Stopping also keeps the period a
      single constant: each letter's negative `animation-delay` is computed
      against one STATUS_WAVE_PERIOD_MS, and a reduced-motion override that merely
-     LENGTHENED the pass would leave every delay seeking to the wrong phase. */
+     LENGTHENED the pass would leave every delay seeking to the wrong phase.
+     `animation: none` stops BOTH the bulge and the colour sweep at once (they
+     are one shorthand on this selector); the letter then rests at its arm tone,
+     legible and never transparent. */
   .pfooter-wave-letter {
-    animation: none;
-  }
-  /* The status word's colour sweep STOPS too, for the same reason and the same
-     way as the letter wave: it is decoration on a fact the strip already spells
-     out, so a reader in this mode loses nothing by the gradient holding still.
-     Stopping the animation leaves the fill at its rest position; the word keeps
-     its arm tone. */
-  .pfooter-status-gradient {
     animation: none;
   }
   /* Per-animation durations, in the order the base rule declares them: the
@@ -3198,7 +3193,19 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    travelling forwards then backwards continually".
 
    ADDITIONAL TO THE COLOUR BREATH, which is untouched: the word keeps its arm's
-   tone and the per-arrival shade step, and nothing here sets a colour.
+   tone and the per-arrival shade step.
+
+   A COLOUR SWEEP RIDES THE SAME LETTERS, coexisting with the bulge (owner
+   ruling, 2026-09-14). It is done PER LETTER, never as a whole-word
+   `background-clip: text` gradient: an earlier attempt clipped a gradient to the
+   holder span and set `-webkit-text-fill-color: transparent`, which inherited
+   into the split letters and rendered the whole word BLANK (the glyphs live in
+   the child letter spans, so there was no text on the holder to clip the
+   gradient to). Here each letter simply animates its OWN `color` between the arm
+   tone (`currentColor`, so it stays legible) and a slightly lighter band, on the
+   SAME staggered negative `animation-delay` the bulge uses — so a soft highlight
+   travels along the letters exactly in step with the bulge, and a letter can
+   never go transparent because its rest colour is always the arm tone.
 
    `transform: scale` and NEVER `font-size`, exactly as `.pfooter-breath` above:
    a font-size oscillation re-measures the word every frame and shoves the whole
@@ -3228,67 +3235,34 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    NO `animation-delay` HERE, on purpose: each letter renders its own negative
    one inline, which is what carries the wave's phase across a footer push, and a
    delay declared in this rule would be the value that inline style exists to
-   override. */
+   override. That ONE inline delay drives BOTH animations below — the single
+   `animation-delay` value applies position-for-position to every name in the
+   shorthand — so the bulge and the colour sweep share the same phase, epoch and
+   period by construction and can never drift; there is no second clock. */
 .pfooter-status-word {
   white-space: pre;
 }
 .pfooter-wave-letter {
   display: inline-block;
   transform-origin: 50% 100%;
-  animation: pfooter-status-wave 2.6s ease-in-out infinite alternate;
+  animation:
+    pfooter-status-wave 2.6s ease-in-out infinite alternate,
+    pfooter-status-color 2.6s ease-in-out infinite alternate;
 }
 @keyframes pfooter-status-wave {
   from { transform: scale(1); }
   to { transform: scale(1.18); }
 }
-
-/* ---- footer status colour gradient (src/footer/strip.ts, src/breathing.ts) ----
-
-   THE PROGRESS STATUS WORD'S GRADIENT (owner's idea, 2026-09-14): the status
-   word carries a soft, slow colour gradient that sweeps across it left→right,
-   then right→left, forever — ADDITIONAL to the travelling scale bulge above, on
-   the very same waving word.
-
-   SUB-CHARACTER, NOT STEPPED. The gradient is one fill painted on the WHOLE word
-   span and clipped to its text (`background-clip: text` + a transparent text
-   fill), so the ramp rolls smoothly through every glyph rather than stepping per
-   letter. The fill is built from `currentColor` — the arm's own tone, inherited
-   from `.pfooter-phase` — with a soft lighter band at its centre, so the word
-   still reads in its status colour (orange for `thinking`) and the sweep is a
-   highlight travelling across it, not a recolouring. `-webkit-text-fill-color`
-   (not `color`) is what goes transparent, precisely so `currentColor` keeps
-   resolving to the arm tone for the gradient stops; the letter spans inherit the
-   transparent fill and so never paint over the clipped gradient.
-
-   LOCKED TO THE SCALE WAVE. Same 2.6s duration, same `ease-in-out`, same
-   `alternate` as `pfooter-status-wave` above — the sweep and the bulge share one
-   period (STATUS_GRADIENT_* === STATUS_WAVE_* in breathing.ts) so their motion
-   never drifts, and the two-period true repeat is why the inline delay is
-   reduced modulo STATUS_GRADIENT_CYCLE_MS.
-
-   The `background-size` overflows the box so a whole highlight band has room to
-   cross it, and `background-position` is what the keyframes animate — a paint,
-   not a re-layout.
-
-   NO `animation-delay` HERE, on purpose: the word renders its own negative one
-   inline, carrying the sweep's phase across a footer push, and a delay declared
-   here would be the value that inline style exists to override. */
-.pfooter-status-gradient {
-  background-image: linear-gradient(
-    90deg,
-    currentColor 0%,
-    color-mix(in srgb, currentColor 45%, #ffffff) 50%,
-    currentColor 100%
-  );
-  background-size: 220% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: pfooter-status-gradient 2.6s ease-in-out infinite alternate;
-}
-@keyframes pfooter-status-gradient {
-  from { background-position: 0% 50%; }
-  to { background-position: 100% 50%; }
+/* The colour sweep, PER LETTER (never a `background-clip: text` gradient — see
+   the block comment above for why that blanked the word). The letter rests at
+   its arm tone (`currentColor`, which resolves to the inherited arm colour, so
+   the letter is always legible and NEVER transparent) and brightens toward a
+   lighter band; run staggered by the same per-letter delay as the bulge and
+   `alternate`d the same way, the bright point travels along the word and back in
+   lockstep with the bulge. */
+@keyframes pfooter-status-color {
+  from { color: currentColor; }
+  to { color: color-mix(in srgb, currentColor 45%, #ffffff); }
 }
 
 /* The turn clock and token cells: tabular figures so a ticking digit never

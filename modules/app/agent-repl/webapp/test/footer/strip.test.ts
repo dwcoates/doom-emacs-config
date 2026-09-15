@@ -24,7 +24,6 @@ import {
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
 import {
-  STATUS_GRADIENT_CYCLE_MS,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
   WAVING_STATUS_ARMS,
@@ -1169,74 +1168,56 @@ describe("the footer status word's letter wave", () => {
   });
 });
 
-// ---- the status word's colour gradient ------------------------------------
+// ---- the status word's colour sweep (the blanking-bug regression lock) -----
 
-describe("the footer status word's colour gradient", () => {
-  /** The gradient word span of the drawn status, or null when there is none. */
-  function gradientWord(row: HTMLElement): HTMLElement | null {
-    return row.querySelector(".footer-status .pfooter-status-gradient");
+describe("the footer status word's per-letter colour sweep", () => {
+  /** Every drawn `.pfooter-wave-letter` of the status word. */
+  function statusLetters(row: HTMLElement): HTMLElement[] {
+    return [...row.querySelectorAll<HTMLElement>(".footer-status .pfooter-wave-letter")];
   }
 
-  /** The negative delay the drawn gradient word renders with, in ms. */
-  function gradientDelay(row: HTMLElement): number {
-    const word = gradientWord(row);
-    if (word === null) throw new Error("no gradient word in the row");
-    const got = /animation-delay:\s*-(\d+)ms/.exec(word.getAttribute("style") ?? "");
-    if (got === null) throw new Error(`no negative delay on ${word.outerHTML}`);
-    return Number(got[1]);
-  }
-
-  it("carries the gradient class on the thinking status word", () => {
+  it("gives each thinking letter a colour that is not transparent", () => {
     // Arrange / Act
     const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
 
-    // Assert
-    expect(gradientWord(row)).not.toBeNull();
+    // Assert — never the transparent fill that blanked the word before.
+    for (const letter of statusLetters(row)) {
+      const colour = getComputedStyle(letter).color;
+      expect(colour).not.toBe("transparent");
+      expect(colour).not.toBe("rgba(0, 0, 0, 0)");
+    }
   });
 
-  it("clips the gradient to the word that reads exactly as the arm", () => {
+  it("sets no clipped-gradient or transparent fill on any thinking letter", () => {
     // Arrange / Act
     const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
 
-    // Assert — the gradient rides the same span that holds the letters.
-    expect(gradientWord(row)?.textContent).toBe("thinking");
+    // Assert — the exact properties whose combination blanked the word.
+    for (const letter of statusLetters(row)) {
+      const style = letter.getAttribute("style") ?? "";
+      expect(style).not.toMatch(/background-clip:\s*text/);
+      expect(style).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+      expect(style).not.toMatch(/color:\s*transparent/);
+    }
   });
 
-  it("continues the sweep's phase across a redraw rather than restarting at zero", () => {
-    // Arrange
-    const before = gradientDelay(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
-    vi.setSystemTime(NOW + 900);
+  it("sets no clipped-gradient or transparent fill on the word holder either", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ status: withSubStatus("thinking", "thinking") });
+    const holder = row.querySelector(".footer-status .pfooter-status-word");
+    const style = holder?.getAttribute("style") ?? "";
 
-    // Act
-    const after = gradientDelay(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
-
-    // Assert — 900ms further along the same cycle, not back at 0.
-    expect(after).toBe((before + 900) % STATUS_GRADIENT_CYCLE_MS);
+    // Assert — the holder is where the reverted gradient rode; it must be clean.
+    expect(style).not.toMatch(/background-clip:\s*text/);
+    expect(style).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+    expect(style).not.toMatch(/color:\s*transparent/);
   });
 
-  it("keeps the redrawn sweep off the cycle's start, so no push reads as a jump", () => {
-    // Arrange
-    drawStrip({ status: withSubStatus("thinking", "thinking") });
-    vi.setSystemTime(NOW + 900);
+  it("carries no colour-swept letters at all under a non-progress arm", () => {
+    // Arrange — a settled status stands still and hosts no colour sweep.
+    const { row } = drawStrip({ status: status("idle", {}) });
 
-    // Act
-    const after = gradientDelay(drawStrip({ status: withSubStatus("thinking", "thinking") }).row);
-
-    // Assert
-    expect(after).not.toBe(0);
-  });
-
-  it("draws no gradient word for a non-waving arm", () => {
-    // Arrange — a settled status stands still and carries no gradient span.
-    const arm = FOOTER_STATUS_CASES.find((one) => !WAVING_STATUS_ARMS.has(one));
-    if (arm === undefined) throw new Error("no non-waving arm to test");
-    const sub = SUBSTATUS_PAIRS.find(([statusCase]) => statusCase === arm)?.[1];
-    const armStatus = sub === undefined ? status(arm, {}) : withSubStatus(arm, sub);
-
-    // Act
-    const { row } = drawStrip({ status: armStatus });
-
-    // Assert
-    expect(gradientWord(row)).toBeNull();
+    // Assert — the sweep lives only on `.pfooter-wave-letter`, absent here.
+    expect(statusLetters(row)).toHaveLength(0);
   });
 });

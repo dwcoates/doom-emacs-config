@@ -317,25 +317,52 @@ message RosterRowCurrent {
   bool current = 1;
 }
 
-// The when-column: ONE value, chosen by the daemon. Merged wins over last
-// selected when both exist; the client renders whichever arm arrives and
-// applies no precedence of its own. UNSET oneof = nothing to show (never
-// selected, not merged) — the column is empty, not "0ms ago".
+// The when-column: ONE value, chosen by the daemon. The column reflects the
+// workspace's LAST ACTIVITY — when it last did real work — never when it was
+// last VIEWED, so it is STABLE across mere selection and navigation. The
+// daemon's precedence is: MERGED wins ("the workspace is done" is the more
+// interesting fact); else ACTIVE (the last turn/prompt/response instant); else
+// CREATED (a registered workspace always has a creation time). The client
+// renders whichever arm arrives and applies no precedence of its own.
+//
+// `last_selected` (field 1) is RETIRED: the column no longer shows
+// viewing-recency, because it reset on every SelectWorkspace and read as a
+// broken clock. It is kept in the oneof for wire compatibility — an older
+// daemon may still emit it — but this build's daemon never does. An UNSET
+// oneof draws an empty column; the daemon leaves it unset only when there is
+// genuinely no instant to show.
 message RosterRowWhen {
   oneof shown {
     RosterRowWhenLastSelected last_selected = 1;
     RosterRowWhenMerged merged = 2;
+    RosterRowWhenActive active = 3;
+    RosterRowWhenCreated created = 4;
   }
 }
 
-// When the user last selected the workspace, in epoch MILLISECONDS — stamped
-// by the daemon on SelectWorkspace. Renders as relative age ("3m", "2h").
+// When the user last selected the workspace, in epoch MILLISECONDS. RETIRED as
+// the when-column's source (see RosterRowWhen): it timed viewing-recency, not
+// activity. LastSelectedAt itself lives on for ordering and attention-clear.
 message RosterRowWhenLastSelected {
   int64 at_ms = 1;
 }
 
 // When the workspace's merge settled, in epoch MILLISECONDS.
 message RosterRowWhenMerged {
+  int64 at_ms = 1;
+}
+
+// When the workspace LAST DID REAL WORK, in epoch MILLISECONDS — the most
+// recent turn start or turn close, stamped by the daemon at the genuine
+// activity edge, NOT at compose time. Renders as relative age ("3m", "2h").
+message RosterRowWhenActive {
+  int64 at_ms = 1;
+}
+
+// When the workspace was CREATED, in epoch MILLISECONDS — the when-column's
+// fallback for a workspace that has never taken a turn, so the column is never
+// left empty for a workspace that genuinely has a time to show.
+message RosterRowWhenCreated {
   int64 at_ms = 1;
 }
 

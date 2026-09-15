@@ -104,7 +104,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// former daemon treefmt engine).
 		fold.markdown = state.Success.GetProse().GetMarkdown()
 		fold.settled = true
-		r.stampSettled(fold)
+		r.stampSettled(fold, state.Success.GetSettledAt().GetAtMs())
 		if notice, ok := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice); ok {
 			// THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT PROSE. Drawing
 			// one as the agent's answer would present an outage as something
@@ -140,7 +140,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true
-		r.stampSettled(fold)
+		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
@@ -168,12 +168,28 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 }
 
 // stampSettled records the instant a fold reached its terminal state, ONCE.
-// The same clock every other feed timestamp is drawn from; a second terminal
-// frame for the same fold (the file plane replaying the stream plane's settle)
-// keeps the first instant rather than moving the corner's "N ago" to the
-// replay time.
-func (r *resolver) stampSettled(fold *proseState) {
+// A second terminal frame for the same fold (the file plane replaying the
+// stream plane's settle) keeps the first instant rather than moving the
+// corner's "N ago" to the replay time.
+//
+// carriedAtMs is the REAL settle instant the producer stamped on the terminal
+// arm (AgentResponseSuccess/Failure.settled_at), epoch ms, or zero when the
+// arm carried none. When present it IS the stamp, so a re-compose from a fresh
+// fold (store/history replay, file-plane redelivery, reconnect) reproduces the
+// SAME instant instead of the compose-time clock. r.deps.Now() is only the
+// fallback for a truly live settle whose source carried no instant.
+//
+// REGRESSION WATCH (2026-09-14): the corner read "0s ago" on every replay
+// because this stamped r.deps.Now() unconditionally — compose time, not the
+// settle instant — so any re-compose reset "N ago" to zero. The carried
+// settled_at (mirroring every other activity terminal) is what keeps at_ms
+// stable across replays; do not drop it back to an unconditional Now().
+func (r *resolver) stampSettled(fold *proseState, carriedAtMs int64) {
 	if fold.settledAtMs != 0 {
+		return
+	}
+	if carriedAtMs != 0 {
+		fold.settledAtMs = carriedAtMs
 		return
 	}
 	fold.settledAtMs = r.deps.Now().UnixMilli()

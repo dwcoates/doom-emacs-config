@@ -276,6 +276,11 @@ func (c *Converter) textBlock(block map[string]any, index int, messageID string,
 
 	success := &conversationv1.AgentResponseSuccess{
 		Prose: &conversationv1.AgentResponseProse{Markdown: text},
+		// Replay-stable by construction: the settle instant is the transcript
+		// record's OWN timestamp, exactly as every sibling terminal stamps it,
+		// so a re-compose from this record reproduces the same instant rather
+		// than the daemon's compose-time clock.
+		SettledAt: settledAt(env.timestampMs),
 	}
 	if notice := synthesizedNotice(record, text); notice != nil {
 		c.log.With(at.ctxFor("response")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).

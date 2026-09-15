@@ -137,7 +137,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       break;
     case "success": {
       const markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
-      firstPaint(body, markdown, () => paintWhole(body, markdown));
+      paintWhole(body, markdown);
       markRevealed(bubble, markdown.length);
       characters = markdown.length;
       break;
@@ -145,7 +145,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     case "error": {
       const markdown = drawFeedResponseError(result.value, `${path}.error`);
       bubble.classList.add("response-cut-short");
-      firstPaint(body, markdown, () => paintWhole(body, markdown));
+      paintWhole(body, markdown);
       markRevealed(bubble, markdown.length);
       bubble.appendChild(cutShortMarker());
       characters = markdown.length;
@@ -228,10 +228,8 @@ export function drawFeedResponseUpdate(
     operation: "feed.cards.response.update",
     context: { path, length: markdown.length, resumed },
   });
-  firstPaint(body, markdown, () => {
-    body.appendChild(arrivingIndicator());
-    animate(bubble, body, markdown, resumed, rc);
-  });
+  body.appendChild(arrivingIndicator());
+  animate(bubble, body, markdown, resumed, rc);
   return markdown.length;
 }
 
@@ -494,58 +492,6 @@ function reflowOnResize(body: HTMLElement, repaint: (cols: number) => void, init
   });
   observer.observe(body);
   onDiscard(body, () => observer.disconnect());
-}
-
-/**
- * Paint the body's content NOW, or — for a TREE that cannot yet resolve its cap
- * — on the first `ResizeObserver` delivery, which is the frame the row is
- * attached to the document and laid out.
- *
- * REGRESSION WATCH (breadcrumb, per AGENTS.md): the row is BUILT and RETURNED
- * detached — feed-view attaches it only after `drawFeedResponse` returns — so a
- * synchronous content paint here has no containing block, `resolveMaxWidthPx`
- * cannot resolve the cap, and a tree wraps to `DEFAULT_TREE_COLS` (105). Then
- * `reflowOnResize`'s first mount delivery re-measures to the real cap and
- * repaints (105 -> cap), a visible first-frame flash where only correctly-
- * wrapped content is allowed to render. So a tree's first paint WAITS for the
- * cap to resolve — on attach — and lands correctly wrapped on its first painted
- * frame; the body is empty until then, never a 105-wrapped body.
- *
- * ONLY A TREE DEFERS. Plain prose reflows through CSS and `renderMarkdown`
- * ignores `cols` off the tree path (metaprompt-tree.ts), so its bytes are
- * identical at any width and a detached synchronous paint is already correct —
- * deferring it would only strand every synchronous reader with an empty body.
- * A host with no `ResizeObserver` (jsdom with nothing attached, an unusual
- * embedder) has no attach signal to wait on, so it paints now and takes the
- * DEFAULT_TREE_COLS fallback — the genuine no-layout case. A bubble whose cap
- * ALREADY resolves (a host that attached it before this ran) paints now, at the
- * cap, so mount adds no second wrap. This is a watch flag, not a lock.
- */
-function firstPaint(body: HTMLElement, markdown: string, paint: () => void): void {
-  if (findTreeRegion(markdown) === null) return paint();
-  const view = body.ownerDocument?.defaultView;
-  if (view === null || view === undefined || typeof view.ResizeObserver !== "function") {
-    return paint();
-  }
-  if (capResolvable(body, view)) return paint();
-  const observer = new view.ResizeObserver(() => {
-    observer.disconnect();
-    paint();
-  });
-  observer.observe(body);
-  onDiscard(body, () => observer.disconnect());
-}
-
-/**
- * Whether the bubble's max-width cap resolves against the CURRENT layout — the
- * same measurement `measureTreeCols` uses for its cap-based count. False for a
- * detached bubble (no containing block, a zero border box) and for one with no
- * resolvable cap, which is exactly when a tree's first paint must wait for
- * attach rather than paint at the fallback width.
- */
-function capResolvable(body: HTMLElement, view: Window): boolean {
-  if (typeof view.getComputedStyle !== "function") return false;
-  return maxBodyContentPx(body, view) !== null;
 }
 
 /**
