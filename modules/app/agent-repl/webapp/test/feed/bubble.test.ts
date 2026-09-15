@@ -730,6 +730,81 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     // Assert
     expect(panelOf(bubble).hidden).toBe(true);
   });
+
+  // FLUSH INTERIOR (owner ruling, 2026-09-14): the recursive sub-feed sits
+  // DIRECTLY in the tool card, not inside a second bordered `.agent-panel` box.
+  // The fill and the corner radius are read from jsdom's resolved cascade (a
+  // `background` shorthand and `border-radius` it parses). The BORDER is not
+  // measurable here -- the base `.agent-panel { border: 1px solid var(--…) }`
+  // shorthand is one jsdom cannot parse into longhands (see the outer-card note
+  // above), so its computed border-style stays `none` whether or not the flush
+  // override lands -- so the border removal is asserted from the sheet's own
+  // source order, scoped to the rules that ACTUALLY match the panel element
+  // (`.matches`, so `.fold-fixed > .agent-panel` and the scrollbar
+  // pseudo-element rules that merely mention `.agent-panel` are excluded).
+
+  /** The panel-matching rules that set PROP, in the sheet's source order. */
+  function panelSetters(bubble: { element: HTMLElement }, prop: string): { selector: string; body: string }[] {
+    const panel = panelOf(bubble);
+    return rules().filter(
+      (rule) =>
+        new RegExp(`(^|[;\\s])${prop}\\s*:`).test(rule.body) &&
+        // `rules()` captures the preceding `/* … */` comment into the selector,
+        // so it is stripped before the split -- otherwise every group is an
+        // invalid selector `.matches` throws on.
+        rule.selector
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .split(",")
+          .some((group) => {
+            const bare = group.trim().replace(/::[a-z-]+$/i, "");
+            if (bare === "") return false;
+            try {
+              return panel.matches(bare);
+            } catch {
+              return false;
+            }
+          }),
+    );
+  }
+
+  it("drops the inner box border so the sub-feed is not a card-within-a-card", () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"));
+    // Act: the last word the cascade gives the panel's border.
+    const setters = panelSetters(bubble, "border");
+    const last = setters[setters.length - 1];
+    // Assert: the flush `.bubble-subfeed` rule wins, removing the border.
+    expect(setters.length).toBeGreaterThan(0);
+    expect(last.selector).toContain(".bubble-subfeed");
+    expect(last.body).toMatch(/(^|[;\s])border\s*:\s*none/);
+  });
+
+  it("drops the inner box fill so the interior reads on the card grey", () => {
+    // Arrange: the base panel fills with `var(--bg)`; the flush override clears
+    // it, which jsdom resolves to a transparent computed background.
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: no fill of its own, so the card grey shows through.
+      expect(window.getComputedStyle(panelOf(bubble)).background).toBe("rgba(0, 0, 0, 0)");
+    } finally {
+      remove();
+    }
+  });
+
+  it("squares the inner box corners so no nested panel radius shows", () => {
+    // Arrange: jsdom parses `border-radius` reliably, so this one is measured.
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: the flush override squares the corners.
+      expect(window.getComputedStyle(panelOf(bubble)).borderRadius).toBe("0px");
+    } finally {
+      remove();
+    }
+  });
 });
 
 // THE DETACHED/SUBAGENT BUBBLE IS FRAMED AS A NORMAL TOOL-CALL CARD (owner
@@ -925,3 +1000,4 @@ describe("mountBubble: the caret's own view rule", () => {
     expect(view.top()).toBe(settled);
   });
 });
+
