@@ -924,12 +924,80 @@ describe("the arriving response indicator", () => {
 });
 
 describe("the thinking bubble", () => {
-  it("draws the thinking bubble non-bordered", () => {
+  /** The raw text of the `@media (prefers-color-scheme: dark)` block, found by
+   * balancing braces from its opening `{` (see the same helper on the prompt
+   * border suite). */
+  function darkBlock(): string {
+    const start = stylesheet.indexOf("@media (prefers-color-scheme: dark)");
+    if (start === -1) throw new Error("no dark-theme media query found");
+    const openBrace = stylesheet.indexOf("{", start);
+    let depth = 0;
+    let i = openBrace;
+    for (; i < stylesheet.length; i++) {
+      if (stylesheet[i] === "{") depth++;
+      else if (stylesheet[i] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    return stylesheet.slice(openBrace + 1, i);
+  }
+
+  it("gives the thinking bubble a light-orange border", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.assistant.thinking-bubble");
 
-    // Assert — the border is explicitly transparent, never a state color.
-    expect(rule).toMatch(/border-color:\s*transparent/);
+    // Assert — the border is the light-orange thinking token (owner ruling
+    // 2026-09-15), never green and never transparent.
+    expect(rule).toMatch(/border-color:\s*var\(--thinking-border\)/);
+  });
+
+  it("borders the thinking bubble at the SAME thickness as the green final border", () => {
+    // Arrange / Act — neither the thinking rule nor the green final-response
+    // rule sets a border width or a `border` shorthand; both change only the
+    // COLOR and inherit the base `.bubble { border: 0.3px solid transparent }`.
+    const thinking = declarationsOf(".bubble.assistant.thinking-bubble") ?? "";
+    const green = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)") ?? "";
+
+    // Assert — same reserved thickness, only the color differs.
+    for (const decls of [thinking, green]) {
+      expect(decls).not.toMatch(/border-width/);
+      expect(decls).not.toMatch(/(?:^|[\s;])border\s*:/);
+      expect(decls).toMatch(/border-color/);
+    }
+  });
+
+  it("defines the light-orange token in the light theme", () => {
+    // Arrange / Act — the top-level (light) :root palette.
+    const root = declarationsOf(":root");
+
+    // Assert
+    expect(root).toMatch(/--thinking-border:\s*#[0-9a-fA-F]{3,6}/);
+  });
+
+  it("redefines the light-orange token for the dark theme", () => {
+    // Arrange / Act
+    const dark = darkBlock();
+
+    // Assert — the dark palette lifts the token like every other state border.
+    expect(dark).toMatch(/--thinking-border:\s*#[0-9a-fA-F]{3,6}/);
+  });
+
+  it("puts the orange only on thinking bubbles, never on a partial-final bubble", () => {
+    // Arrange — every rule that paints the thinking-border color.
+    const orangeRules = rulesOf(stylesheet).filter((r) =>
+      /border-color:\s*var\(--thinking-border\)/.test(r.declarations),
+    );
+
+    // Assert — at least one such rule, and EVERY selector that wears it is a
+    // `.thinking-bubble` selector, so a partial-final response (assistant, not
+    // thinking, not final) can never match it and stays borderless.
+    expect(orangeRules.length).toBeGreaterThan(0);
+    for (const rule of orangeRules) {
+      for (const selector of rule.selectors) {
+        expect(selector).toContain(".thinking-bubble");
+      }
+    }
   });
 
   it("excludes the thinking bubble from the green final-answer rule", () => {
