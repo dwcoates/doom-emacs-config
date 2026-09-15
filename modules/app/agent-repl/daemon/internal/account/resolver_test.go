@@ -138,6 +138,145 @@ func TestConfigDirForResolvesSymlinkedRoot(t *testing.T) {
 	}
 }
 
+// volumeIsCaseInsensitive probes the volume backing base by creating a
+// mixed-case directory and asking whether its lower-cased spelling stats to the
+// same inode. It is a real probe, not an assumption, so a case-skew test can
+// skip-with-reason on a case-sensitive volume rather than silently pass.
+func volumeIsCaseInsensitive(t *testing.T, base string) bool {
+	t.Helper()
+	upper := filepath.Join(base, "CaseProbe")
+	if err := os.MkdirAll(upper, 0o700); err != nil {
+		t.Fatalf("MkdirAll(probe) = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(upper) })
+	upperInfo, err := os.Stat(upper)
+	if err != nil {
+		t.Fatalf("Stat(probe) = %v", err)
+	}
+	lowerInfo, err := os.Stat(filepath.Join(base, "caseprobe"))
+	if err != nil {
+		return false // lower-cased spelling does not resolve: case-sensitive.
+	}
+	return os.SameFile(upperInfo, lowerInfo)
+}
+
+func TestConfigDirForRoutesDifferentlyCasedRealPathToMultiRepo(t *testing.T) {
+	// Arrange: the exact observed defect. The multi-repo root is recorded with
+	// one casing and a real workspace under it is opened through a
+	// differently-cased path to the SAME on-disk directory. Byte-wise prefix
+	// routing sent this to the personal account; the SameFile inode test must
+	// route it to the work account.
+	base := t.TempDir()
+	if !volumeIsCaseInsensitive(t, base) {
+		t.Skip("volume is case-sensitive; the case-skew defect cannot manifest here")
+	}
+	root := filepath.Join(base, "ChessCom")
+	sub := filepath.Join(root, "explanation-engine-worktrees", "iterm-1")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	lowerCasedDir := filepath.Join(base, "chesscom", "explanation-engine-worktrees", "iterm-1")
+	r := newResolver(t, account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi", MultiRepoRoot: root})
+
+	// Act.
+	got := r.ConfigDirFor(lowerCasedDir)
+
+	// Assert.
+	if got != "/roots/multi" {
+		t.Fatalf("ConfigDirFor(%q) = %q, want %q (differently-cased real path must route to the work account)", lowerCasedDir, got, "/roots/multi")
+	}
+}
+
+func TestConfigDirForRoutesUnrelatedRealSiblingToDefault(t *testing.T) {
+	// Arrange: a real root and a genuinely-unrelated real sibling directory
+	// that is NOT under it.
+	base := t.TempDir()
+	root := filepath.Join(base, "multi")
+	sibling := filepath.Join(base, "personal", "proj")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) = %v", err)
+	}
+	if err := os.MkdirAll(sibling, 0o700); err != nil {
+		t.Fatalf("MkdirAll(sibling) = %v", err)
+	}
+	r := newResolver(t, account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi", MultiRepoRoot: root})
+
+	// Act.
+	got := r.ConfigDirFor(sibling)
+
+	// Assert.
+	if got != "/roots/default" {
+		t.Fatalf("ConfigDirFor(%q) = %q, want %q", sibling, got, "/roots/default")
+	}
+}
+
+func TestConfigDirForRoutesAboutToBeCreatedDirUnderExistingRootToMultiRepo(t *testing.T) {
+	// Arrange: the root exists on disk but the workspace directory does not yet
+	// (the daemon is about to create it). The existing-ancestor inode walk must
+	// still recognize it as under the root.
+	base := t.TempDir()
+	root := filepath.Join(base, "multi")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) = %v", err)
+	}
+	notYetCreated := filepath.Join(root, "brand-new-repo", "proj")
+	if _, err := os.Stat(notYetCreated); !os.IsNotExist(err) {
+		t.Fatalf("Stat(notYetCreated) = %v, want a not-exist error so the test covers the missing-path path", err)
+	}
+	r := newResolver(t, account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi", MultiRepoRoot: root})
+
+	// Act.
+	got := r.ConfigDirFor(notYetCreated)
+
+	// Assert.
+	if got != "/roots/multi" {
+		t.Fatalf("ConfigDirFor(%q) = %q, want %q (an about-to-be-created dir under an existing root routes to work)", notYetCreated, got, "/roots/multi")
+	}
+}
+
+func TestConfigDirForEmptyMultiRepoRootRoutesRealDirToDefault(t *testing.T) {
+	// Arrange: an unnamed multi-repo root routes everything to the default,
+	// even a real directory that would otherwise look routable.
+	base := t.TempDir()
+	ws := filepath.Join(base, "any", "workspace")
+	if err := os.MkdirAll(ws, 0o700); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	r := newResolver(t, account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi", MultiRepoRoot: ""})
+
+	// Act.
+	got := r.ConfigDirFor(ws)
+
+	// Assert.
+	if got != "/roots/default" {
+		t.Fatalf("ConfigDirFor(%q) = %q, want %q", ws, got, "/roots/default")
+	}
+}
+
+func TestConfigDirForRealSegmentBoundarySiblingRoutesToDefault(t *testing.T) {
+	// Arrange: the segment-boundary guard must survive the inode-based test.
+	// `.../multi-other` shares a name PREFIX with `.../multi` but is a distinct
+	// directory, so it is not under the root even with both on disk.
+	base := t.TempDir()
+	root := filepath.Join(base, "multi")
+	sibling := filepath.Join(base, "multi-other", "proj")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) = %v", err)
+	}
+	if err := os.MkdirAll(sibling, 0o700); err != nil {
+		t.Fatalf("MkdirAll(sibling) = %v", err)
+	}
+	r := newResolver(t, account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi", MultiRepoRoot: root})
+
+	// Act.
+	got := r.ConfigDirFor(sibling)
+
+	// Assert.
+	if got != "/roots/default" {
+		t.Fatalf("ConfigDirFor(%q) = %q, want %q (a name-prefix sibling is not under the root)", sibling, got, "/roots/default")
+	}
+}
+
 func TestReadPresent(t *testing.T) {
 	// Arrange.
 	dir := t.TempDir()
