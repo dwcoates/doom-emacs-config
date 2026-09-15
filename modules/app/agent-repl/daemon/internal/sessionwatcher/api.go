@@ -344,6 +344,32 @@ type Sinks struct {
 	Sidebar   SidebarSink
 	Holds     HoldsSink
 	Lifecycle LifecycleSink
+	// Title is the synthesized-title trigger sink. OPTIONAL: nil disables title
+	// synthesis, which is what every test that does not exercise it leaves it.
+	// Production always wires it. Its calls are non-blocking (the synthesizer
+	// dispatches its own goroutine), so it rides the watcher's stream goroutine
+	// without holding it up.
+	Title TitleSink
+}
+
+// TitleSink is the synthesized-title synthesizer, seen from the watcher: the
+// four occasions on which a workspace's own title may need (re)making or
+// dropping. It is a SEPARATE sink from TopbarSink because it is not a view — it
+// is the daemon deciding, from these edges, whether to spend a cheap model call
+// on a title. Every method is keyed by workspace alone; the synthesizer
+// resolves the shim, the account and the digest itself.
+type TitleSink interface {
+	// OnSessionStarted is a session naming itself: a resumed or adopted
+	// conversation may already carry prompts and no vendor title.
+	OnSessionStarted(ws ids.WorkspaceID)
+	// OnTurnEnded is a turn completing: a new prompt has changed the digest.
+	OnTurnEnded(ws ids.WorkspaceID)
+	// OnVendorTitle is the vendor stating its own ai-title: synthesis stops,
+	// because the vendor's title always wins.
+	OnVendorTitle(ws ids.WorkspaceID)
+	// OnContextReset is a /clear or a completed /compact: the boundary moved,
+	// so the last synthesis no longer describes the conversation.
+	OnContextReset(ws ids.WorkspaceID)
 }
 
 // Watcher is one live workspace's watch fleet.

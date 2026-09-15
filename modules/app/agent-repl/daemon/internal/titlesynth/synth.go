@@ -3,8 +3,8 @@ package titlesynth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"hash/fnv"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -364,17 +364,20 @@ func cleanTitle(text string) string {
 
 // digestHash is the digest's fingerprint: the boundary, the summary and the
 // prompts, so any change to what a title would summarize changes the hash and
-// any repeat leaves it unchanged.
+// any repeat leaves it unchanged. It writes to the hash directly rather than
+// through fmt, which production code does not use (the durable-logging bypass
+// guard). fnv's Write never errors, so its returns are discarded.
 func digestHash(d *shimv1.GatherTitleDigestSuccess) string {
 	h := fnv.New64a()
-	fmt.Fprintf(h, "b:%d\n", int32(d.GetBoundary()))
-	fmt.Fprintf(h, "s:%s\n", d.GetLastCompactSummary())
+	_, _ = h.Write([]byte("b:" + strconv.Itoa(int(d.GetBoundary())) + "\n"))
+	_, _ = h.Write([]byte("s:" + d.GetLastCompactSummary() + "\n"))
 	for _, p := range d.GetPrompts() {
-		// The separator cannot appear in a prompt, so no two prompt sets hash
-		// alike by concatenation.
-		fmt.Fprintf(h, "p:%s\x00", p)
+		// The NUL separator cannot appear in a prompt, so no two prompt sets
+		// hash alike by concatenation.
+		_, _ = h.Write([]byte("p:" + p))
+		_, _ = h.Write([]byte{0})
 	}
-	return fmt.Sprintf("%x", h.Sum64())
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // causeOf reads a headless failure's closed-set cause, falling back to the exit
