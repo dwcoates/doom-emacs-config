@@ -221,13 +221,13 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("3m");
   });
 
-  it("names a never-active workspace's creation time in its own words", () => {
+  it("draws a never-active workspace's creation time as a bare relative age", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "created", value: { atMs: BigInt(NOW - 3_600_000) } } }),
       sidebarContext(),
       "R",
     );
-    expect(drawn.querySelector(".when")?.textContent).toBe("created 1h");
+    expect(drawn.querySelector(".when")?.textContent).toBe("1h");
   });
 
   it("names a settled merge in its own words", () => {
