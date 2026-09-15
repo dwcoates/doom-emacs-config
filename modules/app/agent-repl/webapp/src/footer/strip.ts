@@ -324,6 +324,15 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * push that rewrites this whole subtree mid-wave continues the wave instead of
  * snapping it back to the word's head.
  *
+ * THAT ONE INLINE DELAY ALSO DRIVES THE COLOUR SWEEP. The letter carries a
+ * second CSS animation (`pfooter-status-color`) that brightens its own `color`
+ * from the arm tone and back; a single `animation-delay` value applies to every
+ * name in the shorthand, so the colour sweep rides the very same phase, epoch
+ * and period as the scale bulge with no second clock. The colour is done PER
+ * LETTER on the letter's own `color` — never a `background-clip: text` gradient
+ * on the holder, which blanked the word once because the transparent text-fill
+ * inherited into these split letters.
+ *
  * A NON-PROGRESS STATUS IS PLAIN TEXT. Waiting, blocked, disconnected, idle,
  * interrupted and background stand still, and they carry no spans at all rather
  * than spans with a stopped animation: nothing should have to look at a class to
