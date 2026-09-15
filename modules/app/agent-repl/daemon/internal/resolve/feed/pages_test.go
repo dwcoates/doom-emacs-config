@@ -739,3 +739,104 @@ func TestAWithheldRowStaysStoredForPaging(t *testing.T) {
 		t.Fatal("the withheld row was dropped from the feed order; it must stay stored for paging")
 	}
 }
+
+// ---- A DELIVERY-BOUND MOVE MUST NOT BLANK A REPLAYED CONVERSATION ----
+//
+// A context cut is not carried in the agent's page; it arrives on the LIVE plane
+// while the conversation around it was drawn on the HISTORY plane. By plane order
+// every history row reads as older than the live cut, so a reconnect that
+// replayed the compaction's POST-cut conversation and THEN took the cut live had
+// its whole feed withheld — blank but for the divider, though the conversation
+// was on screen a moment before. The publication seq tells the post-cut rows
+// (drawn before the cut arrived) from a late-forwarded pre-cut row (drawn after).
+
+func TestALiveCutAfterAReplayKeepsThePostCutConversation(t *testing.T) {
+	// Arrange: a reconnect replays post-compaction turns in the history plane.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-7", "after two"),
+		promptEntry("turn-6", "after one"),
+	))
+
+	// Act: the compaction cut arrives LIVE, after the replay.
+	h.cutAt("entry-cut", compactedCut("what survived"))
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert: the replayed conversation survives the bound move — the feed is not
+	// blank, and the post-cut turns are intact.
+	got := rowIDs(pageRows(t, page))
+	if len(got) == 0 {
+		t.Fatal("the feed went blank across the delivery-bound move")
+	}
+	want := map[string]bool{h.promptRowID("turn-6"): true, h.promptRowID("turn-7"): true}
+	seen := 0
+	for _, id := range got {
+		if want[id] {
+			seen++
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("page rows = %v, want the replayed post-cut turns intact", got)
+	}
+}
+
+func TestALiveCutAfterAReplayIsNotRecordedAsWithholding(t *testing.T) {
+	// Arrange: post-cut turns replayed in the history plane, then the live cut.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-6", "after one"),
+	))
+	h.cutAt("entry-cut", compactedCut("what survived"))
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert: nothing was withheld, so no bound-at-separation record was made for
+	// a conversation the reader can still see.
+	if h.hasRecord("info", "daemon.feed.bound_at_separation") {
+		t.Fatal("a replayed post-cut conversation was recorded as withheld by the bound")
+	}
+}
+
+func TestBoundHides(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name  string
+		row   rowRank
+		bound rowRank
+		want  bool
+	}{
+		{
+			name:  "same plane, before the cut, is pre-cut and hidden",
+			row:   rowRank{plane: planeLive, seq: 3}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+		},
+		{
+			name:  "same plane, after the cut, is post-cut and kept",
+			row:   rowRank{plane: planeLive, seq: 7}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
+		},
+		{
+			name:  "earlier plane drawn after the cut is a late pre-cut row, hidden",
+			row:   rowRank{plane: planeHistory, seq: 9}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+		},
+		{
+			name:  "earlier plane drawn before the cut is replayed post-cut content, kept",
+			row:   rowRank{plane: planeHistory, seq: 2}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
+		},
+		{
+			name:  "later plane is unambiguously after the cut, kept",
+			row:   rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeHistory, seq: 5}, want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := boundHides(tc.row, tc.bound)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("boundHides(%+v, %+v) = %v, want %v", tc.row, tc.bound, got, tc.want)
+			}
+		})
+	}
+}

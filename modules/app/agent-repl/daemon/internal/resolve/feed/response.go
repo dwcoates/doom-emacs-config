@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"strings"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -33,6 +35,14 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			"a context-cut directive's response frame drew no bubble",
 			dlog.Context{"unit": unit})
 		return nil, errNotARow
+	}
+
+	// THIS FOLD'S TURN, learned once from the turn the session is running. It
+	// scopes the CROSS-PLANE reconciliation below: a response block that reaches
+	// the resolver under two divergent activity ids only ever collapses against a
+	// sibling of the same turn.
+	if fold.turn == "" && s.turnStamp != nil {
+		fold.turn = string(*s.turnStamp)
 	}
 
 	// THE STAMP IS THIS TURN'S TOKENS, not this unit's and not the context
@@ -91,6 +101,25 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			return nil, errNotARow
 		}
 		fold.markdown += state.Update.GetNewMarkdown()
+		// THE SAME BLOCK'S SETTLED WHOLE MAY HAVE LANDED UNDER A DIFFERENT UNIT.
+		// When the two store planes disagree on this block's activity id, the
+		// settling whole can settle a SIBLING fold of this turn before this
+		// fold's own deltas arrive. This delta is then a fragment of an
+		// already-settled whole exactly as a same-unit fragment-after-settle is,
+		// so it draws nothing — and any partial row this fold already drew is
+		// retired, so the settled whole is the block's ONLY row.
+		if r.settledWholeContaining(s, fold.turn, unit, fold.markdown) {
+			fold.settled = true
+			if fold.row != nil {
+				r.retire(s, fold.feed, fold.row.GetValue())
+				delete(s.answerRows, unit)
+				fold.row = nil
+			}
+			log.Debug("daemon.feed.response_fragment_of_divergent_settle",
+				"a prose fragment matched a same-turn block already settled under a different activity id; the settled whole stands",
+				dlog.Context{"unit": unit, "turn": fold.turn})
+			return nil, errNotARow
+		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
@@ -152,6 +181,14 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		return nil, errNotARow
 	}
 
+	// THE SETTLED WHOLE IS THE BLOCK'S ONLY ROW, even when the two store planes
+	// delivered the block under DIVERGENT activity ids. A settling frame retires
+	// any same-turn fragment that lost its opening deltas to the other id, so the
+	// settle can never leave an unsettled partial standing beside the green whole.
+	if fold.settled {
+		r.reconcileDivergentProse(s, fold.turn, unit, fold.markdown)
+	}
+
 	// THE STAMP'S INSTANT RIDES THE SETTLE, not the push. The corner is drawn
 	// from the fold's figure in every arm, but its instant is meaningful only
 	// once the fold settled; set after the switch so a settling frame carries
@@ -162,12 +199,81 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
 	s.answerRows[unit] = id
+	// KEPT SO A DIVERGENT SIBLING CAN RETIRE THIS FRAGMENT'S ROW. When the same
+	// block's settled whole later lands under another id, or a late delta of this
+	// fold matches a whole already settled under another id, the reconciler needs
+	// the feed and row identity this fold drew on.
+	fold.feed = at.feed
+	fold.row = id
 	return &frontendv1.FeedRow{
 		Id: id,
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Response{Response: bubble},
 		}},
 	}, nil
+}
+
+// THE TWO STORE PLANES CAN DELIVER ONE RESPONSE BLOCK UNDER DIVERGENT ACTIVITY
+// IDS. A prose block's activity id is `<message.id>:<block index>`, and the
+// shim's stream plane and the sidecar's file plane are supposed to mint the same
+// one so their frames collapse onto a single fold. When they DON'T — a stream
+// that re-mints its message id across a resume, or a block index that shifts
+// under a leading thinking block — the block splits into two folds: the stream's
+// start+delta updates under one id, the settling whole under another. Keyed on
+// the activity id alone, that drew a settled green whole beside an unsettled
+// fragment that had lost its opening deltas (the owner's double render), or, when
+// the whole's own row never reached the reader, a lone streamed bubble that never
+// went green even though the turn's Success exists. The two functions below
+// reconcile the split against the ONE fact both folds share — this turn, and the
+// prose one is a fragment of the other — so the settled whole is always the
+// block's only row.
+
+// reconcileDivergentProse retires any OTHER response fold of the same turn whose
+// accumulated fragment is a suffix of the settled whole `prose`. The lost frames
+// are the block's OPENING deltas, so the surviving fragment is a suffix of the
+// whole; requiring a non-empty suffix that is no longer than the whole keeps two
+// genuinely distinct prose blocks — whose texts do not nest — apart. The retired
+// fold is marked settled so a still-arriving delta of it can never re-open a row.
+func (r *resolver) reconcileDivergentProse(s *wsState, turn, keepUnit, prose string) {
+	if turn == "" || prose == "" {
+		return
+	}
+	for unit, fold := range s.responses {
+		if unit == keepUnit || fold.turn != turn || fold.markdown == "" {
+			continue
+		}
+		if len(fold.markdown) > len(prose) || !strings.HasSuffix(prose, fold.markdown) {
+			continue
+		}
+		fold.settled = true
+		if fold.row != nil {
+			r.retire(s, fold.feed, fold.row.GetValue())
+			delete(s.answerRows, unit)
+			fold.row = nil
+		}
+		r.logger(s.id).Debug("daemon.feed.response_divergent_fold_retired",
+			"a same-turn response fragment under a divergent activity id was retired in favour of the settled whole",
+			dlog.Context{"turn": turn, "retired_unit": unit, "kept_unit": keepUnit})
+	}
+}
+
+// settledWholeContaining reports whether some OTHER settled response fold of the
+// same turn already restated a whole that ENDS WITH this fragment — the mirror of
+// reconcileDivergentProse for the order where the whole settles first and this
+// fold's own deltas arrive after, under the divergent id.
+func (r *resolver) settledWholeContaining(s *wsState, turn, unit, fragment string) bool {
+	if turn == "" || fragment == "" {
+		return false
+	}
+	for other, fold := range s.responses {
+		if other == unit || fold.turn != turn || !fold.settled || fold.markdown == "" {
+			continue
+		}
+		if len(fragment) <= len(fold.markdown) && strings.HasSuffix(fold.markdown, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // stampSettled records the instant a fold reached its terminal state, ONCE.
