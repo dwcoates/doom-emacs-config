@@ -143,10 +143,29 @@ describe("prose", () => {
     expect(success.authorship.case).toBe("fromModel");
   });
 
-  it("carries the settle instant on a settled prose block", () => {
+  it("carries the record's own timestamp as the settle instant, not the wall clock", () => {
+    // A settle instant stamped from the wall clock at conversion time is not
+    // replay-stable; the record's own timestamp is. The corpus record's
+    // timestamp is 2026-07-23T17:42:47.752Z; the deliberately-different nowMs
+    // must NOT win.
     const fold = createFold();
 
     const output = fold.onSdkMessage(streamMessage("assistant"), foldContext({ nowMs: 4242 }));
+
+    const response = activityOf(output.entries[0])?.item.value as conversationv1.AgentResponse;
+    const success = response.result.value as conversationv1.AgentResponseSuccess;
+    expect(success.settledAt?.atMs).toBe(1784828567752n);
+  });
+
+  it("falls back to the live clock for a settled prose block whose record has no timestamp", () => {
+    // The last resort ONLY: a record the vendor gave no timestamp keeps the one
+    // instant we observed rather than dropping onto the daemon's compose-time Now.
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(
+      assistant("msg-no-ts", [{ type: "text", text: "hi" }]),
+      foldContext({ nowMs: 4242 }),
+    );
 
     const response = activityOf(output.entries[0])?.item.value as conversationv1.AgentResponse;
     const success = response.result.value as conversationv1.AgentResponseSuccess;
@@ -197,7 +216,23 @@ describe("prose", () => {
     expect(failure.reason?.reason.case).toBe("aborted");
   });
 
-  it("carries the settle instant on a failed prose block", () => {
+  it("carries the record's own timestamp as the settle instant on a failed prose block", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(
+      assistant("msg-cut", [{ type: "text", text: "half a sen" }], {
+        message: { stop_reason: "max_tokens" },
+        timestamp: "2026-07-23T17:42:47.752Z",
+      }),
+      foldContext({ nowMs: 4242 }),
+    );
+
+    const response = activityOf(output.entries[0])?.item.value as conversationv1.AgentResponse;
+    const failure = response.result.value as conversationv1.AgentResponseFailure;
+    expect(failure.settledAt?.atMs).toBe(1784828567752n);
+  });
+
+  it("falls back to the live clock on a failed prose block whose record has no timestamp", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(
