@@ -1327,6 +1327,19 @@ pre {
   padding-left: 0;
   padding-right: 0;
   min-width: 0;
+  /* NO SIDE-SCROLL ON A BUBBLE, EVER (owner ruling, 2026-09-15). A bubble
+     wraps its text at the max bubble width and grows only vertically
+     (collapse/expand + vertical scroll); it must never grow a horizontal
+     scrollbar. The trap this guards: the collapse/expand rules set only
+     `overflow-y` (hidden collapsed, auto expanded), and per the CSS overflow
+     spec a `visible` other-axis is COMPUTED TO `auto` whenever one axis is
+     hidden/auto — so leaving overflow-x unset silently made the whole bubble
+     side-scroll on any wide content. Pinning it to `clip` keeps overflow-x out
+     of that promotion in BOTH states while still pairing cleanly with the
+     expanded box's `overflow-y: auto`. Wide inner code/tables/mp-trees keep
+     their OWN overflow-x scroller inside the clipped box; the bubble itself
+     never does. */
+  overflow-x: clip;
 }
 /* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
    bubble's right padding gave up. A scrollbar is laid out between the scroll
