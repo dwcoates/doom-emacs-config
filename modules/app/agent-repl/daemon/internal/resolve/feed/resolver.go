@@ -660,8 +660,13 @@ func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool
 	return true
 }
 
-// retire removes a row from a feed. A retired row stops appearing in pages;
-// the tail's already-delivered publications are history and are not rewritten.
+// retire removes a row from a feed and publishes that removal on the feed's
+// tail. A retired row stops appearing in pages, AND — the DUAL of upsert — a
+// removal row is pushed to every connected tail so an already-open feed drops
+// the row live rather than showing it stale until the next reload (the
+// foreground Bash that detaches, whose running tool card is retired in favor
+// of the shell bubble). The tail's already-delivered upserts of the row are
+// history; the removal is a new publication that supersedes them.
 func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	f := r.feed(s, addr)
 	if _, ok := f.rows[id]; !ok {
@@ -677,6 +682,26 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 			f.order = append(f.order[:i], f.order[i+1:]...)
 			break
 		}
+	}
+	// PUBLISH THE REMOVAL, exactly as upsert publishes a change: mint a
+	// sequence, append it to the retained log so a tail that connects later
+	// replays it, and enqueue it to every connected tail so an open feed
+	// updates NOW. The removal row carries ONLY its id — the arm's presence is
+	// the instruction, and the client drops the row that id keys.
+	removal := &frontendv1.FeedRow{
+		Id:  &frontendv1.FeedId{Value: id},
+		Row: &frontendv1.FeedRow_Removed{Removed: &frontendv1.FeedRowRemoved{}},
+	}
+	f.seq++
+	r.logger(s.id).Info("daemon.feed.row_retired",
+		"a row was retired and its removal published on the feed tail",
+		dlog.Context{"feed": f.key, "row": id, "seq": f.seq})
+	f.log = append(f.log, &loggedRow{seq: f.seq, row: removal})
+	if len(f.log) > f.retention {
+		f.log = f.log[len(f.log)-f.retention:]
+	}
+	for sub := range f.subs {
+		sub.enqueue(removal)
 	}
 	return true
 }
