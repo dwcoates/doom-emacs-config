@@ -1,24 +1,33 @@
 /**
- * Edge-gated inner scrolling.
+ * Intent-armed inner scrolling.
  *
  * Every capped section in the feed (Read previews, Bash command/output,
- * diffs, tool input/output) is its own scroll box, so a wheel gesture
- * aimed at the feed gets swallowed whenever the pointer happens to sit
- * over one of them. The gate: a section only takes the wheel when the
- * pointer is in its left- or right-most gutter (EDGE_PX wide). Anywhere
- * else over the section the wheel is redirected to the feed, so
- * scrolling past a section is the default and scrolling the section
- * itself is the deliberate act. The pure helpers below decide; a DOM-facing
- * caller wires the decision to real events and elements.
+ * diffs, tool input/output, a bubble's own scroll box) is its own scroll
+ * box, so a wheel gesture aimed at the feed gets swallowed whenever the
+ * pointer happens to sit over one of them. The gate: a section takes the
+ * wheel ONLY when it is the ARMED section; over any other section the
+ * wheel is redirected to the feed, so scrolling past a section is the
+ * default and scrolling the section itself is the deliberate act.
+ *
+ * A section arms ONLY by a deliberate POINTER act — a pointermove that
+ * moves INTO it, or a pointerdown/click inside it — never by the feed
+ * scrolling it under a still cursor. That distinction is the whole point:
+ * when the feed scrolls a section up under a stationary pointer the browser
+ * fires mouseenter/mouseover but NO pointermove, so the section that
+ * "landed under" the cursor was never entered and stays unarmed, and the
+ * next wheel gesture redirects to the feed instead of getting stuck in the
+ * bubble. Moving the cursor out and back in re-arms, matching the reader's
+ * own sense of which box they mean to scroll. The pure helpers below decide;
+ * `installIntentScroll` wires the decision to real events and elements.
+ *
+ * A purely horizontal wheel is always left to the browser (see
+ * `armedWheelAction`), so a wide code block inside a section still pans.
  *
  * The feed's own tail-following metric (isPinnedToBottom) lives here too:
  * it is the other half of the same question of who owns the scroll
  * position, the user or the feed.
  */
 import { ancestorMatching } from "./dom.js";
-
-/** Width of the left/right gutters that arm a section's own scrolling. */
-export const EDGE_PX = 32;
 
 /** Slack below which the feed still counts as parked at its tail. */
 export const PIN_PX = 40;
@@ -28,12 +37,6 @@ const DELTA_LINE = 1;
 const DELTA_PAGE = 2;
 /** Line height assumed when a wheel event reports its delta in lines. */
 const LINE_PX = 16;
-
-/** The horizontal span of an element's box. */
-export interface Box {
-  left: number;
-  right: number;
-}
 
 /** The geometry that makes an element a scroll box. */
 export interface ScrollMetrics {
@@ -730,26 +733,6 @@ export function isScrollBox(m: ScrollMetrics): boolean {
   return m.scrollHeight - m.clientHeight > 1;
 }
 
-/** True when clientX sits in the box's left or right gutter. */
-export function inEdgeZone(box: Box, clientX: number, edgePx: number = EDGE_PX): boolean {
-  return clientX - box.left <= edgePx || box.right - clientX <= edgePx;
-}
-
-/**
- * True when a wheel over `scroller` belongs to the feed instead.
- * A null scroller means the pointer is over no section at all, and an
- * unscrollable feed means there is nowhere to redirect the wheel to.
- */
-export function redirectsToFeed(opts: {
-  scroller: Box | null;
-  clientX: number;
-  feedScrollable: boolean;
-  edgePx?: number;
-}): boolean {
-  if (!opts.scroller || !opts.feedScrollable) return false;
-  return !inEdgeZone(opts.scroller, opts.clientX, opts.edgePx ?? EDGE_PX);
-}
-
 /** Wheel delta in pixels, whatever unit the event reported it in. */
 export function wheelDeltaPx(e: { deltaY: number; deltaMode: number }, viewportPx: number): number {
   if (e.deltaMode === DELTA_LINE) return e.deltaY * LINE_PX;
@@ -758,31 +741,43 @@ export function wheelDeltaPx(e: { deltaY: number; deltaMode: number }, viewportP
 }
 
 /**
+ * THE INTENT-ARM DECISION: does the section under the wheel keep it?
+ *
+ * A section keeps its own wheel ONLY when it is the section the reader armed
+ * — a real, identity comparison of the armed scroll box against the one the
+ * wheel landed over. Every other section (and there is no third case) hands
+ * its wheel to the feed, which is exactly what a section the FEED scrolled
+ * under a still cursor is: never armed, because arming is a pointer act
+ * (`installIntentScroll`) and the feed moving is not one, so its wheel
+ * redirects rather than getting stuck. A wheel over no section at all
+ * (`wheelScroller === null`) is not "kept" here either — the feed is already
+ * the browser's target for it, so there is nothing to redirect.
+ */
+export function sectionTakesWheel<T>(armed: T | null, wheelScroller: T | null): boolean {
+  return wheelScroller !== null && wheelScroller === armed;
+}
+
+/**
  * The whole wheel decision: null leaves the event to the browser, a
  * number is the pixel delta to add to the feed's scrollTop instead.
- * A purely horizontal wheel is always the browser's, so a wide code
- * block inside a section still pans on shift-wheel.
+ *
+ * A purely horizontal wheel is always the browser's, so a wide code block
+ * inside a section still pans on shift-wheel. A wheel over the armed section,
+ * over no section, or with no scrollable feed to redirect to is likewise the
+ * browser's; only a wheel over a NON-armed section is redirected to the feed.
  */
-export function wheelAction(opts: {
-  scroller: Box | null;
-  clientX: number;
+export function armedWheelAction<T>(opts: {
+  armed: T | null;
+  wheelScroller: T | null;
+  feedScrollable: boolean;
   deltaY: number;
   deltaMode: number;
-  feedScrollable: boolean;
   feedHeight: number;
-  edgePx?: number;
 }): number | null {
   if (opts.deltaY === 0) return null;
-  if (
-    !redirectsToFeed({
-      scroller: opts.scroller,
-      clientX: opts.clientX,
-      feedScrollable: opts.feedScrollable,
-      edgePx: opts.edgePx,
-    })
-  ) {
-    return null;
-  }
+  if (!opts.feedScrollable) return null;
+  if (opts.wheelScroller === null) return null;
+  if (sectionTakesWheel(opts.armed, opts.wheelScroller)) return null;
   return wheelDeltaPx(opts, opts.feedHeight);
 }
 
@@ -814,5 +809,85 @@ export function sectionFor<T extends { parentElement: T | null }>(
     if (isSection(node)) return node;
   }
   return box;
+}
+
+/** The scroll metrics of a real element, for `innerScrollerAt`. */
+const domMetrics = (el: HTMLElement): ScrollMetrics => ({
+  scrollHeight: el.scrollHeight,
+  clientHeight: el.clientHeight,
+  overflowY: getComputedStyle(el).overflowY,
+});
+
+/**
+ * Arm intent-based inner scrolling on `feed` (the scrollable feed region).
+ *
+ * A wheel over a NON-armed inner scroll box is redirected to the feed; a
+ * wheel over the armed box, or over no inner box at all, is the browser's.
+ * A section arms ONLY by a deliberate pointer act:
+ *
+ *   - a `pointermove` that moves INTO a box (the box under the pointer became
+ *     the box the pointer is now over), and
+ *   - a `pointerdown`/click inside a box.
+ *
+ * and NEVER by `mouseenter`/`mouseover`. THAT is the fix, and it turns on one
+ * fact about the browser: when the feed scrolls a box up UNDER A STATIONARY
+ * pointer, mouseenter/mouseover fire but pointermove does NOT. So a box that
+ * was scrolled-into arrives unarmed and its wheel redirects to the feed, while
+ * a box that was moved-into arrives armed and keeps its wheel — the exact
+ * difference between "the reader put the cursor here" and "the feed slid this
+ * under the cursor". Setting `armed` from every pointermove also re-arms on
+ * entry to a different box and disarms over bare feed, so "move the cursor out
+ * and back in" re-arms, which is what the reader expects.
+ *
+ * The wheel listener is the ONE non-passive piece: it must `preventDefault`
+ * to stop the browser scrolling the section it is redirecting off of. The
+ * pointer listeners only READ, so they stay passive.
+ *
+ * Returns the unsubscriber. A mount that drops it leaks listeners onto an
+ * element the next workspace will mount over.
+ */
+export function installIntentScroll(feed: HTMLElement): () => void {
+  const scrollerUnder = (target: EventTarget | null): HTMLElement | null =>
+    innerScrollerAt(target instanceof HTMLElement ? target : null, feed, domMetrics);
+
+  // The armed box: the inner scroll box the reader last deliberately entered.
+  // Written ONLY from pointer events below — never from the wheel, and never
+  // from mouseenter/mouseover — which is what keeps a scrolled-into box unarmed.
+  let armed: HTMLElement | null = null;
+
+  const onWheel = (e: WheelEvent): void => {
+    const delta = armedWheelAction({
+      armed,
+      wheelScroller: scrollerUnder(e.target),
+      feedScrollable: feed.scrollHeight - feed.clientHeight > 1,
+      deltaY: e.deltaY,
+      deltaMode: e.deltaMode,
+      feedHeight: feed.clientHeight,
+    });
+    if (delta === null) return;
+    e.preventDefault();
+    // NOT through TailFollow, and deliberately so: this IS the reader's own
+    // wheel, merely redirected off a section onto the feed. The owner reads it
+    // as the gesture it is — up ends the follow, back to the tail resumes it —
+    // exactly the treatment a wheel on the feed itself gets.
+    feed.scrollTop += delta;
+  };
+
+  // A pointer act names the box the reader means: the one under the pointer
+  // now. Over bare feed that is null, which disarms. Because this fires on
+  // pointermove/pointerdown ONLY, a box the feed scrolled under a still pointer
+  // (mouseenter/mouseover, no pointermove) never reaches here and stays unarmed.
+  const arm = (e: PointerEvent): void => {
+    armed = scrollerUnder(e.target);
+  };
+
+  feed.addEventListener("wheel", onWheel, { capture: true, passive: false });
+  feed.addEventListener("pointermove", arm, { passive: true });
+  feed.addEventListener("pointerdown", arm, { passive: true });
+  return () => {
+    feed.removeEventListener("wheel", onWheel, { capture: true });
+    feed.removeEventListener("pointermove", arm);
+    feed.removeEventListener("pointerdown", arm);
+  };
 }
 
