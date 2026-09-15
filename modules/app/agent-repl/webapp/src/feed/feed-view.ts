@@ -63,6 +63,7 @@ import type {
   SubfeedView,
 } from "./renderers.js";
 import { replaceTicking, stopTicking } from "./ticking.js";
+import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { FINAL_ANSWER_ATTRIBUTE, drawFeedTurnEnded } from "./rows/turn-ended.js";
@@ -112,6 +113,15 @@ export interface FeedControllerOptions {
   composerSlot?: HTMLElement;
   /** The page's scroll box and tail owner. Root feed only. */
   scroll?: { box: AnchorBox; tail: TailFollow };
+  /**
+   * The overscan buffer, rooted on the page's scroll box. One instance is
+   * shared across the root feed and every sub-feed nested inside the same box,
+   * so a row's chrome is observed the moment it is held and unobserved the
+   * moment it is dropped — no matter which feed holds it. Absent where the feed
+   * has no scroll box (a fixture) or the environment ships no
+   * `IntersectionObserver`.
+   */
+  overscan?: Overscan;
 }
 
 /** One row, as the controller holds it. */
@@ -393,6 +403,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       if (state.row.row.case === "turnEnded") forgetSettled();
       state.bubble?.dispose();
       stopTicking(state.element);
+      opts.overscan?.unobserve(state.element);
       state.element.remove();
       states.delete(id);
     }
@@ -426,6 +437,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       if (state === undefined) continue;
       state.bubble?.dispose();
       stopTicking(state.element);
+      opts.overscan?.unobserve(state.element);
       state.element.remove();
       states.delete(gone);
     }
@@ -463,6 +475,10 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     const state: RowState = { row, element, body: null, bubble: null, dirty: true };
     states.set(id, state);
     order.splice(index < 0 ? order.length : index, 0, id);
+    // WATCH THE NEW ROW so the overscan buffer can pre-render it before the
+    // reader reaches it. Every row born on this feed passes here exactly once,
+    // bubble or not, so this is the one place a row starts being watched.
+    opts.overscan?.observe(element);
     if (!isBubbleRow(row)) return;
     // A bubble owns its own element for its whole life: the head redraws inside
     // it and the sub-feed hangs beneath it, so the row's body is never replaced.
@@ -480,6 +496,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     for (const state of states.values()) {
       state.bubble?.dispose();
       stopTicking(state.element);
+      opts.overscan?.unobserve(state.element);
       state.element.remove();
     }
     states.clear();
