@@ -4386,10 +4386,12 @@ body.draining #composer-input::placeholder {
      the prose's FIRST line flows to its left and wraps around it and — because
      the corner is a single row tall (token + duration on one line) — every
      SUBSEQUENT line drops below it and runs the bubble's full width. The token
-     content lands flush at the box's top-right corner: the hover hit-area
-     padding below is cancelled by an equal negative margin, so the float's
-     margin box is exactly the token+duration content and only the empty padding
-     (never the figure) is clipped by the box's `overflow: hidden`. */
+     content lands at the box's top-right corner, inset from the true edge by
+     `--usage-corner-edge-gap` (see below): the hover hit-area padding is
+     cancelled by an equal negative margin on three sides, so the float's
+     margin box is exactly the token+duration content plus that one real
+     right-side inset, and only the empty padding (never the figure) is
+     clipped by the box's `overflow: hidden`. */
   float: right;
   display: inline-flex;
   flex-direction: row;
@@ -4407,7 +4409,28 @@ body.draining #composer-input::placeholder {
      timestamp — it clips to the (now larger) padding box, which the reveal
      never fills. */
   padding: 0.4rem 1.25rem;
-  margin: -0.4rem -1.25rem;
+  margin-top: -0.4rem;
+  margin-bottom: -0.4rem;
+  margin-left: -1.25rem;
+  /* CORNER-SCOPED RIGHT-EDGE GAP (owner ruling, 2026-09-15): the visible gap
+     between the duration/token content and the bubble's right border must be
+     DOUBLE `--bubble-scroll-gap`, without touching `--bubble-scroll-gap`
+     itself (it stays the global scrollbar-inset unit `.bubble`'s own right
+     padding and the `.bubble-body`/`.turn-meta`/tool-card compensations all
+     still read unchanged). `.bubble`'s own right padding already contributes
+     one `--bubble-scroll-gap` of that total; this rule contributes the
+     second, entirely inside the float's own box and nowhere else in the
+     sheet. On the left/top/bottom the padding is still exactly cancelled
+     (`-1.25rem`/`-0.4rem`, unchanged) so only the RIGHT margin departs from
+     that cancellation, by the extra `--bubble-scroll-gap`: less negative than
+     the fully-cancelling `-1.25rem` by that amount pulls the content left by
+     the same amount, real and un-cancelled. It is a static value (not part of
+     the reveal transition), so the reserved footprint — and the no-reflow-on-
+     hover invariant — stay exactly as they were. */
+  --usage-corner-edge-gap: calc(2 * var(--bubble-scroll-gap));
+  margin-right: calc(
+    var(--usage-corner-edge-gap) - var(--bubble-scroll-gap) - 1.25rem
+  );
   /* The one size both the token figure and the revealed duration read
      (owner ruling, 2026-09-15: the two must match). Declared once here,
      the shared ancestor, so neither rule below carries its own copy of
