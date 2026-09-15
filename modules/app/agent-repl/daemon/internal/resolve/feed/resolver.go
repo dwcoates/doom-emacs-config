@@ -680,19 +680,23 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	}
 }
 
-// pushWithheldByBound reports whether ID sorts above the feed's newest
-// context-cutting separation and must therefore be kept off the live push.
-// The separation itself, and every row below it, always pushes.
+// pushWithheldByBound reports whether ID is hidden by the feed's newest
+// context-cutting separation and must therefore be kept off the live push. The
+// separation itself, and every row the bound does not hide, always pushes. It
+// shares the ONE rule pages.go's deliverable uses (boundHides), so the live push
+// and the page can never disagree about which rows the bound withholds — the same
+// rule that keeps a reconnect's replayed post-cut conversation on the wire
+// rather than blanking it.
 func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool {
 	bi := boundIndex(f, f.order)
 	if bi < 0 {
 		return false
 	}
-	if !f.rank[id].before(f.rank[f.order[bi]]) {
+	if !boundHides(f.rank[id], f.rank[f.order[bi]]) {
 		return false
 	}
 	r.logger(s.id).Info("daemon.feed.push_withheld",
-		"a row sorting above the newest context-cut divider was stored but kept off the live push",
+		"a row hidden by the newest context-cut divider was stored but kept off the live push",
 		dlog.Context{"feed": f.key, "row": id, "bound": f.order[bi]})
 	return true
 }

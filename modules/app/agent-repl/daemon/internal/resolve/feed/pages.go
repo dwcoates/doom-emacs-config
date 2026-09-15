@@ -148,19 +148,64 @@ func (r *resolver) CloseReader(ws ids.WorkspaceID, reader ReaderID) {
 // history replay and the live plane draw into the same feed by different
 // routes: the NEWEST bounding separation is a fact about the row order, and
 // reading it off the order cannot disagree with the order.
+//
+// WHAT THE BOUND HIDES IS NOT SIMPLY "EVERYTHING ABOVE IT IN THE ORDER." A cut
+// arrives on the LIVE plane while the rows it does and does not bound were drawn
+// on the HISTORY plane, and plane order alone reads every history row as older
+// than a live cut. That blanks the feed on a reconnect: the compaction's
+// POST-cut conversation is replayed in the history plane BEFORE the cut lands
+// live, so by plane order it sorted above the cut and every last row of it was
+// withheld — the feed went empty but for the divider though the whole
+// conversation was on screen a moment before. `boundHides` reads the seam the
+// plane order misses; see it for the rule.
 func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]string, bool) {
 	durable := durableOrder(f)
 	at := boundIndex(f, durable)
-	if at <= 0 {
-		return durable, at == 0
+	if at < 0 {
+		return durable, false
 	}
-	r.logger(s.id).Info("daemon.feed.bound_at_separation",
-		"the feed's delivery begins at its newest separation; the rows before it were not served",
-		dlog.Context{
-			"feed": f.key, "action": action, "row": durable[at],
-			"withheld": at, "delivered": len(durable) - at,
-		})
-	return durable[at:], true
+	boundRank := f.rank[durable[at]]
+	delivered := make([]string, 0, len(durable))
+	withheld := 0
+	for _, id := range durable {
+		if boundHides(f.rank[id], boundRank) {
+			withheld++
+			continue
+		}
+		delivered = append(delivered, id)
+	}
+	if withheld > 0 {
+		r.logger(s.id).Info("daemon.feed.bound_at_separation",
+			"the feed's delivery begins at its newest separation; the rows before it were not served",
+			dlog.Context{
+				"feed": f.key, "action": action, "row": durable[at],
+				"withheld": withheld, "delivered": len(delivered),
+			})
+	}
+	return delivered, true
+}
+
+// boundHides reports whether a row is the conversation BEFORE the cut, and so is
+// withheld by it. Draw order — (plane, seq) — is the proxy for conversation
+// order, and it is exact WITHIN a plane: a row in the cut's own plane drawn
+// before it is pre-cut. ACROSS planes the proxy fails, because a cut lands on
+// the live plane while the rows around it were drawn on the history plane, so
+// every history row reads as older than the cut. The publication seq — ONE
+// monotonic counter across every plane, fixed at a row's first draw — resolves
+// what the plane cannot: an earlier-plane row drawn AFTER the cut arrived is a
+// late-forwarded pre-cut row (the "/clear dumped all previous history" case) and
+// is hidden; one drawn BEFORE the cut arrived is content the reader already had
+// on screen (a reconnect's replayed post-cut conversation) and is kept, so the
+// bound move never blanks the feed. A later-plane row is unambiguously after the
+// cut and is always kept.
+func boundHides(row, bound rowRank) bool {
+	if row.plane == bound.plane {
+		return row.seq < bound.seq
+	}
+	if row.plane > bound.plane {
+		return false
+	}
+	return row.seq > bound.seq
 }
 
 // boundIndex is the index in ORDER of the newest separation delivery begins
