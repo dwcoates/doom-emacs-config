@@ -724,6 +724,52 @@ export function revealInBox(box: HTMLElement, node: HTMLElement, tail: RevealWri
   if (delta !== 0) tail.shift(delta);
 }
 
+/**
+ * The geometry a CENTER-SCROLL reads, in the box's OWN coordinate space — the
+ * one `restoreFeedAnchor` already works in, where a row's `offsetTop` and the
+ * box's `scrollTop` are the same units, so their difference is a scroll
+ * position with nothing to reconstruct.
+ */
+export interface CenterGeometry {
+  /** The node's top, in the box's own scroll coordinates (`offsetTop`). */
+  nodeOffsetTop: number;
+  /** The node's full height (`offsetHeight`), however far past the fold it runs. */
+  nodeHeight: number;
+  /** The box's visible height (`clientHeight`). */
+  clientHeight: number;
+  /** The box's full scrollable height (`scrollHeight`). */
+  scrollHeight: number;
+  /** The box's current `scrollTop`. */
+  scrollTop: number;
+}
+
+/**
+ * How far the box must move for NODE to sit CENTERED in the viewport, clamped
+ * at the feed's own edges.
+ *
+ * This is the reply-to-a-past-response center-scroll, as an arithmetic. The
+ * daemon names the selected final-response row; the webapp puts it in the
+ * middle of the feed — UNLESS the row is near the feed's start or end, where
+ * there is not room to center it and the best that fits is the edge:
+ *
+ * - a row with room on both sides is placed with its top `(clientHeight -
+ *   nodeHeight) / 2` below the box's top, which puts its center on the box's
+ *   center;
+ * - a row so near the START that centering would scroll above the top is
+ *   clamped at `scrollTop = 0` — the feed's first row cannot rise past the top;
+ * - a row so near the END that centering would scroll past the last reachable
+ *   position is clamped at `scrollHeight - clientHeight`.
+ *
+ * Positive is downward, matching `scrollTop`, so the caller hands the result
+ * straight to `TailFollow.shift`.
+ */
+export function centerDelta(g: CenterGeometry): number {
+  const idealTop = g.nodeOffsetTop - (g.clientHeight - g.nodeHeight) / 2;
+  const maxScrollTop = Math.max(0, g.scrollHeight - g.clientHeight);
+  const target = Math.min(Math.max(idealTop, 0), maxScrollTop);
+  return target - g.scrollTop;
+}
+
 /** True when the element both clips its content and scrolls it vertically. */
 export function isScrollBox(m: ScrollMetrics): boolean {
   if (m.overflowY !== "auto" && m.overflowY !== "scroll") return false;
