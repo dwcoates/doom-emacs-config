@@ -649,6 +649,40 @@ func TestARunningTurnDominatesDetachedWork(t *testing.T) {
 	}
 }
 
+// TestANewTurnDominatesTheAuthoritativeLiveWorkSet is the owner's ruling on the
+// PRODUCTION path: `thinking`/`submitting` is the highest-priority live state
+// and, when a turn is in flight, must be the ONLY thing the roster row reflects
+// — it overrides detached/async work. The existing dominance test drives the
+// async fact through OnDetachedWork (the announcement set `s.detached`, which
+// `startTurn` RESETS), so it never exercises the item the watcher's
+// AUTHORITATIVE OnLiveWorkChanged set carries — the set `startTurn` deliberately
+// preserves because a detached item outlives the turn that spawned it. This
+// pins that the surviving authoritative item does NOT keep the row at
+// `idle_async` once the user sends the next prompt: a turn in flight wins, and
+// the published row says so.
+func TestANewTurnDominatesTheAuthoritativeLiveWorkSet(t *testing.T) {
+	// Arrange: a prior turn spawned a detached item the WATCHER states
+	// authoritatively; the turn then ended, so the row rests at idle_async.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{
+		Shells: []*conversationv1.DetachedWorkId{{Value: "work-1"}}})
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	if got := statusName(onlyRow(t, r)); got != "idle_async" {
+		t.Fatalf("arrange status = %q, want idle_async before the new turn", got)
+	}
+
+	// Act: the user sends a new prompt while the detached item still runs. The
+	// watcher has NOT retired the item, so asyncLive() is still true.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Assert: the in-flight turn overrides the still-live authoritative async
+	// item, and the published row reflects it.
+	if got := statusName(onlyRow(t, r)); got != "submitting" {
+		t.Fatalf("status = %q, want submitting: a turn in flight overrides live async work", got)
+	}
+}
+
 func TestANewTurnRetiresThePreviousTurnsDetachedWork(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
