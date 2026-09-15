@@ -7,6 +7,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
 )
@@ -119,6 +120,69 @@ func TestTailClosesOnlyOnTheReadersCancellation(t *testing.T) {
 	// a transport failure, which is exactly the distinction this preserves.
 	if _, open := <-rows; open {
 		t.Fatal("the tail delivered a row after cancellation")
+	}
+}
+
+// TestRetiringARowPushesARemovalToAnOpenTail is the whole point of this
+// change: retire is the DUAL of upsert, so a client already watching the feed
+// drops the retired row live rather than showing it stale until it reloads.
+func TestRetiringARowPushesARemovalToAnOpenTail(t *testing.T) {
+	// Arrange: a tail is open and following, and a row it has seen live.
+	h := newHarness(t)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+	h.deliverPrompt("turn-1", "live")
+	if got := (<-rows).GetId().GetValue(); got != h.promptRowID("turn-1") {
+		t.Fatalf("streamed row = %q, want turn-1's before its removal", got)
+	}
+
+	// Act.
+	h.resolver.RetireRow(testWorkspace, rootFeed(),
+		&frontendv1.FeedId{Value: h.promptRowID("turn-1")})
+
+	// Assert: the tail delivers a removal naming that row, and nothing draws.
+	removal := <-rows
+	if removal.GetId().GetValue() != h.promptRowID("turn-1") {
+		t.Fatalf("removal row = %q, want turn-1's", removal.GetId().GetValue())
+	}
+	if removal.GetRemoved() == nil {
+		t.Fatalf("streamed row carried no removal arm; row arm = %T", removal.Row)
+	}
+}
+
+// TestRetiringAnAbsentRowPushesNothingToAnOpenTail is the edge case: a retire
+// that finds no row is a no-op on the wire, so the tail's next delivery is the
+// next real row, never a spurious removal.
+func TestRetiringAnAbsentRowPushesNothingToAnOpenTail(t *testing.T) {
+	// Arrange: a tail is open and following, nothing yet retired.
+	h := newHarness(t)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+
+	// Act: retire a row this feed never held, then publish a real one.
+	h.resolver.RetireRow(testWorkspace, rootFeed(),
+		&frontendv1.FeedId{Value: "no-such-row"})
+	h.deliverPrompt("turn-1", "the next real row")
+
+	// Assert: the tail's first delivery is the real row, not a removal.
+	first := <-rows
+	if first.GetRemoved() != nil {
+		t.Fatalf("first streamed row was a removal; the absent retire pushed a spurious one")
+	}
+	if first.GetId().GetValue() != h.promptRowID("turn-1") {
+		t.Fatalf("first streamed row = %q, want turn-1's", first.GetId().GetValue())
 	}
 }
 
