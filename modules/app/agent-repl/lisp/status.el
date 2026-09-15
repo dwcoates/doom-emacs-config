@@ -2966,12 +2966,19 @@ TRANSITION away from `:ready', which this generalizes to any new arm."
   (remhash ws agent-repl--tab-dwell-demoted)
   (agent-repl--tab-dwell-arm ws now))
 
-(defun agent-repl--tab-dwell-on-activation ()
+(defun agent-repl--tab-dwell-on-activation (&rest _)
   "Arm the view dwell for the workspace just activated.
 Registered on the persp activation hook, alongside
 `agent-repl--record-workspace-history' (which stamps `:last-viewed-at').
 Switching INTO a workspace restarts the continuous-viewing clock; it does
-not un-demote a workspace that was already demoted with no new activity."
+not un-demote a workspace that was already demoted with no new activity.
+
+Takes and ignores its arguments (`&rest _'): `persp-activated-functions'
+invokes each registered function WITH the activation type (e.g. `frame' or
+`window'), so a nil arglist signalled \"Wrong number of arguments\" on every
+persp switch and aborted the activation hook run.  It mirrors its sibling
+`agent-repl--record-workspace-history', which is on the same hook for the
+same reason."
   (let ((ws (agent-repl--ws-current-name)))
     (when (and ws (agent-repl--ws-known-p ws))
       (agent-repl--tab-dwell-arm ws (current-time)))))
