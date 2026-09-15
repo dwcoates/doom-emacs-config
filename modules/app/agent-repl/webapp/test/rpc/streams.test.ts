@@ -14,7 +14,7 @@ import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient, type AgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "./app-context.js";
-import { MalformedView } from "../../src/rpc/malformed.js";
+import { MalformedView, UnknownPushArm } from "../../src/rpc/malformed.js";
 import { createTicker } from "../../src/clock.js";
 import {
   clearClientFailures,
@@ -227,6 +227,101 @@ describe("watchStream: an unreadable frame", () => {
     handle.cancel();
     // ASSERT: it surfaced as the run's end, not as a skipped frame.
     expect(sink.reported).not.toContain("frameUndecodable");
+  });
+});
+
+describe("watchStream: forward-compat skew (an unknown push arm)", () => {
+  it("skips the frame quietly, filing NO frameUndecodable", async () => {
+    // ARRANGE: a newer daemon set a top-level push arm this build cannot draw.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {
+      throw new UnknownPushArm("WatchFooterResponse.push", "mutationProgress");
+    });
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).not.toContain("frameUndecodable");
+  });
+
+  it("KEEPS THE STREAM: a later frame this build CAN draw is still delivered", async () => {
+    // ARRANGE: the first frame carries the unknown arm, the second is drawable.
+    const sink = new RecordingSink();
+    let calls = 0;
+    const { client } = scriptedClient([[push(), push()]]);
+    const drawn: WatchFooterResponse[] = [];
+    // ACT
+    const handle = open(contextFor(client, sink), (r) => {
+      calls += 1;
+      if (calls === 1) throw new UnknownPushArm("WatchFooterResponse.push", "mutationProgress");
+      drawn.push(r);
+    });
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(drawn).toHaveLength(1);
+  });
+
+  it("does not reopen the stream over one skew frame", async () => {
+    const sink = new RecordingSink();
+    const { client, state } = scriptedClient([[push(), push()]]);
+    let calls = 0;
+    const handle = open(contextFor(client, sink), () => {
+      calls += 1;
+      if (calls === 1) throw new UnknownPushArm("WatchFooterResponse.push", "mutationProgress");
+    });
+    await settle();
+    handle.cancel();
+    expect(state.openCount).toBe(1);
+  });
+
+  it("logs the skew at info, naming the arm, so the skip is greppable", async () => {
+    // ARRANGE
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[push()]]);
+    // ACT
+    const handle = open(contextFor(client, new RecordingSink()), () => {
+      throw new UnknownPushArm("WatchFooterResponse.push", "mutationProgress");
+    });
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(
+      lines.some(
+        ([level, line]) =>
+          level === "info" &&
+          line.includes("rpc.stream-frame-forward-skew") &&
+          line.includes("mutationProgress"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT log the skew as an undecodable frame, keeping the loud channel clean", async () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[push()]]);
+    const handle = open(contextFor(client, new RecordingSink()), () => {
+      throw new UnknownPushArm("WatchFooterResponse.push", "mutationProgress");
+    });
+    await settle();
+    handle.cancel();
+    expect(lines.some(([, line]) => line.includes("rpc.stream-frame-undecodable"))).toBe(false);
+  });
+
+  it("still files frameUndecodable for a NESTED unknown arm, which is a real malformation", async () => {
+    // ARRANGE: a plain MalformedView (a nested arm), NOT an UnknownPushArm.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    // ACT
+    const handle = open(contextFor(client, sink), () => {
+      throw new MalformedView("FooterView.activity", "arm 'somethingNew' is not one this build can draw");
+    });
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).toContain("frameUndecodable");
   });
 });
 

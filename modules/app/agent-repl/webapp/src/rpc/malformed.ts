@@ -32,3 +32,38 @@ export class MalformedView extends Error {
 export function isMalformedView(err: unknown): err is MalformedView {
   return err instanceof MalformedView;
 }
+
+/**
+ * UnknownPushArm — the one refusal that is FORWARD-COMPAT SKEW rather than a
+ * contract violation: a newer daemon set an arm of a push's TOP-LEVEL oneof
+ * that this bundle's draw switch has no case for.
+ *
+ * WHY IT IS ITS OWN TYPE. Every other MalformedView is a real defect — a
+ * malformed message, an unknown wire field, a required field unset, an unknown
+ * arm on some nested component — and stays loud (the `frame_undecodable` card).
+ * This one is benign version skew: right after a deploy that adds a push arm, a
+ * webview still on the old bundle receives a frame carrying it, and skipping
+ * that one frame quietly is correct — the stream keeps running and a reload
+ * fully resolves it. Distinguishing it by TYPE (thrown only by
+ * `unreachablePushArm` from a push envelope's top-level oneof switch) is what
+ * lets the stream skip it quietly without ever reading the human sentence, so
+ * no genuine malformation is ever quietened by accident.
+ *
+ * It remains a MalformedView so any code that does not care about the
+ * distinction still treats it as the refusal it is; the stream pipeline checks
+ * `isUnknownPushArm` FIRST to peel the skew case off before the loud path.
+ */
+export class UnknownPushArm extends MalformedView {
+  readonly arm: string;
+
+  constructor(path: string, arm: string) {
+    super(path, `arm '${arm}' is not one this build can draw`);
+    this.name = "UnknownPushArm";
+    this.arm = arm;
+  }
+}
+
+/** Whether a refusal is the benign forward-compat skew of an unknown push arm. */
+export function isUnknownPushArm(err: unknown): err is UnknownPushArm {
+  return err instanceof UnknownPushArm;
+}
