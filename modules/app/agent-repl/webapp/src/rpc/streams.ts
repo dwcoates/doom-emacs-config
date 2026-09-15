@@ -18,6 +18,13 @@
  *     log line), and SKIPPED. The stream keeps running, because the next frame
  *     is very probably fine and tearing the view down would lose the rest of
  *     the conversation over one row.
+ *   - EXCEPT forward-compat skew: a push whose refusal is an `UnknownPushArm`
+ *     (a newer daemon set a TOP-LEVEL push oneof arm this bundle has no case
+ *     for, recognized by TYPE) is benign version skew, not a bad frame. It is
+ *     logged at info and SKIPPED, but files NO `frame_undecodable` and raises
+ *     NO card — a reload after the deploy fully resolves it, so the alarming
+ *     card would be wrong. Every OTHER malformation (bad bytes, an unknown
+ *     wire field, a required field unset, a NESTED unknown arm) stays loud.
  *   - a stream that ended is the LINK: `daemon_unreachable` is filed and the
  *     stream reopens with backoff. That card is window-shaped and is retracted
  *     on the first successful push, so a flapping link leaves no ghost.
@@ -41,7 +48,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { log } from "../log.js";
 import { daemonUnreachable, frameUndecodable, type FailureSink } from "../failure/sink.js";
 import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
-import { MalformedView, isMalformedView } from "./malformed.js";
+import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
 
@@ -167,6 +174,16 @@ export function watchStream<Res extends Message>(
       opts.onPush(response);
     } catch (err) {
       if (!isMalformedView(err)) throw err;
+      // FORWARD-COMPAT SKEW IS NOT A BAD FRAME. A newer daemon set a
+      // TOP-LEVEL push oneof arm this bundle has no case for (recognized by
+      // TYPE, never by reading the message). That is benign version skew right
+      // after a deploy — skip this one frame quietly and keep the stream, but
+      // file NO undecodable failure and raise NO card, because a reload fully
+      // resolves it and the scary card would be wrong.
+      if (isUnknownPushArm(err)) {
+        reportForwardSkew(err);
+        return;
+      }
       reportUndecodable(err);
       return;
     }
@@ -190,6 +207,16 @@ export function watchStream<Res extends Message>(
       opts.onReconnected?.();
     }
     backoffMs = initialMs;
+  };
+
+  const reportForwardSkew = (err: UnknownPushArm): void => {
+    log.info(
+      `a ${opts.name} push carried a newer arm '${err.arm}' this build cannot draw; skipping it quietly (forward-compat skew)`,
+      {
+        operation: "rpc.stream-frame-forward-skew",
+        context: { rpc: opts.name, path: err.path, arm: err.arm },
+      },
+    );
   };
 
   const reportUndecodable = (err: MalformedView): void => {
