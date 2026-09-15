@@ -2768,7 +2768,10 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
      agent is working" motion this query keeps. Stopping also keeps the period a
      single constant: each letter's negative `animation-delay` is computed
      against one STATUS_WAVE_PERIOD_MS, and a reduced-motion override that merely
-     LENGTHENED the pass would leave every delay seeking to the wrong phase. */
+     LENGTHENED the pass would leave every delay seeking to the wrong phase.
+     `animation: none` stops BOTH the bulge and the colour sweep at once (they
+     are one shorthand on this selector); the letter then rests at its arm tone,
+     legible and never transparent. */
   .pfooter-wave-letter {
     animation: none;
   }
@@ -3192,7 +3195,19 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    travelling forwards then backwards continually".
 
    ADDITIONAL TO THE COLOUR BREATH, which is untouched: the word keeps its arm's
-   tone and the per-arrival shade step, and nothing here sets a colour.
+   tone and the per-arrival shade step.
+
+   A COLOUR SWEEP RIDES THE SAME LETTERS, coexisting with the bulge (owner
+   ruling, 2026-09-14). It is done PER LETTER, never as a whole-word
+   `background-clip: text` gradient: an earlier attempt clipped a gradient to the
+   holder span and set `-webkit-text-fill-color: transparent`, which inherited
+   into the split letters and rendered the whole word BLANK (the glyphs live in
+   the child letter spans, so there was no text on the holder to clip the
+   gradient to). Here each letter simply animates its OWN `color` between the arm
+   tone (`currentColor`, so it stays legible) and a slightly lighter band, on the
+   SAME staggered negative `animation-delay` the bulge uses — so a soft highlight
+   travels along the letters exactly in step with the bulge, and a letter can
+   never go transparent because its rest colour is always the arm tone.
 
    `transform: scale` and NEVER `font-size`, exactly as `.pfooter-breath` above:
    a font-size oscillation re-measures the word every frame and shoves the whole
@@ -3200,9 +3215,11 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    so the waving word occupies exactly the width its resting letters do.
    `display: inline-block` is what makes a transform apply at all.
 
-   SCALE 1.15, AND NO LAYER PROMOTION. The strip is `font-size: 0.78rem` (12.48px
-   at the default root), so the bulge peaks at 14.35px — visible at a glance and
-   still unmistakably the same word. There is deliberately no `will-change`, no
+   SCALE 1.18, AND NO LAYER PROMOTION. The strip is `font-size: 0.78rem` (12.48px
+   at the default root), so the bulge peaks at 14.73px — a shade more prominent
+   than the 1.15 it grew from (owner ruling, 2026-09-14: nudge the bulge up a
+   little, not a lot), visible at a glance and still unmistakably the same word.
+   There is deliberately no `will-change`, no
    `translateZ(0)` and no `backface-visibility` here: any of them promotes the
    letter to its own layer, and WebKit then rasterises the glyph ONCE at 1x and
    scales that bitmap, which is precisely how a scaled word goes blurry. Left
@@ -3220,18 +3237,34 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    NO `animation-delay` HERE, on purpose: each letter renders its own negative
    one inline, which is what carries the wave's phase across a footer push, and a
    delay declared in this rule would be the value that inline style exists to
-   override. */
+   override. That ONE inline delay drives BOTH animations below — the single
+   `animation-delay` value applies position-for-position to every name in the
+   shorthand — so the bulge and the colour sweep share the same phase, epoch and
+   period by construction and can never drift; there is no second clock. */
 .pfooter-status-word {
   white-space: pre;
 }
 .pfooter-wave-letter {
   display: inline-block;
   transform-origin: 50% 100%;
-  animation: pfooter-status-wave 2.6s ease-in-out infinite alternate;
+  animation:
+    pfooter-status-wave 2.6s ease-in-out infinite alternate,
+    pfooter-status-color 2.6s ease-in-out infinite alternate;
 }
 @keyframes pfooter-status-wave {
   from { transform: scale(1); }
-  to { transform: scale(1.15); }
+  to { transform: scale(1.18); }
+}
+/* The colour sweep, PER LETTER (never a `background-clip: text` gradient — see
+   the block comment above for why that blanked the word). The letter rests at
+   its arm tone (`currentColor`, which resolves to the inherited arm colour, so
+   the letter is always legible and NEVER transparent) and brightens toward a
+   lighter band; run staggered by the same per-letter delay as the bulge and
+   `alternate`d the same way, the bright point travels along the word and back in
+   lockstep with the bulge. */
+@keyframes pfooter-status-color {
+  from { color: currentColor; }
+  to { color: color-mix(in srgb, currentColor 45%, #ffffff); }
 }
 
 /* The turn clock and token cells: tabular figures so a ticking digit never
