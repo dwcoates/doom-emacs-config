@@ -19,11 +19,13 @@ import { createTicker } from "../src/clock.js";
 import type { FailureSink } from "../src/failure/sink.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
+  installProseLinkRouting,
   openExternalRefusal,
   openInEditorRefusal,
   renderEditorLink,
   renderExternalLink,
 } from "../src/link.js";
+import { renderMarkdown } from "../src/markdown.js";
 import { createAgentReplClient } from "../src/rpc/client.js";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { type AppContext } from "../src/rpc/context.js";
@@ -534,5 +536,133 @@ describe("openInEditorRefusal: an arm this build has no words for", () => {
     } catch (err) {
       expect((err as MalformedView).path).toBe("OpenInEditorError.cause");
     }
+  });
+});
+
+describe("installProseLinkRouting: a clicked markdown prose link", () => {
+  /**
+   * A feed-scroll stand-in with a bubble of markdown-rendered HTML inside it,
+   * the interceptor installed over the whole thing exactly as the boot hangs
+   * it on `feedScroll`.
+   */
+  function prose(ctx: AppContext, html: string): { root: HTMLElement; off: () => void } {
+    const root = document.createElement("div");
+    const bubble = document.createElement("div");
+    bubble.innerHTML = html;
+    root.appendChild(bubble);
+    const off = installProseLinkRouting(ctx, root);
+    return { root, off };
+  }
+
+  it("cancels the click, so the webview never navigates", () => {
+    // Arrange.
+    const { ctx } = harness();
+    const { root, off } = prose(ctx, renderMarkdown("[docs](https://example.test/x)"));
+    const anchor = root.querySelector("a")!;
+
+    // Act.
+    const event = click(anchor);
+
+    // Assert.
+    expect(event.defaultPrevented).toBe(true);
+    off();
+  });
+
+  it("routes an http(s) link through OpenExternal", async () => {
+    // Arrange.
+    const { ctx, external } = harness();
+    const { root, off } = prose(ctx, renderMarkdown("[docs](https://example.test/x)"));
+
+    // Act.
+    click(root.querySelector("a")!);
+    await settle();
+
+    // Assert.
+    expect(external).toHaveLength(1);
+    expect(external[0].url).toBe("https://example.test/x");
+    off();
+  });
+
+  it("routes a file:// link through OpenInEditor, decoding its path", async () => {
+    // Arrange: markdown restricts anchors to http(s), so a file link is
+    // injected as the raw anchor the interceptor must still route.
+    const { ctx, editor } = harness();
+    const { root, off } = prose(ctx, `<a href="file:///Users/u/w/my%20file.go">my file.go</a>`);
+
+    // Act.
+    click(root.querySelector("a")!);
+    await settle();
+
+    // Assert.
+    expect(editor).toHaveLength(1);
+    expect(editor[0].path).toBe("/Users/u/w/my file.go");
+    off();
+  });
+
+  it("routes a bare absolute-path link through OpenInEditor", async () => {
+    // Arrange.
+    const { ctx, editor } = harness();
+    const { root, off } = prose(ctx, `<a href="/Users/u/w/a.go">a.go</a>`);
+
+    // Act.
+    click(root.querySelector("a")!);
+    await settle();
+
+    // Assert.
+    expect(editor).toHaveLength(1);
+    expect(editor[0].path).toBe("/Users/u/w/a.go");
+    off();
+  });
+
+  it("leaves a structured external link to its own handler, opening it once", async () => {
+    // Arrange: a structured link inside the same scroll zone must not be
+    // double-fired by the delegated interceptor.
+    const { ctx, external } = harness();
+    const root = document.createElement("div");
+    root.appendChild(renderExternalLink(ctx, { text: "docs", url: "https://example.test/s" }));
+    const off = installProseLinkRouting(ctx, root);
+
+    // Act.
+    click(root.querySelector("a")!);
+    await settle();
+
+    // Assert.
+    expect(external).toHaveLength(1);
+    off();
+  });
+
+  it("leaves a structured editor link to its own handler, opening it once", async () => {
+    // Arrange.
+    const { ctx, editor } = harness();
+    const root = document.createElement("div");
+    root.appendChild(renderEditorLink(ctx, { text: "a.go", path: "/w/a.go" }));
+    const off = installProseLinkRouting(ctx, root);
+
+    // Act.
+    click(root.querySelector("a")!);
+    await settle();
+
+    // Assert.
+    expect(editor).toHaveLength(1);
+    off();
+  });
+
+  it("warns and ignores a prose link whose scheme is neither web nor file", () => {
+    // Arrange.
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { ctx, external, editor } = harness();
+    const { root, off } = prose(ctx, `<a href="mailto:a@b.test">mail</a>`);
+
+    // Act.
+    click(root.querySelector("a")!);
+
+    // Assert.
+    expect(external).toHaveLength(0);
+    expect(editor).toHaveLength(0);
+    expect(
+      lines.some(([level, line]) => level === "warn" && line.includes("link.prose-unroutable-scheme")),
+    ).toBe(true);
+    off();
   });
 });
