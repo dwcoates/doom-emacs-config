@@ -17,7 +17,6 @@ import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
-  FILL_CAP_CLASS,
   REVEALED_ATTRIBUTE,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
@@ -154,12 +153,13 @@ describe("the broken state", () => {
 });
 
 describe("the arriving state", () => {
-  it("draws the arriving indicator", () => {
+  it("draws no arriving indicator: a streaming response shows its prose only", () => {
     const el = drawFeedResponse(
       response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
       rowContext(),
     );
-    expect(el.querySelector(".response-arriving")).not.toBeNull();
+    expect(el.querySelector(".response-arriving")).toBeNull();
+    expect(el.querySelector(".animated-ellipsis")).toBeNull();
   });
 
   it("shows nothing of a first-seen response before the first frame", () => {
@@ -520,7 +520,7 @@ describe("the notice register", () => {
   });
 
   // The arriving state is excluded here on purpose: its prose is PACED, so at
-  // draw time the body holds only the arriving indicator (the state's own suite
+  // draw time the body is empty (nothing revealed yet; the state's own suite
   // covers the type-out). The next test asserts the notice leaves that pacing
   // alone.
   it.each(["success", "error"])("draws the prose itself in the %s state, notice or not", (arm) => {
@@ -542,7 +542,10 @@ describe("the notice register", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
+    // The notice is drawn, and the arriving prose is still PACED (nothing
+    // revealed yet at draw time) — the notice does not disturb the type-out.
+    expect(el.classList.contains("response-notice")).toBe(true);
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("0");
   });
 
   it.each(STATES)("marks no notice on an ordinary %s response", (arm) => {
@@ -657,7 +660,7 @@ describe("a host with no animation frames", () => {
     ]).toEqual(["hello world", String("hello world".length)]);
   });
 
-  it("still wears the arriving indicator, since the prose has not settled", () => {
+  it("wears no arriving indicator even with no animation frames", () => {
     // Arrange
     vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
@@ -665,8 +668,10 @@ describe("a host with no animation frames", () => {
       response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
       rowContext(),
     );
-    // Assert
-    expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
+    // Assert — the whole prose is on screen and no indicator node was appended.
+    expect(el.querySelector(".bubble-body")?.textContent).toContain("typing");
+    expect(el.querySelector(".response-arriving")).toBeNull();
+    expect(el.querySelector(".animated-ellipsis")).toBeNull();
   });
 });
 
@@ -775,31 +780,31 @@ describe("the wrapped tree a settled response carries", () => {
     );
   });
 
-  it("marks a settled tree bubble to fill its width cap, so it does not shrink narrow", () => {
+  it("does not pin a settled tree bubble to the cap; it shrinks to fit", () => {
     // Arrange / Act — a settled response that drew a metaprompt tree.
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
-    // Assert — the bubble is stamped to fill the cap (the stylesheet turns the
-    // class into `width: <cap>`), so `fit-content` cannot collapse the wrapped
-    // tree below its 77% cap.
+    // Assert — the tree drew, but the bubble carries NO full-cap width pin
+    // (owner ruling 2026-09-15, reversing the fill-cap): it stays fit-content
+    // so it shrinks to its widest wrapped line, capped at 77%.
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("leaves a plain-prose bubble at fit-content, so a short answer may still shrink", () => {
+  it("leaves a plain-prose bubble unpinned too, so a short answer may still shrink", () => {
     // Arrange / Act — prose with no tree.
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
       rowContext(),
     );
-    // Assert — no fill-cap marker: the invariant fills only content that WRAPS.
+    // Assert — no full-cap pin: every response bubble is fit-content capped.
     expect(el.querySelector(".mp-tree")).toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(false);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("marks a cut-short (error) bubble that drew a tree to fill the cap too", () => {
+  it("does not pin a cut-short (error) tree bubble to the cap", () => {
     // Arrange / Act — the error arm also paints through paintWhole.
     const el = drawFeedResponse(
       response({ result: { case: "error", value: { prose: { markdown: SHOWCASE_TREE } } } }),
@@ -807,10 +812,10 @@ describe("the wrapped tree a settled response carries", () => {
     );
     // Assert
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("marks an arriving (update) tree bubble to fill the cap as the tree streams in", () => {
+  it("does not pin an arriving (update) tree bubble to the cap as it streams in", () => {
     // Arrange — no animation frames, so the arriving draw paints the whole prose
     // at once (the same trick the streaming/settled-identical test uses).
     vi.stubGlobal("requestAnimationFrame", undefined);
@@ -821,10 +826,10 @@ describe("the wrapped tree a settled response carries", () => {
     );
     // Assert
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
+    expect(el.classList.contains("bubble-fill-cap")).toBe(false);
   });
 
-  it("resolves a fill-cap tree bubble's width to the cap, beating fit-content in the cascade", () => {
+  it("resolves a tree bubble's width to fit-content, capped at 77%, never a full-cap pin", () => {
     // Arrange — the real stylesheet installed, a settled tree bubble attached so
     // getComputedStyle resolves the cascade against it.
     const teardown = installStylesheet();
@@ -834,12 +839,13 @@ describe("the wrapped tree a settled response carries", () => {
         rowContext(),
       );
       document.body.appendChild(el);
-      // Act — the winning `width` (a literal 77%, so it resolves as-is).
+      // Act — the winning `width` and the ceiling.
       const width = cascadedValue(el, "width");
-      // Assert — the cap, never the base rule's `fit-content`.
-      expect(el.classList.contains(FILL_CAP_CLASS)).toBe(true);
-      expect(width).toBe("77%");
-      expect(width).not.toBe("fit-content");
+      const maxWidth = cascadedValue(el, "max-width");
+      // Assert — fit-content up to the 77% cap, never pinned at the cap width.
+      expect(width).toBe("fit-content");
+      expect(width).not.toBe("77%");
+      expect(maxWidth).toBe("77%");
       el.remove();
     } finally {
       teardown();
@@ -1164,6 +1170,28 @@ describe("the columns the tree wraps to are measured against the bubble cap", ()
     expect(after).toBe(before);
   });
 
+  it("keeps the column budget cap-derived when the pin is gone and the bubble shrinks to fit", () => {
+    // Arrange — the shrink-to-fit change (owner ruling 2026-09-15): with the
+    // `bubble-fill-cap` width pin removed, a tree bubble now collapses to its
+    // widest wrapped line, far below the 77% cap. The tree budget must still be
+    // measured from the CAP (the containing block), never the shrunk width, or
+    // the shrink would feed a re-wrap and oscillate.
+    const body = stage({ maxWidth: "77%", containingWidth: 1000, bubbleOuter: 760, bodyClientWidth: 750 });
+    const atCap = measureTreeCols(body);
+    // Act — the bubble collapses hard to its widest line (a genuine fit-content
+    // shrink the pin used to prevent); measure a SECOND time.
+    const bubble = body.closest<HTMLElement>(".bubble");
+    if (bubble === null) throw new Error("no bubble");
+    bubble.getBoundingClientRect = () => rect(300);
+    Object.defineProperty(body, "clientWidth", { value: 290, configurable: true });
+    const afterShrink = measureTreeCols(body);
+    // Assert — the second measure equals the first: the budget is cap-derived
+    // (77% of the 1000px containing block, minus the constant chrome insets),
+    // so shrinking the bubble cannot change the column count and nothing
+    // oscillates.
+    expect(afterShrink).toBe(atCap);
+  });
+
   it("does not re-wrap a settled tree when only the bubble's own fit-content width changes", () => {
     // Arrange — a settled response with a tree; its reflow observer is wired at
     // draw (when the bubble is still detached, so it starts at the default
@@ -1347,12 +1375,11 @@ describe("the record of the drawn response", () => {
  * did not change keep their identity so the reader sees no teardown.
  */
 describe("the incremental reveal reconciles the prose without rebuilding it", () => {
-  /** The body's prose HTML with the arriving ellipsis stripped, so it compares
-   * against the whole-render oracle, which carries none. */
+  /** The body's prose HTML, compared against the whole-render oracle. The
+   * streaming reveal carries no trailing indicator node, so it is exactly the
+   * oracle's markup. */
   function prose(body: HTMLElement): string {
-    const clone = body.cloneNode(true) as HTMLElement;
-    clone.querySelector(".response-arriving")?.remove();
-    return clone.innerHTML;
+    return body.innerHTML;
   }
 
   it("ends the reveal byte-identical to the whole-render oracle", () => {
@@ -1499,7 +1526,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     expect(lenAfter).toBeGreaterThan(lenBefore);
   });
 
-  it("keeps the one arriving ellipsis as the same last node across frames", () => {
+  it("appends no arriving ellipsis on any frame of the reveal", () => {
     // Arrange
     const el = drawFeedResponse(
       response({ result: { case: "update", value: { prose: { markdown: "some words arriving over frames" } } } }),
@@ -1509,13 +1536,14 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     const body = el.querySelector<HTMLElement>(".bubble-body");
     if (body === null) throw new Error("no bubble body");
     vi.advanceTimersByTime(16);
-    const ellipsisBefore = body.querySelector(".response-arriving");
+    // Assert — no indicator on the first frame...
+    expect(body.querySelector(".response-arriving")).toBeNull();
+    expect(body.querySelector(".animated-ellipsis")).toBeNull();
     // Act — a few more frames of reconciliation.
     vi.advanceTimersByTime(48);
-    // Assert — the ellipsis survived every reconcile as the SAME node and is
-    // still the body's last child (so its animation was never restarted).
-    expect(body.querySelector(".response-arriving")).toBe(ellipsisBefore);
-    expect(body.lastChild).toBe(ellipsisBefore);
+    // Assert — ...and none after further frames either.
+    expect(body.querySelector(".response-arriving")).toBeNull();
+    expect(body.querySelector(".animated-ellipsis")).toBeNull();
   });
 
   it("carries no arriving ellipsis once the response has settled", () => {

@@ -149,6 +149,13 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
+  /* The border around a THINKING response bubble: light orange, worn by the
+     agent's intermediate reasoning bubbles (never a final answer, partial or
+     whole). Distinct from the green --final-response an answer wears and from
+     the deep-orange --compact-rule and amber --async, so an in-progress
+     reasoning card reads as its own state. Same 0.3px thickness the base bubble
+     reserves; only the color lands here. */
+  --thinking-border: #fb923c;
   /* The border around the response the reader has SELECTED to reply to
      (reply-to-a-past-response mode): blue, distinct from the green a final
      answer wears at rest, so the one bubble the next prompt will quote is
@@ -335,6 +342,9 @@
     --compact-rule: #f97316;
     --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
+    /* Lighter orange for the dark theme, as the other state borders lift, so
+       the thinking hairline still reads against the dark purple fill. */
+    --thinking-border: #fdba74;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
@@ -1649,26 +1659,20 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
   margin-right: auto;
 }
-/* THE WIDTH INVARIANT: a bubble whose content WRAPS fills the max-width cap
-   (owner ruling, 2026-09-15). `response.ts` stamps FILL_CAP_CLASS on a bubble
-   whose body drew a metaprompt tree — `white-space: pre` content pre-wrapped to
-   the cap's own column budget (measureTreeCols). fit-content sizes a bubble to
-   its widest RENDERED line, and a wrapped tree's longest physical line sits well
-   below the cap, so the whole bubble collapsed narrow though it had wrapped
-   WITHIN budget (tool cards fill ~82.5% while a tree bubble rendered far
-   narrower — the owner-confirmed under-fill). Pinning `width` AT the cap makes
-   the wrapped tree fill the box; it can never exceed the cap because it was
-   wrapped to exactly that budget (and `.mp-tree` keeps its own overflow-x guard
-   for any rounding). Plain prose carries no tree, keeps fit-content, and MAY
-   still shrink below the cap — which is correct: the invariant is that content
-   which WRAPS fills to the cap, not that every bubble is cap-wide.
-   The 77% here MUST equal the two `max-width: 77%` caps (`.bubble.assistant`
-   above and `.bubble.user`); styles.test.ts guards the two against drift. This
-   rule sits AFTER both bubble rules so its equal (0,2,0) specificity wins on
-   source order over their `width: fit-content`. */
-.bubble.bubble-fill-cap {
-  width: 77%;
-}
+/* SHRINK-TO-FIT, CAPPED AT THE MAX (owner ruling, 2026-09-15, reversing the
+   fill-cap pin of the same date). Every response/prompt bubble sizes to its
+   widest RENDERED line plus its padding via `width: fit-content`
+   (`.bubble.assistant`/`.bubble.user` above), capped at the `max-width: 77%`
+   ceiling — for ALL bubbles, INCLUDING those whose body drew a metaprompt tree.
+   The tree is `white-space: pre`, pre-wrapped to the cap's own column budget
+   (`measureTreeCols`), so its longest physical line never exceeds the cap and
+   the bubble shrinks to that line rather than sitting pinned at the full cap.
+   Wrapping stays STABLE while the bubble shrinks because the tree's column
+   budget derives from the CAP (the bubble's resolved max-width against its
+   containing block, `resolveMaxWidthPx`), never from the bubble's shrunk
+   current width — so a shrink cannot feed back into a re-wrap. The old
+   `.bubble.bubble-fill-cap { width: 77% }` pin and its `markFillCap` stamping
+   are gone. */
 /* The answer the turn landed on, as against the commentary above it. Only
    the border color changes, so the 0.3px the base reserved stays laid out.
    `:not(.thinking-bubble)` keeps the GREEN reserved for a concluded answer:
@@ -1679,11 +1683,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .bubble.assistant.final-response:not(.thinking-bubble) { border-color: var(--final-response); }
 /* THE THINKING BUBBLE: the agent's intermediate reasoning, one bubble per
    reasoning block. Purple fill (the same --assistant wash the response bubble
-   wears) and explicitly NON-BORDERED — the base bubble's 0.3px stays
-   transparent, and the green final-answer border is excluded above — so it
-   reads as a quiet in-progress purple card distinct from the answer. Nothing
-   else about the response bubble changes. */
-.bubble.assistant.thinking-bubble { border-color: transparent; }
+   wears) and always a LIGHT ORANGE border (owner ruling 2026-09-15) at the
+   SAME 0.3px thickness the base bubble reserves — only the border COLOR lands
+   here, so there is no reflow. The green final-answer border is excluded above
+   (`:not(.thinking-bubble)`), so an intermediate reasoning bubble can NEVER
+   wear the green answer border; and a partial-final response (an in-construction
+   answer that is NOT a thinking bubble) never matches this rule, so it stays
+   borderless until it becomes the green final answer. */
+.bubble.assistant.thinking-bubble { border-color: var(--thinking-border); }
 /* The SELECTED final response (reply-to-a-past-response mode): blue in place of
    the green. Declared after the green rule and at higher specificity (it adds
    `.response-selected`), so the selected bubble reads blue while selected and
@@ -4453,11 +4460,6 @@ body.draining #composer-input::placeholder {
   .usage-ago {
     transition: none;
   }
-}
-/* The arriving indicator trails the prose that has landed so far. The dots are
-   the same animated ellipsis every other live face uses. */
-.response-arriving {
-  margin-left: 0.15rem;
 }
 /* A bubble the turn's death cut short: the border says it and the marker names
    it. WHY it died is the turn's terminal row, never this bubble's, so the

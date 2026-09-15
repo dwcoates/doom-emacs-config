@@ -96,37 +96,6 @@ export const REVEALED_ATTRIBUTE = "data-revealed";
 export const THINKING_BUBBLE_CLASS = "thinking-bubble";
 
 /**
- * The class that pins a bubble AT its max-width cap when its content WRAPPED.
- *
- * THE WIDTH INVARIANT (owner ruling, 2026-09-15): a bubble whose content wraps
- * must render at the cap, not shrink below it. The metaprompt tree is
- * `white-space: pre`, pre-wrapped to the cap's own column budget
- * (`measureTreeCols`), so its longest PHYSICAL line sits well below the cap —
- * and `width: fit-content` (`.bubble.assistant`/`.bubble.user`) then collapses
- * the whole bubble to that short line, so the bubble looked much narrower than
- * its 77% cap even though it had wrapped WITHIN budget (the owner-confirmed
- * under-fill: tool cards fill ~82.5%, a tree bubble rendered far narrower). The
- * stylesheet turns this class into `width: <cap>` so the wrapped tree fills the
- * box; it can never exceed the cap because it was wrapped to exactly that budget.
- * Plain prose carries no tree and keeps `fit-content`, so a short answer still
- * shrinks — which is correct.
- */
-export const FILL_CAP_CLASS = "bubble-fill-cap";
-
-/**
- * Mark (or unmark) BODY's bubble to fill the cap: on exactly when the body drew
- * a wrapped metaprompt tree. Re-evaluated on every (re)paint — a settle, a
- * resize re-wrap, or a stream frame can add or drop the tree — and idempotent,
- * so it is safe to call each frame. `closest` walks the parent chain whether or
- * not the bubble is attached yet, so it works at synchronous first paint.
- */
-function markFillCap(body: HTMLElement): void {
-  const bubble = body.closest<HTMLElement>(".bubble");
-  if (bubble === null) return;
-  bubble.classList.toggle(FILL_CAP_CLASS, body.querySelector(".mp-tree") !== null);
-}
-
-/**
  * How many prose blocks one response row draws.
  *
  * The daemon folds every fragment of a response into ONE bubble row and
@@ -286,7 +255,6 @@ export function drawFeedResponseUpdate(
     operation: "feed.cards.response.update",
     context: { path, length: markdown.length, resumed },
   });
-  body.appendChild(arrivingIndicator());
   animate(bubble, body, markdown, resumed, rc);
   return markdown.length;
 }
@@ -653,13 +621,11 @@ function reflowOnResize(body: HTMLElement, repaint: (cols: number) => void, init
 function paintWhole(body: HTMLElement, markdown: string): void {
   const cols = measureTreeCols(body);
   body.innerHTML = proseHtml(markdown, cols);
-  markFillCap(body);
   if (body.querySelector(".mp-tree") !== null) {
     reflowOnResize(
       body,
       (next) => {
         body.innerHTML = proseHtml(markdown, next);
-        markFillCap(body);
       },
       cols,
     );
@@ -687,14 +653,6 @@ export function revealedSoFar(previous: HTMLElement | undefined, length: number)
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.min(parsed, length);
-}
-
-/** The "still arriving" indicator: the animated ellipsis every live face wears. */
-function arrivingIndicator(): HTMLElement {
-  const dots = document.createElement("span");
-  dots.className = "animated-ellipsis response-arriving";
-  dots.setAttribute("aria-hidden", "true");
-  return dots;
 }
 
 /** The broken bubble's marker. The WHY is the turn's terminal row. */
@@ -729,9 +687,10 @@ function cutShortMarker(): HTMLElement {
  * result is byte-identical to a fresh `proseHtml(slice, cols)` — the same string
  * `paintWhole` writes in one shot.
  *
- * TAIL, when given, is a node kept as PARENT's last child (the arriving
- * indicator): it is never matched against the target and never removed, so the
- * prose reconciles ahead of it and it stays put.
+ * TAIL, when given, is a node kept as PARENT's last child: it is never matched
+ * against the target and never removed, so the prose reconciles ahead of it and
+ * it stays put. The streaming reveal passes `null` (no trailing node), and the
+ * in-place tree line-diff (`patchNode`) does too.
  */
 export function reconcileChildren(parent: Node, target: Node, tail: Node | null): void {
   const goal = Array.from(target.childNodes);
@@ -837,11 +796,6 @@ function animate(
       cols,
     );
   };
-  // The arriving indicator is a STABLE node kept as the body's last child across
-  // every frame (drawFeedResponseUpdate appended it before this ran). Reusing
-  // the one node — never minting a fresh ellipsis per frame — keeps its CSS
-  // animation running unbroken and keeps it out of the prose reconciliation.
-  const indicator = body.querySelector<HTMLElement>(".response-arriving") ?? arrivingIndicator();
   const paint = (shown: number): void => {
     lastShown = shown;
     // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
@@ -860,12 +814,7 @@ function animate(
     // frame. This is a watch flag, not a lock.
     const target = document.createElement("div");
     target.innerHTML = proseHtml(markdown.slice(0, shown), cols);
-    reconcileChildren(body, target, indicator);
-    if (indicator.parentNode !== body || body.lastChild !== indicator) body.appendChild(indicator);
-    // Fill the cap the moment the arriving prose has wrapped a tree, so a
-    // streaming tree bubble fills its cap frame-by-frame rather than snapping
-    // to it only at settle.
-    markFillCap(body);
+    reconcileChildren(body, target, null);
     markRevealed(bubble, shown);
     wireReflow();
   };
