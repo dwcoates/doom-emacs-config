@@ -117,6 +117,10 @@ export function readHistoryRequest(): shimv1.ReadHistoryRequest {
   });
 }
 
+export function gatherTitleDigestRequest(): shimv1.GatherTitleDigestRequest {
+  return create(shimv1.GatherTitleDigestRequestSchema, {});
+}
+
 export function getWorkflowRequest(): shimv1.GetWorkflowRequest {
   return create(shimv1.GetWorkflowRequestSchema, {
     work: create(conversationv1.DetachedWorkIdSchema, { value: "w1" }),

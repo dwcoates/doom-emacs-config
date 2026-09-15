@@ -25,6 +25,7 @@ import { shimv1 } from "../proto.js";
 import { internalFromUnknown, unimplemented } from "./failures.js";
 import {
   validateDetachForegroundRequest,
+  validateGatherTitleDigestRequest,
   validateHibernateRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
@@ -267,6 +268,14 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("ReadHistory");
         validateReadHistoryRequest(request);
         return answering("ReadHistory", () => engine.readHistory(request));
+      },
+
+      // ---- Title digest ----
+
+      async gatherTitleDigest(request) {
+        entered("GatherTitleDigest");
+        validateGatherTitleDigestRequest(request);
+        return answering("GatherTitleDigest", () => engine.gatherTitleDigest(request));
       },
     });
   };

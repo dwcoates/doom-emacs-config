@@ -110,6 +110,17 @@ export interface Engine {
   /** One page of one agent's durable past, newest first. */
   readHistory(request: shimv1.ReadHistoryRequest): Promise<shimv1.ReadHistoryResponse>;
 
+  // ---- Title digest ----
+
+  /**
+   * The material for a synthesized workspace title: the user's prompts since
+   * the last context boundary, plus the compaction summary when that boundary
+   * was a /compact. Read from the transcript the shim owns.
+   */
+  gatherTitleDigest(
+    request: shimv1.GatherTitleDigestRequest,
+  ): Promise<shimv1.GatherTitleDigestResponse>;
+
   // ---- Process lifecycle ----
 
   /**
@@ -194,6 +205,10 @@ export class NotImplementedEngine implements Engine {
 
   readHistory(): Promise<shimv1.ReadHistoryResponse> {
     return Promise.reject(unimplemented("ReadHistory"));
+  }
+
+  gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {
+    return Promise.reject(unimplemented("GatherTitleDigest"));
   }
 
   /**
