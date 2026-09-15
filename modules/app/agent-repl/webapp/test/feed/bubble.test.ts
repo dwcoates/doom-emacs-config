@@ -5,6 +5,7 @@ import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
 import { mountBubble } from "../../src/feed/bubble.js";
+import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { installStylesheet } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
@@ -1001,3 +1002,73 @@ describe("mountBubble: the caret's own view rule", () => {
   });
 });
 
+// THE TOKEN COUNT RIDES THE HEAD (owner ruling, 2026-09-14). The subagent head
+// carries the daemon's running/settled token sum, and the head is what the
+// bubble draws ABOVE its sub-feed in EVERY fold state -- collapse hides the
+// panel, never the head -- so the figure stands whether the bubble is collapsed
+// or expanded, and a re-push redraws the head with the grown total. These mount
+// the REAL subagent head (not the stub the other suites use) to hold that.
+describe("mountBubble: the head carries the subagent's token count", () => {
+  /** The FeedSubagent inside a fixture subagent row. */
+  function subagentOf(row: FeedRow) {
+    if (row.row.case === "activity" && row.row.value.unit.case === "subagent") {
+      return row.row.value.unit.value;
+    }
+    throw new Error("fixture is not a synchronous subagent row");
+  }
+
+  /** Mount a bubble whose head is the real subagent head. */
+  function mountReal(row: FeedRow, h: Harness = harness()) {
+    const bubble = mountBubble({
+      ctx: h.ctx,
+      row,
+      rc: rowContext(h.ctx, row),
+      head: (r, rc) => drawFeedSubagent(subagentOf(r), rc),
+      body: defaultBubbleBody,
+      renderers: stubRenderers(),
+      revealRow: async () => false,
+      bubble: () => {
+        throw new Error("no nested bubble in this fixture");
+      },
+      initialFolded: true,
+    });
+    document.body.replaceChildren(bubble.element);
+    return { bubble, h };
+  }
+
+  /** The panel the sub-feed opens into. */
+  function panelOf(bubble: { element: HTMLElement }): HTMLElement {
+    const panel = bubble.element.querySelector<HTMLElement>("[data-subfeed]");
+    if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
+    return panel;
+  }
+
+  it("shows the token count while the bubble is collapsed", () => {
+    // Arrange / Act: a fresh bubble starts collapsed.
+    const { bubble } = mountReal(subagentRow("b1", { tokens: "12.4k tok" }));
+    // Assert: the head carries the figure with the panel still shut.
+    expect(bubble.isExpanded()).toBe(false);
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("12.4k tok");
+  });
+
+  it("keeps the token count on the head once the bubble is expanded", async () => {
+    // Arrange
+    const { bubble } = mountReal(subagentRow("b1", { tokens: "12.4k tok" }));
+    // Act: open the sub-feed.
+    await bubble.expand();
+    await settle();
+    // Assert: the head -- above the now-shown panel -- still carries the figure.
+    expect(panelOf(bubble).hidden).toBe(false);
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("12.4k tok");
+  });
+
+  it("redraws the head with the grown total on a re-push", () => {
+    // Arrange: a live head at one total.
+    const { bubble } = mountReal(subagentRow("b1", { tokens: "1.0k tok" }));
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("1.0k tok");
+    // Act: the same subagent re-pushed with a larger total.
+    bubble.update(subagentRow("b1", { tokens: "9.9k tok" }));
+    // Assert: the head shows the new figure, not the stale one.
+    expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("9.9k tok");
+  });
+});
