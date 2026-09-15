@@ -549,9 +549,119 @@ describe("convertDetached: task_updated", () => {
   });
 });
 
+/** The progress arm one task-progress beat produced, when it produced one. */
+function progressOf(entry: PersistEntry | undefined): conversationv1.AgentSubagentProgress {
+  const subagent = activityOf(entry)?.item.value as conversationv1.AgentSubagent;
+  const update = subagent.result.value as conversationv1.AgentSubagentUpdate;
+  return update.progress as conversationv1.AgentSubagentProgress;
+}
+
 describe("convertDetached: task_progress", () => {
-  it("is consumed; the unit's own frames are the account", () => {
-    expect(convert({ subtype: "task_progress", task_id: "t1" })).toEqual([]);
+  it("advances the subagent unit with the beat's running token sum", () => {
+    // A beat carrying `tool_use_id` directly (the corpus shape) joins to its
+    // spawn unit and surfaces the running total the settled frame supersedes.
+    const entries = convert({
+      subtype: "task_progress",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      usage: { total_tokens: 4_200, tool_uses: 1, duration_ms: 500 },
+    });
+
+    expect(progressOf(entries[0]).totalTokens).toBe(4_200n);
+  });
+
+  it("keys the beat to the SPAWN unit, so successive beats upsert one row", () => {
+    // The unit is `toolCallActivityId(toolUseId)` — its value is the tool-use
+    // id — exactly as the terminal keys it, so a later beat replaces this one.
+    const entries = convert({
+      subtype: "task_progress",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      usage: { total_tokens: 4_200 },
+    });
+
+    expect(activityOf(entries[0])?.activityId?.value).toBe("toolu_1");
+  });
+
+  it("carries the beat's tool-call count and elapsed wall-clock", () => {
+    const entries = convert({
+      subtype: "task_progress",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      usage: { total_tokens: 4_200, tool_uses: 3, duration_ms: 1_403 },
+    });
+
+    const progress = progressOf(entries[0]);
+    expect(progress.toolUseCount).toBe(3);
+    expect(progress.durationMs).toBe(1_403n);
+  });
+
+  it("states zero rather than inventing figures the beat omitted", () => {
+    const entries = convert({
+      subtype: "task_progress",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+    });
+
+    const progress = progressOf(entries[0]);
+    expect(progress.totalTokens).toBe(0n);
+    expect(progress.toolUseCount).toBe(0);
+    expect(progress.durationMs).toBe(0n);
+  });
+
+  it("joins to the spawn REMEMBERED from an earlier message when the beat restates no call", () => {
+    // `task_started` states the spawning call; a later beat need not restate it,
+    // so the registry supplies the join rather than the beat being dropped.
+    const registry = createTaskKindRegistry();
+    convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "local_agent" },
+      {},
+      registry,
+    );
+
+    const entries = convert(
+      { subtype: "task_progress", task_id: "t1", usage: { total_tokens: 9_000 } },
+      {},
+      registry,
+    );
+
+    expect(activityOf(entries[0])?.activityId?.value).toBe("toolu_1");
+    expect(progressOf(entries[0]).totalTokens).toBe(9_000n);
+  });
+
+  it("drops a beat that names no spawning call and none is remembered", () => {
+    expect(
+      convert({ subtype: "task_progress", task_id: "t1", usage: { total_tokens: 4_200 } }),
+    ).toEqual([]);
+  });
+
+  it("shares the spawn unit's key with the settled terminal, so the total supersedes the beat", () => {
+    // Both frames key by `activityUpsertKey(toolCallActivityId(toolUseId))`, so
+    // the notification's settled `total_only` upserts the same row the running
+    // beat did — the running figure is replaced, never left standing beside it.
+    const registry = createTaskKindRegistry();
+    const beat = convert(
+      { subtype: "task_progress", task_id: "t1", tool_use_id: "toolu_1", usage: { total_tokens: 4_200 } },
+      {},
+      registry,
+    );
+    const settle = convert(
+      {
+        subtype: "task_notification",
+        task_id: "t1",
+        tool_use_id: "toolu_1",
+        status: "completed",
+        usage: { total_tokens: 11_114 },
+      },
+      {},
+      registry,
+    );
+
+    const settledSuccess = (activityOf(settle.at(-1))?.item.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentSuccess;
+    const settledUsage = settledSuccess.totals?.usage.value as conversationv1.AgentSubagentAsyncUsage;
+    expect(beat[0]?.upsertKey).toBe(settle.at(-1)?.upsertKey);
+    expect(settledUsage.totalTokens).toBe(11_114n);
   });
 });
 
