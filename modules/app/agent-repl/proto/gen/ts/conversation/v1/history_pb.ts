@@ -13,6 +13,8 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { AgentFrame } from "./agent_pb";
 import { file_conversation_v1_agent } from "./agent_pb";
+import type { PeerMessage } from "./peer_pb";
+import { file_conversation_v1_peer } from "./peer_pb";
 import type { AgentPrompt } from "./turn_pb";
 import { file_conversation_v1_turn } from "./turn_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -21,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/history.proto.
  */
 export const file_conversation_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSJrCg5IaXN0b3J5RW50cnlBdBIrCgJhdBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlchIsCgVlbnRyeRgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnkigAEKDEhpc3RvcnlFbnRyeRIzCgt1c2VyX3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIAEIHCgVlbnRyeSJCCgtIaXN0b3J5TW9yZRIzCgpsYXN0X2VudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyIg4KDEhpc3RvcnlGbG9vciIfCg5IaXN0b3J5UG9pbnRlchINCgV2YWx1ZRgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSJrCg5IaXN0b3J5RW50cnlBdBIrCgJhdBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlchIsCgVlbnRyeRgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnkitgEKDEhpc3RvcnlFbnRyeRIzCgt1c2VyX3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIHCgVlbnRyeSJCCgtIaXN0b3J5TW9yZRIzCgpsYXN0X2VudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyIg4KDEhpc3RvcnlGbG9vciIfCg5IaXN0b3J5UG9pbnRlchINCgV2YWx1ZRgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
 
 /**
  * One page: a contiguous run of an agent's history, NEWEST FIRST, and
@@ -130,6 +132,16 @@ export type HistoryEntry = Message<"conversation.v1.HistoryEntry"> & {
      */
     value: AgentFrame;
     case: "agentFrame";
+  } | {
+    /**
+     * A message another Claude session (a peer, or a returning subagent) sent
+     * into this agent's conversation — never a person's prompt, never this
+     * agent's own work.
+     *
+     * @generated from field: conversation.v1.PeerMessage peer_message = 3;
+     */
+    value: PeerMessage;
+    case: "peerMessage";
   } | { case: undefined; value?: undefined };
 };
 

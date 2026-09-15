@@ -356,6 +356,7 @@ type StoreAgentItem struct {
 	//
 	//	*StoreAgentItem_AgentPrompt
 	//	*StoreAgentItem_AgentFrame
+	//	*StoreAgentItem_PeerMessage
 	Item          isStoreAgentItem_Item `protobuf_oneof:"item"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -416,6 +417,15 @@ func (x *StoreAgentItem) GetAgentFrame() *v1.AgentFrame {
 	return nil
 }
 
+func (x *StoreAgentItem) GetPeerMessage() *v1.PeerMessage {
+	if x != nil {
+		if x, ok := x.Item.(*StoreAgentItem_PeerMessage); ok {
+			return x.PeerMessage
+		}
+	}
+	return nil
+}
+
 type isStoreAgentItem_Item interface {
 	isStoreAgentItem_Item()
 }
@@ -428,9 +438,18 @@ type StoreAgentItem_AgentFrame struct {
 	AgentFrame *v1.AgentFrame `protobuf:"bytes,2,opt,name=agent_frame,json=agentFrame,proto3,oneof"`
 }
 
+type StoreAgentItem_PeerMessage struct {
+	// A message another Claude session sent into this agent's conversation
+	// (an inter-session peer message or a subagent hand-back). Servable and
+	// paged like a prompt; routed to the recipient's book by `peer_message.agent`.
+	PeerMessage *v1.PeerMessage `protobuf:"bytes,3,opt,name=peer_message,json=peerMessage,proto3,oneof"`
+}
+
 func (*StoreAgentItem_AgentPrompt) isStoreAgentItem_Item() {}
 
 func (*StoreAgentItem_AgentFrame) isStoreAgentItem_Item() {}
+
+func (*StoreAgentItem_PeerMessage) isStoreAgentItem_Item() {}
 
 // A detached shell run's frame, wrapped with the unit id the spawning stream
 // announced, so a reader holding the announcement resolves the run's state.
@@ -1498,7 +1517,7 @@ var File_store_v1_store_proto protoreflect.FileDescriptor
 
 const file_store_v1_store_proto_rawDesc = "" +
 	"\n" +
-	"\x14store/v1/store.proto\x12\bstore.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bconversation/v1/agent.proto\x1a$conversation/v1/agent_activity.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\x80\x02\n" +
+	"\x14store/v1/store.proto\x12\bstore.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bconversation/v1/agent.proto\x1a$conversation/v1/agent_activity.proto\x1a\x1aconversation/v1/peer.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\x80\x02\n" +
 	"\n" +
 	"StoreEntry\x12%\n" +
 	"\x05plane\x18\x01 \x01(\v2\x0f.store.v1.PlaneR\x05plane\x12\x19\n" +
@@ -1521,11 +1540,12 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"\rStorePageLine\x12<\n" +
 	"\rpage_agent_id\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\vpageAgentId\x127\n" +
 	"\n" +
-	"agent_item\x18\x02 \x01(\v2\x18.store.v1.StoreAgentItemR\tagentItem\"\x9b\x01\n" +
+	"agent_item\x18\x02 \x01(\v2\x18.store.v1.StoreAgentItemR\tagentItem\"\xde\x01\n" +
 	"\x0eStoreAgentItem\x12A\n" +
 	"\fagent_prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptH\x00R\vagentPrompt\x12>\n" +
 	"\vagent_frame\x18\x02 \x01(\v2\x1b.conversation.v1.AgentFrameH\x00R\n" +
-	"agentFrameB\x06\n" +
+	"agentFrame\x12A\n" +
+	"\fpeer_message\x18\x03 \x01(\v2\x1c.conversation.v1.PeerMessageH\x00R\vpeerMessageB\x06\n" +
 	"\x04item\"v\n" +
 	"\x0eStoreAgentBash\x122\n" +
 	"\x03run\x18\x01 \x01(\v2 .conversation.v1.AgentActivityIdR\x03run\x120\n" +
@@ -1624,10 +1644,11 @@ var file_store_v1_store_proto_goTypes = []any{
 	(*v1.AgentId)(nil),          // 22: conversation.v1.AgentId
 	(*v1.AgentPrompt)(nil),      // 23: conversation.v1.AgentPrompt
 	(*v1.AgentFrame)(nil),       // 24: conversation.v1.AgentFrame
-	(*v1.AgentActivityId)(nil),  // 25: conversation.v1.AgentActivityId
-	(*v1.AgentBash)(nil),        // 26: conversation.v1.AgentBash
-	(*v1.AgentWorkflow)(nil),    // 27: conversation.v1.AgentWorkflow
-	(*structpb.Struct)(nil),     // 28: google.protobuf.Struct
+	(*v1.PeerMessage)(nil),      // 25: conversation.v1.PeerMessage
+	(*v1.AgentActivityId)(nil),  // 26: conversation.v1.AgentActivityId
+	(*v1.AgentBash)(nil),        // 27: conversation.v1.AgentBash
+	(*v1.AgentWorkflow)(nil),    // 28: conversation.v1.AgentWorkflow
+	(*structpb.Struct)(nil),     // 29: google.protobuf.Struct
 }
 var file_store_v1_store_proto_depIdxs = []int32{
 	6,  // 0: store.v1.StoreEntry.plane:type_name -> store.v1.Plane
@@ -1642,31 +1663,32 @@ var file_store_v1_store_proto_depIdxs = []int32{
 	3,  // 9: store.v1.StorePageLine.agent_item:type_name -> store.v1.StoreAgentItem
 	23, // 10: store.v1.StoreAgentItem.agent_prompt:type_name -> conversation.v1.AgentPrompt
 	24, // 11: store.v1.StoreAgentItem.agent_frame:type_name -> conversation.v1.AgentFrame
-	25, // 12: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
-	26, // 13: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
-	22, // 14: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
-	27, // 15: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
-	7,  // 16: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
-	8,  // 17: store.v1.Plane.file:type_name -> store.v1.PlaneFile
-	3,  // 18: store.v1.StoreUnservedItem.keepalive:type_name -> store.v1.StoreAgentItem
-	10, // 19: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
-	11, // 20: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
-	12, // 21: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
-	28, // 22: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
-	28, // 23: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
-	0,  // 24: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
-	14, // 25: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
-	15, // 26: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
-	2,  // 27: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
-	15, // 28: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
-	16, // 29: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
-	17, // 30: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
-	18, // 31: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	25, // 12: store.v1.StoreAgentItem.peer_message:type_name -> conversation.v1.PeerMessage
+	26, // 13: store.v1.StoreAgentBash.run:type_name -> conversation.v1.AgentActivityId
+	27, // 14: store.v1.StoreAgentBash.frame:type_name -> conversation.v1.AgentBash
+	22, // 15: store.v1.StoreAgentWorkflow.run:type_name -> conversation.v1.AgentId
+	28, // 16: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
+	7,  // 17: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
+	8,  // 18: store.v1.Plane.file:type_name -> store.v1.PlaneFile
+	3,  // 19: store.v1.StoreUnservedItem.keepalive:type_name -> store.v1.StoreAgentItem
+	10, // 20: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
+	11, // 21: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
+	12, // 22: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
+	29, // 23: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
+	29, // 24: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
+	0,  // 25: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
+	14, // 26: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
+	15, // 27: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
+	2,  // 28: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
+	15, // 29: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
+	16, // 30: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
+	17, // 31: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
+	18, // 32: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_store_proto_init() }
@@ -1687,6 +1709,7 @@ func file_store_v1_store_proto_init() {
 	file_store_v1_store_proto_msgTypes[3].OneofWrappers = []any{
 		(*StoreAgentItem_AgentPrompt)(nil),
 		(*StoreAgentItem_AgentFrame)(nil),
+		(*StoreAgentItem_PeerMessage)(nil),
 	}
 	file_store_v1_store_proto_msgTypes[6].OneofWrappers = []any{
 		(*Plane_Stream)(nil),
