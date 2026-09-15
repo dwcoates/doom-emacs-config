@@ -165,6 +165,18 @@ type Resolver interface {
 	// scrolling back must find.
 	ResolveColdGate(ws ids.WorkspaceID, remediation *conversationv1.SessionColdRemediation) *frontendv1.FeedId
 
+	// FinalResponses answers the workspace's ordered selectable final-response
+	// rows — the ones drawn with the green final-answer border, oldest first —
+	// for reply-to-a-past-response mode. The server owns the selection cursor
+	// over this set; the resolver owns the set itself, because it draws the
+	// border. Empty is "no final responses yet", never an error.
+	FinalResponses(ws ids.WorkspaceID) []*frontendv1.FeedId
+	// ResponseMarkdown answers the settled markdown of one selectable final
+	// response, and whether the feedid is selectable at all. A miss is a
+	// feedid the daemon does not deem selectable — the submit path refuses it
+	// rather than delivering an empty reply prefix.
+	ResponseMarkdown(ws ids.WorkspaceID, id *frontendv1.FeedId) (string, bool)
+
 	// MintSubFeedHead records a bubble row's sub-feed so pages opened on it
 	// resolve their breadcrumbs. The resolver calls it for subagent bubbles
 	// itself; the merge orchestrator calls it for the merge head it

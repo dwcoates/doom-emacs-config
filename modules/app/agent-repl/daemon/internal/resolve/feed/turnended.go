@@ -151,6 +151,13 @@ func (r *resolver) concludedOutcome(s *wsState, success *conversationv1.AgentSuc
 			if id, ok := s.answerRows[answer]; ok {
 				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id, ok := s.answerRows[answer]; ok"})
 				concluded.Answer = id
+				// THE GREEN FINAL-ANSWER ROW BECOMES SELECTABLE HERE, at the
+				// one site that names it — reply-to-a-past-response mode walks
+				// exactly the rows drawn with that border. Recorded append-once
+				// (the terminal replays across planes) so the selectable set
+				// carries each answer once, in conclusion order, which is
+				// root-feed order.
+				r.recordFinalAnswer(s, id, answer)
 			}
 		}
 		return concludedArm(concluded)

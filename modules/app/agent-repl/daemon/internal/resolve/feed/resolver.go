@@ -185,6 +185,28 @@ type wsState struct {
 	// conclusion can name its answering row.
 	answerRows map[string]*frontendv1.FeedId
 
+	// finalAnswers is the ORDERED list of this workspace's root-feed
+	// final-response rows — the rows a concluded turn named as its answer, the
+	// ones the webapp draws with the GREEN final-answer border. It is the
+	// selectable set reply-to-a-past-response mode walks (SelectResponse), in
+	// feed order: a turn concludes after its rows are drawn, so conclusion
+	// order IS root-feed order. Subagent terminals never reach the conclusion
+	// site (drawTerminal returns early when turn is nil), so only the main
+	// turn's answers land here.
+	finalAnswers []*frontendv1.FeedId
+	// finalAnswerSeen dedupes finalAnswers by FeedId value: a turn's terminal
+	// replays across planes (history then live, the file plane after the
+	// stream plane), and the same answer row must be appended once, not once
+	// per replay.
+	finalAnswerSeen map[string]bool
+	// answerMarkdown copies each final-response row's settled markdown, keyed
+	// by its FeedId value, so a reply-to-a-past-response submission can PREPEND
+	// the referenced response verbatim without re-walking the fold. It holds
+	// only the selectable finals, so a lookup that misses is a feedid the
+	// daemon does not deem selectable — the submit path's refusal, never a
+	// silent empty prefix.
+	answerMarkdown map[string]string
+
 	// apiResponseSeq numbers the API responses observed so far; a unit
 	// arriving with usage opens the next one.
 	apiResponseSeq uint64
@@ -427,6 +449,8 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		directiveTurns:       map[ids.TurnID]bool{},
 		directiveUnits:       map[string]bool{},
 		answerRows:           map[string]*frontendv1.FeedId{},
+		finalAnswerSeen:      map[string]bool{},
+		answerMarkdown:       map[string]string{},
 
 		unitAPIResponse:  map[string]uint64{},
 		apiResponseUsage: map[uint64]string{},
