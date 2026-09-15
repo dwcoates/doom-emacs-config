@@ -355,6 +355,15 @@ describe("the footer status wave's stylesheet contract", () => {
     return reducedMotionSplit().rest;
   }
 
+  /**
+   * The full body of the `@keyframes pfooter-status-color` block. The spectrum
+   * sweep has many stops, so the body is captured up to the closing brace on its
+   * own line rather than by the two-stop pattern the lighten keyframe used.
+   */
+  function colorKeyframeBody(): string {
+    return /@keyframes pfooter-status-color \{([\s\S]*?)\n\}/.exec(stylesheet)?.[1] ?? "";
+  }
+
   it("scales the letter rather than resizing it, so the word's width never moves", () => {
     // Arrange / Act
     const keyframes = /@keyframes pfooter-status-wave \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1];
@@ -430,26 +439,49 @@ describe("the footer status wave's stylesheet contract", () => {
 
   it("rests each letter at its arm tone (currentColor), so a letter is never transparent", () => {
     // Arrange / Act
-    const keyframes = /@keyframes pfooter-status-color \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    const keyframes = colorKeyframeBody();
 
-    // Assert — the from-stop is the inherited arm colour, legible at rest.
-    expect(keyframes).toMatch(/from\s*\{\s*color:\s*currentColor/);
+    // Assert — the 0% stop is the inherited arm colour, legible at rest, so a
+    // letter caught stopped shows the arm tone rather than a mid-spectrum hue.
+    expect(keyframes).toMatch(/0%\s*\{\s*color:\s*currentColor/);
   });
 
-  it("brightens toward a lighter band, never toward transparent", () => {
+  it("returns to the arm tone at the end of each pass, not to a random hue", () => {
     // Arrange / Act
-    const keyframes = /@keyframes pfooter-status-color \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    const keyframes = colorKeyframeBody();
 
-    // Assert — the to-stop mixes currentColor with white, an opaque colour.
-    expect(keyframes).toMatch(/to\s*\{\s*color:\s*color-mix\(in srgb, currentColor .+ #ffffff\)/);
+    // Assert — the 100% stop is currentColor too, so `alternate` departs from
+    // and returns to the arm tone rather than snapping between two hues.
+    expect(keyframes).toMatch(/100%\s*\{\s*color:\s*currentColor/);
+  });
+
+  it("sweeps the full spectrum, not a single-hue lighten", () => {
+    // Arrange / Act — the distinct HSL hues the running sweep steps through.
+    const keyframes = colorKeyframeBody();
+    const hues = new Set([...keyframes.matchAll(/hsl\((\d+)\s/g)].map((m) => Number(m[1])));
+
+    // Assert — a rainbow of many hues (red..violet), never the old lone lighten.
+    expect(keyframes).not.toMatch(/color-mix/);
+    expect(hues.size).toBeGreaterThanOrEqual(5);
+  });
+
+  it("keeps every keyframe stop a fully opaque colour, never transparent", () => {
+    // Arrange / Act — every stop is currentColor or an opaque hsl(), no alpha.
+    const keyframes = colorKeyframeBody();
+    const colors = [...keyframes.matchAll(/color:\s*([^;]+);/g)].map((m) => m[1].trim());
+
+    // Assert
+    expect(colors.length).toBeGreaterThan(0);
+    for (const colour of colors) {
+      expect(colour === "currentColor" || /^hsl\(\d+ \d+% \d+%\)$/.test(colour)).toBe(true);
+    }
   });
 
   it("never clips a gradient to the word's text on the status-word path (the bug that shipped)", () => {
     // Arrange / Act — the whole letter/word path, base and reduced-motion alike.
     const word = ruleFor(stylesheet, ".pfooter-status-word") ?? "";
     const letter = ruleFor(stylesheet, ".pfooter-wave-letter") ?? "";
-    const colorKeyframes =
-      /@keyframes pfooter-status-color \{([^}]*\}[^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    const colorKeyframes = colorKeyframeBody();
 
     // Assert — none of background-clip:text, transparent text-fill, or color:transparent.
     for (const path of [word, letter, colorKeyframes]) {
@@ -471,6 +503,16 @@ describe("the footer status wave's stylesheet contract", () => {
     // Assert — stopping the animation must not park a transparent colour.
     expect(declarations).not.toMatch(/color:\s*transparent/);
     expect(declarations).not.toMatch(/-webkit-text-fill-color:\s*transparent/);
+  });
+
+  it("sets no static colour on the letter, so a stopped letter falls back to the arm tone", () => {
+    // Arrange / Act — the base rule carries only the animation, no fixed colour;
+    // with the animation stopped (reduced motion, or seeked to rest) the letter
+    // then inherits currentColor — the legible arm tone — never a keyframe hue.
+    const declarations = ruleFor(baseSheet(), ".pfooter-wave-letter") ?? "";
+
+    // Assert
+    expect(declarations).not.toMatch(/(?:^|;|\{)\s*color:/);
   });
 });
 

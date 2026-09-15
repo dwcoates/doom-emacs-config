@@ -540,6 +540,21 @@ describe("StatusWave: the footer status word's travelling letter bulge", () => {
     expect(got).toBe(STATUS_WAVE_PERIOD_MS);
   });
 
+  it("emits a reverse-pass delay on a redraw during the backward half, so the sweep reverses", () => {
+    // Arrange — the epoch is stamped, then the footer redraws one period plus a
+    // bit later: that instant is in the animation's BACKWARD iteration.
+    const wave = new StatusWave();
+    wave.delayMs(NOW, 0);
+
+    // Act — the redraw's emitted delay for the head letter.
+    const got = wave.delayMs(NOW + STATUS_WAVE_PERIOD_MS + 500, 0);
+
+    // Assert — >= one period, which seeks the rebuilt letter into the reverse
+    // (odd-parity) iteration rather than folding it back onto the forward pass.
+    expect(got).toBe(STATUS_WAVE_PERIOD_MS + 500);
+    expect(got).toBeGreaterThanOrEqual(STATUS_WAVE_PERIOD_MS);
+  });
+
   it("wraps at the end of the forward-and-back cycle", () => {
     // Arrange
     const wave = new StatusWave();
