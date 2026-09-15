@@ -206,6 +206,12 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	})
 	agent := w.watchAgentLocked(a)
 	w.sinks.Feed.OnHistoryPage(w.ws, agent, page, w.addr)
+	// A SPAWN ON THIS PAGE OWES ITS CHILD A WATCH. The page's own frames drew
+	// the commission, but the created agent's conversation lives only on the
+	// child's own book — so every spawn the page carries opens the same watch
+	// a live spawn would, and the child's page replays into its sub-feed. See
+	// watchSpawnedSubagentsOnPageLocked for the regression this repairs.
+	w.watchSpawnedSubagentsOnPageLocked(page)
 	// THE FOOTER SEES THE PAGE TOO, and for one reason only: a resumed
 	// session's prior turns are facts no edge on this daemon's streams will
 	// ever restate, so without the page the strip reports a rehydrated
@@ -495,10 +501,19 @@ func (w *watcher) watchSpawnedSubagentLocked(act *conversationv1.AgentActivity) 
 	if start == nil {
 		return
 	}
-	created := start.GetCreatedAgentId()
+	w.watchCreatedAgentLocked(start.GetCreatedAgentId(), act.GetActivityId().GetValue())
+}
+
+// watchCreatedAgentLocked opens the WatchAgent stream one spawn's created agent
+// draws on, keyed by the created agent's id so the open is idempotent: a spawn
+// already watched (a repeated live frame, a page that also carries the child's
+// own book, a child re-adopted as live work) opens no second stream. It is the
+// shared core of the two callers that name a created agent — the live spawn
+// path and the opening-page replay.
+func (w *watcher) watchCreatedAgentLocked(created *conversationv1.AgentId, activityID string) {
 	if created.GetValue() == "" {
 		w.log.Error("daemon.sessionwatcher.subagent_unaddressable", "a subagent spawn named no created agent to watch", dlog.Context{
-			"activity_id": act.GetActivityId().GetValue(),
+			"activity_id": activityID,
 		})
 		return
 	}
@@ -511,9 +526,47 @@ func (w *watcher) watchSpawnedSubagentLocked(act *conversationv1.AgentActivity) 
 	entry := &agentWatch{id: created}
 	w.agents[created.GetValue()] = entry
 	w.log.Debug("daemon.sessionwatcher.subagent_watch", "watching a spawned subagent's own stream", dlog.Context{
-		"agent_id": created.GetValue(), "activity_id": act.GetActivityId().GetValue(),
+		"agent_id": created.GetValue(), "activity_id": activityID,
 	})
 	w.openAgentStreamLocked(entry)
+}
+
+// watchSpawnedSubagentsOnPageLocked opens a WatchAgent for every created child a
+// spawn frame on an OPENING PAGE names.
+//
+// REGRESSION FIX (subagent conversation empty after resume). A subagent's own
+// conversation reaches the feed ONLY through a WatchAgent opened for the created
+// agent, and the live path opens one from every spawn frame
+// (watchSpawnedSubagentLocked from routeActivityLocked, routeDetachedWorkLocked
+// from an announcement). On RESUME neither fires: the opening page is walked by
+// routeOpeningPageLocked rather than as live frames, so a subagent that finished
+// in a prior session was neither live work nor re-watched and its book was never
+// fetched — the expanded bubble showed only the parent's commission. The child's
+// frames ARE in the store, so this is wiring, not new capture: for every spawn
+// the page carries — the in-turn spawn activity, and the detached-work
+// announcement's created arm — we open the same watch the live path would, and
+// the child's own page replays into Feed{Agent: created}. Opening is idempotent
+// (watchCreatedAgentLocked skips an already-watched agent), so this cannot
+// double a watch the main watch or live-work adoption already holds.
+func (w *watcher) watchSpawnedSubagentsOnPageLocked(page *conversationv1.HistoryPage) {
+	for _, at := range page.GetEntries() {
+		frame := at.GetEntry().GetAgentFrame()
+		if frame == nil {
+			continue
+		}
+		switch arm := frame.GetResult().(type) {
+		case *conversationv1.AgentFrame_Update:
+			if act := arm.Update.GetActivity(); act != nil {
+				w.watchSpawnedSubagentLocked(act)
+			}
+		case *conversationv1.AgentFrame_DetachedWork:
+			if sub := arm.DetachedWork.GetCreated().GetWorkCreated().GetSubagent(); sub != nil {
+				if start := sub.GetStart(); start != nil {
+					w.watchCreatedAgentLocked(start.GetCreatedAgentId(), arm.DetachedWork.GetWork().GetValue())
+				}
+			}
+		}
+	}
 }
 
 // routeTerminalLocked routes how one agent's stream ended, and reaps the watch

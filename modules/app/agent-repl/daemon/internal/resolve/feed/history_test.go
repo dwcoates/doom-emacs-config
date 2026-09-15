@@ -390,3 +390,57 @@ func TestAReplayedUpdateWithNoArmIsWarned(t *testing.T) {
 		t.Fatalf("records = %+v, want a WARN daemon.feed.history_update_unset", h.records())
 	}
 }
+
+// TestAReplayedDetachedSubagentSettlesSucceededNeverFailed locks the resume
+// guarantee behind BUG B: once the child watch (opened on resume by the session
+// watcher for a spawn on the opening page) delivers the run's head-settle, the
+// detached bubble takes the STORED outcome — a success settles Succeeded, never
+// a failed default. The delivery mirrors the store: the announcement is one page
+// line and the run's SubagentSuccess settle is another on the owner's book.
+func TestAReplayedDetachedSubagentSettlesSucceededNeverFailed(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-remote"}
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		// NEWEST FIRST: the success settle is newer than the announcement.
+		frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Activity{Activity: &conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: "work-1"},
+				Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+					Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+						CreatedAgentId: created,
+						SettledAt:      &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+					}},
+				}},
+			}},
+		}),
+		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+			Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+				WorkCreated: &conversationv1.DetachableWork{
+					Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
+						Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+							CreatedAgentId: created,
+							Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go"},
+							StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+						}},
+					}},
+				},
+			}},
+		}),
+	))
+
+	// Assert: the detached bubble is settled Succeeded, never a failed default.
+	var bubble *frontendv1.FeedSubagent
+	for _, row := range h.everyRow() {
+		if detached := row.GetDetachedSubagent(); detached != nil {
+			bubble = detached.GetSubagent()
+		}
+	}
+	if bubble == nil {
+		t.Fatalf("rows = %+v, want a detached subagent bubble", h.everyRow())
+	}
+	if bubble.GetSettled().GetSucceeded() == nil {
+		t.Fatalf("outcome = %T, want Succeeded (never a failed default)", bubble.GetSettled().GetOutcome())
+	}
+}

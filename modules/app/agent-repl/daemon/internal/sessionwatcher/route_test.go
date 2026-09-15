@@ -1052,3 +1052,92 @@ func TestRunningDetachedSubagentStaysLive(t *testing.T) {
 		t.Fatalf("live work = %v, want the still-running detached subagent", live.Agents)
 	}
 }
+
+// TestOpeningPageOpensAWatchForAnInTurnSpawnedSubagent covers the resume
+// wiring: a subagent that ran in a PRIOR session reaches this daemon only as a
+// spawn frame on the main agent's opening page, and its own conversation lives
+// on the child's book — so the page must open the child's watch, exactly as the
+// live spawn path does. Without it the expanded bubble shows only the parent's
+// commission.
+func TestOpeningPageOpensAWatchForAnInTurnSpawnedSubagent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the main agent's opening page carries an in-turn spawn.
+	h.route(h.main, pageFrame(frameEntryAt("ptr-1",
+		frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1"))))))
+
+	// Assert.
+	open := h.client.nextAgentOpen(t)
+	if open.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the opening page opened a watch on %q, want the created agent sub-1", open.req.GetTarget().GetValue())
+	}
+}
+
+// TestOpeningPageOpensAWatchForADetachedAnnouncedSubagent covers the second
+// spawn shape a page carries: a detached-work announcement's created arm names
+// the child agent the same way an in-turn spawn does, and a settled detached
+// subagent is neither live work nor re-adopted on resume, so its book is
+// fetched only if the page opens its watch.
+func TestOpeningPageOpensAWatchForADetachedAnnouncedSubagent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the opening page carries a detached-subagent announcement.
+	h.route(h.main, pageFrame(frameEntryAt("ptr-1",
+		frameDetached("main-1", createdWork("w-1", subagentWork("sub-1"))))))
+
+	// Assert.
+	open := h.client.nextAgentOpen(t)
+	if open.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the opening page opened a watch on %q, want the created agent sub-1", open.req.GetTarget().GetValue())
+	}
+}
+
+// TestOpeningPageDoesNotReopenAnAlreadyWatchedSubagent covers idempotency: a
+// spawn already watched — here by a live frame that arrived before the page —
+// opens no second stream when the page restates the same spawn.
+func TestOpeningPageDoesNotReopenAnAlreadyWatchedSubagent(t *testing.T) {
+	// Arrange: the live spawn opened sub-1's watch.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
+	h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act: the opening page restates the same spawn.
+	h.route(h.main, pageFrame(frameEntryAt("ptr-1",
+		frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1"))))))
+
+	// Assert.
+	h.client.noAgentOpen(t)
+}
+
+// TestOpeningPageOpensWatchesForNestedSpawnsRecursively covers the whole
+// subtree: a child's own opening page flows through the same routeOpeningPage
+// path, so a spawn ON the child's page opens the grandchild's watch too. This
+// is what carries a NESTED subagent's head-settle home on resume — that settle
+// is a line in the parent-subagent's book, not the main agent's, so without the
+// child watch the nested bubble restored unsettled.
+func TestOpeningPageOpensWatchesForNestedSpawnsRecursively(t *testing.T) {
+	// Arrange: the main page names child sub-1, whose watch opens.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.route(h.main, pageFrame(frameEntryAt("ptr-1",
+		frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1"))))))
+	child := h.client.nextAgentOpen(t)
+	if child.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("first open = %q, want the child sub-1", child.req.GetTarget().GetValue())
+	}
+
+	// Act: the child's OWN opening page names grandchild sub-2.
+	child.stream.send(t, pageFrame(frameEntryAt("ptr-2",
+		frameUpdate("sub-1", activityUpdate(subagentActivity("spawn-2", "sub-2"))))))
+
+	// Assert.
+	grandchild := h.client.nextAgentOpen(t)
+	if grandchild.req.GetTarget().GetValue() != "sub-2" {
+		t.Fatalf("second open = %q, want the grandchild sub-2", grandchild.req.GetTarget().GetValue())
+	}
+}
