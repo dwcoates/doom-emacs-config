@@ -64,7 +64,10 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			// a signature but no text; the proto is explicit that there is
 			// "nothing to draw but a live indicator", and the feed's live
 			// indicator is the footer's, not a bubble. So a withheld update
-			// draws nothing here rather than an empty card.
+			// draws nothing here rather than an empty card — and RETIRES the
+			// empty bubble the Start arm optimistically opened, since a block's
+			// withheld-ness is not known until this frame.
+			r.retireWithheldThinking(s, at, unit)
 			log.Debug("daemon.feed.thinking_withheld",
 				"a reasoning block is withholding its text; no thinking bubble is drawn",
 				dlog.Context{"unit": unit})
@@ -79,7 +82,11 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 		if !ok {
 			// A withheld block settles withheld: the proto says draw NOTHING
 			// once it settles, "not an empty card". An unset reasoning arm is
-			// treated the same — nothing to draw.
+			// treated the same — nothing to draw. It also RETIRES the empty
+			// bubble the Start arm opened: the stream emits Start (empty) before
+			// the assistant message settles the block withheld, so without this
+			// the empty card would stand as the block's leftover row.
+			r.retireWithheldThinking(s, at, unit)
 			log.Debug("daemon.feed.thinking_withheld_settled",
 				"a reasoning block settled withheld; no thinking bubble is drawn",
 				dlog.Context{"unit": unit})
@@ -114,4 +121,18 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			Unit: &frontendv1.FeedTurnActivity_Response{Response: bubble},
 		}},
 	}, nil
+}
+
+// retireWithheldThinking drops the empty bubble a reasoning block's Start arm
+// opened once the block reveals itself WITHHELD. The Start arm draws the empty
+// card before the block's withheld-ness can be known (the stream opens the block
+// on content_block_start and only settles it withheld when the assistant message
+// arrives), so a block that turns out to withhold its text would otherwise leave
+// that empty card standing — the empty leading bubble the owner saw. The row id
+// is deterministic from the unit, so this retires the same row the Start arm
+// drew; retire is a no-op when no bubble was ever opened (a block delivered
+// withheld from the file plane on replay, with no prior Start).
+func (r *resolver) retireWithheldThinking(s *wsState, at placement, unit string) {
+	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
+	r.retire(s, at.feed, id.GetValue())
 }
