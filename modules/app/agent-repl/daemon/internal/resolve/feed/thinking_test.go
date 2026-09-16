@@ -266,9 +266,10 @@ func TestThinkingAndResponseDrawSeparateBubbles(t *testing.T) {
 }
 
 // A WITHHELD REASONING BLOCK LEAVES NO EMPTY BUBBLE. The stream opens a thinking
-// block with a Start (which draws an empty card) before the block reveals itself
-// withheld at settle; the withheld settle must retire that card so the block
-// draws nothing at all, and the turn's real prose is the only response row and
+// block with a Start before the block reveals itself withheld at settle; because
+// the bubble is DEFERRED until the block carries content, the Start draws
+// nothing and the withheld settle draws nothing — no empty card is ever opened,
+// so none is ever retired. The turn's real prose is the only response row and
 // takes the green final answer.
 func TestAWithheldThinkingLeadingBlockLeavesOnlyTheGreenedProse(t *testing.T) {
 	// Arrange: a turn is running.
@@ -307,12 +308,18 @@ func TestAWithheldThinkingLeadingBlockLeavesOnlyTheGreenedProse(t *testing.T) {
 	if answer := h.terminalRow("turn-1").GetConcluded().GetAnswer().GetValue(); answer != prose.GetId().GetValue() {
 		t.Fatalf("green final answer = %q, want the prose row %q", answer, prose.GetId().GetValue())
 	}
+	// No empty card was ever opened, so none was retired: the withheld block is
+	// never drawn, not drawn-then-retired.
+	if h.hasRecord("debug", "daemon.feed.retire_row") {
+		t.Fatalf("a row was retired; the withheld thinking block must never draw a card to retire")
+	}
 }
 
 // A WITHHELD REASONING BLOCK BEFORE A TOOL CALL LEAVES ONLY THE TOOL CARD. The
-// message opens with a withheld thinking block and then a tool_use; the empty
-// thinking card its Start opened must be retired, so the tool card is the only
-// row and no empty response bubble precedes it.
+// message opens with a withheld thinking block and then a tool_use; because the
+// thinking bubble is DEFERRED until the block carries content, the Start opens
+// no card, so the tool card is the only row and no empty response bubble
+// precedes it.
 func TestAWithheldThinkingBlockBeforeAToolCallDrawsOnlyTheToolCard(t *testing.T) {
 	// Arrange: a turn is running.
 	h := newHarness(t)
@@ -348,11 +355,13 @@ func TestAWithheldThinkingBlockBeforeAToolCallDrawsOnlyTheToolCard(t *testing.T)
 	}
 }
 
-// A WITHHELD UPDATE RETIRES THE OPENED CARD TOO. A block can reveal itself
-// withheld on the update arm (a withheld beat before the message settles), which
-// must retire the Start arm's empty card exactly as the withheld settle does.
-func TestAWithheldThinkingUpdateRetiresTheOpenedCard(t *testing.T) {
-	// Arrange: a thinking block opened its empty card.
+// A WITHHELD UPDATE AFTER START DRAWS NOTHING, WITH NO RETIRE. A block can
+// reveal itself withheld on the update arm (a withheld beat before the message
+// settles). Because the bubble is deferred until first content, the Start opened
+// no card, so the withheld update simply draws nothing — there is no card to
+// retire.
+func TestAWithheldThinkingUpdateAfterStartDrawsNoRow(t *testing.T) {
+	// Arrange: a thinking block opened (deferred; no card yet).
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
@@ -364,15 +373,118 @@ func TestAWithheldThinkingUpdateRetiresTheOpenedCard(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingUpdate_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
 		}), noAddress())
 
-	// Assert: no thinking bubble stands.
+	// Assert: no thinking bubble stands, and nothing was drawn-then-retired.
 	if got := h.thinkingRows(); len(got) != 0 {
 		t.Fatalf("thinking rows = %d, want 0 after a withheld update", len(got))
 	}
+	if h.hasRecord("debug", "daemon.feed.retire_row") {
+		t.Fatalf("a row was retired; a deferred bubble opens no card to retire")
+	}
 }
 
-// A SHOWN REASONING BLOCK IS NEVER RETIRED. The withheld retirement must not
-// touch a block that actually carries reasoning text: an opened-then-settled
-// shown block keeps its thinking bubble.
+// A LONE START DEFERS THE BUBBLE: a reasoning block that has only opened, with
+// no content yet, draws no row at all.
+func TestThinkingStartAloneDefersTheBubble(t *testing.T) {
+	// Arrange: a turn is running.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Act: a reasoning block opens with a Start and nothing else.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+
+	// Assert: no thinking bubble is drawn.
+	if got := h.thinkingRows(); len(got) != 0 {
+		t.Fatalf("thinking rows = %d, want 0 for a lone Start", len(got))
+	}
+}
+
+// A WITHHELD BLOCK (START THEN WITHHELD SETTLE) NEVER DRAWS A ROW. This is the
+// owner's reported flash: the empty bubble must never be opened, so it is never
+// drawn-then-retired — nothing is ever drawn.
+func TestWithheldThinkingStartThenSettleNeverDrawsARow(t *testing.T) {
+	// Arrange: a turn is running.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Act: a block opens with a Start, then settles WITHHELD with no content.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
+		}), noAddress())
+
+	// Assert: no bubble ever stands, and nothing was retired — never drawn, not
+	// drawn-then-retired.
+	if got := h.thinkingRows(); len(got) != 0 {
+		t.Fatalf("thinking rows = %d, want 0 for a withheld block", len(got))
+	}
+	if h.hasRecord("debug", "daemon.feed.retire_row") {
+		t.Fatalf("a row was retired; the withheld block must never draw a card to retire")
+	}
+}
+
+// A SHOWN BLOCK EMITS ITS ROW ONLY ON THE FIRST CONTENT DELTA, then streams
+// live and finalizes on settle. The Start defers the row; the first content
+// delta opens it; subsequent deltas update it; the settle finalizes the whole.
+func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
+	// Arrange: a reasoning block opened (deferred; no card yet).
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+	if got := h.thinkingRows(); len(got) != 0 {
+		t.Fatalf("thinking rows after Start = %d, want 0 (deferred)", len(got))
+	}
+
+	// Act 1: the first content delta arrives.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", thinkingTextDelta("first ")), noAddress())
+
+	// Assert 1: the bubble now stands, holding the first fragment.
+	got := h.thinkingRows()
+	if len(got) != 1 {
+		t.Fatalf("thinking rows after first delta = %d, want 1", len(got))
+	}
+	if md := got[0].GetUpdate().GetProse().GetMarkdown(); md != "first " {
+		t.Fatalf("markdown after first delta = %q, want %q", md, "first ")
+	}
+
+	// Act 2: a second content delta streams in.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", thinkingTextDelta("second")), noAddress())
+
+	// Assert 2: the same bubble updates live.
+	got = h.thinkingRows()
+	if len(got) != 1 {
+		t.Fatalf("thinking rows after second delta = %d, want 1", len(got))
+	}
+	if md := got[0].GetUpdate().GetProse().GetMarkdown(); md != "first second" {
+		t.Fatalf("markdown after second delta = %q, want %q", md, "first second")
+	}
+
+	// Act 3: the block settles, restating the whole.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
+				Text: &conversationv1.AgentThinkingText{Text: "first second"},
+			},
+		}), noAddress())
+
+	// Assert 3: the bubble finalizes with the whole reasoning.
+	got = h.thinkingRows()
+	if len(got) != 1 {
+		t.Fatalf("thinking rows after settle = %d, want 1", len(got))
+	}
+	if md := got[0].GetSuccess().GetProse().GetMarkdown(); md != "first second" {
+		t.Fatalf("settled markdown = %q, want %q", md, "first second")
+	}
+}
+
+// A SHOWN REASONING BLOCK KEEPS ITS BUBBLE THROUGH SETTLEMENT: a block that
+// carries reasoning text draws its bubble on the first content delta and that
+// bubble stands, settled, once the block concludes.
 func TestAShownThinkingBlockSurvivesSettlement(t *testing.T) {
 	// Arrange: a thinking block opened and streamed a fragment.
 	h := newHarness(t)
