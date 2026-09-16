@@ -1016,3 +1016,35 @@ func TestAnAdoptedClientsOrderedDepartureIsNotADeath(t *testing.T) {
 		t.Fatal("the adopted client recorded this daemon's own teardown as a death")
 	}
 }
+
+// TestSpawnDisableAutoCompactControlsTheCompactEnv asserts DISABLE_COMPACT is
+// set on the child ONLY when the Spec asks for it, so a work-account session
+// disables vendor auto-compaction while a personal one is untouched.
+func TestSpawnDisableAutoCompactControlsTheCompactEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		disable bool
+		want    string
+	}{
+		{name: "disabled sets DISABLE_COMPACT=1", disable: true, want: "1"},
+		{name: "enabled omits DISABLE_COMPACT", disable: false, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := shortDir(t)
+			f, uds := startFakeShim(t, dir)
+			spec, sink := newTestSpec(t, dir, uds, helperIdle)
+			spec.DisableAutoCompact = tc.disable
+
+			// Act.
+			_ = spawnReady(t, f, spec)
+			record := sink.record(t)
+
+			// Assert.
+			if got := record.Env[EnvDisableCompact]; got != tc.want {
+				t.Fatalf("child %s = %q, want %q", EnvDisableCompact, got, tc.want)
+			}
+		})
+	}
+}
