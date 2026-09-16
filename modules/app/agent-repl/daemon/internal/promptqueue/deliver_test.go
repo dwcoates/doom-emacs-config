@@ -430,3 +430,181 @@ func TestDeliverMirrorsOntoTheRootFeedWhenNoOutputAddressStands(t *testing.T) {
 		t.Fatalf("mirror id = %q, want the root feed's %q", got, want.GetValue())
 	}
 }
+
+// A KEEP-ALIVE COLLISION IS TRANSIENT, NOT TERMINAL. A StartTurn refused
+// because one of the shim's own keep-alive pings was momentarily in flight is
+// re-driven until the ping closes, then succeeds — never surfaced as an error.
+func TestDeliverReDrivesAKeepaliveCollisionThenSucceeds(t *testing.T) {
+	// Arrange: two collisions, then the keep-alive closes and the turn starts.
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startScript = []error{
+		keepaliveCollisionErr{keepalive: true},
+		keepaliveCollisionErr{keepalive: true},
+		nil,
+	}
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+	h.waitRedrives()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v, want a keep-alive collision to be re-driven, not surfaced", err)
+	}
+	if !got.Delivered {
+		t.Fatalf("disposition = %+v, want the prompt accepted while it re-drives", got)
+	}
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
+		t.Fatalf("started turns = %v, want the one turn started once it frees", started)
+	}
+	if h.watcher.handovers() != 1 {
+		t.Fatalf("handovers = %d, want the turn handed over once it started", h.watcher.handovers())
+	}
+}
+
+// THE RE-DRIVE IS A RETRY, NOT A SECOND TURN. Every re-drive uses the same
+// minted turn id (the idempotency key), so exactly one durable turn record
+// stands and the shim opens the one turn.
+func TestDeliverReDrivesWithTheSameIdempotencyKey(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startScript = []error{keepaliveCollisionErr{keepalive: true}, nil}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.waitRedrives()
+
+	// Assert: the successful StartTurn carried the original turn id.
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
+		t.Fatalf("started turns = %v, want the same minted turn re-driven", started)
+	}
+	// And exactly one durable turn record was written — no second turn.
+	if _, ok := h.db.startedTurn("t1"); !ok {
+		t.Fatal("the one turn must be recorded")
+	}
+}
+
+// THE SUBMITTING STATUS STAYS UP ACROSS A TRANSIENT RE-DRIVE. The footer is
+// told the turn once, at acceptance, and is never cleared while the prompt
+// re-drives behind the keep-alive.
+func TestDeliverKeepsSubmittingUpAcrossAKeepaliveReDrive(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startScript = []error{keepaliveCollisionErr{keepalive: true}, nil}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.waitRedrives()
+
+	// Assert: the footer carries exactly the one submitting turn, never cleared.
+	turns := h.footer.startedTurns()
+	if len(turns) != 1 || turns[0] == nil {
+		t.Fatalf("footer turns = %+v, want the submitting turn raised once and never cleared", turns)
+	}
+}
+
+// A NON-TRANSIENT turn_already_open (a genuine daemon double-submit, keepalive
+// false) is NOT re-driven: it stays a surfaced error, and the footer clears.
+func TestDeliverSurfacesANonKeepaliveTurnAlreadyOpen(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startErr = keepaliveCollisionErr{keepalive: false}
+
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err == nil {
+		t.Fatal("a genuine daemon double-submit must be surfaced, never re-driven")
+	}
+	if got := h.sender.startAttempts(); got != 1 {
+		t.Fatalf("StartTurn attempts = %d, want the terminal refusal not re-driven", got)
+	}
+	turns := h.footer.startedTurns()
+	if len(turns) == 0 || turns[len(turns)-1] != nil {
+		t.Fatalf("footer turns = %+v, want the submitting turn cleared after the terminal refusal", turns)
+	}
+}
+
+// THE RE-DRIVE IS BOUNDED. A keep-alive that never closes does not loop
+// forever: the re-drive stops at its cap and surfaces a real error rather than
+// spinning.
+func TestDeliverBoundsTheKeepaliveReDrive(t *testing.T) {
+	// Arrange: the keep-alive never closes.
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startErr = keepaliveCollisionErr{keepalive: true}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v, want the prompt accepted while it re-drives", err)
+	}
+	h.waitRedrives()
+
+	// Assert: the initial delivery plus a bounded number of re-drives, no more.
+	if got, want := h.sender.startAttempts(), 1+keepaliveRedriveMaxAttempts; got != want {
+		t.Fatalf("StartTurn attempts = %d, want exactly %d (initial + bounded re-drives)", got, want)
+	}
+}
+
+// A RE-DRIVE THAT EXHAUSTS ITS BOUND SURFACES A REAL ERROR — the durable turn
+// is stamped FAILED and the submitting status clears, never a silent drop.
+func TestDeliverFailsTheTurnWhenTheReDriveIsExhausted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startErr = keepaliveCollisionErr{keepalive: true}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.waitRedrives()
+
+	// Assert: the turn is closed failed, the footer is cleared, and the roster
+	// is told the turn ended failed.
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseFailed {
+		t.Fatalf("closed turn = (%v, %v), want it stamped CloseFailed", how, ok)
+	}
+	turns := h.footer.startedTurns()
+	if len(turns) == 0 || turns[0] == nil || turns[len(turns)-1] != nil {
+		t.Fatalf("footer turns = %+v, want submitting raised then cleared on exhaustion", turns)
+	}
+	if ends := h.sidebar.rosterEnds(); len(ends) != 1 || ends[0] != wsm.CloseFailed {
+		t.Fatalf("roster ends = %v, want exactly one failed close", ends)
+	}
+}
+
+// A NON-TRANSIENT refusal ARRIVING DURING a re-drive stops the re-drive and
+// surfaces the failure rather than re-driving into a wall.
+func TestDeliverStopsReDrivingOnANonTransientRefusal(t *testing.T) {
+	// Arrange: a keep-alive collision, then the query dies.
+	h := newHarness(t)
+	h.instantRedrive()
+	h.sender.startScript = []error{
+		keepaliveCollisionErr{keepalive: true},
+		errors.New("the vendor query is dead"),
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.waitRedrives()
+
+	// Assert: it stopped at the terminal refusal, not the bound.
+	if got := h.sender.startAttempts(); got != 2 {
+		t.Fatalf("StartTurn attempts = %d, want it to stop at the terminal refusal", got)
+	}
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseFailed {
+		t.Fatalf("closed turn = (%v, %v), want it stamped CloseFailed", how, ok)
+	}
+}
