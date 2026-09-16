@@ -85,6 +85,24 @@ describe("drawFeedTurnEnded: the final answer", () => {
     expect(bubble.classList.contains("final-response")).toBe(true);
   });
 
+  it("never puts the amber async-live class on a settled answer bubble", () => {
+    // Arrange — a settled answer bubble (owner ruling 2026-09-16: the amber
+    // async-quiescence border is gone; a settled answer goes green, never amber,
+    // even while background/detached work is still running).
+    const row = document.createElement("article");
+    const bubble = document.createElement("div");
+    bubble.className = "bubble assistant";
+    row.append(bubble);
+    // Act
+    drawFeedTurnEnded(
+      ended({ case: "concluded", value: { answer: feedId("r1") } }),
+      contextWithRow(row),
+    );
+    // Assert — the settled bubble is green and carries no amber async class.
+    expect(bubble.classList.contains("final-response")).toBe(true);
+    expect(bubble.classList.contains("async-live")).toBe(false);
+  });
+
   it("never puts the green class on a thinking bubble in the named row", () => {
     // Arrange — a row whose only assistant bubble is a thinking bubble.
     const row = document.createElement("article");
