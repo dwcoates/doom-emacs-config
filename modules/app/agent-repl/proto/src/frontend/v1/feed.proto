@@ -581,6 +581,19 @@ message FeedResponse {
   // green-final-answer rule exclude it structurally. UNSET = an ordinary
   // response bubble (a partial or a final answer), unchanged.
   bool thinking = 6;
+
+  // SET when this response bubble IS the turn's concluded final answer — the
+  // last agent prose the turn settled on. It is a DATA PROPERTY of the row,
+  // carried on EVERY push and EVERY history/replay draw, NOT an event-driven
+  // one-shot: the daemon stamps it true whenever it draws the row it has
+  // recorded as this turn's answer (live at turn-end AND when a feed is
+  // rebuilt from the store on reconnect/reload/adopt, where no live turn-ended
+  // event fires). The client draws the green final-answer border from THIS
+  // flag on every draw, so no redraw, tool-group re-arrange, or replay can
+  // lose it. UNSET = an ordinary response bubble (a partial, an interim, or an
+  // interrupted/cut-short row that never became the answer): no green. Never
+  // set on a thinking bubble (`thinking` above is the structural exclusion).
+  bool final_answer = 7;
 }
 
 // The notice register's heading, daemon-composed.
