@@ -1699,15 +1699,6 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .bubble.assistant.final-response.response-selected {
   border-color: var(--selected-response);
 }
-/* Async quiescence: a bubble whose LIVE background work is enumerated inside
-   it (see AsyncCatalog) wears the amber async border — "the answer is landed
-   but its detached work is not". Amber outranks the green final-response (it
-   is declared after it, at higher specificity for the assistant case), and
-   flips to green once every member settles. The user's own prompt bubble
-   takes it too, for a tools-only turn that hosts its survivors there. Only
-   the color changes, so the reserved 0.3px stays put — no reflow on the flip. */
-.bubble.assistant.async-live,
-.bubble.user.async-live { border-color: var(--async); }
 /* The working-frontier BREATH is gone with the pulse machinery that drove it,
    and so is the streaming caret that used to trail a live bubble's text: the
    consolidated progress footer is the one place a still-running turn
