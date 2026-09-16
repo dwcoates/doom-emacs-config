@@ -140,28 +140,62 @@ func keepaliveRedriveDelay(attempt int) time.Duration {
 	return d
 }
 
+// redriveHandle is the interrupt's handle on one in-flight keep-alive re-drive.
+// The re-drive registers it on entry and consumes it on exit; an interrupt
+// cancels it. `canceled` and the goroutine's own consume of the handle meet
+// under q.mu, so the accept and the cancel commit against each other atomically:
+// whichever takes q.mu first at the commit point wins, and the loser observes
+// it rather than both acting.
+type redriveHandle struct {
+	// turn is the turn this re-drive is retrying, so a stale interrupt naming a
+	// different turn does not cancel the one that is actually re-driving.
+	turn ids.TurnID
+	// cancel breaks the re-drive's backoff wait the moment an interrupt lands,
+	// rather than letting it sleep out the whole cadence before it notices.
+	cancel context.CancelFunc
+	// canceled records that an interrupt has claimed this re-drive. The
+	// goroutine reads it at the commit point to decide whether to accept the
+	// turn or stop it.
+	canceled bool
+}
+
 // redriveBehindKeepalive re-drives a prompt the shim refused behind an
 // in-flight keep-alive turn, OFF the request path. The submitting status raised
 // at acceptance is left standing across every retry; it clears only when the
-// turn genuinely starts (acceptOpenedTurn) or the bound is exhausted
-// (failRedrive). Exactly the SAME idempotency key (sub.Turn) is used, so a
-// re-drive is a retry of the one turn, never a second turn.
+// turn genuinely starts (acceptOpenedTurn), the bound is exhausted
+// (failRedrive), or an interrupt cancels the queued turn (closeCancelledRedrive).
+// Exactly the SAME idempotency key (sub.Turn) is used, so a re-drive is a retry
+// of the one turn, never a second turn.
 func (q *queue) redriveBehindKeepalive(ctx context.Context, sub Submission, sender Sender, watcher Watcher, log dlog.Logger) {
+	// THE RE-DRIVE'S OWN CANCELLATION IS SEPARATE FROM ITS RETRY DRIVE. `cancelCtx`
+	// only breaks the backoff wait when an interrupt lands; the StartTurn calls
+	// and the durable closes ride `ctx` (already uncancelable — deliver hands us
+	// context.WithoutCancel), so a cancel that lands mid-StartTurn never aborts
+	// the shim call or a durable write halfway.
+	cancelCtx, cancel := context.WithCancel(ctx)
+	q.mu.Lock()
+	q.redrives[sub.WS] = &redriveHandle{turn: sub.Turn, cancel: cancel}
+	q.mu.Unlock()
+
 	q.redriving.Add(1)
 	go func() {
 		defer q.redriving.Done()
+		defer cancel()
 		for attempt := 1; attempt <= keepaliveRedriveMaxAttempts; attempt++ {
 			select {
-			case <-ctx.Done():
-				q.failRedrive(ctx, sub, watcher, log, "the daemon is shutting down before the keep-alive closed")
-				return
+			case <-cancelCtx.Done():
 			case <-q.deps.After(keepaliveRedriveDelay(attempt)):
+			}
+			// An interrupt that landed during the wait cancels the queued turn
+			// BEFORE it is started: the user asked for it not to run, and it has
+			// not yet reached the shim, so nothing needs killing.
+			if q.claimCancelledRedrive(sub.WS, sub.Turn) {
+				q.closeCancelledRedrive(ctx, sub, watcher, log)
+				return
 			}
 			success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 			if err == nil {
-				log.Info(opDeliver, "re-drove the prompt once the keep-alive closed",
-					dlog.Context{"attempts": attempt})
-				q.acceptOpenedTurn(ctx, sub, success, watcher, log)
+				q.commitRedriveSuccess(ctx, sub, success, sender, watcher, log, attempt)
 				return
 			}
 			if isKeepaliveCollision(err) {
@@ -173,13 +207,113 @@ func (q *queue) redriveBehindKeepalive(ctx context.Context, sub Submission, send
 			// re-driving into a wall.
 			log.Error(opDeliver, "the re-driven turn was refused for a non-transient reason",
 				dlog.Context{"attempt": attempt, "cause": err.Error()})
+			q.dropRedrive(sub.WS, sub.Turn)
 			q.failRedrive(ctx, sub, watcher, log, err.Error())
 			return
 		}
 		log.Error(opDeliver, "the keep-alive never closed within the re-drive bound; the prompt could not be started",
 			dlog.Context{"attempts": keepaliveRedriveMaxAttempts})
+		q.dropRedrive(sub.WS, sub.Turn)
 		q.failRedrive(ctx, sub, watcher, log, "the keep-alive turn never closed within the re-drive bound")
 	}()
+}
+
+// commitRedriveSuccess is the re-drive's decision the moment StartTurn opened
+// the turn: accept it, UNLESS an interrupt claimed the re-drive first. The
+// decision meets CancelKeepaliveRedrive under q.mu (consumeRedrive), so exactly
+// one of the two wins. When the interrupt won the race — the turn opened in the
+// same instant it was cancelled — the turn is accepted so its terminal is
+// attributable and then killed, so a stopped turn does not run on unnoticed.
+func (q *queue) commitRedriveSuccess(ctx context.Context, sub Submission, success *shimv1.StartTurnSuccess, sender Sender, watcher Watcher, log dlog.Logger, attempt int) {
+	if q.consumeRedrive(sub.WS, sub.Turn) {
+		log.Info(opDeliver, "the re-driven turn opened as an interrupt cancelled it; stopping it",
+			dlog.Context{"attempts": attempt})
+		q.acceptOpenedTurn(ctx, sub, success, watcher, log)
+		if err := sender.KillTurn(ctx, sub.Turn, true); err != nil {
+			log.Error(opDeliver, "could not stop the interrupt-cancelled turn that had just opened",
+				dlog.Context{"cause": err.Error()})
+		}
+		return
+	}
+	log.Info(opDeliver, "re-drove the prompt once the keep-alive closed",
+		dlog.Context{"attempts": attempt})
+	q.acceptOpenedTurn(ctx, sub, success, watcher, log)
+}
+
+// CancelKeepaliveRedrive cancels a turn re-driving behind a keep-alive. See the
+// Queue interface. It reports whether it claimed such a re-drive; the re-drive
+// goroutine does the durable close and status clear, so the two never both
+// mutate the turn.
+func (q *queue) CancelKeepaliveRedrive(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	h, ok := q.redrives[ws]
+	if !ok || h.turn != turn || h.canceled {
+		return false
+	}
+	h.canceled = true
+	h.cancel()
+	return true
+}
+
+// claimCancelledRedrive reports whether an interrupt has claimed this re-drive,
+// removing the handle when it has. It is the goroutine's read of the cancel flag
+// at a point where the turn has NOT been started this iteration, so a true
+// answer means nothing reached the shim.
+func (q *queue) claimCancelledRedrive(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	h, ok := q.redrives[ws]
+	if !ok || h.turn != turn || !h.canceled {
+		return false
+	}
+	delete(q.redrives, ws)
+	return true
+}
+
+// consumeRedrive removes this re-drive's handle and reports whether an interrupt
+// had claimed it. It is the commit point a successful StartTurn meets
+// CancelKeepaliveRedrive at: the handle is gone afterwards either way, so a
+// cancel that arrives after it reports false and the interrupt kills the now-open
+// turn itself.
+func (q *queue) consumeRedrive(ws ids.WorkspaceID, turn ids.TurnID) (canceled bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	h, ok := q.redrives[ws]
+	if !ok || h.turn != turn {
+		return false
+	}
+	delete(q.redrives, ws)
+	return h.canceled
+}
+
+// dropRedrive removes this re-drive's handle without reading the cancel flag,
+// for the exit paths that are not a cancel — a non-transient refusal and the
+// exhausted bound.
+func (q *queue) dropRedrive(ws ids.WorkspaceID, turn ids.TurnID) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if h, ok := q.redrives[ws]; ok && h.turn == turn {
+		delete(q.redrives, ws)
+	}
+}
+
+// closeCancelledRedrive stamps a turn an interrupt cancelled before it started.
+// The rpc that submitted it has already answered `submitting`, so the cancel is
+// surfaced by clearing that status and stamping the durable turn KILLED — the
+// user's own stop, never a failure and never a silent drop. The turn never
+// reached the shim (the race in which it opened as it was cancelled is handled
+// by commitRedriveSuccess through the ordinary terminal), so there is nothing to
+// kill here.
+func (q *queue) closeCancelledRedrive(ctx context.Context, sub Submission, watcher Watcher, log dlog.Logger) {
+	q.retireOpenedTurn(sub, watcher)
+	// The roster's turn fact is the daemon's own, so the killed close is too.
+	q.deps.Sidebar.SetTurnEnded(sub.WS, wsm.CloseKilled)
+	if err := q.deps.DB.CloseTurn(ctx, sub.Turn, q.deps.Now(), wsm.CloseKilled); err != nil {
+		log.Error(opDeliver, "could not stamp the re-drive's cancelled close", dlog.Context{"cause": err.Error()})
+	}
+	log.Info(opDeliver, "an interrupt cancelled the queued turn before the keep-alive closed",
+		dlog.Context{"turn": string(sub.Turn)})
 }
 
 // failRedrive surfaces a re-drive that could not start the turn. The rpc has

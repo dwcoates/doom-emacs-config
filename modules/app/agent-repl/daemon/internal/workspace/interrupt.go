@@ -95,6 +95,24 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "turn"})
 		return InterruptOutcome{NothingRunning: true}, nil
 	}
+
+	// THE TURN MAY NOT BE OPEN ON THE SHIM AT ALL. A keep-alive collision on
+	// the submit path leaves the user's turn RE-DRIVING behind an in-flight
+	// keep-alive ping: the daemon believes the turn is in flight (the freeness
+	// read above names it), but the shim never started it — a keep-alive holds
+	// the turn slot. Killing it there answers `not_the_open_turn`, which is why
+	// the Emacs stop failed with a transport-style error during a vendor storm.
+	// The interrupt CANCELS the re-drive so the turn the user asked to stop
+	// never starts, and answers a normal stop. A re-driving turn has spawned no
+	// detached work — it never reached the shim — so this precedes the confirm
+	// challenge, which cannot apply.
+	if v.deps.Queue.CancelKeepaliveRedrive(ctx, ws, *running.Turn) {
+		log.Info(opInterrupt, "cancelled a turn re-driving behind a keep-alive", dlog.Context{
+			"turn": string(*running.Turn),
+		})
+		return InterruptOutcome{Turn: true}, nil
+	}
+
 	// THE CHALLENGE COUNTS LIVE AGENTS, AND ONLY THEM. The arm's field is
 	// `live_agent_count` and it means what it says: a detached SHELL is not an
 	// agent, so it neither raises the challenge nor is counted by it. A shell
@@ -132,6 +150,22 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 				// The turn ended between the freeness read and the kill. That
 				// is an ANSWER, not a failure.
 				log.Debug(opInterrupt, "nothing is running", dlog.Context{
+					"target": "turn", "shim_arm": refusal.Arm,
+				})
+				return InterruptOutcome{NothingRunning: true}, nil
+			}
+			if refusal.Arm == ArmShimNotTheOpenTurn {
+				// ONLY A KEEP-ALIVE IS OPEN, AND NO RE-DRIVE IS PENDING. The
+				// re-drive cancel above already answered false, so the user's
+				// own turn is not queued behind the keep-alive — it finished,
+				// and a keep-alive ping now holds the turn slot. There is
+				// nothing of the user's left to interrupt, so this answers the
+				// `nothing_running` SUCCESS arm rather than surfacing the shim's
+				// `not_the_open_turn` — which InterruptError has no home for and
+				// which reached Emacs as a transport failure during a vendor
+				// storm. A genuinely live turn is a different arm (`live`) and
+				// is still surfaced below.
+				log.Info(opInterrupt, "nothing of the user's is running; a keep-alive holds the turn slot", dlog.Context{
 					"target": "turn", "shim_arm": refusal.Arm,
 				})
 				return InterruptOutcome{NothingRunning: true}, nil
