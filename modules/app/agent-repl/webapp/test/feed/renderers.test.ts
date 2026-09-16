@@ -12,7 +12,20 @@ import {
   nestSlot,
   type SubfeedView,
 } from "../../src/feed/renderers.js";
-import { feedId, harness, mergeTabRow, responseRow, rowContext, userPromptRow } from "./harness.js";
+import {
+  feedId,
+  harness,
+  mergeTabRow,
+  responseRow,
+  rowContext,
+  subagentRow,
+  toolCallRow,
+  userPromptRow,
+} from "./harness.js";
+import {
+  GROUP_TAB_MEMBER_ATTRIBUTE,
+  createToolGroupStore,
+} from "../../src/feed/tool-group.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../src/clock.js";
 import { tick } from "../../src/feed/ticking.js";
@@ -177,6 +190,82 @@ describe("arrangeSubfeedRows", () => {
     rows.splice(1, 1);
     arrangeSubfeedRows(host, view);
     expect(host.querySelector(`[${NEST_ATTRIBUTE}] [data-feed-row="b"]`)).toBeNull();
+  });
+});
+
+describe("arrangeSubfeedRows tabbed grouping", () => {
+  it("batches a run of >=2 same-kind tool cards into ONE tabbed container", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // Assert: one top-level child, a group with two tabs.
+    expect(host.children).toHaveLength(1);
+    expect(host.querySelector(".feed-group")).not.toBeNull();
+    expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(2);
+  });
+
+  it("does not leave grouped members as separate TOP-LEVEL bubbles", () => {
+    const host = document.createElement("div");
+    const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // The members are inside the group's panel, not direct children of the host.
+    expect(host.querySelector(':scope > [data-feed-row="a"]')).toBeNull();
+    expect(host.querySelector('.feed-group-panel [data-feed-row="a"]')).not.toBeNull();
+  });
+
+  it("leaves a LONE tool card ungrouped, rendered exactly as today", () => {
+    const host = document.createElement("div");
+    arrangeSubfeedRows(host, viewOf([toolCallRow("a", "returned")]), createToolGroupStore());
+    expect(host.querySelector(".feed-group")).toBeNull();
+    expect(host.querySelector(':scope > [data-feed-row="a"]')).not.toBeNull();
+  });
+
+  it("breaks a run on a KIND change (Bash,Bash,Edit,Bash)", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [
+      toolCallRow("a", "returned", { tool: "Bash" }),
+      toolCallRow("b", "returned", { tool: "Bash" }),
+      toolCallRow("c", "returned", { tool: "Edit" }),
+      toolCallRow("d", "returned", { tool: "Bash" }),
+    ];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // Assert: one group of two Bash, then a lone Edit, then a lone Bash.
+    expect(host.children).toHaveLength(3);
+    expect(host.children[0].querySelectorAll(".feed-group-tab")).toHaveLength(2);
+    expect(host.children[1].getAttribute("data-feed-row")).toBe("c");
+    expect(host.children[2].getAttribute("data-feed-row")).toBe("d");
+  });
+
+  it("breaks a run when a response bubble sits between two same-kind cards", () => {
+    const host = document.createElement("div");
+    const rows = [
+      toolCallRow("a", "returned"),
+      responseRow("mid"),
+      toolCallRow("b", "returned"),
+    ];
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // No group forms; three lone top-level rows.
+    expect(host.querySelector(".feed-group")).toBeNull();
+    expect(host.children).toHaveLength(3);
+  });
+
+  it("groups a run of subagent bubbles into tabs", () => {
+    const host = document.createElement("div");
+    const rows = [subagentRow("a"), subagentRow("b"), subagentRow("c")];
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(3);
+  });
+
+  it("never groups without a store (a fixture exercising the arranger alone)", () => {
+    const host = document.createElement("div");
+    const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
+    arrangeSubfeedRows(host, viewOf(rows));
+    expect(host.querySelector(".feed-group")).toBeNull();
+    expect(host.children).toHaveLength(2);
   });
 });
 
@@ -345,6 +434,39 @@ describe("defaultBubbleBody", () => {
     rows.push(responseRow("b"));
     view.fire();
     expect(mount.querySelectorAll("[data-feed-row]")).toHaveLength(0);
+  });
+
+  it("adds a tab live when a same-kind card extends the run", () => {
+    // Arrange: a two-card Bash run, drawn once.
+    const { ctx } = harness();
+    const mount = document.createElement("div");
+    const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
+    const view = viewOf(rows);
+    defaultBubbleBody(mount, view, rowContext(ctx, responseRow("root")));
+    expect(mount.querySelectorAll(".feed-group-tab")).toHaveLength(2);
+    // Act: a third same-kind card streams in.
+    rows.push(toolCallRow("c", "returned"));
+    view.fire();
+    // Assert: the group grew a tab rather than spawning a second bubble.
+    expect(mount.querySelectorAll(".feed-group")).toHaveLength(1);
+    expect(mount.querySelectorAll(".feed-group-tab")).toHaveLength(3);
+  });
+
+  it("preserves the reader's selected tab across a live append", () => {
+    // Arrange: the reader selects the first tab of a two-card run.
+    const { ctx } = harness();
+    const mount = document.createElement("div");
+    const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
+    const view = viewOf(rows);
+    defaultBubbleBody(mount, view, rowContext(ctx, responseRow("root")));
+    mount.querySelector<HTMLButtonElement>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
+    // Act: a third card arrives.
+    rows.push(toolCallRow("c", "returned"));
+    view.fire();
+    // Assert: member a stays the shown one, not yanked onto the newest.
+    const shown = mount.querySelector('.feed-group-panel [data-feed-row="a"]') as HTMLElement;
+    const newest = mount.querySelector('.feed-group-panel [data-feed-row="c"]') as HTMLElement;
+    expect([shown.hidden, newest.hidden]).toEqual([false, true]);
   });
 });
 
