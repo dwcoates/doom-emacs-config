@@ -2,10 +2,13 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -57,17 +60,38 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	watcher.OnTurnOpening(sub.WS, sub.Turn)
 	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	if err != nil {
-		// The submitting phase was published; the shim then refused. The failure
-		// is surfaced to the caller (which answers the rpc with it) rather than
-		// swallowed, and the footer and roster drop the submitting turn so no
-		// workspace is left showing a `submitting` phase for a turn that never ran.
-		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
-		q.deps.Footer.SetTurn(sub.WS, nil)
-		q.deps.Sidebar.SetTurn(sub.WS, nil)
+		// A KEEP-ALIVE COLLISION IS TRANSIENT, NOT A REFUSAL. The shim opens
+		// keep-alive turns internally and no daemon queue can see them; a user
+		// StartTurn that lands during one is refused through no fault of the
+		// daemon's, and the ping closes on its own (in milliseconds normally,
+		// but tens of seconds during a vendor 5xx storm). The submitting status
+		// STAYS UP and the prompt is re-driven in the background with the SAME
+		// idempotency key until the keep-alive closes and the turn starts — the
+		// rpc answers `submitting` at once rather than hanging on the retry.
+		if isKeepaliveCollision(err) {
+			log.Info(opDeliver, "the shim refused the turn behind an in-flight keep-alive; re-driving the prompt",
+				dlog.Context{"cause": err.Error()})
+			q.redriveBehindKeepalive(context.WithoutCancel(ctx), sub, sender, watcher, log)
+			return Disposition{Delivered: true}, nil
+		}
+		// A non-transient refusal is surfaced to the caller (which answers the
+		// rpc with it) rather than swallowed, and the footer and roster drop the
+		// submitting turn so no workspace is left showing a `submitting` phase
+		// for a turn that never ran.
+		q.retireOpenedTurn(sub, watcher)
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
 
+	q.acceptOpenedTurn(ctx, sub, success, watcher, log)
+	return Disposition{Delivered: true}, nil
+}
+
+// acceptOpenedTurn is the handover a successful StartTurn owes, whether it
+// succeeded on the first call or after re-driving behind a keep-alive: the
+// submitting window closes, the main agent is named, and the accepted turn is
+// handed to the watcher that will see it end.
+func (q *queue) acceptOpenedTurn(ctx context.Context, sub Submission, success *shimv1.StartTurnSuccess, watcher Watcher, log dlog.Logger) {
 	// The shim TOOK the turn: the `submitting` window is over.
 	q.deps.Sidebar.AckTurn(sub.WS)
 
@@ -80,7 +104,107 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	log.Info(opDeliver, "delivered the prompt to the shim", dlog.Context{
 		"agent": success.GetPrompt().GetAgent().GetValue(),
 	})
-	return Disposition{Delivered: true}, nil
+}
+
+// retireOpenedTurn drops the submitting turn a StartTurn opened but the shim
+// then refused for a non-transient reason: the watcher's opening record is
+// retired and the footer and roster clear the submitting phase.
+func (q *queue) retireOpenedTurn(sub Submission, watcher Watcher) {
+	watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
+	q.deps.Footer.SetTurn(sub.WS, nil)
+	q.deps.Sidebar.SetTurn(sub.WS, nil)
+}
+
+// keepaliveRedriveMaxAttempts bounds the background re-drive: past it the
+// prompt is surfaced as a real error rather than re-driven forever. The
+// schedule below sums to comfortably more than the tens of seconds a keep-alive
+// stays open through a vendor 5xx storm (each retry_after is ~35-39s and the
+// cadence pauses while the ping is open, so at most one ping is ever outlasted),
+// so the bound is only reached when the turn is genuinely stuck.
+const keepaliveRedriveMaxAttempts = 24
+
+// keepaliveRedriveDelay is the capped backoff before re-drive attempt n
+// (1-based): 250ms, 500ms, 1s, 2s, 4s, then 5s thereafter.
+func keepaliveRedriveDelay(attempt int) time.Duration {
+	const (
+		base = 250 * time.Millisecond
+		max  = 5 * time.Second
+	)
+	d := base
+	for i := 1; i < attempt; i++ {
+		d *= 2
+		if d >= max {
+			return max
+		}
+	}
+	return d
+}
+
+// redriveBehindKeepalive re-drives a prompt the shim refused behind an
+// in-flight keep-alive turn, OFF the request path. The submitting status raised
+// at acceptance is left standing across every retry; it clears only when the
+// turn genuinely starts (acceptOpenedTurn) or the bound is exhausted
+// (failRedrive). Exactly the SAME idempotency key (sub.Turn) is used, so a
+// re-drive is a retry of the one turn, never a second turn.
+func (q *queue) redriveBehindKeepalive(ctx context.Context, sub Submission, sender Sender, watcher Watcher, log dlog.Logger) {
+	q.redriving.Add(1)
+	go func() {
+		defer q.redriving.Done()
+		for attempt := 1; attempt <= keepaliveRedriveMaxAttempts; attempt++ {
+			select {
+			case <-ctx.Done():
+				q.failRedrive(ctx, sub, watcher, log, "the daemon is shutting down before the keep-alive closed")
+				return
+			case <-q.deps.After(keepaliveRedriveDelay(attempt)):
+			}
+			success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+			if err == nil {
+				log.Info(opDeliver, "re-drove the prompt once the keep-alive closed",
+					dlog.Context{"attempts": attempt})
+				q.acceptOpenedTurn(ctx, sub, success, watcher, log)
+				return
+			}
+			if isKeepaliveCollision(err) {
+				log.Debug(opDeliver, "the keep-alive is still in flight; will re-drive again",
+					dlog.Context{"attempt": attempt})
+				continue
+			}
+			// A DIFFERENT refusal is not transient: surface it rather than
+			// re-driving into a wall.
+			log.Error(opDeliver, "the re-driven turn was refused for a non-transient reason",
+				dlog.Context{"attempt": attempt, "cause": err.Error()})
+			q.failRedrive(ctx, sub, watcher, log, err.Error())
+			return
+		}
+		log.Error(opDeliver, "the keep-alive never closed within the re-drive bound; the prompt could not be started",
+			dlog.Context{"attempts": keepaliveRedriveMaxAttempts})
+		q.failRedrive(ctx, sub, watcher, log, "the keep-alive turn never closed within the re-drive bound")
+	}()
+}
+
+// failRedrive surfaces a re-drive that could not start the turn. The rpc has
+// already answered `submitting`, so the failure is surfaced by clearing that
+// status and stamping the durable turn FAILED — never by silently dropping it.
+func (q *queue) failRedrive(ctx context.Context, sub Submission, watcher Watcher, log dlog.Logger, cause string) {
+	q.retireOpenedTurn(sub, watcher)
+	// The roster's turn fact is the daemon's own, so the failed close is too.
+	q.deps.Sidebar.SetTurnEnded(sub.WS, wsm.CloseFailed)
+	if err := q.deps.DB.CloseTurn(ctx, sub.Turn, q.deps.Now(), wsm.CloseFailed); err != nil {
+		log.Error(opDeliver, "could not stamp the re-drive's failed close", dlog.Context{"cause": err.Error()})
+	}
+	log.Error(opDeliver, "the prompt could not be delivered behind the keep-alive", dlog.Context{"cause": cause})
+}
+
+// isKeepaliveCollision reports whether a StartTurn refusal is the one the queue
+// re-drives: a turn_already_open caused by an in-flight KEEP-ALIVE turn. It is
+// matched STRUCTURALLY through a package-local interface so the queue never
+// imports internal/workspace, which is where the typed refusal is minted.
+func isKeepaliveCollision(err error) bool {
+	var collision interface{ KeepaliveTurnAlreadyOpen() bool }
+	if errors.As(err, &collision) {
+		return collision.KeepaliveTurnAlreadyOpen()
+	}
+	return false
 }
 
 // deliverToAgent sends a bubble composer's prompt to the addressed agent.

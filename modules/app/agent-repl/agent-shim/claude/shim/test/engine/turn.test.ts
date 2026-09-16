@@ -151,6 +151,17 @@ function failureKind(response: { result: { case?: string; value?: unknown } }): 
   return failure?.kind?.case ?? failure?.cause?.case;
 }
 
+// Reads the turn_already_open arm's keepalive flag off a StartTurn refusal.
+function turnAlreadyOpenKeepalive(response: {
+  result: { case?: string; value?: unknown };
+}): boolean | undefined {
+  const failure = response.result.value as {
+    kind?: { case?: string; value?: { keepalive?: boolean } };
+  };
+  if (failure?.kind?.case !== "turnAlreadyOpen") return undefined;
+  return failure.kind.value?.keepalive;
+}
+
 describe("what the user said", () => {
   it("is the text of the text blocks", () => {
     expect(saidText(textSaid("hello"))).toBe("hello");
@@ -298,6 +309,30 @@ describe("StartTurn", () => {
     const second = await h.turns.startTurn(startTurn());
 
     expect(failureKind(second)).toBe("turnAlreadyOpen");
+  });
+
+  // A DAEMON DOUBLE-SUBMIT is a genuine daemon bug, so the collision reports
+  // keepalive=false and the daemon surfaces it terminally.
+  it("marks a real turn's collision as NOT a keep-alive", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    const second = await h.turns.startTurn(startTurn());
+
+    expect(turnAlreadyOpenKeepalive(second)).toBe(false);
+  });
+
+  // A KEEP-ALIVE PING is shim-internal and invisible to the daemon's queue, so
+  // its collision reports keepalive=true and the daemon re-drives rather than
+  // failing.
+  it("marks a keep-alive turn's collision as a keep-alive", async () => {
+    const h = await harness();
+    h.open = { id: TURN, keepalive: true, startedAtMs: 1 };
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(failureKind(response)).toBe("turnAlreadyOpen");
+    expect(turnAlreadyOpenKeepalive(response)).toBe(true);
   });
 
   it("does not queue the refused prompt", async () => {
