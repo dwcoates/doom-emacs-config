@@ -597,6 +597,9 @@ func (q *fakeQueue) Accept(context.Context, ids.WorkspaceID, ids.TurnID) error  
 func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
 	return nil
 }
+func (q *fakeQueue) CancelKeepaliveRedrive(context.Context, ids.WorkspaceID, ids.TurnID) bool {
+	return false
+}
 func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
 func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
 	q.mu.Lock()
