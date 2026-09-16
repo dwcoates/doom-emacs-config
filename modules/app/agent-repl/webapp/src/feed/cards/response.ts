@@ -236,6 +236,17 @@ function recordDraw(
     usage: u.usage !== undefined,
     notice: u.notice !== undefined,
   };
+  // THE THINKING SIDE OF THE EMIT-VS-DRAW CORRELATION. The daemon logs
+  // `daemon.feed.thinking_emitted` when it hands a thinking row to the feed
+  // (thinking.go); this is the webapp's matching record that the row actually
+  // drew as a thinking bubble, so the two can be correlated to tell whether a
+  // thinking response landed on screen. It mirrors `feed.draw-response`'s own
+  // context (row id, state, settled) and always logs at DEBUG, regardless of
+  // first-draw or settled, since a thinking bubble draws no less often than a
+  // prose one and this is purely a correlation record, not a reader-facing one.
+  if (u.thinking) {
+    log.debug("drew a thinking bubble", { operation: "feed.draw-thinking", context });
+  }
   if (first || settled) {
     log.info(
       settled ? "drew a response bubble settled" : "drew a response bubble for the first time",

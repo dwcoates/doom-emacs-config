@@ -1620,6 +1620,33 @@ describe("the thinking bubble", () => {
     expect(first.querySelector(".bubble-body")?.textContent).toContain("block one");
     expect(second.querySelector(".bubble-body")?.textContent).toContain("block two");
   });
+
+  it("logs feed.draw-thinking when a thinking bubble is drawn", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    drawFeedResponse(
+      response({ thinking: true, result: { case: "update", value: { prose: { markdown: "weighing" } } } }),
+      rowContext(),
+    );
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-thinking");
+    expect(record.level.case).toBe("debug");
+  });
+
+  it("does NOT log feed.draw-thinking for an ordinary (non-thinking) response draw", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "an answer" } } } }),
+      rowContext(),
+    );
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.some((rec) => rec.operation === "feed.draw-thinking")).toBe(false);
+  });
 });
 
 describe("the data-driven final-answer green", () => {
