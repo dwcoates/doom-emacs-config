@@ -514,6 +514,10 @@ type fakeAccounts struct {
 	account.Resolver
 
 	configDir     string
+	// multiRepoDir is the work (multi-repo) account root the fake reports
+	// IsMultiRepo true for; empty means the fixture has no work account, so
+	// every config dir is personal (IsMultiRepo false).
+	multiRepoDir  string
 	transcript    account.Transcript
 	transcriptErr error
 	// newest is the transcript NewestTranscript answers with for the no-record
@@ -550,6 +554,13 @@ type movedTranscript struct{ Path, ToConfigDir, WorkspaceDir string }
 type portedTranscript struct{ Path, ConfigDir, WorkspaceDir, VendorSessionID string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
+
+// IsMultiRepo reports whether the given config dir is the fixture's work
+// (multi-repo) account root. An empty multiRepoDir means no work account, so
+// every dir is personal.
+func (a *fakeAccounts) IsMultiRepo(configDir string) bool {
+	return a.multiRepoDir != "" && configDir == a.multiRepoDir
+}
 
 // Read answers the account the fixture holds; an unset email is the logged-out
 // arm, which is an answer and not a failure.
