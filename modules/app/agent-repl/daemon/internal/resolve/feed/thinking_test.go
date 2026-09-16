@@ -511,3 +511,23 @@ func TestAShownThinkingBlockSurvivesSettlement(t *testing.T) {
 		t.Fatalf("settled thinking markdown = %q, want %q", md, "weighing options")
 	}
 }
+
+// A SHOWN REASONING BLOCK LOGS ITS EMIT: the first content-bearing update that
+// draws a thinking row records daemon.feed.thinking_emitted, so the daemon's
+// side of the emit-vs-draw correlation is on record.
+func TestAShownThinkingBlockLogsItsEmit(t *testing.T) {
+	// Arrange: a thinking block has opened.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+
+	// Act: the block's first content-bearing update draws its bubble.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", thinkingTextDelta("weighing options")), noAddress())
+
+	// Assert: the emit is logged at debug.
+	if !h.hasRecord("debug", "daemon.feed.thinking_emitted") {
+		t.Fatalf("records = %+v, want a daemon.feed.thinking_emitted debug record", h.records())
+	}
+}
