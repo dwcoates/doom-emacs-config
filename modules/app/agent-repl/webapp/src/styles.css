@@ -4489,7 +4489,13 @@ body.draining #composer-input::placeholder {
      the same amount, real and un-cancelled. It is a static value (not part of
      the reveal transition), so the reserved footprint — and the no-reflow-on-
      hover invariant — stay exactly as they were. */
-  --usage-corner-edge-gap: calc(2 * var(--bubble-scroll-gap));
+  /* Twice as CLOSE to the right edge as before (owner ruling, 2026-09-15):
+     the gap was `2 * --bubble-scroll-gap`; halving it to one
+     `--bubble-scroll-gap` sits the token figure snug against the bubble's
+     right border. Still corner-scoped and STATIC (not part of the reveal
+     transition), so it neither touches `--bubble-scroll-gap` globally nor
+     the duration figure nor the transform-based hover slide. */
+  --usage-corner-edge-gap: var(--bubble-scroll-gap);
   margin-right: calc(
     var(--usage-corner-edge-gap) - var(--bubble-scroll-gap) - 1.25rem
   );
