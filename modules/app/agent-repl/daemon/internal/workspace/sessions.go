@@ -1279,7 +1279,11 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			UDSPath:      udsPath,
 			StoreSocket:  f.deps.StoreSocket,
 			ConfigDir:    configDir,
-			SessionID:    hostSessionID,
+			// Work (multi-repo) accounts disable vendor auto-compaction; the
+			// account layer owns the work-vs-personal policy and this session's
+			// account is exactly the configDir it spends under.
+			DisableAutoCompact: f.deps.Accounts.IsMultiRepo(configDir),
+			SessionID:          hostSessionID,
 			ShimBuildSHA: f.deps.ShimBuildSHA,
 			NodeBin:      f.deps.NodeBin,
 			MainJS:       f.deps.MainJS,
