@@ -408,7 +408,7 @@ export function responseRow(
 export function toolCallRow(
   id: string,
   state: "running" | "returned",
-  opts: { turn?: string; beatAtMs?: bigint } = {},
+  opts: { turn?: string; beatAtMs?: bigint; tool?: string } = {},
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -419,7 +419,7 @@ export function toolCallRow(
         unit: {
           case: "simpleToolCall",
           value: {
-            name: { text: "Bash" },
+            name: { text: opts.tool ?? "Bash" },
             input: { text: "$ ls" },
             outcome:
               state === "running"
