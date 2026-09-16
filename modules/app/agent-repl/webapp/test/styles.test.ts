@@ -847,15 +847,16 @@ describe("the cost corner's hover hit area", () => {
     expect(ago).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
   });
 
-  it("doubles the corner's right-edge gap to the bubble border without touching --bubble-scroll-gap itself (owner ruling, 2026-09-15)", () => {
+  it("sits the corner's right-edge gap at one --bubble-scroll-gap, twice as close as before, without touching --bubble-scroll-gap itself (owner ruling, 2026-09-15)", () => {
     // Arrange / Act
     const mainCol = declarationsOf("#main-col") ?? "";
     const corner = declarationsOf(".usage-corner") ?? "";
 
     // Assert — the global scrollbar-inset unit is untouched...
     expect(mainCol).toMatch(/--bubble-scroll-gap:\s*2px/);
-    // ...the corner names its own edge gap as exactly double that unit...
-    expect(corner).toMatch(/--usage-corner-edge-gap:\s*calc\(\s*2\s*\*\s*var\(--bubble-scroll-gap\)\s*\)/);
+    // ...the corner names its own edge gap as exactly one such unit (halved
+    // from the previous 2x, so the token sits twice as close to the edge)...
+    expect(corner).toMatch(/--usage-corner-edge-gap:\s*var\(--bubble-scroll-gap\)\s*;/);
     // ...and the corner's own right margin is the one place that departs
     // from the padding/margin cancellation (unlike top/bottom/left, asserted
     // above): it is less negative than the fully-cancelling `-1.25rem` by
