@@ -199,6 +199,20 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
 	s.answerRows[unit] = id
+	// THE GREEN FINAL-ANSWER BORDER IS A DATA PROPERTY, STAMPED ON EVERY DRAW.
+	// When this row is the one the workspace has recorded as a turn's concluded
+	// answer, the flag rides the row itself so no redraw, tool-group re-arrange,
+	// or history replay can lose it — the client draws the green from the flag
+	// alone. The recording happens at the terminal, which fires AFTER this
+	// response's frames both live and on replay, so a row drawn before its turn
+	// concluded is re-stamped by restampFinalAnswer at the terminal; this branch
+	// carries the flag on every LATER draw of an already-recorded answer (a
+	// file-plane re-delivery, a resize redraw, a replay where the terminal
+	// already ran). A thinking bubble never reaches here — it draws through
+	// drawThinking — so it is excluded structurally.
+	if s.finalAnswerSeen[id.GetValue()] {
+		bubble.FinalAnswer = true
+	}
 	// KEPT SO A DIVERGENT SIBLING CAN RETIRE THIS FRAGMENT'S ROW. When the same
 	// block's settled whole later lands under another id, or a late delta of this
 	// fold matches a whole already settled under another id, the reconciler needs

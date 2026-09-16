@@ -444,3 +444,42 @@ func TestAReplayedDetachedSubagentSettlesSucceededNeverFailed(t *testing.T) {
 		t.Fatalf("outcome = %T, want Succeeded (never a failed default)", bubble.GetSettled().GetOutcome())
 	}
 }
+
+// THE CRUX REGRESSION: A REPLAYED CONCLUDED TURN STAMPS ITS ANSWER ROW GREEN.
+// This is the reload/reconnect/adopt case — a feed rebuilt from the store with
+// NO live turn-ended event. The recurring bug was that the green depended on a
+// live event and never appeared on a replayed feed. Because the flag is a data
+// property re-stamped along the same terminal path replay walks, the replayed
+// answer row must carry final_answer=true just as a live one does.
+func TestAReplayedConcludedTurnStampsItsAnswerRowFinal(t *testing.T) {
+	// Arrange, Act: a stored turn — prompt, its answering response, and the
+	// concluded terminal naming that response — replayed newest-first.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), &conversationv1.AgentSuccess{
+			Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{
+				Answer: &conversationv1.AgentActivityId{Value: "unit-1"},
+			}},
+		}),
+		frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Activity{
+				Activity: responseSuccessActivity("unit-1", "the replayed answer"),
+			},
+		}),
+		promptEntry("turn-1", "ask it"),
+	))
+
+	// Assert: the replayed answer row is green, with no live turn-ended event.
+	var answer *frontendv1.FeedResponse
+	for _, row := range h.rows(rootFeed()) {
+		if resp := row.GetActivity().GetResponse(); resp != nil {
+			answer = resp
+		}
+	}
+	if answer == nil {
+		t.Fatal("no response row was replayed")
+	}
+	if !answer.GetFinalAnswer() {
+		t.Fatal("a replayed concluded turn's answer row was not stamped final_answer=true")
+	}
+}
