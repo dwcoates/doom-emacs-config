@@ -145,22 +145,45 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
     });
     return;
   }
+  // THE ROW-LEVEL MARKER IS THE DURABLE STATE. The class below lives on the
+  // bubble element, but a response redraw REBUILDS that element from scratch
+  // (drawFeedResponse mints a fresh `.bubble.assistant` on every push, and the
+  // daemon delivers a settled response TWICE — once per store plane paying out
+  // the same success), so a class added here as a one-shot is dropped by the
+  // trailing settled re-draw. The `data-final-answer` attribute rides the row
+  // CHROME, which the controller reuses across redraws, so it survives; the
+  // controller re-asserts the class from it on every (re)draw (feed-view's
+  // `drawBody`), keeping the green durable rather than one-shot.
   row.setAttribute(FINAL_ANSWER_ATTRIBUTE, "true");
-  // The existing green-border rule keys on the response bubble itself, so the
-  // class goes where that rule can see it. A card drawn some other way still
-  // carries the row-level marker above.
-  //
-  // A THINKING BUBBLE IS EXCLUDED FROM THE LOOKUP: it reuses `.bubble.assistant`
-  // but is intermediate reasoning, never the answer, so it must never take the
-  // green final-answer class. The daemon never files a thinking row as an
-  // answer, so this branch is not normally reached for one; the `:not` here is
-  // the second guard, matching the stylesheet's own `.final-response` exclusion.
-  const bubble = row.querySelector(".bubble.assistant:not(.thinking-bubble)");
-  if (bubble !== null) bubble.classList.add(FINAL_RESPONSE_CLASS);
+  const styled = applyFinalResponseClass(row);
   log.info("marked the answering row with the final-answer treatment", {
     operation: "feed.final-answer-marked",
-    context: { answer: answer.value, styled_bubble: bubble !== null },
+    context: { answer: answer.value, styled_bubble: styled },
   });
+}
+
+/**
+ * Put the green final-answer class on ROW's answering bubble, if it has one.
+ *
+ * The green-border rule keys on the response bubble itself, so the class goes
+ * where that rule can see it. A card drawn some other way still carries only the
+ * row-level marker its caller set. Returns whether a bubble was found to style.
+ *
+ * This is shared by the one-shot mark (`markFinalAnswer`) and the controller's
+ * per-redraw re-assertion, so both apply the SAME class to the SAME bubble by
+ * the SAME rule — there is one place that knows what "green the answer" means.
+ *
+ * A THINKING BUBBLE IS EXCLUDED FROM THE LOOKUP: it reuses `.bubble.assistant`
+ * but is intermediate reasoning, never the answer, so it must never take the
+ * green final-answer class. The daemon never files a thinking row as an answer,
+ * so this branch is not normally reached for one; the `:not` here is the second
+ * guard, matching the stylesheet's own `.final-response` exclusion.
+ */
+export function applyFinalResponseClass(row: HTMLElement): boolean {
+  const bubble = row.querySelector(".bubble.assistant:not(.thinking-bubble)");
+  if (bubble === null) return false;
+  bubble.classList.add(FINAL_RESPONSE_CLASS);
+  return true;
 }
 
 /** The died-mid-turn row: the vendor's sentence, the cause, and any wait. */
