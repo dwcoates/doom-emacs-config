@@ -281,7 +281,9 @@ export function killSessionClosed(
 
 /** Why a turn could not be started. */
 type StartTurnKind =
-  | { readonly kind: "turnAlreadyOpen" }
+  // `keepalive` marks the open turn as one of the shim's OWN keep-alive pings,
+  // which the daemon re-drives past rather than treating as its own bug.
+  | { readonly kind: "turnAlreadyOpen"; readonly keepalive: boolean }
   | { readonly kind: "noSession" }
   | { readonly kind: "vendorRefused" }
   | { readonly kind: "queryDead" };
@@ -292,7 +294,10 @@ export function startTurnFailure(cause: StartTurnKind, detail: string): shimv1.S
     detail,
     kind:
       cause.kind === "turnAlreadyOpen"
-        ? { case: "turnAlreadyOpen", value: create(shimv1.StartTurnTurnAlreadyOpenSchema, {}) }
+        ? {
+            case: "turnAlreadyOpen",
+            value: create(shimv1.StartTurnTurnAlreadyOpenSchema, { keepalive: cause.keepalive }),
+          }
         : cause.kind === "noSession"
           ? { case: "noSession", value: create(shimv1.StartTurnNoSessionSchema, {}) }
           : cause.kind === "vendorRefused"
