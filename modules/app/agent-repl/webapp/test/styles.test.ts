@@ -1156,6 +1156,38 @@ describe("the thinking bubble", () => {
   });
 });
 
+/**
+ * THE AMBER ASYNC BORDER IS GONE (owner ruling, 2026-09-16: "remove the amber
+ * async-quiescence border on response/prompt bubbles ENTIRELY — I never wanted
+ * it"). A settled final response goes GREEN unconditionally; no bubble ever
+ * wears the amber `--async` border while background/detached work is still
+ * running. The `--async` token itself stays — the async-catalog badge, the
+ * topbar/sidebar monitoring rows, and the parked-merge glyphs still use it.
+ */
+describe("the removed amber async border", () => {
+  it("paints the amber async token on no bubble", () => {
+    // Arrange — every rule that colors a border with the amber async token.
+    const amberBorders = rulesOf(stylesheet).filter((r) =>
+      /border-color:\s*var\(--async\)/.test(r.declarations),
+    );
+
+    // Assert — no rule paints an amber border on any .bubble selector.
+    for (const rule of amberBorders) {
+      for (const selector of rule.selectors) {
+        expect(selector).not.toContain(".bubble");
+      }
+    }
+  });
+
+  it("settles a final-response bubble to the green border unconditionally", () => {
+    // Arrange / Act — the only border color the settled answer bubble can take.
+    const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+
+    // Assert — green, with nothing amber able to outrank it on settle.
+    expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
+  });
+});
+
 describe("the selected-response border (reply-to-a-past-response)", () => {
   it("recolors the selected final-response bubble with the blue selection token", () => {
     // Arrange / Act
