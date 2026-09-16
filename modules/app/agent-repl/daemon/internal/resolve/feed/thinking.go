@@ -31,6 +31,11 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 	unit := act.GetActivityId().GetValue()
 	fold := s.thinkingProse(unit)
 	log := r.logger(s.id)
+	// hadContentBefore records whether an earlier call already emitted this
+	// unit's thinking row (the fold's markdown became non-empty then and is
+	// never cleared back to empty), so the emit log below can tell the row's
+	// first appearance in the feed from a later update to it.
+	hadContentBefore := fold.markdown != ""
 
 	// NO USAGE STAMP ON THE THINKING BUBBLE. Reasoning's cost is the footer's
 	// (and the thinking block is frequently the sibling unit that carries the
@@ -135,6 +140,9 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 	}
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
+	log.Debug("daemon.feed.thinking_emitted",
+		"emitted a thinking row to the feed",
+		dlog.Context{"unit": unit, "first_emit": !hadContentBefore})
 	// DELIBERATELY NOT filed in s.answerRows: a thinking row can never be named
 	// the turn's answer, so it can never take the green final-answer treatment.
 	return &frontendv1.FeedRow{
