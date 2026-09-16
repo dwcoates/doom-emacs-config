@@ -264,3 +264,138 @@ func TestThinkingAndResponseDrawSeparateBubbles(t *testing.T) {
 		t.Fatalf("thinking=%d prose=%d, want exactly one of each", thinkingCount, proseCount)
 	}
 }
+
+// A WITHHELD REASONING BLOCK LEAVES NO EMPTY BUBBLE. The stream opens a thinking
+// block with a Start (which draws an empty card) before the block reveals itself
+// withheld at settle; the withheld settle must retire that card so the block
+// draws nothing at all, and the turn's real prose is the only response row and
+// takes the green final answer.
+func TestAWithheldThinkingLeadingBlockLeavesOnlyTheGreenedProse(t *testing.T) {
+	// Arrange: a turn is running.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Act: block :0 opens as thinking (empty card) then settles WITHHELD; block
+	// :1 is the real prose; the turn concludes naming the prose as its answer.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
+		}), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("msg:1", &conversationv1.AgentResponseStart{}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("msg:1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "the real answer"},
+		}, nil), noAddress())
+	h.terminal("turn-1", completedWith("msg:1"), nil)
+
+	// Assert: exactly one response-shaped row — the settled prose — and the
+	// terminal's green final answer names that same row, not any empty leftover.
+	rows := h.responseRows()
+	if len(rows) != 1 {
+		t.Fatalf("response-shaped rows = %d, want 1 (the prose only)", len(rows))
+	}
+	prose := rows[0]
+	if prose.GetActivity().GetResponse().GetThinking() {
+		t.Fatalf("the surviving row is flagged thinking; want the prose row")
+	}
+	if md := prose.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "the real answer" {
+		t.Fatalf("surviving prose = %q, want %q", md, "the real answer")
+	}
+	if answer := h.terminalRow("turn-1").GetConcluded().GetAnswer().GetValue(); answer != prose.GetId().GetValue() {
+		t.Fatalf("green final answer = %q, want the prose row %q", answer, prose.GetId().GetValue())
+	}
+}
+
+// A WITHHELD REASONING BLOCK BEFORE A TOOL CALL LEAVES ONLY THE TOOL CARD. The
+// message opens with a withheld thinking block and then a tool_use; the empty
+// thinking card its Start opened must be retired, so the tool card is the only
+// row and no empty response bubble precedes it.
+func TestAWithheldThinkingBlockBeforeAToolCallDrawsOnlyTheToolCard(t *testing.T) {
+	// Arrange: a turn is running.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+
+	// Act: block :0 opens as thinking then settles withheld; block :1 is a bash
+	// tool call.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
+		}), noAddress())
+	h.send(activityOf("msg:1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "go test ./..."},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert: no response-shaped bubble at all, and exactly one tool card.
+	if rows := h.responseRows(); len(rows) != 0 {
+		t.Fatalf("response-shaped rows = %d, want 0 (only the tool card)", len(rows))
+	}
+	var toolCards int
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetActivity().GetSimpleToolCall() != nil {
+			toolCards++
+		}
+	}
+	if toolCards != 1 {
+		t.Fatalf("tool cards = %d, want 1", toolCards)
+	}
+}
+
+// A WITHHELD UPDATE RETIRES THE OPENED CARD TOO. A block can reveal itself
+// withheld on the update arm (a withheld beat before the message settles), which
+// must retire the Start arm's empty card exactly as the withheld settle does.
+func TestAWithheldThinkingUpdateRetiresTheOpenedCard(t *testing.T) {
+	// Arrange: a thinking block opened its empty card.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+
+	// Act: a withheld update arrives.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingUpdate{
+			Reasoning: &conversationv1.AgentThinkingUpdate_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
+		}), noAddress())
+
+	// Assert: no thinking bubble stands.
+	if got := h.thinkingRows(); len(got) != 0 {
+		t.Fatalf("thinking rows = %d, want 0 after a withheld update", len(got))
+	}
+}
+
+// A SHOWN REASONING BLOCK IS NEVER RETIRED. The withheld retirement must not
+// touch a block that actually carries reasoning text: an opened-then-settled
+// shown block keeps its thinking bubble.
+func TestAShownThinkingBlockSurvivesSettlement(t *testing.T) {
+	// Arrange: a thinking block opened and streamed a fragment.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", thinkingTextDelta("weighing options")), noAddress())
+
+	// Act: the block settles with its whole reasoning text.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
+				Text: &conversationv1.AgentThinkingText{Text: "weighing options"},
+			},
+		}), noAddress())
+
+	// Assert: the thinking bubble stands, settled with its text.
+	got := h.thinkingRows()
+	if len(got) != 1 {
+		t.Fatalf("thinking rows = %d, want 1 (the shown block survives)", len(got))
+	}
+	if md := got[0].GetSuccess().GetProse().GetMarkdown(); md != "weighing options" {
+		t.Fatalf("settled thinking markdown = %q, want %q", md, "weighing options")
+	}
+}
