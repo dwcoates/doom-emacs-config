@@ -64,6 +64,7 @@ import {
   type RowRenderers,
 } from "./renderers.js";
 import { drawFeedSubagent, drawFeedDetachedSubagent } from "./rows/subagent.js";
+import { activateGroupedMember } from "./tool-group.js";
 import { tick, stopTicking } from "./ticking.js";
 import { createOverscan } from "./overscan.js";
 
@@ -437,6 +438,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
 
   /** Scroll the row into view and mark it, briefly, as the one meant. */
   function land(element: HTMLElement): void {
+    // A grouped member sits in an inactive tab is HIDDEN and has no layout box;
+    // bring its tab to the front before scrolling, so the reveal lands on a
+    // member that is actually on screen (tool-group.ts). A member outside any
+    // group is left alone.
+    activateGroupedMember(element);
     revealNode(element);
     element.classList.add(REVEAL_CLASS);
     // STATED, not only styled: "this is the row you asked for" is a fact about

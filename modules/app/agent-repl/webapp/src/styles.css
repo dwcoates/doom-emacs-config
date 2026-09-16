@@ -6832,3 +6832,59 @@ body.draining #composer-input::placeholder {
   background: var(--muted);
   border-radius: 4px;
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+   THE TABBED TOOL GROUP (tool-group.ts). A maximal run of >=2 consecutive
+   same-specific-kind tool cards collapses into one bubble whose members are
+   selectable as tabs. The `.feed-group` shares the feed's card grey, border and
+   radius so a group reads as one card, and the shared width cap already keys on
+   `.feed-item > .feed-group` (see the feed-card rule above). The tab strip
+   mirrors the merge strip's chrome; a member card inside a panel keeps its own
+   look, only its width cap lifted so it fills the group rather than being capped
+   twice.
+   ──────────────────────────────────────────────────────────────────────── */
+.feed-group {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+}
+/* The strip: one tab per member, icon + 1-based index, wrapping when many. */
+.feed-group-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.1rem 0 0.3rem;
+  border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+}
+.feed-group-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.feed-group-tab:hover { background: rgba(128, 128, 128, 0.12); }
+.feed-group-tab.is-active {
+  border-color: var(--line, rgba(128, 128, 128, 0.35));
+  background: rgba(128, 128, 128, 0.16);
+}
+.feed-group-tab-icon { color: var(--muted); }
+.feed-group-tab-index { font-variant-numeric: tabular-nums; }
+.feed-group-panel { padding-top: 0.3rem; }
+/* A member fills the group rather than being capped a second time inside it: the
+   group already stops at the shared card ceiling, so the inner `.feed-item >
+   .tool-card` cap is lifted here and the member spans the panel. */
+.feed-group-panel > .feed-item {
+  content-visibility: visible;
+}
+.feed-group-panel > .feed-item > .tool-card {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
