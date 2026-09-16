@@ -35,6 +35,13 @@ import { mergeBubbleBody } from "./merge/merge-body.js";
 import type { Handle } from "../failure/overlay.js";
 import { log } from "../log.js";
 import { stopTicking } from "./ticking.js";
+import {
+  createToolGroupStore,
+  groupKindOf,
+  groupKey,
+  type GroupMember,
+  type ToolGroupStore,
+} from "./tool-group.js";
 import type {
   FeedArtifact,
   FeedBreadcrumb,
@@ -220,9 +227,14 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   const rows = document.createElement("div");
   rows.className = "feed-rows";
 
+  // ONE GROUP STORE PER BODY (so per open feed). It outlives every redraw, which
+  // is what lets a reader's tab pick and a run's identity survive the re-arrange
+  // each live push triggers.
+  const groups = createToolGroupStore();
+
   const draw = (): void => {
     drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
-    arrangeSubfeedRows(rows, view);
+    arrangeSubfeedRows(rows, view, groups);
     if (view.composerSlot !== undefined) mount.append(view.composerSlot);
   };
 
@@ -280,19 +292,34 @@ export function drawFeedBreadcrumb(crumb: FeedBreadcrumb, rc: RowContext): HTMLE
 }
 
 /**
- * Lay a feed's rows out in order, nesting each row that names a container.
+ * Lay a feed's rows out in order, nesting each row that names a container and
+ * batching each maximal run of consecutive same-kind tool cards into ONE tabbed
+ * group.
  *
  * `parent` is PRESENTATION NESTING WITHIN ONE FEED — a merge phase's rows, work
  * grouped under a skill heading — never the sub-feed relationship, which is the
  * connection itself. A row whose container this feed has not drawn is placed at
  * the top level and REPORTED: dropping it would hide real work, and inventing a
  * container would state a grouping the daemon did not.
+ *
+ * GROUPING IS OPTIONAL and lives here because this is the one place the ORDERED
+ * sequence — and so adjacency — is known. A run of >=2 consecutive TOP-LEVEL
+ * same-specific-kind tool cards (see `groupKindOf`) collapses into one tabbed
+ * container; a lone card, a non-groupable row, a kind change or a parented row
+ * breaks the run and renders unchanged. Callers with no `groups` store (a fixture
+ * exercising the arranger alone) get the plain per-row layout.
  */
-export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
+export function arrangeSubfeedRows(
+  host: HTMLElement,
+  view: SubfeedView,
+  groups?: ToolGroupStore,
+): void {
   // WHAT WAS DRAWN BEFORE, so a row this arrangement DROPS can be unsubscribed
   // rather than left ticking against an element nobody can see. A row that is
   // re-placed is merely moved and keeps its clocks; only one the arrangement
-  // did not put back is stopped, below.
+  // did not put back is stopped, below. Grouped members sit inside their group's
+  // panel, still descendants of the host, so this descendant query still finds
+  // them and a member merely regrouped is never mistaken for a dropped one.
   const before = [...host.querySelectorAll("[data-feed-row]")];
   // Every nesting slot is emptied first, so a row that stopped being in the
   // feed (deletion is ROW OMISSION on the next push) cannot linger inside a
@@ -300,12 +327,43 @@ export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
   for (const slot of host.querySelectorAll(`[${NEST_ATTRIBUTE}]`)) slot.replaceChildren();
   const placed = new Map<string, HTMLElement>();
   const top: HTMLElement[] = [];
-  for (const row of view.rows()) {
+  const rows = view.rows();
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i];
+    // A run is only ever of TOP-LEVEL groupable cards: a parented row nests, and
+    // its appearance between two same-kind cards breaks the run.
+    const kind = groups !== undefined && row.parent?.row === undefined ? groupKindOf(row) : null;
+    if (kind !== null) {
+      let j = i + 1;
+      while (
+        j < rows.length &&
+        rows[j].parent?.row === undefined &&
+        groupKindOf(rows[j]) === kind
+      ) {
+        j += 1;
+      }
+      if (j - i >= 2) {
+        const members: GroupMember[] = [];
+        for (const member of rows.slice(i, j)) {
+          const el = view.drawRow(member);
+          const id = member.id?.value ?? "";
+          if (member.id !== undefined) placed.set(id, el);
+          members.push({ id, element: el });
+        }
+        // `groups` is defined here — `kind` is non-null only when it is.
+        top.push(groups!.place(groupKey(kind, members[0].id), kind, members));
+        i = j;
+        continue;
+      }
+      // A run of one is a lone card: fall through to the ordinary placement.
+    }
     const el = view.drawRow(row);
     if (row.id !== undefined) placed.set(row.id.value, el);
     const parent = row.parent?.row;
     if (parent === undefined) {
       top.push(el);
+      i += 1;
       continue;
     }
     const container = placed.get(parent.value);
@@ -315,11 +373,17 @@ export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
         context: { row: row.id?.value ?? "unset", container: parent.value },
       });
       top.push(el);
+      i += 1;
       continue;
     }
     nestSlot(container).append(el);
+    i += 1;
   }
   host.replaceChildren(...top);
+  // A group not placed this pass (its run broke, or its rows left the feed) is
+  // disposed — after `replaceChildren`, so a member re-placed elsewhere is safely
+  // out of the old group before it is torn down.
+  groups?.prune();
   let stopped = 0;
   for (const el of before) {
     if (host.contains(el)) continue;
