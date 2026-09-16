@@ -222,7 +222,7 @@ describe("killSessionClosed", () => {
 });
 
 describe("startTurnFailure", () => {
-  it.each([["turnAlreadyOpen"], ["noSession"], ["vendorRefused"], ["queryDead"]] as const)(
+  it.each([["noSession"], ["vendorRefused"], ["queryDead"]] as const)(
     "states the %s arm",
     (kind) => {
       // Arrange, Act.
@@ -232,6 +232,30 @@ describe("startTurnFailure", () => {
       expect(failure.kind.case).toBe(kind);
     },
   );
+
+  it("states the turnAlreadyOpen arm", () => {
+    // Arrange, Act.
+    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen", keepalive: false }, "why");
+
+    // Assert.
+    expect(failure.kind.case).toBe("turnAlreadyOpen");
+  });
+
+  it("carries keepalive=true on a keep-alive collision", () => {
+    // Arrange, Act.
+    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen", keepalive: true }, "why");
+
+    // Assert.
+    expect(failure.kind.case === "turnAlreadyOpen" && failure.kind.value.keepalive).toBe(true);
+  });
+
+  it("carries keepalive=false on a genuine daemon double-submit", () => {
+    // Arrange, Act.
+    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen", keepalive: false }, "why");
+
+    // Assert.
+    expect(failure.kind.case === "turnAlreadyOpen" && failure.kind.value.keepalive).toBe(false);
+  });
 });
 
 describe("startTurnRefused", () => {

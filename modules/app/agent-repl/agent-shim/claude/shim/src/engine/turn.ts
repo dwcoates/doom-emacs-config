@@ -317,11 +317,17 @@ export class TurnEngine {
     const open = this.session.openTurn();
     if (open !== undefined) {
       LOGGER.debug(
-        { open_turn: open.id.value, requested_turn: request.turn?.value ?? "" },
+        { open_turn: open.id.value, requested_turn: request.turn?.value ?? "", keepalive: open.keepalive },
         "refused a second StartTurn because one turn is already in flight",
       );
+      // A KEEP-ALIVE COLLISION IS TRANSIENT, NOT THE DAEMON'S BUG. The shim
+      // opens keep-alive turns internally and no daemon queue can see them, so
+      // a user StartTurn that lands during one is refused through no fault of
+      // the daemon's. The `keepalive` flag tells the daemon to re-drive the
+      // prompt (same idempotency key) until the ping closes, rather than
+      // surfacing a terminal turn_already_open.
       return startTurnRefused(
-        { kind: "turnAlreadyOpen" },
+        { kind: "turnAlreadyOpen", keepalive: open.keepalive },
         `turn ${open.id.value} is already in flight; the daemon holds the queue and the shim never does`,
       );
     }
