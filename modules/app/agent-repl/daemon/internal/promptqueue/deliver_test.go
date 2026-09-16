@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -607,4 +608,103 @@ func TestDeliverStopsReDrivingOnANonTransientRefusal(t *testing.T) {
 	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseFailed {
 		t.Fatalf("closed turn = (%v, %v), want it stamped CloseFailed", how, ok)
 	}
+}
+
+// AN INTERRUPT CANCELS A TURN RE-DRIVING BEHIND A KEEP-ALIVE. The user asked to
+// stop a turn that never started on the shim — a keep-alive held the slot — so
+// the re-drive is removed and the turn is closed KILLED rather than starting
+// later or being surfaced as an error.
+func TestCancelKeepaliveRedriveCancelsAQueuedTurn(t *testing.T) {
+	// Arrange: the backoff never fires, so the re-drive is parked in its wait,
+	// and every StartTurn collides with the keep-alive.
+	h := newHarness(t)
+	blocked := make(chan time.Time)
+	h.q.deps.After = func(time.Duration) <-chan time.Time { return blocked }
+	h.sender.startErr = keepaliveCollisionErr{keepalive: true}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Act
+	cancelled := h.q.CancelKeepaliveRedrive(context.Background(), theWorkspace, "t1")
+	h.waitRedrives()
+
+	// Assert
+	if !cancelled {
+		t.Fatal("CancelKeepaliveRedrive = false, want the queued turn cancelled")
+	}
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseKilled {
+		t.Fatalf("closed turn = (%v, %v), want it stamped CloseKilled", how, ok)
+	}
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started turns = %v, want the cancelled turn never started", got)
+	}
+}
+
+// THE CANCEL CLEARS THE SUBMITTING STATUS. The rpc answered `submitting` when
+// the prompt was accepted; a cancelled re-drive clears that footer status and
+// tells the roster the turn ended killed, never leaving a dangling submitting.
+func TestCancelKeepaliveRedriveClearsTheSubmittingStatus(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	blocked := make(chan time.Time)
+	h.q.deps.After = func(time.Duration) <-chan time.Time { return blocked }
+	h.sender.startErr = keepaliveCollisionErr{keepalive: true}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Act
+	h.q.CancelKeepaliveRedrive(context.Background(), theWorkspace, "t1")
+	h.waitRedrives()
+
+	// Assert: the footer's submitting turn was raised then cleared, and the
+	// roster was told the turn ended killed.
+	turns := h.footer.startedTurns()
+	if len(turns) == 0 || turns[0] == nil || turns[len(turns)-1] != nil {
+		t.Fatalf("footer turns = %+v, want submitting raised then cleared on the cancel", turns)
+	}
+	ends := h.sidebar.rosterEnds()
+	if len(ends) != 1 || ends[0] != wsm.CloseKilled {
+		t.Fatalf("roster ends = %v, want one CloseKilled end", ends)
+	}
+}
+
+// A CANCEL FOR A TURN THAT IS NOT RE-DRIVING IS A NO-OP. There is nothing of
+// the user's queued behind the keep-alive, so the cancel reports false and the
+// caller interrupts the genuinely open turn instead.
+func TestCancelKeepaliveRedriveReportsFalseWhenNoReDriveStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act & Assert
+	if h.q.CancelKeepaliveRedrive(context.Background(), theWorkspace, "t1") {
+		t.Fatal("CancelKeepaliveRedrive = true, want false when no turn is re-driving")
+	}
+}
+
+// A CANCEL NAMING A DIFFERENT TURN LEAVES THE RE-DRIVE ALONE. A stale interrupt
+// for a turn that is not the one re-driving must not cancel the one that is.
+func TestCancelKeepaliveRedriveIgnoresAMismatchedTurn(t *testing.T) {
+	// Arrange: t1 is re-driving behind the keep-alive.
+	h := newHarness(t)
+	blocked := make(chan time.Time)
+	h.q.deps.After = func(time.Duration) <-chan time.Time { return blocked }
+	h.sender.startErr = keepaliveCollisionErr{keepalive: true}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Act: an interrupt for a different turn.
+	mismatched := h.q.CancelKeepaliveRedrive(context.Background(), theWorkspace, "t2")
+
+	// Assert: it reported false and t1's re-drive still stands (cancel it to
+	// drain the goroutine cleanly).
+	if mismatched {
+		t.Fatal("CancelKeepaliveRedrive(t2) = true, want false for a turn that is not re-driving")
+	}
+	if !h.q.CancelKeepaliveRedrive(context.Background(), theWorkspace, "t1") {
+		t.Fatal("CancelKeepaliveRedrive(t1) = false, want the still-standing re-drive cancellable")
+	}
+	h.waitRedrives()
 }

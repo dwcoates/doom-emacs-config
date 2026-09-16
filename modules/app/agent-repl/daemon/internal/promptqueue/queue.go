@@ -86,6 +86,13 @@ type queue struct {
 	// behind a keep-alive turn. It is a WaitGroup rather than a sleep so a test
 	// can join them, and so Drain waits them out before the state client closes.
 	redriving sync.WaitGroup
+
+	// redrives holds a per-workspace handle to the in-flight keep-alive
+	// re-drive so an INTERRUPT can cancel the queued turn before it ever starts.
+	// A workspace has exactly one turn re-driving at a time, so the workspace
+	// id keys it; it is guarded by mu, and every re-drive registers on entry
+	// and consumes its own handle on exit.
+	redrives map[ids.WorkspaceID]*redriveHandle
 }
 
 // newQueue validates the dependencies and builds the queue. Every collaborator
@@ -121,7 +128,11 @@ func newQueue(deps Deps) (*queue, error) {
 	if deps.StripSentinels == nil {
 		deps.StripSentinels = func(s string) string { return s }
 	}
-	q := &queue{deps: deps, states: make(map[ids.WorkspaceID]*wsState)}
+	q := &queue{
+		deps:     deps,
+		states:   make(map[ids.WorkspaceID]*wsState),
+		redrives: make(map[ids.WorkspaceID]*redriveHandle),
+	}
 	deps.Log.Global().Debug(opNew, "the prompt queue is wired", nil)
 	return q, nil
 }
