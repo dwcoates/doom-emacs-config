@@ -3,6 +3,9 @@ package feed
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"google.golang.org/protobuf/proto"
+
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 )
 
@@ -34,6 +37,42 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 	if fold, ok := s.responses[unit]; ok {
 		s.answerMarkdown[value] = fold.markdown
 	}
+}
+
+// restampFinalAnswer re-publishes an already-drawn answer row with
+// final_answer=true. The response frames precede the turn's terminal both live
+// and on history replay, so the answering row was drawn WITHOUT the flag by the
+// time the terminal names it the answer. Rather than recompose the bubble (and
+// risk drifting from drawResponse's arm/notice/usage handling), this re-pushes
+// the row the fold already composed, reusing it verbatim and flipping only the
+// data flag. It is the ONE site that makes the green appear at turn-end AND on
+// a reloaded/replayed feed with no live turn-ended event: replay runs the same
+// terminal path, so the recorded answer row is re-stamped there too. The write
+// is idempotent — an already-stamped row upserts to an equal snapshot, which
+// upsert drops as churn.
+func (r *resolver) restampFinalAnswer(s *wsState, unit string) {
+	fold, ok := s.responses[unit]
+	if !ok || fold.row == nil {
+		return
+	}
+	f := r.feed(s, fold.feed)
+	existing, ok := f.rows[fold.row.GetValue()]
+	if !ok {
+		return
+	}
+	resp := existing.GetActivity().GetResponse()
+	if resp == nil || resp.GetFinalAnswer() {
+		return
+	}
+	clone, ok := proto.Clone(existing).(*frontendv1.FeedRow)
+	if !ok {
+		r.logger(s.id).Error("daemon.feed.final_answer_restamp_unclonable",
+			"the recorded answer row could not be cloned to stamp final_answer",
+			dlog.Context{"unit": unit, "row": fold.row.GetValue()})
+		return
+	}
+	clone.GetActivity().GetResponse().FinalAnswer = true
+	r.upsert(s, placement{feed: fold.feed}, clone, true)
 }
 
 // FinalResponses answers the workspace's ordered selectable final-response
