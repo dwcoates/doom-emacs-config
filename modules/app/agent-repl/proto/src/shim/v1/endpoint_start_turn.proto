@@ -64,7 +64,10 @@ message StartTurnFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
   oneof kind {
-    // A turn is already open — the DAEMON's fault (it is the only queue).
+    // A turn is already open. Ordinarily the DAEMON's fault (it is the only
+    // queue) — EXCEPT when the open turn is one of the shim's own keep-alive
+    // pings, which the shim opens internally and no daemon queue can see. That
+    // case is TRANSIENT, not a daemon bug: see `turn_already_open.keepalive`.
     StartTurnTurnAlreadyOpen turn_already_open = 2;
     // No session is open on this shim.
     StartTurnNoSession no_session = 3;
@@ -75,7 +78,16 @@ message StartTurnFailure {
     StartTurnQueryDead query_dead = 5;
   }
 }
-message StartTurnTurnAlreadyOpen {}
+message StartTurnTurnAlreadyOpen {
+  // True when the open turn is one of the shim's OWN keep-alive pings rather
+  // than a daemon turn. A keep-alive collision is TRANSIENT — the ping normally
+  // closes on its own in milliseconds, but a vendor 5xx storm can hold it open
+  // for tens of seconds — so the daemon RE-DRIVES the queued prompt (same
+  // idempotency key) until the keep-alive closes and the turn starts, rather
+  // than surfacing a terminal error. False keeps the historical meaning: a
+  // genuine daemon double-submit, which stays the daemon's own bug.
+  bool keepalive = 1;
+}
 message StartTurnNoSession {}
 message StartTurnVendorRefused {}
 message StartTurnQueryDead {}
