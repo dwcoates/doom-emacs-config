@@ -242,6 +242,11 @@ type Deps struct {
 	ResolveImage feed.ImageResolver
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
+	// After schedules the wait before each re-drive of a StartTurn the shim
+	// refused because a KEEP-ALIVE turn was momentarily in flight. nil means
+	// time.After. It is injected so a test drives the re-drive cadence without
+	// waiting on a real clock.
+	After func(d time.Duration) <-chan time.Time
 	// Log is the queue's logger.
 	Log dlog.Surfaces
 }
