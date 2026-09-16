@@ -1621,3 +1621,83 @@ describe("the thinking bubble", () => {
     expect(second.querySelector(".bubble-body")?.textContent).toContain("block two");
   });
 });
+
+describe("the data-driven final-answer green", () => {
+  const FINAL_RESPONSE_CLASS = "final-response";
+
+  it("greens a final answer on its FIRST draw", () => {
+    // Arrange, Act — a settled response the daemon stamped as the turn's answer.
+    const el = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      rowContext(),
+    );
+    // Assert — the green class rides the row's own data, on the first draw, with
+    // no live turn-ended event.
+    expect(el.classList.contains(FINAL_RESPONSE_CLASS)).toBe(true);
+  });
+
+  it("KEEPS the green across a redraw/re-arrange", () => {
+    // Arrange — the same final-answer data, drawn once...
+    const data = response({
+      finalAnswer: true,
+      result: { case: "success", value: { prose: { markdown: "the answer" } } },
+    });
+    const first = drawFeedResponse(data, rowContext());
+    expect(first.classList.contains(FINAL_RESPONSE_CLASS)).toBe(true);
+    // Act — ...and drawn again, as a re-push / tool-group re-arrange rebuilds the
+    // bubble from scratch.
+    const redrawn = drawFeedResponse(data, rowContext(first));
+    // Assert — the rebuilt bubble carries the green from its own data, so no
+    // redraw can lose it (the root fix for the recurring disappearing border).
+    expect(redrawn.classList.contains(FINAL_RESPONSE_CLASS)).toBe(true);
+  });
+
+  it("does NOT green a response that is not the answer", () => {
+    // Arrange, Act — final_answer unset.
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "just talking" } } } }),
+      rowContext(),
+    );
+    // Assert.
+    expect(el.classList.contains(FINAL_RESPONSE_CLASS)).toBe(false);
+  });
+
+  it("NEVER greens a thinking bubble, even when final_answer is set", () => {
+    // Arrange, Act — a thinking bubble that also carries the flag (defensive: the
+    // daemon never files a thinking row as an answer, and this is the second
+    // guard).
+    const el = drawFeedResponse(
+      response({
+        thinking: true,
+        finalAnswer: true,
+        result: { case: "success", value: { prose: { markdown: "reasoning" } } },
+      }),
+      rowContext(),
+    );
+    // Assert — the green never lands on a purple thinking bubble.
+    expect(el.classList.contains(FINAL_RESPONSE_CLASS)).toBe(false);
+    expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
+  });
+
+  it("lets the BLUE selected-response border win over the green", () => {
+    // Arrange — a green final answer that is also the selected reply target, so
+    // both classes ride the same bubble.
+    const el = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      rowContext(),
+    );
+    el.classList.add("response-selected");
+    // Act, Assert — the drawn bubble matches BOTH the green rule and the
+    // higher-specificity blue rule, and the blue rule is declared AFTER the green
+    // one in the stylesheet, so the cascade paints it blue while selected and
+    // falls back to green the moment the selection clears. (var()-resolved
+    // colours are not observable under jsdom; selector + order is the
+    // deterministic proof, mirrored from styles.test.ts.)
+    expect(el.matches(".bubble.assistant.final-response:not(.thinking-bubble)")).toBe(true);
+    expect(el.matches(".bubble.assistant.final-response.response-selected")).toBe(true);
+    const green = stylesheet.indexOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+    const blue = stylesheet.indexOf(".bubble.assistant.final-response.response-selected");
+    expect(green).toBeGreaterThanOrEqual(0);
+    expect(blue).toBeGreaterThan(green);
+  });
+});

@@ -105,3 +105,51 @@ func TestResponseMarkdownMissesAnUnselectableFeedid(t *testing.T) {
 		t.Fatalf("ResponseMarkdown reported selectable for a feedid that names no final response")
 	}
 }
+
+// TestConcludingATurnStampsItsAnswerRowFinal pins the LIVE green: when a turn
+// concludes on an answering response, that response ROW carries
+// final_answer=true, so the client draws the green border from the row's data
+// rather than from a live turn-ended event. The response is drawn before the
+// terminal names it, so this proves the terminal re-stamps the already-drawn
+// row.
+func TestConcludingATurnStampsItsAnswerRowFinal(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.concludeAnswer("turn-1", "unit-1", "the answer")
+
+	// Assert.
+	rows := h.responseRows()
+	if len(rows) != 1 {
+		t.Fatalf("response rows = %d, want 1", len(rows))
+	}
+	if !rows[0].GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatal("the concluded answer row was not stamped final_answer=true")
+	}
+}
+
+// TestABackgroundedConclusionStampsNoAnswerRow pins that a turn concluding with
+// NO answering response (backgrounded) leaves every response row unstamped —
+// the flag names exactly the row the conclusion pointed at.
+func TestABackgroundedConclusionStampsNoAnswerRow(t *testing.T) {
+	// Arrange: an ordinary response, then a conclusion that names no answer.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "some prose"},
+		}, nil), noAddress())
+	id := ids.TurnID("turn-1")
+
+	// Act: conclude with backgrounded (no answer unit).
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Backgrounded{Backgrounded: &conversationv1.AgentBackgrounded{}},
+	}, nil, noAddress())
+
+	// Assert.
+	rows := h.responseRows()
+	if len(rows) != 1 {
+		t.Fatalf("response rows = %d, want 1", len(rows))
+	}
+	if rows[0].GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatal("a response was stamped final_answer with no conclusion naming it")
+	}
+}

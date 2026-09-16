@@ -3222,7 +3222,19 @@ type FeedResponse struct {
 	// row daemon-side); this flag is the second guard, letting the client's own
 	// green-final-answer rule exclude it structurally. UNSET = an ordinary
 	// response bubble (a partial or a final answer), unchanged.
-	Thinking      bool `protobuf:"varint,6,opt,name=thinking,proto3" json:"thinking,omitempty"`
+	Thinking bool `protobuf:"varint,6,opt,name=thinking,proto3" json:"thinking,omitempty"`
+	// SET when this response bubble IS the turn's concluded final answer — the
+	// last agent prose the turn settled on. It is a DATA PROPERTY of the row,
+	// carried on EVERY push and EVERY history/replay draw, NOT an event-driven
+	// one-shot: the daemon stamps it true whenever it draws the row it has
+	// recorded as this turn's answer (live at turn-end AND when a feed is
+	// rebuilt from the store on reconnect/reload/adopt, where no live turn-ended
+	// event fires). The client draws the green final-answer border from THIS
+	// flag on every draw, so no redraw, tool-group re-arrange, or replay can
+	// lose it. UNSET = an ordinary response bubble (a partial, an interim, or an
+	// interrupted/cut-short row that never became the answer): no green. Never
+	// set on a thinking bubble (`thinking` above is the structural exclusion).
+	FinalAnswer   bool `protobuf:"varint,7,opt,name=final_answer,json=finalAnswer,proto3" json:"final_answer,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3308,6 +3320,13 @@ func (x *FeedResponse) GetNotice() *FeedResponseNotice {
 func (x *FeedResponse) GetThinking() bool {
 	if x != nil {
 		return x.Thinking
+	}
+	return false
+}
+
+func (x *FeedResponse) GetFinalAnswer() bool {
+	if x != nil {
+		return x.FinalAnswer
 	}
 	return false
 }
@@ -16482,14 +16501,15 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0fFeedArtifactUrl\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\"(\n" +
 	"\x12FeedArtifactFailed\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xf8\x02\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\x9b\x03\n" +
 	"\fFeedResponse\x12>\n" +
 	"\x05usage\x18\x01 \x01(\v2#.frontend.v1.FeedResponseUsageStampH\x01R\x05usage\x88\x01\x01\x129\n" +
 	"\x06update\x18\x02 \x01(\v2\x1f.frontend.v1.FeedResponseUpdateH\x00R\x06update\x12<\n" +
 	"\asuccess\x18\x03 \x01(\v2 .frontend.v1.FeedResponseSuccessH\x00R\asuccess\x126\n" +
 	"\x05error\x18\x04 \x01(\v2\x1e.frontend.v1.FeedResponseErrorH\x00R\x05error\x12<\n" +
 	"\x06notice\x18\x05 \x01(\v2\x1f.frontend.v1.FeedResponseNoticeH\x02R\x06notice\x88\x01\x01\x12\x1a\n" +
-	"\bthinking\x18\x06 \x01(\bR\bthinkingB\b\n" +
+	"\bthinking\x18\x06 \x01(\bR\bthinking\x12!\n" +
+	"\ffinal_answer\x18\a \x01(\bR\vfinalAnswerB\b\n" +
 	"\x06resultB\b\n" +
 	"\x06_usageB\t\n" +
 	"\a_notice\".\n" +

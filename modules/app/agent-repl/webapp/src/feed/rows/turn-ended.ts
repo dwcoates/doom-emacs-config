@@ -129,12 +129,25 @@ export function drawFeedTurnEndedConcluded(
 }
 
 /**
- * Put the final-answer treatment on the answering row.
+ * Record on the answering row's chrome that its turn's FINAL ANSWER has landed.
+ *
+ * THE GREEN BORDER IS NO LONGER APPLIED HERE. It is now a DATA property the
+ * daemon stamps on the answering response row (`FeedResponse.final_answer`) and
+ * the client draws from that flag on every draw (cards/response.ts), so no
+ * live turn-ended event, redraw, re-arrange, or history replay can lose it —
+ * which the one-shot green marking this function used to do repeatedly did lose.
+ *
+ * WHAT SURVIVES HERE is the `data-final-answer` marker, which is LOAD-BEARING
+ * for something else: the prompt bubble's working wave ends when its turn's
+ * final answer lands (owner ruling, 2026-09-14), and the feed's settlement scan
+ * reads this marker by name (feed-view's `settledTurns`). So the concluded arm
+ * still records the marker on the answering row's chrome, it just no longer
+ * carries the green look.
  *
  * The lookup is THIS FEED's, because a `FeedId` on a turn_ended row names a row
  * of the same feed; a row that is not there (a page that has not been walked
  * back to, a producer naming a row it never sent) is reported and nothing is
- * marked, since guessing which row to green-border would be worse than none.
+ * marked, since guessing which row is the answer would be worse than none.
  */
 function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   const row = rc.findRowElement?.(answer) ?? null;
@@ -145,45 +158,15 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
     });
     return;
   }
-  // THE ROW-LEVEL MARKER IS THE DURABLE STATE. The class below lives on the
-  // bubble element, but a response redraw REBUILDS that element from scratch
-  // (drawFeedResponse mints a fresh `.bubble.assistant` on every push, and the
-  // daemon delivers a settled response TWICE — once per store plane paying out
-  // the same success), so a class added here as a one-shot is dropped by the
-  // trailing settled re-draw. The `data-final-answer` attribute rides the row
-  // CHROME, which the controller reuses across redraws, so it survives; the
-  // controller re-asserts the class from it on every (re)draw (feed-view's
-  // `drawBody`), keeping the green durable rather than one-shot.
+  // The marker rides the row CHROME, which the controller reuses across redraws,
+  // so a response redraw (drawFeedResponse mints a fresh `.bubble.assistant` on
+  // every push) cannot drop it. It is the settlement scan's signal only; the
+  // green look is drawn from the row's own `final_answer` data.
   row.setAttribute(FINAL_ANSWER_ATTRIBUTE, "true");
-  const styled = applyFinalResponseClass(row);
-  log.info("marked the answering row with the final-answer treatment", {
+  log.info("recorded the final-answer marker on the answering row", {
     operation: "feed.final-answer-marked",
-    context: { answer: answer.value, styled_bubble: styled },
+    context: { answer: answer.value },
   });
-}
-
-/**
- * Put the green final-answer class on ROW's answering bubble, if it has one.
- *
- * The green-border rule keys on the response bubble itself, so the class goes
- * where that rule can see it. A card drawn some other way still carries only the
- * row-level marker its caller set. Returns whether a bubble was found to style.
- *
- * This is shared by the one-shot mark (`markFinalAnswer`) and the controller's
- * per-redraw re-assertion, so both apply the SAME class to the SAME bubble by
- * the SAME rule — there is one place that knows what "green the answer" means.
- *
- * A THINKING BUBBLE IS EXCLUDED FROM THE LOOKUP: it reuses `.bubble.assistant`
- * but is intermediate reasoning, never the answer, so it must never take the
- * green final-answer class. The daemon never files a thinking row as an answer,
- * so this branch is not normally reached for one; the `:not` here is the second
- * guard, matching the stylesheet's own `.final-response` exclusion.
- */
-export function applyFinalResponseClass(row: HTMLElement): boolean {
-  const bubble = row.querySelector(".bubble.assistant:not(.thinking-bubble)");
-  if (bubble === null) return false;
-  bubble.classList.add(FINAL_RESPONSE_CLASS);
-  return true;
 }
 
 /** The died-mid-turn row: the vendor's sentence, the cause, and any wait. */

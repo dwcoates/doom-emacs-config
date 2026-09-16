@@ -69,11 +69,7 @@ import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
-import {
-  FINAL_ANSWER_ATTRIBUTE,
-  applyFinalResponseClass,
-  drawFeedTurnEnded,
-} from "./rows/turn-ended.js";
+import { FINAL_ANSWER_ATTRIBUTE, drawFeedTurnEnded } from "./rows/turn-ended.js";
 import {
   drawFeedSessionSeparation,
   separationBoundsFeed,
@@ -673,18 +669,14 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     state.body = body;
     state.element.prepend(body);
     mirrorState(state);
-    // THE GREEN FINAL-ANSWER TREATMENT IS RE-ASSERTED ON EVERY REDRAW. The
-    // concluded arm marks the answering row with the durable `data-final-answer`
-    // attribute on this chrome, but the green CLASS lives on the response bubble
-    // — and a response redraw rebuilds that bubble from scratch (a settled
-    // response is delivered twice, once per store plane), which would drop a
-    // one-shot class. So whenever the chrome still carries the marker, the class
-    // is put back on the freshly drawn bubble, from the same durable state and
-    // by the same rule the mark used. This makes the green survive the trailing
-    // settled re-draw instead of being clobbered by it.
-    if (state.element.getAttribute(FINAL_ANSWER_ATTRIBUTE) === "true") {
-      applyFinalResponseClass(state.element);
-    }
+    // THE GREEN FINAL-ANSWER TREATMENT IS NO LONGER RE-ASSERTED HERE. It is a
+    // DATA property the daemon stamps on the answering response row
+    // (`FeedResponse.final_answer`), which cards/response.ts draws from on every
+    // (re)draw — so a rebuilt bubble carries the green from its own data and
+    // needs no per-redraw re-assertion from the chrome. The `data-final-answer`
+    // marker still rides the chrome for the settlement scan (`settledTurns`),
+    // but it is no longer the source of the border.
+    //
     // The concluded arm puts the final-answer mark on the row it NAMES, which
     // is the other thing that can settle a turn.
     if (state.row.row.case === "turnEnded") forgetSettled();
