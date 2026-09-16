@@ -79,6 +79,7 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/str
 import { SmoothReveal } from "../../smooth.js";
 import { onDiscard, tick } from "../ticking.js";
 import type { RowContext } from "./context.js";
+import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -123,6 +124,22 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   if (u.thinking) {
     bubble.classList.add(THINKING_BUBBLE_CLASS);
     bubble.setAttribute("data-thinking", "");
+  }
+
+  // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When
+  // the daemon has stamped this response as the turn's concluded answer, the
+  // flag rides the row data — so the green is (re)applied here on every push,
+  // redraw, tool-group re-arrange, and history replay, and no rebuild of this
+  // bubble can lose it. This replaces the former one-shot mark the turn-ended
+  // row applied in reaction to a live event, which the daemon no longer needs
+  // to deliver for the border to appear (turn-ended.ts). A THINKING BUBBLE IS
+  // EXCLUDED: it is never the answer, so it never greens — the guard here
+  // matches the stylesheet's own `.final-response:not(.thinking-bubble)` rule.
+  // The BLUE selected-response border still wins over the green: the controller
+  // toggles `.response-selected` on this same bubble and the stylesheet's
+  // `.final-response.response-selected` rule paints blue over the green.
+  if (u.finalAnswer && !u.thinking) {
+    bubble.classList.add(FINAL_RESPONSE_CLASS);
   }
 
   // BEFORE the body, and outside it: the body is rewritten whole by the prose

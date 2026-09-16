@@ -73,7 +73,11 @@ describe("drawFeedTurnEnded: the final answer", () => {
     expect(row.getAttribute("data-final-answer")).toBe("true");
   });
 
-  it("puts the existing green-border class on the answering response bubble", () => {
+  it("does not paint the answer bubble green itself; the green is data-driven", () => {
+    // The green final-answer border is now a DATA property the daemon stamps on
+    // the answering response row (FeedResponse.final_answer), drawn by
+    // cards/response.ts on every draw — so the concluded arm records only the
+    // marker and never touches the bubble's border classes.
     const row = document.createElement("article");
     const bubble = document.createElement("div");
     bubble.className = "bubble assistant";
@@ -82,7 +86,7 @@ describe("drawFeedTurnEnded: the final answer", () => {
       ended({ case: "concluded", value: { answer: feedId("r1") } }),
       contextWithRow(row),
     );
-    expect(bubble.classList.contains("final-response")).toBe(true);
+    expect(bubble.classList.contains("final-response")).toBe(false);
   });
 
   it("never puts the amber async-live class on a settled answer bubble", () => {
@@ -98,24 +102,8 @@ describe("drawFeedTurnEnded: the final answer", () => {
       ended({ case: "concluded", value: { answer: feedId("r1") } }),
       contextWithRow(row),
     );
-    // Assert — the settled bubble is green and carries no amber async class.
-    expect(bubble.classList.contains("final-response")).toBe(true);
+    // Assert — the concluded arm leaves the bubble's border classes alone.
     expect(bubble.classList.contains("async-live")).toBe(false);
-  });
-
-  it("never puts the green class on a thinking bubble in the named row", () => {
-    // Arrange — a row whose only assistant bubble is a thinking bubble.
-    const row = document.createElement("article");
-    const bubble = document.createElement("div");
-    bubble.className = "bubble assistant thinking-bubble";
-    row.append(bubble);
-    // Act
-    drawFeedTurnEnded(
-      ended({ case: "concluded", value: { answer: feedId("r1") } }),
-      contextWithRow(row),
-    );
-    // Assert — the green final-answer class lands on no thinking bubble.
-    expect(bubble.classList.contains("final-response")).toBe(false);
   });
 
   it("marks nothing when the turn concluded with no answering prose", () => {
