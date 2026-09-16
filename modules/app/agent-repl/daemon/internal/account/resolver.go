@@ -87,6 +87,35 @@ func (r *resolver) ConfigDirFor(workspaceDir string) string {
 	return r.roots.Default
 }
 
+// IsMultiRepo implements Resolver.
+//
+// THE POLICY LIVES HERE, not at the call site: a caller hands the config dir a
+// session spends under and this package alone says whether it is the work
+// (multi-repo) account. A single root configured for both accounts is one
+// account with no distinct work root, so it answers false — there is nothing
+// to distinguish. Identity is by inode where both dirs exist, so a
+// differently-cased or differently-normalized spelling of the same root still
+// matches; a normalized string compare is the fallback when either cannot be
+// stat'd.
+func (r *resolver) IsMultiRepo(configDir string) bool {
+	if configDir == "" {
+		return false
+	}
+	if r.roots.Default == r.roots.MultiRepo {
+		return false
+	}
+	ca := r.canonical(configDir, "is_multi_repo.config_dir")
+	cb := r.canonical(r.roots.MultiRepo, "is_multi_repo.multi_repo")
+	if ai, err := os.Stat(ca); err == nil {
+		if bi, err := os.Stat(cb); err == nil {
+			if os.SameFile(ai, bi) {
+				return true
+			}
+		}
+	}
+	return normalizePathForCompare(ca) == normalizePathForCompare(cb)
+}
+
 // canonical cleans and absolutizes a path and resolves its symlinks, so a
 // workspace reached through a symlinked path routes the same as the path it
 // points at.

@@ -474,3 +474,66 @@ func TestReadNeverWritesTheIdentityFileOrTheRoot(t *testing.T) {
 		t.Fatalf("identity file changed across Read:\n before = %s\n after  = %s", before, after)
 	}
 }
+
+func TestIsMultiRepo(t *testing.T) {
+	tests := []struct {
+		name      string
+		default_  string
+		multiRepo string
+		configDir string
+		want      bool
+	}{
+		{
+			name:      "the multi-repo root is the work account",
+			default_:  "/roots/default",
+			multiRepo: "/roots/multi",
+			configDir: "/roots/multi",
+			want:      true,
+		},
+		{
+			name:      "the default root is personal",
+			default_:  "/roots/default",
+			multiRepo: "/roots/multi",
+			configDir: "/roots/default",
+			want:      false,
+		},
+		{
+			name:      "an unrelated dir is not the work account",
+			default_:  "/roots/default",
+			multiRepo: "/roots/multi",
+			configDir: "/roots/other",
+			want:      false,
+		},
+		{
+			name:      "an empty config dir is not the work account",
+			default_:  "/roots/default",
+			multiRepo: "/roots/multi",
+			configDir: "",
+			want:      false,
+		},
+		{
+			name:      "one root for both accounts has no distinct work account",
+			default_:  "/roots/only",
+			multiRepo: "/roots/only",
+			configDir: "/roots/only",
+			want:      false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := newResolver(t, account.Roots{
+				Default:   tc.default_,
+				MultiRepo: tc.multiRepo,
+			})
+
+			// Act.
+			got := r.IsMultiRepo(tc.configDir)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("IsMultiRepo(%q) = %v, want %v", tc.configDir, got, tc.want)
+			}
+		})
+	}
+}

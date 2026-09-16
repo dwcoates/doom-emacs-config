@@ -120,6 +120,14 @@ type Resolver interface {
 	// (internal/workspace, which owns the git client) resolves the common dir
 	// first. This package stays a leaf and never shells out to git.
 	ConfigDirFor(workspaceDir string) string
+	// IsMultiRepo reports whether a config dir IS the multi-repo (work)
+	// account root. It is the account-policy predicate a caller uses to decide
+	// work-only behavior for a session — it takes the ROUTED/CHOSEN config dir
+	// the session actually spends under (not a workspace path) and answers
+	// whether that is the work account. A single root configured for both
+	// accounts has no distinct work account, so it answers false for every
+	// dir.
+	IsMultiRepo(configDir string) bool
 	// Read loads one config root's account facts from its .claude.json.
 	Read(ctx context.Context, configDir string) (Account, error)
 	// Roster is both roots' accounts, for the topbar's account display.
