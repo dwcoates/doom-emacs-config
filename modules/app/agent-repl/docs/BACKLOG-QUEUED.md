@@ -50,3 +50,19 @@ Last updated: 2026-09-16.
      real turn (turn-accounting corruption); a safe design exists (route the
      abort through the normal close path with a bounded wait, degrading to A+B on
      timeout) — dispatch only if the owner wants the extra polish.
+
+## Active-next (do the moment the final-answer-flag agent merges)
+
+7. **Thinking-landing debug logging + turn debug on.**
+   - Add daemon debug log at the thinking-row EMIT site (thinking.go) —
+     `daemon.feed.thinking_emitted` (daemon currently logs only thinking
+     deferred/withheld/fragment, never the emit).
+   - Add webapp debug log where a thinking bubble is drawn/marked
+     (feed/cards/response.ts where THINKING_BUBBLE_CLASS is applied) —
+     `feed.draw-thinking`.
+   - Turn debug on: `AGENT_REPL_LOG_LEVEL=debug` for daemon/shim/webapp; deploy.
+   - Purpose (owner): check whether thinking responses ever land in the webapp —
+     correlate `thinking_emitted` (daemon) vs `feed.draw-thinking` (webapp).
+   - SEQUENCING: both files are edited by the in-flight final-answer-flag agent
+     (fix/final-answer-on-row-data); do this right AFTER it merges to avoid
+     conflict.
