@@ -42,12 +42,21 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 
 	switch state := thinking.GetResult().(type) {
 	case *conversationv1.AgentThinking_Start:
+		// THE ROW IS DEFERRED UNTIL THE BLOCK HAS CONTENT. A block opens on
+		// content_block_start before its shown-vs-withheld fate is known, so
+		// drawing here would open an empty bubble that a withheld block would
+		// then have to retire — the empty card that FLASHED in the feed. Instead
+		// the Start arm only initializes the fold and draws NOTHING; the first
+		// content-bearing Update (or a Success carrying the whole) is what first
+		// emits the row. A withheld block therefore draws nothing at all, with
+		// no retire required.
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawThinking", "branch": "case *conversationv1.AgentThinking_Start"})
 		fold.markdown = ""
 		fold.settled = false
-		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose: &frontendv1.FeedResponseProse{Markdown: ""},
-		}}
+		log.Debug("daemon.feed.thinking_deferred",
+			"a reasoning block opened; its bubble is deferred until it carries content",
+			dlog.Context{"unit": unit})
+		return nil, errNotARow
 	case *conversationv1.AgentThinking_Update:
 		if fold.settled {
 			// A fragment after the terminal cannot re-open a closed bubble; the
@@ -63,17 +72,24 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			// WITHHELD REASONING DRAWS NO BUBBLE. The model emits the block and
 			// a signature but no text; the proto is explicit that there is
 			// "nothing to draw but a live indicator", and the feed's live
-			// indicator is the footer's, not a bubble. So a withheld update
-			// draws nothing here rather than an empty card — and RETIRES the
-			// empty bubble the Start arm optimistically opened, since a block's
-			// withheld-ness is not known until this frame.
-			r.retireWithheldThinking(s, at, unit)
+			// indicator is the footer's, not a bubble. Because the row is
+			// deferred until first content, no bubble was ever opened — so a
+			// withheld update simply draws nothing, with no retire to perform.
 			log.Debug("daemon.feed.thinking_withheld",
 				"a reasoning block is withholding its text; no thinking bubble is drawn",
 				dlog.Context{"unit": unit})
 			return nil, errNotARow
 		}
 		fold.markdown += text.Text.GetNewText()
+		if fold.markdown == "" {
+			// A content-free delta (an empty fragment before any real text)
+			// carries no content yet, so it keeps the row deferred rather than
+			// opening an empty bubble.
+			log.Debug("daemon.feed.thinking_deferred",
+				"a reasoning delta carried no text yet; the bubble stays deferred",
+				dlog.Context{"unit": unit})
+			return nil, errNotARow
+		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
@@ -82,11 +98,9 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 		if !ok {
 			// A withheld block settles withheld: the proto says draw NOTHING
 			// once it settles, "not an empty card". An unset reasoning arm is
-			// treated the same — nothing to draw. It also RETIRES the empty
-			// bubble the Start arm opened: the stream emits Start (empty) before
-			// the assistant message settles the block withheld, so without this
-			// the empty card would stand as the block's leftover row.
-			r.retireWithheldThinking(s, at, unit)
+			// treated the same — nothing to draw. Because the row is deferred
+			// until first content, no bubble was ever opened, so this simply
+			// draws nothing with no retire.
 			log.Debug("daemon.feed.thinking_withheld_settled",
 				"a reasoning block settled withheld; no thinking bubble is drawn",
 				dlog.Context{"unit": unit})
@@ -96,6 +110,14 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 		// accumulated — which is what makes a lost fragment harmless.
 		fold.markdown = text.Text.GetText()
 		fold.settled = true
+		if fold.markdown == "" {
+			// A shown block whose settled whole is empty carries no content, so
+			// it draws nothing rather than settling an empty card.
+			log.Debug("daemon.feed.thinking_deferred",
+				"a reasoning block settled with no text; no thinking bubble is drawn",
+				dlog.Context{"unit": unit})
+			return nil, errNotARow
+		}
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
@@ -121,18 +143,4 @@ func (r *resolver) drawThinking(s *wsState, at placement, act *conversationv1.Ag
 			Unit: &frontendv1.FeedTurnActivity_Response{Response: bubble},
 		}},
 	}, nil
-}
-
-// retireWithheldThinking drops the empty bubble a reasoning block's Start arm
-// opened once the block reveals itself WITHHELD. The Start arm draws the empty
-// card before the block's withheld-ness can be known (the stream opens the block
-// on content_block_start and only settles it withheld when the assistant message
-// arrives), so a block that turns out to withhold its text would otherwise leave
-// that empty card standing — the empty leading bubble the owner saw. The row id
-// is deterministic from the unit, so this retires the same row the Start arm
-// drew; retire is a no-op when no bubble was ever opened (a block delivered
-// withheld from the file plane on replay, with no prior Start).
-func (r *resolver) retireWithheldThinking(s *wsState, at placement, unit string) {
-	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
-	r.retire(s, at.feed, id.GetValue())
 }
