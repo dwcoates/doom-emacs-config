@@ -158,6 +158,14 @@ func (r *resolver) concludedOutcome(s *wsState, success *conversationv1.AgentSuc
 				// carries each answer once, in conclusion order, which is
 				// root-feed order.
 				r.recordFinalAnswer(s, id, answer)
+				// RE-STAMP THE ANSWER ROW SO THE GREEN APPEARS WITHOUT A LIVE
+				// EVENT. The response's frames drew this row before the terminal
+				// named it the answer, so it is on screen without the flag; this
+				// re-pushes it with final_answer=true. Because history replay
+				// walks this same terminal path, a reloaded/replayed feed's
+				// answer row is re-stamped here too — the crux that makes the
+				// green survive a reconnect/reload with no live turn-ended event.
+				r.restampFinalAnswer(s, answer)
 			}
 		}
 		return concludedArm(concluded)

@@ -739,3 +739,92 @@ func TestADivergentFragmentOfAnotherTurnIsNotSuppressed(t *testing.T) {
 		t.Fatalf("response rows = %d, want the two turns' rows both kept", got)
 	}
 }
+
+// THE GREEN FINAL-ANSWER BORDER IS A DATA PROPERTY STAMPED ON EVERY DRAW. Once
+// a turn concludes on an answering response, that row carries final_answer=true
+// and KEEPS it across any later redraw — a file-plane re-delivery, a resize
+// redraw, a tool-group re-arrange — because the flag rides the row's data, not a
+// one-shot event. The bug this replaces lost the border whenever the row's DOM
+// was rebuilt with no live turn-ended event; a data flag re-drawn every time
+// cannot be lost.
+func TestARecordedAnswerRowKeepsFinalAnswerAcrossARedraw(t *testing.T) {
+	// Arrange: a turn concluded on its answering response, so the row is stamped.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
+		}, nil), noAddress())
+	id := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{
+			Answer: &conversationv1.AgentActivityId{Value: "unit-1"},
+		}},
+	}, nil, noAddress())
+
+	// Act: the file plane re-delivers the same settled response — a fresh draw of
+	// the same row with no live turn-ended event.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
+		}, nil), noAddress())
+
+	// Assert: the redrawn row still carries the flag.
+	rows := h.responseRows()
+	if len(rows) != 1 {
+		t.Fatalf("response rows = %d, want 1", len(rows))
+	}
+	if !rows[0].GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatal("a redraw of the recorded answer row lost final_answer")
+	}
+}
+
+// A RESPONSE NO CONCLUSION EVER NAMED GETS NO GREEN. An ordinary settled
+// response that is not a turn's answer carries final_answer=false, so the client
+// draws it plain.
+func TestANonAnswerResponseIsNotStampedFinal(t *testing.T) {
+	// Arrange, Act: a settled response with no conclusion naming it.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "just talking"},
+		}, nil), noAddress())
+
+	// Assert.
+	rows := h.responseRows()
+	if len(rows) != 1 {
+		t.Fatalf("response rows = %d, want 1", len(rows))
+	}
+	if rows[0].GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatal("a response no conclusion named was stamped final_answer")
+	}
+}
+
+// A THINKING BUBBLE IS NEVER STAMPED FINAL. Reasoning prose draws through the
+// thinking path, not drawResponse's answer-row stamping, and a turn's conclusion
+// can never name it — so its row carries final_answer=false however the turn
+// ends. The green must never land on a purple thinking bubble.
+func TestAThinkingBubbleIsNeverStampedFinal(t *testing.T) {
+	// Arrange, Act: a settled thinking block, then its turn concludes.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "think about it")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		thinkingResultFrame("unit-1", &conversationv1.AgentThinkingSuccess{
+			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
+				Text: &conversationv1.AgentThinkingText{Text: "reasoning"},
+			},
+		}), noAddress())
+	id := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil, noAddress())
+
+	// Assert.
+	got := h.thinkingRows()
+	if len(got) != 1 {
+		t.Fatalf("thinking rows = %d, want 1", len(got))
+	}
+	if got[0].GetFinalAnswer() {
+		t.Fatal("a thinking bubble was stamped final_answer")
+	}
+}
