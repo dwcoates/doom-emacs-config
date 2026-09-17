@@ -521,6 +521,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     | undefined;
   let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
+  /**
+   * How many keep-alive beats this session has sent, so each prompt is unique.
+   *
+   * Only ever increments — see {@link keepalivePromptText} for why two identical
+   * keep-alive prompts are the pattern the numbering exists to break.
+   */
+  let keepaliveCount = 0;
   let startResolve: (() => void) | undefined;
   /** Settles the same pending start as {@link startResolve}, with a named reason. */
   let startReject: ((reason: Error) => void) | undefined;
@@ -3377,7 +3384,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const turn = create(conversationv1.TurnIdSchema, {
       value: `keepalive-${deps.nowMs()}-${process.pid}`,
     });
-    const said = textSaid(keepalivePromptText());
+    keepaliveCount += 1;
+    const said = textSaid(keepalivePromptText(keepaliveCount));
     open = { id: turn, keepalive: true, startedAtMs: deps.nowMs() };
     try {
       const prompt = buildPrompt(

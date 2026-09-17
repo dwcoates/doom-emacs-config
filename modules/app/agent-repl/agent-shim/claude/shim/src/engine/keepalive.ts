@@ -65,9 +65,18 @@ export const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
  * Minimal on purpose: it exists to make an API call that reads the cache back,
  * not to get an answer, so anything the model would have to think about is
  * wasted money.
+ *
+ * NUMBERED, AND WHY (ruled 2026-09-17). Successive keep-alives used to be
+ * byte-for-byte identical. On 2026-09-17 a keep-alive turn on claude-opus-5
+ * degenerated: instead of answering ".", the model echoed the prompt back into
+ * a ~64,000-token block and hit max_tokens, and it did so on turn after turn.
+ * A repeated-identical prompt is the pattern that reinforces such an echo loop,
+ * so every keep-alive now carries an incrementing counter and no two are the
+ * same. The counter trails the instruction, so the marker the store and
+ * sidecar classify on is untouched and {@link isKeepalivePrompt} still matches.
  */
-export function keepalivePromptText(): string {
-  return `${KEEPALIVE_PROMPT_MARKER}\nRespond with the single character "." and nothing else.`;
+export function keepalivePromptText(counter: number): string {
+  return `${KEEPALIVE_PROMPT_MARKER}\nRespond with the single character "." and nothing else. (${counter})`;
 }
 
 /** True when a prompt the shim is about to submit is one of its own keep-alives. */
