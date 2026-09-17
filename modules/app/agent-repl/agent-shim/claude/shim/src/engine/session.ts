@@ -521,6 +521,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     | undefined;
   let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
+  /**
+   * How many keep-alive beats this session has sent, so each prompt is unique.
+   *
+   * Only ever increments — see {@link keepalivePromptText} for why two identical
+   * keep-alive prompts are the pattern the numbering exists to break.
+   */
+  let keepaliveCount = 0;
   let startResolve: (() => void) | undefined;
   /** Settles the same pending start as {@link startResolve}, with a named reason. */
   let startReject: ((reason: Error) => void) | undefined;
@@ -553,7 +560,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * plain resume. Cleared the moment the rewound query answers.
    */
   let rewindWatch:
-    | { readonly anchorUuid: string; readonly anchorTurnId: string; readonly said: conversationv1.UserSaid }
+    | {
+        readonly anchorUuid: string;
+        readonly anchorTurnId: string;
+        readonly said: conversationv1.UserSaid;
+        /** True when the rewind was performed to precede a keep-alive, not a real prompt. */
+        readonly keepalive: boolean;
+      }
     | undefined;
   /**
    * How the vendor child ended, once it has.
@@ -2097,7 +2110,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function submit(said: conversationv1.UserSaid, keepalive: boolean): Promise<void> {
     const text = saidText(said);
-    if (!keepalive) await yieldObligation(said);
+    // THE ROLLBACK PRECEDES A KEEP-ALIVE TOO, not only a real prompt. The anchor
+    // never advances past the last real record, so the same obligation a real
+    // prompt owes is owed by the next keep-alive beat, and discharging it here
+    // keeps at most one keep-alive in the transcript (engine/keepalive.ts). The
+    // real-prompt path is byte-for-byte the same rollback; nothing about it
+    // changes.
+    await yieldObligation(said, keepalive);
     const queue = prompts;
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
     cadence?.pause();
@@ -2114,22 +2133,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * closed first: two queries on one conversation are two writers on one
    * transcript.
    */
-  async function yieldObligation(said: conversationv1.UserSaid): Promise<void> {
+  async function yieldObligation(said: conversationv1.UserSaid, keepalive: boolean): Promise<void> {
     const owed = rewind.obligation();
     if (owed === undefined) return;
     const current = identity;
     if (current === undefined) return;
     // INFO, WITH THE ANCHOR'S PROVENANCE. This is the one step that can lose a
     // real prompt, and when it goes wrong the only evidence anyone has is this
-    // line naming which turn's assistant record the shim chose to resume at.
-    LOGGER.info(
-      {
-        resume_session_at: owed.resumeSessionAt,
-        anchor_turn_id: owed.anchorTurnId,
-        discarded_keepalive_turns: owed.discardedKeepaliveTurns,
-      },
-      "REWINDING the vendor context past the trailing keep-alive turns before delivering a real prompt; the anchor is the assistant record of that turn",
-    );
+    // line naming which turn's assistant record the shim chose to resume at. The
+    // two messages stay whole string literals (not one templated line) so the
+    // log-classification guard can pin each at INFO by its exact text.
+    const rewindContext = {
+      resume_session_at: owed.resumeSessionAt,
+      anchor_turn_id: owed.anchorTurnId,
+      discarded_keepalive_turns: owed.discardedKeepaliveTurns,
+      before: keepalive ? "keepalive" : "real_prompt",
+    };
+    if (keepalive) {
+      LOGGER.info(
+        rewindContext,
+        "REWINDING the vendor context past the outstanding keep-alive turn before submitting the next keep-alive; at most one keep-alive is ever in the transcript",
+      );
+    } else {
+      LOGGER.info(
+        rewindContext,
+        "REWINDING the vendor context past the trailing keep-alive turns before delivering a real prompt; the anchor is the assistant record of that turn",
+      );
+    }
     try {
       await replaceQuery({
         binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
@@ -2149,6 +2179,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       anchorUuid: owed.resumeSessionAt,
       anchorTurnId: owed.anchorTurnId,
       said,
+      keepalive,
     };
   }
 
@@ -2231,10 +2262,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (watch === undefined) return false;
     if (message.type === "assistant" || (message.type === "result" && message.subtype === "success")) {
       rewindWatch = undefined;
-      LOGGER.info(
-        { resume_session_at: watch.anchorUuid, anchor_turn_id: watch.anchorTurnId },
-        "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
-      );
+      // Whole string literals, one per branch, so the log-classification guard
+      // can pin each LANDED message at INFO by its exact text.
+      const landedContext = {
+        resume_session_at: watch.anchorUuid,
+        anchor_turn_id: watch.anchorTurnId,
+        before: watch.keepalive ? "keepalive" : "real_prompt",
+      };
+      if (watch.keepalive) {
+        LOGGER.info(
+          landedContext,
+          "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the next keep-alive",
+        );
+      } else {
+        LOGGER.info(
+          landedContext,
+          "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
+        );
+      }
       pushes.resolveComponent(KEEPALIVE_REWIND_COMPONENT, 0);
       return false;
     }
@@ -3377,7 +3422,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const turn = create(conversationv1.TurnIdSchema, {
       value: `keepalive-${deps.nowMs()}-${process.pid}`,
     });
-    const said = textSaid(keepalivePromptText());
+    keepaliveCount += 1;
+    const said = textSaid(keepalivePromptText(keepaliveCount));
     open = { id: turn, keepalive: true, startedAtMs: deps.nowMs() };
     try {
       const prompt = buildPrompt(

@@ -31,6 +31,18 @@
  * {@link KeepaliveRewind.obligation} answers whether one is owed and names the
  * uuid to resume at.
  *
+ * THE SAME ROLLBACK RUNS BETWEEN KEEP-ALIVES (ruled 2026-09-17). The anchor is
+ * always the last REAL record — keep-alive turns never advance it — so the same
+ * obligation the next real prompt owes is owed by the next keep-alive BEAT too.
+ * The cadence discharges it before each beat, so the transcript never holds
+ * more than the one keep-alive currently in flight: a degenerate keep-alive
+ * (see {@link keepalivePromptText}) is rewound out before the next one is sent,
+ * and context can never accumulate a pile of them across an idle night. Because
+ * every beat but the first {@link KeepaliveRewind.settled}s the debt, the count
+ * an eventual real prompt discards is at most one. The rollback is byte-for-byte
+ * the real-prompt rollback — same declared `resumeSessionAt` surface, same
+ * uuid, no file rewrite — so nothing about the transcript's safety changes.
+ *
  * THE ANCHOR IS AN ASSISTANT RECORD OF A REAL TURN (ruled 2026-09-14). The SDK
  * states the type of the uuid it will accept: "The message ID should be from
  * `SDKAssistantMessage.uuid`". Every OTHER message the vendor emits carries a
@@ -65,9 +77,18 @@ export const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
  * Minimal on purpose: it exists to make an API call that reads the cache back,
  * not to get an answer, so anything the model would have to think about is
  * wasted money.
+ *
+ * NUMBERED, AND WHY (ruled 2026-09-17). Successive keep-alives used to be
+ * byte-for-byte identical. On 2026-09-17 a keep-alive turn on claude-opus-5
+ * degenerated: instead of answering ".", the model echoed the prompt back into
+ * a ~64,000-token block and hit max_tokens, and it did so on turn after turn.
+ * A repeated-identical prompt is the pattern that reinforces such an echo loop,
+ * so every keep-alive now carries an incrementing counter and no two are the
+ * same. The counter trails the instruction, so the marker the store and
+ * sidecar classify on is untouched and {@link isKeepalivePrompt} still matches.
  */
-export function keepalivePromptText(): string {
-  return `${KEEPALIVE_PROMPT_MARKER}\nRespond with the single character "." and nothing else.`;
+export function keepalivePromptText(counter: number): string {
+  return `${KEEPALIVE_PROMPT_MARKER}\nRespond with the single character "." and nothing else. (${counter})`;
 }
 
 /** True when a prompt the shim is about to submit is one of its own keep-alives. */
