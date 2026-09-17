@@ -16,7 +16,7 @@ import {
   keepalivePromptText,
   REAL_SCHEDULER,
 } from "../../src/engine/keepalive.js";
-import { CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
+import { CACHE_TTL_1H_MS } from "../../src/engine/cold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler } from "./fakes.js";
 
@@ -64,10 +64,16 @@ describe("the keep-alive prompt", () => {
 });
 
 describe("the interval", () => {
-  it("beats inside the vendor's five-minute ephemeral tier", () => {
-    // A beat at or past the tier would let the cache lapse between beats, which
-    // is the exact cost the cadence exists to avoid paying.
-    expect(KEEPALIVE_INTERVAL_MS).toBeLessThan(CACHE_TTL_5M_MS);
+  it("is fifty-two minutes", () => {
+    expect(KEEPALIVE_INTERVAL_MS).toBe(52 * 60 * 1000);
+  });
+
+  it("beats inside subscription billing's one-hour cache window", () => {
+    // A beat at or past the window would let the cache lapse between beats,
+    // which is the exact cost the cadence exists to avoid paying. (The
+    // 5-minute ephemeral tier is API billing's window, not subscription
+    // billing's, which is why the interval is checked against the 1-hour one.)
+    expect(KEEPALIVE_INTERVAL_MS).toBeLessThan(CACHE_TTL_1H_MS);
   });
 });
 

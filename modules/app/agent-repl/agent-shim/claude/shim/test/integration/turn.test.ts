@@ -1311,8 +1311,9 @@ describe("keep-alives", () => {
   // KEEP-ALIVES ARE ENTIRELY SHIM-INTERNAL: nothing keep-alive-shaped exists on
   // the wire (no PromptOrigin value, no rpc, no control-plane signal), so the
   // only producer is the shim's OWN cadence. Its interval is a module constant
-  // (four minutes against the vendor's five-minute cache tier), and waiting
-  // four real minutes is the sleep this suite refuses to write — so `main.ts`
+  // (fifty-two minutes against subscription billing's ~1-hour cache window),
+  // and waiting fifty-two real minutes is the sleep this suite refuses to write
+  // — so `main.ts`
   // honors `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS` under `--fake` and ONLY
   // under `--fake`, which is what makes both obligations below observable.
   // Every wait here is on the shim's own records, never on a clock.
