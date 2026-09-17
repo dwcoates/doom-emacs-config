@@ -82,6 +82,34 @@ const RECLASSIFIED_SITES: readonly ExpectedSite[] = [
       "no rewind anchor exists (none taken yet, or cleared at a boundary): the next real prompt proceeds WITHOUT a rewind and carries the keep-alive turns",
     level: "info",
   },
+  // THE MANUAL RESET BACKDOOR IS VISIBLE (2026-09-17). SIGUSR2 collapses every
+  // outstanding keep-alive turn back to the last real record; an operator
+  // reading the feed must be able to see it happened and whether it landed.
+  {
+    file: "main.ts",
+    message: "received SIGUSR2: resetting all outstanding keep-alive turns back to the last real record",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message: "keep-alive reset requested: no keep-alive turns are outstanding; nothing to do",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message: "keep-alive reset requested: no vendor session is bound; nothing to do",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message: "RESETTING all outstanding keep-alive turns back to the last real record on request",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message: "the keep-alive RESET landed: the vendor resumed at the last real record",
+    level: "info",
+  },
 ] as const;
 
 const SOURCE_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
