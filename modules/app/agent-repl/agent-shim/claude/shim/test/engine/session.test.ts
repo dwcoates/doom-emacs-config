@@ -20,7 +20,7 @@ import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { workspaceLockKey } from "../../src/locks.js";
-import { textSaid } from "../../src/engine/turn.js";
+import { saidText, textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
@@ -1413,6 +1413,94 @@ describe("the keep-alive turn", () => {
     await realPrompt(h, "turn-1");
 
     expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-assistant-uuid");
+  });
+});
+
+/**
+ * THE ROLLBACK RUNS BETWEEN BEATS.
+ *
+ * The bug of 2026-09-17: a keep-alive degenerated into a ~64,000-token block,
+ * and because keep-alives were rewound only on the next REAL prompt, an idle
+ * night with no real prompt let block after block pile up until the context
+ * blew the client-side length guard. The fix rewinds the outstanding keep-alive
+ * before sending the next, so the transcript never holds more than one.
+ */
+describe("the keep-alive rewind between beats", () => {
+  it("rewinds the prior keep-alive before the next, to the last REAL record", async () => {
+    // Arrange. A real turn leaves the anchor, then one keep-alive rides it.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    const afterFirst = h.queries.length;
+
+    // Act. The SECOND beat is the first that owes a rollback.
+    await keepaliveTurn(h, []);
+
+    // Assert. Exactly one new query, resuming at the real record — the first
+    // keep-alive is rewound out, so at most one is ever in the transcript.
+    expect(h.queries.length).toBe(afterFirst + 1);
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+  });
+
+  it("does NOT rewind on the first keep-alive after a real turn", async () => {
+    // The first beat owes nothing: no keep-alive has run since the anchor.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    const before = h.queries.length;
+
+    await keepaliveTurn(h, []);
+
+    expect(h.queries.length).toBe(before);
+  });
+
+  it("rewinds even a degenerate huge keep-alive response before the next cycle", async () => {
+    // Arrange. The keep-alive leaves its OWN assistant record, as the runaway
+    // 64k-token block did; the anchor must not move onto it.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, [assistantMessage("keepalive-degenerate-uuid")]);
+
+    // Act.
+    await keepaliveTurn(h, []);
+
+    // Assert. The next beat rewinds to the real record, discarding the huge one.
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+  });
+
+  it("still rewinds the one outstanding keep-alive when a real prompt finally arrives", async () => {
+    // Many idle cycles, then a real prompt: the existing real-prompt rewind
+    // still removes the single keep-alive that is outstanding.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await keepaliveTurn(h, []);
+    await keepaliveTurn(h, []);
+
+    await realPrompt(h, "turn-1");
+
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+  });
+
+  it("numbers successive keep-alive prompts so no two beats are identical", async () => {
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+
+    await keepaliveTurn(h, []);
+    await keepaliveTurn(h, []);
+
+    const texts: string[] = [];
+    for (const entry of h.persistence.buffered) {
+      if (entry.item.kind !== "prompt" || !entry.keepalive) continue;
+      const said = entry.item.prompt.said;
+      if (said !== undefined) texts.push(saidText(said));
+    }
+    expect(texts.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(texts).size).toBe(texts.length);
   });
 });
 
