@@ -31,6 +31,18 @@
  * {@link KeepaliveRewind.obligation} answers whether one is owed and names the
  * uuid to resume at.
  *
+ * THE SAME ROLLBACK RUNS BETWEEN KEEP-ALIVES (ruled 2026-09-17). The anchor is
+ * always the last REAL record — keep-alive turns never advance it — so the same
+ * obligation the next real prompt owes is owed by the next keep-alive BEAT too.
+ * The cadence discharges it before each beat, so the transcript never holds
+ * more than the one keep-alive currently in flight: a degenerate keep-alive
+ * (see {@link keepalivePromptText}) is rewound out before the next one is sent,
+ * and context can never accumulate a pile of them across an idle night. Because
+ * every beat but the first {@link KeepaliveRewind.settled}s the debt, the count
+ * an eventual real prompt discards is at most one. The rollback is byte-for-byte
+ * the real-prompt rollback — same declared `resumeSessionAt` surface, same
+ * uuid, no file rewrite — so nothing about the transcript's safety changes.
+ *
  * THE ANCHOR IS AN ASSISTANT RECORD OF A REAL TURN (ruled 2026-09-14). The SDK
  * states the type of the uuid it will accept: "The message ID should be from
  * `SDKAssistantMessage.uuid`". Every OTHER message the vendor emits carries a
