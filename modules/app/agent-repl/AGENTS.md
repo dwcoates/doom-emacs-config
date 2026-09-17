@@ -342,6 +342,29 @@ stop ahead of a fresh ensure. Neither ever signalled the process object,
 so neither lost anything to the detach. Only the implicit death-on-exit is
 gone.
 
+## SIGUSR2 to a shim resets its keep-alives (a backdoor, not a wire verb)
+
+Each shim (`agent-shim/claude/shim/src/main.ts`) answers SIGTERM (graceful
+shutdown) and SIGINT (refused, to protect a live turn under an attached
+terminal). It also answers **SIGUSR2**: sent to a live shim process, it
+collapses every outstanding keep-alive turn for that shim's session back to
+the last real record, reclaiming the context and the store bookkeeping those
+turns hold — precisely the rollback the shim's own per-cycle keep-alive
+rewind already performs before every beat and every real prompt (the shared
+`resetKeepalives` subroutine in `agent-shim/claude/shim/src/engine/session.ts`;
+see `engine/keepalive.ts` for the cadence and the rewind it reuses). It never
+rewrites the vendor's transcript file. A shim with nothing outstanding, or no
+session bound yet, treats the signal as a safe no-op and logs that it did.
+
+There is no rpc for this — it is a deliberate backdoor for an operator at a
+shell, not a daemon-issued verb. To send it: find the shim's pid for the
+workspace's socket, then signal it.
+
+```
+ps -eo pid,command | grep 'shim/dist/main.js .*<workspace-id>.sock'
+kill -SIGUSR2 <pid>
+```
+
 ## Runtime investigations go through one skill
 
 For any current or historical agent-repl behavior, use the complete controller

@@ -110,6 +110,7 @@ import {
   keepalivePromptText,
   REAL_SCHEDULER,
   type KeepaliveScheduler,
+  type RewindObligation,
 } from "./keepalive.js";
 import {
   DEFAULT_PERMISSION_MODE,
@@ -459,6 +460,14 @@ export interface SessionEngine extends Engine {
   onSdkMessage(message: SdkMessage): Promise<void>;
   /** The WatchSession fan-out, for a caller that needs to observe pushes. */
   readonly pushes: SessionPushes;
+  /**
+   * Collapse all outstanding keep-alive turns back to the last real record.
+   *
+   * The manual counterpart of the per-cycle rewind (see engine/keepalive.ts),
+   * reached from `main.ts`'s SIGUSR2 handler. A safe no-op when nothing is
+   * owed or no session is bound.
+   */
+  resetKeepalives(): Promise<void>;
 }
 
 export function createEngine(deps: EngineDeps): SessionEngine {
@@ -2125,13 +2134,46 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * THE SHARED COLLAPSE (ruled 2026-09-17).
+   *
+   * Both {@link yieldObligation} (run before every keep-alive and before every
+   * real prompt) and {@link resetKeepalives} (the manual SIGUSR2 backdoor) roll
+   * the vendor context back to the identical place: the last REAL assistant
+   * record, discarding every keep-alive turn accumulated since. This is the ONE
+   * place that performs that roll — replace the query with one that resumes
+   * only THROUGH the anchor (`resumeSessionAt`), then settle the debt. The old
+   * query is closed first: two queries on one conversation are two writers on
+   * one transcript. Neither caller hand-edits or truncates the vendor's
+   * transcript file; this is byte-for-byte the same declared `resumeSessionAt`
+   * surface either way.
+   *
+   * A caller with a prompt riding on the collapse (`yieldObligation`) arranges
+   * its own delivery and watch afterward; a caller with nothing to deliver
+   * (`resetKeepalives`) just wants the collapse itself.
+   */
+  async function collapseToAnchor(
+    owed: RewindObligation,
+    current: SessionIdentity,
+  ): Promise<{ ok: true } | { ok: false; detail: string }> {
+    try {
+      await replaceQuery({
+        binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
+        resumeSessionAt: owed.resumeSessionAt,
+      });
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    }
+    rewind.settled();
+    return { ok: true };
+  }
+
+  /**
    * THE YIELD OBLIGATION.
    *
    * A real prompt must never build on keep-alive context, so when keep-alive
    * turns have run since the last real record the query is REPLACED by one that
-   * resumes only THROUGH that record (`resumeSessionAt`). The old query is
-   * closed first: two queries on one conversation are two writers on one
-   * transcript.
+   * resumes only THROUGH that record (`resumeSessionAt`), via the shared
+   * {@link collapseToAnchor}.
    */
   async function yieldObligation(said: conversationv1.UserSaid, keepalive: boolean): Promise<void> {
     const owed = rewind.obligation();
@@ -2160,19 +2202,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         "REWINDING the vendor context past the trailing keep-alive turns before delivering a real prompt; the anchor is the assistant record of that turn",
       );
     }
-    try {
-      await replaceQuery({
-        binding: { kind: "resume", resumeSessionId: current.vendorSessionId },
-        resumeSessionAt: owed.resumeSessionAt,
-      });
-    } catch (err) {
+    const collapsed = await collapseToAnchor(owed, current);
+    if (!collapsed.ok) {
       // THE REWIND FAILED TO START. The prompt has not been queued yet, so the
       // recovery is simply a plain resume; `submit` pushes onto whatever query
       // this leaves behind.
-      await abandonRewind(owed, current, err instanceof Error ? err.message : String(err));
+      await abandonRewind(owed, current, collapsed.detail);
       return;
     }
-    rewind.settled();
     // WATCH IT LAND. The vendor may still refuse the anchor asynchronously, and
     // the prompt this rewind was performed FOR has to survive that.
     rewindWatch = {
@@ -2181,6 +2218,46 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       said,
       keepalive,
     };
+  }
+
+  /**
+   * THE MANUAL RESET (SIGUSR2 backdoor; ruled 2026-09-17).
+   *
+   * "Reset all the keep-alives to the last one": collapse every outstanding
+   * keep-alive turn back to the last real record, through the exact same
+   * {@link collapseToAnchor} the per-cycle rewind uses. Nothing is owed to a
+   * prompt here — there is none in flight for this call — so on success there
+   * is nothing further to watch. A no-op (no keep-alive debt, or no bound
+   * session) is safe and logged as such.
+   */
+  async function resetKeepalives(): Promise<void> {
+    const owed = rewind.obligation();
+    if (owed === undefined) {
+      LOGGER.info({}, "keep-alive reset requested: no keep-alive turns are outstanding; nothing to do");
+      return;
+    }
+    const current = identity;
+    if (current === undefined) {
+      LOGGER.info({}, "keep-alive reset requested: no vendor session is bound; nothing to do");
+      return;
+    }
+    LOGGER.info(
+      {
+        resume_session_at: owed.resumeSessionAt,
+        anchor_turn_id: owed.anchorTurnId,
+        discarded_keepalive_turns: owed.discardedKeepaliveTurns,
+      },
+      "RESETTING all outstanding keep-alive turns back to the last real record on request",
+    );
+    const collapsed = await collapseToAnchor(owed, current);
+    if (!collapsed.ok) {
+      await abandonRewind(owed, current, collapsed.detail);
+      return;
+    }
+    LOGGER.info(
+      { resume_session_at: owed.resumeSessionAt, anchor_turn_id: owed.anchorTurnId },
+      "the keep-alive RESET landed: the vendor resumed at the last real record",
+    );
   }
 
   /**
@@ -4338,6 +4415,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     detachForeground: (request) => turns.detachForeground(request),
     readHistory: (request) => turns.readHistory(request),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
+    resetKeepalives,
     standDown: async (reason: string) => {
       await teardown(reason);
       return lostRowsAtStandDown > 0 ? 1 : 0;
