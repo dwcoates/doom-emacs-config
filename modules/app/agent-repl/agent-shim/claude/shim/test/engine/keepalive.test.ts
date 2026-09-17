@@ -41,15 +41,25 @@ const keepaliveTurn = { turnId: "keepalive-1", keepalive: true } as const;
 
 describe("the keep-alive prompt", () => {
   it("BEGINS with the marker the store and sidecar classify on", () => {
-    expect(keepalivePromptText().startsWith(KEEPALIVE_PROMPT_MARKER)).toBe(true);
+    expect(keepalivePromptText(1).startsWith(KEEPALIVE_PROMPT_MARKER)).toBe(true);
   });
 
-  it("recognizes its own prompts by that prefix", () => {
-    expect(isKeepalivePrompt(keepalivePromptText())).toBe(true);
+  it("recognizes its own prompts by that prefix, counter and all", () => {
+    expect(isKeepalivePrompt(keepalivePromptText(7))).toBe(true);
   });
 
   it("does not mistake a user's prompt for one", () => {
     expect(isKeepalivePrompt("ship the feature")).toBe(false);
+  });
+
+  it("carries the counter it was given, so no two beats are identical", () => {
+    // A repeated-identical prompt is the pattern that reinforced the echo loop
+    // on 2026-09-17; the counter is what breaks it.
+    expect(keepalivePromptText(1)).not.toBe(keepalivePromptText(2));
+  });
+
+  it("appends the counter after the instruction", () => {
+    expect(keepalivePromptText(42).endsWith("(42)")).toBe(true);
   });
 });
 
