@@ -1275,11 +1275,14 @@ switch to it.  The daemon registers the main worktree through the same
 registration `SPC TAB C-n\=' runs, so the row is an ordinary workspace row
 in every respect.
 
-IT BECOMES SELECTABLE WHEN THE ROSTER PUSH LANDS, not when this command
-returns.  The editor\='s registry is built by the roster reconcile
-(`agent-repl-roster-reconcile\='), and the daemon republishes the roster as
-the LAST act of the registration -- before it answers -- so the push is on
-the wire ahead of this ack rather than waiting for a later one.  The ack
+AND THIS COMMAND STANDS ON IT, exactly as `SPC TAB C-n\=' stands on the
+workspace it just registered: the success\='s `:workspace' ref is handed
+to `agent-repl-verbs-select-minted\=', the same landing every minted
+workspace comes up through.  \"Register the repository I am standing in\"
+was a request to be ATTACHED TO the main worktree, not merely told it now
+exists in a roster the user must still find and click into -- a version of
+this command that only messaged left the owner where they started, which
+read as \"nothing happened\" even though the row was there.  The ack still
 names both facts because the two halves are independently new: the
 repository may be already known while the workspace is freshly opened."
   (interactive)
@@ -1297,7 +1300,8 @@ repository may be already known while the workspace is freshly opened."
                   dir
                   (agent-repl-verbs--workspace-display-name workspace)
                   (if (plist-get value :workspace-already-known)
-                      "already known" "opened"))))
+                      "already known" "opened"))
+         (agent-repl-verbs-select-minted workspace)))
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
