@@ -31,6 +31,7 @@ import {
   observeScrollBox,
 } from "../src/scroll.js";
 import { fireResize } from "./resize-observer.js";
+import { installClickExpand } from "../src/expand.js";
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -1636,11 +1637,164 @@ describe("installIntentScroll", () => {
     // Arrange
     const feed = makeFeed();
     const box = makeSection(feed);
-    const uninstall = installIntentScroll(feed);
+    const { uninstall } = installIntentScroll(feed);
     // Act
     uninstall();
     wheelAt(box, 40);
     // Assert — a released mount leaves no wheel listener on the element.
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("arms a section programmatically, without any prior pointermove", () => {
+    // Arrange — the owner bug: a click that expands a bubble fires no
+    // pointermove, so the box it just revealed must still be armable.
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    const { arm } = installIntentScroll(feed);
+    // Act — arm the box the same way a pointermove into it would, but without
+    // dispatching any pointer event at all.
+    arm(box);
+    wheelAt(box, 40);
+    // Assert — the box keeps its own wheel; the feed did not move.
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("arm() resolves the innermost scroll box enclosing the given element", () => {
+    // Arrange — arm is called with a descendant of the section (as the click
+    // handler calls it with the section itself, but the lookup must still
+    // walk up from whatever element it is handed).
+    const feed = makeFeed();
+    const box = makeSection(feed);
+    const inner = document.createElement("span");
+    box.append(inner);
+    const { arm } = installIntentScroll(feed);
+    // Act
+    arm(inner);
+    wheelAt(box, 40);
+    // Assert
+    expect(feed.scrollTop).toBe(0);
+  });
+
+  it("programmatic arm() does not arm a different, unarmed section", () => {
+    // Arrange — arming one box must not blanket-arm every section.
+    const feed = makeFeed();
+    const armedBox = makeSection(feed);
+    const other = makeSection(feed);
+    const { arm } = installIntentScroll(feed);
+    // Act
+    arm(armedBox);
+    wheelAt(other, 40);
+    // Assert — the other section still redirects to the feed.
+    expect(feed.scrollTop).toBe(40);
+  });
+});
+
+describe("click-to-expand arms the just-expanded box (the feed.ts wiring)", () => {
+  // OWNER BUG: a click that expands a bubble fires no pointermove, so the
+  // just-expanded box stayed unarmed until the cursor moved. feed.ts fixes
+  // this by calling installIntentScroll's `arm` from installClickExpand's
+  // `afterToggle`, on EXPAND only. These tests wire the two real modules
+  // together exactly as feed.ts does and drive real click/wheel events.
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  /** A feed region that reports itself scrollable and stores its scrollTop. */
+  function makeFeed(): HTMLElement {
+    const feed = document.createElement("div");
+    Object.defineProperty(feed, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(feed, "clientHeight", { value: 300, configurable: true });
+    let top = 0;
+    Object.defineProperty(feed, "scrollTop", {
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+      configurable: true,
+    });
+    document.body.append(feed);
+    return feed;
+  }
+
+  /** A `.tool-fold` capped section that also overflows once expanded. */
+  function makeCappedSection(feed: HTMLElement): HTMLElement {
+    const box = document.createElement("div");
+    box.classList.add("tool-fold");
+    box.style.overflowY = "auto";
+    Object.defineProperty(box, "scrollHeight", { value: 400, configurable: true });
+    Object.defineProperty(box, "clientHeight", { value: 100, configurable: true });
+    feed.append(box);
+    return box;
+  }
+
+  /** Dispatch a vertical wheel at `target`. */
+  function wheelAt(target: HTMLElement, deltaY = 40): void {
+    const e = new Event("wheel", { bubbles: true, cancelable: true }) as WheelEvent;
+    Object.defineProperty(e, "deltaY", { value: deltaY });
+    Object.defineProperty(e, "deltaMode", { value: 0 });
+    target.dispatchEvent(e);
+  }
+
+  /** Wire the two modules exactly as feed.ts does, recording every `arm` call. */
+  function wire(feed: HTMLElement) {
+    const { arm } = installIntentScroll(feed);
+    const armCalls: HTMLElement[] = [];
+    installClickExpand(feed, () => "", (section, expanded) => {
+      if (expanded) {
+        armCalls.push(section);
+        arm(section);
+      }
+    });
+    return { armCalls };
+  }
+
+  it("arms the expanded section's own box on EXPAND, with no pointermove at all", () => {
+    // Arrange
+    const feed = makeFeed();
+    const box = makeCappedSection(feed);
+    const { armCalls } = wire(feed);
+    // Act — click expands the box; no pointer event of any kind precedes it.
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    wheelAt(box, 40);
+    // Assert — the box kept its own wheel immediately, and `arm` ran once.
+    expect(feed.scrollTop).toBe(0);
+    expect(armCalls).toEqual([box]);
+  });
+
+  it("does NOT arm on COLLAPSE", () => {
+    // Arrange — an already-expanded (and thus armed) box.
+    const feed = makeFeed();
+    const box = makeCappedSection(feed);
+    const { armCalls } = wire(feed);
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // expand -> arms
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // collapse
+    // Assert — only the expand called `arm`, never the collapse.
+    expect(armCalls).toEqual([box]);
+  });
+
+  it("a wheel over a DIFFERENT, unarmed section still redirects to the feed", () => {
+    // Arrange — expanding one bubble must not blanket-arm every section.
+    const feed = makeFeed();
+    const box = makeCappedSection(feed);
+    const other = makeCappedSection(feed);
+    wire(feed);
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // expand+arm `box`
+    // Act
+    wheelAt(other, 40);
+    // Assert
+    expect(feed.scrollTop).toBe(40);
+  });
+
+  it("pointermove arming still works for a box no click has touched", () => {
+    // Arrange — regression: the original arming path is untouched.
+    const feed = makeFeed();
+    const box = makeCappedSection(feed);
+    wire(feed);
+    // Act
+    box.dispatchEvent(new Event("pointermove", { bubbles: true }));
+    wheelAt(box, 40);
+    // Assert
     expect(feed.scrollTop).toBe(0);
   });
 });
