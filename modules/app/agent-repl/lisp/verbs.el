@@ -1300,8 +1300,7 @@ repository may be already known while the workspace is freshly opened."
                   dir
                   (agent-repl-verbs--workspace-display-name workspace)
                   (if (plist-get value :workspace-already-known)
-                      "already known" "opened"))
-         (agent-repl-verbs-select-minted workspace)))
+                      "already known" "opened"))))
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
