@@ -45,6 +45,14 @@
  * SIGINT is REFUSED and logged at error. A shim may be spawned under an
  * attached terminal, and a Ctrl-C there must not end a turn the user is
  * watching.
+ *
+ * SIGUSR2 is the MANUAL KEEP-ALIVE RESET backdoor (ruled 2026-09-17): it
+ * collapses every outstanding keep-alive turn back to the last real record,
+ * through the same rewind the per-cycle keep-alive already performs
+ * (`engine/session.ts`'s `resetKeepalives`; see `engine/keepalive.ts` for the
+ * cadence and rewind this reuses). It is documented in AGENTS.md as the way an
+ * operator reclaims context on a live session from the shell. Neither SIGTERM
+ * nor SIGINT claims it, and it was free before this change.
  */
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -56,7 +64,7 @@ import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
 import { lockBinaryPath, lockDir, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
-import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
+import { createEngine, type CreateQuery, type QuerySpec, type SessionEngine } from "./engine/session.js";
 import { createFold } from "./convert/fold.js";
 import { createStoreClient } from "./store/client.js";
 import {
@@ -186,8 +194,9 @@ export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
 /**
  * The keep-alive interval override, honored ONLY under `--fake`.
  *
- * The cadence is four minutes against the vendor's five-minute cache tier, and
- * from outside the process there was no way to make one fire — so the two
+ * The cadence is fifty-two minutes against subscription billing's ~1-hour
+ * cache window (engine/keepalive.ts), and from outside the process there was
+ * no way to make one fire — so the two
  * keep-alive obligations could only be declared, never tested. The override
  * exists for that and nothing else, which is why it is refused for a real
  * session: a production shim that took its cadence from the environment could
@@ -576,6 +585,32 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
   };
 }
 
+/** The handler set for the manual keep-alive reset backdoor, exposed so a test can invoke it without raising a signal. */
+export interface KeepaliveResetSignalHandlers {
+  readonly onSigusr2: () => void;
+}
+
+/**
+ * SIGUSR2: the manual keep-alive reset backdoor (see the module doc's
+ * "Signals" section).
+ *
+ * `engine.resetKeepalives()` is itself a safe no-op when no keep-alive debt is
+ * outstanding or no session is bound, so this handler does no session-presence
+ * check of its own — it always fires, and the engine decides whether there is
+ * anything to collapse.
+ */
+export function keepaliveResetSignalHandler(engine: SessionEngine): KeepaliveResetSignalHandlers {
+  return {
+    onSigusr2(): void {
+      MAIN_LIFECYCLE_LOGGER.info(
+        { signal: "SIGUSR2", outcome: "keepalive_reset_requested" },
+        "received SIGUSR2: resetting all outstanding keep-alive turns back to the last real record",
+      );
+      void engine.resetKeepalives();
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -802,7 +837,7 @@ export async function main(): Promise<void> {
     process.exit(code);
   };
 
-  const engine: Engine = createEngine({
+  const engine: SessionEngine = createEngine({
     endProcess: (code) => {
       endProcess(code);
     },
@@ -866,6 +901,8 @@ export async function main(): Promise<void> {
   });
   process.on("SIGTERM", handlers.onSigterm);
   process.on("SIGINT", handlers.onSigint);
+  const keepaliveResetHandlers = keepaliveResetSignalHandler(engine);
+  process.on("SIGUSR2", keepaliveResetHandlers.onSigusr2);
 
   MAIN_LIFECYCLE_LOGGER.info(
     { listen_socket: args.listen, outcome: "serving" },

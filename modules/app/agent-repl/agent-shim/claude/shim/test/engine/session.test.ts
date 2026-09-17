@@ -1505,6 +1505,80 @@ describe("the keep-alive rewind between beats", () => {
 });
 
 /**
+ * THE MANUAL RESET (SIGUSR2 backdoor; ruled 2026-09-17).
+ *
+ * `resetKeepalives` is the same collapse the per-cycle rewind performs, run on
+ * demand rather than before a beat or a real prompt. It shares the exact
+ * rollback: a replacement query bound with `resumeSessionAt` at the last real
+ * record, never a hand-edit of the vendor's transcript file.
+ */
+describe("resetKeepalives (the manual keep-alive reset)", () => {
+  it("collapses an outstanding keep-alive turn back to the last real record", async () => {
+    // Arrange. The one keep-alive beat after a real turn owes nothing YET (see
+    // "does NOT rewind on the first keep-alive after a real turn" above) but
+    // leaves the debt outstanding once it ends — exactly the state the manual
+    // reset exists to collapse on demand, instead of waiting for the next beat
+    // or real prompt to do it.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    const beforeReset = h.queries.length;
+
+    // Act.
+    await h.engine.resetKeepalives();
+
+    // Assert. A new query was opened, resuming at the last real record.
+    expect(h.queries.length).toBe(beforeReset + 1);
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+  });
+
+  it("is a safe no-op when no keep-alive turns are outstanding", async () => {
+    // Arrange. A real turn with no keep-alive since it: nothing is owed.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    const before = h.queries.length;
+
+    // Act.
+    await h.engine.resetKeepalives();
+
+    // Assert. No query was replaced.
+    expect(h.queries.length).toBe(before);
+  });
+
+  it("is a safe no-op when no session has been bound yet", async () => {
+    // Arrange: a fresh engine, never started.
+    const h = harness();
+
+    // Act, Assert.
+    await expect(h.engine.resetKeepalives()).resolves.toBeUndefined();
+    expect(h.queries.length).toBe(0);
+  });
+
+  it("goes through the SAME rollback the per-cycle rewind uses: an identical resumeSessionAt", async () => {
+    // Arrange: two sessions brought to an identical outstanding-keep-alive
+    // state, one settled by the ordinary per-cycle rewind (a second beat), the
+    // other by the manual reset.
+    const viaCadence = harness();
+    await started(viaCadence);
+    await realTurn(viaCadence, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(viaCadence, []);
+    await keepaliveTurn(viaCadence, []);
+
+    const viaReset = harness();
+    await started(viaReset);
+    await realTurn(viaReset, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(viaReset, []);
+    await viaReset.engine.resetKeepalives();
+
+    // Assert: both landed a replacement query resuming at the same anchor.
+    expect(viaCadence.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+    expect(viaReset.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+  });
+});
+
+/**
  * THE ANCHOR, AND THE TWO DEAD UUIDS OF 2026-09-14.
  *
  * `resumeSessionAt` is declared to take an `SDKAssistantMessage.uuid`. The

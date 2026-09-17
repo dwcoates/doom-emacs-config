@@ -35,13 +35,14 @@ import {
   workspaceIdFromListenSocket,
   resolveEnvironment,
   shutdownSignalHandlers,
+  keepaliveResetSignalHandler,
   versionLine,
   type CliArgs,
   type ShimEnvironment,
 } from "../src/main.js";
 import { VendorCallsForbiddenError } from "../src/vendor-guard.js";
 import type { Engine } from "../src/engine/engine.js";
-import type { QuerySpec } from "../src/engine/session.js";
+import type { QuerySpec, SessionEngine } from "../src/engine/session.js";
 
 /** A complete, legal spawn environment. */
 function spawnEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -418,6 +419,43 @@ describe("workspaceIdFromListenSocket", () => {
     expect(() => workspaceIdFromListenSocket("/tmp/0100059cb65649bZ.sock")).toThrow(
       /not named after a workspace id/,
     );
+  });
+});
+
+/** An engine that records calls to `resetKeepalives`. */
+function resetKeepalivesEngine(): { engine: SessionEngine; calls: number[] } {
+  const calls: number[] = [];
+  const engine = {
+    resetKeepalives: async (): Promise<void> => {
+      calls.push(calls.length);
+    },
+  } as unknown as SessionEngine;
+  return { engine, calls };
+}
+
+describe("keepaliveResetSignalHandler", () => {
+  it("invokes the engine's resetKeepalives on SIGUSR2", () => {
+    // Arrange.
+    const { engine, calls } = resetKeepalivesEngine();
+    const handlers = keepaliveResetSignalHandler(engine);
+
+    // Act.
+    handlers.onSigusr2();
+
+    // Assert.
+    expect(calls).toEqual([0]);
+  });
+
+  it("is a safe no-op when the engine has no active session", () => {
+    // Arrange: `resetKeepalives` itself is the no-op session owns; the handler
+    // just has to call it without throwing.
+    const engine = {
+      resetKeepalives: async (): Promise<void> => undefined,
+    } as unknown as SessionEngine;
+    const handlers = keepaliveResetSignalHandler(engine);
+
+    // Act, Assert.
+    expect(() => handlers.onSigusr2()).not.toThrow();
   });
 });
 
@@ -1159,8 +1197,9 @@ describe("main", () => {
     h.letServeReturn();
     await h.reached("serving");
 
-    // Assert.
-    expect([...h.signals.keys()].sort()).toEqual(["SIGINT", "SIGTERM"]);
+    // Assert. SIGUSR2 is the manual keep-alive reset backdoor, installed
+    // alongside the other two.
+    expect([...h.signals.keys()].sort()).toEqual(["SIGINT", "SIGTERM", "SIGUSR2"]);
   });
 
   it("refuses SIGINT through the handler it registered", async () => {
