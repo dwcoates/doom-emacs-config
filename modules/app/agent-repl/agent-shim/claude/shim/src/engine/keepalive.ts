@@ -13,11 +13,12 @@
  * such a prompt as keep-alive — its prompt and every frame land as
  * `unserved_item.keepalive` — until the next non-keep-alive prompt.
  *
- * THE INTERVAL. Four minutes, against the vendor's FIVE-minute ephemeral tier
- * (`cache_creation.ephemeral_5m_input_tokens`, engine/cold.ts). The tier is the
- * shorter of the two the vendor buys, so keeping it warm keeps the 1-hour tier
- * warm as well; the one-minute margin absorbs a slow turn without letting the
- * cache lapse between beats.
+ * THE INTERVAL. Fifty-two minutes (ruled 2026-09-17). The ~5-minute ephemeral
+ * cache-invalidation window (`cache_creation.ephemeral_5m_input_tokens`,
+ * engine/cold.ts) is an API-BILLING window, not a subscription-billing one:
+ * subscription billing's own window is ~1 hour, so the keep-alive fires every
+ * 52 minutes to stay inside THAT window, with an eight-minute margin against a
+ * slow turn.
  *
  * THE YIELD OBLIGATION. A real prompt must never build on keep-alive context,
  * so before one is delivered the vendor context is ROLLED BACK to just after
@@ -68,8 +69,12 @@ const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.en
 /** Every keep-alive prompt BEGINS with this literal. */
 export const KEEPALIVE_PROMPT_MARKER = "<!--agent-repl:keepalive-->";
 
-/** Four minutes: inside the vendor's five-minute ephemeral tier, with a margin. */
-export const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
+/**
+ * Fifty-two minutes: inside subscription billing's ~1-hour cache window, with
+ * an eight-minute margin. (The ~5-minute ephemeral window is API billing's,
+ * not subscription billing's.)
+ */
+export const KEEPALIVE_INTERVAL_MS = 52 * 60 * 1000;
 
 /**
  * The prompt itself.
