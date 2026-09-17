@@ -2072,6 +2072,37 @@ is in, so the two bools are reported independently rather than as one."
       (should (agent-repl-test-verbs--messaged-p
                "already known repository /tmp/agent-repl-test/repo; workspace repo already known")))))
 
+(ert-deftest agent-repl-verbs-register-repository-selects-the-opened-workspace ()
+  "`SPC j .' stands on the main-worktree workspace it just opened.
+Registering the repository you are standing in used to leave you exactly
+where you started -- the row existed but nothing visibly moved, which
+read as \"nothing happened\" -- so the command now lands on it the same
+way `SPC TAB C-n' and `SPC TAB n' already do."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo")
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--selected
+                     '("/tmp/agent-repl-test/repo"))))))
+
+(ert-deftest agent-repl-verbs-register-repository-selects-an-already-known-workspace ()
+  "A main worktree already registered still gets selected, not skipped.
+`already_known' is an answer about MINTING, never a reason to leave the
+user where they were: re-registering the repository you are standing in
+must still stand you on its workspace."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer t t)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo")
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--selected
+                     '("/tmp/agent-repl-test/repo"))))))
+
 (ert-deftest agent-repl-verbs-register-repository-reports-a-path-in-no-repository ()
   "The `not_in_a_repository' arm reaches the user as its own sentence."
   ;; Arrange.
