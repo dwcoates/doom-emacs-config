@@ -86,6 +86,14 @@ describe("realQueryOptions", () => {
     expect(options.forwardSubagentText).toBe(true);
   });
 
+  it("asks for summarized adaptive thinking so thinking bubbles render", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec());
+
+    // Assert.
+    expect(options.thinking).toEqual({ type: "adaptive", display: "summarized" });
+  });
+
   it("PRE-MINTS the vendor session id on a fresh start", () => {
     // Arrange, Act.
     const options = realQueryOptions(spec({ binding: { kind: "fresh", sessionId: "vendor-42" } }));

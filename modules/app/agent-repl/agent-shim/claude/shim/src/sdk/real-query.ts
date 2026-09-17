@@ -187,6 +187,14 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
     settingSources: ["user", "project", "local"],
     includePartialMessages: true,
     forwardSubagentText: true,
+    // EXPOSE READABLE SUMMARIZED THINKING. Without a `thinking` option current
+    // models default `display` to "omitted": reasoning still happens but the
+    // text is withheld (empty thinking deltas), so no thinking bubble ever
+    // renders. `display: "summarized"` makes the vendor stream readable
+    // `thinking_delta` text, which convert/stream-events.ts already folds into
+    // thinking units. `type: "adaptive"` is the form current models
+    // (Claude 4.7+/5 family) accept — `"enabled"` is rejected by them.
+    thinking: { type: "adaptive", display: "summarized" },
     cwd: spec.cwd,
     permissionMode: spec.permissionMode,
     canUseTool: spec.canUseTool,
