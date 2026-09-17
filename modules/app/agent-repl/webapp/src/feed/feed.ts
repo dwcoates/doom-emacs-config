@@ -111,7 +111,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // wheel redirects to the feed. Without it, a section the feed scrolled under
   // a still cursor captures the next gesture and scrolling gets stuck in the
   // bubble (scroll.ts's installIntentScroll). No box, no sections to gate.
-  const uninstallIntentScroll = scrollBox === null ? null : installIntentScroll(scrollBox);
+  const intentScroll = scrollBox === null ? null : installIntentScroll(scrollBox);
   // The caret's view rule, bound ONCE for the whole universe of feeds: every
   // bubble in it -- root-level, nested, merge or subagent -- is built by
   // `bubbleFor` below, so they all obey the same one.
@@ -133,7 +133,18 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // expand/collapse whose height did not change, which the ResizeObserver in
   // bubble-more.ts cannot catch; refreshHasMore self-restricts to response/prompt
   // bubbles, so a click on a tool section does nothing.
-  installClickExpand(host, undefined, (section) => refreshHasMore(section));
+  //
+  // OWNER BUG FIX: a click that EXPANDS a bubble fires no pointermove, so
+  // scroll.ts's intent-arm latch never sees the box the click just revealed —
+  // the first wheel over it, cursor unmoved, redirects to the feed instead of
+  // scrolling the bubble. `intentScroll.arm` is the same armed-state latch a
+  // pointermove writes; calling it here on EXPAND ONLY (never on collapse)
+  // arms the just-expanded section immediately, so the wheel scrolls it
+  // without requiring the cursor to move first.
+  installClickExpand(host, undefined, (section, expanded) => {
+    refreshHasMore(section);
+    if (expanded) intentScroll?.arm(section);
+  });
 
   const root: FeedController = createFeedController({
     ctx,
@@ -463,7 +474,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     disposed = true;
     watch?.cancel();
     unobserve?.();
-    uninstallIntentScroll?.();
+    intentScroll?.uninstall();
     overscan?.dispose();
     root.dispose();
   }

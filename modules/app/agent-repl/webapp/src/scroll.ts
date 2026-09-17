@@ -889,16 +889,24 @@ const domMetrics = (el: HTMLElement): ScrollMetrics => ({
  * to stop the browser scrolling the section it is redirecting off of. The
  * pointer listeners only READ, so they stay passive.
  *
- * Returns the unsubscriber. A mount that drops it leaks listeners onto an
- * element the next workspace will mount over.
+ * Returns `{ uninstall, arm }`. `uninstall` removes the listeners, exactly as
+ * the bare unsubscriber did before. `arm` is a SECOND, PROGRAMMATIC entry to
+ * the very same armed-state latch a pointermove writes — not a parallel
+ * notion of "armed" — for the one gesture that arms nothing on its own: a
+ * click that expands a bubble fires no pointermove, so the box it just
+ * revealed would otherwise sit unarmed until the reader's cursor happened to
+ * move (see `installClickExpand`'s `afterToggle`, which calls this on
+ * expand). It resolves the same innermost-scroll-box lookup a pointer event
+ * would, from any element inside (or equal to) that box.
  */
-export function installIntentScroll(feed: HTMLElement): () => void {
+export function installIntentScroll(feed: HTMLElement): { uninstall: () => void; arm: (el: Element) => void } {
   const scrollerUnder = (target: EventTarget | null): HTMLElement | null =>
     innerScrollerAt(target instanceof HTMLElement ? target : null, feed, domMetrics);
 
   // The armed box: the inner scroll box the reader last deliberately entered.
-  // Written ONLY from pointer events below — never from the wheel, and never
-  // from mouseenter/mouseover — which is what keeps a scrolled-into box unarmed.
+  // Written ONLY from pointer events below and from `arm` — never from the
+  // wheel, and never from mouseenter/mouseover — which is what keeps a
+  // scrolled-into box unarmed.
   let armed: HTMLElement | null = null;
 
   const onWheel = (e: WheelEvent): void => {
@@ -930,10 +938,15 @@ export function installIntentScroll(feed: HTMLElement): () => void {
   feed.addEventListener("wheel", onWheel, { capture: true, passive: false });
   feed.addEventListener("pointermove", arm, { passive: true });
   feed.addEventListener("pointerdown", arm, { passive: true });
-  return () => {
-    feed.removeEventListener("wheel", onWheel, { capture: true });
-    feed.removeEventListener("pointermove", arm);
-    feed.removeEventListener("pointerdown", arm);
+  return {
+    uninstall: () => {
+      feed.removeEventListener("wheel", onWheel, { capture: true });
+      feed.removeEventListener("pointermove", arm);
+      feed.removeEventListener("pointerdown", arm);
+    },
+    arm: (el: Element) => {
+      armed = scrollerUnder(el);
+    },
   };
 }
 
