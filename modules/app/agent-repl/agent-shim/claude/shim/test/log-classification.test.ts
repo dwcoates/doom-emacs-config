@@ -48,6 +48,22 @@ const RECLASSIFIED_SITES: readonly ExpectedSite[] = [
     message: "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
     level: "info",
   },
+  // THE ROLLBACK NOW RUNS BETWEEN BEATS (2026-09-17). Each keep-alive rewinds
+  // the prior one out, so the transcript never holds more than one; the two
+  // messages below are the keep-alive-facing counterparts of the real-prompt
+  // pair above, and stay at INFO for the same reason.
+  {
+    file: "engine/session.ts",
+    message:
+      "REWINDING the vendor context past the outstanding keep-alive turn before submitting the next keep-alive; at most one keep-alive is ever in the transcript",
+    level: "info",
+  },
+  {
+    file: "engine/session.ts",
+    message:
+      "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the next keep-alive",
+    level: "info",
+  },
   {
     file: "engine/session.ts",
     message:
