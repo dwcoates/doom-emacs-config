@@ -570,6 +570,27 @@ const shellInit = (state: "live" | ShellOutcome) => ({
         },
 });
 
+/**
+ * A MESSAGE FROM ANOTHER CLAUDE — `FeedRow.peer_message`. Not a prompt: drawn
+ * on the prompt's side of the feed but purple, and ABBREVIATED (the collapsed
+ * form is the sender label and a chevron, with no body).
+ */
+export const peerMessageRow = (
+  overrides?: Partial<RowInit>,
+): FeedRow =>
+  feedRow(
+    { case: "peerMessage", value: { sender: "agent Explore", body: "the sweep found nothing" } },
+    overrides,
+  );
+
+/**
+ * A REMOVAL — `FeedRow.removed`, the DUAL of an upsert on the same tail: the
+ * daemon retired the row this one keys, so the client drops it rather than
+ * drawing anything. The arm carries no payload.
+ */
+export const removedRow = (overrides?: Partial<RowInit>): FeedRow =>
+  feedRow({ case: "removed", value: {} }, overrides);
+
 export const detachedSubagentRow = (
   state: "live" | SubagentOutcome = "live",
   overrides?: Partial<RowInit>,

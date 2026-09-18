@@ -74,6 +74,8 @@ import {
   commandRefusedRow,
   detachedShellRow,
   shellHeadRow,
+  peerMessageRow,
+  removedRow,
   detachedSubagentRow,
   feedId,
   findingsUnit,
@@ -136,6 +138,8 @@ describe("arm coverage", () => {
       "detachedSubagent",
       "detachedShell",
       "shellHead",
+      "peerMessage",
+      "removed",
       "permission",
       "question",
       "separation",
@@ -751,6 +755,65 @@ describe("a live detached shell head", () => {
     expect(row.dataset.state).toBe("live");
   });
 
+});
+
+describe("a peer message", () => {
+  it("draws the sender label the daemon composed, verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(peerMessageRow());
+    // Assert
+    expect(row.querySelector(".peer-label")?.textContent).toBe("agent Explore");
+  });
+
+  it("is not a prompt: it wears the peer bubble, never the user's", async () => {
+    // Arrange / Act
+    const row = await drawRow(peerMessageRow());
+    // Assert
+    expect(row.querySelector(".bubble.peer")).not.toBeNull();
+    expect(row.querySelector(".bubble.user")).toBeNull();
+  });
+
+  it("starts collapsed, so the body is not revealed", async () => {
+    // Arrange / Act
+    const row = await drawRow(peerMessageRow());
+    // Assert
+    expect(row.querySelector(".peer-head")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("reveals the body when the head is clicked", async () => {
+    // Arrange
+    await drawRow(peerMessageRow({ id: feedId("peer-1") }));
+    // Act
+    await harness.click('[data-feed-row="peer-1"] .peer-head');
+    // Assert
+    expect(
+      harness.$('[data-feed-row="peer-1"] .peer-head')?.getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+});
+
+describe("a removal", () => {
+  it("drops the row it keys rather than drawing anything", async () => {
+    // Arrange: a row on the tail.
+    await drawRow(userPromptRow("the retired row", { id: feedId("gone-1") }));
+    // Act: the daemon retires it — the upsert's dual, on the same tail.
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, removedRow({ id: feedId("gone-1") }));
+    await harness.settle();
+    // Assert
+    expect(harness.row("gone-1")).toBeNull();
+  });
+
+  it("leaves every other row standing", async () => {
+    // Arrange
+    await drawRow(userPromptRow("the retired row", { id: feedId("gone-1") }));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("the row that stays", { id: feedId("kept-1") }));
+    await harness.settle();
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, removedRow({ id: feedId("gone-1") }));
+    await harness.settle();
+    // Assert
+    expect(harness.rowIds()).toEqual(["kept-1"]);
+  });
 });
 
 describe("a detached shell's spool body", () => {
