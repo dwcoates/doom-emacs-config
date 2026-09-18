@@ -73,6 +73,9 @@ import {
   commandPanelRow,
   commandRefusedRow,
   detachedShellRow,
+  shellHeadRow,
+  peerMessageRow,
+  removedRow,
   detachedSubagentRow,
   feedId,
   findingsUnit,
@@ -134,6 +137,9 @@ describe("arm coverage", () => {
       "turnEnded",
       "detachedSubagent",
       "detachedShell",
+      "shellHead",
+      "peerMessage",
+      "removed",
       "permission",
       "question",
       "separation",
@@ -725,35 +731,104 @@ describe("a detached subagent", () => {
   });
 });
 
-describe.each(SHELL_OUTCOMES)("a settled (%s) detached shell", (outcome) => {
+describe.each(SHELL_OUTCOMES)("a settled (%s) detached shell head", (outcome) => {
   it("carries its outcome as the state", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow(outcome));
+    const row = await drawRow(shellHeadRow(outcome));
     // Assert
     expect(row.dataset.state).toBe(outcome);
   });
 
   it("draws the exit code as a badge rather than a failure", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow(outcome));
+    const row = await drawRow(shellHeadRow(outcome));
     // Assert: a non-zero exit is still `completed`; the code is information.
-    expect(row.textContent).toContain("1");
+    expect(row.querySelector(".shell-exit")?.getAttribute("data-exit-code")).toBe("1");
   });
 });
 
-describe("a live detached shell", () => {
+describe("a live detached shell head", () => {
   it("carries the live state", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow("live"));
+    const row = await drawRow(shellHeadRow("live"));
     // Assert
     expect(row.dataset.state).toBe("live");
   });
 
-  it("draws the spool's omission note verbatim", async () => {
+});
+
+describe("a peer message", () => {
+  it("draws the sender label the daemon composed, verbatim", async () => {
     // Arrange / Act
+    const row = await drawRow(peerMessageRow());
+    // Assert
+    expect(row.querySelector(".peer-label")?.textContent).toBe("agent Explore");
+  });
+
+  it("is not a prompt: it wears the peer bubble, never the user's", async () => {
+    // Arrange / Act
+    const row = await drawRow(peerMessageRow());
+    // Assert
+    expect(row.querySelector(".bubble.peer")).not.toBeNull();
+    expect(row.querySelector(".bubble.user")).toBeNull();
+  });
+
+  it("starts collapsed, so the body is not revealed", async () => {
+    // Arrange / Act
+    const row = await drawRow(peerMessageRow());
+    // Assert
+    expect(row.querySelector(".peer-head")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("reveals the body when the head is clicked", async () => {
+    // Arrange
+    await drawRow(peerMessageRow({ id: feedId("peer-1") }));
+    // Act
+    await harness.click('[data-feed-row="peer-1"] .peer-head');
+    // Assert
+    expect(
+      harness.$('[data-feed-row="peer-1"] .peer-head')?.getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+});
+
+describe("a removal", () => {
+  it("drops the row it keys rather than drawing anything", async () => {
+    // Arrange: a row on the tail.
+    await drawRow(userPromptRow("the retired row", { id: feedId("gone-1") }));
+    // Act: the daemon retires it — the upsert's dual, on the same tail.
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, removedRow({ id: feedId("gone-1") }));
+    await harness.settle();
+    // Assert
+    expect(harness.row("gone-1")).toBeNull();
+  });
+
+  it("leaves every other row standing", async () => {
+    // Arrange
+    await drawRow(userPromptRow("the retired row", { id: feedId("gone-1") }));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("the row that stays", { id: feedId("kept-1") }));
+    await harness.settle();
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, removedRow({ id: feedId("gone-1") }));
+    await harness.settle();
+    // Assert
+    expect(harness.rowIds()).toEqual(["kept-1"]);
+  });
+});
+
+describe("a detached shell's spool body", () => {
+  it("draws the spool's omission note verbatim", async () => {
+    // Arrange / Act: the BODY arm draws the spool and nothing else.
     const row = await drawRow(detachedShellRow("live"));
     // Assert
     expect(row.textContent).toContain("40 lines omitted");
+  });
+
+  it("draws no head facts, which live on the head row", async () => {
+    // Arrange / Act
+    const row = await drawRow(detachedShellRow("live"));
+    // Assert: drawing the clock here too would duplicate the head's.
+    expect(row.querySelector(".shell-clock")).toBeNull();
   });
 });
 
@@ -1463,10 +1538,10 @@ describe("a live detached subagent's stop", () => {
   });
 });
 
-describe("a live detached shell's stop", () => {
+describe("a live detached shell head's stop", () => {
   it("sends the detached target", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live", { id: feedId("shell-3") }));
+    await drawRow(shellHeadRow("live", { id: feedId("shell-3") }));
     // Act
     await harness.click('[data-feed-row="shell-3"] [data-interrupt]');
     // Assert
@@ -1476,7 +1551,7 @@ describe("a live detached shell's stop", () => {
 
   it("echoes the shell row's own FeedId", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live", { id: feedId("shell-3") }));
+    await drawRow(shellHeadRow("live", { id: feedId("shell-3") }));
     // Act
     await harness.click('[data-feed-row="shell-3"] [data-interrupt]');
     // Assert
@@ -1486,7 +1561,7 @@ describe("a live detached shell's stop", () => {
 
   it("offers no stop on a settled shell", async () => {
     // Arrange / Act: there is nothing left to stop.
-    const row = await drawRow(detachedShellRow("completed", { id: feedId("shell-3") }));
+    const row = await drawRow(shellHeadRow("completed", { id: feedId("shell-3") }));
     // Assert
     expect(row.querySelector("[data-interrupt]")).toBeNull();
   });
@@ -1572,20 +1647,46 @@ describe("a compaction divider's fold", () => {
   });
 });
 
+// THE SKILL CARD'S FOLD IS THE WHOLE CARD (owner ruling, 2026-09-15). It is
+// not a named `data-fold` section with a `data-folded` flag: the card itself
+// wears `.tool-fold` — a CAPPED_CLASSES section — and the feed-wide expand
+// handler toggles `.expanded` on it, which is the same key `expandedKeys`
+// reconciles across a re-push.
 describe("a skill document's fold", () => {
   it("starts folded", async () => {
     // Arrange / Act: a SKILL.md is long, and the reader asked for a skill to
     // run rather than to be read to.
     const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
     // Assert
-    expect(row.querySelector("[data-fold]")?.getAttribute("data-folded")).toBe("true");
+    expect(row.querySelector(".tool-skill.tool-fold")?.classList.contains("expanded")).toBe(
+      false,
+    );
+  });
+
+  it("hides the document until the reader opens the card", async () => {
+    // Arrange / Act: no preview — the document is not revealed on a collapsed
+    // card, which is the whole point of the card-level fold.
+    const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    // Assert: the document is present but its host card is not expanded.
+    expect(row.querySelector(".skill-content")).not.toBeNull();
+    expect(row.querySelector(".tool-skill.expanded")).toBeNull();
+  });
+
+  it("reveals the document when the card is clicked", async () => {
+    // Arrange
+    await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    // Act
+    await harness.click('[data-feed-row="skill-1"] .tool-skill');
+    // Assert
+    expect(
+      harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
+    ).toBe(true);
   });
 
   it("keeps the reader's toggle across a re-push of the same row", async () => {
     // Arrange
-    const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
-    const name = row.querySelector("[data-fold]")?.getAttribute("data-fold") ?? "";
-    await harness.click(`[data-feed-row="skill-1"] [data-fold="${name}"]`);
+    await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    await harness.click('[data-feed-row="skill-1"] .tool-skill');
     // Act
     harness.fake.pushRow(
       WORKSPACE_ID,
@@ -1593,10 +1694,10 @@ describe("a skill document's fold", () => {
       activityRow(skillUnit("loaded"), { id: feedId("skill-1") }),
     );
     await harness.settle();
-    // Assert
+    // Assert: a re-push never un-toggles what the reader opened.
     expect(
-      harness.$(`[data-feed-row="skill-1"] [data-fold="${name}"]`)?.getAttribute("data-folded"),
-    ).toBe("false");
+      harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
+    ).toBe(true);
   });
 });
 
@@ -1988,14 +2089,14 @@ describe("a detached subagent's head clock", () => {
 describe("a live detached shell's head clock", () => {
   it("counts up from the served start instant", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow("live"));
+    const row = await drawRow(shellHeadRow("live"));
     // Assert
     expect(row.querySelector(".shell-clock")?.textContent).toBe("9s");
   });
 
   it("grows as time passes", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live"));
+    await drawRow(shellHeadRow("live"));
     // Act
     await harness.tick(5_000);
     // Assert
@@ -2004,17 +2105,17 @@ describe("a live detached shell's head clock", () => {
 
   it("reads the quiet-for figure from the live arm's last progress", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow("live"));
+    const row = await drawRow(shellHeadRow("live"));
     // Assert
     expect(row.querySelector(".shell-quiet")?.textContent).toBe("quiet for 8s");
   });
 
   it("keeps the original start instant across a re-push", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live"));
+    await drawRow(shellHeadRow("live"));
     await harness.tick(5_000);
     // Act
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedShellRow("live"));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, shellHeadRow("live"));
     await harness.settle();
     // Assert
     expect(harness.row("row-1")?.querySelector(".shell-clock")?.textContent).toBe("14s");
