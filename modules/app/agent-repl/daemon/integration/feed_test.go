@@ -67,6 +67,31 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	}
 }
 
+// TestAFeedTextScaleFrameIsNotARowOnTheFeedTail pins that WatchFeed's THREE
+// arms stay distinguishable on the wire: the response carries `row`,
+// `selection` and `feed_text_scale` (endpoint_watch_feed.proto), and the zoom
+// frame is pushed on EVERY open feed's watch. A reader that takes any frame
+// for a row sees a row that does not exist -- which is precisely what every
+// "produces no feed row" probe in this suite reported until the harness
+// selected row frames rather than picking a (nil) row out of each one.
+func TestAFeedTextScaleFrameIsNotARowOnTheFeedTail(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	tail := f.watchRootFeed()
+
+	// Act: nudge the daemon-global zoom, which pushes a FeedTextScale frame to
+	// every open feed's watch -- this tail included.
+	if _, err := f.d.Client().AdjustFeedTextScale(f.d.Ctx(), connect.NewRequest(&agentreplv1.AdjustFeedTextScaleRequest{
+		Direction: agentreplv1.AdjustFeedTextScaleDirection_ADJUST_FEED_TEXT_SCALE_DIRECTION_INCREASE,
+	})); err != nil {
+		t.Fatalf("AdjustFeedTextScale = error %v, want the scale now in force", err)
+	}
+
+	// Assert: the zoom reached the watch, and NO row was drawn by it.
+	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a feed text scale frame is not a feed row")
+}
+
 func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 	t.Parallel()
 	// Arrange
