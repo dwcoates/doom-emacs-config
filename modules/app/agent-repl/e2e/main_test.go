@@ -63,14 +63,6 @@ func runSuite(m *testing.M) int {
 		return 1
 	}
 
-	binDir, err := os.MkdirTemp("", "agentrepl-e2e-bin-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: temp bin dir:", err)
-		return 1
-	}
-	defer os.RemoveAll(binDir)
-	e2eBinDir = binDir
-
 	code := harness.MainAt(m, l.daemonDir)
 	// The perf phase's final summary block (PERF-SPEC.md §D4), after every
 	// test has reported. A no-op in the default build, where the perf files
@@ -128,7 +120,33 @@ func resolveLayout() (layout, error) {
 // bundle, the real store, the real sidecar), one per `go test` run, shared
 // across every test. claude-repld and the (unused) fake shim/git live in
 // harness's OWN temp dir, built by MainAt above.
-var e2eBinDir string
+//
+// IT LIVES UNDER THE HARNESS'S OWNER-LOCKED RUN ROOT, which MainAt lays out
+// before any test runs and removes after the last, so a run that dies
+// abnormally (a -timeout panic, a SIGKILL) leaves nothing the next run does
+// not reclaim. It used to be its own os.MkdirTemp removed by a defer, which a
+// dead run never reached.
+func e2eBinDir() string {
+	e2eBinOnce.Do(func() {
+		root := harness.RunRoot()
+		if root == "" {
+			e2eBinErr = fmt.Errorf("e2e: the harness run root is not laid out; TestMain must run the suite through harness.MainAt")
+			return
+		}
+		e2eBinPath = filepath.Join(root, "e2e-bin")
+		e2eBinErr = os.MkdirAll(e2eBinPath, 0o755)
+	})
+	if e2eBinErr != nil {
+		panic(e2eBinErr)
+	}
+	return e2eBinPath
+}
+
+var (
+	e2eBinOnce sync.Once
+	e2eBinPath string
+	e2eBinErr  error
+)
 
 // ---------------------------------------------------------------------------
 // Loud, lazy, per-precondition builds. Each is built ONCE (sync.Once) on the
@@ -305,7 +323,7 @@ func buildShimBundle(node string) (string, error) {
 	// map beside it, and both are read by the REPORTER, after this process
 	// (and with it e2eBinDir) is gone. Under coverage the bundle is therefore
 	// staged beneath the coverage root, which the reporter owns.
-	root := e2eBinDir
+	root := e2eBinDir()
 	if covRoot := harness.CoverageRoot(); covRoot != "" {
 		root = filepath.Join(covRoot, "shim-bundle")
 	}
@@ -411,7 +429,7 @@ var (
 func requireStoreBinary(t *testing.T) string {
 	t.Helper()
 	storeOnce.Do(func() {
-		storePath, storeErr = goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir, "shim-store"))
+		storePath, storeErr = goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir(), "shim-store"))
 	})
 	if storeErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL store, which does not build: %v", storeErr)
@@ -429,7 +447,7 @@ var (
 func requireSidecarBinary(t *testing.T) string {
 	t.Helper()
 	sidecarOnce.Do(func() {
-		sidecarPath, sidecarErr = goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir, "shim-claude-sidecar"))
+		sidecarPath, sidecarErr = goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir(), "shim-claude-sidecar"))
 	})
 	if sidecarErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL sidecar, which does not build: %v", sidecarErr)
@@ -453,7 +471,7 @@ var (
 func requireLockBinary(t *testing.T) string {
 	t.Helper()
 	lockOnce.Do(func() {
-		lockPath, lockErr = goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir, "shim-lock"))
+		lockPath, lockErr = goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir(), "shim-lock"))
 	})
 	if lockErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL shim, whose lock holder does not build: %v", lockErr)
