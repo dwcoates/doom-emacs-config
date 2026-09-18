@@ -16,6 +16,7 @@
 package daemonaddr
 
 import (
+	"errors"
 	"net"
 	"time"
 )
@@ -38,9 +39,22 @@ type Claim interface {
 	// it is idempotent, removing an absent file is success, and a successor's
 	// advertisement is left alone.
 	Withdraw() (bool, error)
+	// Verify reports whether what this claim OWNS ON DISK is still there: the
+	// state root it was bound in (the same directory, not one recreated at
+	// the same path), the daemon.lock whose kernel lock it holds (the same
+	// inode), and -- while it is published and not withdrawn -- daemon.addr
+	// naming this claim's address. A loss wraps ErrVanished and names what
+	// vanished; any other error means the question could not be answered.
+	Verify() error
 	// Close closes the listener. It does not withdraw the advertisement.
 	Close() error
 }
+
+// ErrVanished marks a Verify failure that is a LOSS: something this claim owns
+// on disk is gone or was replaced. A daemon that reads it no longer holds an
+// exclusive state root -- a second daemon booting on a recreated root takes a
+// daemon.lock nobody holds -- and must stand down.
+var ErrVanished = errors.New("the daemon's state on disk vanished")
 
 // Bind claims a loopback listener and prepares the advertisement at addrPath.
 // port 0 asks the kernel for a free port, which is what Address then reports.
