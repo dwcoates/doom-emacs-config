@@ -45,6 +45,7 @@
 (declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-classifier-failed "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-conversation-abandoned "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "wire-common")
@@ -160,6 +161,11 @@ Rotates on restart within one session; fault windows scope to it."
 `SessionFaultAdoptionWindowExpired'."
   (agent-repl-wire-decode-session-fault-adoption-window-expired value))
 
+(defun agent-repl-wire-decode-host-fault-final-answer-unresolved (value)
+  "Decode HostFault's `final_answer_unresolved' kind arm from VALUE as a
+`SessionFaultFinalAnswerUnresolved'."
+  (agent-repl-wire-decode-session-fault-final-answer-unresolved value))
+
 (defun agent-repl-wire-decode-host-fault-kind (value)
   "Decode HostFault's `kind' oneof from the object VALUE.
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -180,7 +186,8 @@ fault the consumer would have to parse."
        (sessionAbsent :session-absent agent-repl-wire-decode-host-fault-session-absent)
        (watchOpenRefused :watch-open-refused agent-repl-wire-decode-host-fault-watch-open-refused)
        (daemonStateUnreadable :daemon-state-unreadable agent-repl-wire-decode-host-fault-daemon-state-unreadable)
-       (adoptionWindowExpired :adoption-window-expired agent-repl-wire-decode-host-fault-adoption-window-expired)))))
+       (adoptionWindowExpired :adoption-window-expired agent-repl-wire-decode-host-fault-adoption-window-expired)
+       (finalAnswerUnresolved :final-answer-unresolved agent-repl-wire-decode-host-fault-final-answer-unresolved)))))
 
 (defun agent-repl-wire-decode-host-fault (value)
   "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms :kind)'.
@@ -189,7 +196,7 @@ verbatim with SessionHealth's `SessionFault' — the stream reporting a
 fault never changes its class."
   (let ((object (agent-repl-wire--object "HostFault" value)))
     (agent-repl-wire--check-keys
-     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired))
+     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved))
     (agent-repl-wire--decoded
      "HostFault"
      (list :detail (agent-repl-wire--decode-string "HostFault" 'detail object)

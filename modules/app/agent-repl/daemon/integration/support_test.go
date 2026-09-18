@@ -292,6 +292,31 @@ func successFrame(agent string, answer *conversationv1.AgentActivityId) *convers
 	}
 }
 
+// answeringResponseFrame is the SETTLED response bubble a terminal's answer
+// names. A real producer never names an answer it did not emit — the Completed
+// arm points at a response block the same stream paid out — so a fake that
+// pushes the terminal alone is not a shim, and the daemon is right to call that
+// a turn whose answer did not land.
+func answeringResponseFrame(agent string, answer *conversationv1.AgentActivityId, prose string) *conversationv1.AgentFrame {
+	return activityFrame(agent, &conversationv1.AgentActivity{
+		ActivityId: answer,
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{
+			Result: &conversationv1.AgentResponse_Success{Success: &conversationv1.AgentResponseSuccess{
+				Prose: &conversationv1.AgentResponseProse{Markdown: prose},
+			}},
+		}},
+	})
+}
+
+// pushConcludedTurn ends a turn the way a producer ends one: the answering
+// response block first, then the terminal that names it. Every fixture that
+// only needs a turn to END goes through it, so no fixture can leave the daemon
+// looking at a conclusion whose answer resolves to nothing.
+func pushConcludedTurn(shim *harness.ShimControl, agent, unit string) {
+	shim.PushAgentFrame(agent, answeringResponseFrame(agent, activityID(unit), "done"))
+	shim.PushAgentFrame(agent, successFrame(agent, activityID(unit)))
+}
+
 // interruptedFrame is an agent's terminal interruption frame.
 func interruptedFrame(agent string) *conversationv1.AgentFrame {
 	return &conversationv1.AgentFrame{

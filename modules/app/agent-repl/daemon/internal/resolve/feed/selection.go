@@ -17,10 +17,10 @@ import (
 // selection state": this package answers only what the set is and what each
 // row said.
 
-// recordFinalAnswer appends one concluded turn's answering row to the workspace
-//'s ordered selectable set and copies its settled markdown. It is called from
-// the conclusion site under r.mu, append-once by FeedId value because a
-// terminal replays across planes.
+// recordFinalAnswer appends one concluded turn's answering row to the
+// workspace's ordered selectable set and copies its settled markdown. It is
+// called from the conclusion site under r.mu, append-once by FeedId value
+// because a terminal replays across planes.
 func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit string) {
 	value := id.GetValue()
 	if value == "" {
@@ -34,11 +34,38 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 	// after the fold settled carries the same text, and a fold that grew
 	// between drawings is captured at its latest settled state, which is what
 	// the user saw as the final answer.
-	if fold, ok := s.responses[unit]; ok {
+	if fold, ok := s.foldOfAnswer(id, unit); ok {
 		s.answerMarkdown[value] = fold.markdown
 	}
 }
 
+// foldOfAnswer is the fold that OWNS the answering row, which is NOT always
+// the fold filed under the named unit. A response block delivered under two
+// divergent activity ids leaves one row standing and retires the other fold,
+// and the retired unit is ALIASED onto the survivor's row (response.go's
+// aliasAnswerRow) so a terminal naming it still resolves. Reading the named
+// unit's fold in that case would copy the RETIRED FRAGMENT's partial text as
+// the final answer's markdown, and would find no row to re-stamp at all — so
+// the row's own owner is looked up first, and the named unit's fold is the
+// fallback for every ordinary answer, where the two are the same fold.
+func (s *wsState) foldOfAnswer(id *frontendv1.FeedId, unit string) (*proseState, bool) {
+	if value := id.GetValue(); value != "" {
+		for _, fold := range s.responses {
+			if fold.row.GetValue() == value {
+				return fold, true
+			}
+		}
+	}
+	fold, ok := s.responses[unit]
+	return fold, ok
+}
+
+// restampFinalAnswer re-publishes an already-drawn answer row with
+// final_answer=true, and REPORTS WHETHER IT FOUND ONE TO STAMP. False is the
+// whole of "the terminal named an answer no drawn response row resolves": the
+// fold is gone, or it drew no row, or the row has left the feed. The caller
+// raises the final-answer fault on it rather than concluding silently.
+//
 // restampFinalAnswer re-publishes an already-drawn answer row with
 // final_answer=true. The response frames precede the turn's terminal both live
 // and on history replay, so the answering row was drawn WITHOUT the flag by the
@@ -50,29 +77,39 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 // terminal path, so the recorded answer row is re-stamped there too. The write
 // is idempotent — an already-stamped row upserts to an equal snapshot, which
 // upsert drops as churn.
-func (r *resolver) restampFinalAnswer(s *wsState, unit string) {
-	fold, ok := s.responses[unit]
+func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit string) bool {
+	fold, ok := s.foldOfAnswer(id, unit)
 	if !ok || fold.row == nil {
-		return
+		return false
 	}
 	f := r.feed(s, fold.feed)
 	existing, ok := f.rows[fold.row.GetValue()]
 	if !ok {
-		return
+		return false
 	}
 	resp := existing.GetActivity().GetResponse()
-	if resp == nil || resp.GetFinalAnswer() {
-		return
+	if resp == nil {
+		// A ROW THAT IS NOT A RESPONSE BUBBLE IS NOT AN ANSWER. Rule 1 asks for
+		// a drawn, NON-THINKING response row, and this is the one place that can
+		// tell: a thinking bubble folds through its own map and its row carries
+		// no response arm.
+		return false
+	}
+	if resp.GetFinalAnswer() {
+		// ALREADY GREEN — the terminal replayed across planes. Landed, and the
+		// upsert it would produce is churn.
+		return true
 	}
 	clone, ok := proto.Clone(existing).(*frontendv1.FeedRow)
 	if !ok {
 		r.logger(s.id).Error("daemon.feed.final_answer_restamp_unclonable",
 			"the recorded answer row could not be cloned to stamp final_answer",
 			dlog.Context{"unit": unit, "row": fold.row.GetValue()})
-		return
+		return false
 	}
 	clone.GetActivity().GetResponse().FinalAnswer = true
 	r.upsert(s, placement{feed: fold.feed}, clone, true)
+	return true
 }
 
 // FinalResponses answers the workspace's ordered selectable final-response

@@ -879,7 +879,7 @@ func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
 	promptAwaitMergeLease(t, f)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("merge-conflict-brief")))
+	pushConcludedTurn(f.shim, mainAgent, "merge-conflict-brief")
 	awaitFooter(t, f, footer, "the merge parked on its conflict", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
 	})

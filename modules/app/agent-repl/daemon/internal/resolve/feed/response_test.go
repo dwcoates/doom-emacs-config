@@ -828,3 +828,100 @@ func TestAThinkingBubbleIsNeverStampedFinal(t *testing.T) {
 		t.Fatal("a thinking bubble was stamped final_answer")
 	}
 }
+
+// ---- A RETIRED DIVERGENT UNIT STILL NAMES THE SURVIVING ANSWER ROW ----
+//
+// The producer names the turn's answering activity id knowing nothing about
+// which of two divergent ids this resolver kept a row for. When the retired one
+// is named, the lookup used to miss outright — no green border and no selectable
+// final response — because the retirement DELETED the mapping. It now ALIASES it
+// onto the surviving row, so either id resolves to the block's one row.
+
+// TestARetiredDivergentUnitStillResolvesToTheSurvivingAnswerRow covers BOTH
+// retirement orders: the whole settling after the fragment (reconcileDivergentProse)
+// and the fragment arriving after the whole (settledWholeContaining).
+func TestARetiredDivergentUnitStillResolvesToTheSurvivingAnswerRow(t *testing.T) {
+	tests := []struct {
+		name    string
+		deliver func(h *harness)
+	}{
+		{
+			name: "the whole settles after the fragment, retiring it",
+			deliver: func(h *harness) {
+				h.resolver.OnActivity(testWorkspace, mainAgent(),
+					responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+				h.resolver.OnActivity(testWorkspace, mainAgent(),
+					responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
+						Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+					}, nil), noAddress())
+			},
+		},
+		{
+			name: "the fragment arrives after the whole already settled",
+			deliver: func(h *harness) {
+				h.resolver.OnActivity(testWorkspace, mainAgent(),
+					responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
+						Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+					}, nil), noAddress())
+				h.resolver.OnActivity(testWorkspace, mainAgent(),
+					responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: one block delivered under two divergent activity ids.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "do the thing")
+			tt.deliver(h)
+
+			// Act: the terminal names the RETIRED stream unit as the answer.
+			turn := ids.TurnID("turn-1")
+			h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn,
+				completedWith("unit-stream"), nil, noAddress())
+
+			// Assert: the surviving row wears the green final-answer flag.
+			rows := h.responseRows()
+			if len(rows) != 1 {
+				t.Fatalf("response rows = %d, want the block's one surviving row", len(rows))
+			}
+			if !rows[0].GetActivity().GetResponse().GetFinalAnswer() {
+				t.Fatal("the surviving answer row did not go green for a terminal naming the retired unit")
+			}
+		})
+	}
+}
+
+// TestARetiredDivergentAnswerIsSelectableAsTheWholeNotTheFragment pins that the
+// selectable copy is the SETTLED WHOLE. The alias points at the survivor's row,
+// and reading the retired unit's own fold would hand a reply the partial suffix
+// that fold had accumulated.
+func TestARetiredDivergentAnswerIsSelectableAsTheWholeNotTheFragment(t *testing.T) {
+	// Arrange: the stream fragment is retired by the settling whole.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-stream", &conversationv1.AgentResponseUpdate{NewMarkdown: "world"}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-file", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "hello world"},
+		}, nil), noAddress())
+
+	// Act: the terminal names the retired unit.
+	turn := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn,
+		completedWith("unit-stream"), nil, noAddress())
+
+	// Assert: the one selectable final response carries the whole.
+	finals := h.resolver.FinalResponses(testWorkspace)
+	if len(finals) != 1 {
+		t.Fatalf("final responses = %d, want one", len(finals))
+	}
+	md, ok := h.resolver.ResponseMarkdown(testWorkspace, finals[0])
+	if !ok {
+		t.Fatal("the concluded answer row is not selectable")
+	}
+	if md != "hello world" {
+		t.Fatalf("selectable markdown = %q, want the settled whole", md)
+	}
+}

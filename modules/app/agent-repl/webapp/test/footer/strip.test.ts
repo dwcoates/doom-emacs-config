@@ -1003,6 +1003,38 @@ describe("the fault activity: every daemon fault kind reaches the strip", () => 
       "shim reported \u00b7 the shim said so",
     );
   });
+
+  // THE TURN THAT CONCLUDED WITH NO GREEN ANSWER. The kind is new, the
+  // rendering is not: the chip holds no table keyed on the kind, so
+  // `final_answer_unresolved` draws through the same line every other fault
+  // kind draws through, with the daemon's terse detail beside it.
+  it.each([
+    ["the turn named no answering response"],
+    ["the named answer has no drawn row"],
+    ["no response frame for 1m30s"],
+  ])("draws the unresolved final answer with its detail %s", (detail) => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "final_answer_unresolved",
+        detail,
+      }),
+    });
+    expect(row.querySelector(".footer-activity-fault")?.textContent).toBe(
+      `final answer unresolved \u00b7 ${detail}`,
+    );
+  });
+
+  // IT NEVER ESCALATES THE STATUS. The session is serving and the prose is on
+  // screen; `disconnected` would close the composer over a healthy session.
+  it("stands as the activity line under an ordinary idle status", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "fault", {
+        kind: "final_answer_unresolved",
+        detail: "the named answer has no drawn row",
+      }),
+    });
+    expect(row.querySelector(".footer-status")?.textContent?.toLowerCase()).toContain("idle");
+  });
 });
 
 // ---- the status word's letter wave ----------------------------------------
