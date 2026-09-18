@@ -40,6 +40,13 @@
 The selection is commands.el's persp/projectile boundary, so it is
 RECORDED here rather than run -- exactly as the tab teardown is.")
 
+(defvar agent-repl-test-verbs--tab-switched nil
+  "Workspace names handed to `agent-repl--ws-switch', oldest first.
+Switching to a workspace's OWN TAB is a different landing from switching
+to its project directory, so it is recorded separately from
+`agent-repl-test-verbs--selected' -- a test that says the origin was left
+alone has to be able to tell the two apart.")
+
 (defun agent-repl-test-verbs--ref (&optional id dir)
   "Return a decoded `WorkspaceRef' plist, echoed verbatim by production."
   (list :id (or id "ws-id-1") :dir (or dir "/tmp/agent-repl-test/ws-1")))
@@ -112,6 +119,8 @@ answers a bare success, which is what almost every verb's success is."
   (declare (indent 1))
   `(let ((agent-repl-test-verbs--sent nil)
          (agent-repl-verbs--pending-landing nil)
+         (agent-repl-verbs--pending-landing-lander nil)
+         (agent-repl-test-verbs--tab-switched nil)
          (agent-repl-test-verbs--torn-down nil)
          (agent-repl-test-verbs--messages nil)
          (agent-repl-test-verbs--handover nil)
@@ -155,6 +164,9 @@ answers a bare success, which is what almost every verb's success is."
                 ((symbol-function 'agent-repl-switch-to-project)
                  (lambda (&optional project)
                    (push project agent-repl-test-verbs--selected)))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _)
+                   (push ws agent-repl-test-verbs--tab-switched)))
                 ((symbol-function 'message)
                  (lambda (fmt &rest args)
                    (push (if args (apply #'format fmt args) fmt)
@@ -2138,6 +2150,76 @@ is in, so the two bools are reported independently rather than as one."
       ;; Assert.
       (should (agent-repl-test-verbs--messaged-p
                "already known repository /tmp/agent-repl-test/repo; workspace repo already known")))))
+
+(ert-deftest agent-repl-verbs-register-repository-claims-its-arrival-as-registered ()
+  "`SPC j .\' leaves `registered\' so the ROSTER opens the workspace it asked for.
+The new workspace is born in this editor when its roster row arrives, and
+the roster opens panels only for an arrival a verb claimed by name -- so
+claiming it is what makes the tab a real one to switch to."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+      (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+        ;; Act.
+        (agent-repl-register-repository)
+        ;; Assert.
+        (should (equal (agent-repl--panels-take-arrival-reason "ws-id-1")
+                       "registered"))))))
+
+(ert-deftest agent-repl-verbs-register-repository-switches-to-the-new-workspace-tab ()
+  "Registering a repository STANDS THE USER ON its main worktree's own tab."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo-ws")
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--tab-switched '("repo-ws"))))))
+
+(ert-deftest agent-repl-verbs-register-repository-leaves-the-origin-workspace-alone ()
+  "The workspace the command was RUN FROM is not touched by the switch.
+Landing by project DIRECTORY let Doom pick the perspective by the repo
+directory's basename, miss the workspace's own tab, and mint one from the
+origin's window configuration -- which is how `SPC j .\' run from iterm-2
+turned iterm-2 into explanation-engine.  The landing is by identity now,
+so no project switch is made at all."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo-ws")
+      ;; Assert.
+      (should-not agent-repl-test-verbs--selected))))
+
+(ert-deftest agent-repl-verbs-register-repository-switches-to-an-already-known-workspace ()
+  "A main worktree already registered still gets switched to, not skipped.
+`already_known\' is an answer about MINTING, never a reason to leave the
+user where they were."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer t t)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo-ws")
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--tab-switched '("repo-ws"))))))
+
+(ert-deftest agent-repl-verbs-a-refused-register-repository-switches-nowhere ()
+  "A refusal moves the user NOWHERE: there is no workspace to come up on."
+  ;; Arrange.
+  (agent-repl-test-verbs--with
+      (list (cons :register-repository
+                  (list :response
+                        (list :arm :error
+                              :value (list :cause (list :arm :not-in-a-repository
+                                                        :value nil))))))
+    (agent-repl-test-verbs--picking-file "/tmp/elsewhere/loose.txt"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should-not agent-repl-test-verbs--tab-switched))))
 
 (ert-deftest agent-repl-verbs-register-repository-reports-a-path-in-no-repository ()
   "The `not_in_a_repository' arm reaches the user as its own sentence."

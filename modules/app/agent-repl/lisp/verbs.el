@@ -67,6 +67,7 @@
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
+(declare-function agent-repl--ws-switch "agent-repl-workspace" (ws &rest args))
 (declare-function agent-repl--pseudo-workspace-name-p "agent-repl-core" (ws))
 (declare-function agent-repl--log-note-workspace-departing "agent-repl-core" (ws))
 (declare-function agent-repl--log-forget-workspace-departure "agent-repl-core" (ws))
@@ -847,8 +848,15 @@ move is to write exactly those."
                    dir)))
       t)))
 
-(defun agent-repl-verbs-select-minted (ref)
+(defun agent-repl-verbs-select-minted (ref &optional lander)
   "Stand on the workspace REF names, once the daemon has minted it.
+
+LANDER is HOW the landing is made, and defaults to
+`agent-repl-verbs--land-on\=' -- a projectile switch to the minted
+WORKTREE, which is right for every verb whose workspace is a worktree
+Doom has never seen.  A verb whose workspace is a repository\='s MAIN
+worktree passes `agent-repl-verbs--land-on-tab\=' instead; see that
+function for why landing by DIRECTORY cannot be used there.
 
 THE ANSWER IS WHEN THE WORKSPACE EXISTS.  A minted `WorkspaceRef\' is the
 one place the identity is known before the roster push carries it, so
@@ -867,7 +875,8 @@ skipped: the decoder already refuses a success without the ref, so a
 missing dir is a contract breach and the user is owed the reason their
 new workspace did not come up."
   (let ((dir (plist-get ref :dir))
-        (id (plist-get ref :id)))
+        (id (plist-get ref :id))
+        (land (or lander #'agent-repl-verbs--land-on)))
     (if (and dir (not (string-empty-p dir)))
         (let ((ws (agent-repl--ws-by-ref-id id)))
           (agent-repl--info
@@ -877,7 +886,7 @@ new workspace did not come up."
                "a minted workspace awaiting its roster row has no sink"))
            "elisp.verbs.select-minted dir=%s" dir)
           (if ws
-              (agent-repl-verbs--land-on ref "already-a-tab" ws)
+              (funcall land ref "already-a-tab" ws)
             ;; THE TAB IS NOT HERE YET.  The minted ref is the daemon's
             ;; ANSWER, and the workspace itself reaches Emacs on the ROSTER
             ;; stream -- `agent-repl-roster--open-tab' is the whole of its
@@ -893,7 +902,7 @@ new workspace did not come up."
             ;; `agent-repl--ffw-pending-fire' waits for one: the arrival of
             ;; the tab fires it. Nothing here polls, retries or schedules --
             ;; a tab that never arrives simply leaves the landing pending.
-            (agent-repl-verbs--pending-landing-register ref)))
+            (agent-repl-verbs--pending-landing-register ref land)))
       (agent-repl--error '(:agent-repl-central
                            "a malformed minted reference owns no workspace sink")
                          "elisp.verbs.select-minted-no-dir ref=%S" ref)
@@ -912,10 +921,49 @@ fires, so nothing here outlives the arrival it waits on.")
     (agent-repl--info ws "elisp.verbs.land-on ws=%s dir=%s why=%s" ws dir why)
     (agent-repl-switch-to-project dir)))
 
-(defun agent-repl-verbs--pending-landing-register (ref)
-  "Record REF as the landing waiting for its tab to reach the roster."
+(defvar agent-repl-verbs--pending-landing-lander nil
+  "The lander `agent-repl-verbs--pending-landing\=' is waiting to be made with.
+Kept beside the ref rather than inside it because the ref is a decoded
+`WorkspaceRef\=' -- a wire value -- and an editor-local choice about HOW
+to stand on it is not part of that contract.  Set and cleared with the
+ref it belongs to, so the two can never disagree.")
+
+(defun agent-repl-verbs--land-on-tab (ref why ws)
+  "Stand on workspace WS by switching to ITS OWN TAB, recording WHY.
+
+A LANDING BY DIRECTORY IS NOT A LANDING BY IDENTITY, and for a
+repository\='s MAIN worktree the difference is the whole bug.
+`agent-repl-verbs--land-on\=' stands on the workspace through
+`agent-repl-switch-to-project\=', i.e. through projectile, and Doom\='s
+`+workspaces-switch-to-project-h\=' then picks the perspective by the
+project directory\='s BASENAME.  A minted worktree\='s perspective is
+named after its own directory, so for create, fork and register that
+lookup finds the workspace\='s own tab.  The main worktree\='s workspace
+carries the DAEMON\='S name, which is not that basename, so the lookup
+missed, Doom minted a perspective of its own from the window
+configuration of the perspective the user was standing in, and the
+origin workspace\='s frame came up as the repository that had just been
+registered (`SPC j .\=' from iterm-2 turned iterm-2 into
+explanation-engine).
+
+So the landing switches to the tab the ROSTER opened for this
+workspace -- `agent-repl--ws-switch\=', which can only ever activate a
+perspective that already exists and so cannot rename, recycle or
+re-point the one being left.  The tab is guaranteed to be there: this
+lander is only ever reached with WS resolved from the ref id, which is
+the roster row itself."
+  (agent-repl--info ws "elisp.verbs.land-on-tab ws=%s dir=%s why=%s"
+                    ws (plist-get ref :dir) why)
+  (agent-repl--ws-switch ws))
+
+(defun agent-repl-verbs--pending-landing-register (ref &optional lander)
+  "Record REF as the landing waiting for its tab to reach the roster.
+LANDER is how it will be made when the tab arrives; see
+`agent-repl-verbs-select-minted\='."
   (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.pending-landing-registered dir=%s id=%s"
                     (plist-get ref :dir) (plist-get ref :id))
+  (setq agent-repl-verbs--pending-landing-lander
+        (or lander #'agent-repl-verbs--land-on))
   (setq agent-repl-verbs--pending-landing ref))
 
 (defun agent-repl-verbs--pending-landing-fire (&rest _)
@@ -928,10 +976,12 @@ before the landing runs."
               (id (plist-get ref :id)))
     (let ((ws (agent-repl--ws-by-ref-id id)))
       (if ws
-          (progn
-            (setq agent-repl-verbs--pending-landing nil)
+          (let ((land (or agent-repl-verbs--pending-landing-lander
+                          #'agent-repl-verbs--land-on)))
+            (setq agent-repl-verbs--pending-landing nil
+                  agent-repl-verbs--pending-landing-lander nil)
             (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
-            (agent-repl-verbs--land-on ref "tab-arrived" ws))
+            (funcall land ref "tab-arrived" ws))
         ;; A LANDING THAT IS STILL WAITING SAYS SO.  Nothing here polls or
         ;; times out -- a tab that never arrives simply leaves the landing
         ;; pending -- and for as long as that lasted the log went silent
@@ -1320,16 +1370,25 @@ switch to it.  The daemon registers the main worktree through the same
 registration `SPC TAB C-n\=' runs, so the row is an ordinary workspace row
 in every respect.
 
-AND THIS COMMAND STANDS ON IT, exactly as `SPC TAB C-n\=' stands on the
-workspace it just registered: the success\='s `:workspace' ref is handed
-to `agent-repl-verbs-select-minted\=', the same landing every minted
-workspace comes up through.  \"Register the repository I am standing in\"
-was a request to be ATTACHED TO the main worktree, not merely told it now
-exists in a roster the user must still find and click into -- a version of
-this command that only messaged left the owner where they started, which
-read as \"nothing happened\" even though the row was there.  The ack still
-names both facts because the two halves are independently new: the
-repository may be already known while the workspace is freshly opened."
+AND THIS COMMAND SWITCHES TO IT (owner ruling, 2026-09-18).  \"Register
+the repository I am standing in\" is a request to be ATTACHED TO its main
+worktree, not merely told it now exists in a roster the user must still
+find and click into -- a version of this command that only messaged left
+the owner where they started, which read as \"nothing happened\" even
+though the row was there.
+
+THE SWITCH IS ONTO THE ROSTER\='S OWN TAB, and it leaves the workspace the
+command was run FROM exactly as it was.  The arrival is claimed as
+`registered\=' so the roster materializes the new workspace the same way
+it materializes a created one -- tab and panels -- and the landing is
+`agent-repl-verbs--land-on-tab\=', which activates that tab by identity.
+An earlier attempt landed by DIRECTORY instead and re-pointed the origin
+workspace at the registered repository; that function\='s docstring holds
+the whole of why.
+
+The ack still names both facts because the two halves are independently
+new: the repository may be already known while the workspace is freshly
+opened."
   (interactive)
   (let ((path (agent-repl-verbs--register-repository-read-path)))
     ;; The gesture leaves a mark the instant it is made, exactly as every
@@ -1349,7 +1408,16 @@ repository may be already known while the workspace is freshly opened."
           dir
           (agent-repl-verbs--workspace-display-name workspace)
           (if (plist-get value :workspace-already-known)
-              "already known" "opened"))))
+              "already known" "opened"))
+         ;; The roster is where the workspace is actually born in this
+         ;; editor, and it only opens panels for an arrival some verb
+         ;; claimed -- so this one claims it before standing on it, exactly
+         ;; as `SPC TAB C-n\=' does.  `already known\=' is an answer about
+         ;; MINTING and never a reason to leave the user where they were.
+         (agent-repl--panels-note-arrival-reason
+          (plist-get workspace :id) "registered")
+         (agent-repl-verbs-select-minted
+          workspace #'agent-repl-verbs--land-on-tab)))
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
