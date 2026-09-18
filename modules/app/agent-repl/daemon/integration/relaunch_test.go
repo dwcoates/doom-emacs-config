@@ -86,7 +86,10 @@ func TestARelaunchedDaemonRehydratesAnAnnouncedWorkspacesConversation(t *testing
 	footer := f.d.WatchFooter(f.ws)
 	f.submit(relaunchPrompt, "k-relaunch", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-relaunch", relaunchAnswer)[1])
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	// THE TERMINAL NAMES THE ANSWER IT JUST EMITTED. A producer that settles
+	// prose and then concludes naming nothing is the NOT-LANDED case the daemon
+	// raises `final_answer_unresolved` for; this turn landed its answer.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("resp-relaunch")))
 	awaitFooter(t, f, footer, "idle.done once the pre-stop turn concludes", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
 	})
