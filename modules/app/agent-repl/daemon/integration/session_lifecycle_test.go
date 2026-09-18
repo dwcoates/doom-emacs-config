@@ -1589,10 +1589,10 @@ func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
 	// Act
 	f.open()
 
-	// Assert: the restored item's row lands on the ROOT feed.
-	awaitRow(t, f, feed, "the restored live-work row on the root feed", func(r *frontendv1.FeedRow) bool {
-		return r.GetDetachedShell() != nil
-	})
+	// Assert: the restored item's row lands on the ROOT feed. A shell's row
+	// there is its HEAD (FeedRow.shell_head) — `detached_shell` is the spool
+	// BODY, drawn only on the bubble's own sub-feed.
+	awaitShellHead(t, f, feed, "the restored live-work row on the root feed")
 }
 
 func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
