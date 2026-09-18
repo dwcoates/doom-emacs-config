@@ -93,6 +93,7 @@
 (declare-function agent-repl-mutation-progress-new-op-id "mutation-progress" ())
 (declare-function agent-repl-mutation-progress-register "mutation-progress" (op-id &rest callbacks))
 (declare-function agent-repl-mutation-progress-forget "mutation-progress" (op-id))
+(declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
@@ -264,7 +265,8 @@ the user as the verb, the word refused, the arm keyword, and the fields."
 
 ;;;; ---- The one dispatcher ----------------------------------------------
 
-(cl-defun agent-repl-verbs--send (rpc conn request &key ws op on-success on-error on-accepted)
+(cl-defun agent-repl-verbs--send (rpc conn request &key ws op on-success on-error
+                                      on-accepted on-transport-failure)
   "Send REQUEST through RPC on CONN and dispatch the answer shapes.
 OP names the verb for the log.  ON-SUCCESS receives the decoded success
 value and is the ONLY place editor state changes.  ON-ERROR, when given,
@@ -274,7 +276,11 @@ when given, receives the decoded accepted value -- the option-B ack a
 mutation returns when its real outcome will arrive on the progress channel
 rather than on this rpc; an accepted answer with no ON-ACCEPTED is an
 unexpected shape and is logged.  A transport failure never reaches
-ON-ERROR: nobody answering and the daemon refusing are different facts."
+ON-ERROR: nobody answering and the daemon refusing are different facts.
+ON-TRANSPORT-FAILURE, when given, receives the failure detail on that
+third path; it is for RETIRING STATE the verb armed before the send (a
+registered progress op has no other way to learn nothing is coming) and
+never for wording the failure, which this dispatcher owns."
   (let ((request-id (or (plist-get request :idempotency-key)
                         (agent-repl--next-log-request-id)))
         (log-ws (or ws agent-repl--global-log-scope)))
@@ -321,6 +327,7 @@ ON-ERROR: nobody answering and the daemon refusing are different facts."
                      (agent-repl--error
                       ws "elisp.verbs.transport-failure op=%s ws=%s detail=%S"
                       op ws detail)
+                     (when on-transport-failure (funcall on-transport-failure detail))
                      (message "agent-repl: %s failed -- the daemon did not answer" op)))))))))
 
 ;;;; ---- Editor-state updates ---------------------------------------------
@@ -473,18 +480,50 @@ front of it can still say why."
 
 (defun agent-repl-verb-open (ref)
   "Open the closed workspace named by REF.  Any revival is the daemon's.
-The tab arrives through the roster push, not through this answer."
-  (agent-repl-verbs--send
-   #'agent-repl-rpc-open-workspace (agent-repl-verbs--conn)
-   (list :workspace ref)
-   :op "open"
-   :on-success (lambda (_)
-                 ;; The tab arrives on the roster push, and when it does it
-                 ;; opens its panels as a re-open (owner ruling,
-                 ;; 2026-09-13, item 6).
-                 (agent-repl--panels-note-arrival-reason
-                  (plist-get ref :id) "reopened")
-                 (message "agent-repl: opening %s" (plist-get ref :dir)))))
+The tab arrives through the roster push, not through this answer.
+
+THE WAIT IS REPORTED, not only its outcome.  A re-open sits inside the
+daemon\='s `Sessions.Start\=' -- a shim spawn plus a vendor resume -- for as
+long as a create sits in `git worktree add\=', and for all of it Emacs used
+to say one line on the way in and one on the way out.  So the request
+carries a minted op id, exactly as a create\='s does, and the daemon pushes
+the open\='s stages back on the daemon-level stream keyed on it
+\(`workspace_mutation_progress.proto\').
+
+THE OP IS FORGOTTEN ON EVERY TERMINAL PATH, because unlike a create the
+open\='s outcome arrives on THIS rpc rather than on the progress channel:
+nothing on the stream would ever retire the registration."
+  (let ((op-id (agent-repl-mutation-progress-new-op-id))
+        (name (or (plist-get ref :dir) "the workspace")))
+    ;; Registered BEFORE the send, so a stage push cannot outrun its handler.
+    (agent-repl-mutation-progress-register
+     op-id
+     :on-stage (lambda (stage) (agent-repl-workspace-progress-report :open stage)))
+    (agent-repl-workspace-progress-report :open :requested name)
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-open-workspace (agent-repl-verbs--conn)
+     (list :workspace ref :op-id op-id)
+     :op "open"
+     :on-success (lambda (_)
+                   (agent-repl-mutation-progress-forget op-id)
+                   ;; The tab arrives on the roster push, and when it does it
+                   ;; opens its panels as a re-open (owner ruling,
+                   ;; 2026-09-13, item 6).
+                   (agent-repl--panels-note-arrival-reason
+                    (plist-get ref :id) "reopened")
+                   (agent-repl-workspace-progress-report :open :completed name))
+     :on-error
+     ;; The arm is NOT claimed (nil): the daemon-authored refusal is still
+     ;; worded by the shared dispatcher, which names the arm and its fields.
+     ;; All this does is retire an op no further stage will ever arrive for.
+     (lambda (_value)
+       (agent-repl-mutation-progress-forget op-id)
+       nil)
+     ;; A daemon that never answered will never push a stage either, so the
+     ;; op is retired here too: otherwise every unanswered open would leave a
+     ;; registration behind for the life of the session.
+     :on-transport-failure
+     (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
 
 (defun agent-repl-verb-merge (ws)
   "Enqueue WS's merge.  Success means ENQUEUED and nothing more.
@@ -671,7 +710,7 @@ and the new workspace\'s tab arrives through the roster push."
      (lambda (value)
        (let ((ref (plist-get value :workspace))
              (name (plist-get value :name)))
-         (message "agent-repl: workspace created: %s" name)
+         (agent-repl-workspace-progress-report :create :completed name)
          ;; The minted ref is the FIRST place this workspace has an identity;
          ;; the arrival reason is claimed here so a one-shot (which never
          ;; selects) still opens its panels when its tab arrives.
@@ -682,7 +721,7 @@ and the new workspace\'s tab arrives through the roster push."
     ;; THE ACK UX IS IMMEDIATE: the minibuffer reflects the create the instant
     ;; the command runs, not when the slow work finishes -- the owner's rule
     ;; that phases are messages, not only a mode line.
-    (message "agent-repl: creating workspace...")
+    (agent-repl-workspace-progress-report :create :requested)
     (agent-repl-verbs--send
      #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
      (list :repository repository
@@ -716,15 +755,20 @@ and the new workspace\'s tab arrives through the roster push."
      ;; the op and word the refusal, falling through for arms it does not claim.
      (lambda (value)
        (agent-repl-mutation-progress-forget op-id)
-       (agent-repl-verbs--create-refusal value)))))
+       (agent-repl-verbs--create-refusal value))
+     ;; A daemon that never answered will never push progress either, so the
+     ;; op is retired on that path too rather than left registered for the
+     ;; life of the session.
+     :on-transport-failure
+     (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
 
 (defun agent-repl-verbs--create-stage-message (stage)
-  "Echo the minibuffer line for a create STAGE keyword."
-  (message "agent-repl: %s"
-           (pcase stage
-             (:deriving-name "deriving workspace name...")
-             (:creating-worktree "creating workspace git worktree...")
-             (_ (format "workspace creation stage %s" stage)))))
+  "Echo the minibuffer line for a create STAGE keyword.
+The wording lives in `agent-repl-workspace-progress-phases\=' with every
+other phase of every other way of making a workspace, so the create\='s
+stages and the open\='s cannot drift into two vocabularies.  A stage with
+no template is reported as the contract breach it is, never invented."
+  (agent-repl-workspace-progress-report :create stage))
 
 (defun agent-repl-verbs--create-failure (arm detail)
   "Surface a background create's failure LOUDLY, never silently.
@@ -740,11 +784,11 @@ the daemon log)."
     (:internal
      (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
                         "elisp.verbs.create-failed-internal detail=%S" detail)
-     (message "agent-repl: workspace creation failed: %s" detail))
+     (agent-repl-workspace-progress-report :create :failed detail))
     (_
      (agent-repl--error '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
                         "elisp.verbs.create-failed-unknown arm=%S detail=%S" arm detail)
-     (message "agent-repl: workspace creation failed"))))
+     (agent-repl-workspace-progress-report :create :failed "the daemon named no cause"))))
 
 (defun agent-repl-verbs--create-refusal (value)
   "Draw the create refusals Emacs words itself, from VALUE.
@@ -1228,7 +1272,8 @@ refusal the daemon adds later still reaches the user correctly."
       (agent-repl--warn agent-repl--global-log-scope
                         "elisp.verbs.register-repository-refused path=%S arm=%S"
                         path (plist-get arm :arm))
-      (message "agent-repl: %s: %s" sentence path)
+      (agent-repl-workspace-progress-report
+       :register-repository :failed (format "%s: %s" sentence path))
       t)))
 
 (defun agent-repl-verbs--workspace-display-name (ref)
@@ -1287,6 +1332,9 @@ names both facts because the two halves are independently new: the
 repository may be already known while the workspace is freshly opened."
   (interactive)
   (let ((path (agent-repl-verbs--register-repository-read-path)))
+    ;; The gesture leaves a mark the instant it is made, exactly as every
+    ;; other way of putting a workspace on the roster now does.
+    (agent-repl-workspace-progress-report :register-repository :requested path)
     (agent-repl-verbs--send
      #'agent-repl-rpc-register-repository (agent-repl-verbs--conn)
      (list :path path)
@@ -1295,12 +1343,13 @@ repository may be already known while the workspace is freshly opened."
      (lambda (value)
        (let ((dir (plist-get (plist-get value :repository) :dir))
              (workspace (plist-get value :workspace)))
-         (message "agent-repl: %s repository %s; workspace %s %s"
-                  (if (plist-get value :already-known) "already known" "registered")
-                  dir
-                  (agent-repl-verbs--workspace-display-name workspace)
-                  (if (plist-get value :workspace-already-known)
-                      "already known" "opened"))))
+         (agent-repl-workspace-progress-report
+          :register-repository :completed
+          (if (plist-get value :already-known) "already known" "registered")
+          dir
+          (agent-repl-verbs--workspace-display-name workspace)
+          (if (plist-get value :workspace-already-known)
+              "already known" "opened"))))
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 

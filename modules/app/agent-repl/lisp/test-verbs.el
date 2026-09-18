@@ -326,8 +326,75 @@ answers a bare success, which is what almost every verb's success is."
   (let ((closed-ref (agent-repl-test-verbs--ref "closed-id" "/tmp/closed")))
     (agent-repl-test-verbs--with nil
       (agent-repl-verb-open closed-ref)
-      (should (equal (agent-repl-test-verbs--request :open)
-                     (list :workspace closed-ref))))))
+      (should (equal (plist-get (agent-repl-test-verbs--request :open) :workspace)
+                     closed-ref)))))
+
+(ert-deftest agent-repl-verbs-open-sends-an-op-id ()
+  "Every open carries a client-minted op_id -- the token that correlates it
+to the stages the daemon pushes on the WatchDaemon channel while the rpc
+is still in flight."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (plist-get (agent-repl-test-verbs--request :open) :op-id))))
+
+(ert-deftest agent-repl-verbs-open-reports-the-request-leaving ()
+  "The open says so the instant it is sent, naming the workspace."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: opening workspace /tmp/closed…"))))
+
+(ert-deftest agent-repl-verbs-open-reports-its-completion ()
+  "A successful open says the workspace is open, not merely that it asked."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace opened: /tmp/closed"))))
+
+(ert-deftest agent-repl-verbs-open-reports-each-daemon-stage ()
+  "A stage the daemon pushes for THIS open reaches the minibuffer."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (let ((op-id (plist-get (agent-repl-test-verbs--request :open) :op-id)))
+      ;; The op is retired by the success above, so the stage is replayed
+      ;; against a freshly registered one -- the correlation, not the verb,
+      ;; is what this pins.
+      (agent-repl-mutation-progress-register
+       op-id :on-stage (lambda (stage)
+                         (agent-repl-workspace-progress-report :open stage)))
+      (agent-repl-mutation-progress-handle
+       (list :op-id op-id
+             :event (list :arm :open :value (list :stage :starting-session)))))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: starting the workspace's session…"))))
+
+(ert-deftest agent-repl-verbs-open-retires-its-op-on-success ()
+  "The open's outcome rides its rpc, so nothing on the stream would ever
+retire the registration: the success does."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (let ((op-id (plist-get (agent-repl-test-verbs--request :open) :op-id))
+          (stages nil))
+      (cl-letf (((symbol-function 'agent-repl-workspace-progress-report)
+                 (lambda (_kind phase &rest _) (push phase stages))))
+        (agent-repl-mutation-progress-handle
+         (list :op-id op-id
+               :event (list :arm :open :value (list :stage :starting-session)))))
+      (should-not stages))))
+
+(ert-deftest agent-repl-verbs-open-retires-its-op-when-nobody-answers ()
+  "A daemon that never answered will never push a stage either."
+  (agent-repl-test-verbs--with
+      (list (cons :open (list :failure "connection refused")))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (let ((op-id (plist-get (agent-repl-test-verbs--request :open) :op-id))
+          (stages nil))
+      (cl-letf (((symbol-function 'agent-repl-workspace-progress-report)
+                 (lambda (_kind phase &rest _) (push phase stages))))
+        (agent-repl-mutation-progress-handle
+         (list :op-id op-id
+               :event (list :arm :open :value (list :stage :starting-session)))))
+      (should-not stages))))
 
 (ert-deftest agent-repl-verbs-restart-states-force-false ()
   "A graceful restart states `force' explicitly rather than omitting it."
@@ -804,7 +871,7 @@ rides the progress channel."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :initial-prompt "fix the flaky login test")
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace..."))))
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace…"))))
 
 (ert-deftest agent-repl-verbs-create-sends-an-op-id ()
   "Every create carries a client-minted op_id -- the token that correlates it
@@ -818,13 +885,13 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
   "The deriving-name stage renders the owner's exact minibuffer line."
   (agent-repl-test-verbs--with nil
     (agent-repl-verbs--create-stage-message :deriving-name)
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: deriving workspace name..."))))
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: deriving the workspace's name…"))))
 
 (ert-deftest agent-repl-verbs-create-stage-message-renders-creating-worktree ()
   "The creating-worktree stage renders the owner's exact minibuffer line."
   (agent-repl-test-verbs--with nil
     (agent-repl-verbs--create-stage-message :creating-worktree)
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace git worktree..."))))
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating the workspace's git worktree…"))))
 
 (ert-deftest agent-repl-verbs-create-failure-internal-messages-the-error ()
   "An internal failure event surfaces the daemon's sentence loudly."
@@ -876,8 +943,8 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
                  (lambda (_p candidates &rest _) (setq offered candidates) "closed-row")))
         (agent-repl-open-workspace)
         (should (equal offered '("closed-row")))
-        (should (equal (agent-repl-test-verbs--request :open)
-                       (list :workspace (agent-repl-test-verbs--ref "cid" "/tmp/c"))))))))
+        (should (equal (plist-get (agent-repl-test-verbs--request :open) :workspace)
+                       (agent-repl-test-verbs--ref "cid" "/tmp/c")))))))
 
 (ert-deftest agent-repl-verbs-open-command-refuses-with-no-closed-rows ()
   "With nothing closed there is nothing to open, and that is a refusal."
