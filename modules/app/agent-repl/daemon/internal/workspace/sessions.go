@@ -1284,12 +1284,12 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			// account is exactly the configDir it spends under.
 			DisableAutoCompact: f.deps.Accounts.IsMultiRepo(configDir),
 			SessionID:          hostSessionID,
-			ShimBuildSHA: f.deps.ShimBuildSHA,
-			NodeBin:      f.deps.NodeBin,
-			MainJS:       f.deps.MainJS,
-			Fake:         f.deps.Fake,
-			LogSink:      sink.File(),
-			ForbidVendor: f.deps.ForbidVendor,
+			ShimBuildSHA:       f.deps.ShimBuildSHA,
+			NodeBin:            f.deps.NodeBin,
+			MainJS:             f.deps.MainJS,
+			Fake:               f.deps.Fake,
+			LogSink:            sink.File(),
+			ForbidVendor:       f.deps.ForbidVendor,
 			// THE PID IS DURABLE FROM THE FORK. Spawn blocks until the shim
 			// has bound and answered; a daemon killed inside that window
 			// leaves a shim its successor cannot tell from no shim at all.
