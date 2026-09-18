@@ -657,13 +657,11 @@ message FeedSimpleToolCall {
     FeedToolCallReturned returned = 4;
     // The permission gate refused it; it never ran. No output section.
     FeedToolCallDenied denied = 5;
-    // The work MOVED: the call handed its command to the background (a
-    // timed-out or explicitly detached shell) and this card is not where it
-    // finishes. No output section, never a verdict — the detached shell row
-    // the daemon draws beneath it is the record of the run, and it alone
-    // settles. Without this arm a moved call sat on `running` forever above
-    // a row that had already reported `exit 0` (observed 2026-09-09).
-    FeedToolCallMoved moved = 6;
+    // Tag 6 is RETIRED: nothing filled `FeedToolCallMoved`. A backgrounded
+    // call is retire-then-redraw instead — the running tool card is removed
+    // (FeedRow.removed) and the detached shell bubble (FeedRow.shell_head)
+    // is drawn in its place, which is the same foreground→detached
+    // transition FeedRow.shell_head's own doc already describes.
   }
 }
 // The head's name element.
@@ -718,10 +716,6 @@ message FeedToolCallLastProgress {
 // The denied state. Empty: the head's badge says denied, and the consent
 // story is the permission card's — this card only shows the call never ran.
 message FeedToolCallDenied {}
-// The call's work moved to the background; see the `moved` arm. The badge
-// reads as moved (neither ok nor err nor running), and the card draws no
-// output section.
-message FeedToolCallMoved {}
 
 // ③ OUTPUT, below the dashed divider, plus the badge's verdict.
 message FeedToolCallReturned {
