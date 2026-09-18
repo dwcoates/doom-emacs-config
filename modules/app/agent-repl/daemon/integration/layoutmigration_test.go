@@ -66,33 +66,76 @@ func TestBootStampsTheMigratedLayoutOnTheStateDatabase(t *testing.T) {
 	}
 }
 
+// layout3Undo is the inverse of EVERY migration step this build can apply,
+// keyed by the layout version that step produces. It is what takes a state
+// file written by THIS build back to a genuine layout-3 file.
+//
+// IT IS KEYED BY VERSION SO IT CANNOT DRIFT SILENTLY. It was a flat list of
+// statements once, hand-maintained against a migration list that grows, and it
+// drifted exactly as such a list does: layout 10 appended `feed_text_scale`,
+// the list was never extended, and the "layout 3" file it produced still
+// carried a layout-10 table. The migration then replayed step 10 onto it, hit
+// `table feed_text_scale already exists`, and rolled the whole chain back --
+// so both tests here failed on a daemon that had done nothing wrong. The
+// production refusal is CORRECT and is deliberately left alone: a migration
+// that finds an object it is about to create must refuse rather than write
+// over it. What was wrong was the fixture's claim about the file it built.
+//
+// demoteToLayout3 checks this map covers every version from 4 to
+// wsm.LayoutVersion, so appending a migration step without its inverse fails
+// loudly here instead of producing a file that is not the layout it claims.
+var layout3Undo = map[int][]string{
+	4: {
+		`DROP INDEX ported_prompts_by_workspace`,
+		`DROP TABLE ported_prompts`,
+	},
+	// The layout-5 step is a BACKFILL: it introduces no shape, so taking the
+	// file back past it removes nothing. The rows it healed stay healed, which
+	// is harmless -- re-running the backfill over them is a no-op.
+	5: nil,
+	6: {`ALTER TABLE creation_jobs ADD COLUMN one_shot_finish TEXT NOT NULL DEFAULT ''`},
+	7: {`ALTER TABLE sessions DROP COLUMN selected_config_dir`},
+	8: {`ALTER TABLE workspaces DROP COLUMN spawned_shim_pid`},
+	9: {`ALTER TABLE workspaces DROP COLUMN last_activity_at`},
+	10: {`DROP TABLE feed_text_scale`},
+}
+
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
-// undoing exactly what every migration since layout 3 does: the 3 -> 4 step's
-// table and index go, the column the 5 -> 6 step drops comes back, and the
-// columns the 6 -> 7, 7 -> 8 and 8 -> 9 steps add go. The daemon must be
-// stopped: it holds the sole writing handle while it runs.
+// undoing every migration step since layout 3, newest first, and stamping the
+// version. The daemon must be stopped: it holds the sole writing handle while
+// it runs.
 func demoteToLayout3(t *testing.T, d *harness.Daemon) {
 	t.Helper()
+	for v := 4; v <= wsm.LayoutVersion; v++ {
+		if _, covered := layout3Undo[v]; !covered {
+			t.Fatalf("layout3Undo has no inverse for migration step %d; a step was appended to wsm.migrations without one, so this fixture cannot build a layout-3 file", v)
+		}
+	}
 	d.WithDB(func(db *sql.DB) {
-		for _, stmt := range []string{
-			`DROP INDEX ported_prompts_by_workspace`,
-			`DROP TABLE ported_prompts`,
-			`ALTER TABLE creation_jobs ADD COLUMN one_shot_finish TEXT NOT NULL DEFAULT ''`,
-			`ALTER TABLE sessions DROP COLUMN selected_config_dir`,
-			`ALTER TABLE workspaces DROP COLUMN spawned_shim_pid`,
-			`ALTER TABLE workspaces DROP COLUMN last_activity_at`,
-			`UPDATE layout SET version = 3 WHERE id = 1`,
-		} {
-			if _, err := db.Exec(stmt); err != nil {
-				t.Fatalf("demote the state database to layout 3 (%s): %v", stmt, err)
+		// NEWEST FIRST: a step's inverse may depend on shape a later step's
+		// inverse has not yet removed.
+		for v := wsm.LayoutVersion; v >= 4; v-- {
+			for _, stmt := range layout3Undo[v] {
+				if _, err := db.Exec(stmt); err != nil {
+					t.Fatalf("demote the state database past layout %d (%s): %v", v, stmt, err)
+				}
 			}
 		}
-		var present int
-		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'ported_prompts'`).Scan(&present); err != nil {
-			t.Fatalf("probe the demoted state database: %v", err)
+		if _, err := db.Exec(`UPDATE layout SET version = 3 WHERE id = 1`); err != nil {
+			t.Fatalf("stamp the demoted state database at layout 3: %v", err)
 		}
-		if present != 0 {
-			t.Fatalf("the demoted state database still carries ported_prompts; the fixture is not a layout-3 file")
+		// The file must actually BE layout 3, not merely stamped as one: every
+		// table a migration since layout 3 creates has to be gone, or the
+		// migration this fixture exists to drive will refuse the step that
+		// creates it.
+		for _, table := range []string{"ported_prompts", "feed_text_scale"} {
+			var present int
+			if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&present); err != nil {
+				t.Fatalf("probe the demoted state database for %s: %v", table, err)
+			}
+			if present != 0 {
+				t.Fatalf("the demoted state database still carries %s; the fixture is not a layout-3 file", table)
+			}
 		}
 	})
 }
