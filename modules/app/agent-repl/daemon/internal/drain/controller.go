@@ -86,6 +86,9 @@ type controller struct {
 	// scheduled are the drain holds taken when the schedule was put in force,
 	// by workspace.
 	scheduled map[ids.WorkspaceID]ids.LeaseID
+	// retries is the idle sweep's backoff for workspaces whose hibernation
+	// FAILED, by workspace. See hibernateRetryDelay.
+	retries map[ids.WorkspaceID]hibernateRetry
 }
 
 // Schedule puts a schedule in force and announces it. The persisted row and

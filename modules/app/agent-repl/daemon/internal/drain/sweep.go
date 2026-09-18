@@ -76,8 +76,21 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no shim to address; skipping its hibernation", fields)
 			continue
 		}
-		if c.hibernate(ctx, log, ws.ID, fields) {
+		if retry, backingOff := c.backingOff(ws.ID, now); backingOff {
+			log.Debug(opSweep, "the workspace's last hibernation failed; backing off before the next attempt",
+				merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
+			continue
+		}
+		switch c.hibernate(ctx, log, ws.ID, fields) {
+		case hibernateDone:
+			c.clearRetry(ws.ID)
 			hibernated = append(hibernated, ws.ID)
+		case hibernateDeferred:
+			c.clearRetry(ws.ID)
+		case hibernateFailed:
+			retry := c.recordFailure(ws.ID, now)
+			log.Debug(opSweep, "backing off the failed hibernation",
+				merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 		}
 	}
 	c.log.Debug(opSweep, "one idle-sweep pass finished",
@@ -85,17 +98,33 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	return hibernated, nil
 }
 
+// hibernateOutcome is what one hibernation attempt came to.
+type hibernateOutcome int
+
+const (
+	// hibernateDone: the session was stood down and recorded.
+	hibernateDone hibernateOutcome = iota
+	// hibernateDeferred: an ORDINARY deferral -- another lease holder, a
+	// session that went away, a turn in flight, a compaction under way. The
+	// next pass asks again at the sweep's own cadence.
+	hibernateDeferred
+	// hibernateFailed: something that should have worked did not -- a failed
+	// or unreadable directive, a warned refusal, a failed stand-down or
+	// record. The workspace is BACKED OFF (see hibernateRetryDelay).
+	hibernateFailed
+)
+
 // hibernate stands one session down: the Hibernate directive, then the ack,
 // then a GRACEFUL KillSession, then the durable stand-down record. It reports
-// whether the session was actually hibernated; every failure and every refusal
-// DEFERS the workspace rather than failing the whole pass, because one wedged
-// session must not stop the sweep reaching the rest.
-func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) bool {
+// what the attempt came to; every failure and every refusal DEFERS the
+// workspace rather than failing the whole pass, because one wedged session
+// must not stop the sweep reaching the rest.
+func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) hibernateOutcome {
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderHibernate, wsm.PolicyHold)
 	if err != nil {
 		log.Debug(opSweep, "another holder has the lease; deferring the hibernation",
 			withCause(fields, err))
-		return false
+		return hibernateDeferred
 	}
 	defer func() {
 		if err := c.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
@@ -131,11 +160,11 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		if errors.Is(err, ErrNoLiveSession) {
 			log.Debug(opSweep, "the session went away before the hibernate directive; deferring the hibernation",
 				withCause(fields, err))
-			return false
+			return hibernateDeferred
 		}
 		log.Error(opSweep, "the hibernate directive failed; deferring the hibernation",
 			withCause(fields, err))
-		return false
+		return hibernateFailed
 	}
 	// A COMPACTION THAT IS UNDER WAY IS NOT A FAILURE, AND NOT AN ACK. The
 	// directive is two-phase precisely because a compaction is a real vendor
@@ -152,7 +181,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// fix.
 	if answer.GetCompacting() != nil {
 		log.Debug(opSweep, "compaction in flight; deferring the hibernation", fields)
-		return false
+		return hibernateDeferred
 	}
 	if refusal := answer.GetError(); refusal != nil {
 		// A REFUSAL IS AN ANSWER. turn_in_flight simply defers; the other two
@@ -160,10 +189,10 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		refused := merge(fields, dlog.Context{"refusal": hibernateRefusal(refusal)})
 		if refusal.GetTurnInFlight() != nil {
 			log.Debug(opSweep, "a turn is in flight; deferring the hibernation", refused)
-		} else {
-			log.Warn(opSweep, "the shim refused to hibernate; deferring", refused)
+			return hibernateDeferred
 		}
-		return false
+		log.Warn(opSweep, "the shim refused to hibernate; deferring", refused)
+		return hibernateFailed
 	}
 	// AND EVERY OTHER ARM IS A DEFERRAL, NOT A STAND-DOWN. The three arms
 	// above are the whole of what this daemon knows how to read; anything else
@@ -172,7 +201,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// session whose transcript was never compacted.
 	if answer.GetSuccess() == nil {
 		log.Error(opSweep, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation", fields)
-		return false
+		return hibernateFailed
 	}
 
 	standDown, cancelStandDown := context.WithTimeout(ctx, c.deps.StandBound)
@@ -181,7 +210,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	if err != nil {
 		log.Error(opSweep, "the graceful stand-down failed after the hibernate ack; deferring",
 			withCause(fields, err))
-		return false
+		return hibernateFailed
 	}
 
 	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
@@ -190,14 +219,14 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		At:     c.deps.Clock.Now(),
 	}); err != nil {
 		log.Error(opSweep, "could not record the hibernation stand-down", withCause(fields, err))
-		return false
+		return hibernateFailed
 	}
 	// The shim is gone, so the pid the intent manifest would name is gone with
 	// it. A pid left behind would make the next reconciliation read a dead
 	// session as preserved.
 	if err := c.deps.DB.SetShimPID(ctx, ws, nil); err != nil {
 		log.Error(opSweep, "could not clear the hibernated session's shim pid", withCause(fields, err))
-		return false
+		return hibernateFailed
 	}
 	// AND SO IS THE SPAWN THE REGISTRY RECORDS. That pid exists so a successor
 	// daemon waits for a shim that is still starting instead of spawning a
@@ -205,7 +234,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// would make the next boot wait out its whole adoption bound for it.
 	if err := c.deps.DB.SetSpawnedShimPID(ctx, ws, nil); err != nil {
 		log.Error(opSweep, "could not clear the hibernated workspace's recorded spawn pid", withCause(fields, err))
-		return false
+		return hibernateFailed
 	}
 	// AND SO IS THE FOOTER'S, AND THE CONNECTIVITY INDICATOR'S. Both are
 	// in-memory accumulations fed by events, so unlike the roster they cannot
@@ -239,7 +268,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		}
 	}
 	log.Info(opSweep, "hibernated an idle session", fields)
-	return true
+	return hibernateDone
 }
 
 // workspaceLog resolves one workspace's own durable sink, or the central sink
