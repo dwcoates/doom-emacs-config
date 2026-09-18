@@ -45,6 +45,38 @@ adding an unlisted `message` call fails the ERT suite. The same source audit
 rejects record-builder/file-writer bypasses and unclassified literal-nil
 workspace log sites.
 
+## Workspace create/open/register progress
+
+Every gesture that makes or restores a workspace -- `SPC TAB n`, `N`, `c`,
+`C`, `f`, `o`, `O`, `C-n` and `SPC j .` -- reports each step it reaches
+through exactly one function, `agent-repl-workspace-progress-report` in
+`mutation-progress.el`. Its sentences live in one table,
+`agent-repl-workspace-progress-phases`, keyed by KIND (`:create`, `:open`,
+`:register`, `:register-repository`) and PHASE. No entry point words its own
+feedback: a new one supplies a kind and a phase, never a `message` call.
+
+Every kind carries `:requested` (Emacs is sending), `:completed` and
+`:failed`; everything between them is a stage the DAEMON reported reaching,
+and a kind lists exactly the stages its rpc can push. A phase with no
+template is reported as a caller bug and never invented, so a stage added to
+`WorkspaceCreateStage` or `WorkspaceOpenStage` without a sentence here fails
+loudly rather than reaching the user as an enum name.
+
+The echo goes through `agent-repl--backend-phase`, the same startup-phase
+channel the daemon build and bounce use: one call produces both the durable
+record and the minibuffer line. Details ride as FORMAT ARGUMENTS, never
+pasted into the sentence, because the log record's operation name is derived
+from the template and a runtime value must never become part of one. That is
+also why these sites are absent from the `message` audit above -- they reach
+the user through `agent-repl--emit-message`, which the audit already permits.
+
+A create is acked and worked in the daemon's background, so its terminal
+outcome arrives on the progress stream and the correlation seat retires the
+op there. An OPEN is answered synchronously, so only its stages ride the
+stream: the verb retires the op itself on success, on refusal, and on a
+transport failure (`agent-repl-verbs--send`'s `:on-transport-failure`).
+Nothing on the stream would ever retire it.
+
 ## Verification
 
 Run from `modules/app/agent-repl/`, always through the host suite slot:

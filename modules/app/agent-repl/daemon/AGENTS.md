@@ -413,6 +413,35 @@ that allowlist.
 Read daemon records and harvest run windows through `../bin/logs.sh`; the full
 path, rotation, attribution, and level-switch table is in `../AGENTS.md`.
 
+## Workspace-mutation progress (stages on WatchDaemon)
+
+A workspace mutation's stages are pushed on the daemon-level `WatchDaemon`
+stream as `WorkspaceMutationProgress`, keyed on a CLIENT-MINTED `op_id` the
+request carried. That stream and not the per-workspace one, because a
+create's stages precede the workspace's existence; the stream is a broadcast,
+so the id is the only thing that lets a client tell its own operation apart.
+
+Two mutations report stages today and they do NOT work the same way:
+
+- **Create.** An `op_id` opts the create into option B: the rpc ACKS at once,
+  the work detaches, and the stages AND the terminal outcome (`succeeded` /
+  `failed`) both ride the stream. A create with no `op_id` keeps the legacy
+  synchronous contract.
+- **Open.** An `op_id` changes nothing about how the rpc answers -- it stays
+  synchronous, and its success and every typed refusal reach the caller on
+  `OpenWorkspaceResponse`. Only the STAGES ride the stream, because the wait
+  inside the rpc is exactly what the answer cannot carry. There is no terminal
+  step on `WorkspaceOpenProgress`, deliberately: two terminal reports for one
+  operation could disagree.
+
+Each verb takes its reporter as a proto-free interface (`CreateProgress`,
+`OpenProgress`) so the verb layer never names a wire type; the server maps the
+verb's own stage vocabulary onto the enum, and an unmapped stage is logged at
+ERROR and NOT relayed rather than sent as UNSPECIFIED. A stage is reported
+only when the work it names actually runs -- an already-live session emits no
+bring-up stage -- because a stage announcing work that is not happening is
+worse than no stage at all.
+
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one

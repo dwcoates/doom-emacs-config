@@ -1050,6 +1050,40 @@ replaces it."
             "\"stage\":\"WORKSPACE_CREATE_STAGE_TELEPORT\"}}}"))))
 
 
+(ert-deftest agent-repl-test-wire-host-mutation-progress-open-stage ()
+  "An open stage push decodes to the op id and the stage keyword."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  (concat "{\"mutationProgress\":{\"opId\":\"op-6\",\"open\":{"
+                          "\"stage\":\"WORKSPACE_OPEN_STAGE_STARTING_SESSION\"}}}"))
+                 '(:arm :mutation-progress
+                   :value (:op-id "op-6"
+                           :event (:arm :open
+                                   :value (:stage :starting-session)))))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-open-reviving-stage ()
+  "The conditional revival stage decodes on its own name."
+  (should (equal (plist-get
+                  (plist-get
+                   (plist-get
+                    (agent-repl-test-wire-host--decode
+                     #'agent-repl-wire-decode-watch-daemon-response
+                     (concat "{\"mutationProgress\":{\"opId\":\"op-7\",\"open\":{"
+                             "\"stage\":\"WORKSPACE_OPEN_STAGE_REVIVING\"}}}"))
+                    :value)
+                   :event)
+                  :value)
+                 '(:stage :reviving))))
+
+(ert-deftest agent-repl-test-wire-host-mutation-progress-unknown-open-stage-is-a-breach ()
+  "An unknown open-stage enum name is refused, not guessed at."
+  (should-error
+   (agent-repl-test-wire-host--decode
+    #'agent-repl-wire-decode-watch-daemon-response
+    (concat "{\"mutationProgress\":{\"opId\":\"op-8\",\"open\":{"
+            "\"stage\":\"WORKSPACE_OPEN_STAGE_TELEPORT\"}}}"))))
+
+
 (provide 'test-wire-host)
 
 ;;; test-wire-host.el ends here

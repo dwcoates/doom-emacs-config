@@ -72,6 +72,7 @@
 (declare-function agent-repl-host-register "agent-repl-host" (conn dir on-done))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-verbs-select-minted "agent-repl-verbs" (ref))
+(declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
@@ -597,6 +598,11 @@ moves the user nowhere: there is no workspace to come up on."
       (user-error "agent-repl: %s is not a directory" canonical))
     (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project dir=%s" canonical)
     (agent-repl--ws-register-project canonical)
+    ;; THE GESTURE LEAVES A MARK IMMEDIATELY, like every other way of putting
+    ;; a workspace on the roster: the register round-trips to the daemon, and
+    ;; a directory that takes a moment to accept used to look like a keypress
+    ;; that went nowhere.
+    (agent-repl-workspace-progress-report :register :requested canonical)
     (agent-repl-host-register
      (agent-repl-link-primary) canonical
      (lambda (ref)
@@ -610,9 +616,16 @@ moves the user nowhere: there is no workspace to come up on."
              ;; so the reason is left for it here.
              (agent-repl--panels-note-arrival-reason
               (plist-get ref :id) "registered")
+             (agent-repl-workspace-progress-report :register :completed canonical)
              (agent-repl-verbs-select-minted ref))
+         ;; A REGISTER THAT DID NOT LAND IS SAID OUT LOUD.  It only ever
+         ;; reached the log before, so a refused or unanswered register was
+         ;; indistinguishable from one that worked and simply did not move
+         ;; the user -- the exact ambiguity this whole ladder is against.
          (agent-repl--warn '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project-not-registered dir=%s"
-                           canonical))))))
+                           canonical)
+         (agent-repl-workspace-progress-report
+          :register :failed (format "the daemon did not register %s" canonical)))))))
 
 ;;;; ---- Workspace navigation ---------------------------------------------
 
