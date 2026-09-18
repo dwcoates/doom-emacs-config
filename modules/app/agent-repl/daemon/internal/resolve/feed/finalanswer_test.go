@@ -530,3 +530,31 @@ func TestTheFooterLineIsTerseAndSaysWhichWayTheAnswerWasLost(t *testing.T) {
 		})
 	}
 }
+
+// TestASiblingFoldMovingDoesNotAnswerAnotherFoldsStall pins the scoping: the
+// stall is about ONE fold, and a different response block of the same turn
+// paying out says nothing about the one that went silent.
+func TestASiblingFoldMovingDoesNotAnswerAnotherFoldsStall(t *testing.T) {
+	// Arrange: unit-1 stalls.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), noAddress())
+	h.clock.elapse()
+	if h.standingAnswerFault() == nil {
+		t.Fatal("arrange: the stall did not stand")
+	}
+
+	// Act: a DIFFERENT block of the same turn pays out.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-2", &conversationv1.AgentResponseUpdate{NewMarkdown: "a second block"}, nil), noAddress())
+
+	// Assert: unit-1's stall still stands.
+	fault := h.standingAnswerFault()
+	if fault == nil {
+		t.Fatal("a sibling fold's frame retracted another fold's stall")
+	}
+	if fault.Evidence["unit"] != "unit-1" {
+		t.Fatalf("unit = %q, want the stalled fold's", fault.Evidence["unit"])
+	}
+}

@@ -177,12 +177,26 @@ func (r *resolver) closeAnswerFault(s *wsState, because string) {
 			"fault": string(fault.id), "why": fault.why, "because": because})
 }
 
-// clearStalledAnswerFault retracts a standing fault ONLY when it is the stall:
-// a stall is answered by the frame or terminal that finally arrived, while the
-// two NOT-LANDED faults are raised at the terminal and stand until the next
-// turn starts.
-func (r *resolver) clearStalledAnswerFault(s *wsState, because string) {
+// clearStalledAnswerFault retracts a standing fault ONLY when it is the stall
+// raised about THIS fold: a stall is answered by the frame that finally arrived
+// on the very fold that went silent, and a sibling fold moving says nothing
+// about it. The two NOT-LANDED faults are never cleared here — they are raised
+// at the terminal and stand until the next turn starts.
+func (r *resolver) clearStalledAnswerFault(s *wsState, unit, because string) {
+	if s.answerFault == nil || s.answerFault.why != whyStalled || s.answerFault.unit != unit {
+		return
+	}
+	r.closeAnswerFault(s, because)
+}
+
+// clearTurnStalledAnswerFault is the terminal's clearing: the turn ended, so
+// every fold of it is answered, including the one the stall was raised about.
+func (r *resolver) clearTurnStalledAnswerFault(s *wsState, turn, because string) {
 	if s.answerFault == nil || s.answerFault.why != whyStalled {
+		return
+	}
+	fold, ok := s.responses[s.answerFault.unit]
+	if !ok || fold.turn != turn {
 		return
 	}
 	r.closeAnswerFault(s, because)
