@@ -627,7 +627,7 @@ func TestStandDownEverySpawnKillsASpawnStillBringingUp(t *testing.T) {
 	dir := shortDir(t)
 	f, uds := startFakeShim(t, dir)
 	spec, sink := newTestSpec(t, dir, uds, helperIdle)
-	sup := newSupervisor(t, WithKillGrace(50*time.Millisecond))
+	sup := newSupervisor(t, WithKillGrace(sweepReapBound))
 
 	done := make(chan error, 1)
 	go func() {
@@ -813,7 +813,7 @@ func TestTheSweptSpawnIsRecordedAtInfo(t *testing.T) {
 	dir := shortDir(t)
 	f, uds := startFakeShim(t, dir)
 	spec, sink := newTestSpec(t, dir, uds, helperIdle)
-	sup, surfaces := newSupervisorLogging(t, WithKillGrace(50*time.Millisecond))
+	sup, surfaces := newSupervisorLogging(t, WithKillGrace(sweepReapBound))
 
 	done := make(chan error, 1)
 	go func() {
