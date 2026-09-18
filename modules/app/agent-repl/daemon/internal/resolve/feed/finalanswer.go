@@ -94,14 +94,34 @@ type stallState struct {
 	seq   uint64
 }
 
+// answerFaultLine is the TERSE line the footer's fault chip draws beside the
+// kind, one per `why`. It is short because the chip is one elastic cell on a
+// one-line strip; the explanatory sentence is the ERROR record's, not the
+// reader's.
+func (r *resolver) answerFaultLine(why string) string {
+	switch why {
+	case whyNoAnswerNamed:
+		return "the turn named no answering response"
+	case whyAnswerRowUnresolved:
+		return "the named answer has no drawn row"
+	case whyStalled:
+		return "no response frame for " + r.deps.AnswerStall.String()
+	}
+	return why
+}
+
 // raiseAnswerFault records a turn whose answer did not land, at ERROR, and
 // opens the standing fault the footer draws. A fault already standing for the
 // same unit and the same reason is left exactly as it is, so a terminal that
 // replays across store planes neither doubles the record nor moves the line's
 // age.
-func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, detail string) {
+//
+// `message` is the ERROR record's explanatory sentence; the footer's line is
+// composed from `why` by answerFaultLine, so the strip stays terse and the log
+// stays readable without either wording the other.
+func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, message string) {
 	log := r.logger(s.id)
-	log.Error("daemon.feed.final_answer_unresolved", detail,
+	log.Error("daemon.feed.final_answer_unresolved", message,
 		dlog.Context{"turn": turn, "unit": unit, "why": why})
 	if s.answerFault != nil && s.answerFault.why == why && s.answerFault.unit == unit {
 		log.Debug("daemon.feed.final_answer_fault_already_standing",
@@ -118,11 +138,12 @@ func (r *resolver) raiseAnswerFault(s *wsState, turn, unit, why, detail string) 
 		return
 	}
 	ws := s.id
+	line := r.answerFaultLine(why)
 	id, err := r.deps.Faults.OpenFault(context.Background(), wsm.Fault{
 		Workspace: &ws,
 		Kind:      health.KindFinalAnswerUnresolved,
-		Detail:    detail,
-		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why, "detail": detail},
+		Detail:    message,
+		Evidence:  map[string]string{"turn": turn, "unit": unit, "why": why, "detail": line},
 		OpenedAt:  r.deps.Now(),
 	})
 	if err != nil {
