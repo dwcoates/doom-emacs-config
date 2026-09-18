@@ -30,6 +30,7 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
+import { ViewedRegistry } from "../../src/sidebar/viewed.js";
 import type { SidebarContext, SidebarPrefs } from "../../src/sidebar/context.js";
 
 /** The webview's own workspace. */
@@ -134,6 +135,7 @@ export function sidebarContext(
     ctx,
     prefs,
     attention: new AttentionRegistry(timers),
+    viewed: new ViewedRegistry(),
     tasks: [],
     disposers,
     onDispose: (fn) => {
@@ -166,6 +168,8 @@ export function row(init: {
   current?: boolean;
   closed?: boolean;
   attention?: boolean;
+  /** The VIEWED marker: present means the daemon holds this row PARTIAL. */
+  viewed?: boolean;
   priority?: string;
   /** The when-column's ARM; omitted leaves the column empty. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
@@ -182,6 +186,7 @@ export function row(init: {
     detail: init.detail ?? {},
     children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
+    ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
 }

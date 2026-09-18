@@ -973,3 +973,72 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
     }
   });
 });
+
+describe("the row's display mode", () => {
+  it("greys the NAME when the daemon carries the viewed marker", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", viewed: true }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.classList.contains("viewed")).toBe(true);
+  });
+
+  it("leaves the NAME alone when it carries none", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.classList.contains("viewed")).toBe(false);
+  });
+
+  it("marks the whole row PARTIAL for the hook contract", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", viewed: true }), sidebarContext(), "R");
+
+    // Assert.
+    expect(drawn.getAttribute("data-viewed")).toBe("true");
+  });
+
+  it("leaves the status dot's tone untouched in partial mode", () => {
+    // Arrange: the mode says what the user has SEEN, never what the workspace
+    // is doing — the dot is what says that.
+    const sc = sidebarContext();
+
+    // Act.
+    const full = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sc, "R");
+    const partial = drawRosterRow(
+      row({ id: "ws-2", status: { case: "thinking", value: {} }, viewed: true }),
+      sc,
+      "R",
+    );
+
+    // Assert.
+    const dot = (el: HTMLElement): string =>
+      (el.querySelector(":scope > .row > .st") as HTMLElement).className;
+    expect(dot(partial)).toBe(dot(full));
+  });
+
+  it("draws FULL despite the marker when this row's status just changed", () => {
+    // Arrange: the page applies the restore rule itself rather than waiting
+    // for the daemon's next push to drop the marker.
+    const sc = sidebarContext();
+    sc.viewed.beginPass();
+    drawRosterRow(row({ id: "ws-1", status: { case: "ready", value: {} }, viewed: true }), sc, "R");
+    sc.viewed.endPass();
+
+    // Act.
+    sc.viewed.beginPass();
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "thinking", value: {} }, viewed: true }),
+      sc,
+      "R",
+    );
+    sc.viewed.endPass();
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.classList.contains("viewed")).toBe(false);
+  });
+});
