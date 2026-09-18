@@ -211,6 +211,11 @@ type fakeVerbs struct {
 	openErr   error
 	forgetErr error
 
+	// openStages are replayed into whatever reporter the rpc armed, and
+	// openProgress is the reporter itself so a test can assert its absence.
+	openStages   []workspace.OpenStage
+	openProgress workspace.OpenProgress
+
 	setModel    string
 	setModelErr error
 
@@ -271,7 +276,17 @@ func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string)
 	return f.setModelErr
 }
 
-func (f *fakeVerbs) Open(context.Context, ids.WorkspaceID) error { return f.openErr }
+// openStages records every stage the server's reporter relayed into the verb,
+// so a test can assert the rpc armed a reporter (or deliberately did not).
+func (f *fakeVerbs) Open(_ context.Context, _ ids.WorkspaceID, progress workspace.OpenProgress) error {
+	f.openProgress = progress
+	for _, stage := range f.openStages {
+		if progress != nil {
+			progress.Stage(stage)
+		}
+	}
+	return f.openErr
+}
 
 func (f *fakeVerbs) SetPermissionMode(context.Context, ids.WorkspaceID, string) error {
 	return f.setPermissionModeErr

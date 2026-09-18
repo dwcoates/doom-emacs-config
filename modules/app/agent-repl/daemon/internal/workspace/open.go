@@ -21,7 +21,16 @@ import (
 // It is idempotent: opening a workspace whose session is already live clears
 // the closed flag and returns, because the mount it answers has already
 // happened.
-func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
+// reportOpenStage relays one stage to an Open's progress reporter, if the
+// caller set one. An open with no reporter (every non-client caller) emits
+// nothing.
+func reportOpenStage(progress OpenProgress, stage OpenStage) {
+	if progress != nil {
+		progress.Stage(stage)
+	}
+}
+
+func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgress) error {
 	record, log, err := v.owned(ctx, "OpenWorkspace", ws)
 	if err != nil {
 		return err
@@ -39,6 +48,7 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 	// discipline boot applies: "could not tell" is not an answer, and refusing
 	// the open on it would strand a workspace that is merely unreachable this
 	// instant.
+	reportOpenStage(progress, OpenStageCheckingWorktree)
 	if _, statErr := os.Stat(record.Dir); errors.Is(statErr, fs.ErrNotExist) {
 		return refuse(log, "OpenWorkspace", ArmSpawnFailed,
 			fmt.Sprintf("the workspace's directory no longer exists: %s", record.Dir), false)
@@ -57,24 +67,33 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	if v.deps.Sessions.Live(ws) {
 		log.Debug(opOpen, "the session is already live", nil)
-	} else if err := v.deps.Sessions.Start(ctx, ws); err != nil {
-		// A DEPARTING DAEMON IS NOT A SESSION THAT FAILED TO COME UP. The
-		// bring-up refused before it spawned because nothing would be left to
-		// own the shim, and the successor opens the workspace from the same
-		// record; the caller still gets the refusal, which is what it acts on.
-		if errors.Is(err, shimclient.ErrStandingDown) {
-			log.Info(opOpen, "the session was not brought up: this daemon is standing down", nil)
-		} else {
-			log.Error(opOpen, "the session did not come up", dlog.Context{"cause": err.Error()})
+	} else {
+		// THE SLOW STAGE. Reported only when a bring-up actually runs: a
+		// session already live waited for nothing, and a stage announcing
+		// work that is not happening is worse than no stage at all.
+		reportOpenStage(progress, OpenStageStartingSession)
+		if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+			// A DEPARTING DAEMON IS NOT A SESSION THAT FAILED TO COME UP. The
+			// bring-up refused before it spawned because nothing would be left
+			// to own the shim, and the successor opens the workspace from the
+			// same record; the caller still gets the refusal, which is what it
+			// acts on.
+			if errors.Is(err, shimclient.ErrStandingDown) {
+				log.Info(opOpen, "the session was not brought up: this daemon is standing down", nil)
+			} else {
+				log.Error(opOpen, "the session did not come up", dlog.Context{"cause": err.Error()})
+			}
+			return fmt.Errorf("open %q: start the session: %w", ws, err)
 		}
-		return fmt.Errorf("open %q: start the session: %w", ws, err)
 	}
 	if asleep {
+		reportOpenStage(progress, OpenStageReviving)
 		v.unpark(ws)
 		log.Info(opOpen, "revived the hibernated workspace", nil)
 	}
 
 	if record.Closed {
+		reportOpenStage(progress, OpenStageClearingClosed)
 		if err := v.deps.DB.SetClosed(ctx, ws, false); err != nil {
 			log.Error(opOpen, "could not clear the closed flag", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("open %q: clear closed: %w", ws, err)
@@ -89,6 +108,7 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 	// The build-staleness check belongs to the mount: a workspace coming up
 	// against a shim older than the deployed build is bounced onto it now,
 	// rather than discovering the mismatch mid-turn.
+	reportOpenStage(progress, OpenStageCheckingBuild)
 	if err := v.deps.Rollout.RelaunchShim(ctx, ws, rollout.ReasonBuildStale); err != nil {
 		// A staleness bounce that will not run is a WARNING, not a failed
 		// mount: the session is up and usable on the older build.

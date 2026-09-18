@@ -254,6 +254,43 @@ func (r createProgressReporter) Stage(stage workspace.CreateStage) {
 	})
 }
 
+// openProgressReporter relays an open's stage transitions onto the
+// mutation-progress channel, keyed on the op_id the request supplied. It
+// satisfies workspace.OpenProgress, keeping the verb itself proto-free.
+type openProgressReporter struct {
+	server *server
+	opID   string
+}
+
+func (r openProgressReporter) Stage(stage workspace.OpenStage) {
+	var wire agentreplv1.WorkspaceOpenStage
+	switch stage {
+	case workspace.OpenStageCheckingWorktree:
+		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE
+	case workspace.OpenStageStartingSession:
+		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION
+	case workspace.OpenStageReviving:
+		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_REVIVING
+	case workspace.OpenStageClearingClosed:
+		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CLEARING_CLOSED
+	case workspace.OpenStageCheckingBuild:
+		wire = agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_BUILD
+	default:
+		// An unmapped stage is a bug in this switch, not a client condition —
+		// but an open's progress relay must never take the open down, so it is
+		// surfaced loudly and the open proceeds unaffected.
+		r.server.log.Error("daemon.server.open_workspace", "an unmapped open stage was reported; it was not relayed",
+			dlog.Context{"op_id": r.opID, "stage": int(stage)})
+		return
+	}
+	r.server.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId: r.opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Open{
+			Open: &agentreplv1.WorkspaceOpenProgress{Stage: wire},
+		},
+	})
+}
+
 // mergeActions renders the configured merge actions.
 //
 // SEAM MISMATCH (recorded in the report): wsm.MergeActions holds PROMPT NAMES
@@ -360,7 +397,15 @@ func (s *server) OpenWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Open(ctx, subject.Record.ID); err != nil {
+	// A client that minted an op_id also gets the open's STAGES, pushed onto
+	// WatchDaemon keyed on it while this rpc is still in flight. A client that
+	// minted none gets exactly the behavior it always had: no reporter, no
+	// pushes. The terminal outcome stays on this answer either way.
+	var progress workspace.OpenProgress
+	if opID := req.Msg.GetOpId(); opID != "" {
+		progress = openProgressReporter{server: s, opID: opID}
+	}
+	if err := s.deps.Verbs.Open(ctx, subject.Record.ID, progress); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
