@@ -2835,3 +2835,21 @@ always registers the main worktree, so an answer without it is not one."
   (should (equal (agent-repl-wire-decode-adjust-feed-text-scale-response
                   (agent-repl-test-wire-verbs--parse "{\"scale\":1.02}"))
                  '(:scale 1.02))))
+
+;;;; ---- OpenWorkspace: the optional correlation id ----------------------
+
+(ert-deftest agent-repl-test-wire-verbs-open-workspace-request-omits-an-absent-op-id ()
+  "An open that minted no op id sends the bare {workspace} it always did."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-encode-open-workspace-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-workspace-request-carries-the-op-id ()
+  "An op id rides the request, which is what opts the open into stage pushes."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (cdr (assq 'opId
+                             (agent-repl-wire-encode-open-workspace-request
+                              (list :workspace agent-repl-test-wire-verbs--ref
+                                    :op-id "op-42"))))
+                  "op-42"))))

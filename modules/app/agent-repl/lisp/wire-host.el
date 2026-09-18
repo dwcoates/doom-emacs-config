@@ -1005,9 +1005,39 @@ THE ARM IS THE STEP: an intermediate `stage', or a terminal `succeeded' or
        (succeeded :succeeded agent-repl-wire-decode-workspace-create-succeeded)
        (failed :failed agent-repl-wire-decode-workspace-create-failed)))))
 
+(defun agent-repl-wire-decode-workspace-open-stage (value)
+  "Decode `WorkspaceOpenStage''s protojson enum-name VALUE into a keyword.
+Enums travel as their string names; an unknown one is a contract breach,
+not a stage to guess at."
+  (pcase value
+    ("WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE" :checking-worktree)
+    ("WORKSPACE_OPEN_STAGE_STARTING_SESSION" :starting-session)
+    ("WORKSPACE_OPEN_STAGE_REVIVING" :reviving)
+    ("WORKSPACE_OPEN_STAGE_CLEARING_CLOSED" :clearing-closed)
+    ("WORKSPACE_OPEN_STAGE_CHECKING_BUILD" :checking-build)
+    (_ (agent-repl-wire--fail "WorkspaceOpenStage" 'stage
+                              (format "unknown enum value %S" value)))))
+
+(defun agent-repl-wire-decode-workspace-open-progress (value)
+  "Decode `WorkspaceOpenProgress' from VALUE into `(:stage STAGE)'.
+NO TERMINAL STEP: an open is answered synchronously on its own rpc, so
+its success and every refusal reach the caller there.  This message
+carries only the wait that answer cannot express."
+  (let ((object (agent-repl-wire--object "WorkspaceOpenProgress" value)))
+    (agent-repl-wire--check-keys "WorkspaceOpenProgress" object '(stage))
+    (agent-repl-wire--decoded
+     "WorkspaceOpenProgress"
+     (list :stage (agent-repl-wire-decode-workspace-open-stage
+                   (agent-repl-wire--decode-string
+                    "WorkspaceOpenProgress" 'stage object))))))
+
 (defun agent-repl-wire-decode-workspace-mutation-progress-create (value)
   "Decode `WorkspaceMutationProgress''s `create' event arm from VALUE."
   (agent-repl-wire-decode-workspace-create-progress value))
+
+(defun agent-repl-wire-decode-workspace-mutation-progress-open (value)
+  "Decode `WorkspaceMutationProgress''s `open' event arm from VALUE."
+  (agent-repl-wire-decode-workspace-open-progress value))
 
 (defun agent-repl-wire-decode-workspace-mutation-progress (value)
   "Decode `WorkspaceMutationProgress' from VALUE.
@@ -1015,14 +1045,16 @@ Returns `(:op-id ID :event (:arm ARM :value V))'.  THE OP ID IS THE
 CORRELATION KEY: a client matches this push to the operation it issued by
 it, and drops any it does not recognize."
   (let ((object (agent-repl-wire--object "WorkspaceMutationProgress" value)))
-    (agent-repl-wire--check-keys "WorkspaceMutationProgress" object '(opId create))
+    (agent-repl-wire--check-keys "WorkspaceMutationProgress" object '(opId create open))
     (agent-repl-wire--decoded
      "WorkspaceMutationProgress"
      (list :op-id (agent-repl-wire--decode-string "WorkspaceMutationProgress" 'opId object)
            :event (agent-repl-wire--decode-oneof
                    "WorkspaceMutationProgress" 'event object
                    '((create :create
-                             agent-repl-wire-decode-workspace-mutation-progress-create)))))))
+                             agent-repl-wire-decode-workspace-mutation-progress-create)
+                     (open :open
+                           agent-repl-wire-decode-workspace-mutation-progress-open)))))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-push (value)
   "Decode `WatchDaemonResponse''s `push' oneof from the object VALUE."
