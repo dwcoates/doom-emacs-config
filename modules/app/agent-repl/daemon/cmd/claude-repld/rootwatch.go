@@ -80,23 +80,30 @@ func (w rootWatch) run(ctx context.Context) error {
 	}
 }
 
-// standDownCause records why the daemon stood down on its own, so the
-// process's exit reports it rather than reading as an orderly one.
-type standDownCause struct {
-	mu    sync.Mutex
-	cause error
+// standDownRecord records why the serving lifetime ended, so the process's
+// exit reports the cause and runs only the teardown that reason owes. The
+// FIRST record wins: a loss found while a handover is already leaving must
+// not rewrite why the daemon left.
+type standDownRecord struct {
+	mu     sync.Mutex
+	set    bool
+	reason standDownReason
+	cause  error
 }
 
-func (s *standDownCause) set(err error) {
+func (s *standDownRecord) record(reason standDownReason, cause error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cause == nil {
-		s.cause = err
+	if s.set {
+		return
 	}
+	s.set, s.reason, s.cause = true, reason, cause
 }
 
-func (s *standDownCause) get() error {
+// get answers the recorded reason and cause; an unrecorded end -- the
+// process's signal context -- is an orderly one with no cause.
+func (s *standDownRecord) get() (standDownReason, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.cause
+	return s.reason, s.cause
 }
