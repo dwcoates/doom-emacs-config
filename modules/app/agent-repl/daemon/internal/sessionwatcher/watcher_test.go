@@ -470,7 +470,7 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	assertNames(t, got, []string{
 		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
 		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {
 		t.Fatal("a started session is not connected")

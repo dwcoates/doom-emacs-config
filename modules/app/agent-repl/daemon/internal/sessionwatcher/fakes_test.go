@@ -557,6 +557,11 @@ func (s *footerSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.S
 	s.rec.emit(event{sink: "footer", method: "OnSessionUpdate", detail: sessionArm(update)})
 }
 
+func (s *footerSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
+	held := live
+	s.rec.emit(event{sink: "footer", method: "OnLiveWorkChanged", live: &held})
+}
+
 func (s *footerSink) OnLink(_ ids.WorkspaceID, link LinkState) {
 	s.rec.emit(event{sink: "footer", method: "OnLink", link: link})
 }
