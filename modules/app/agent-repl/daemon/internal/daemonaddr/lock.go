@@ -196,3 +196,28 @@ func (l *bootLock) release() error {
 	}
 	return nil
 }
+
+// verify reports whether the lock file at the lock's path is still the inode
+// this lock holds. A lock file that is gone, or was replaced by another file,
+// is a claim nobody else can see: a second daemon opening the path creates or
+// opens a different inode and takes a lock that does not conflict with this
+// one.
+func (l *bootLock) verify() error {
+	if l.f == nil {
+		return fmt.Errorf("the boot lock %q is released", l.path)
+	}
+	held, err := l.f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat the held boot lock %q: %w", l.path, err)
+	}
+	named, err := os.Stat(l.path)
+	switch {
+	case os.IsNotExist(err):
+		return fmt.Errorf("%w: daemon.lock %q is gone", ErrVanished, l.path)
+	case err != nil:
+		return fmt.Errorf("stat the boot lock %q: %w", l.path, err)
+	case !os.SameFile(held, named):
+		return fmt.Errorf("%w: daemon.lock %q was replaced by another file", ErrVanished, l.path)
+	}
+	return nil
+}

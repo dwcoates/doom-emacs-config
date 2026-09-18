@@ -561,3 +561,140 @@ func TestAJoiningClaimTakesTheBootClaimWhenItAdvertises(t *testing.T) {
 		t.Fatalf("Bind after the successor advertised = %v, want ErrClaimed", err)
 	}
 }
+
+func TestVerify(t *testing.T) {
+	cases := []struct {
+		name    string
+		joining bool
+		publish bool
+		// mutate changes the state root after the claim is bound (and
+		// published, when publish is set).
+		mutate func(t *testing.T, c Claim, addrPath string)
+		// want is a substring of the loss; empty means Verify must pass.
+		want string
+	}{
+		{
+			name:    "an intact published claim verifies",
+			publish: true,
+			mutate:  func(*testing.T, Claim, string) {},
+		},
+		{
+			name:    "a removed state root is a loss",
+			publish: true,
+			mutate: func(t *testing.T, _ Claim, addrPath string) {
+				if err := os.RemoveAll(filepath.Dir(addrPath)); err != nil {
+					t.Fatalf("RemoveAll: %v", err)
+				}
+			},
+			want: "the state root",
+		},
+		{
+			name:    "a state root recreated at the same path is a loss",
+			publish: true,
+			mutate: func(t *testing.T, _ Claim, addrPath string) {
+				dir := filepath.Dir(addrPath)
+				if err := os.RemoveAll(dir); err != nil {
+					t.Fatalf("RemoveAll: %v", err)
+				}
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatalf("Mkdir: %v", err)
+				}
+			},
+			want: "was replaced by another directory",
+		},
+		{
+			name: "a removed daemon.lock is a loss",
+			mutate: func(t *testing.T, _ Claim, addrPath string) {
+				if err := os.Remove(LockPath(addrPath)); err != nil {
+					t.Fatalf("Remove: %v", err)
+				}
+			},
+			want: "daemon.lock",
+		},
+		{
+			name: "a daemon.lock replaced by another file is a loss",
+			mutate: func(t *testing.T, _ Claim, addrPath string) {
+				if err := os.Remove(LockPath(addrPath)); err != nil {
+					t.Fatalf("Remove: %v", err)
+				}
+				if err := os.WriteFile(LockPath(addrPath), nil, 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			},
+			want: "was replaced by another file",
+		},
+		{
+			name:    "a removed daemon.addr is a loss while published",
+			publish: true,
+			mutate: func(t *testing.T, _ Claim, addrPath string) {
+				if err := os.Remove(addrPath); err != nil {
+					t.Fatalf("Remove: %v", err)
+				}
+			},
+			want: "daemon.addr",
+		},
+		{
+			name:    "a daemon.addr naming another address is a loss while published",
+			publish: true,
+			mutate: func(t *testing.T, _ Claim, addrPath string) {
+				if err := os.WriteFile(addrPath, []byte("127.0.0.1:1\n"), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+			},
+			want: "127.0.0.1:1",
+		},
+		{
+			name:   "an unpublished claim owes no daemon.addr",
+			mutate: func(*testing.T, Claim, string) {},
+		},
+		{
+			name:    "a withdrawn claim owes no daemon.addr",
+			publish: true,
+			mutate: func(t *testing.T, c Claim, _ string) {
+				if _, err := c.Withdraw(); err != nil {
+					t.Fatalf("Withdraw: %v", err)
+				}
+			},
+		},
+		{
+			name:    "a joining claim owes no daemon.lock before it publishes",
+			joining: true,
+			mutate:  func(*testing.T, Claim, string) {},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			addrPath := newAddrPath(t)
+			bind := Bind
+			if tc.joining {
+				bind = BindJoining
+			}
+			c, err := bind(addrPath, 0)
+			if err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+			t.Cleanup(func() { c.Close() })
+			if tc.publish {
+				if err := c.Publish(); err != nil {
+					t.Fatalf("Publish: %v", err)
+				}
+			}
+			tc.mutate(t, c, addrPath)
+
+			// Act
+			err = c.Verify()
+
+			// Assert
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Verify = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrVanished) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Verify = %v, want an ErrVanished naming %q", err, tc.want)
+			}
+		})
+	}
+}
