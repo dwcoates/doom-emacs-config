@@ -987,6 +987,7 @@ func TestHostFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "watch open refused", kind: health.KindWatchOpenRefused},
 		{name: "daemon state unreadable", kind: health.KindStateUnreadable},
 		{name: "adoption window expired", kind: health.KindAdoptionWindowExpired},
+		{name: "final answer unresolved", kind: health.KindFinalAnswerUnresolved},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -1103,5 +1104,30 @@ func TestPublishHostWorkspaceSurvivesAWorkspaceThatOwnsNoLogSink(t *testing.T) {
 	}
 	if errs := log.at("ERROR"); len(errs) != 0 {
 		t.Fatalf("recorded %v at ERROR, want none: an unroutable sink is an ordinary outcome", errs)
+	}
+}
+
+// TestAnUnresolvedFinalAnswerReachesTheHostView pins that the host stream
+// carries the turn, the unit and the WHY, so a reader of the host view can tell
+// a terminal that named nothing from one whose answer resolved to no row.
+func TestAnUnresolvedFinalAnswerReachesTheHostView(t *testing.T) {
+	// Arrange, Act.
+	got, ok := hostFault(wsm.Fault{
+		Kind: health.KindFinalAnswerUnresolved,
+		Evidence: map[string]string{
+			"turn": "turn-7", "unit": "msg_01:0", "why": "stalled",
+		},
+	})
+
+	// Assert.
+	if !ok {
+		t.Fatal("hostFault withheld final_answer_unresolved from the host stream")
+	}
+	arm := got.GetFinalAnswerUnresolved()
+	if arm == nil {
+		t.Fatalf("hostFault rendered %T, want the final-answer arm", got.GetKind())
+	}
+	if arm.GetTurn() != "turn-7" || arm.GetUnit() != "msg_01:0" || arm.GetWhy() != "stalled" {
+		t.Fatalf("arm = %+v, want the recorded turn, unit and why", arm)
 	}
 }

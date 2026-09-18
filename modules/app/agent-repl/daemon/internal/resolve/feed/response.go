@@ -45,6 +45,13 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.turn = string(*s.turnStamp)
 	}
 
+	// A FRAME ARRIVED, so this fold is not silent. The stall window is dropped
+	// and a stall fault raised about this fold is retracted THE INSTANT the
+	// frame lands, before anything else is decided about it; the window is
+	// restarted at the foot of this function only if the fold is still open.
+	r.disarmAnswerStall(s, unit)
+	r.clearStalledAnswerFault(s, "a response frame arrived")
+
 	// THE STAMP IS THIS TURN'S TOKENS, not this unit's and not the context
 	// window: usage rides exactly one unit per API response (usually a sibling,
 	// the thinking block's), and the bubble draws the SUM of fresh input +
@@ -222,6 +229,12 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// the feed and row identity this fold drew on.
 	fold.feed = at.feed
 	fold.row = id
+	// AN OPEN FOLD IS EXPECTED TO KEEP MOVING. Rearmed from THIS frame, so the
+	// window measures silence rather than the fold's whole lifetime; a settled
+	// fold is owed nothing more and stays disarmed.
+	if !fold.settled {
+		r.armAnswerStall(s, unit, fold.turn)
+	}
 	return &frontendv1.FeedRow{
 		Id: id,
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{

@@ -109,6 +109,11 @@ type harness struct {
 	// the opening history page; portedErr fails that read.
 	ported    []PortedPrompt
 	portedErr error
+	// faults is the fake fault record every raise in this resolver lands in.
+	faults *fakeFaults
+	// clock is the fake AfterFunc: stall windows are armed into it and fired
+	// by the test, never waited on.
+	clock *fakeStallClock
 }
 
 // newHarness builds a resolver with deterministic dependencies: a fixed clock,
@@ -118,7 +123,10 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	log := dlog.NewTestLogger()
 	painter := &fakePainter{}
-	h := &harness{t: t, log: log, painter: painter, nowMs: 1_700_000_000_000}
+	h := &harness{
+		t: t, log: log, painter: painter, nowMs: 1_700_000_000_000,
+		faults: &fakeFaults{}, clock: &fakeStallClock{},
+	}
 
 	resolver, err := newResolver(Deps{
 		Log:          &fakeSurfaces{log: log},
@@ -132,8 +140,10 @@ func newHarness(t *testing.T) *harness {
 		PortedPrompts: func(context.Context, ids.WorkspaceID) ([]PortedPrompt, error) {
 			return h.ported, h.portedErr
 		},
-		Now:      func() time.Time { return time.UnixMilli(h.nowMs) },
-		PageSize: 3,
+		Now:       func() time.Time { return time.UnixMilli(h.nowMs) },
+		AfterFunc: h.clock.AfterFunc,
+		Faults:    h.faults,
+		PageSize:  3,
 	})
 	if err != nil {
 		t.Fatalf("newResolver: %v", err)

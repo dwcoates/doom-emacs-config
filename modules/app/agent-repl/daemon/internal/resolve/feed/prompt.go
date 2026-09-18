@@ -43,6 +43,11 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			running := ids.TurnID(turn.GetValue())
 			s.turnInFlight = &running
 			s.turnStamp = &running
+			// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and
+			// the next turn beginning is what retires it. Both turn-start sites
+			// call it: a prompt drawn from history replay opens a turn here
+			// without ever passing OnTurnOpened.
+			r.turnStarted(s, running)
 			// THE PROMPT ITSELF MARKS ITS TURN A DIRECTIVE. The prompt is the
 			// turn's FIRST frame on every path, so recognising the /clear or
 			// /compact literal here registers the turn before its response and
