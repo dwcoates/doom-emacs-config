@@ -1762,18 +1762,18 @@ func assertShimRequestOrder(t *testing.T, f *fixture, first, second string) {
 func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 	t.Parallel()
 	// Arrange: a very short idle cutoff so the sweep fires promptly, and a
-	// generous run of scripted Hibernate transport failures so the assertion
-	// window below never lands on a sweep pass that got through to a real
-	// (successful) hibernate and forced a KillSession for real.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// Hibernate transport failure the fake is BORN with, so no sweep pass can
+	// ever get through to a real (successful) hibernate and force a
+	// KillSession for real. It used to queue twenty scripted failures after
+	// the workspace was already open, which raced the sweep at both ends: an
+	// early sweep hibernated for real before the first was filed, and a
+	// loaded run exhausted the twenty.
+	f := newOpenedWithProfile(t, harness.Opts{IdleCutoffMS: 50}, harness.ShimProfile{HibernateFailure: "transport blew up"})
 	f.shim.ExpectStartSession()
 	// The shim client records each refused call at ERROR of its own — that
 	// record IS the transport failure this test scripts — and the sweep then
 	// records the deferral.
 	f.d.ExpectWarnings("daemon.drain.sweep", "daemon.shimclient.hibernate")
-	for i := 0; i < 20; i++ {
-		f.shim.AnswerFailure(harness.RPCHibernate, "transport blew up")
-	}
 
 	// Act: wait for the sweep to log the failed directive.
 	rec := f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
@@ -1800,16 +1800,11 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 // no_session), which log WARN — so this test asserts no WARN fires at all.
 func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// Arrange: the refusal is in force from the fake's BIRTH. Scripted after
+	// the open, it raced the 50ms sweep — an early pass hibernated for real
+	// and killed the fake — and a queue of twenty ran out under load.
+	f := newOpenedWithProfile(t, harness.Opts{IdleCutoffMS: 50}, harness.ShimProfile{HibernateTurnInFlight: true})
 	f.shim.ExpectStartSession()
-	for i := 0; i < 20; i++ {
-		f.shim.Answer(harness.RPCHibernate, &shimv1.HibernateResponse{
-			Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
-				Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
-			}},
-		})
-	}
 
 	// Act: wait for at least one refused Hibernate attempt.
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})

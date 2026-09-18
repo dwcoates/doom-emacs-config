@@ -28,7 +28,13 @@
  * card was unreadable would lose the reader everything, including the evidence.
  */
 import { log } from "../log.js";
-import { carryExpanded } from "../expand.js";
+import {
+  applyExpanded,
+  cappedSectionsOf,
+  carryExpanded,
+  retainRows,
+  snapshotExpanded,
+} from "../expand.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -190,6 +196,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   // `null` = stale; only the two things that can change it drop it (see
   // `settledTurns`).
   let settled: ReadonlySet<string> | null = null;
+  // THE READER'S FOLDS ACROSS A PAGE REPLACE. A replace rebuilds every row from
+  // scratch, so `carryExpanded`'s previous element is gone; this is the
+  // per-row-id snapshot taken just before the teardown and spent on each row's
+  // first draw after it (see `applyPage` and `carryForRow`).
+  let carriedFolds = new Map<string, string[]>();
 
   opts.host.setAttribute("data-feed", opts.feed === "root" ? "root" : opts.feed.value);
 
@@ -338,11 +349,25 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         else loadMore.remove();
         crumbs = requireMessage(result.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
         const anchor = capture();
-        if (placement === "replace") clearRows();
+        if (placement === "replace") {
+          // OWNER RULING (2026-09-18): A REDRAW NEVER UN-TOGGLES, WHATEVER ITS
+          // SHAPE. A fold the reader opened survives a full page replace
+          // exactly as it survives a single-card upsert, so the expansions are
+          // snapshotted by row id here, across the teardown.
+          carriedFolds = snapshotExpanded(
+            [...states].flatMap(([id, state]) =>
+              state.body === null ? [] : [[id, state.body] as [string, HTMLElement]],
+            ),
+          );
+          clearRows();
+        }
         const incoming = result.value.rows;
         for (let i = 0; i < incoming.length; i += 1) {
           adopt(incoming[i], placement === "prepend" ? i : order.length);
         }
+        // A ROW THE REPLACE DID NOT SERVE AGAIN IS GONE: its keys drop rather
+        // than linger for a row that will never be drawn.
+        if (placement === "replace") retainRows(carriedFolds, new Set(states.keys()));
         announce();
         restore(anchor);
         return;
@@ -603,6 +628,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     state.bubble = bubble;
     state.body = bubble.element;
     state.dirty = false;
+    carryForRow(id, bubble.element);
     element.append(bubble.element);
     mirrorState(state);
   }
@@ -646,6 +672,19 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     return state.element;
   }
 
+  /**
+   * Re-open the folds the reader had open on this row before a page replace.
+   *
+   * Spent once: the snapshot describes the page that was torn down, and a row's
+   * later redraws carry their own state forward through `carryExpanded`.
+   */
+  function carryForRow(rowId: string, body: HTMLElement): void {
+    const keys = carriedFolds.get(rowId);
+    if (keys === undefined) return;
+    carriedFolds.delete(rowId);
+    applyExpanded(cappedSectionsOf(body), keys);
+  }
+
   /** Draw (or redraw) one row's body inside its chrome. */
   function drawBody(state: RowState): void {
     const previous = state.body ?? undefined;
@@ -662,6 +701,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     } catch (err) {
       if (!isMalformedView(err)) throw err;
       body = malformedPlaceholder(err, state.row);
+    }
+    if (previous === undefined) {
+      carryForRow(requireMessage(state.row.id, "FeedRow.id").value, body);
     }
     if (previous !== undefined) {
       // R2: THE WIRE'S FOLD IS THE INITIAL FOLD. A push says how a section

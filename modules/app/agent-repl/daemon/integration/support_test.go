@@ -96,6 +96,20 @@ func newOpened(t *testing.T, opts harness.Opts) *fixture {
 	return f
 }
 
+// newOpenedWithProfile is newOpened for a fake shim that must be born with a
+// profile in force — a condition the daemon can meet on its very first request
+// or its very first idle sweep, which a control-socket script filed after the
+// workspace is open would be racing.
+func newOpenedWithProfile(t *testing.T, opts harness.Opts, profile harness.ShimProfile) *fixture {
+	t.Helper()
+	f := newRegistered(t, opts)
+	f.d.WriteShimProfile(f.repo.Dir, profile)
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	f.web = f.d.WatchWeb(f.ws)
+	return f
+}
+
 // newOpenedWorktree is newOpened for a workspace on a WORKTREE of its
 // repository rather than on the repository root. It exists for the tests whose
 // subject is destructive git — a workspace at the repository root is one whose
