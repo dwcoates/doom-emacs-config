@@ -588,25 +588,68 @@ describe("command panels", () => {
     expect(harness.$('[data-panel="mcp"]')?.textContent).toContain("handshake refused");
   });
 
-  it("draws the context panel's header verbatim", async () => {
+  // /context IS THE ONE PANEL THIS END DRAWS CUSTOM. The daemon states the
+  // header's PARTS (used, total, percent, model) and a recursive tree of
+  // sections; the client joins the parts into one line, colors only the
+  // percent, and renders every section that HAS detail as a `<details>` closed
+  // by default. There is no named `data-fold` here and no per-section fold
+  // ruling — the tree's own shape is the fold.
+  it("composes the header line from the daemon's own parts", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert: the client joins, it never does the arithmetic.
+    expect(harness.$('[data-panel="context"] .context-header')?.textContent).toBe(
+      "142.3k of 200k (71%) · claude-opus-5",
+    );
+  });
+
+  it("colors only the percent, and echoes the daemon's figure verbatim", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert: the percent is the one span that turns into a warning.
+    const percent = harness.$('[data-panel="context"] .context-header-percent');
+    expect(percent?.getAttribute("data-percent")).toBe("71");
+    expect(percent?.style.color).not.toBe("");
+  });
+
+  it("draws a section that has detail as a fold closed by default", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert: the `open` attribute is deliberately never set on a fresh draw.
+    const sections = harness.$$('[data-panel="context"] details.context-section');
+    expect(sections.length).toBeGreaterThan(0);
+    expect(sections.every((el) => !el.hasAttribute("open"))).toBe(true);
+  });
+
+  it("nests a sub-fold beneath the section that carries it", async () => {
+    // Arrange / Act: `tool calls` is a nested section under `Messages`.
+    await submitPanel("context");
+    // Assert
+    const nested = harness.$$(
+      '[data-panel="context"] details.context-section details.context-section',
+    );
+    expect(nested.map((el) => el.querySelector(".panel-row-label")?.textContent)).toContain(
+      "tool calls",
+    );
+  });
+
+  it("draws a section with no detail as a bare row rather than a fold", async () => {
+    // Arrange / Act: `Free space` has neither items nor sub-sections, so
+    // offering a chevron would lie about there being something to unfold.
+    await submitPanel("context");
+    // Assert
+    const leaves = harness.$$('[data-panel="context"] .context-section-leaf');
+    expect(leaves.map((el) => el.textContent)).toContain("Free space57.7k · 29%");
+    expect(leaves.every((el) => el.tagName !== "DETAILS")).toBe(true);
+  });
+
+  it("draws the auto-compaction line the resolver composed, verbatim", async () => {
     // Arrange / Act
     await submitPanel("context");
     // Assert
-    expect(harness.$('[data-panel="context"]')?.textContent).toContain("context usage");
-  });
-
-  it("folds the context panel's tool-calls section automatically", async () => {
-    // Arrange / Act
-    await submitPanel("context");
-    // Assert: ruled — the tool calls render in an automatically folded fold.
-    expect(harness.$('[data-panel="context"] [data-fold="toolCalls"]')?.dataset.folded).toBe("true");
-  });
-
-  it("leaves the context panel's other sections unfolded", async () => {
-    // Arrange / Act
-    await submitPanel("context");
-    // Assert
-    expect(harness.$('[data-panel="context"] [data-fold="planes"]')?.dataset.folded).not.toBe("true");
+    expect(harness.$('[data-panel="context"] .context-auto-compact')?.textContent).toBe(
+      "auto-compact at 90%",
+    );
   });
 
   it("draws the context panel's auto-compact line verbatim", async () => {
