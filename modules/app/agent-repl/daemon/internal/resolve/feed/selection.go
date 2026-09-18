@@ -34,9 +34,30 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 	// after the fold settled carries the same text, and a fold that grew
 	// between drawings is captured at its latest settled state, which is what
 	// the user saw as the final answer.
-	if fold, ok := s.responses[unit]; ok {
+	if fold, ok := s.foldOfAnswer(id, unit); ok {
 		s.answerMarkdown[value] = fold.markdown
 	}
+}
+
+// foldOfAnswer is the fold that OWNS the answering row, which is NOT always
+// the fold filed under the named unit. A response block delivered under two
+// divergent activity ids leaves one row standing and retires the other fold,
+// and the retired unit is ALIASED onto the survivor's row (response.go's
+// aliasAnswerRow) so a terminal naming it still resolves. Reading the named
+// unit's fold in that case would copy the RETIRED FRAGMENT's partial text as
+// the final answer's markdown, and would find no row to re-stamp at all — so
+// the row's own owner is looked up first, and the named unit's fold is the
+// fallback for every ordinary answer, where the two are the same fold.
+func (s *wsState) foldOfAnswer(id *frontendv1.FeedId, unit string) (*proseState, bool) {
+	if value := id.GetValue(); value != "" {
+		for _, fold := range s.responses {
+			if fold.row.GetValue() == value {
+				return fold, true
+			}
+		}
+	}
+	fold, ok := s.responses[unit]
+	return fold, ok
 }
 
 // restampFinalAnswer re-publishes an already-drawn answer row with
@@ -50,8 +71,8 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 // terminal path, so the recorded answer row is re-stamped there too. The write
 // is idempotent — an already-stamped row upserts to an equal snapshot, which
 // upsert drops as churn.
-func (r *resolver) restampFinalAnswer(s *wsState, unit string) {
-	fold, ok := s.responses[unit]
+func (r *resolver) restampFinalAnswer(s *wsState, id *frontendv1.FeedId, unit string) {
+	fold, ok := s.foldOfAnswer(id, unit)
 	if !ok || fold.row == nil {
 		return
 	}
