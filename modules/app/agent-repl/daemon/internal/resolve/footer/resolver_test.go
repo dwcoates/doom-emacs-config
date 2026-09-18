@@ -2,6 +2,7 @@ package footer
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -357,6 +358,53 @@ func contains(haystack, needle string) bool {
 }
 
 // hasLevel reports whether any record matches the level and operation.
+// TestTheStatusArmIsRecordedWhenItChanges — a later disagreement between the
+// strip and the roster is diagnosed from the log, so every MOVE of the
+// published arm is recorded once, with the arm it replaced.
+func TestTheStatusArmIsRecordedWhenItChanges(t *testing.T) {
+	// Arrange: the first published view settles on idle.
+	h := newHarness(t)
+	connected(h)
+
+	// Act: detached work raises background, and the authoritative set retires it.
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+	h.r.OnLiveWorkChanged(testWS, LiveWorkSet{})
+
+	// Assert
+	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "background", "idle"}) {
+		t.Fatalf("recorded arms = %v, want idle, background, idle", got)
+	}
+}
+
+// TestAnUnchangedStatusArmIsNotRecordedAgain keeps the record a record of
+// CHANGES: a push that leaves the arm where it stands writes nothing.
+func TestAnUnchangedStatusArmIsNotRecordedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act: a second fact that leaves the strip idle.
+	h.r.SetParked(testWS, false)
+
+	// Assert
+	if got := countOf(h.log.Records(), dlog.LevelInfo, "daemon.footer.status_arm_changed"); got != 1 {
+		t.Fatalf("arm-change records = %d, want the one for the first published arm", got)
+	}
+}
+
+// armChanges is every recorded arm, in the order the footer published them.
+func armChanges(records []dlog.Record) []string {
+	var out []string
+	for _, rec := range records {
+		if rec.Operation != "daemon.footer.status_arm_changed" {
+			continue
+		}
+		arm, _ := rec.Context["arm"].(string)
+		out = append(out, arm)
+	}
+	return out
+}
+
 func hasLevel(records []dlog.Record, level, operation string) bool {
 	for _, rec := range records {
 		if rec.Level == level && rec.Operation == operation {
