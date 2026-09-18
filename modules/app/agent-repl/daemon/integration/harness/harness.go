@@ -94,12 +94,50 @@ func Main(m *testing.M) int {
 // it resolves its own relative path to daemon/ and calls this instead of
 // Main.
 func MainAt(m *testing.M, module string) int {
-	dir, err := os.MkdirTemp("", "agent-repl-integration-bin-")
+	return WithRunRoot(func() int { return mainIn(m, module, runRoot) })
+}
+
+// WithRunRoot runs body inside a fresh, owner-locked run root (runroot.go),
+// after reclaiming every dead run's leftovers, and removes the root when body
+// returns. MainAt runs the whole suite through it; a package that uses the
+// harness's temp helpers without the daemon builds (the harness's own tests)
+// calls it from its TestMain directly.
+func WithRunRoot(body func() int) int {
+	// A dead run's leftovers are reclaimed BEFORE this run adds its own. A
+	// reclaim that fails is a failed run, never a shrug: the leftovers are
+	// exactly the disk and the CPU the suite cannot spare.
+	if err := reclaimDeadRuns(); err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
+	root, lock, err := newRunRoot()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
+	defer os.RemoveAll(root)
+	defer lock.Close()
+	runRoot = root
+	// Every t.TempDir, every child's temp file and the go builds land under
+	// the run root, so a run that dies abnormally leaves exactly one
+	// directory for the next run to reclaim.
+	if err := os.Setenv("TMPDIR", root); err != nil {
+		fmt.Fprintln(os.Stderr, "harness: point TMPDIR at the run root:", err)
+		return 1
+	}
+	return body()
+}
+
+// RunRoot is this run's owner-locked root, for a suite's own per-run files.
+// Empty before WithRunRoot.
+func RunRoot() string { return runRoot }
+
+func mainIn(m *testing.M, module, root string) int {
+	dir, err := os.MkdirTemp(root, "agent-repl-integration-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness: temp dir:", err)
 		return 1
 	}
-	defer os.RemoveAll(dir)
 
 	daemonBinary = filepath.Join(dir, "claude-repld")
 	fakeshimBinary = filepath.Join(dir, "fakeshim")
