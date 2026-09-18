@@ -26,8 +26,14 @@ const (
 )
 
 type OpenWorkspaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Workspace     *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// A client-minted correlation id. OPTIONAL, and it changes nothing about
+	// how this rpc answers: supplying one asks the daemon to also push the
+	// open's stages onto WatchDaemon keyed on it
+	// (workspace_mutation_progress.proto), so a client can report the wait
+	// rather than only its outcome. An open with no op_id emits no stages.
+	OpId          string `protobuf:"bytes,2,opt,name=op_id,json=opId,proto3" json:"op_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -67,6 +73,13 @@ func (x *OpenWorkspaceRequest) GetWorkspace() *v1.WorkspaceRef {
 		return x.Workspace
 	}
 	return nil
+}
+
+func (x *OpenWorkspaceRequest) GetOpId() string {
+	if x != nil {
+		return x.OpId
+	}
+	return ""
 }
 
 // THE ARM IS THE OUTCOME.
@@ -727,9 +740,10 @@ var File_agentrepl_v1_endpoint_open_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_open_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"P\n" +
+	"*agentrepl/v1/endpoint_open_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"e\n" +
 	"\x14OpenWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x9b\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x13\n" +
+	"\x05op_id\x18\x02 \x01(\tR\x04opId\"\x9b\x01\n" +
 	"\x15OpenWorkspaceResponse\x12>\n" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.OpenWorkspaceSuccessH\x00R\asuccess\x128\n" +
 	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.OpenWorkspaceErrorH\x00R\x05errorB\b\n" +
