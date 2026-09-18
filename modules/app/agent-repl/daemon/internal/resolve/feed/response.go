@@ -50,7 +50,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// frame lands, before anything else is decided about it; the window is
 	// restarted at the foot of this function only if the fold is still open.
 	r.disarmAnswerStall(s, unit)
-	r.clearStalledAnswerFault(s, "a response frame arrived")
+	r.clearStalledAnswerFault(s, unit, "a response frame arrived")
 
 	// THE STAMP IS THIS TURN'S TOKENS, not this unit's and not the context
 	// window: usage rides exactly one unit per API response (usually a sibling,
