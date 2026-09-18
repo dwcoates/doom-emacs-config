@@ -929,7 +929,7 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	}
 	first.shim.ExpectStartTurn()
 	d.AwaitWorkspaceLogOperationCount(first.ws.GetDir(), harness.OpTurnOpened, 2)
-	first.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(first.shim, mainAgent, "conflict-brief-done")
 	host := d.WatchHost(first.ws)
 	awaitView(t, first, host, "the first merge parked", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil

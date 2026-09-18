@@ -477,9 +477,11 @@ first is silent (`internal/resolve/feed/finalanswer.go`, `turnended.go`).
    history opens a turn without passing `OnTurnOpened`.
 3. **NOT TIMELY.** An open response fold that has received no frame and no
    terminal for `DefaultAnswerStall` (90s) raises the SAME fault kind with
-   `why` = `stalled`, cleared the instant a frame or the turn's terminal
-   arrives. The window is the injected `Deps.AfterFunc`, so tests advance a
-   virtual clock and never sleep.
+   `why` = `stalled`, cleared the instant a frame arrives ON THAT FOLD — a
+   sibling block of the same turn paying out says nothing about the one that
+   stopped — or the turn's terminal arrives, which answers every fold at once.
+   The window is the injected `Deps.AfterFunc`, so tests advance a virtual
+   clock and never sleep.
 4. **Presentation is the FOOTER ONLY.** The bubble is never marked: the prose on
    screen is exactly what the agent said, and a turn whose answer the workspace
    cannot POINT AT is a fact about the workspace, not about the prose. The
