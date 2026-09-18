@@ -473,6 +473,27 @@ arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
 
+## The roster row's viewed mode is cleared by the RENDER, not by a setter
+
+`RosterRowViewed` is the row's display mode: present is PARTIAL (the client
+recedes the row's NAME), absent is FULL. `sidebar.Resolver.SetViewed` raises it
+— the editor's `MarkWorkspaceViewed` is the only caller, because dwell is an
+editor fact — and there is deliberately NO setter that lowers it.
+
+It is lowered in exactly one place: `wsState.noteArm`, called from `row()` as
+each row's status arm is resolved for publication, which clears the marker
+whenever the arm differs from the one last published for that workspace.
+**Hanging the clear off the render rather than off any particular fact-setter
+is the point**: every origin of a status change — an accepted turn, a shim
+frame, a merge, a dead session — reaches the row through that one funnel, so
+"any status change restores FULL" holds without every present and future setter
+having to remember to clear anything.
+
+The mode is in-memory only and writes no durable record: it is a view fact and
+must not outlive a restart. The editor's tab-bar draws the same mode from its
+own latch, on the same reset rule; the module-root AGENTS.md section "The
+viewed mode" owns the cross-surface invariant.
+
 ## A BROWSER page holds ONE stream; Emacs holds its own
 
 Every standing watch a webview holds is a SUBSCRIPTION on that page's single
