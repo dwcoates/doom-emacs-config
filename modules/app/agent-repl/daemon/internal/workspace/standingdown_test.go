@@ -150,7 +150,7 @@ func TestOpenLevelsAStandingDownStartAtInfo(t *testing.T) {
 			f.fleet.startErr = tt.startErr
 
 			// Act.
-			if err := f.verbs.Open(context.Background(), "w1"); err == nil {
+			if err := f.verbs.Open(context.Background(), "w1", nil); err == nil {
 				t.Fatal("Open = nil error, want the start's own failure")
 			}
 

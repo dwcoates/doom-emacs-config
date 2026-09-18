@@ -105,6 +105,43 @@ type CreateProgress interface {
 	Stage(CreateStage)
 }
 
+// OpenStage is one stage an Open passes through while its rpc is in flight.
+// Like CreateStage it is the verb's own vocabulary, proto-free: the caller maps
+// it onto whatever channel carries progress.
+//
+// THE TERMINAL OUTCOME IS NOT A STAGE. An open is answered synchronously by its
+// own rpc, so success and every refusal already reach the caller there; what
+// the answer cannot carry is the wait inside it, which is what these are.
+type OpenStage int
+
+const (
+	// OpenStageCheckingWorktree: the daemon is confirming the workspace's
+	// directory is still on disk. An open whose directory is gone is refused
+	// at this stage.
+	OpenStageCheckingWorktree OpenStage = iota
+	// OpenStageStartingSession: the daemon is bringing the session up —
+	// spawning the shim and resuming the vendor conversation. THE SLOW STAGE,
+	// and the reason this vocabulary exists.
+	OpenStageStartingSession
+	// OpenStageReviving: the daemon is lifting a hibernation park. Reported
+	// only for a workspace that was actually parked.
+	OpenStageReviving
+	// OpenStageClearingClosed: the daemon is clearing the closed flag, which
+	// is what puts the row back among the open ones. Reported only for a
+	// workspace that was actually closed.
+	OpenStageClearingClosed
+	// OpenStageCheckingBuild: the daemon is checking the shim against the
+	// deployed build and bouncing it when stale.
+	OpenStageCheckingBuild
+)
+
+// OpenProgress receives an Open's stage transitions in order. The terminal
+// outcome is NOT reported here: it is the verb's own return value, which the
+// caller maps. An open with no reporter leaves this nil.
+type OpenProgress interface {
+	Stage(OpenStage)
+}
+
 // InterruptTarget names what an Interrupt aims at. Exactly one is set.
 type InterruptTarget struct {
 	// Turn interrupts the running turn: KillTurn{force: confirm}, with the
@@ -148,8 +185,9 @@ type Verbs interface {
 	// that brief as its initial prompt.
 	RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, command string) (wsm.Workspace, error)
 	// Open spawns a registered-but-closed workspace's session (spawn on mount
-	// semantics).
-	Open(ctx context.Context, ws ids.WorkspaceID) error
+	// semantics). progress receives the open's stages as it reaches them, for
+	// a caller relaying them to a client; nil reports nothing.
+	Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgress) error
 	// Close tears down a workspace's editor state. It REQUIRES QUIET: no turn
 	// in flight, no live work, no held prompts, no queued merge. The refusal
 	// manifests in the footer, not only in the answer.

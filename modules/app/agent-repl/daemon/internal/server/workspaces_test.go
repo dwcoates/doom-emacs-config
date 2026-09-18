@@ -574,3 +574,95 @@ func TestCreateWorkspaceSurfacesARefusalOnTheFailureEvent(t *testing.T) {
 		t.Fatalf("naming_failed cause = %q, want timeout", got)
 	}
 }
+
+// TestOpenWorkspaceRelaysProgressStagesInOrder pins that an open carrying an
+// op_id has its stages pushed onto WatchDaemon, in order, keyed on that id.
+func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.openStages = []workspace.OpenStage{
+		workspace.OpenStageCheckingWorktree,
+		workspace.OpenStageStartingSession,
+		workspace.OpenStageCheckingBuild,
+	}
+	stream := proveDaemonSubscription(t, h)
+
+	// Act.
+	resp, err := h.Client.OpenWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref(), OpId: "op-open"}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+
+	// Assert.
+	wantStages := []agentreplv1.WorkspaceOpenStage{
+		agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE,
+		agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_STARTING_SESSION,
+		agentreplv1.WorkspaceOpenStage_WORKSPACE_OPEN_STAGE_CHECKING_BUILD,
+	}
+	for i, want := range wantStages {
+		if !stream.Receive() {
+			t.Fatalf("receive stage %d: %v", i, stream.Err())
+		}
+		prog := stream.Msg().GetMutationProgress()
+		if prog.GetOpId() != "op-open" {
+			t.Fatalf("stage %d op_id = %q, want op-open", i, prog.GetOpId())
+		}
+		if got := prog.GetOpen().GetStage(); got != want {
+			t.Fatalf("stage %d = %v, want %v", i, got, want)
+		}
+	}
+}
+
+// TestOpenWorkspaceArmsNoReporterWithoutAnOpID pins that an open that minted no
+// correlation id gets exactly the behavior it always had: no reporter is armed,
+// so nothing is pushed to a stream that could not correlate it anyway.
+func TestOpenWorkspaceArmsNoReporterWithoutAnOpID(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.OpenWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+
+	// Assert.
+	if h.Verbs.openProgress != nil {
+		t.Fatalf("open progress reporter = %v, want none for an open with no op_id", h.Verbs.openProgress)
+	}
+}
+
+// TestOpenWorkspaceRelaysNoUnmappedStage pins that a stage this server's switch
+// does not know is refused loudly rather than relayed as UNSPECIFIED, which a
+// client would have to guess at.
+func TestOpenWorkspaceRelaysNoUnmappedStage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.openStages = []workspace.OpenStage{workspace.OpenStage(9999)}
+	stream := proveDaemonSubscription(t, h)
+
+	// Act.
+	if _, err := h.Client.OpenWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref(), OpId: "op-bad"})); err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+	// A second, MAPPED open proves the stream is live and carried nothing for
+	// the unmapped stage — the only way to assert an absence on a stream.
+	h.Verbs.openStages = []workspace.OpenStage{workspace.OpenStageStartingSession}
+	if _, err := h.Client.OpenWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref(), OpId: "op-good"})); err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+
+	// Assert: the FIRST thing on the stream is the second open's stage.
+	if !stream.Receive() {
+		t.Fatalf("receive: %v", stream.Err())
+	}
+	if got := stream.Msg().GetMutationProgress().GetOpId(); got != "op-good" {
+		t.Fatalf("op_id = %q, want op-good (the unmapped stage must not have been relayed)", got)
+	}
+}
