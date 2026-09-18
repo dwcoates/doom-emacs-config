@@ -350,6 +350,10 @@ func cleanGitEnv(env []string) []string {
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.
 func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	t.Helper()
+	// The suite's live-daemon cap, held for this top-level test's whole run.
+	// See slots.go: DefaultTimeout's measured basis is eight concurrent
+	// daemons, and `-parallel` alone does not bound that.
+	acquireDaemonSlot(t)
 	binary := DaemonBinary(t)
 	root := t.TempDir()
 	// Unix-domain socket paths are capped at 103 bytes, and t.TempDir() encodes
