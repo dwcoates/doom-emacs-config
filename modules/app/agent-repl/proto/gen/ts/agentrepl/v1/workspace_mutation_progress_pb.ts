@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_mutation_progress.proto.
  */
 export const file_agentrepl_v1_workspace_mutation_progress: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEibAoZV29ya3NwYWNlTXV0YXRpb25Qcm9ncmVzcxINCgVvcF9pZBgBIAEoCRI3CgZjcmVhdGUYAiABKAsyJS5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlUHJvZ3Jlc3NIAEIHCgVldmVudCLKAQoXV29ya3NwYWNlQ3JlYXRlUHJvZ3Jlc3MSMwoFc3RhZ2UYASABKA4yIi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VIABI7CglzdWNjZWVkZWQYAiABKAsyJi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3VjY2VlZGVkSAASNQoGZmFpbGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZUZhaWxlZEgAQgYKBHN0ZXAiawoVV29ya3NwYWNlQ3JlYXRlRmFpbGVkEjUKB3JlZnVzYWwYASABKAsyIi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlRXJyb3JIABISCghpbnRlcm5hbBgCIAEoCUgAQgcKBWNhdXNlIlcKGFdvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkqlgEKFFdvcmtzcGFjZUNyZWF0ZVN0YWdlEiYKIldPUktTUEFDRV9DUkVBVEVfU1RBR0VfVU5TUEVDSUZJRUQQABIoCiRXT1JLU1BBQ0VfQ1JFQVRFX1NUQUdFX0RFUklWSU5HX05BTUUQARIsCihXT1JLU1BBQ0VfQ1JFQVRFX1NUQUdFX0NSRUFUSU5HX1dPUktUUkVFEAJCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEioQEKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIAEIHCgVldmVudCJIChVXb3Jrc3BhY2VPcGVuUHJvZ3Jlc3MSLwoFc3RhZ2UYASABKA4yIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlIsoBChdXb3Jrc3BhY2VDcmVhdGVQcm9ncmVzcxIzCgVzdGFnZRgBIAEoDjIiLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZUgAEjsKCXN1Y2NlZWRlZBgCIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdWNjZWVkZWRIABI1CgZmYWlsZWQYAyABKAsyIy5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlRmFpbGVkSABCBgoEc3RlcCJrChVXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSNQoHcmVmdXNhbBgBIAEoCzIiLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VFcnJvckgAEhIKCGludGVybmFsGAIgASgJSABCBwoFY2F1c2UiVwoYV29ya3NwYWNlQ3JlYXRlU3VjY2VlZGVkEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEbmFtZRgCIAEoCSqHAgoSV29ya3NwYWNlT3BlblN0YWdlEiQKIFdPUktTUEFDRV9PUEVOX1NUQUdFX1VOU1BFQ0lGSUVEEAASKgomV09SS1NQQUNFX09QRU5fU1RBR0VfQ0hFQ0tJTkdfV09SS1RSRUUQARIpCiVXT1JLU1BBQ0VfT1BFTl9TVEFHRV9TVEFSVElOR19TRVNTSU9OEAISIQodV09SS1NQQUNFX09QRU5fU1RBR0VfUkVWSVZJTkcQAxIoCiRXT1JLU1BBQ0VfT1BFTl9TVEFHRV9DTEVBUklOR19DTE9TRUQQBBInCiNXT1JLU1BBQ0VfT1BFTl9TVEFHRV9DSEVDS0lOR19CVUlMRBAFKpYBChRXb3Jrc3BhY2VDcmVhdGVTdGFnZRImCiJXT1JLU1BBQ0VfQ1JFQVRFX1NUQUdFX1VOU1BFQ0lGSUVEEAASKAokV09SS1NQQUNFX0NSRUFURV9TVEFHRV9ERVJJVklOR19OQU1FEAESLAooV09SS1NQQUNFX0NSRUFURV9TVEFHRV9DUkVBVElOR19XT1JLVFJFRRACQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
 
 /**
  * One staged-progress push for one in-flight workspace mutation.
@@ -58,6 +58,12 @@ export type WorkspaceMutationProgress = Message<"agentrepl.v1.WorkspaceMutationP
      */
     value: WorkspaceCreateProgress;
     case: "create";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.WorkspaceOpenProgress open = 3;
+     */
+    value: WorkspaceOpenProgress;
+    case: "open";
   } | { case: undefined; value?: undefined };
 };
 
@@ -67,6 +73,33 @@ export type WorkspaceMutationProgress = Message<"agentrepl.v1.WorkspaceMutationP
  */
 export const WorkspaceMutationProgressSchema: GenMessage<WorkspaceMutationProgress> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_workspace_mutation_progress, 0);
+
+/**
+ * The progress of one OpenWorkspace — a workspace being RESTORED rather than
+ * made. THE TERMINAL OUTCOME IS NOT HERE: unlike a create, an open is answered
+ * SYNCHRONOUSLY on its own rpc (OpenWorkspaceResponse), so the success and
+ * every typed refusal already reach the caller there. Duplicating them on this
+ * stream would give one operation two terminal reports that could disagree.
+ * What the rpc cannot carry is the WAIT inside it, which is what these stages
+ * are.
+ *
+ * @generated from message agentrepl.v1.WorkspaceOpenProgress
+ */
+export type WorkspaceOpenProgress = Message<"agentrepl.v1.WorkspaceOpenProgress"> & {
+  /**
+   * The stage the open has just entered.
+   *
+   * @generated from field: agentrepl.v1.WorkspaceOpenStage stage = 1;
+   */
+  stage: WorkspaceOpenStage;
+};
+
+/**
+ * Describes the message agentrepl.v1.WorkspaceOpenProgress.
+ * Use `create(WorkspaceOpenProgressSchema)` to create a new message.
+ */
+export const WorkspaceOpenProgressSchema: GenMessage<WorkspaceOpenProgress> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 1);
 
 /**
  * The progress of one CreateWorkspace, from just after the ack to the terminal
@@ -119,7 +152,7 @@ export type WorkspaceCreateProgress = Message<"agentrepl.v1.WorkspaceCreateProgr
  * Use `create(WorkspaceCreateProgressSchema)` to create a new message.
  */
 export const WorkspaceCreateProgressSchema: GenMessage<WorkspaceCreateProgress> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 1);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 2);
 
 /**
  * The terminal failure of a background create. THE ARM IS THE KIND OF FAILURE,
@@ -160,7 +193,7 @@ export type WorkspaceCreateFailed = Message<"agentrepl.v1.WorkspaceCreateFailed"
  * Use `create(WorkspaceCreateFailedSchema)` to create a new message.
  */
 export const WorkspaceCreateFailedSchema: GenMessage<WorkspaceCreateFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 2);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 3);
 
 /**
  * The terminal success of a create, on the progress channel.
@@ -192,7 +225,67 @@ export type WorkspaceCreateSucceeded = Message<"agentrepl.v1.WorkspaceCreateSucc
  * Use `create(WorkspaceCreateSucceededSchema)` to create a new message.
  */
 export const WorkspaceCreateSucceededSchema: GenMessage<WorkspaceCreateSucceeded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 3);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 4);
+
+/**
+ * The stages an open passes through while its rpc is in flight. Emitted only
+ * for the stages the open actually reaches: a workspace that was not
+ * hibernated never emits `REVIVING`, and one that was not closed never emits
+ * `CLEARING_CLOSED`.
+ *
+ * @generated from enum agentrepl.v1.WorkspaceOpenStage
+ */
+export enum WorkspaceOpenStage {
+  /**
+   * @generated from enum value: WORKSPACE_OPEN_STAGE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The daemon is confirming the workspace's worktree is still on disk. An
+   * open whose directory is gone is refused here.
+   *
+   * @generated from enum value: WORKSPACE_OPEN_STAGE_CHECKING_WORKTREE = 1;
+   */
+  CHECKING_WORKTREE = 1,
+
+  /**
+   * The daemon is bringing the session up — spawning the shim and resuming
+   * the vendor conversation. THE SLOW STAGE, and the reason this enum exists.
+   *
+   * @generated from enum value: WORKSPACE_OPEN_STAGE_STARTING_SESSION = 2;
+   */
+  STARTING_SESSION = 2,
+
+  /**
+   * The daemon is lifting a hibernation park off the workspace.
+   *
+   * @generated from enum value: WORKSPACE_OPEN_STAGE_REVIVING = 3;
+   */
+  REVIVING = 3,
+
+  /**
+   * The daemon is clearing the workspace's closed flag, which is what puts
+   * its row back among the open ones.
+   *
+   * @generated from enum value: WORKSPACE_OPEN_STAGE_CLEARING_CLOSED = 4;
+   */
+  CLEARING_CLOSED = 4,
+
+  /**
+   * The daemon is checking the shim against the deployed build and bouncing
+   * it when stale.
+   *
+   * @generated from enum value: WORKSPACE_OPEN_STAGE_CHECKING_BUILD = 5;
+   */
+  CHECKING_BUILD = 5,
+}
+
+/**
+ * Describes the enum agentrepl.v1.WorkspaceOpenStage.
+ */
+export const WorkspaceOpenStageSchema: GenEnum<WorkspaceOpenStage> = /*@__PURE__*/
+  enumDesc(file_agentrepl_v1_workspace_mutation_progress, 0);
 
 /**
  * The stages a create passes through between the ack and the terminal outcome.
@@ -227,5 +320,5 @@ export enum WorkspaceCreateStage {
  * Describes the enum agentrepl.v1.WorkspaceCreateStage.
  */
 export const WorkspaceCreateStageSchema: GenEnum<WorkspaceCreateStage> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_workspace_mutation_progress, 0);
+  enumDesc(file_agentrepl_v1_workspace_mutation_progress, 1);
 

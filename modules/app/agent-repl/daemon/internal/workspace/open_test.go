@@ -22,7 +22,7 @@ func TestOpenStartsTheSession(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -39,7 +39,7 @@ func TestOpenIsIdempotentWhenTheSessionIsAlreadyLive(t *testing.T) {
 	f.fleet.live["w1"] = true
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestOpenClearsTheClosedFlag(t *testing.T) {
 	f.db.with(ws)
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -73,7 +73,7 @@ func TestOpenRetiresAStandingCloseRefusal(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestOpenRunsTheBuildStalenessCheck(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestOpenSurvivesAFailedBuildStalenessCheck(t *testing.T) {
 	f.rollout.relaunchErr = errors.New("the shim is busy")
 
 	// Act.
-	err := f.verbs.Open(context.Background(), "w1")
+	err := f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert.
 	if err != nil {
@@ -122,7 +122,7 @@ func TestOpenSurfacesABringUpFailure(t *testing.T) {
 	f.fleet.startErr = errors.New("the shim exited during bring-up")
 
 	// Act.
-	err := f.verbs.Open(context.Background(), "w1")
+	err := f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert.
 	if err == nil {
@@ -135,7 +135,7 @@ func TestOpenRefusesAnUnknownWorkspace(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	err := f.verbs.Open(context.Background(), "nope")
+	err := f.verbs.Open(context.Background(), "nope", nil)
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -151,7 +151,7 @@ func TestOpenRefusesAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
 	f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
 
 	// Act.
-	err := f.verbs.Open(context.Background(), "w1")
+	err := f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert.
 	asRefusal(t, err, ArmSpawnFailed)
@@ -163,7 +163,7 @@ func TestOpenNamesTheMissingDirectoryInItsRefusal(t *testing.T) {
 	ws := f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
 
 	// Act.
-	err := f.verbs.Open(context.Background(), "w1")
+	err := f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert: the refusal's evidence says WHICH directory is gone.
 	refusal := asRefusal(t, err, ArmSpawnFailed)
@@ -178,7 +178,7 @@ func TestOpenStartsNoSessionWhenTheDirectoryIsGone(t *testing.T) {
 	f.workspace("w1", filepath.Join(t.TempDir(), "gone"))
 
 	// Act.
-	_ = f.verbs.Open(context.Background(), "w1")
+	_ = f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert: a shim with no working tree is never spawned.
 	if len(f.fleet.started) != 0 {
@@ -199,7 +199,7 @@ func TestOpenProceedsWhenTheDirectoryStatCannotTell(t *testing.T) {
 	f.workspace("w1", filepath.Join(blocker, "under"))
 
 	// Act.
-	err := f.verbs.Open(context.Background(), "w1")
+	err := f.verbs.Open(context.Background(), "w1", nil)
 
 	// Assert.
 	if err != nil {
@@ -340,7 +340,7 @@ func TestOpenRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
 	f.hibernate("w1")
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -359,12 +359,136 @@ func TestOpenLiftsNoParkFromAWorkspaceThatWasNotAsleep(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Open(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
 	// Assert.
 	if len(f.topbarParked) != 0 {
 		t.Fatalf("topbar parked = %v, want untouched", f.topbarParked)
+	}
+}
+
+// recordingOpenProgress collects the stages an Open reported, in order. It is
+// the whole observation surface of the stage contract: the ORDER is part of it,
+// because a client renders the stages as a ladder.
+type recordingOpenProgress struct {
+	stages []OpenStage
+}
+
+func (r *recordingOpenProgress) Stage(stage OpenStage) { r.stages = append(r.stages, stage) }
+
+func TestOpenReportsItsStagesInOrder(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, f *fixture)
+		want  []OpenStage
+	}{
+		{
+			name:  "a plain open reports only the unconditional stages",
+			setup: func(*testing.T, *fixture) {},
+			want: []OpenStage{
+				OpenStageCheckingWorktree,
+				OpenStageStartingSession,
+				OpenStageCheckingBuild,
+			},
+		},
+		{
+			name:  "a hibernated workspace also reports the revival",
+			setup: func(_ *testing.T, f *fixture) { f.hibernate("w1") },
+			want: []OpenStage{
+				OpenStageCheckingWorktree,
+				OpenStageStartingSession,
+				OpenStageReviving,
+				OpenStageCheckingBuild,
+			},
+		},
+		{
+			name: "a closed workspace also reports the flag being cleared",
+			setup: func(_ *testing.T, f *fixture) {
+				ws := f.db.workspaces["w1"]
+				ws.Closed = true
+				f.db.with(ws)
+			},
+			want: []OpenStage{
+				OpenStageCheckingWorktree,
+				OpenStageStartingSession,
+				OpenStageClearingClosed,
+				OpenStageCheckingBuild,
+			},
+		},
+		{
+			name: "an already-live session skips the bring-up stage",
+			setup: func(_ *testing.T, f *fixture) { f.fleet.live["w1"] = true },
+			want: []OpenStage{
+				OpenStageCheckingWorktree,
+				OpenStageCheckingBuild,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			test.setup(t, f)
+			progress := &recordingOpenProgress{}
+
+			// Act.
+			if err := f.verbs.Open(context.Background(), "w1", progress); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+
+			// Assert.
+			if len(progress.stages) != len(test.want) {
+				t.Fatalf("stages = %v, want %v", progress.stages, test.want)
+			}
+			for i, stage := range test.want {
+				if progress.stages[i] != stage {
+					t.Fatalf("stages = %v, want %v", progress.stages, test.want)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenReportsTheWorktreeCheckBeforeRefusingAMissingDirectory(t *testing.T) {
+	// Arrange: the refusal comes FROM the stage the ladder is standing on, so
+	// a client's last line names the step that actually failed.
+	f := newFixture(t)
+	dir := filepath.Join(t.TempDir(), "gone")
+	f.workspace("w1", dir)
+	progress := &recordingOpenProgress{}
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", progress)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Open: want a refusal for a directory that is gone")
+	}
+	if len(progress.stages) != 1 || progress.stages[0] != OpenStageCheckingWorktree {
+		t.Fatalf("stages = %v, want only the worktree check", progress.stages)
+	}
+}
+
+func TestOpenReportsNoStageAfterAFailedBringUp(t *testing.T) {
+	// Arrange: a ladder must not advance past the stage that failed.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.startErr = errors.New("the shim would not spawn")
+	progress := &recordingOpenProgress{}
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", progress)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Open: want the bring-up failure")
+	}
+	last := progress.stages[len(progress.stages)-1]
+	if last != OpenStageStartingSession {
+		t.Fatalf("stages = %v, want the last to be the bring-up", progress.stages)
 	}
 }
