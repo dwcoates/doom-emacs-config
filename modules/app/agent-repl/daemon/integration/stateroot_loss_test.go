@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-repld/integration/harness"
 )
@@ -56,9 +57,14 @@ func TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes(t *testing.T) {
 			t.Parallel()
 			// Arrange
 			var d *harness.Daemon
+			shimPID := 0
 			if tc.open {
 				f := newOpened(t, harness.Opts{})
 				d = f.d
+				shimPID = d.Shim(f.ws).Info().PID
+				if shimPID == 0 {
+					t.Fatalf("the served workspace's shim reports no pid")
+				}
 			} else {
 				d = newDaemon(t, harness.Opts{})
 			}
@@ -69,6 +75,11 @@ func TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes(t *testing.T) {
 				t.Fatalf("remove: %v", err)
 			}
 			code := d.AwaitExit()
+			// NOTHING CAN ADOPT A SHIM WHOSE ROOT IS GONE, so the stand-down
+			// stops it: its exit has landed by the time the daemon's has.
+			if shimPID != 0 {
+				harness.AwaitProcessExit(t, shortTimeout(t, d.Ctx(), 200*time.Millisecond), shimPID)
+			}
 
 			// Assert
 			if code == 0 {
