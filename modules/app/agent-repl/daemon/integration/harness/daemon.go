@@ -664,7 +664,13 @@ func (d *Daemon) awaitServing() {
 // named after the test that left them.
 func ShortTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "ar")
+	// Under the run root (runroot.go), so an abnormally ended run's state
+	// roots are reclaimed with it. It is itself under /tmp and short.
+	base := runRoot
+	if base == "" {
+		t.Fatal("harness: the suite's TestMain must call harness.Main")
+	}
+	dir, err := os.MkdirTemp(base, "ar")
 	if err != nil {
 		t.Fatalf("harness: mkdir a short temp root: %v", err)
 	}
