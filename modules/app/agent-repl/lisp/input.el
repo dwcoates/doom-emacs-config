@@ -80,6 +80,12 @@
 (declare-function agent-repl--history-prev "agent-repl-history" ())
 (declare-function agent-repl--history-next "agent-repl-history" ())
 (declare-function agent-repl-history-search "agent-repl-history" ())
+;; The history ring's own buffer-local state, declared here because the
+;; refusal restore puts it back to its pre-submit value (see
+;; `agent-repl--input-restore').
+(defvar agent-repl--input-history)
+(defvar agent-repl--history-index)
+(defvar agent-repl--history-navigating)
 (declare-function agent-repl--on-close "agent-repl-panels" ())
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
@@ -869,17 +875,67 @@ independent of the composer.  Between the ring and the queue, the erased
 draft is always recoverable.
 
 ATTACHMENTS are cleared too: the submission carried them, so leaving them
-would re-send them on the next prompt.  The ring is persisted once here."
-  (let ((buf (agent-repl--input-buffer ws)))
+would re-send them on the next prompt.  The ring is persisted once here.
+
+RETURNS A SNAPSHOT of everything this erased -- the composer's text and
+point, its attachments, and the history ring and browse index as they
+stood BEFORE the push.  `agent-repl--input-restore' puts it all back when
+the daemon REFUSES the submission, so a refused prompt is never in
+history and never costs the user their words.  (Regression watch: the
+optimistic clear landed without a restore arm, and six composer
+integration scenarios read an empty composer after a refusal.)"
+  (let ((buf (agent-repl--input-buffer ws))
+        (snapshot nil))
     (when buf
       (with-current-buffer buf
+        (setq snapshot (list :buffer buf
+                             :text (buffer-string)
+                             :point (point)
+                             :attachments agent-repl-input-attachments
+                             :history agent-repl--input-history
+                             :history-index agent-repl--history-index))
         (agent-repl--history-push raw)
         (agent-repl--history-reset)
         (erase-buffer)))
     (agent-repl--history-save ws)
     (agent-repl-input-clear-attachments ws)
     (agent-repl--log ws "elisp.input.optimistic-clear ws=%s raw-len=%d buffer=%s"
-                     ws (length raw) (and buf t))))
+                     ws (length raw) (and buf t))
+    snapshot))
+
+(defun agent-repl--input-restore (ws snapshot)
+  "Put WS's composer back exactly as SNAPSHOT found it, after a REFUSAL.
+A refusal is the daemon saying the prompt did NOT land, so every trace of
+the optimistic clear is undone: the text and point return, the
+attachments return, and the history ring and browse index go back to
+their pre-push values -- a refused prompt is never in history.  The ring
+is re-persisted so the un-push survives a restart.
+
+SNAPSHOT is nil for any submission that was never taken from the composer
+(a canned command, a metaprompt read, a queue re-drive), and then this is
+a no-op: those left the user's own draft alone and there is nothing to
+restore.  A composer buffer that has since been killed is likewise
+nothing to restore into."
+  (let ((buf (plist-get snapshot :buffer)))
+    (cond
+     ((null snapshot)
+      (agent-repl--log-verbose ws "elisp.input.restore-skipped ws=%s reason=no-snapshot" ws))
+     ((not (buffer-live-p buf))
+      (agent-repl--log ws "elisp.input.restore-skipped ws=%s reason=buffer-dead" ws))
+     (t
+      (with-current-buffer buf
+        (let ((agent-repl--history-navigating t)
+              (text (plist-get snapshot :text)))
+          (erase-buffer)
+          (insert text)
+          (goto-char (min (plist-get snapshot :point) (point-max))))
+        (setq agent-repl-input-attachments (plist-get snapshot :attachments))
+        (setq agent-repl--input-history (plist-get snapshot :history))
+        (setq agent-repl--history-index (plist-get snapshot :history-index)))
+      (agent-repl--history-save ws)
+      (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d attachments=%d"
+                       ws (length (plist-get snapshot :text))
+                       (length (plist-get snapshot :attachments)))))))
 
 (defun agent-repl--input-accepted (ws raw arm &optional from-buffer)
   "Finish an ACCEPTED submission for WS: keep the record, clear what was sent.
@@ -1011,17 +1067,17 @@ A workspace with NO SESSION AT ALL, which is the daemon's own to bring
 up.  Nothing is owed by the user and nothing is owed by this composer, so
 the sentence states the fact and the prompt is neither held nor lost.")
 
-(defun agent-repl--input-on-error (ws said origin raw error key)
+(defun agent-repl--input-on-error (ws said origin raw error key &optional snapshot)
   "Handle a `SubmitPromptError' for WS.
-This path never touches the composer.  A from-buffer submission was
-already cleared and recorded to history at dispatch, so a refusal that is
-NOT queued (`duplicate_submission', `cold_gate', `no_session',
-`bubble_refused') is still lossless: the user recalls the text with
-history-prev.  A canned/metaprompt/re-drive send composed its own text and
-left the user's draft in place, so there is nothing here to keep or erase
-either.  Wherever a docstring below says \"the text stays where it is\" it
-means this path adds no erase and no restore; the recovery is the ring for
-a from-buffer send and the untouched draft for a canned one.
+EVERY arm here is the daemon saying the prompt did NOT land, so the FIRST
+thing this does is hand SNAPSHOT to `agent-repl--input-restore\=': a
+from-buffer submission gets its text, its point, its attachments and its
+history ring back exactly as they were before the optimistic clear, and
+the refused prompt is never left in history.  SNAPSHOT is nil for a
+canned/metaprompt/re-drive send, which cleared nothing to begin with.
+Wherever a docstring below says \"the text stays where it is\" it means
+this arm adds no further erase: the restore above has already put the
+composer back.
 ERROR is the decoded error message.  Its `merging' arm means the prompt
 arrived after a merge began and would be orphaned, so the user resubmits
 once the merge resolves.  Its two HANDOVER arms are not failures at all
@@ -1039,6 +1095,7 @@ the user, and the text stays where it is.
 
 SAID, RAW and KEY are the submission\='s own, carried so a handover
 refusal can re-drive the very prompt that was refused."
+  (agent-repl--input-restore ws snapshot)
   (let* ((reason (plist-get error :reason))
          (arm (plist-get reason :arm)))
     (pcase arm
@@ -1112,7 +1169,7 @@ back out under the same key and the daemon can refuse a duplicate."
   (agent-repl--input-flash ws "send failed -- held until the daemon is back")
   (message "agent-repl: the daemon did not answer; the prompt is held"))
 
-(cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer)
+(cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer snapshot)
   "Submit SAID to WS with ORIGIN; RAW is the user's own text for the record.
 Resolves the workspace ref and the connection, mints the idempotency key,
 and dispatches the answer arms.  Returns the idempotency key.
@@ -1165,7 +1222,7 @@ value Emacs constructs from a path."
                (:success (agent-repl--input-on-success
                           ws raw origin (plist-get response :value) from-buffer))
                (:error (agent-repl--input-on-error
-                        ws said origin raw (plist-get response :value) key))
+                        ws said origin raw (plist-get response :value) key snapshot))
                (arm
                 (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S"
                                    ws arm))))))
@@ -1260,9 +1317,9 @@ Returns the submission's idempotency key, or nil when nothing was sent."
           ;; can never leave the composer full (owner ruling).  `said' and
           ;; `attachments' were already captured above, so the clear costs
           ;; the submission nothing.
-          (when from-buffer
-            (agent-repl--input-optimistic-clear ws raw))
-          (agent-repl--input-submit ws said origin raw nil from-buffer))))))
+          (let ((snapshot (when from-buffer
+                            (agent-repl--input-optimistic-clear ws raw))))
+            (agent-repl--input-submit ws said origin raw nil from-buffer snapshot)))))))
 
 ;;;; ---- The send sites --------------------------------------------------
 ;;
