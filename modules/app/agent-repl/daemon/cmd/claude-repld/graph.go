@@ -135,6 +135,11 @@ type graph struct {
 	// under the landing's own stamps, losing merged_at, closed and the lease
 	// release to failed transactions. See merge.TerminalDrainBound.
 	DrainMerges func(ctx context.Context)
+	// StopShims force-stops every shim this daemon supervises and answers how
+	// many it stopped. `run` calls it ONLY on a state-root-loss stand-down
+	// (standDownShims): an ordinary exit or a handover leaves them for a
+	// successor to adopt, and with the root gone nothing ever can.
+	StopShims func(ctx context.Context) (int, error)
 }
 
 // backgroundLoop is one long-running loop the daemon runs for its whole
@@ -545,9 +550,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DeployStamp:      deployStamp(paths.BuiltSHA),
 		SessionBuildSHA:  fleet.SessionBuildSHA,
 		ColdGate:         fleet.RaiseColdGate,
-		Exit:             orderlyExit(p.Exit),
-		Lifetime:         ctx,
-		Log:              p.Surfaces,
+		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
+		// adopts.
+		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),
+		Lifetime: ctx,
+		Log:      p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the rollout controller: %w", err)
@@ -585,7 +592,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			footerResolver.SetParked(ws, parked)
 			topbarResolver.SetParked(ws, parked)
 		},
-		Exit: orderlyExit(p.Exit),
+		Exit: orderlyExit(func() { p.Exit(standDownOrderly) }),
 		Log:  p.Surfaces,
 	})
 	if err != nil {
@@ -811,6 +818,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DrainQueue:    queue.Drain,
 		DrainStarts:   fleet.DrainStarts,
 		DrainMerges:   mergeOrchestrator.Drain,
+		StopShims:     stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 	}, nil
 }
 
