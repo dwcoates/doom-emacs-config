@@ -783,6 +783,18 @@ func (s *server) Hibernate(ctx context.Context, req *connect.Request[shimv1.Hibe
 	if resp, done, err := scripted[shimv1.HibernateResponse, *shimv1.HibernateResponse](s, RPCHibernate); done {
 		return resp, err
 	}
+	// The profile's standing refusals, in force from the fake's birth. A
+	// scripted answer still wins: it is the narrower instruction.
+	if s.profile.HibernateFailure != "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New(s.profile.HibernateFailure))
+	}
+	if s.profile.HibernateTurnInFlight {
+		return connect.NewResponse(&shimv1.HibernateResponse{
+			Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
+				Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
+			}},
+		}), nil
+	}
 	return connect.NewResponse(&shimv1.HibernateResponse{
 		Result: &shimv1.HibernateResponse_Success{Success: &shimv1.HibernateSuccess{}},
 	}), nil
