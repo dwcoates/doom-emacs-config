@@ -513,6 +513,54 @@ resolves the defect, then say what you would have changed and why, and leave it
 for the owner to rule on. Restyling that arrives attached to a bug fix is hard
 to review and hard to reverse, which is why it waits.
 
+## UI changes require an explicit specification
+
+Owner ruling, standing. UI/visual changes — layout, colors, sizes, borders,
+animations, copy, keybinding-visible behavior, and the presentation of the
+minibuffer, footer, tab-bar, or sidebar — are NEVER made without an explicit
+specification from the owner.
+
+Never infer a UI change: not from a bug report, not from a nearby edit, not
+from a judgment that something would look better. The only latitude is a very
+small refinement strictly necessary to REALIZE an explicit prescription, never
+to extend or improve on it.
+
+Any question about whether a change is covered by an existing specification
+is asked before the change is made, not resolved by guessing. "Owner" means
+the user; for a subagent, it means the parent agent that dispatched it — and a
+parent agent that receives such a question does not rule on it itself, it
+recurses the question up to the user in turn.
+
+This sits beside "No look-and-feel changes during bug remediation" above: that
+section rules out restyling attached to a bug fix specifically, and this one
+rules out inferring a UI change under any circumstance. Remediation fixes
+defects; it never restyles.
+
+## Workspace status is a cross-surface invariant
+
+Owner ruling, standing. A workspace's status renders on three surfaces: the
+Emacs tab-bar, the webapp sidebar, and the webapp footer.
+
+These three are STRUCTURAL invariants, not a convention kept in sync by hand:
+none may ever disagree with either of the other two. All three derive from the
+same daemon-published source of truth — the roster/status stream — and never
+from a locally inferred or cached state that can drift out from under it.
+
+Whether background tasks exist for a workspace is part of that status and
+follows the same rule: the footer's background-task accounting must be
+invariant with respect to the daemon's source of truth, never a
+locally-kept count.
+
+A disagreement between surfaces is a defect in whichever surface departs from
+the daemon-published truth. Fix it at the source — the publisher or consumer
+of that truth — never by patching the surface that looked wrong.
+
+Any status change, from any origin (a user action, a backend event, or
+anything else), restores a workspace's rendering to full (non-demoted)
+display mode on every surface. (Forward reference: a sibling section covers
+the viewed/partial display modes and demotion this restores from; read the two
+together.)
+
 ## An invisible action is a logging defect, not a test problem
 
 When a test, an investigation, or a person cannot tell from the logs what the
