@@ -873,6 +873,17 @@ func (d *Daemon) waitCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(d.ctx, d.waitBound)
 }
 
+// WaitCtx is waitCtx for the TESTS' own waits, which need the same bound for
+// the same reason.
+//
+// The suite's shared await helpers (awaitRow, awaitFooter, awaitTopbar,
+// awaitRoster, awaitHostFault) handed harness.AwaitView the daemon's whole-run
+// context, which is precisely what waitCtx's doc says not to do. The cost is
+// not theoretical: every detached-shell red in the 2026-09-18 run burned the
+// FULL 35s run budget on one wait that was never going to be satisfied,
+// turning a handful of reds into minutes of waiting for nothing new.
+func (d *Daemon) WaitCtx() (context.Context, context.CancelFunc) { return d.waitCtx() }
+
 // PID is the daemon process's id.
 func (d *Daemon) PID() int { return d.cmd.Process.Pid }
 

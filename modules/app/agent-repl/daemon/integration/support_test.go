@@ -345,7 +345,10 @@ func activityID(v string) *conversationv1.AgentActivityId {
 // awaitRow reads feed rows until one satisfies the predicate.
 func awaitRow(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.FeedRow], what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
-	return harness.AwaitView(t, f.d.Ctx(), s, what, pred)
+	// ONE WAIT'S BOUND, NEVER THE RUN'S -- see harness.Daemon.WaitCtx.
+	ctx, cancel := f.d.WaitCtx()
+	defer cancel()
+	return harness.AwaitView(t, ctx, s, what, pred)
 }
 
 // awaitShellHead answers a detached shell's HEAD row on the feed being tailed.
@@ -388,19 +391,25 @@ func expectNoShellSpool(t *testing.T, f *fixture, head *frontendv1.FeedRow, what
 // awaitFooter reads footer pushes until one satisfies the predicate.
 func awaitFooter(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.FooterView], what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
 	t.Helper()
-	return harness.AwaitView(t, f.d.Ctx(), s, what, pred)
+	ctx, cancel := f.d.WaitCtx()
+	defer cancel()
+	return harness.AwaitView(t, ctx, s, what, pred)
 }
 
 // awaitTopbar reads topbar pushes until one satisfies the predicate.
 func awaitTopbar(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.TopbarView], what string, pred func(*frontendv1.TopbarView) bool) *frontendv1.TopbarView {
 	t.Helper()
-	return harness.AwaitView(t, f.d.Ctx(), s, what, pred)
+	ctx, cancel := f.d.WaitCtx()
+	defer cancel()
+	return harness.AwaitView(t, ctx, s, what, pred)
 }
 
 // awaitRoster reads roster pushes until one satisfies the predicate.
 func awaitRoster(t *testing.T, d *harness.Daemon, s *harness.Stream[*frontendv1.WorkspaceRoster], what string, pred func(*frontendv1.WorkspaceRoster) bool) *frontendv1.WorkspaceRoster {
 	t.Helper()
-	return harness.AwaitView(t, d.Ctx(), s, what, pred)
+	ctx, cancel := d.WaitCtx()
+	defer cancel()
+	return harness.AwaitView(t, ctx, s, what, pred)
 }
 
 // rosterRow finds a workspace's row anywhere in the roster, repository

@@ -122,7 +122,9 @@ func writeManifestFile(t *testing.T, path string, m rollout.Manifest) {
 func awaitHostFault(t *testing.T, d *harness.Daemon, host *harness.Stream[*agentreplv1.WatchHostWorkspaceResponse], what string, pred func(*agentreplv1.HostFault) bool) *agentreplv1.HostFault {
 	t.Helper()
 	var found *agentreplv1.HostFault
-	harness.AwaitView(t, d.Ctx(), host, what, func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+	ctx, cancel := d.WaitCtx()
+	defer cancel()
+	harness.AwaitView(t, ctx, host, what, func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		for _, f := range r.GetHost().GetExisting().GetLive().GetFaults() {
 			if pred(f) {
 				found = f
