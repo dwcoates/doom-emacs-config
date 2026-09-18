@@ -157,6 +157,49 @@ describe("the transfer", () => {
   });
 });
 
+// FORWARD-COMPAT SKEW IS NOT A BAD FRAME. `mutation_progress` is a TOP-LEVEL
+// WatchDaemon push arm this bundle has no case for: a newer daemon setting it
+// is version skew a reload resolves, so the pipeline logs it and skips it —
+// raising no card, filing no `frame_undecodable`, and leaving the stream
+// standing. Every OTHER malformation stays loud.
+describe("a WatchDaemon push arm this build has no case for", () => {
+  it("raises no failure card", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    harness.fake.pushMutationProgress("op-1");
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("draws nothing for it", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    harness.fake.pushMutationProgress("op-1");
+    await harness.settle();
+    // Assert: the banner is the only thing this stream draws, and this arm is
+    // not one of its.
+    expect(harness.$('[data-component="drain-banner"]')?.textContent?.trim() ?? "").toBe("");
+  });
+
+  it("leaves the stream standing, so the next push it DOES know still lands", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    harness.fake.pushMutationProgress("op-1");
+    await harness.settle();
+    // Act
+    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    await harness.settle();
+    // Assert
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+  });
+});
+
 describe("the drain banner", () => {
   it.each(DRAIN_REASON_ARMS)("draws a scheduled drain for the %s reason", async (arm) => {
     // Arrange
