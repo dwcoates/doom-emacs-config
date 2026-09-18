@@ -72,6 +72,22 @@ type Profile struct {
 	// daemon's very first request: a test that queued the answer over the
 	// control socket would be racing the spawn it is scripting.
 	LiveWork [][]byte `json:"live_work,omitempty"`
+	// HibernateFailure makes EVERY Hibernate answer a transport-level error
+	// carrying this detail, and HibernateTurnInFlight makes every one answer
+	// the typed turn_in_flight refusal.
+	//
+	// THEY ARE PROFILE FIELDS RATHER THAN SCRIPTED ANSWERS BECAUSE THE DRAIN
+	// SWEEP DOES NOT WAIT FOR THE TEST. A test whose subject is a hibernate
+	// the shim keeps refusing runs the daemon at a 50ms idle cutoff and a
+	// 50ms sweep, so the first sweep can land before the test has scripted
+	// anything: the fake hibernates for real, the daemon stands the session
+	// down, the fake exits, and the test either waits out its deadline for a
+	// refusal that can no longer happen or fails writing to a control socket
+	// whose process is gone. A profile is in force from the fake's BIRTH, so
+	// there is no such window — and no guessed number of queued answers to
+	// run out of either.
+	HibernateFailure      string `json:"hibernate_failure,omitempty"`
+	HibernateTurnInFlight bool   `json:"hibernate_turn_in_flight,omitempty"`
 	// HangStartSession makes StartSession never answer, waiting out the
 	// caller's context instead. It is a PROFILE rather than a scripted answer
 	// because the daemon's boot bring-up sends StartSession as its very first

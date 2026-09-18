@@ -771,7 +771,18 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	dir := f.ws.GetDir()
+	// EVERY STREAM THIS TEST READS IS OPENED BEFORE THE MERGE IS ENQUEUED.
+	// The feed's reason is below; the footer's and the roster's is that both
+	// facts this test asserts are MOMENTS the landing passes through. The
+	// footer's merged substatus is a momentary status the daemon's own
+	// successor push retires after footer.DefaultMomentaryDwell, and the
+	// merged roster row is closed out right behind it — so a watch opened
+	// after the terminal feed row has already arrived is a watch that opens
+	// on the state AFTER the one it is waiting for, and it then waits out its
+	// whole bound for a push that has already happened.
 	root := f.watchRootFeed()
+	footer := f.d.WatchFooter(f.ws)
+	roster := f.d.WatchRoster()
 
 	// THE TEARDOWN'S ORDER IS NOT ASSERTED FROM HERE. Publishing the terminal
 	// row and removing the worktree are both the daemon's, in that order, and
@@ -796,22 +807,23 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	}
 
 	// Assert: footer merged, roster merged + recently_merged.
-	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "the footer's merged substatus", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetMerging().GetMerged() != nil
 	})
-	roster := f.d.WatchRoster()
-	got := awaitRoster(t, f.d, roster, "the merged workspace under recently_merged", func(r *frontendv1.WorkspaceRoster) bool {
+	// THE STATUS IS PART OF THE PREDICATE, NOT A SECOND READ OF WHATEVER
+	// SNAPSHOT THE FIRST ONE MATCHED. The row enters recently_merged as
+	// MERGED and is closed out a moment later, so matching only on its
+	// presence and then reading the status off that same view asserted
+	// whichever of the two snapshots happened to arrive first — and read
+	// `inactive` whenever the close had already landed.
+	awaitRoster(t, f.d, roster, "the merged workspace under recently_merged, stated merged", func(r *frontendv1.WorkspaceRoster) bool {
 		for _, row := range r.GetRecentlyMerged().GetRows().GetRows() {
 			if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
-				return true
+				return row.GetMerged() != nil
 			}
 		}
 		return false
 	})
-	if rosterRow(got, f.ws.GetId()).GetMerged() == nil {
-		t.Fatalf("merged workspace roster status = %v, want merged", rosterRow(got, f.ws.GetId()))
-	}
 
 	// Assert: the worktree is removed once the terminal state has settled.
 	d.AwaitFileGone(dir)
