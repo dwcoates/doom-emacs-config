@@ -333,6 +333,16 @@ const bringUpProbeWindow = 200 * time.Millisecond
 // paid only by a red test.
 const bringUpAnswerBound = 2 * time.Second
 
+// sweepReapBound is the kill grace a sweep test hands its supervisor, and it
+// is a FAILURE bound only. StandDownEverySpawn forces its kill, so no SIGTERM
+// grace is ever spent: the grace's one remaining role is bounding the wait for
+// the reaper's exit decode, and that wait returns the instant the real reap
+// lands. At 50ms it was a success-path deadline instead, and a scheduler
+// pause between the SIGKILL and the reap (reproduced 2/500 under a 20ms
+// SIGSTOP/SIGCONT loop at GOMAXPROCS=1) turned a clean kill into a reported
+// overrun. Same measured basis as bringUpAnswerBound; paid only by a red test.
+const sweepReapBound = 2 * time.Second
+
 // spawnResult is one asynchronous Spawn's outcome.
 type spawnResult struct {
 	c   Client
