@@ -2431,9 +2431,17 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the shim death this test drives, the link it severs, and the bring-up the revival runs.
+	//
+	// daemon.shimclient.gather_title_digest is the same class and is declared
+	// for the same reason: the title gather is an ordinary unary call to the
+	// session's shim, so whether it is in flight when the SIGKILL lands is a
+	// matter of scheduling. When it is, it comes back `unavailable: unexpected
+	// EOF` and is recorded at ERROR -- correctly, since this daemon did NOT
+	// order the teardown and so shimclient's stand-down latch is not set. The
+	// record is evidence of the very kill this test performs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
-		"daemon.shimclient.exit", "daemon.workspace.bring_up")
+		"daemon.shimclient.exit", "daemon.workspace.bring_up", "daemon.shimclient.gather_title_digest")
 	f.shim.ExpectStartSession()
 	roster := f.d.WatchRoster()
 	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
