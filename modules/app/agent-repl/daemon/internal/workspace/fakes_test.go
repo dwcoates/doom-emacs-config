@@ -106,11 +106,11 @@ type fakeDB struct {
 	// A workspace with no session row surfaces wsm.ErrNotFound here, and any
 	// other error stands for a real terminal-recording failure.
 	setTerminalErr error
-	orphanReport wsm.OrphanReport
-	createdTasks []string
-	taskChanges  map[ids.TaskID]wsm.TaskChange
-	assignments  map[ids.WorkspaceID]*ids.TaskID
-	taskErr      error
+	orphanReport   wsm.OrphanReport
+	createdTasks   []string
+	taskChanges    map[ids.TaskID]wsm.TaskChange
+	assignments    map[ids.WorkspaceID]*ids.TaskID
+	taskErr        error
 
 	// dbFaults is the fault table the fleet opens and closes lost-link rows
 	// in; dbClosed records the ids CloseFault was called with.
@@ -513,7 +513,7 @@ func (g *fakeGit) Nuke(_ context.Context, repoDir, worktreeDir, branch string) e
 type fakeAccounts struct {
 	account.Resolver
 
-	configDir     string
+	configDir string
 	// multiRepoDir is the work (multi-repo) account root the fake reports
 	// IsMultiRepo true for; empty means the fixture has no work account, so
 	// every config dir is personal (IsMultiRepo false).
@@ -530,8 +530,8 @@ type fakeAccounts struct {
 	// so a test can assert the recorded-session path never probes at all.
 	newestProbedDir string
 	newestProbed    bool
-	ported        []portedTranscript
-	portErr       error
+	ported          []portedTranscript
+	portErr         error
 	// mint is the fork mapping PortTranscript answers with; nil takes a
 	// readable default so a test that does not care still gets one mapping.
 	mint account.RemintedID

@@ -18,7 +18,7 @@ import (
 // row said.
 
 // recordFinalAnswer appends one concluded turn's answering row to the workspace
-//'s ordered selectable set and copies its settled markdown. It is called from
+// 's ordered selectable set and copies its settled markdown. It is called from
 // the conclusion site under r.mu, append-once by FeedId value because a
 // terminal replays across planes.
 func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit string) {

@@ -68,6 +68,7 @@ const (
 //  6. bring the session up, forking the parent's transcript first when asked;
 //  7. submit the initial prompt through the QUEUE, with origin
 //     WORKSPACE_CREATED, only after the session is up.
+//
 // reportCreateStage relays one stage to the spec's progress reporter, if it
 // set one. A create with no reporter (the synchronous form) emits nothing.
 func reportCreateStage(spec CreateSpec, stage CreateStage) {
