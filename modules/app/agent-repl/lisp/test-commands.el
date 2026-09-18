@@ -428,6 +428,49 @@ nothing is armed."
         (should-not switched)
         (should-not (agent-repl--ws-get "registered" :pending-show-panels))))))
 
+(defun agent-repl-test-commands--registering-phases (answer)
+  "Return the progress phases `agent-repl-add-project-workspace' reported.
+ANSWER is the ref the register answered with, or nil for a refusal."
+  (let (phases)
+    (cl-letf (((symbol-function 'agent-repl-workspace-progress-report)
+               (lambda (kind phase &rest _) (push (cons kind phase) phases))))
+      (agent-repl-test-commands--registering answer
+        (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) nil))
+                  ((symbol-function 'agent-repl-verbs-select-minted) (lambda (_ref) nil)))
+          (agent-repl-add-project-workspace "/tmp/proj"))))
+    (nreverse phases)))
+
+(ert-deftest agent-repl-test-commands-add-project-reports-the-request-leaving ()
+  "The gesture leaves a mark before the daemon has answered anything."
+  ;; Arrange / Act.
+  (let ((phases (agent-repl-test-commands--registering-phases
+                 '(:id "minted" :dir "/tmp/proj"))))
+    ;; Assert.
+    (should (equal (car phases) '(:register . :requested)))))
+
+(ert-deftest agent-repl-test-commands-add-project-reports-its-completion ()
+  "A register the daemon accepted says so, not only in the log."
+  ;; Arrange / Act.
+  (let ((phases (agent-repl-test-commands--registering-phases
+                 '(:id "minted" :dir "/tmp/proj"))))
+    ;; Assert.
+    (should (member '(:register . :completed) phases))))
+
+(ert-deftest agent-repl-test-commands-add-project-reports-a-refusal-loudly ()
+  "A register that did not land is SAID, not merely logged: a silent refusal
+is indistinguishable from a success that did not move the user."
+  ;; Arrange / Act.
+  (let ((phases (agent-repl-test-commands--registering-phases nil)))
+    ;; Assert.
+    (should (member '(:register . :failed) phases))))
+
+(ert-deftest agent-repl-test-commands-add-project-claims-no-completion-on-a-refusal ()
+  "A refused register never claims the workspace was registered."
+  ;; Arrange / Act.
+  (let ((phases (agent-repl-test-commands--registering-phases nil)))
+    ;; Assert.
+    (should-not (member '(:register . :completed) phases))))
+
 ;;;; ---- Navigation over roster order ----
 
 (defun agent-repl-test-commands--row (name id at-ms &optional closed)
