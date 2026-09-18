@@ -539,6 +539,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SessionBuildSHA:  fleet.SessionBuildSHA,
 		ColdGate:         fleet.RaiseColdGate,
 		Exit:             orderlyExit(p.Exit),
+		Lifetime:         ctx,
 		Log:              p.Surfaces,
 	})
 	if err != nil {
