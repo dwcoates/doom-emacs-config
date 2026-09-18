@@ -265,13 +265,13 @@ func TestContextUsage(t *testing.T) {
 	// Assert: both readings resolve a populated panel — the panel is
 	// ALWAYS POPULATED once a session has started (contextpanel.go), never
 	// a round trip to the vendor.
-	if firstPanel.GetHeader() == "" {
+	if firstPanel.GetHeader() == nil || firstPanel.GetHeader().GetUsed() == "" || firstPanel.GetHeader().GetTotal() == "" || firstPanel.GetHeader().GetModel() == "" {
 		t.Fatalf("the /context panel after turn 1 = %v, want a composed header", firstPanel)
 	}
-	if len(firstPanel.GetCategories()) == 0 {
-		t.Fatalf("the /context panel after turn 1 = %v, want at least one category", firstPanel)
+	if len(firstPanel.GetSections()) == 0 {
+		t.Fatalf("the /context panel after turn 1 = %v, want at least one section", firstPanel)
 	}
-	if secondPanel.GetHeader() == "" {
+	if secondPanel.GetHeader() == nil || secondPanel.GetHeader().GetUsed() == "" || secondPanel.GetHeader().GetTotal() == "" || secondPanel.GetHeader().GetModel() == "" {
 		t.Fatalf("the /context panel after turn 2 = %v, want a composed header", secondPanel)
 	}
 
@@ -280,8 +280,10 @@ func TestContextUsage(t *testing.T) {
 	// because the shim pushed again at the second turn's end, never
 	// because /context itself asked the vendor anything (it is a read of
 	// state the daemon already has; contextpanel.go's own doc comment).
-	if secondPanel.GetHeader() == firstPanel.GetHeader() {
-		t.Fatalf("the /context panel header did not move between two context-usage-drift turns: %q both times, want the drift scenario's growing occupancy to show up as a second, different PUSH", firstPanel.GetHeader())
+	if secondPanel.GetHeader().GetUsed() == firstPanel.GetHeader().GetUsed() && secondPanel.GetHeader().GetPercent() == firstPanel.GetHeader().GetPercent() {
+		t.Fatalf("the /context panel header occupancy did not move between two context-usage-drift turns: used %q/percent %d then used %q/percent %d, want the drift scenario's growing occupancy to show up as a second, different PUSH",
+			firstPanel.GetHeader().GetUsed(), firstPanel.GetHeader().GetPercent(),
+			secondPanel.GetHeader().GetUsed(), secondPanel.GetHeader().GetPercent())
 	}
 }
 
