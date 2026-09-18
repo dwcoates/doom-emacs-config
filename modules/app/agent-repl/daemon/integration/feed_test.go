@@ -1882,19 +1882,25 @@ func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
 	f.submit("go", "k-detachshell", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-shell-1", "tail -f build.log")))
-	head := awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
+	if got := head.GetShellHead().GetCommand().GetText(); got != "tail -f build.log" {
+		t.Fatalf("the head's command = %q, want the announced command", got)
+	}
+	if head.GetShellHead().GetSpool() != nil {
+		t.Fatalf("the head carries a spool %v, want none — the spool is the BODY row on the sub-feed", head.GetShellHead().GetSpool())
+	}
 
 	// Act
 	f.shim.PushBash("work-shell-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
 		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n", FromOffset: 0},
 	}})
 
-	// Assert
-	grown := awaitRow(t, f, tail, "the spool tail growing from the bash delta", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetSpool() != nil
+	// Assert: the spool rides the BODY row, on the sub-feed the head addresses.
+	spool := awaitShellSpool(t, f, head, "the spool body growing from the bash delta", func(sh *frontendv1.FeedShell) bool {
+		return sh.GetSpool() != nil
 	})
-	if grown.GetDetachedShell().GetShell().GetSpool().GetText() != "building...\n" {
-		t.Fatalf("the spool tail = %q, want the delta's text", grown.GetDetachedShell().GetShell().GetSpool().GetText())
+	if spool.GetSpool().GetText() != "building...\n" {
+		t.Fatalf("the spool tail = %q, want the delta's text", spool.GetSpool().GetText())
 	}
 }
 
@@ -1905,7 +1911,7 @@ func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
 	f.submit("go", "k-detachshellend", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-shell-2", "make")))
-	head := awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
 	// Act
 	f.shim.PushBash("work-shell-2", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
@@ -1920,10 +1926,11 @@ func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
 	}})
 
 	// Assert
-	settled := awaitRow(t, f, tail, "the settled detached shell", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetSettled() != nil
+	// THE STATE IS THE HEAD'S. The settle re-pushes the same head row.
+	settled := awaitRow(t, f, tail, "the settled shell head", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetShellHead().GetSettled() != nil
 	})
-	shellSettled := settled.GetDetachedShell().GetShell().GetSettled()
+	shellSettled := settled.GetShellHead().GetSettled()
 	if shellSettled.GetCompleted() == nil {
 		t.Fatalf("the settled shell's outcome = %v, want completed", shellSettled.GetOutcome())
 	}
@@ -1939,7 +1946,7 @@ func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testin
 	f.submit("go", "k-notobserved", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-notobs-1", "long-forgotten")))
-	head := awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
 	// Act: the run settles, but nothing observed its output at all -- no
 	// WatchBash delta ever arrived, and the settle itself carries
@@ -1958,15 +1965,16 @@ func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testin
 	// Assert: settled, but the spool stays UNSET -- nothing observed the
 	// output, and drawing an empty spool would claim the command printed
 	// nothing when the truth is that nobody knows.
-	settled := awaitRow(t, f, tail, "the settled detached shell with unobserved output", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetSettled() != nil
+	settled := awaitRow(t, f, tail, "the settled shell head with unobserved output", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetShellHead().GetSettled() != nil
 	})
-	if settled.GetDetachedShell().GetShell().GetSpool() != nil {
-		t.Fatalf("the settled shell's spool = %v, want unset when the output was never observed", settled.GetDetachedShell().GetShell().GetSpool())
+	if settled.GetShellHead().GetSettled().GetCompleted() == nil {
+		t.Fatalf("the settled shell's outcome = %v, want completed even with unobserved output", settled.GetShellHead().GetSettled().GetOutcome())
 	}
-	if settled.GetDetachedShell().GetShell().GetSettled().GetCompleted() == nil {
-		t.Fatalf("the settled shell's outcome = %v, want completed even with unobserved output", settled.GetDetachedShell().GetShell().GetSettled().GetOutcome())
-	}
+	// UNSET means the BODY ROW WAS NEVER DRAWN AT ALL: the spool lives on the
+	// sub-feed, so "no spool" is the absence of that row, not an empty field on
+	// the head.
+	expectNoShellSpool(t, f, head, "a shell whose output was never observed draws no spool body")
 }
 
 func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
@@ -1976,7 +1984,7 @@ func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
 	f.submit("go", "k-spoolgap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-gap-1", "long-build")))
-	awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
 	// Act: a delta whose from_offset does not match what has accumulated
 	// (nothing has accumulated yet, so any nonzero offset is a gap).
@@ -1984,8 +1992,10 @@ func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
 		Update: &conversationv1.AgentBashUpdate{NewOutput: "mid-stream\n", FromOffset: 999},
 	}})
 
-	// Assert: the gap is refused — the spool does not silently jump ahead.
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a spool gap must not upsert the shell's row")
+	// Assert: the gap is refused — the spool does not silently jump ahead, so
+	// the BODY row it would have drawn on the sub-feed never appears.
+	expectNoShellSpool(t, f, head, "a spool gap must not draw the shell's spool body")
+	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a spool gap must not upsert the shell's head")
 	// subagent.go logs daemon.feed.spool_gap at ERROR precisely on a refused
 	// gap ("a detached shell's output frame did not continue the spool").
 	f.d.ExpectWarnings("daemon.feed.spool_gap")
@@ -2808,13 +2818,21 @@ func TestApiRequestFailedTerminalStatesAMidTurnFailureItSurvived(t *testing.T) {
 // A shell whose work MOVED to the background.
 // ==========================================================================
 
-// A BACKGROUNDED COMMAND DID NOT END, IT MOVED. Two rows carry one run -- the
-// card the agent's call drew, and the detached shell bubble the run reports
-// from -- and only the bubble settles. The card said `running` forever above a
-// bubble already reporting `exit 0` until the `moved` arm existed to say where
-// the work went (observed 2026-09-09).
+// A BACKGROUNDED COMMAND DID NOT END, IT MOVED. The card the agent's call drew
+// said `running` forever above a bubble already reporting `exit 0` (observed
+// 2026-09-09).
+//
+// RETIRE THEN REDRAW is how that is answered now: ONE row carries the run, not
+// two. The foreground card's kind (KindActivity) differs from the shell head's
+// (KindShellHead), so the card cannot change arm under one identity the way a
+// subagent bubble does -- it is RETIRED, its removal published on the tail
+// (FeedRow.removed, "a foreground Bash that detached, its running tool card
+// retired in favor of the shell bubble"), and the shell bubble is drawn in its
+// place (FeedRow.shell_head, "a foreground->detached transition retires the
+// running tool card and redraws THIS bubble in its place"). See
+// internal/resolve/feed/subagent.go's detachForegroundShell.
 
-func TestABackgroundedForegroundShellsCardDrawsTheMovedArm(t *testing.T) {
+func TestABackgroundedForegroundShellsCardIsRetiredAndRedrawnAsItsShellBubble(t *testing.T) {
 	t.Parallel()
 	// Arrange: a foreground shell, drawn running.
 	f := newOpened(t, harness.Opts{})
@@ -2829,7 +2847,7 @@ func TestABackgroundedForegroundShellsCardDrawsTheMovedArm(t *testing.T) {
 			},
 		}}},
 	}))
-	awaitRow(t, f, tail, "the running bash card", func(r *frontendv1.FeedRow) bool {
+	card := awaitRow(t, f, tail, "the running bash card", func(r *frontendv1.FeedRow) bool {
 		return r.GetActivity().GetSimpleToolCall().GetRunning() != nil
 	})
 
@@ -2837,13 +2855,23 @@ func TestABackgroundedForegroundShellsCardDrawsTheMovedArm(t *testing.T) {
 	// background rather than killed.
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedShell("bash-moved")))
 
-	// Assert: no verdict and no output -- the detached bubble beneath it is
-	// the record of the run.
-	card := awaitRow(t, f, tail, "the moved bash card", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetSimpleToolCall().GetMoved() != nil
-	}).GetActivity().GetSimpleToolCall()
-	if card.GetReturned() != nil || card.GetRunning() != nil {
-		t.Fatalf("outcome = %T, want the moved arm alone", card.GetOutcome())
+	// Assert: the running card's REMOVAL is published on the tail, so an
+	// already-open feed drops it live rather than showing it stale.
+	removal := awaitRow(t, f, tail, "the running bash card's removal", func(r *frontendv1.FeedRow) bool {
+		return r.GetRemoved() != nil
+	})
+	if removal.GetId().GetValue() != card.GetId().GetValue() {
+		t.Fatalf("the removal names row %q, want the running card's own id %q", removal.GetId().GetValue(), card.GetId().GetValue())
+	}
+
+	// Assert: and the shell bubble is drawn in its place, carrying the command
+	// the retired card drew -- one row for the run, not two.
+	head := awaitShellHead(t, f, tail, "the shell bubble redrawn in the retired card's place")
+	if got := head.GetShellHead().GetCommand().GetText(); got != "sleep 600" {
+		t.Fatalf("the redrawn bubble's command = %q, want the moved call's own %q", got, "sleep 600")
+	}
+	if head.GetShellHead().GetLive() == nil {
+		t.Fatalf("the redrawn bubble's state = %v, want live — the work moved, it did not end", head.GetShellHead().GetState())
 	}
 }
 
@@ -2855,7 +2883,7 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 	f.submit("go", "k-shell-resettle", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-resettle-1", "make")))
-	head := awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 	f.shim.PushBash("work-resettle-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
 		Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: "make"},
@@ -2866,8 +2894,8 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 			SettledAt: settledAt(2),
 		},
 	}})
-	awaitRow(t, f, tail, "the settled detached shell", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetSettled() != nil
+	awaitRow(t, f, tail, "the settled shell head", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetShellHead().GetSettled() != nil
 	})
 
 	// Act: the next turn's live-work reconciliation announces the SAME work
@@ -2889,7 +2917,7 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 	}))
 	redrawnLive := false
 	awaitRow(t, f, tail, "the barrier row behind the replayed announcement", func(r *frontendv1.FeedRow) bool {
-		if r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetLive() != nil {
+		if r.GetId().GetValue() == head.GetId().GetValue() && r.GetShellHead().GetLive() != nil {
 			redrawnLive = true
 		}
 		return r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Read"
