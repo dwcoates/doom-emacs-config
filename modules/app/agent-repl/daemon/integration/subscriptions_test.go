@@ -315,6 +315,27 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				if identity.GetAgentReplSessionId() != "" {
 					t.Fatalf("%s on a workspace with no session = agent_repl_session_id %q, want empty", k.Name, identity.GetAgentReplSessionId())
 				}
+			case "WatchFooter":
+				// THE STRIP IS ALWAYS DRAWN (footer.proto: "The one-line strip at
+				// the bottom of the workspace view. Always drawn."), and a
+				// registration PRIMES it: workspace/register.go calls
+				// Footer.Prime, whose whole purpose is that "a subscriber that
+				// arrives early receives the first view ever published rather than
+				// an empty one". So a registered-but-unopened workspace has a
+				// footer to send, and the no-view flush path never fires here --
+				// the same reason WatchTopbar below gets its own case.
+				//
+				// The render bottoms out rather than being withheld: the status
+				// falls through to idle, and every panel is populated, because a
+				// workspace with no session fact yet still has a complete footer.
+				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the primed strip a registered workspace opens with")
+				view := push.(*frontendv1.FooterView)
+				if view.GetStrip() == nil {
+					t.Fatalf("%s on a registered-but-unopened workspace = %v, want the always-drawn strip", k.Name, view)
+				}
+				if view.GetStrip().GetStatus().GetIdle() == nil {
+					t.Fatalf("%s on a workspace with no session = status %v, want idle (the status the render bottoms out at)", k.Name, view.GetStrip().GetStatus())
+				}
 			case "WatchTopbar":
 				// THE STRIP HAS ONE SHAPE AND IS NEVER WITHHELD (topbar.proto,
 				// FIXED SCHEMA AND ORGANIZATION). Its readiness gate is the

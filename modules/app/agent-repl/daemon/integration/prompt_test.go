@@ -1657,9 +1657,10 @@ func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedW
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
-	row := awaitRow(t, f, feed, "the detached shell bubble row", func(r *frontendv1.FeedRow) bool {
-		return r.GetDetachedShell() != nil
-	})
+	// THE HEAD'S OWN FeedId IS THE HANDLE. It addresses the bubble's sub-feed,
+	// and it is what Interrupt{detached} names; `detached_shell` is the spool
+	// BODY row on that sub-feed and never appears on the root feed at all.
+	row := awaitShellHead(t, f, feed, "the shell bubble's head on the root feed")
 	// Neither branch below logs a WARN: the success path is Info
 	// (internal/workspace/interrupt.go's interruptDetached), and
 	// not_detached_work is answered directly at the server layer
