@@ -1647,20 +1647,46 @@ describe("a compaction divider's fold", () => {
   });
 });
 
+// THE SKILL CARD'S FOLD IS THE WHOLE CARD (owner ruling, 2026-09-15). It is
+// not a named `data-fold` section with a `data-folded` flag: the card itself
+// wears `.tool-fold` — a CAPPED_CLASSES section — and the feed-wide expand
+// handler toggles `.expanded` on it, which is the same key `expandedKeys`
+// reconciles across a re-push.
 describe("a skill document's fold", () => {
   it("starts folded", async () => {
     // Arrange / Act: a SKILL.md is long, and the reader asked for a skill to
     // run rather than to be read to.
     const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
     // Assert
-    expect(row.querySelector("[data-fold]")?.getAttribute("data-folded")).toBe("true");
+    expect(row.querySelector(".tool-skill.tool-fold")?.classList.contains("expanded")).toBe(
+      false,
+    );
+  });
+
+  it("hides the document until the reader opens the card", async () => {
+    // Arrange / Act: no preview — the document is not revealed on a collapsed
+    // card, which is the whole point of the card-level fold.
+    const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    // Assert: the document is present but its host card is not expanded.
+    expect(row.querySelector(".skill-content")).not.toBeNull();
+    expect(row.querySelector(".tool-skill.expanded")).toBeNull();
+  });
+
+  it("reveals the document when the card is clicked", async () => {
+    // Arrange
+    await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    // Act
+    await harness.click('[data-feed-row="skill-1"] .tool-skill');
+    // Assert
+    expect(
+      harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
+    ).toBe(true);
   });
 
   it("keeps the reader's toggle across a re-push of the same row", async () => {
     // Arrange
-    const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
-    const name = row.querySelector("[data-fold]")?.getAttribute("data-fold") ?? "";
-    await harness.click(`[data-feed-row="skill-1"] [data-fold="${name}"]`);
+    await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    await harness.click('[data-feed-row="skill-1"] .tool-skill');
     // Act
     harness.fake.pushRow(
       WORKSPACE_ID,
@@ -1668,10 +1694,10 @@ describe("a skill document's fold", () => {
       activityRow(skillUnit("loaded"), { id: feedId("skill-1") }),
     );
     await harness.settle();
-    // Assert
+    // Assert: a re-push never un-toggles what the reader opened.
     expect(
-      harness.$(`[data-feed-row="skill-1"] [data-fold="${name}"]`)?.getAttribute("data-folded"),
-    ).toBe("false");
+      harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
+    ).toBe(true);
   });
 });
 
