@@ -23,6 +23,7 @@ import {
   feedPageSuccess,
   mergeUnit,
   responseRow,
+  skillUnit,
   subagentUnit,
   turnEndedConcludedRow,
   userPromptRow,
@@ -697,5 +698,52 @@ describe("a sub-feed's tail after a transport death", () => {
     await harness.tick(5_000);
     // Assert
     expect(harness.row("inner-live")).toBeNull();
+  });
+});
+
+/**
+ * A FOLD SURVIVES A FULL PAGE REPLACE (owner ruling, 2026-09-18: "a redraw
+ * never un-toggles, whatever its shape"). A re-push of one row has always kept
+ * the reader's toggle; a REPLACE — the reconnect, the reload, the compaction
+ * replay — tears every row down and rebuilds it, and the folds ride across that
+ * gap on the row's own identity.
+ */
+describe("the reader's folds across a page replace", () => {
+  /** Boot on a page holding one skill card, and serve that same page again. */
+  const bootWithSkill = async (): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(skillUnit("loaded"), { id: feedId("skill-1") })]),
+        );
+      },
+    });
+  };
+
+  it("keeps a card the reader opened open across the replace", async () => {
+    // Arrange
+    await bootWithSkill();
+    await harness.click('[data-feed-row="skill-1"] .tool-skill');
+    // Act: the tail dies, the app re-opens the feed and REPLACES every row.
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, ROOT_FEED);
+    await harness.tick(5_000);
+    // Assert
+    expect(
+      harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
+    ).toBe(true);
+  });
+
+  it("leaves a card the reader never opened closed across the replace", async () => {
+    // Arrange
+    await bootWithSkill();
+    // Act
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, ROOT_FEED);
+    await harness.tick(5_000);
+    // Assert
+    expect(
+      harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
+    ).toBe(false);
   });
 });
