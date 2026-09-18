@@ -92,11 +92,11 @@ var layout3Undo = map[int][]string{
 	// The layout-5 step is a BACKFILL: it introduces no shape, so taking the
 	// file back past it removes nothing. The rows it healed stay healed, which
 	// is harmless -- re-running the backfill over them is a no-op.
-	5: nil,
-	6: {`ALTER TABLE creation_jobs ADD COLUMN one_shot_finish TEXT NOT NULL DEFAULT ''`},
-	7: {`ALTER TABLE sessions DROP COLUMN selected_config_dir`},
-	8: {`ALTER TABLE workspaces DROP COLUMN spawned_shim_pid`},
-	9: {`ALTER TABLE workspaces DROP COLUMN last_activity_at`},
+	5:  nil,
+	6:  {`ALTER TABLE creation_jobs ADD COLUMN one_shot_finish TEXT NOT NULL DEFAULT ''`},
+	7:  {`ALTER TABLE sessions DROP COLUMN selected_config_dir`},
+	8:  {`ALTER TABLE workspaces DROP COLUMN spawned_shim_pid`},
+	9:  {`ALTER TABLE workspaces DROP COLUMN last_activity_at`},
 	10: {`DROP TABLE feed_text_scale`},
 }
 
