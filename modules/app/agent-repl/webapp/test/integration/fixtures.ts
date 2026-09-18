@@ -1847,7 +1847,7 @@ type RosterRowInit = {
   current?: boolean;
   closed?: boolean;
   detail?: boolean;
-  when?: "lastSelected" | "merged";
+  when?: "lastSelected" | "merged" | "active" | "created";
   whenAtMs?: bigint;
   children?: RosterRow[];
 };
