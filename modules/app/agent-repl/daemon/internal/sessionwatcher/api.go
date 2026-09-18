@@ -200,6 +200,14 @@ type FooterSink interface {
 	OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage)
 	// OnLink is the connectivity change the footer reflects.
 	OnLink(ws ids.WorkspaceID, link LinkState)
+	// OnLiveWorkChanged republishes the AUTHORITATIVE live-work set, which is
+	// what the footer's `background` arm and its live-work chips mean by LIVE.
+	// The same set the roster takes: the watcher reaps each item's watch at
+	// its terminal, so it is the one party that knows an item has ENDED, and
+	// a footer that decided liveness from its own frame ledger could — and
+	// did — report a background task for work that had finished while the
+	// roster said ready.
+	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)
 }
 
 // TopbarSink receives what the topbar's title, model selector, connectivity

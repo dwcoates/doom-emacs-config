@@ -157,6 +157,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	s.seen = true
 	apply(s)
 	view := r.render(ws, s)
+	arm, armChanged, previousArm := s.observeArm(view)
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
 	r.mu.Unlock()
@@ -165,7 +166,20 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		ctx = dlog.Context{}
 	}
 	log.Debug(operation, message, ctx)
+	logArmChange(log, operation, arm, armChanged, previousArm)
 	topic.Publish(view)
+}
+
+// logArmChange records the PUBLISHED status arm whenever it changes, and only
+// then. It is what makes a later disagreement between the strip and the roster
+// diagnosable from the log alone: the arm, the arm it replaced, and the
+// operation that moved it.
+func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous string) {
+	if !changed {
+		return
+	}
+	log.Info("daemon.footer.status_arm_changed", "the footer published a new status arm",
+		dlog.Context{"arm": arm, "previous_arm": previous, "cause": operation})
 }
 
 // mutateAll applies a resolver-WIDE change and republishes every workspace
@@ -175,9 +189,12 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // that makes a workspace's strip exist.
 func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply func(*wsState), global func()) {
 	type publication struct {
-		topic *publish.Topic[*frontendv1.FooterView]
-		view  *frontendv1.FooterView
-		log   dlog.Logger
+		topic       *publish.Topic[*frontendv1.FooterView]
+		view        *frontendv1.FooterView
+		log         dlog.Logger
+		arm         string
+		armChanged  bool
+		previousArm string
 	}
 	r.mu.Lock()
 	global()
@@ -187,7 +204,9 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 			continue
 		}
 		apply(s)
-		out = append(out, publication{r.topicLocked(ws), r.render(ws, s), r.logOf(ws, s)})
+		view := r.render(ws, s)
+		arm, armChanged, previousArm := s.observeArm(view)
+		out = append(out, publication{r.topicLocked(ws), view, r.logOf(ws, s), arm, armChanged, previousArm})
 	}
 	r.mu.Unlock()
 

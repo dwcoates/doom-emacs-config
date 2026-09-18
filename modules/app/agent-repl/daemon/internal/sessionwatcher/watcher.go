@@ -661,6 +661,11 @@ func (w *watcher) publishLiveWorkLocked() {
 	// The roster hears the same set: its `idle_async` arm retires on an empty
 	// one, which no announcement can ever state.
 	w.sinks.Sidebar.OnLiveWorkChanged(w.ws, live)
+	// AND THE FOOTER HEARS THE SAME SET, for the same reason and out of the
+	// same value: the strip's `background` arm and the roster's `idle_async`
+	// arm are two renderings of ONE fact, so they cannot be allowed to resolve
+	// from two ledgers.
+	w.sinks.Footer.OnLiveWorkChanged(w.ws, live)
 	// The live-work set is half of freeness, so every change to it is a
 	// freeness edge a lease holder may be waiting on.
 	w.signalFreenessLocked()
