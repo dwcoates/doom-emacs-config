@@ -846,40 +846,35 @@ row's name greys to `--muted`. **The status itself never recedes** — the
 bracket and the sidebar dot keep their colour in either mode. The mode says
 what the user has SEEN; the colour says what the workspace is DOING.
 
-**ANY status change restores full, from any origin.** A user's prompt, a shim
-frame, a merge, a session that died — all of them reach a client as a changed
-`RosterRow.status` arm, and that edge is the whole reset rule. A first sighting
-is not a change, and a push restating the same arm is not a change, or nothing
+**THE DAEMON IS THE SINGLE SOURCE OF THIS MODE.** A roster row carrying
+`RosterRowViewed` is **partial**; a row without it is **full**. Both the Emacs
+tab-bar and the webapp sidebar RENDER the mode from that marker and nothing
+else, so they cannot disagree. The daemon raises the marker on
+`MarkWorkspaceViewed` and clears it on ANY status change, from any origin (a
+user's prompt, a shim frame, a merge, a session that died). A first sighting is
+not a change, and a push restating the same arm is not a change, or nothing
 could ever stay partial.
 
-**Each surface has exactly two functions, and they are the invariant.**
+**Emacs DETECTS and REPORTS; it does not decide.** The 5-second dwell is
+measured in Emacs, because only Emacs knows what the user is standing in front
+of. When it is satisfied, `agent-repl--tab-view-partial` (status.el) reports
+the workspace (`agent-repl-host-mark-viewed` -> `MarkWorkspaceViewed`) and
+repaints, and latches nothing locally. The tab turns partial when the next
+roster push carries the marker: `agent-repl--tab-dwell-demoted-p` reads only
+`agent-repl-roster-viewed-for-ws` (roster.el). That one roster round trip of
+visible latency is ruled acceptable.
 
 | | applies PARTIAL | restores FULL |
 |---|---|---|
-| Emacs | `agent-repl--tab-view-partial` (status.el) | `agent-repl--tab-view-restore-full` (status.el) |
-| webapp | `ViewedRegistry.modeFor` (webapp/src/sidebar/viewed.ts) | the same function, on the arm change |
-| daemon | `sidebar.Resolver.SetViewed` | `wsState.noteArm` (daemon/internal/resolve/sidebar/state.go) |
+| daemon (the source) | `sidebar.Resolver.SetViewed` | `wsState.noteArm` (daemon/internal/resolve/sidebar/state.go) |
+| Emacs (renders the marker) | reports via `agent-repl--tab-view-partial` (status.el) | `agent-repl--tab-view-restore-full` re-arms the dwell (status.el) |
+| webapp (renders the marker) | `ViewedRegistry.modeFor` (webapp/src/sidebar/viewed.ts) | the same function, on the arm change |
 
-Emacs's apply does BOTH halves in one place: it latches the tab bar AND reports
-the workspace to the daemon (`MarkWorkspaceViewed` -> `RosterRowViewed` on the
-row). That is deliberate and is what makes the two drawings one mode — a site
-that latched the tab without reporting would be a divergence by construction.
-Emacs's restore reports NOTHING: the daemon originated the status change and
-clears the row's marker on the same edge, so a report back would be Emacs
-telling the daemon what the daemon just said.
-
-**THE TAB-BAR AND THE SIDEBAR MAY NEVER DISAGREE ABOUT THIS MODE.** They are
-two drawings of one fact, exactly as the attention marker's blink cadence is
-one cadence drawn twice, and a divergence is a defect rather than a surface's
-own taste. The webapp therefore applies the restore rule itself rather than
-waiting to be told twice — a page that has already drawn the new status never
-draws the stale mode.
-
-Emacs learns every workspace status from the roster stream, which is why its
-restore hangs off ONE hook, `agent-repl-roster-status-change-functions`
-(roster.el), rather than enumerating origins. Emacs decodes `RosterRowViewed`
-and does not read it: the mode originates in the editor, so reading it back
-would be asking the daemon what the editor just said.
+Emacs's restore reports NOTHING: the daemon originated the clear. It hangs off
+ONE hook, `agent-repl-roster-viewed-cleared-functions` (roster.el), which fires
+per workspace on the marker's present->absent edge (a restated marker is not a
+clear, and neither is a first sighting without it). The reaction only re-arms
+the dwell clock, since the tab already draws full from the row.
 
 ## Purple means the vendor, blue means the local environment, teal means nothing is wrong
 

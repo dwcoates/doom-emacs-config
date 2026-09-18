@@ -25,11 +25,12 @@
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children',
-`:attention', `:priority', `:current', `:dir'."
+`:attention', `:priority', `:viewed', `:current', `:dir'."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (list :workspace (list :workspace (list :id id :dir dir))
           :attention (plist-get overrides :attention)
           :priority (plist-get overrides :priority)
+          :viewed (plist-get overrides :viewed)
           :name (list :text name)
           :status (list :arm status :value nil)
           :current (list :current (or (plist-get overrides :current) :false))
@@ -99,6 +100,8 @@ whose calls are the observation."
            (agent-repl-roster--tab-order nil)
            (agent-repl-roster--rows-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
+           (agent-repl-roster--viewed-by-id (make-hash-table :test 'equal))
+           (agent-repl-roster-viewed-cleared-functions nil)
            (agent-repl-roster-finish-functions nil)
            (agent-repl-roster-status-change-functions nil)
            (agent-repl-roster-update-functions nil)
@@ -1032,6 +1035,92 @@ user's next sidebar click."
       ;; Assert
       (should (equal fired nil)))))
 
+
+
+;;;; ---- The viewed marker ----
+
+(ert-deftest agent-repl-test-roster-row-viewed-p-when-marker-present ()
+  "A row carrying `RosterRowViewed' reads as viewed."
+  (should (agent-repl-roster-row-viewed-p
+           (agent-repl-test-roster--row "a" "one" :ready :viewed '(:viewed t)))))
+
+(ert-deftest agent-repl-test-roster-row-viewed-p-when-marker-absent ()
+  "A row without the marker reads as not viewed."
+  (should-not (agent-repl-roster-row-viewed-p
+               (agent-repl-test-roster--row "a" "one" :ready))))
+
+(ert-deftest agent-repl-test-roster-viewed-for-ws-after-a-push ()
+  "After a push, a workspace's marker is its current row's `:viewed'."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready :viewed '(:viewed t)))))))
+    ;; Assert
+    (should (equal (agent-repl-roster-viewed-for-ws "one") '(:viewed t)))))
+
+(ert-deftest agent-repl-test-roster-viewed-for-ws-before-any-push ()
+  "Before any push carried its row, a workspace has no marker."
+  (agent-repl-test-roster--with-editor
+    (should-not (agent-repl-roster-viewed-for-ws "one"))))
+
+(defmacro agent-repl-test-roster--recording-viewed-clears (var &rest body)
+  "Run BODY with the viewed-cleared hook recording each WS onto VAR."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (add-hook 'agent-repl-roster-viewed-cleared-functions
+               (lambda (ws) (push ws ,var)))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-a-dropped-viewed-marker-announces-a-clear ()
+  "A row whose viewed marker went present->absent announces a clear."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-viewed-clears cleared
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready :viewed '(:viewed t)))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (equal cleared '("one"))))))
+
+(ert-deftest agent-repl-test-roster-a-restated-viewed-marker-is-no-clear ()
+  "A re-push restating the marker cleared nothing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-viewed-clears cleared
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready :viewed '(:viewed t)))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready :viewed '(:viewed t)))))))
+      ;; Assert
+      (should (equal cleared nil)))))
+
+(ert-deftest agent-repl-test-roster-an-unviewed-first-sighting-is-no-clear ()
+  "A row first seen without the marker had nothing to clear."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-viewed-clears cleared
+      
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (equal cleared nil)))))
 
 ;;;; ---- The status change ----
 

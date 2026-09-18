@@ -36,6 +36,7 @@
 (declare-function agent-repl-roster-row-priority-label "roster")
 (declare-function agent-repl-roster-row-status "roster")
 (declare-function agent-repl-roster-walk "roster")
+(declare-function agent-repl-roster-viewed-for-ws "roster" (ws))
 
 (defun agent-repl--status-log-scope (central-reason)
   "Return the active workspace or an explicit CENTRAL-REASON marker.
@@ -1516,14 +1517,6 @@ workspace, `agent-repl--ws-display-state' draws it PARTIAL (only the
 seen it\" demotion.  The next status update for the workspace clears the
 demotion and re-arms this dwell.")
 
-(defvar agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)
-  "Workspace -> t once its tab has been demoted by the view dwell.
-The dwell-satisfied latch `agent-repl--ws-display-state' reads to draw a
-panels-open workspace PARTIAL.  Set by `agent-repl--tab-view-partial',
-the ONE place staleness is applied; cleared by
-`agent-repl--tab-view-restore-full', the ONE place a status update
-restores it.")
-
 (defvar agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal)
   "Workspace -> the time its current 5-second view dwell was armed.
 Stamped when the workspace is activated (viewing begins) and re-stamped
@@ -1538,9 +1531,10 @@ deadline so the demotion repaints then, rather than waiting for the next
 heartbeat tick.")
 
 (defun agent-repl--tab-dwell-demoted-p (ws)
-  "Return non-nil when WS's tab has been view-demoted to PARTIAL.
-Reads the `agent-repl--tab-dwell-demoted' latch."
-  (and (gethash ws agent-repl--tab-dwell-demoted) t))
+  "Return non-nil when WS's tab is view-demoted to PARTIAL.
+The daemon is the single source: the decoded roster row's `:viewed'
+marker (`agent-repl-roster-viewed-for-ws') is the ONLY input."
+  (and (agent-repl-roster-viewed-for-ws ws) t))
 
 (defun agent-repl--ws-display-state (ws)
   "Return the palette display key for WS.
@@ -2953,21 +2947,17 @@ THE ONE PLACE STALENESS IS APPLIED.  Whatever detects it — today the view
 dwell, tomorrow anything else — calls exactly this, and it does BOTH
 halves of applying the mode:
 
-  - the TAB BAR, by latching `agent-repl--tab-dwell-demoted' (which
-    `agent-repl--ws-display-state' reads) and forcing the repaint, so the
-    flip lands on the redisplay that caused it; and
-  - the WEBAPP SIDEBAR, by reporting the workspace to the daemon
-    \(`agent-repl-host-mark-viewed'), which raises the row's viewed marker
-    and re-pushes the roster.
+  - it REPORTS the workspace to the daemon (`agent-repl-host-mark-viewed'),
+    which raises the row's viewed marker and re-pushes the roster; and
+  - it forces a tab-bar repaint.
 
-The two surfaces are ONE MODE WITH TWO DRAWINGS and may never disagree,
-which is why the report is not some caller's separate responsibility: a
-site that latched the tab without telling the daemon would be a
-divergence by construction.
+It latches NOTHING locally.  The daemon is the single source of the mode:
+the tab bar and the webapp sidebar both render it from the roster row's
+`:viewed' marker, so the tab flips one roster round trip after the
+report (ruled acceptable) and the two surfaces can never disagree.
 
 There is no matching notification on the RESTORE — see
 `agent-repl--tab-view-restore-full'."
-  (puthash ws t agent-repl--tab-dwell-demoted)
   (agent-repl--log
    ws
    "tab-view: PARTIAL ws=%s reason=%s — the tab name falls back to default and [N] keeps the status color; the sidebar row's name greys"
@@ -2976,12 +2966,12 @@ There is no matching notification on the RESTORE — see
   (agent-repl-host-mark-viewed ws))
 
 (defun agent-repl--tab-view-restore-full (ws now)
-  "Restore WS to FULL as of NOW, because its status changed.
+  "Re-arm WS's dwell as of NOW, because the daemon cleared its viewed marker.
 
-THE ONE PLACE A STATUS UPDATE RESTORES THE MODE.  It clears the demotion
-latch so the tab draws FULL again and re-arms the dwell
-\(`agent-repl--tab-dwell-arm'), so the clock restarts from the new
-activity rather than from whenever the workspace was last activated.
+THE ONE PLACE THE RESTORE IS REACTED TO.  The tab already draws FULL:
+the row it renders from no longer carries the marker.  This only re-arms
+the dwell (`agent-repl--tab-dwell-arm'), so the clock restarts from the
+new activity rather than from whenever the workspace was last activated.
 
 IT NOTIFIES THE DAEMON OF NOTHING, deliberately.  The daemon ORIGINATED
 the status change that brought us here — every status Emacs knows arrives
@@ -2989,9 +2979,7 @@ on the roster stream — and it clears the row's viewed marker on that same
 edge, in that same push.  A report back would be Emacs telling the daemon
 a fact the daemon has just told Emacs.
 
-The old ready-view latch cleared on a state TRANSITION away from
-`:ready'; this generalizes to any changed arm, from any origin."
-  (remhash ws agent-repl--tab-dwell-demoted)
+The daemon clears the marker on any changed arm, from any origin."
   (agent-repl--tab-dwell-arm ws now))
 
 (defun agent-repl--tab-dwell-on-activation (&rest _)
@@ -3013,27 +3001,17 @@ same reason."
 
 (agent-repl--ws-add-activated-hook #'agent-repl--tab-dwell-on-activation)
 
-(defun agent-repl--tab-view-restore-on-status-change (ws previous current)
-  "Restore WS to FULL: its status moved from PREVIOUS to CURRENT.
-
-Registered on `agent-repl-roster-status-change-functions', which fires
-once per row whose arm actually changed.  THAT is what makes \"any change
-to the workspace's status, from any origin\" true here: the roster stream
-is the ONE way Emacs learns any workspace's status, so every origin — a
-prompt the user sent, a frame the shim pushed, a merge, a session that
-died — arrives as a changed arm on that hook, and this reaction never has
-to enumerate them.
-
-It used to compare arms against a SECOND per-workspace table of its own,
-kept beside the roster's, which meant two answers to \"did this push
-change anything\" and a reaction that saw only the changes its own table
-happened to catch."
-  (agent-repl--log ws "tab-view: FULL ws=%s from=%s to=%s reason=status-change"
-                   ws previous current)
+(defun agent-repl--tab-view-restore-on-viewed-cleared (ws)
+  "React to the daemon clearing WS's viewed marker: restore FULL.
+Registered on `agent-repl-roster-viewed-cleared-functions', which fires
+once per row whose marker went present->absent.  The daemon clears the
+marker on any status change from any origin, so this reaction never has
+to enumerate origins."
+  (agent-repl--log ws "tab-view: FULL ws=%s reason=viewed-cleared" ws)
   (agent-repl--tab-view-restore-full ws (current-time)))
 
-(add-hook 'agent-repl-roster-status-change-functions
-          #'agent-repl--tab-view-restore-on-status-change)
+(add-hook 'agent-repl-roster-viewed-cleared-functions
+          #'agent-repl--tab-view-restore-on-viewed-cleared)
 
 (defun agent-repl--arm-state-poll-timer ()
   "Arm the tab-bar repaint heartbeat under the `:state-poll' key.
