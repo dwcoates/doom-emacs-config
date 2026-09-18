@@ -2,9 +2,11 @@ package rollout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -700,6 +702,35 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 	}
 }
 
+// advertiseBackoffCeiling caps the wait between two attempts to take the boot
+// claim and write daemon.addr. The first retry waits manifestPoll and each one
+// after doubles it. The claim is released by the incumbent's own exit, bounded
+// by daemonaddr.ClaimWaitBound (2.32s), so an ordinary handover spends a
+// handful of attempts here and a claim that is never released costs one
+// attempt a second rather than forty.
+const advertiseBackoffCeiling = time.Second
+
+// advertiseRefusedBound is how long the claim may stay refused before the
+// successor says so at ERROR: well past daemonaddr.ClaimWaitBound, the
+// longest an orderly incumbent holds the claim after its last transfer.
+const advertiseRefusedBound = 30 * time.Second
+
+// advertiseDelay is the wait before retry n (n >= 1): manifestPoll doubled
+// n-1 times, capped at advertiseBackoffCeiling.
+func advertiseDelay(n int) time.Duration {
+	delay := manifestPoll
+	for i := 1; i < n; i++ {
+		if delay >= advertiseBackoffCeiling/2 {
+			return advertiseBackoffCeiling
+		}
+		delay *= 2
+	}
+	if delay > advertiseBackoffCeiling {
+		return advertiseBackoffCeiling
+	}
+	return delay
+}
+
 // advertise writes daemon.addr once every workspace is owned, retrying while
 // the OUTGOING daemon still holds the boot claim.
 //
@@ -707,31 +738,60 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 // claim when it exits, and it exits when the adoptions complete — so failing an
 // adoption because the claim is still held deadlocks the handover on itself.
 // The workspace is adopted either way; only the address file waits.
+//
+// ONLY A HELD CLAIM IS WAITED ON, AND WITH A BOUNDED BACKOFF. Any other
+// failure -- a state root that is gone, a directory that cannot be written --
+// is not the incumbent departing and will not fix itself, so it is an ERROR
+// and the retry stops. It once retried every failure every 25ms forever.
 func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
-	if err := c.deps.WriteDaemonAddr(ctx); err == nil {
+	err := c.deps.WriteDaemonAddr(ctx)
+	if err == nil {
 		c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
 		return
 	}
-	c.log.Debug(opAdopt, "the outgoing daemon still holds the boot claim; advertising once it lets go", fields)
+	if !errors.Is(err, daemonaddr.ErrClaimed) {
+		c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim", withCause(fields, err))
+		return
+	}
+	c.log.Debug(opAdopt, "the outgoing daemon still holds the boot claim; advertising once it lets go", withCause(fields, err))
 	// THE RETRY OUTLIVES THE CALL. The context here is an rpc's, cancelled the
 	// moment the adopt answers — and the claim is released by the incumbent's
-	// exit, which happens after that answer.
-	ctx = context.WithoutCancel(ctx)
-	go func() {
-		ticker := time.NewTicker(manifestPoll)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-			if err := c.deps.WriteDaemonAddr(ctx); err == nil {
-				c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
-				return
-			}
+	// exit, which happens after that answer. The daemon's own lifetime still
+	// ends it.
+	lifetime := c.deps.Lifetime
+	if lifetime == nil {
+		lifetime = context.WithoutCancel(ctx)
+	}
+	go c.retryAdvertise(lifetime, fields)
+}
+
+// retryAdvertise is advertise's retry loop, on the injected clock.
+func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
+	started := c.deps.Clock.Now()
+	reported := false
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-ctx.Done():
+			c.log.Debug(opAdopt, "the daemon's lifetime ended before daemon.addr could be written", fields)
+			return
+		case <-c.deps.Clock.After(advertiseDelay(attempt)):
 		}
-	}()
+		err := c.deps.WriteDaemonAddr(ctx)
+		if err == nil {
+			c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", merge(fields, dlog.Context{"attempts": attempt + 1}))
+			return
+		}
+		if !errors.Is(err, daemonaddr.ErrClaimed) {
+			c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim",
+				withCause(merge(fields, dlog.Context{"attempts": attempt + 1}), err))
+			return
+		}
+		if held := c.deps.Clock.Now().Sub(started); !reported && held >= advertiseRefusedBound {
+			reported = true
+			c.log.Error(opAdopt, "the boot claim is still held long after the outgoing daemon should have exited; still retrying",
+				withCause(merge(fields, dlog.Context{"attempts": attempt + 1, "held": held.String()}), err))
+		}
+	}
 }
 
 // releaseHeadless undoes a headless claim whose adoption failed.
