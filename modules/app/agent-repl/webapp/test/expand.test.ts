@@ -12,6 +12,8 @@ import {
   expandedKeys,
   cappedSectionsOf,
   carryExpanded,
+  retainRows,
+  snapshotExpanded,
   isCappedSection,
   installClickExpand,
   isExpanded,
@@ -614,5 +616,71 @@ describe("installClickExpand", () => {
     box.dispatchEvent(new MouseEvent("click", { bubbles: true })); // collapse
     // Assert
     expect(calls.at(-1)).toEqual([box, false]);
+  });
+});
+
+// A PAGE REPLACE has no previous element to read a fold back off: every row is
+// torn down and rebuilt, and the row's own id is the only thing that survives.
+
+describe("snapshotExpanded", () => {
+  it("keys an open fold by its row id", () => {
+    // Arrange
+    const body = el("tool-card", "tool-fold");
+    body.classList.add(EXPANDED_CLASS);
+    // Act
+    const snapshot = snapshotExpanded([["row-1", body]]);
+    // Assert
+    expect(snapshot.get("row-1")).toEqual(["tool-fold:0"]);
+  });
+
+  it("holds nothing for a row whose folds are all closed", () => {
+    // Arrange
+    const body = el("tool-card", "tool-fold");
+    // Act
+    const snapshot = snapshotExpanded([["row-1", body]]);
+    // Assert
+    expect(snapshot.has("row-1")).toBe(false);
+  });
+
+  it("keys the expanded bubble's scroll box the same way as any other section", () => {
+    // Arrange — the 50vh response/prompt bubble is a CAPPED_CLASSES section.
+    const body = el("bubble", "bubble-scroll");
+    body.classList.add(EXPANDED_CLASS);
+    // Act
+    const snapshot = snapshotExpanded([["row-1", body]]);
+    // Assert
+    expect(snapshot.get("row-1")).toEqual(["bubble-scroll:0"]);
+  });
+
+  it("re-opens the same section when its keys are applied to a rebuilt body", () => {
+    // Arrange
+    const before = el("tool-card", "tool-fold");
+    before.classList.add(EXPANDED_CLASS);
+    const snapshot = snapshotExpanded([["row-1", before]]);
+    // Act — the replace rebuilds the row from the same push.
+    const after = el("tool-card", "tool-fold");
+    applyExpanded(cappedSectionsOf(after), snapshot.get("row-1") ?? []);
+    // Assert
+    expect(after.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+});
+
+describe("retainRows", () => {
+  it("drops the keys of a row the replacing page did not serve", () => {
+    // Arrange
+    const snapshot = new Map([["gone", ["tool-fold:0"]]]);
+    // Act
+    retainRows(snapshot, new Set(["kept"]));
+    // Assert
+    expect(snapshot.has("gone")).toBe(false);
+  });
+
+  it("keeps the keys of a row the replacing page served again", () => {
+    // Arrange
+    const snapshot = new Map([["kept", ["tool-fold:0"]]]);
+    // Act
+    retainRows(snapshot, new Set(["kept"]));
+    // Assert
+    expect(snapshot.get("kept")).toEqual(["tool-fold:0"]);
   });
 });
