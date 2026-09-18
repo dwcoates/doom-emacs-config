@@ -578,10 +578,31 @@ export const detachedSubagentRow = (
   return feedRow({ case: "detachedSubagent", value: { subagent: unit.value } }, overrides);
 };
 
+/**
+ * The shell bubble's BODY row — the spool alone, on the shell's own sub-feed.
+ *
+ * feed.proto: `FeedRow.detached_shell` is the spool BODY. The command, clock,
+ * stop and outcome live on the HEAD (`shellHeadRow`), so only the spool is
+ * drawn from this arm.
+ */
 export const detachedShellRow = (
   state: "live" | ShellOutcome = "live",
   overrides?: Partial<RowInit>,
 ): FeedRow => feedRow({ case: "detachedShell", value: { shell: shellInit(state) } }, overrides);
+
+/**
+ * The shell bubble's HEAD row — the command, the clock and, while live, the
+ * stop, carried on the PARENT feed (`FeedRow.shell_head`).
+ *
+ * The SAME `FeedShell` message feeds both arms; which half is drawn is the
+ * arm's business, not the message's. Every head fact — `data-state`, the
+ * clock, the quiet-for figure, the exit chip, the stop control — is asserted
+ * against THIS row, never against the spool-only body.
+ */
+export const shellHeadRow = (
+  state: "live" | ShellOutcome = "live",
+  overrides?: Partial<RowInit>,
+): FeedRow => feedRow({ case: "shellHead", value: shellInit(state) }, overrides);
 
 // ---- FeedTurnEnded --------------------------------------------------------
 

@@ -73,6 +73,7 @@ import {
   commandPanelRow,
   commandRefusedRow,
   detachedShellRow,
+  shellHeadRow,
   detachedSubagentRow,
   feedId,
   findingsUnit,
@@ -134,6 +135,7 @@ describe("arm coverage", () => {
       "turnEnded",
       "detachedSubagent",
       "detachedShell",
+      "shellHead",
       "permission",
       "question",
       "separation",
@@ -725,35 +727,45 @@ describe("a detached subagent", () => {
   });
 });
 
-describe.each(SHELL_OUTCOMES)("a settled (%s) detached shell", (outcome) => {
+describe.each(SHELL_OUTCOMES)("a settled (%s) detached shell head", (outcome) => {
   it("carries its outcome as the state", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow(outcome));
+    const row = await drawRow(shellHeadRow(outcome));
     // Assert
     expect(row.dataset.state).toBe(outcome);
   });
 
   it("draws the exit code as a badge rather than a failure", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow(outcome));
+    const row = await drawRow(shellHeadRow(outcome));
     // Assert: a non-zero exit is still `completed`; the code is information.
-    expect(row.textContent).toContain("1");
+    expect(row.querySelector(".shell-exit")?.getAttribute("data-exit-code")).toBe("1");
   });
 });
 
-describe("a live detached shell", () => {
+describe("a live detached shell head", () => {
   it("carries the live state", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow("live"));
+    const row = await drawRow(shellHeadRow("live"));
     // Assert
     expect(row.dataset.state).toBe("live");
   });
 
+});
+
+describe("a detached shell's spool body", () => {
   it("draws the spool's omission note verbatim", async () => {
-    // Arrange / Act
+    // Arrange / Act: the BODY arm draws the spool and nothing else.
     const row = await drawRow(detachedShellRow("live"));
     // Assert
     expect(row.textContent).toContain("40 lines omitted");
+  });
+
+  it("draws no head facts, which live on the head row", async () => {
+    // Arrange / Act
+    const row = await drawRow(detachedShellRow("live"));
+    // Assert: drawing the clock here too would duplicate the head's.
+    expect(row.querySelector(".shell-clock")).toBeNull();
   });
 });
 
@@ -1463,10 +1475,10 @@ describe("a live detached subagent's stop", () => {
   });
 });
 
-describe("a live detached shell's stop", () => {
+describe("a live detached shell head's stop", () => {
   it("sends the detached target", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live", { id: feedId("shell-3") }));
+    await drawRow(shellHeadRow("live", { id: feedId("shell-3") }));
     // Act
     await harness.click('[data-feed-row="shell-3"] [data-interrupt]');
     // Assert
@@ -1476,7 +1488,7 @@ describe("a live detached shell's stop", () => {
 
   it("echoes the shell row's own FeedId", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live", { id: feedId("shell-3") }));
+    await drawRow(shellHeadRow("live", { id: feedId("shell-3") }));
     // Act
     await harness.click('[data-feed-row="shell-3"] [data-interrupt]');
     // Assert
@@ -1486,7 +1498,7 @@ describe("a live detached shell's stop", () => {
 
   it("offers no stop on a settled shell", async () => {
     // Arrange / Act: there is nothing left to stop.
-    const row = await drawRow(detachedShellRow("completed", { id: feedId("shell-3") }));
+    const row = await drawRow(shellHeadRow("completed", { id: feedId("shell-3") }));
     // Assert
     expect(row.querySelector("[data-interrupt]")).toBeNull();
   });
@@ -1988,14 +2000,14 @@ describe("a detached subagent's head clock", () => {
 describe("a live detached shell's head clock", () => {
   it("counts up from the served start instant", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow("live"));
+    const row = await drawRow(shellHeadRow("live"));
     // Assert
     expect(row.querySelector(".shell-clock")?.textContent).toBe("9s");
   });
 
   it("grows as time passes", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live"));
+    await drawRow(shellHeadRow("live"));
     // Act
     await harness.tick(5_000);
     // Assert
@@ -2004,17 +2016,17 @@ describe("a live detached shell's head clock", () => {
 
   it("reads the quiet-for figure from the live arm's last progress", async () => {
     // Arrange / Act
-    const row = await drawRow(detachedShellRow("live"));
+    const row = await drawRow(shellHeadRow("live"));
     // Assert
     expect(row.querySelector(".shell-quiet")?.textContent).toBe("quiet for 8s");
   });
 
   it("keeps the original start instant across a re-push", async () => {
     // Arrange
-    await drawRow(detachedShellRow("live"));
+    await drawRow(shellHeadRow("live"));
     await harness.tick(5_000);
     // Act
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedShellRow("live"));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, shellHeadRow("live"));
     await harness.settle();
     // Assert
     expect(harness.row("row-1")?.querySelector(".shell-clock")?.textContent).toBe("14s");
