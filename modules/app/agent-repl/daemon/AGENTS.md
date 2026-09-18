@@ -6,8 +6,8 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
 ## Build and test
 
-- `make test` — `go build ./... && go vet ./... && go test ./... -count=1` from
-  this directory. Measured 2.2s wall; slowest package 1.21s
+- `make test` — `go build ./... && go vet ./... && test -z "$(gofmt -l .)" && go test ./... -count=1`
+  from this directory. Measured 2.2s wall; slowest package 1.21s
   (`internal/gitclient`), slowest test 0.19s (`TestConfigDirForRouting`).
   Nothing in it is parallelized within a package, because at those figures
   per-test parallelism buys nothing measurable.

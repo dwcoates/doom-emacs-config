@@ -378,4 +378,3 @@ func digestHash(d *shimv1.GatherTitleDigestSuccess) string {
 	}
 	return strconv.FormatUint(h.Sum64(), 16)
 }
-
