@@ -135,6 +135,17 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   oneof, an unset non-optional message field, or an unknown arm is a
   `MalformedView` — never a default, never something else drawn instead. An
   absent `optional` field means draw nothing.
+- **ONE VIEWED MODE.** `ViewedRegistry` (src/sidebar/viewed.ts) decides every
+  row's FULL/PARTIAL display mode, and nothing else reads `RosterRowViewed`. In
+  PARTIAL the row's NAME greys to `--muted` and NOTHING else changes — the
+  status dot keeps its tone. It is the ONE deliberate piece of memory in the
+  stateless renderer: it remembers the status arm it last drew per workspace,
+  so that a row whose arm CHANGED is drawn FULL even while the wire still
+  carries the marker. That rule is the daemon's own (it clears the marker on
+  the same edge) and the Emacs tab-bar's; the three may never disagree, and the
+  module-root AGENTS.md section "The viewed mode" owns the invariant. The pass
+  is bracketed like the blink pass, because both groupings draw every row and
+  the two copies must resolve identically.
 - **ONE REFUSAL HOOK.** `src/rpc/refuse.ts`. `refusalOf` for a call site that
   words its own refusal, `drawTypedRefusal` for one that lets the hook draw it,
   `crossCuttingSentence` for one that composes its own sentence — all three

@@ -764,12 +764,13 @@ them in code, comments, tests and prose.
 - **partial** — only `[N]` carries it; the name region falls back to the bar's
   own ground (`agent-repl-tab-unarmed`).
 
-**THE RULE IS AN IF AND ONLY IF.** A tab is full exactly when that workspace's
-agent-repl panels — the webapp panel AND the input window — are open, and
-partial exactly when they are not. Nothing else may decide it: not selection,
-not how long the user has looked at the workspace, not the arm. A local
-ready-view dwell latch used to fade a viewed `:ready` workspace to partial with
-its panels wide open, and that is precisely what the rule forbids.
+**THE RULE IS AN IF AND ONLY IF, PLUS THE VIEWED MODE.** A tab is partial
+whenever that workspace's agent-repl panels — the webapp panel AND the input
+window — are closed, and full when they are open AND the user has not already
+seen what the workspace is showing. Nothing else may decide it: not selection,
+not the arm. Ruling 5 (2026-09-13) had "panels open" as the whole rule and
+struck the ready-view dwell that fought it; the owner's 2026-09-15 ruling put a
+dwell back, GENERALIZED — see the next section, which owns it.
 
 Where it is executable: `agent-repl--ws-agent-open-p` (status.el) is the
 panels-open fact, `agent-repl--ws-display-state` applies the rule and returns
@@ -785,6 +786,52 @@ The three axes on a tab are independent, and each says one thing:
 | color | the connection/lifecycle state | the arm's hue |
 | extent | are the panels open | full vs partial |
 | selection | which workspace the user is standing in | an underline under the NAME alone |
+
+## The viewed mode: PARTIAL means "you have already seen this"
+
+The same two words, `full` and `partial`, name a SECOND thing a workspace
+carries, and it is drawn on the Emacs tab-bar and in the webapp sidebar alike.
+A workspace whose panels the user has stood in front of for
+`agent-repl-tab-dwell-demote-seconds` is demoted to **partial**: the tab's name
+falls back to the bar's ground (`[N]` keeps the status colour) and the sidebar
+row's name greys to `--muted`. **The status itself never recedes** — the
+bracket and the sidebar dot keep their colour in either mode. The mode says
+what the user has SEEN; the colour says what the workspace is DOING.
+
+**ANY status change restores full, from any origin.** A user's prompt, a shim
+frame, a merge, a session that died — all of them reach a client as a changed
+`RosterRow.status` arm, and that edge is the whole reset rule. A first sighting
+is not a change, and a push restating the same arm is not a change, or nothing
+could ever stay partial.
+
+**Each surface has exactly two functions, and they are the invariant.**
+
+| | applies PARTIAL | restores FULL |
+|---|---|---|
+| Emacs | `agent-repl--tab-view-partial` (status.el) | `agent-repl--tab-view-restore-full` (status.el) |
+| webapp | `ViewedRegistry.modeFor` (webapp/src/sidebar/viewed.ts) | the same function, on the arm change |
+| daemon | `sidebar.Resolver.SetViewed` | `wsState.noteArm` (daemon/internal/resolve/sidebar/state.go) |
+
+Emacs's apply does BOTH halves in one place: it latches the tab bar AND reports
+the workspace to the daemon (`MarkWorkspaceViewed` -> `RosterRowViewed` on the
+row). That is deliberate and is what makes the two drawings one mode — a site
+that latched the tab without reporting would be a divergence by construction.
+Emacs's restore reports NOTHING: the daemon originated the status change and
+clears the row's marker on the same edge, so a report back would be Emacs
+telling the daemon what the daemon just said.
+
+**THE TAB-BAR AND THE SIDEBAR MAY NEVER DISAGREE ABOUT THIS MODE.** They are
+two drawings of one fact, exactly as the attention marker's blink cadence is
+one cadence drawn twice, and a divergence is a defect rather than a surface's
+own taste. The webapp therefore applies the restore rule itself rather than
+waiting to be told twice — a page that has already drawn the new status never
+draws the stale mode.
+
+Emacs learns every workspace status from the roster stream, which is why its
+restore hangs off ONE hook, `agent-repl-roster-status-change-functions`
+(roster.el), rather than enumerating origins. Emacs decodes `RosterRowViewed`
+and does not read it: the mode originates in the editor, so reading it back
+would be asking the daemon what the editor just said.
 
 ## Purple means the vendor, blue means the local environment, teal means nothing is wrong
 
