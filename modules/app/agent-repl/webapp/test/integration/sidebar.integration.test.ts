@@ -48,7 +48,12 @@ describe("arm coverage", () => {
   });
 
   it("covers both when-column arms", () => {
-    assertCoversOneof(RosterRowWhenSchema, "shown", ["lastSelected", "merged"]);
+    assertCoversOneof(RosterRowWhenSchema, "shown", [
+      "active",
+      "created",
+      "lastSelected",
+      "merged",
+    ]);
   });
 
   it("gives every merge arm a glyph rather than a color", () => {
@@ -227,11 +232,26 @@ describe("row decoration", () => {
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-detail]`)).toBeNull();
   });
 
-  it("recedes a closed row", async () => {
+  // A CLOSED ROW NEVER APPEARS IN THE RAIL (owner ruling, 2026-09-14). The
+  // daemon still EMITS it — Emacs reconciles its tab set from the `closed`
+  // flag — so the omission is this renderer's, applied where a live section's
+  // rows are laid out. The recently-merged band is the deliberate exception and
+  // has its own tests above.
+  it("drops a closed row from the rail rather than receding it", async () => {
     // Arrange / Act
     await withRoster({ rows: [rosterRow({ closed: true })] });
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"]`)?.dataset.closed).toBe("true");
+    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"]`)).toBeNull();
+  });
+
+  it("hoists a closed row's live child into its place", async () => {
+    // Arrange / Act: a live workspace cut from a killed parent's branch is
+    // still live, and keeps its row one level up rather than vanishing.
+    await withRoster({
+      rows: [rosterRow({ closed: true, children: [rosterRow({ id: "ws-child" })] })],
+    });
+    // Assert
+    expect(harness.$('[data-roster-row="ws-child"]')).not.toBeNull();
   });
 
   it("does not mark an open row closed", async () => {
@@ -275,6 +295,44 @@ describe("the when column", () => {
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
       "lastSelected",
     );
+  });
+
+  it("draws a relative age from the active arm", async () => {
+    // Arrange / Act: `active` is what this build's daemon sends — when the
+    // workspace LAST DID REAL WORK, not when it was last looked at.
+    await withRoster({ rows: [rosterRow({ when: "active", whenAtMs: 0n })] });
+    // Assert
+    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
+      "active",
+    );
+  });
+
+  it("draws the active arm as a bare age, with no prefix", async () => {
+    // Arrange / Act
+    await withRoster({ rows: [rosterRow({ when: "active", whenAtMs: 0n })] });
+    // Assert: only `merged` earns a word in front of its age.
+    expect(
+      harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent,
+    ).not.toContain("merged");
+  });
+
+  it("draws a relative age from the created arm", async () => {
+    // Arrange / Act: the fallback for a workspace that has never taken a turn,
+    // so the column is never blank for one that genuinely has a time to show.
+    await withRoster({ rows: [rosterRow({ when: "created", whenAtMs: 0n })] });
+    // Assert
+    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe(
+      "created",
+    );
+  });
+
+  it("draws the created arm as a bare age, with no prefix", async () => {
+    // Arrange / Act
+    await withRoster({ rows: [rosterRow({ when: "created", whenAtMs: 0n })] });
+    // Assert
+    expect(
+      harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.textContent,
+    ).not.toContain("created");
   });
 
   it("draws a relative age from the merged arm", async () => {
