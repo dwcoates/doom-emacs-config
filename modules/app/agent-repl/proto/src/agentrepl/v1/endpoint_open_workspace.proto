@@ -11,6 +11,12 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message OpenWorkspaceRequest {
   workspace.v1.WorkspaceRef workspace = 1;
+  // A client-minted correlation id. OPTIONAL, and it changes nothing about
+  // how this rpc answers: supplying one asks the daemon to also push the
+  // open's stages onto WatchDaemon keyed on it
+  // (workspace_mutation_progress.proto), so a client can report the wait
+  // rather than only its outcome. An open with no op_id emits no stages.
+  string op_id = 2;
 }
 
 // THE ARM IS THE OUTCOME.
