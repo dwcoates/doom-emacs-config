@@ -807,24 +807,24 @@ func TestBoundHides(t *testing.T) {
 		want  bool
 	}{
 		{
-			name:  "same plane, before the cut, is pre-cut and hidden",
-			row:   rowRank{plane: planeLive, seq: 3}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+			name: "same plane, before the cut, is pre-cut and hidden",
+			row:  rowRank{plane: planeLive, seq: 3}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
 		},
 		{
-			name:  "same plane, after the cut, is post-cut and kept",
-			row:   rowRank{plane: planeLive, seq: 7}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
+			name: "same plane, after the cut, is post-cut and kept",
+			row:  rowRank{plane: planeLive, seq: 7}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
 		},
 		{
-			name:  "earlier plane drawn after the cut is a late pre-cut row, hidden",
-			row:   rowRank{plane: planeHistory, seq: 9}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
+			name: "earlier plane drawn after the cut is a late pre-cut row, hidden",
+			row:  rowRank{plane: planeHistory, seq: 9}, bound: rowRank{plane: planeLive, seq: 5}, want: true,
 		},
 		{
-			name:  "earlier plane drawn before the cut is replayed post-cut content, kept",
-			row:   rowRank{plane: planeHistory, seq: 2}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
+			name: "earlier plane drawn before the cut is replayed post-cut content, kept",
+			row:  rowRank{plane: planeHistory, seq: 2}, bound: rowRank{plane: planeLive, seq: 5}, want: false,
 		},
 		{
-			name:  "later plane is unambiguously after the cut, kept",
-			row:   rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeHistory, seq: 5}, want: false,
+			name: "later plane is unambiguously after the cut, kept",
+			row:  rowRank{plane: planeLive, seq: 1}, bound: rowRank{plane: planeHistory, seq: 5}, want: false,
 		},
 	}
 

@@ -418,7 +418,7 @@ func TestOpenReportsItsStagesInOrder(t *testing.T) {
 			},
 		},
 		{
-			name: "an already-live session skips the bring-up stage",
+			name:  "an already-live session skips the bring-up stage",
 			setup: func(_ *testing.T, f *fixture) { f.fleet.live["w1"] = true },
 			want: []OpenStage{
 				OpenStageCheckingWorktree,
