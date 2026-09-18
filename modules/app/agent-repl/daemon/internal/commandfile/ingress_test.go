@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -420,7 +419,14 @@ func TestSettledLeavesAYoungHalfWrittenFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`[{"type":"task-cre`), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	f.now = time.Now()
+	// The clock reads the file's own mtime, so its age is exactly zero:
+	// a wall-clock read after the write aged it by however long the
+	// scheduler held this goroutine, past Interval under load.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	f.now = info.ModTime()
 
 	// Act.
 	got, err := f.ingress.(*ingress).settled(path)
@@ -441,7 +447,14 @@ func TestSettledAcceptsAYoungButCompleteFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`[{"type":"task-create","title":"t"}]`), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	f.now = time.Now()
+	// The clock reads the file's own mtime, so its age is exactly zero:
+	// a wall-clock read after the write aged it by however long the
+	// scheduler held this goroutine, past Interval under load.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	f.now = info.ModTime()
 
 	// Act.
 	got, err := f.ingress.(*ingress).settled(path)
