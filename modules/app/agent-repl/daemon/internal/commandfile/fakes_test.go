@@ -83,7 +83,7 @@ func (v *fakeVerbs) Forget(_ context.Context, ws ids.WorkspaceID) error {
 	return v.err
 }
 
-func (v *fakeVerbs) Open(_ context.Context, ws ids.WorkspaceID) error {
+func (v *fakeVerbs) Open(_ context.Context, ws ids.WorkspaceID, _ workspace.OpenProgress) error {
 	v.calls = append(v.calls, verbCall{Verb: "open", WS: ws})
 	return v.err
 }
