@@ -574,3 +574,51 @@ func TestCreateWorkspaceSurfacesARefusalOnTheFailureEvent(t *testing.T) {
 		t.Fatalf("naming_failed cause = %q, want timeout", got)
 	}
 }
+
+// ---- MarkWorkspaceViewed ---------------------------------------------------
+
+// TestMarkWorkspaceViewedAnswersSuccess pins the editor's viewed report
+// reaching the verb with the id the registry resolved.
+func TestMarkWorkspaceViewedAnswersSuccess(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.MarkWorkspaceViewed(context.Background(),
+		connect.NewRequest(&agentreplv1.MarkWorkspaceViewedRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MarkWorkspaceViewed: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.markViewed) != 1 || h.Verbs.markViewed[0] != testWorkspaceID {
+		t.Fatalf("marked = %v, want the resolved workspace once", h.Verbs.markViewed)
+	}
+}
+
+// TestMarkWorkspaceViewedRefusesAnUnknownWorkspace pins that an id the registry
+// does not hold answers the unknown_workspace arm rather than a transport error.
+func TestMarkWorkspaceViewedRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.MarkWorkspaceViewed(context.Background(),
+		connect.NewRequest(&agentreplv1.MarkWorkspaceViewedRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MarkWorkspaceViewed: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.markViewed) != 0 {
+		t.Fatalf("marked = %v, want nothing marked for an unknown workspace", h.Verbs.markViewed)
+	}
+}
