@@ -58,6 +58,7 @@
 
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-link-dial-successor "daemon-link" (address))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
@@ -453,6 +454,50 @@ workspace has no identity to select."
        (lambda (detail)
          (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
          (when on-settled (funcall on-settled :failure))))
+      t))))
+
+(defun agent-repl-host-mark-viewed (ws)
+  "Tell the daemon the user has now SEEN workspace WS.
+The editor half of the FULL/PARTIAL display mode: the tab bar has just
+demoted WS\='s tab to PARTIAL after the view dwell, and this is what puts
+the same mode on the workspace\='s sidebar row, so the two surfaces never
+disagree about what the user has seen.
+
+FIRE AND FORGET, and deliberately: the mode is presentation, the daemon
+clears it itself on the row\='s next status change, and a workspace whose
+report never lands simply keeps a FULL sidebar row until the next one
+does.  So a refusal is RECORDED and nothing is retried or rolled back —
+there is no local state to roll back to.
+
+Answers nil without calling anything when WS has no ref or no connection
+yet: an unregistered workspace has no row to mark."
+  (let ((ref (agent-repl-host-ref ws))
+        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+    (cond
+     ((null ref)
+      (agent-repl--log ws "elisp.host.mark-viewed-skipped ws=%s reason=no-ref" ws)
+      nil)
+     ((null conn)
+      (agent-repl--log ws "elisp.host.mark-viewed-skipped ws=%s reason=no-connection" ws)
+      nil)
+     (t
+      (agent-repl--log ws "elisp.host.mark-viewed ws=%s id=%S" ws (plist-get ref :id))
+      (agent-repl-rpc-mark-workspace-viewed
+       conn (list :workspace ref)
+       :on-response
+       (lambda (response)
+         (pcase (plist-get response :arm)
+           (:success
+            (agent-repl--log ws "elisp.host.marked-viewed ws=%s" ws))
+           (:error
+            (agent-repl-host--on-refused ws "mark-viewed" (plist-get response :value)))
+           (arm
+            (agent-repl--error ws "elisp.host.mark-viewed-unknown-arm ws=%s arm=%S"
+                               ws arm))))
+       :on-failure
+       (lambda (detail)
+         (agent-repl--error ws "elisp.host.mark-viewed-failed ws=%s detail=%S"
+                            ws detail)))
       t))))
 
 (defun agent-repl-host--on-workspace-activated (&rest _)

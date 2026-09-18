@@ -144,6 +144,45 @@
                   #'agent-repl-wire-decode-select-workspace-response "{}")
                  '("SelectWorkspaceResponse" result "oneof is unset"))))
 
+;;;; ---- MarkWorkspaceViewed ----
+
+(ert-deftest agent-repl-test-wire-host-mark-viewed-request-echoes-the-ref ()
+  "MarkWorkspaceViewed echoes the daemon-minted ref, never a path it built."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-mark-workspace-viewed-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-mark-viewed-request-without-a-ref-is-refused ()
+  "An incomplete request errors before send, never on the wire."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (condition-case err
+                       (progn (agent-repl-wire-encode-mark-workspace-viewed-request nil) nil)
+                     (agent-repl-wire-error (cdr err))))
+                 '("MarkWorkspaceViewedRequest" workspace
+                   "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-mark-viewed-success-is-empty ()
+  "Marked; the roster stream carries the row's viewed marker."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-mark-workspace-viewed-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-mark-viewed-error-arm-decodes ()
+  "The error arm decodes to its keyword with the cause the daemon named."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-mark-workspace-viewed-response
+                  "{\"error\":{\"unknownWorkspace\":{}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-mark-viewed-unset-result-is-a-breach ()
+  "A MarkWorkspaceViewed response with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-mark-workspace-viewed-response "{}")
+                 '("MarkWorkspaceViewedResponse" result "oneof is unset"))))
+
 ;;;; ---- AdoptHostWorkspace ----
 
 (ert-deftest agent-repl-test-wire-host-adopt-request-echoes-the-ref ()

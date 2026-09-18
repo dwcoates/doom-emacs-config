@@ -100,6 +100,17 @@ construction, so a new push REPLACES this value outright.")
 Runs AFTER reconciliation, so a handler observing the tabs sees the ones
 this push produced.")
 
+(defvar agent-repl-roster-status-change-functions nil
+  "Abnormal hook run with (WS PREVIOUS CURRENT) per row whose ARM CHANGED.
+
+THE ONE ANNOUNCEMENT THAT A WORKSPACE\='S STATUS CHANGED, whatever caused
+it: a prompt the user sent, a frame the shim pushed, a merge, a session
+that died.  Emacs learns every status from this one stream, so a reaction
+registered here sees every origin without enumerating any of them.
+
+Runs before `agent-repl-roster-update-functions\=' and only for rows that
+have a tab.  A first sighting is NOT a change (PREVIOUS is never nil).")
+
 (defvar agent-repl-roster-bringup-functions nil
   "Abnormal hook run with (OPENED TOTAL FINISHED) as a reconcile opens tabs.
 
@@ -695,32 +706,81 @@ edge, and neither is a move within the running set."
        (memq current agent-repl-roster-settled-statuses)
        t))
 
+(defun agent-repl-roster--walk-status-transitions (roster fn)
+  "Call FN once per row of ROSTER with that row\='s status transition.
+
+FN receives a plist `(:row ROW :id ID :ws WS :scope SCOPE :previous
+PREVIOUS :current CURRENT)\=', where PREVIOUS is the arm the last accepted
+push carried for the row (nil on a first sighting), WS is the tab\='s
+workspace or nil when no tab exists for the id yet, and SCOPE is the log
+sink to attribute a record about the row to.
+
+THE ONE PLACE A PUSH IS COMPARED AGAINST THE ONE BEFORE IT.  Both
+readers of that comparison — the FINISH EDGE and the STATUS CHANGE —
+walk through here, so there is one answer to \"what changed in this
+push\" rather than two tables drifting apart.  It must run BEFORE
+`agent-repl-roster--record-statuses\=', which is what makes this push\='s
+arms the next push\='s PREVIOUS."
+  (dolist (entry (agent-repl-roster-walk roster))
+    (let* ((row (plist-get entry :row))
+           (id (agent-repl-roster-row-id row))
+           (current (agent-repl-roster-row-status row))
+           (previous (gethash id agent-repl-roster--status-by-id))
+           (ws (agent-repl--ws-by-ref-id id))
+           (scope (if ws
+                      ws
+                    '(:agent-repl-central
+                      "a roster row without a tab has no workspace sink"))))
+      (funcall fn (list :row row :id id :ws ws :scope scope
+                        :previous previous :current current)))))
+
 (defun agent-repl-roster--run-finish-edges (roster)
   "Run `agent-repl-roster-finish-functions' for every finish edge in ROSTER.
 Returns the workspaces whose rows crossed the edge."
   (let ((fired nil))
-    (dolist (entry (agent-repl-roster-walk roster))
-      (let* ((row (plist-get entry :row))
-             (id (agent-repl-roster-row-id row))
-             (current (agent-repl-roster-row-status row))
-             (previous (gethash id agent-repl-roster--status-by-id))
-             (ws (agent-repl--ws-by-ref-id id))
-             (scope (if ws
-                        ws
-                      '(:agent-repl-central
-                        "a roster row without a tab has no workspace sink"))))
-        (if (agent-repl-roster--finish-edge-p previous current)
-            (if ws
-                (progn
-                  (agent-repl--info ws "elisp.roster.finish-edge: ws=%s from=%s to=%s"
-                                    ws previous current)
-                  (push ws fired)
-                  (run-hook-with-args 'agent-repl-roster-finish-functions ws))
-              (agent-repl--log scope "elisp.roster.finish-edge: no tab id=%s from=%s to=%s"
-                               id previous current))
-          (agent-repl--log scope "elisp.roster.status: id=%s from=%s to=%s edge=nil"
-                           id previous current))))
+    (agent-repl-roster--walk-status-transitions
+     roster
+     (lambda (transition)
+       (let ((id (plist-get transition :id))
+             (ws (plist-get transition :ws))
+             (scope (plist-get transition :scope))
+             (previous (plist-get transition :previous))
+             (current (plist-get transition :current)))
+         (if (agent-repl-roster--finish-edge-p previous current)
+             (if ws
+                 (progn
+                   (agent-repl--info ws "elisp.roster.finish-edge: ws=%s from=%s to=%s"
+                                     ws previous current)
+                   (push ws fired)
+                   (run-hook-with-args 'agent-repl-roster-finish-functions ws))
+               (agent-repl--log scope "elisp.roster.finish-edge: no tab id=%s from=%s to=%s"
+                                id previous current))
+           (agent-repl--log scope "elisp.roster.status: id=%s from=%s to=%s edge=nil"
+                            id previous current)))))
     (nreverse fired)))
+
+(defun agent-repl-roster--run-status-changes (roster)
+  "Run `agent-repl-roster-status-change-functions' for every changed arm.
+
+A CHANGE is a row whose arm differs from the arm the last accepted push
+carried for it.  A FIRST SIGHTING is not a change — there is no previous
+status for the row to have moved away from — which is exactly the rule
+the daemon applies to the same edge, so the two cannot disagree about
+what counts as new activity.
+
+Returns the workspaces whose status changed."
+  (let ((changed nil))
+    (agent-repl-roster--walk-status-transitions
+     roster
+     (lambda (transition)
+       (let ((ws (plist-get transition :ws))
+             (previous (plist-get transition :previous))
+             (current (plist-get transition :current)))
+         (when (and ws previous (not (eq previous current)))
+           (push ws changed)
+           (run-hook-with-args 'agent-repl-roster-status-change-functions
+                               ws previous current)))))
+    (nreverse changed)))
 
 ;;;; ---- The reactions ----------------------------------------------------
 
@@ -790,6 +850,9 @@ dropped."
       (setq agent-repl-roster-view roster)
       (let ((order (agent-repl-roster-reconcile roster)))
         (agent-repl-roster--run-finish-edges roster)
+        ;; BEFORE the statuses are recorded: this compares against the arms
+        ;; the LAST push left behind, which the record below replaces.
+        (agent-repl-roster--run-status-changes roster)
         (agent-repl-roster--record-statuses entries)
         (agent-repl-roster-react-to-current roster)
         (run-hook-with-args 'agent-repl-roster-update-functions roster)
