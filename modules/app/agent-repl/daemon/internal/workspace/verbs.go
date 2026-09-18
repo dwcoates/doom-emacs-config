@@ -30,6 +30,7 @@ const (
 	opForget         = "daemon.workspace.forget"
 	opRestart        = "daemon.workspace.restart"
 	opSelect         = "daemon.workspace.select"
+	opMarkViewed     = "daemon.workspace.mark_viewed"
 	opSetPriority    = "daemon.workspace.set_priority"
 	opCreateTask     = "daemon.workspace.create_task"
 	opUpdateTask     = "daemon.workspace.update_task"

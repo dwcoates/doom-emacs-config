@@ -145,6 +145,9 @@ const (
 	// AgentReplSelectWorkspaceProcedure is the fully-qualified name of the AgentRepl's SelectWorkspace
 	// RPC.
 	AgentReplSelectWorkspaceProcedure = "/agentrepl.v1.AgentRepl/SelectWorkspace"
+	// AgentReplMarkWorkspaceViewedProcedure is the fully-qualified name of the AgentRepl's
+	// MarkWorkspaceViewed RPC.
+	AgentReplMarkWorkspaceViewedProcedure = "/agentrepl.v1.AgentRepl/MarkWorkspaceViewed"
 	// AgentReplWatchHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchHostWorkspace RPC.
 	AgentReplWatchHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
@@ -225,6 +228,7 @@ var (
 	agentReplClientLogMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ClientLog")
 	agentReplRegisterWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
 	agentReplSelectWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
+	agentReplMarkWorkspaceViewedMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
 	agentReplWatchHostWorkspaceMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplAdoptHostWorkspaceMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
@@ -358,6 +362,9 @@ type AgentReplClient interface {
 	// The user switched to this workspace in the editor; idempotent. See
 	// endpoint_select_workspace.proto.
 	SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error)
+	// The user has now SEEN this workspace: its row goes PARTIAL until its
+	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
+	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error)
@@ -652,6 +659,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSelectWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		markWorkspaceViewed: connect.NewClient[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](
+			httpClient,
+			baseURL+AgentReplMarkWorkspaceViewedProcedure,
+			connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchHostWorkspace: connect.NewClient[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchHostWorkspaceProcedure,
@@ -781,6 +794,7 @@ type agentReplClient struct {
 	clientLog              *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
 	registerWorkspace      *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
 	selectWorkspace        *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
+	markWorkspaceViewed    *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
 	watchHostWorkspace     *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon            *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	adoptHostWorkspace     *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
@@ -997,6 +1011,11 @@ func (c *agentReplClient) SelectWorkspace(ctx context.Context, req *connect.Requ
 	return c.selectWorkspace.CallUnary(ctx, req)
 }
 
+// MarkWorkspaceViewed calls agentrepl.v1.AgentRepl.MarkWorkspaceViewed.
+func (c *agentReplClient) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
+	return c.markWorkspaceViewed.CallUnary(ctx, req)
+}
+
 // WatchHostWorkspace calls agentrepl.v1.AgentRepl.WatchHostWorkspace.
 func (c *agentReplClient) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error) {
 	return c.watchHostWorkspace.CallServerStream(ctx, req)
@@ -1184,6 +1203,9 @@ type AgentReplHandler interface {
 	// The user switched to this workspace in the editor; idempotent. See
 	// endpoint_select_workspace.proto.
 	SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error)
+	// The user has now SEEN this workspace: its row goes PARTIAL until its
+	// status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
+	MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error
@@ -1474,6 +1496,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSelectWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplMarkWorkspaceViewedHandler := connect.NewUnaryHandler(
+		AgentReplMarkWorkspaceViewedProcedure,
+		svc.MarkWorkspaceViewed,
+		connect.WithSchema(agentReplMarkWorkspaceViewedMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchHostWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchHostWorkspaceProcedure,
 		svc.WatchHostWorkspace,
@@ -1640,6 +1668,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplRegisterWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSelectWorkspaceProcedure:
 			agentReplSelectWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplMarkWorkspaceViewedProcedure:
+			agentReplMarkWorkspaceViewedHandler.ServeHTTP(w, r)
 		case AgentReplWatchHostWorkspaceProcedure:
 			agentReplWatchHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchDaemonProcedure:
@@ -1835,6 +1865,10 @@ func (UnimplementedAgentReplHandler) RegisterWorkspace(context.Context, *connect
 
 func (UnimplementedAgentReplHandler) SelectWorkspace(context.Context, *connect.Request[v1.SelectWorkspaceRequest]) (*connect.Response[v1.SelectWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) MarkWorkspaceViewed(context.Context, *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MarkWorkspaceViewed is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {

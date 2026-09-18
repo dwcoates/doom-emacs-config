@@ -683,6 +683,23 @@ func (s *requestLoggingServer) SelectWorkspace(
 	return s.server.SelectWorkspace(ctx, req)
 }
 
+func (s *requestLoggingServer) MarkWorkspaceViewed(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],
+) (resp *connect.Response[agentreplv1.MarkWorkspaceViewedResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "MarkWorkspaceViewed", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.mark_workspace_viewed", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.mark_workspace_viewed", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.MarkWorkspaceViewed(ctx, req)
+}
+
 func (s *requestLoggingServer) WatchHostWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchHostWorkspaceRequest],
