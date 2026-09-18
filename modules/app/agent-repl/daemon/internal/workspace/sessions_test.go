@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -3097,5 +3098,43 @@ func TestResumeColdOpensNoWatchWhenNobodyIsListening(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("ResumeCold: %v", err)
+	}
+}
+
+func TestFleetWorkspacesAnswersTheHeldSessions(t *testing.T) {
+	cases := []struct {
+		name  string
+		start bool
+		stop  bool
+		want  []ids.WorkspaceID
+	}{
+		{name: "no session is held", want: []ids.WorkspaceID{}},
+		{name: "a started session is held", start: true, want: []ids.WorkspaceID{"w1"}},
+		{name: "a stopped session is not held", start: true, stop: true, want: []ids.WorkspaceID{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tc.start {
+				if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+					t.Fatalf("Start: %v", err)
+				}
+			}
+			if tc.stop {
+				if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
+					t.Fatalf("Stop: %v", err)
+				}
+			}
+
+			// Act.
+			got := f.fleet.Workspaces()
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("Workspaces() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
