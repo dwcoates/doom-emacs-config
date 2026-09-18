@@ -37,6 +37,31 @@ const runRootGlob = "/tmp/arrun*"
 
 const ownerLockName = "owner.lock"
 
+// creationLockPath serializes a root's BIRTH against every reclaim.
+//
+// A root is created, then its owner lock is opened, then taken: three steps,
+// and a reclaim that looked in between saw a root with no lock file, or with
+// one nobody held yet, and read it as dead. `go test ./...` starts this
+// package's suite and the harness package's own tests at the same instant,
+// so one run's reclaim removed the other's brand-new root out from under it.
+// Holding this one fixed, never-removed lock across both the birth and the
+// scan makes that window unobservable: a reclaim sees a root only before it
+// exists or after its owner holds it.
+const creationLockPath = "/tmp/agent-repl-itest-runroot.lock"
+
+// withCreationLock runs body holding creationLockPath exclusively.
+func withCreationLock(body func() error) error {
+	f, err := os.OpenFile(creationLockPath, os.O_CREATE|os.O_RDWR, 0o666)
+	if err != nil {
+		return fmt.Errorf("open the run-root creation lock: %w", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("take the run-root creation lock: %w", err)
+	}
+	return body()
+}
+
 // runRoot is this process's run root; empty until MainAt lays it out.
 var runRoot string
 
@@ -44,7 +69,15 @@ var runRoot string
 // state roots beneath it carry unix sockets under a 103-byte budget — and takes
 // its owner lock. The returned file IS the lock: it must stay open for the
 // whole run, and is never inherited by a child (Go opens with O_CLOEXEC).
-func newRunRoot() (string, *os.File, error) {
+func newRunRoot() (dir string, lock *os.File, err error) {
+	err = withCreationLock(func() error {
+		dir, lock, err = newRunRootLocked()
+		return err
+	})
+	return dir, lock, err
+}
+
+func newRunRootLocked() (string, *os.File, error) {
 	dir, err := os.MkdirTemp("/tmp", "arrun")
 	if err != nil {
 		return "", nil, fmt.Errorf("mkdir the run root: %w", err)
@@ -68,6 +101,10 @@ func newRunRoot() (string, *os.File, error) {
 // Every reclaim is reported on stderr, because a reclaim is evidence that an
 // earlier run died without cleaning up, and that is worth seeing.
 func reclaimDeadRuns() error {
+	return withCreationLock(reclaimDeadRunsLocked)
+}
+
+func reclaimDeadRunsLocked() error {
 	roots, err := filepath.Glob(runRootGlob)
 	if err != nil {
 		return fmt.Errorf("list the run roots: %w", err)
