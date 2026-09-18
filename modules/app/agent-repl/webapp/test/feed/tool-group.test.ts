@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import stylesheet from "../../src/styles.css?raw";
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   FEED_GROUP_CLASS,
@@ -264,5 +265,34 @@ describe("activateGroupedMember", () => {
     const stray = document.createElement("span");
     group?.append(stray);
     expect(() => activateGroupedMember(stray)).not.toThrow();
+  });
+});
+
+describe("the tab strip's size (styles.css)", () => {
+  // Owner-prescribed: the tab strip and its tabs read about 50% smaller than
+  // before. Pinned here, alongside the module that draws them, so a future
+  // resize of `.feed-group-strip`/`.feed-group-tab` is a deliberate edit to
+  // this test rather than a silent drift.
+  /** The declaration block for SELECTOR, exactly as it appears in the sheet. */
+  function ruleBodyOf(selector: string): string {
+    const pattern = new RegExp(
+      `${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`,
+    );
+    const match = pattern.exec(stylesheet);
+    if (match === null) throw new Error(`no rule found for ${selector}`);
+    return match[1];
+  }
+
+  it("halves the strip's gap and padding", () => {
+    const body = ruleBodyOf(".feed-group-strip");
+    expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.125rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.05rem 0 0\.15rem\s*;/);
+  });
+
+  it("halves a tab's gap, padding and font-size", () => {
+    const body = ruleBodyOf(".feed-group-tab");
+    expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.125rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.075rem 0\.225rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])font-size\s*:\s*0\.5em\s*;/);
   });
 });
