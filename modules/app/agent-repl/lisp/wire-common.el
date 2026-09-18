@@ -735,6 +735,26 @@ against the workspace it was handing over and the daemon-health filter
      (list :adoption-window (agent-repl-wire--decode-string
                     "SessionFaultAdoptionWindowExpired" 'adoptionWindow object)))))
 
+(defun agent-repl-wire-decode-session-fault-final-answer-unresolved (value)
+  "Decode VALUE as `SessionFaultFinalAnswerUnresolved', a plist
+(`:turn' `:unit' `:why').
+A turn that concluded with NO GREEN ANSWER STANDING: the terminal named no
+answering response while the turn drew prose, the answer it named resolves to
+no drawn row, or an open response went silent.  NOT a failure to serve — the
+session is healthy and the prose is on screen — so it never escalates the
+footer's status; `why' is the substatus, and it is carried HERE rather than in
+the status cell for exactly that reason."
+  (let ((object (agent-repl-wire--object "SessionFaultFinalAnswerUnresolved" value)))
+    (agent-repl-wire--check-keys "SessionFaultFinalAnswerUnresolved" object '(turn unit why))
+    (agent-repl-wire--decoded
+     "SessionFaultFinalAnswerUnresolved"
+     (list :turn (agent-repl-wire--decode-string
+                    "SessionFaultFinalAnswerUnresolved" 'turn object)
+           :unit (agent-repl-wire--decode-string
+                    "SessionFaultFinalAnswerUnresolved" 'unit object)
+           :why (agent-repl-wire--decode-string
+                    "SessionFaultFinalAnswerUnresolved" 'why object)))))
+
 (provide 'wire-common)
 
 ;;; wire-common.el ends here

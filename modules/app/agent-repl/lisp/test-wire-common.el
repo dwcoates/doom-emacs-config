@@ -656,6 +656,22 @@ without a keyword here fails this test instead of failing a send."
                   "{\"adoptionWindow\":\"30s\"}")
                  '(:adoption-window "30s"))))
 
+(ert-deftest agent-repl-test-wire-common-session-fault-final-answer-unresolved-decodes ()
+  "The unresolved-final-answer class carries the turn, the unit and the `why'
+that tells its three cases apart."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-final-answer-unresolved
+                  "{\"turn\":\"turn-7\",\"unit\":\"msg_01:0\",\"why\":\"no_answer_named\"}")
+                 '(:turn "turn-7" :unit "msg_01:0" :why "no_answer_named"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-final-answer-unresolved-refuses-a-field ()
+  "A field the unresolved-final-answer class does not declare is refused."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-session-fault-final-answer-unresolved
+                     (agent-repl-test-wire-common--parse "{\"turn\":\"t\",\"unit\":\"u\",\"why\":\"w\",\"row\":\"r\"}"))))
+                 '("SessionFaultFinalAnswerUnresolved" row "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-common-session-fault-session-absent-refuses-a-field ()
   "A field inside the empty session-absent class is refused, never dropped."
   (should (equal (agent-repl-test-wire-common--breach

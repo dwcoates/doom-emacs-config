@@ -84,6 +84,7 @@
 (declare-function agent-repl-wire-decode-session-fault-watch-open-refused "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-daemon-state-unreadable "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -2404,6 +2405,11 @@ ANSWERED at all."
 `SessionFaultAdoptionWindowExpired'."
   (agent-repl-wire-decode-session-fault-adoption-window-expired json))
 
+(defun agent-repl-wire-decode-session-fault-kind-final-answer-unresolved (json)
+  "Decode SessionFault's `final_answer_unresolved' kind arm from JSON as a
+`SessionFaultFinalAnswerUnresolved'."
+  (agent-repl-wire-decode-session-fault-final-answer-unresolved json))
+
 (defun agent-repl-wire-decode-session-fault-kind (json)
   "Decode SessionFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -2422,15 +2428,16 @@ it, so a fault with no kind is a contract breach."
                  (list 'sessionAbsent :session-absent #'agent-repl-wire-decode-session-fault-kind-session-absent)
                  (list 'watchOpenRefused :watch-open-refused #'agent-repl-wire-decode-session-fault-kind-watch-open-refused)
                  (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-session-fault-kind-daemon-state-unreadable)
-                 (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-session-fault-kind-adoption-window-expired))))
+                 (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-session-fault-kind-adoption-window-expired)
+                 (list 'finalAnswerUnresolved :final-answer-unresolved #'agent-repl-wire-decode-session-fault-kind-final-answer-unresolved))))
 
 (defun agent-repl-wire-decode-session-fault (json)
   "Decode SessionFault from JSON into (:detail STRING :kind ONEOF).
 Deliberately NOT DaemonFault: a session's fault classes are the session
-controller's own vocabulary — the same thirteen the host stream's HostFault
+controller's own vocabulary — the same fourteen the host stream's HostFault
 carries, decoded through the same shared arm messages."
   (let ((message "SessionFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired))
+    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-session-fault-kind json))))
 

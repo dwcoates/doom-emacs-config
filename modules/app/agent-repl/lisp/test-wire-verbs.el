@@ -2275,6 +2275,15 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"adoptionWindowExpired\":{\"adoptionWindow\":\"30s\"}}"))
                    '(:detail "" :kind (:arm :adoption-window-expired :value (:adoption-window "30s")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-session-fault-final-answer-unresolved-kind ()
+  "SessionFault's `final_answer_unresolved' kind decodes with everything it
+carries: the turn, the unit, and the `why' that IS this kind's substatus."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"finalAnswerUnresolved\":{\"turn\":\"turn-7\",\"unit\":\"msg_01:0\",\"why\":\"answer_row_unresolved\"}}"))
+                   '(:detail "" :kind (:arm :final-answer-unresolved
+                                       :value (:turn "turn-7" :unit "msg_01:0" :why "answer_row_unresolved")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-session-fault-unknown-kind-is-a-breach ()
   "A SessionFault kind this codec does not know is refused, never dropped."
   (agent-repl-test-wire-verbs--with-common
@@ -2283,11 +2292,11 @@ carries."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-session-fault-kind-arms-pinned ()
-  "SessionFault's kind oneof has exactly the thirteen arms decoded here."
+  "SessionFault's kind oneof has exactly the fourteen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_session_health.pb.go" "SessionFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved")
                        #'string<))))
 
 ;;;; ---- DaemonFault kinds (landing 4) ------------------------------------
