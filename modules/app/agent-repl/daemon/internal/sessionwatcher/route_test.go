@@ -554,7 +554,7 @@ func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
 	})
 	if !h.w.LiveWork().Empty() {
 		t.Fatal("lost work stayed in the live set")
@@ -608,7 +608,7 @@ func TestRouteDetachedSubagentFrame(t *testing.T) {
 	// same breath the chip retires.
 	assertNames(t, got, []string{
 		"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
 	})
 }
 
@@ -625,7 +625,7 @@ func TestRouteDetachedWorkAnnouncement(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"feed.OnDetachedWork", "footer.OnDetachedWork", "sidebar.OnDetachedWork",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
 	})
 }
 
@@ -778,7 +778,8 @@ func TestRouteQueryDied(t *testing.T) {
 	assertNames(t, got, []string{
 		"footer.OnSessionUpdate", "feed.OnTurnOpened", "feed.OnSessionUpdate",
 		"sidebar.OnSessionUpdate",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "lifecycle.OnTurnEnded",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
+		"lifecycle.OnTurnEnded",
 	})
 	if !h.w.Free() {
 		t.Fatal("a dead session is not free; a lease holder would wait forever")

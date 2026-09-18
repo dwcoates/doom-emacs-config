@@ -478,8 +478,14 @@ func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 }
 
 // background resolves detached work running while the main thread is free.
+//
+// IT ANSWERS FROM THE WATCHER'S LIVE-WORK SET, never from a count of the
+// footer's own rows: the watcher reaps each detached item at its terminal and
+// is the single authority for detached liveness on this surface and on the
+// roster (see livework.go). An EMPTY set is never a background arm, whatever
+// rows the footer still holds.
 func (r *resolver) background(s *wsState) *frontendv1.FooterStatus {
-	if len(s.agents)+len(s.shells)+len(s.monitors) == 0 {
+	if !s.detachedLive() {
 		return nil
 	}
 	return &frontendv1.FooterStatus{
