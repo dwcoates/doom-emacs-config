@@ -162,7 +162,8 @@ message FooterStrip {
 //   | status     | substatus | fault kinds                                  |
 //   |------------|-----------|----------------------------------------------|
 //   | (whatever  | (whatever | shim_reported, classifier_failed,            |
-//   |  stands)   |  stands)  | bounce_unknown, conversation_abandoned       |
+//   |  stands)   |  stands)  | bounce_unknown, conversation_abandoned,      |
+//   |            |           | final_answer_unresolved                      |
 //
 // WHY THOSE FOUR DO NOT ESCALATE, since the ruling's worked example put them
 // under `disconnected · degraded`: the shim answered in every one of them. A
@@ -174,6 +175,15 @@ message FooterStrip {
 // (webapp/src/main.ts), so escalating them would lock the user out of a
 // session that is serving perfectly. The fault still reaches the footer —
 // which is what the ruling asked for — as the activity line.
+//
+// `final_answer_unresolved` joins them for the same reason and one more. It is
+// the turn that concluded with no green answer standing (the terminal named
+// none while prose was drawn, the named answer resolved to no row, or an open
+// response went silent) — the session is healthy and the prose is on screen,
+// so nothing about it means the session cannot be used. Its three cases are
+// told apart by the `why` value SessionFaultFinalAnswerUnresolved carries,
+// never by a substatus, because a substatus is only legal under a status the
+// fault claims and neither claimable status would be true here.
 //
 // `bounce_disposition` is the one recorded kind with no footer cell, for the
 // same reason it has no wire arm: it is opened and closed in one breath as

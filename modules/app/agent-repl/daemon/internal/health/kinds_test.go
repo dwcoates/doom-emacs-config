@@ -111,6 +111,7 @@ func TestSessionFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "watch open refused", kind: KindWatchOpenRefused},
 		{name: "daemon state unreadable", kind: KindStateUnreadable},
 		{name: "adoption window expired", kind: KindAdoptionWindowExpired},
+		{name: "final answer unresolved", kind: KindFinalAnswerUnresolved},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -517,5 +518,30 @@ func TestStartFailedDetailComposesTheLineFromTheFaultsOwnEvidence(t *testing.T) 
 				t.Fatalf("StartFailedDetail = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestFinalAnswerUnresolvedCarriesTheTurnTheUnitAndTheWhy pins that the arm
+// carries what the reader needs to tell the three cases apart: `why` IS the
+// substatus for this kind, and the footer's substatus cell never holds it.
+func TestFinalAnswerUnresolvedCarriesTheTurnTheUnitAndTheWhy(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{Kind: KindFinalAnswerUnresolved, Evidence: map[string]string{
+		"turn": "turn-7", "unit": "msg_01:0", "why": "answer_row_unresolved",
+	}}
+
+	// Act.
+	got, ok := sessionFault(fault)
+
+	// Assert.
+	if !ok {
+		t.Fatal("sessionFault withheld final_answer_unresolved from the wire")
+	}
+	arm := got.GetFinalAnswerUnresolved()
+	if arm == nil {
+		t.Fatalf("sessionFault rendered %T, want the final-answer arm", got.GetKind())
+	}
+	if arm.GetTurn() != "turn-7" || arm.GetUnit() != "msg_01:0" || arm.GetWhy() != "answer_row_unresolved" {
+		t.Fatalf("arm = %+v, want the recorded turn, unit and why", arm)
 	}
 }

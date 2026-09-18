@@ -1002,6 +1002,16 @@ carries."
                  '(:detail "d" :opened-at-ms 5
                    :kind (:arm :adoption-window-expired :value (:adoption-window "30s"))))))
 
+(ert-deftest agent-repl-test-wire-host-fault-final-answer-unresolved-kind ()
+  "HostFault's `final_answer_unresolved' kind decodes with everything it
+carries: the turn, the unit, and the `why' that IS this kind's substatus."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"finalAnswerUnresolved\":{\"turn\":\"turn-7\",\"unit\":\"msg_01:0\",\"why\":\"stalled\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :final-answer-unresolved
+                          :value (:turn "turn-7" :unit "msg_01:0" :why "stalled"))))))
+
 (ert-deftest agent-repl-test-wire-host-fault-unset-kind-is-a-breach ()
   "A fault with no kind is a breach: `detail' supplements the class, never
 replaces it."
@@ -1017,12 +1027,12 @@ replaces it."
                  '("HostFault" shimDead "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-fault-kind-arms-pinned ()
-  "HostFault's kind oneof has exactly the thirteen arms decoded here."
+  "HostFault's kind oneof has exactly the fourteen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "HostFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved")
                        #'string<))))
 
 

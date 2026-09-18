@@ -240,6 +240,21 @@ type Deps struct {
 	// Now is the resolver's clock, injected so tests never sleep. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// AfterFunc schedules the response stall window, injected for the same
+	// reason Now is: the window is a DAEMON-SIDE timer, and a test that waited
+	// on the real one would be waiting on wall-clock rather than on a fact.
+	// Defaults to time.AfterFunc. nil disables the stall window entirely.
+	AfterFunc func(time.Duration, func()) Timer
+	// AnswerStall is how long an open response fold may go with neither a frame
+	// nor a terminal before the turn is called not timely. Defaults to
+	// DefaultAnswerStall.
+	AnswerStall time.Duration
+	// Faults records the `final_answer_unresolved` fault a turn raises when its
+	// answer does not land. It is the state client health.ObserveFaults
+	// decorates, so the fault reaches the footer by the ONE path every fault
+	// reaches it by. nil leaves the condition recorded in the log alone, which
+	// is what a test that is not about the footer wants.
+	Faults FaultRecorder
 	// PageSize is how many rows a page carries. Defaults to DefaultPageSize.
 	PageSize int
 	// TailRetention is how many published rows a feed retains for a tail's
