@@ -1196,6 +1196,15 @@ func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	const url = "https://example.invalid/report"
+	// THE FIXTURE HAS NO CHROME, and that is the condition the account->profile
+	// routing warns on by design: externalbrowser.go's ProfileForAccount is
+	// documented "FALLBACK IS LOUD, NEVER SILENT" -- a non-empty account email
+	// whose Chrome Local State cannot be read routes to the pinned default at
+	// WARN naming the email, because a link that quietly landed in the wrong
+	// profile is what that record exists to prevent. The daemon's HOME here is a
+	// t.TempDir() with no Chrome installation, so the record is evidence of the
+	// fixture rather than of anything wrong, and the level stays as ruled.
+	f.d.ExpectWarnings("daemon.externalbrowser.profile_for_account")
 
 	// Act
 	if _, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
@@ -1255,6 +1264,15 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 	// A launcher that will not run is recorded at WARN under the verb's own
 	// operation and then ANSWERED as launch_failed{detail}.
 	f.d.ExpectWarnings("daemon.workspace.open_external", "daemon.externalbrowser.open")
+	// THE FIXTURE HAS NO CHROME, and that is the condition the account->profile
+	// routing warns on by design: externalbrowser.go's ProfileForAccount is
+	// documented "FALLBACK IS LOUD, NEVER SILENT" -- a non-empty account email
+	// whose Chrome Local State cannot be read routes to the pinned default at
+	// WARN naming the email, because a link that quietly landed in the wrong
+	// profile is what that record exists to prevent. The daemon's HOME here is a
+	// t.TempDir() with no Chrome installation, so the record is evidence of the
+	// fixture rather than of anything wrong, and the level stays as ruled.
+	f.d.ExpectWarnings("daemon.externalbrowser.profile_for_account")
 
 	// Act
 	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
