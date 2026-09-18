@@ -3,10 +3,12 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 )
@@ -843,5 +845,169 @@ func TestAnAdoptCallForAWorkspaceAnArrivedManifestDoesNotNameIsRefusedAtOnce(t *
 		if waited == adoptionWindow {
 			t.Fatalf("the refusal armed the %s adoption window, want it answered at once", adoptionWindow)
 		}
+	}
+}
+
+func TestAdvertiseDelay(t *testing.T) {
+	cases := []struct {
+		name  string
+		retry int
+		want  time.Duration
+	}{
+		{name: "the first retry waits one manifest poll", retry: 1, want: manifestPoll},
+		{name: "each further retry doubles the wait", retry: 3, want: 4 * manifestPoll},
+		{name: "the wait never passes the ceiling", retry: 7, want: advertiseBackoffCeiling},
+		{name: "a long run of retries cannot overflow past the ceiling", retry: 500, want: advertiseBackoffCeiling},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the table row.
+
+			// Act
+			got := advertiseDelay(tc.retry)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("advertiseDelay(%d) = %s, want %s", tc.retry, got, tc.want)
+			}
+		})
+	}
+}
+
+// scriptedAddrWrites is a WriteDaemonAddr that answers each call from a
+// script, advancing the clock by `advance` per call. Calls past the script's
+// end fail the test.
+type scriptedAddrWrites struct {
+	t       *testing.T
+	clock   *fakeClock
+	advance time.Duration
+	mu      sync.Mutex
+	script  []error
+	calls   int
+}
+
+func (s *scriptedAddrWrites) write(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock.advance(s.advance)
+	if s.calls >= len(s.script) {
+		s.t.Errorf("daemon.addr write %d is past the %d scripted", s.calls+1, len(s.script))
+		return errors.New("unscripted")
+	}
+	err := s.script[s.calls]
+	s.calls++
+	return err
+}
+
+func (s *scriptedAddrWrites) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+var errHeldClaim = fmt.Errorf("%w: daemon.lock", daemonaddr.ErrClaimed)
+
+// TestTheAdvertiseRetryBacksOffWhileTheClaimIsHeld drives the successor's
+// daemon.addr retry on the fake clock: every wait it arms is fired, and the
+// waits, the writes and the ERROR records are counted.
+func TestTheAdvertiseRetryBacksOffWhileTheClaimIsHeld(t *testing.T) {
+	errGone := errors.New("the state root is gone")
+	cases := []struct {
+		name       string
+		script     []error
+		advance    time.Duration
+		wantWaits  []time.Duration
+		wantErrors int
+	}{
+		{
+			name:      "a held claim is retried on a doubling wait until it is released",
+			script:    []error{errHeldClaim, errHeldClaim, nil},
+			wantWaits: []time.Duration{manifestPoll, 2 * manifestPoll, 4 * manifestPoll},
+		},
+		{
+			name:       "a failure that is not a held claim ends the retry at ERROR",
+			script:     []error{errHeldClaim, errGone},
+			wantWaits:  []time.Duration{manifestPoll, 2 * manifestPoll},
+			wantErrors: 1,
+		},
+		{
+			name:       "a claim held past its bound is reported once and still retried",
+			script:     []error{errHeldClaim, errHeldClaim, errHeldClaim, errHeldClaim, nil},
+			advance:    advertiseRefusedBound / 3,
+			wantWaits:  []time.Duration{manifestPoll, 2 * manifestPoll, 4 * manifestPoll, 8 * manifestPoll, 16 * manifestPoll},
+			wantErrors: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var writes *scriptedAddrWrites
+			h := newHarness(t, func(d *Deps) {
+				d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
+			})
+			writes = &scriptedAddrWrites{t: t, clock: h.clock, advance: tc.advance, script: tc.script}
+			done := make(chan struct{})
+
+			// Act
+			go func() {
+				defer close(done)
+				h.c.retryAdvertise(context.Background(), nil)
+			}()
+			for _, wait := range tc.wantWaits {
+				h.clock.awaitArmed(t, wait)
+				h.clock.Fire(wait)
+			}
+			<-done
+
+			// Assert
+			if got := writes.count(); got != len(tc.script) {
+				t.Fatalf("daemon.addr writes = %d, want %d", got, len(tc.script))
+			}
+			if got := len(levelRecords(records(h.log, opAdopt), "error")); got != tc.wantErrors {
+				t.Fatalf("ERROR records = %d, want %d", got, tc.wantErrors)
+			}
+		})
+	}
+}
+
+// TestTheAdvertiseRetryEndsWithTheDaemonsLifetime pins that the retry is not
+// a goroutine that outlives the daemon's serving lifetime.
+func TestTheAdvertiseRetryEndsWithTheDaemonsLifetime(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(context.Context) error { return errHeldClaim }
+	})
+	lifetime, end := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.c.retryAdvertise(lifetime, nil)
+	}()
+	h.clock.awaitArmed(t, manifestPoll)
+
+	// Act
+	end()
+
+	// Assert: the retry returns without its wait ever being fired.
+	<-done
+}
+
+// TestAdvertiseDoesNotRetryAFailureThatIsNotAHeldClaim pins the first
+// attempt's own refusal: nothing is armed and the failure is an ERROR.
+func TestAdvertiseDoesNotRetryAFailureThatIsNotAHeldClaim(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(context.Context) error { return errors.New("the state root is gone") }
+	})
+
+	// Act
+	h.c.advertise(context.Background(), nil)
+
+	// Assert
+	if waits := h.clock.Waits(); len(waits) != 0 {
+		t.Fatalf("waits armed = %v, want none for a failure that is not a held claim", waits)
+	}
+	if got := len(levelRecords(records(h.log, opAdopt), "error")); got != 1 {
+		t.Fatalf("ERROR records = %d, want 1", got)
 	}
 }
