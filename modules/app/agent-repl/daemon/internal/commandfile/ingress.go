@@ -251,7 +251,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		if err != nil {
 			return err
 		}
-		return i.deps.Verbs.Open(ctx, ws)
+		return i.deps.Verbs.Open(ctx, ws, nil)
 	case TypeSwitch:
 		ws, err := i.target(ctx, entry)
 		if err != nil {
