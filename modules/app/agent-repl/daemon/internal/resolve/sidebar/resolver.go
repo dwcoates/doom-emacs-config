@@ -246,6 +246,18 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 		})
 }
 
+// SetViewed raises the workspace's VIEWED marker, which draws its row PARTIAL.
+//
+// The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
+// fact. There is no companion lowering setter, deliberately — the marker is
+// cleared by the row's next STATUS CHANGE and by nothing else (`wsState.
+// noteArm`), so the sidebar and the Emacs tab-bar reset on the same rule.
+func (r *resolver) SetViewed(ws ids.WorkspaceID) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_viewed",
+		"the roster took the editor's viewed report and drew the row PARTIAL",
+		nil, func(s *wsState) { s.viewed = true })
+}
+
 // SetTurn installs the accepted turn.
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 	ctx := dlog.Context{"in_flight": turn != nil}

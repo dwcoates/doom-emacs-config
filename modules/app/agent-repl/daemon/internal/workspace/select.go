@@ -77,6 +77,25 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 	return nil
 }
 
+// MarkViewed records that the user has SEEN the workspace, which draws its
+// roster row PARTIAL (the name recedes; the status dot keeps its colour).
+//
+// It does ONE thing, and the things it deliberately does NOT do are the point:
+// it writes no durable record, because the display mode is a view fact that
+// should not survive a restart; it does not revive a parked session, because
+// looking at something is not working on it; and it has no companion "unview"
+// verb, because the roster clears the marker itself on the row's next status
+// change. Idempotent — marking an already-viewed workspace changes nothing.
+func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
+	_, log, err := v.owned(ctx, "MarkWorkspaceViewed", ws)
+	if err != nil {
+		return err
+	}
+	log.Debug(opMarkViewed, "the user has seen the workspace; its row goes PARTIAL", nil)
+	v.deps.Sidebar.SetViewed(ws)
+	return nil
+}
+
 // SetPriority sets or clears the roster's ordering priority. The roster orders
 // by it; clients — Emacs tabs included — follow roster order strictly, so this
 // is the only place the order is decided.

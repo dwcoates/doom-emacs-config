@@ -80,6 +80,28 @@ message RosterRowPriorityBadge {
 // coincidental, and a divergent cadence is a defect.
 message RosterRowAttention {}
 
+// The VIEWED marker: the row's display mode. Empty: presence is the fact.
+//
+// ABSENT is FULL and PRESENT is PARTIAL — the two words the Emacs tab-bar
+// already uses for the same distinction, and deliberately the same words here,
+// because the tab-bar entry and this row are two drawings of ONE mode and may
+// never disagree.
+//
+// PARTIAL means "you have already seen this workspace's information". Emacs
+// raises it (MarkWorkspaceViewed) once the user has dwelt on the workspace's
+// panels, and it says nothing about the lifecycle: the status dot keeps its
+// colour in either mode, and only the row's NAME text recedes to the muted
+// colour while the marker stands.
+//
+// THE DAEMON CLEARS IT ON ANY STATUS CHANGE, and that clear is the whole
+// reset rule: the moment a row resolves to a different `status` arm than the
+// one last published for it, the marker goes and the row is FULL again — new
+// activity is by definition not something the user has already seen. Nothing
+// else clears it, and no client waits to be told twice: a client that sees a
+// row's status change restores FULL itself, on the same rule, rather than
+// drawing a stale marker until the next push.
+message RosterRowViewed {}
+
 // The selected workspace, by identity. Compared against RosterRowWorkspace,
 // never against a display name, which is not unique.
 message RosterCurrentWorkspace {
@@ -203,6 +225,10 @@ message RosterRow {
   // UNSET = unprioritized (no badge). Ordering is already the resolver's;
   // this is only the drawn label.
   optional RosterRowPriorityBadge priority = 33;
+
+  // The row's DISPLAY MODE: present = PARTIAL (the name recedes), absent =
+  // FULL. See RosterRowViewed, which carries the mode's whole contract.
+  optional RosterRowViewed viewed = 34;
 
   // The row's display name.
   RosterRowName name = 2;

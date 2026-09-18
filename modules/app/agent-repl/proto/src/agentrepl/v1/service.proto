@@ -57,6 +57,7 @@ import "agentrepl/v1/endpoint_client_log.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_select_account.proto";
 import "agentrepl/v1/endpoint_select_workspace.proto";
+import "agentrepl/v1/endpoint_mark_workspace_viewed.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
@@ -229,6 +230,10 @@ service AgentRepl {
   // The user switched to this workspace in the editor; idempotent. See
   // endpoint_select_workspace.proto.
   rpc SelectWorkspace(SelectWorkspaceRequest) returns (SelectWorkspaceResponse);
+
+  // The user has now SEEN this workspace: its row goes PARTIAL until its
+  // status changes; idempotent. See endpoint_mark_workspace_viewed.proto.
+  rpc MarkWorkspaceViewed(MarkWorkspaceViewedRequest) returns (MarkWorkspaceViewedResponse);
 
   // The host-facing view of one workspace, per-workspace subscription. See
   // endpoint_watch_host_workspace.proto.

@@ -537,6 +537,28 @@ func (s *server) SelectWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
+// MarkWorkspaceViewed records that the user has SEEN this workspace, which
+// draws its roster row PARTIAL until the row's status changes. It is
+// idempotent, and it is the editor's verb: dwell is an editor fact.
+func (s *server) MarkWorkspaceViewed(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],
+) (*connect.Response[agentreplv1.MarkWorkspaceViewedResponse], error) {
+	const rpc = "MarkWorkspaceViewed"
+	resp := &agentreplv1.MarkWorkspaceViewedResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := s.deps.Verbs.MarkViewed(ctx, subject.Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.MarkWorkspaceViewedResponse_Success{
+		Success: &agentreplv1.MarkWorkspaceViewedSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // SetWorkspacePriority sets or clears the roster's ordering priority. An unset
 // priority is the CLEAR spelling.
 func (s *server) SetWorkspacePriority(

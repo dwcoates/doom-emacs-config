@@ -4,6 +4,11 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -434,5 +439,101 @@ func TestRowDoesNotRecedeWhileTheWorkspaceIsOpen(t *testing.T) {
 	// Assert.
 	if onlyRow(t, r).GetClosed().GetClosed() {
 		t.Fatal("an open workspace's row receded")
+	}
+}
+
+// ---- The VIEWED marker: the row's display mode ----------------------------
+//
+// PRESENT is PARTIAL and ABSENT is FULL, and the only thing that lowers it is
+// the row's next STATUS CHANGE. These lock both halves, because a marker that
+// never clears and a marker that clears on every push are the two ways this
+// feature fails.
+
+func TestRowCarriesNoViewedMarkerUntilTheEditorReportsOne(t *testing.T) {
+	// Arrange, Act.
+	r := arrange(t)
+
+	// Assert: ABSENT is FULL, which is what a row that has not been seen is.
+	if got := onlyRow(t, r).GetViewed(); got != nil {
+		t.Fatalf("viewed = %v, want unset for a row nobody has dwelt on", got)
+	}
+}
+
+func TestViewedReportDrawsTheRowPartial(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.SetViewed(theWS)
+
+	// Assert: presence is the mode.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the marker the editor's report raises")
+	}
+}
+
+func TestViewedReportIsIdempotent(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetViewed(theWS)
+
+	// Act: marking an already-viewed workspace changes nothing.
+	r.SetViewed(theWS)
+
+	// Assert.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the marker to still stand after a second report")
+	}
+}
+
+func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
+	// Arrange: a viewed, ready row.
+	r := live(t, arrange(t))
+	r.SetViewed(theWS)
+
+	// Act: new activity, from an origin the editor never told the roster about.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Assert: new activity is not something the user has already seen.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "submitting" {
+		t.Fatalf("status = %q, want submitting — the arrangement did not change the arm", got)
+	}
+	if got := row.GetViewed(); got != nil {
+		t.Fatalf("viewed = %v, want the marker cleared by the status change", got)
+	}
+}
+
+func TestAPushThatRestatesTheSameStatusKeepsTheViewedMarker(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetViewed(theWS)
+
+	// Act: a re-push that leaves the arm exactly where it was.
+	r.SetSummary(theWS, "a summary line")
+
+	// Assert: without this guard nothing could ever stay PARTIAL.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the marker to survive a push that changed no status")
+	}
+}
+
+func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
+	// Arrange: two workspaces, one of them viewed.
+	r := arrange(t, workspace(string(theWS), "one"), workspace("w2", "two"))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	r.SetViewed(theWS)
+
+	// Act: the OTHER workspace takes a turn.
+	r.SetTurn(ids.WorkspaceID("w2"), &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Assert: the reset is per row, never roster-wide.
+	row := rowFor(repoRows(t, latest(t, r)), string(theWS))
+	if row == nil {
+		t.Fatal("the viewed workspace lost its row")
+	}
+	if got := row.GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want a neighbour's activity to leave this row PARTIAL")
 	}
 }

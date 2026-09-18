@@ -207,6 +207,11 @@ type fakeVerbs struct {
 	createTaskErr error
 
 	selectErr error
+
+	// markViewed records every workspace MarkWorkspaceViewed resolved onto the
+	// verb, so the handler's own resolution is what a test asserts.
+	markViewed    []ids.WorkspaceID
+	markViewedErr error
 	closeErr  error
 	openErr   error
 	forgetErr error
@@ -296,6 +301,11 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 }
 
 func (f *fakeVerbs) Select(context.Context, ids.WorkspaceID) error { return f.selectErr }
+
+func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
+	f.markViewed = append(f.markViewed, ws)
+	return f.markViewedErr
+}
 
 func (f *fakeVerbs) Close(context.Context, ids.WorkspaceID) error { return f.closeErr }
 
