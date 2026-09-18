@@ -570,6 +570,27 @@ const shellInit = (state: "live" | ShellOutcome) => ({
         },
 });
 
+/**
+ * A MESSAGE FROM ANOTHER CLAUDE — `FeedRow.peer_message`. Not a prompt: drawn
+ * on the prompt's side of the feed but purple, and ABBREVIATED (the collapsed
+ * form is the sender label and a chevron, with no body).
+ */
+export const peerMessageRow = (
+  overrides?: Partial<RowInit>,
+): FeedRow =>
+  feedRow(
+    { case: "peerMessage", value: { sender: "agent Explore", body: "the sweep found nothing" } },
+    overrides,
+  );
+
+/**
+ * A REMOVAL — `FeedRow.removed`, the DUAL of an upsert on the same tail: the
+ * daemon retired the row this one keys, so the client drops it rather than
+ * drawing anything. The arm carries no payload.
+ */
+export const removedRow = (overrides?: Partial<RowInit>): FeedRow =>
+  feedRow({ case: "removed", value: {} }, overrides);
+
 export const detachedSubagentRow = (
   state: "live" | SubagentOutcome = "live",
   overrides?: Partial<RowInit>,
@@ -578,10 +599,31 @@ export const detachedSubagentRow = (
   return feedRow({ case: "detachedSubagent", value: { subagent: unit.value } }, overrides);
 };
 
+/**
+ * The shell bubble's BODY row — the spool alone, on the shell's own sub-feed.
+ *
+ * feed.proto: `FeedRow.detached_shell` is the spool BODY. The command, clock,
+ * stop and outcome live on the HEAD (`shellHeadRow`), so only the spool is
+ * drawn from this arm.
+ */
 export const detachedShellRow = (
   state: "live" | ShellOutcome = "live",
   overrides?: Partial<RowInit>,
 ): FeedRow => feedRow({ case: "detachedShell", value: { shell: shellInit(state) } }, overrides);
+
+/**
+ * The shell bubble's HEAD row — the command, the clock and, while live, the
+ * stop, carried on the PARENT feed (`FeedRow.shell_head`).
+ *
+ * The SAME `FeedShell` message feeds both arms; which half is drawn is the
+ * arm's business, not the message's. Every head fact — `data-state`, the
+ * clock, the quiet-for figure, the exit chip, the stop control — is asserted
+ * against THIS row, never against the spool-only body.
+ */
+export const shellHeadRow = (
+  state: "live" | ShellOutcome = "live",
+  overrides?: Partial<RowInit>,
+): FeedRow => feedRow({ case: "shellHead", value: shellInit(state) }, overrides);
 
 // ---- FeedTurnEnded --------------------------------------------------------
 
@@ -1805,7 +1847,7 @@ type RosterRowInit = {
   current?: boolean;
   closed?: boolean;
   detail?: boolean;
-  when?: "lastSelected" | "merged";
+  when?: "lastSelected" | "merged" | "active" | "created";
   whenAtMs?: bigint;
   children?: RosterRow[];
 };
@@ -2037,7 +2079,16 @@ export const drainReason = (arm: DrainReasonArm): DrainReason =>
 export const SHUTDOWN_CAUSE_ARMS = ["selfMergeRollout", "scheduledDrain", "immediate"] as const;
 export type ShutdownCauseArm = (typeof SHUTDOWN_CAUSE_ARMS)[number];
 
-export const WATCH_DAEMON_PUSHES = ["shutdownAnnounced", "drainScheduled", "drainCancelled"] as const;
+export const WATCH_DAEMON_PUSHES = [
+  "shutdownAnnounced",
+  "drainScheduled",
+  "drainCancelled",
+  // A TOP-LEVEL arm this bundle has NO case for. It is covered by the skew
+  // tests rather than by a drawing test, because not drawing it is the
+  // contract: `unreachablePushArm` raises `UnknownPushArm`, and the stream
+  // pipeline skips it quietly rather than filing a bad frame.
+  "mutationProgress",
+] as const;
 
 export function shutdownAnnounced(init?: {
   address?: string;

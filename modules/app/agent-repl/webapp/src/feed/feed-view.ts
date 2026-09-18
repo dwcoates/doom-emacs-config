@@ -28,6 +28,7 @@
  * card was unreadable would lose the reader everything, including the evidence.
  */
 import { log } from "../log.js";
+import { carryExpanded } from "../expand.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -663,6 +664,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       body = malformedPlaceholder(err, state.row);
     }
     if (previous !== undefined) {
+      // R2: THE WIRE'S FOLD IS THE INITIAL FOLD. A push says how a section
+      // STARTS; after that the reader's own toggle wins, so a re-push of the
+      // same row may never re-collapse what they opened. The NAMED folds read
+      // their state back off `rc.previous` themselves; the CAPPED sections
+      // (`.tool-fold` and its siblings — a whole skill or tool-call card is
+      // one) are keyed by class, and this is the one seam that carries them.
+      carryExpanded(previous, body);
       stopTicking(previous);
       previous.remove();
     }

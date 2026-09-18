@@ -171,6 +171,38 @@ export function expandedKeys(sections: ArrayLike<Section>): string[] {
   return open;
 }
 
+/**
+ * Every capped section of ROOT, in document order, ROOT ITSELF FIRST when it is
+ * one.
+ *
+ * A card-level fold (`.tool-fold` on a whole skill or tool-call card) IS the
+ * element a renderer hands back, so a plain `querySelectorAll` — which never
+ * matches its own root — would walk straight past the one section the reader is
+ * most likely to have opened. Both sides of the capture/re-apply round trip go
+ * through this function, so the two walks cannot disagree about whether the
+ * root counts.
+ */
+export function cappedSectionsOf(root: HTMLElement): HTMLElement[] {
+  const nested = [...root.querySelectorAll<HTMLElement>(CAPPED_SELECTOR)];
+  return isCappedSection(root.classList) ? [root, ...nested] : nested;
+}
+
+/**
+ * Carry the reader's expansions from the body a redraw REPLACES onto the body
+ * that replaces it.
+ *
+ * R2, THE WIRE'S FOLD IS THE INITIAL FOLD: a push states how a section starts
+ * on its FIRST draw and never again — a re-push may not un-toggle a section the
+ * reader opened. The named folds (`foldSection`, `data-folded`) have always read
+ * their state back off the previous element; the CAPPED sections are keyed by
+ * class rather than by name, and this is where they get the same guarantee.
+ */
+export function carryExpanded(previous: HTMLElement, next: HTMLElement): void {
+  const keys = expandedKeys(cappedSectionsOf(previous));
+  if (keys.length === 0) return;
+  applyExpanded(cappedSectionsOf(next), keys);
+}
+
 /** Re-expand the sections whose keys are in KEYS (from expandedKeys). */
 export function applyExpanded(sections: ArrayLike<Section>, keys: readonly string[]): void {
   const open = new Set(keys);

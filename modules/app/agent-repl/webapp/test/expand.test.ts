@@ -10,6 +10,8 @@ import {
   cappedSectionAt,
   expandAction,
   expandedKeys,
+  cappedSectionsOf,
+  carryExpanded,
   isCappedSection,
   installClickExpand,
   isExpanded,
@@ -266,6 +268,106 @@ describe("expandedKeys", () => {
   it("records nothing for an item with no capped section at all", () => {
     // Arrange + Act + Assert
     expect(expandedKeys([])).toEqual([]);
+  });
+});
+
+/** A real DOM element carrying CLASSES — the two helpers below walk the DOM. */
+function el(...classes: string[]): HTMLElement {
+  const node = document.createElement("div");
+  node.className = classes.join(" ");
+  return node;
+}
+
+describe("cappedSectionsOf", () => {
+  it("counts the root itself when the root is the capped section", () => {
+    // Arrange — a card-level fold IS the element the renderer hands back.
+    const root = el("tool-card", "tool-fold");
+    // Act + Assert
+    expect(cappedSectionsOf(root)).toEqual([root]);
+  });
+
+  it("omits a root that is not a capped section", () => {
+    // Arrange
+    const root = el("tool-card");
+    // Act + Assert
+    expect(cappedSectionsOf(root)).toEqual([]);
+  });
+
+  it("puts the capped root ahead of its capped descendants", () => {
+    // Arrange
+    const root = el("tool-fold");
+    const nested = el("shell-tail");
+    root.append(nested);
+    // Act + Assert
+    expect(cappedSectionsOf(root)).toEqual([root, nested]);
+  });
+
+  it("walks the descendants in document order", () => {
+    // Arrange
+    const root = el("tool-card");
+    const first = el("hook-output");
+    const second = el("shell-tail");
+    root.append(first, second);
+    // Act + Assert
+    expect(cappedSectionsOf(root)).toEqual([first, second]);
+  });
+});
+
+describe("carryExpanded", () => {
+  it("carries a card-level fold the reader opened onto the redrawn card", () => {
+    // Arrange — the replaced body IS the open fold.
+    const previous = el("tool-card", "tool-fold");
+    previous.classList.add(EXPANDED_CLASS);
+    const next = el("tool-card", "tool-fold");
+    // Act
+    carryExpanded(previous, next);
+    // Assert
+    expect(next.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("carries a nested section the reader opened", () => {
+    // Arrange
+    const previous = el("tool-card");
+    const openBox = el("hook-output");
+    openBox.classList.add(EXPANDED_CLASS);
+    previous.append(openBox);
+    const next = el("tool-card");
+    const freshBox = el("hook-output");
+    next.append(freshBox);
+    // Act
+    carryExpanded(previous, next);
+    // Assert
+    expect(freshBox.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("leaves a section the reader never opened collapsed", () => {
+    // Arrange
+    const previous = el("tool-card", "tool-fold");
+    const next = el("tool-card", "tool-fold");
+    // Act
+    carryExpanded(previous, next);
+    // Assert
+    expect(next.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("carries only the occurrence that was open", () => {
+    // Arrange — two folds in one body, the second open.
+    const previous = el("tool-card");
+    const shut = el("tool-fold");
+    const open = el("tool-fold");
+    open.classList.add(EXPANDED_CLASS);
+    previous.append(shut, open);
+    const next = el("tool-card");
+    const freshFirst = el("tool-fold");
+    const freshSecond = el("tool-fold");
+    next.append(freshFirst, freshSecond);
+    // Act
+    carryExpanded(previous, next);
+    // Assert
+    expect([
+      freshFirst.classList.contains(EXPANDED_CLASS),
+      freshSecond.classList.contains(EXPANDED_CLASS),
+    ]).toEqual([false, true]);
   });
 });
 
