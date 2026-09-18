@@ -502,3 +502,31 @@ func TestAStallWindowThatLostItsRaceRaisesNothing(t *testing.T) {
 		t.Fatalf("a superseded stall window raised a fault: %v", fault.Evidence)
 	}
 }
+
+// TestTheFooterLineIsTerseAndSaysWhichWayTheAnswerWasLost pins the chip's line:
+// one short phrase per `why`, so the strip's one elastic cell can carry it.
+func TestTheFooterLineIsTerseAndSaysWhichWayTheAnswerWasLost(t *testing.T) {
+	tests := []struct {
+		name string
+		why  string
+		want string
+	}{
+		{"the terminal named nothing", whyNoAnswerNamed, "the turn named no answering response"},
+		{"the named answer resolves to nothing", whyAnswerRowUnresolved, "the named answer has no drawn row"},
+		{"an open response went silent", whyStalled, "no response frame for 1m30s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			got := h.resolver.answerFaultLine(tt.why)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("answerFaultLine(%q) = %q, want %q", tt.why, got, tt.want)
+			}
+		})
+	}
+}
