@@ -205,6 +205,12 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   the page loaded. Every expanded subagent bubble opens another feed tail, so no
   fixed budget could have contained the count — which is why the guarantee is
   "one stream exists" rather than "few enough streams exist".
+- **A REDRAW NEVER UN-TOGGLES, WHATEVER ITS SHAPE** (owner ruling, 2026-09-18).
+  The wire's fold is the INITIAL fold: an upsert carries the reader's open folds
+  off the element it replaces (`carryExpanded`), and a full page replace —
+  reconnect, reload, compaction replay — snapshots them by row `FeedId` across
+  the teardown (`snapshotExpanded`/`retainRows` in src/expand.ts, spent in
+  `feed-view.ts`), the expanded bubble's own 50vh scroll box included.
 - **EVERY CLICK IS AN RPC**, and its refusal renders AT the clicked control,
   never as pushed state. Domain outcomes (deny, nothing-running, empty) are
   SUCCESS arms.
