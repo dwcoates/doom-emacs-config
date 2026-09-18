@@ -20,10 +20,102 @@
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--error "core")
+(declare-function agent-repl--backend-phase "core" (ws fmt &rest args))
 
 (defconst agent-repl-mutation-progress--scope
   '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
   "The log scope for mutation progress: it precedes any workspace's ownership.")
+
+;;;; ---- The one progress report ------------------------------------------
+;;
+;; EVERY WAY OF MAKING OR RESTORING A WORKSPACE REPORTS THROUGH THIS ONE
+;; FUNCTION.  `SPC TAB n', `N', `c', `C', `f', `o', `O', `C-n' and `SPC j .'
+;; are nine gestures over four rpcs, and each of them used to word its own
+;; feedback -- where it worded any at all.  A user cannot learn nine
+;; vocabularies for one operation, so the vocabulary is a TABLE here and the
+;; entry points supply only which phase they reached.
+;;
+;; The echo goes through `agent-repl--backend-phase', which is the module's
+;; existing startup-phase channel: one call produces both the durable log
+;; record and the minibuffer line, and the line is prefixed "agent-repl: "
+;; exactly as "bouncing the store service…" and "backend restart complete"
+;; already are.  That is deliberate -- a workspace coming up is the same kind
+;; of event as the backend coming up, and it should read the same.
+
+(defconst agent-repl-workspace-progress-phases
+  '((:create
+     (:requested . "creating workspace…")
+     (:deriving-name . "deriving the workspace's name…")
+     (:creating-worktree . "creating the workspace's git worktree…")
+     (:completed . "workspace created: %s")
+     (:failed . "workspace creation FAILED: %s"))
+    (:open
+     (:requested . "opening workspace %s…")
+     (:checking-worktree . "checking the workspace's worktree…")
+     (:starting-session . "starting the workspace's session…")
+     (:reviving . "reviving the hibernated workspace…")
+     (:clearing-closed . "clearing the workspace's closed flag…")
+     (:checking-build . "checking the workspace's build…")
+     (:completed . "workspace opened: %s")
+     (:failed . "opening the workspace FAILED: %s"))
+    (:register
+     (:requested . "registering directory %s…")
+     (:completed . "workspace registered: %s")
+     (:failed . "registering the directory FAILED: %s"))
+    (:register-repository
+     (:requested . "registering the repository holding %s…")
+     (:completed . "%s repository %s; workspace %s %s")
+     (:failed . "registering the repository FAILED: %s")))
+  "The sentence every workspace create/open/register phase is echoed as.
+
+KIND -> ((PHASE . TEMPLATE) ...).  A template\='s `%s\=' holes are filled by
+the DETAILS its caller passes, and a template with none takes no details
+-- so every phase is reported through the same call whether or not it has
+anything to name.
+
+The three phases every KIND carries are `:requested\=' (Emacs is sending the
+request), `:completed\=' and `:failed\='; everything between them is a stage
+the DAEMON reported reaching, and a kind lists only the stages its rpc
+actually has.  The wording follows the startup phases\=' own: a lowercase
+clause, a trailing ellipsis while the work is in flight, none once it has
+landed, and FAILED in capitals because a failure has to be readable at a
+glance in a line the user was not watching for.")
+
+(defconst agent-repl-workspace-progress--scope
+  agent-repl-mutation-progress--scope
+  "The log scope every workspace-progress phase is recorded under.
+The same scope the correlation seat uses: a create\='s phases PRECEDE the
+workspace\='s existence, so none of them has a workspace sink to route to.")
+
+(defun agent-repl-workspace-progress-report (kind phase &rest details)
+  "Report that a workspace mutation of KIND reached PHASE, naming DETAILS.
+
+THE ONE REPORTING FUNCTION.  It records the phase and echoes it in a
+single call, so a phase can never be logged without being shown or shown
+without being logged.  The TEMPLATE is what the log record\='s operation
+name is derived from, which is why DETAILS ride as format arguments
+rather than being pasted into the sentence by the caller: a runtime
+value must never become part of an operation name.
+
+A `:failed\=' phase is ALSO recorded at ERROR, so a failure is in the
+durable record at the level a failure deserves rather than only in a line
+that scrolls away.
+
+Returns the echoed sentence, or nil when KIND/PHASE names no template --
+which is a bug in the caller, reported and never guessed at."
+  (let ((template (alist-get phase (alist-get kind agent-repl-workspace-progress-phases))))
+    (if (null template)
+        (progn
+          (agent-repl--error agent-repl-workspace-progress--scope
+                             "elisp.workspace-progress.unknown-phase kind=%S phase=%S details=%S"
+                             kind phase details)
+          nil)
+      (when (eq phase :failed)
+        (agent-repl--error agent-repl-workspace-progress--scope
+                           "elisp.workspace-progress.failed kind=%S details=%S" kind details))
+      (apply #'agent-repl--backend-phase agent-repl-workspace-progress--scope
+             template details)
+      (apply #'format template details))))
 
 (defvar agent-repl-mutation-progress--pending (make-hash-table :test 'equal)
   "Map of op id -> callback plist for an in-flight workspace mutation.
@@ -81,6 +173,22 @@ CREATE is `(:arm STEP :value V)'."
                           "elisp.mutation-progress.unknown-step op-id=%s step=%S"
                           op-id step)))))
 
+(defun agent-repl-mutation-progress--dispatch-open (op-id callbacks open)
+  "Dispatch one decoded WorkspaceOpenProgress OPEN for OP-ID to CALLBACKS.
+OPEN is `(:stage STAGE)\='.
+
+AN OPEN HAS NO TERMINAL STEP ON THIS CHANNEL: its rpc answers
+synchronously, so the caller learns success and every refusal from the
+answer and forgets the op there.  Everything that arrives here is a
+stage."
+  (let ((stage (plist-get open :stage)))
+    (if (null stage)
+        (agent-repl--error agent-repl-mutation-progress--scope
+                           "elisp.mutation-progress.open-without-a-stage op-id=%s open=%S"
+                           op-id open)
+      (when-let ((fn (plist-get callbacks :on-stage)))
+        (funcall fn stage)))))
+
 (defun agent-repl-mutation-progress-handle (progress)
   "Dispatch one decoded WorkspaceMutationProgress PROGRESS to its op's callbacks.
 PROGRESS is `(:op-id ID :event (:arm ARM :value V))'.  An op id this Emacs
@@ -96,6 +204,7 @@ for another client's op, or a replayed stale one, is expected."
              (value (plist-get event :value)))
         (pcase arm
           (:create (agent-repl-mutation-progress--dispatch-create op-id callbacks value))
+          (:open (agent-repl-mutation-progress--dispatch-open op-id callbacks value))
           (_
            (agent-repl--error agent-repl-mutation-progress--scope
                               "elisp.mutation-progress.unknown-mutation op-id=%s arm=%S"
