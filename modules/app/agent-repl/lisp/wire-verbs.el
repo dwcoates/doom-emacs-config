@@ -631,12 +631,18 @@ when the request carried an op_id, in place of `success'/`error'."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-open-workspace-request (request)
-  "Encode OpenWorkspaceRequest from plist REQUEST (:workspace REF)."
+  "Encode OpenWorkspaceRequest from plist REQUEST (:workspace REF :op-id ID).
+The OP ID IS OPTIONAL and changes nothing about how the rpc answers:
+present, the daemon also pushes this open\='s stages on WatchDaemon keyed
+on it; absent, the open reports only its terminal answer."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-open-workspace-request")
-  (list (cons 'workspace
-              (agent-repl-wire-encode-open-workspace-request-workspace
-               (agent-repl-wire-verbs--require "OpenWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))))
+  (let ((out (list (cons 'workspace
+                         (agent-repl-wire-encode-open-workspace-request-workspace
+                          (agent-repl-wire-verbs--require "OpenWorkspaceRequest" "workspace"
+                                                          (plist-get request :workspace)))))))
+    (when (plist-get request :op-id)
+      (setq out (append out (list (cons 'opId (plist-get request :op-id))))))
+    out))
 
 (defun agent-repl-wire-decode-open-workspace-success (json)
   "Decode OpenWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
