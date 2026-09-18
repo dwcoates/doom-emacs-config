@@ -1,0 +1,64 @@
+// endpoint_mark_workspace_viewed.proto — MarkWorkspaceViewed: the user has
+// now SEEN this workspace's information. HOST section.
+//
+// Emacs is the only sender, because dwell is an editor fact: it is the only
+// process that knows the workspace's panels are on screen and how long the
+// user has stood in front of them. The threshold is the editor's own and is
+// no part of this contract; what crosses the wire is only the verdict.
+//
+// THE VERDICT IS "PARTIAL". The daemon raises the row's
+// `frontend.v1.RosterRowViewed` marker and re-pushes the roster, so the
+// webapp sidebar recedes the row's name at the same moment the Emacs tab-bar
+// recedes the tab's name. There is NO companion verb to lower it: the daemon
+// clears the marker itself on the row's next STATUS CHANGE, which is the one
+// reset rule both surfaces implement (see RosterRowViewed).
+//
+// IDEMPOTENT: marking an already-viewed workspace is a success and changes
+// nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message MarkWorkspaceViewedRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message MarkWorkspaceViewedResponse {
+  oneof result {
+    MarkWorkspaceViewedSuccess success = 1;
+    MarkWorkspaceViewedError error = 2;
+  }
+}
+// Marked; the roster stream carries the row's viewed marker.
+message MarkWorkspaceViewedSuccess {}
+// Arms derived from the daemon's refusal sites, exactly SelectWorkspace's:
+// this verb resolves the same subject through the same guard.
+// Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
+message MarkWorkspaceViewedError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    MarkWorkspaceViewedUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    MarkWorkspaceViewedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    MarkWorkspaceViewedTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    MarkWorkspaceViewedNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message MarkWorkspaceViewedUnknownWorkspace {}
+message MarkWorkspaceViewedWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message MarkWorkspaceViewedTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message MarkWorkspaceViewedNotYetAdopted {}

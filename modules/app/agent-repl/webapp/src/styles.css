@@ -813,6 +813,12 @@ body::after {
 }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* PARTIAL display mode (frontend.v1.RosterRowViewed): the user has already
+   seen this workspace, so its NAME recedes to the secondary text colour. The
+   status dot keeps its tone — the mode says what has been seen, never what the
+   workspace is doing — and the Emacs tab-bar draws the same distinction on the
+   same message. `viewed.ts` decides which rows carry the class. */
+#ws-sidebar .row .name.viewed { color: var(--muted); }
 #ws-sidebar .row .when {
   margin-left: auto;
   color: var(--muted);

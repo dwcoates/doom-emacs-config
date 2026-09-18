@@ -211,6 +211,10 @@ type Verbs interface {
 	// Select records the user's switch to this workspace and clears its
 	// attention marker. Idempotent.
 	Select(ctx context.Context, ws ids.WorkspaceID) error
+	// MarkViewed records that the user has SEEN this workspace: its roster row
+	// goes PARTIAL until its status changes. Idempotent, and it touches no
+	// durable record — the mode is a view fact, not a workspace fact.
+	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
 	// CreateTask records a new task.

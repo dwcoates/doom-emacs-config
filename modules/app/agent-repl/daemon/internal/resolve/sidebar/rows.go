@@ -27,6 +27,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
 
 	armName := statusArm(s, rec, session, rowLog)
+	// THE STATUS CHANGE IS THE RESET. Recording the arm here is what clears a
+	// standing viewed marker, so the row's display mode is decided in the same
+	// breath as its status and cannot lag it by a push.
+	armChanged := s.noteArm(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
 
@@ -34,7 +38,14 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		"status":  armName,
 		"current": current,
 		"closed":  closed,
+		"viewed":  s.viewed,
 	})
+	if armChanged {
+		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
+			"the row's status changed, so it is drawn FULL again", dlog.Context{
+				"status": armName,
+			})
+	}
 	r.assertArm(armName, rowLog)
 
 	out := &frontendv1.RosterRow{
@@ -52,6 +63,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	}
 	if attention(rec, current) {
 		out.Attention = &frontendv1.RosterRowAttention{}
+	}
+	// PRESENCE IS THE MODE: the marker is set for PARTIAL and omitted for
+	// FULL, exactly as `frontend.v1.RosterRowViewed` states it.
+	if s.viewed {
+		out.Viewed = &frontendv1.RosterRowViewed{}
 	}
 	for _, child := range rc.tree.children[rec.ID] {
 		out.Children = append(out.Children, r.row(child, rc, rowLog))

@@ -330,3 +330,72 @@ func TestSelectLogsTheReselectionReceiptAtInfo(t *testing.T) {
 		t.Fatalf("the reselection receipt is %q, want info", got)
 	}
 }
+
+// ---- MarkViewed ------------------------------------------------------------
+
+func TestMarkViewedTellsTheRoster(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
+		t.Fatalf("MarkViewed: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.viewed) != 1 || f.sidebar.viewed[0] != "w1" {
+		t.Fatalf("roster viewed reports = %v, want w1 once", f.sidebar.viewed)
+	}
+}
+
+func TestMarkViewedWritesNoDurableRecord(t *testing.T) {
+	// Arrange: the display mode is a VIEW fact and must not outlive a restart.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
+		t.Fatalf("MarkViewed: %v", err)
+	}
+
+	// Assert: looking at a workspace is not selecting it either.
+	if f.db.current != nil {
+		t.Fatalf("current = %v, want MarkViewed to have recorded no selection", f.db.current)
+	}
+}
+
+func TestMarkViewedIsIdempotent(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
+		t.Fatalf("first MarkViewed: %v", err)
+	}
+	if err := f.verbs.MarkViewed(context.Background(), "w1"); err != nil {
+		t.Fatalf("second MarkViewed: %v", err)
+	}
+
+	// Assert: a second report is a success that changes nothing downstream.
+	if len(f.sidebar.viewed) != 2 {
+		t.Fatalf("roster viewed reports = %v, want both reports forwarded", f.sidebar.viewed)
+	}
+}
+
+func TestMarkViewedRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	err := f.verbs.MarkViewed(context.Background(), "nope")
+
+	// Assert: an unregistered workspace has no row to mark.
+	if err == nil {
+		t.Fatal("MarkViewed() accepted a workspace the registry does not hold")
+	}
+	if len(f.sidebar.viewed) != 0 {
+		t.Fatalf("roster viewed reports = %v, want none for a refused mark", f.sidebar.viewed)
+	}
+}

@@ -195,6 +195,10 @@ func (s *fakeServer) SelectWorkspace(ctx context.Context, req *connect.Request[v
 	return handleUnary[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse](ctx, s, "SelectWorkspace", req.Msg)
 }
 
+func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
+	return handleUnary[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](ctx, s, "MarkWorkspaceViewed", req.Msg)
+}
+
 func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest], stream *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
 	s.record(ctx, "WatchHostWorkspace", req.Msg)
 	if err := validateRequest(req.Msg); err != nil {

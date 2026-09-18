@@ -90,6 +90,9 @@
 (defvar agent-repl-test-host--select-answer nil
   "What the stubbed SelectWorkspace answers; see the harness.")
 
+(defvar agent-repl-test-host--mark-viewed-answer nil
+  "What the stubbed MarkWorkspaceViewed answers; see the harness.")
+
 (defvar agent-repl-test-host--effects nil
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
 
@@ -186,6 +189,8 @@ unary rpc can produce, which the contract never collapses into one."
                                 :value (list :workspace (agent-repl-test-host--ref)))))
          (agent-repl-test-host--select-answer
           (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--mark-viewed-answer
+          (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil))))
      (cl-letf (((symbol-function 'agent-repl-rpc-register-workspace)
@@ -198,6 +203,12 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "SelectWorkspace" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--select-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-mark-workspace-viewed)
+                (lambda (conn request &rest keys)
+                  (push (list "MarkWorkspaceViewed" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--mark-viewed-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
@@ -447,6 +458,54 @@ looked at."
     (agent-repl-test-host--subscribe "ws-1")
     ;; Assert
     (should (null (assoc "SelectWorkspace" agent-repl-test-host--calls)))))
+
+;;;; ---- Mark viewed ----
+
+(ert-deftest agent-repl-test-host-mark-viewed-echoes-the-ref ()
+  "MarkWorkspaceViewed carries the daemon-minted ref, never a path."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil)
+    ;; Act
+    (agent-repl-host-mark-viewed "ws-1")
+    ;; Assert
+    (should (equal (car agent-repl-test-host--calls)
+                   (list "MarkWorkspaceViewed"
+                         (nth 1 (car agent-repl-test-host--calls))
+                         (list :workspace (agent-repl-test-host--ref)))))))
+
+(ert-deftest agent-repl-test-host-mark-viewed-without-a-ref-sends-nothing ()
+  "An unregistered workspace has no row to mark."
+  (agent-repl-test-host--with-harness
+    ;; Arrange / Act
+    (agent-repl-host-mark-viewed "ws-unknown")
+    ;; Assert
+    (should (null agent-repl-test-host--calls))))
+
+(ert-deftest agent-repl-test-host-mark-viewed-refusal-is-logged-at-error ()
+  "A refused report is surfaced, never swallowed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--mark-viewed-answer
+          (list :response (list :arm :error :value nil)))
+    ;; Act
+    (agent-repl-host-mark-viewed "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-refused"))))
+
+(ert-deftest agent-repl-test-host-mark-viewed-transport-failure-is-logged-at-error ()
+  "A report that never lands is recorded; there is no local state to undo."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--mark-viewed-answer
+          (list :failure (list :kind :transport :message "no route")))
+    ;; Act
+    (agent-repl-host-mark-viewed "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-failed"))))
 
 (ert-deftest agent-repl-test-host-select-refusal-is-logged-at-error ()
   "A refused selection is surfaced, never swallowed."

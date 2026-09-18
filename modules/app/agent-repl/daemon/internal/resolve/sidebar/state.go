@@ -77,6 +77,19 @@ type wsState struct {
 	// account's rather than agent-repl's.
 	vendorBlocked bool
 
+	// viewed is the row's DISPLAY MODE: true once the editor reported that the
+	// user has SEEN this workspace (MarkWorkspaceViewed), false again the
+	// moment the row's status arm changes. It draws the row's name receded and
+	// says nothing about the lifecycle. See `noteArm`, which is the one place
+	// it is cleared.
+	viewed bool
+	// lastArm is the status arm last PUBLISHED for this workspace, which is
+	// what a status CHANGE is measured against.
+	lastArm string
+	// lastArmSeen reports whether any arm has been published at all, so a
+	// workspace's first render is not mistaken for a change from "".
+	lastArmSeen bool
+
 	// merge is what the merge orchestrator last told the roster.
 	merge footer.MergeFacts
 	// summary is the row detail's summary line, empty when none is set.
@@ -108,6 +121,29 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	// spawned it is still running, and only the watcher knows when it ends.
 	s.detached = map[string]struct{}{}
 	s.permissions = map[string]struct{}{}
+}
+
+// noteArm records the arm being published for this workspace and reports
+// whether it CHANGED, clearing the viewed marker when it did.
+//
+// THE ONE PLACE THE VIEWED MARKER IS CLEARED, and it hangs off the render
+// rather than off any particular fact-setter deliberately: every origin of a
+// status change — a prompt the user sent, a frame the shim pushed, a merge the
+// orchestrator ran, a session that died — reaches the row through exactly one
+// funnel, which is the arm this function is handed. A per-setter clear would
+// have to be re-added to every future setter and would silently miss the one
+// nobody remembered.
+//
+// New activity is by definition not something the user has already seen, so a
+// changed arm restores the row to FULL.
+func (s *wsState) noteArm(arm string) bool {
+	changed := s.lastArmSeen && s.lastArm != arm
+	s.lastArm = arm
+	s.lastArmSeen = true
+	if changed {
+		s.viewed = false
+	}
+	return changed
 }
 
 // asyncLive reports whether detached work is running right now. The watcher's

@@ -112,6 +112,21 @@ spelled, and an empty message decodes to nil everywhere else."
   (agent-repl-wire--decode-empty "RosterRowAttention" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-viewed (value)
+  "Decode VALUE as `RosterRowViewed' and return t.
+The DISPLAY MODE marker: present is PARTIAL and absent is FULL.  The
+message is EMPTY and PRESENCE IS THE FACT, exactly as for the attention
+marker above, so the decoded value must be something other than nil.
+
+EMACS DECODES IT AND DRAWS FROM ITS OWN LATCH.  The mode originates here
+— the tab bar demotes on the view dwell and reports it
+\(`agent-repl--tab-view-partial'), which is what put the marker on the
+row in the first place — so reading it back would be Emacs asking the
+daemon what Emacs just said.  It is decoded because the codec refuses
+unknown fields, and refusing this one would drop every roster push."
+  (agent-repl-wire--decode-empty "RosterRowViewed" value)
+  t)
+
 ;;;; ---- The when column ----
 ;;
 ;; REGRESSION WATCH (2026-09-15): this strict decoder rejects the whole
@@ -398,15 +413,15 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority name current children when detail closed)
+  (append '(workspace attention priority viewed name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 23 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
-Returns `(:workspace W :attention A :priority P :name N :status S :current
-C :children ROWS :when WHEN :detail D :closed CLOSED)', with the message
-tree preserved as the contract spells it."
+Returns `(:workspace W :attention A :priority P :viewed V :name N :status
+S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
+the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
     (agent-repl-wire--check-keys "RosterRow" object agent-repl-wire--roster-row-keys)
     (agent-repl-wire--decoded
@@ -420,6 +435,9 @@ tree preserved as the contract spells it."
            :priority (agent-repl-wire--decode-optional-message
                       "RosterRow" 'priority object
                       #'agent-repl-wire-decode-roster-row-priority-badge)
+           :viewed (agent-repl-wire--decode-optional-message
+                    "RosterRow" 'viewed object
+                    #'agent-repl-wire-decode-roster-row-viewed)
            :name (agent-repl-wire--decode-message
                   "RosterRow" 'name object
                   #'agent-repl-wire-decode-roster-row-name)

@@ -52,6 +52,8 @@
 (declare-function agent-repl-wire-decode-register-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-select-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-select-workspace-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-mark-workspace-viewed-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-mark-workspace-viewed-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-adopt-host-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-adopt-host-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-host-workspace-request "wire-host" (request))
@@ -235,6 +237,17 @@ reconciles to the same ref and answers one success.")
 The daemon stamps `current', records last-selected and clears the
 workspace's attention marker; the roster stream reflects it.  Idempotent —
 re-selecting the current workspace succeeds.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-mark-workspace-viewed
+  "MarkWorkspaceViewed"
+  agent-repl-wire-encode-mark-workspace-viewed-request
+  agent-repl-wire-decode-mark-workspace-viewed-response
+  "Tell the daemon the user has now SEEN this workspace.
+Its roster row goes PARTIAL — the sidebar recedes the row's name, exactly
+as the tab bar recedes the tab's — until the row's STATUS CHANGES, which
+the daemon detects itself.  There is no companion verb to undo it, and no
+notification on the restore: the daemon originated the status change that
+restores FULL, so it already knows.  Idempotent.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-adopt-host-workspace
   "AdoptHostWorkspace"

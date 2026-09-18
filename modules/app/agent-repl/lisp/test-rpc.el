@@ -69,6 +69,9 @@ would abort the very branch a test is asserting."
     ("SelectWorkspace" agent-repl-rpc-select-workspace
      agent-repl-wire-encode-select-workspace-request
      agent-repl-wire-decode-select-workspace-response)
+    ("MarkWorkspaceViewed" agent-repl-rpc-mark-workspace-viewed
+     agent-repl-wire-encode-mark-workspace-viewed-request
+     agent-repl-wire-decode-mark-workspace-viewed-response)
     ("AdoptHostWorkspace" agent-repl-rpc-adopt-host-workspace
      agent-repl-wire-encode-adopt-host-workspace-request
      agent-repl-wire-decode-adopt-host-workspace-response)
