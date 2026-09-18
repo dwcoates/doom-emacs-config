@@ -314,7 +314,7 @@ func answeringResponseFrame(agent string, answer *conversationv1.AgentActivityId
 // looking at a conclusion whose answer resolves to nothing.
 func pushConcludedTurn(shim *harness.ShimControl, agent, unit string) {
 	shim.PushAgentFrame(agent, answeringResponseFrame(agent, activityID(unit), "done"))
-	pushConcludedTurn(shim, agent, unit)
+	shim.PushAgentFrame(agent, successFrame(agent, activityID(unit)))
 }
 
 // interruptedFrame is an agent's terminal interruption frame.
