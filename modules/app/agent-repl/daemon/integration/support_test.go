@@ -348,6 +348,43 @@ func awaitRow(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.FeedRow], 
 	return harness.AwaitView(t, f.d.Ctx(), s, what, pred)
 }
 
+// awaitShellHead answers a detached shell's HEAD row on the feed being tailed.
+//
+// THE SHELL BUBBLE IS A FEED, exactly as a subagent's is (feed.proto,
+// FeedRow.shell_head): the HEAD carries the command, the clock and the state
+// and rides the PARENT feed, while the spool is a separate BODY row
+// (FeedRow.detached_shell) on the shell's own sub-feed, which the head's own
+// FeedId addresses. `detached_shell` is therefore NEVER a top-level row, and a
+// test that waits for one on the root feed waits until its bound expires.
+func awaitShellHead(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.FeedRow], what string) *frontendv1.FeedRow {
+	t.Helper()
+	return awaitRow(t, f, s, what, func(r *frontendv1.FeedRow) bool { return r.GetShellHead() != nil })
+}
+
+// awaitShellSpool answers the spool BODY row on the sub-feed a shell head
+// addresses — the row that carries the output, wherever in that sub-feed's
+// page or tail it turns up.
+func awaitShellSpool(t *testing.T, f *fixture, head *frontendv1.FeedRow, what string, pred func(*frontendv1.FeedShell) bool) *frontendv1.FeedShell {
+	t.Helper()
+	row := f.awaitRowInFeed(head.GetId(), what, func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedShell() != nil && pred(r.GetDetachedShell().GetShell())
+	})
+	return row.GetDetachedShell().GetShell()
+}
+
+// expectNoShellSpool asserts the shell bubble's sub-feed carries NO spool body
+// at all — neither already in its page nor arriving on its tail.
+func expectNoShellSpool(t *testing.T, f *fixture, head *frontendv1.FeedRow, what string) {
+	t.Helper()
+	page, token := f.openFeed(head.GetId())
+	for _, r := range page.GetSuccess().GetRows() {
+		if r.GetDetachedShell() != nil {
+			t.Fatalf("the shell sub-feed's page carries a spool body %v, want none: %s", r.GetDetachedShell(), what)
+		}
+	}
+	harness.ExpectNoPush(t, f.d.WatchFeed(token), harness.ProbeWindow, what)
+}
+
 // awaitFooter reads footer pushes until one satisfies the predicate.
 func awaitFooter(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.FooterView], what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
 	t.Helper()
