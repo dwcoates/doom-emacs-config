@@ -88,7 +88,7 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 	// Drain the front's conflict brief so its turn can conclude and the run
 	// can actually reach the parked state, rather than sitting mid-turn.
 	front.shim.ExpectStartTurn()
-	front.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("front-conflict-brief")))
+	pushConcludedTurn(front.shim, mainAgent, "front-conflict-brief")
 	// The success frame and the merge worker are separate observers. Wait for
 	// the worker's parked record so a test cannot finish and tear the daemon
 	// down while its final conflicted-files subprocess is still running.
@@ -569,7 +569,7 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 
 	// Act: conclude the brief's turn. The conflict is never cleared (no
 	// harness surface exists to resolve it), so the run parks.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 
 	// Assert: footer, host composer.
 	footer := f.d.WatchFooter(f.ws)
@@ -614,7 +614,7 @@ func TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal(t *test
 	}
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 	host := f.d.WatchHost(f.ws)
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
@@ -723,7 +723,7 @@ func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *tes
 		[]byte(mergeEscalationMarker+"\nthis needs a redesign\n"), 0o644); err != nil {
 		t.Fatalf("write the escalation file: %v", err)
 	}
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("fixes-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "fixes-brief-done")
 
 	// Assert: the run parks.
 	footer := f.d.WatchFooter(f.ws)
@@ -916,7 +916,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	childShim := d.Shim(child)
 	childShim.ExpectStartSession()
 	childShim.ExpectStartTurn()
-	childShim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("sibling7a-child-initial")))
+	pushConcludedTurn(childShim, mainAgent, "sibling7a-child-initial")
 	// A commit that WOULD classify into this daemon's own subsystem, so
 	// nothing but the literal-checkout gate is what keeps the deploy off.
 	writeCommit(t, repo, child.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
@@ -1060,7 +1060,7 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	}
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 	host := f.d.WatchHost(f.ws)
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
@@ -1179,7 +1179,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	})
 
 	// Act: conclude the pre-prompt's turn.
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("pre-prompt-done")))
+	pushConcludedTurn(f.shim, mainAgent, "pre-prompt-done")
 
 	// Assert: the turn's own concluded row is parented to the pre_prompt tab —
 	// the OUTPUT ADDRESS the lease's session was stamped with — never to root.
@@ -1457,7 +1457,7 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 	}
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
@@ -1487,7 +1487,7 @@ func TestParkedGuidanceLandsAsAUserPromptRowOnTheConflictsTabNeverOnTheRootFeed(
 	}
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 	host := f.d.WatchHost(f.ws)
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
@@ -1917,7 +1917,7 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 	// pushed until the daemon has the turn OPEN, or the terminal names no turn
 	// and everything waiting on that turn's end waits forever.
 	d.AwaitWorkspaceLogOperationCount(ws.GetDir(), harness.OpTurnOpened, 1)
-	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID(name+"-initial")))
+	pushConcludedTurn(shim, mainAgent, name+"-initial")
 	// A created workspace is an OPENED one, so all three connectivity hops are
 	// up (daemon.md invariant 11): without the two client streams its footer
 	// reads disconnected, which outranks every merge substatus.

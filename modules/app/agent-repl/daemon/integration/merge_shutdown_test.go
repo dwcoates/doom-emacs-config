@@ -127,7 +127,7 @@ func TestStoppingTheDaemonWithAMergeParkedRecordsNoFailedWrites(t *testing.T) {
 	}
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
-	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	pushConcludedTurn(f.shim, mainAgent, "conflict-brief-done")
 	host := f.d.WatchHost(f.ws)
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil

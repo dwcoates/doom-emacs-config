@@ -45,6 +45,13 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.turn = string(*s.turnStamp)
 	}
 
+	// A FRAME ARRIVED, so this fold is not silent. The stall window is dropped
+	// and a stall fault raised about this fold is retracted THE INSTANT the
+	// frame lands, before anything else is decided about it; the window is
+	// restarted at the foot of this function only if the fold is still open.
+	r.disarmAnswerStall(s, unit)
+	r.clearStalledAnswerFault(s, unit, "a response frame arrived")
+
 	// THE STAMP IS THIS TURN'S TOKENS, not this unit's and not the context
 	// window: usage rides exactly one unit per API response (usually a sibling,
 	// the thinking block's), and the bubble draws the SUM of fresh input +
@@ -108,13 +115,13 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// already-settled whole exactly as a same-unit fragment-after-settle is,
 		// so it draws nothing — and any partial row this fold already drew is
 		// retired, so the settled whole is the block's ONLY row.
-		if r.settledWholeContaining(s, fold.turn, unit, fold.markdown) {
+		if survivor, ok := r.settledWholeContaining(s, fold.turn, unit, fold.markdown); ok {
 			fold.settled = true
 			if fold.row != nil {
 				r.retire(s, fold.feed, fold.row.GetValue())
-				delete(s.answerRows, unit)
 				fold.row = nil
 			}
+			r.aliasAnswerRow(s, unit, survivor, fold.turn, "the settled whole landed under a sibling activity id")
 			log.Debug("daemon.feed.response_fragment_of_divergent_settle",
 				"a prose fragment matched a same-turn block already settled under a different activity id; the settled whole stands",
 				dlog.Context{"unit": unit, "turn": fold.turn})
@@ -181,14 +188,6 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		return nil, errNotARow
 	}
 
-	// THE SETTLED WHOLE IS THE BLOCK'S ONLY ROW, even when the two store planes
-	// delivered the block under DIVERGENT activity ids. A settling frame retires
-	// any same-turn fragment that lost its opening deltas to the other id, so the
-	// settle can never leave an unsettled partial standing beside the green whole.
-	if fold.settled {
-		r.reconcileDivergentProse(s, fold.turn, unit, fold.markdown)
-	}
-
 	// THE STAMP'S INSTANT RIDES THE SETTLE, not the push. The corner is drawn
 	// from the fold's figure in every arm, but its instant is meaningful only
 	// once the fold settled; set after the switch so a settling frame carries
@@ -199,6 +198,17 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
 	s.answerRows[unit] = id
+	// THE SETTLED WHOLE IS THE BLOCK'S ONLY ROW, even when the two store planes
+	// delivered the block under DIVERGENT activity ids. A settling frame retires
+	// any same-turn fragment that lost its opening deltas to the other id, so the
+	// settle can never leave an unsettled partial standing beside the green whole.
+	//
+	// RUN AFTER THE ROW ID IS MINTED, because the retirement ALIASES each retired
+	// unit onto THIS row: the shim may name the retired unit as the turn's answer,
+	// and an alias is what makes that lookup land on the surviving row.
+	if fold.settled {
+		r.reconcileDivergentProse(s, fold.turn, unit, id, fold.markdown)
+	}
 	// THE GREEN FINAL-ANSWER BORDER IS A DATA PROPERTY, STAMPED ON EVERY DRAW.
 	// When this row is the one the workspace has recorded as a turn's concluded
 	// answer, the flag rides the row itself so no redraw, tool-group re-arrange,
@@ -219,6 +229,12 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// the feed and row identity this fold drew on.
 	fold.feed = at.feed
 	fold.row = id
+	// AN OPEN FOLD IS EXPECTED TO KEEP MOVING. Rearmed from THIS frame, so the
+	// window measures silence rather than the fold's whole lifetime; a settled
+	// fold is owed nothing more and stays disarmed.
+	if !fold.settled {
+		r.armAnswerStall(s, unit, fold.turn)
+	}
 	return &frontendv1.FeedRow{
 		Id: id,
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
@@ -248,7 +264,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 // whole; requiring a non-empty suffix that is no longer than the whole keeps two
 // genuinely distinct prose blocks — whose texts do not nest — apart. The retired
 // fold is marked settled so a still-arriving delta of it can never re-open a row.
-func (r *resolver) reconcileDivergentProse(s *wsState, turn, keepUnit, prose string) {
+func (r *resolver) reconcileDivergentProse(s *wsState, turn, keepUnit string, keepRow *frontendv1.FeedId, prose string) {
 	if turn == "" || prose == "" {
 		return
 	}
@@ -262,32 +278,65 @@ func (r *resolver) reconcileDivergentProse(s *wsState, turn, keepUnit, prose str
 		fold.settled = true
 		if fold.row != nil {
 			r.retire(s, fold.feed, fold.row.GetValue())
-			delete(s.answerRows, unit)
 			fold.row = nil
 		}
+		r.aliasAnswerRow(s, unit, keepRow, turn, "the settled whole retired this fragment's row")
 		r.logger(s.id).Debug("daemon.feed.response_divergent_fold_retired",
 			"a same-turn response fragment under a divergent activity id was retired in favour of the settled whole",
 			dlog.Context{"turn": turn, "retired_unit": unit, "kept_unit": keepUnit})
 	}
 }
 
+// aliasAnswerRow POINTS A RETIRED UNIT AT THE ROW THAT SURVIVED IT.
+//
+// THIS IS THE FIX FOR THE ANSWERS THAT NEVER WENT GREEN. A response block that
+// reaches the resolver under two divergent activity ids leaves ONE row standing
+// and retires the other fold — and the producer is then free to name EITHER id
+// as the turn's answer, because it knows nothing about which id this resolver
+// kept. Dropping the retired unit's mapping (what this used to do) made the
+// terminal's lookup miss whenever the producer named the retired one: no green
+// border, no selectable final response, and a debug line as the only trace. Over
+// one 40-hour window the daemon's own records had 199 answers named and 175 rows
+// found; the 24 that went missing are exactly this.
+//
+// So the mapping is REPOINTED rather than deleted. Both ids name the same block,
+// the surviving row IS that block's row, and a lookup through either id lands on
+// it. A survivor with no row of its own (the whole settled but drew nothing)
+// leaves no alias to make, and the mapping is dropped as before — an alias to
+// nothing would be a worse answer than none.
+func (r *resolver) aliasAnswerRow(s *wsState, unit string, survivor *frontendv1.FeedId, turn, why string) {
+	if survivor.GetValue() == "" {
+		delete(s.answerRows, unit)
+		r.logger(s.id).Debug("daemon.feed.answer_row_alias_unavailable",
+			"a retired response fold had no surviving sibling row to alias onto; the unit names no answer row",
+			dlog.Context{"unit": unit, "turn": turn, "why": why})
+		return
+	}
+	s.answerRows[unit] = survivor
+	r.logger(s.id).Debug("daemon.feed.answer_row_aliased",
+		"a retired response unit was aliased onto the surviving sibling's row so a terminal naming it still resolves",
+		dlog.Context{"unit": unit, "turn": turn, "row": survivor.GetValue(), "why": why})
+}
+
 // settledWholeContaining reports whether some OTHER settled response fold of the
 // same turn already restated a whole that ENDS WITH this fragment — the mirror of
 // reconcileDivergentProse for the order where the whole settles first and this
 // fold's own deltas arrive after, under the divergent id.
-func (r *resolver) settledWholeContaining(s *wsState, turn, unit, fragment string) bool {
+func (r *resolver) settledWholeContaining(s *wsState, turn, unit, fragment string) (*frontendv1.FeedId, bool) {
 	if turn == "" || fragment == "" {
-		return false
+		return nil, false
 	}
 	for other, fold := range s.responses {
 		if other == unit || fold.turn != turn || !fold.settled || fold.markdown == "" {
 			continue
 		}
 		if len(fragment) <= len(fold.markdown) && strings.HasSuffix(fold.markdown, fragment) {
-			return true
+			// THE SURVIVOR'S ROW IS ANSWERED, not merely the fact of it, so the
+			// caller can alias this fragment's unit onto the row that stands.
+			return fold.row, true
 		}
 	}
-	return false
+	return nil, false
 }
 
 // stampSettled records the instant a fold reached its terminal state, ONCE.

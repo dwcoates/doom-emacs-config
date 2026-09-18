@@ -72,6 +72,9 @@ message SessionFault {
     SessionFaultDaemonStateUnreadable daemon_state_unreadable = 13;
     // A handover whose adoption window ran out with this workspace unclaimed.
     SessionFaultAdoptionWindowExpired adoption_window_expired = 14;
+    // A concluded turn whose answering response the feed could not stand
+    // behind, or an open response that went silent.
+    SessionFaultFinalAnswerUnresolved final_answer_unresolved = 15;
   }
 }
 message SessionFaultShimStartFailed {
@@ -145,6 +148,42 @@ message SessionFaultDaemonStateUnreadable {
 message SessionFaultAdoptionWindowExpired {
   // How long the window was, as the controller rendered it ("30s").
   string adoption_window = 1;
+}
+
+// THE TURN CONCLUDED AND NO GREEN ANSWER STANDS. A turn's terminal names the
+// response that answered it, and the feed draws that row with the green
+// final-answer border; this arm is every way that can fail to happen. It is
+// NOT a failure to serve — the session is healthy and the prose is on screen —
+// it is the record that the workspace cannot point at an answer, which is why
+// it stands as the footer's activity line alone and never escalates the
+// status.
+//
+// `why` IS THE SUBSTATUS, and it is carried here rather than in the footer's
+// substatus cell on purpose: the footer's substatus is only legal under a
+// status the fault CLAIMS, and the two statuses a fault may claim
+// (`disconnected`, `blocked`) both say the session cannot be used — which is
+// false of every case below, and `disconnected` would close the composer on a
+// session that is serving perfectly.
+message SessionFaultFinalAnswerUnresolved {
+  // The turn whose answer could not be stood behind.
+  string turn = 1;
+  // The activity id the terminal named as the answer, or the response unit
+  // that went silent. EMPTY when the terminal named no answer at all, which
+  // is itself one of the `why` values below.
+  string unit = 2;
+  // WHICH of the three ways it failed, as the daemon's own word:
+  //
+  //   `no_answer_named`       — the terminal concluded naming no answer while
+  //                             this turn had drawn response prose.
+  //   `answer_row_unresolved` — the terminal named an answer the feed resolves
+  //                             to no drawn, non-thinking response row.
+  //   `stalled`               — an open response fold has had no frame and no
+  //                             terminal for the stall window.
+  //
+  // A closed vocabulary, spelled as a string rather than an enum because it is
+  // the fault record's own evidence value and the client renders it verbatim
+  // beside the kind.
+  string why = 3;
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

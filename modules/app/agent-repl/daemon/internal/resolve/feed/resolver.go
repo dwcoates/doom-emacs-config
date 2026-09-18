@@ -204,6 +204,17 @@ type wsState struct {
 	// stream plane), and the same answer row must be appended once, not once
 	// per replay.
 	finalAnswerSeen map[string]bool
+	// answerFault is the ONE standing `final_answer_unresolved` fault, nil when
+	// none stands. It is raised at a terminal whose answer did not land, or by
+	// an open response fold's stall window elapsing, and retracted when the next
+	// turn starts (or, for the stall, by the frame that finally arrived).
+	answerFault *answerFaultState
+	// stalls are the armed stall windows, keyed by the response unit.
+	stalls map[string]*stallState
+	// stallSeq numbers the armed windows so a timer that fired and is waiting
+	// on the resolver's mutex can tell it is no longer the armed one.
+	stallSeq uint64
+
 	// answerMarkdown copies each final-response row's settled markdown, keyed
 	// by its FeedId value, so a reply-to-a-past-response submission can PREPEND
 	// the referenced response verbatim without re-walking the fold. It holds
@@ -367,6 +378,12 @@ func newResolver(deps Deps) (*resolver, error) {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
+	if deps.AfterFunc == nil {
+		deps.AfterFunc = func(d time.Duration, f func()) Timer { return time.AfterFunc(d, f) }
+	}
+	if deps.AnswerStall <= 0 {
+		deps.AnswerStall = DefaultAnswerStall
+	}
 	if deps.PageSize <= 0 {
 		deps.PageSize = DefaultPageSize
 	}
@@ -463,6 +480,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		answerRows:           map[string]*frontendv1.FeedId{},
 		finalAnswerSeen:      map[string]bool{},
 		answerMarkdown:       map[string]string{},
+		stalls:               map[string]*stallState{},
 
 		unitAPIResponse:       map[string]uint64{},
 		apiResponseTurn:       map[uint64]string{},

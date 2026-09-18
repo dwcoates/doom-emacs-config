@@ -33,10 +33,17 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	turnID := &conversationv1.TurnId{Value: string(*turn)}
 	ended := &frontendv1.FeedTurnEnded{EndedAtMs: r.deps.Now().UnixMilli()}
 
+	// THE TERMINAL ANSWERS EVERY STALL THIS TURN HAD OPEN. No fold of a turn
+	// that ended is still expecting a frame, so the windows are dropped and a
+	// stall fault is retracted BEFORE the conclusion below decides whether this
+	// terminal raises a fault of its own.
+	r.disarmTurnStalls(s, string(*turn))
+	r.clearTurnStalledAnswerFault(s, string(*turn), "the turn's terminal arrived")
+
 	switch {
 	case success != nil:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case success != nil"})
-		r.concludedOutcome(s, success)(ended)
+		r.concludedOutcome(s, string(*turn), success)(ended)
 	case failure != nil:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawTerminal", "branch": "case failure != nil"})
 		ended.Outcome = &frontendv1.FeedTurnEnded_Errored{Errored: r.erroredOutcome(s, string(*turn), failure)}
@@ -139,17 +146,35 @@ func terminalArm(ended *frontendv1.FeedTurnEnded) string {
 
 // concludedOutcome renders the two SUCCESS endings. Both are answers, never
 // failures: a stop the user asked for is not the turn breaking.
-func (r *resolver) concludedOutcome(s *wsState, success *conversationv1.AgentSuccess) turnOutcome {
+func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversationv1.AgentSuccess) turnOutcome {
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentSuccess_Completed:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "concludedOutcome", "branch": "case *conversationv1.AgentSuccess_Completed"})
 		concluded := &frontendv1.FeedTurnEndedConcluded{}
 		// THE ANSWERING RESPONSE, named by the producer rather than derived
-		// from position. Absence draws no final-answer border anywhere.
-		if answer := outcome.Completed.GetAnswer().GetValue(); answer != "" {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "answer := outcome.Completed.GetAnswer().GetValue(); answer != \"\""})
-			if id, ok := s.answerRows[answer]; ok {
-				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id, ok := s.answerRows[answer]; ok"})
+		// from position.
+		//
+		// EVERY WAY THIS FAILS IS A FAULT NOW, not a silence. See
+		// finalanswer.go: a turn that concluded with no green answer standing
+		// is a fact the reader is owed, and the footer's fault chip is where
+		// they are told it. A CONTEXT-CUT DIRECTIVE is excluded outright — its
+		// response draws no bubble at all, so it never had an answer to lose.
+		answer := outcome.Completed.GetAnswer().GetValue()
+		switch {
+		case s.directiveTurns[ids.TurnID(turn)] || s.directiveUnits[answer]:
+			r.logger(s.id).Debug("daemon.feed.final_answer_directive_turn",
+				"a context-cut directive's turn concluded; it draws no answering bubble and owes no final answer",
+				dlog.Context{"turn": turn, "unit": answer})
+		case answer == "":
+			// NOT LANDED (a): the producer named nothing while this turn's
+			// prose was drawn, so the words on screen belong to no answer.
+			if unit, drew := r.turnDrewProse(s, turn); drew {
+				r.raiseAnswerFault(s, turn, unit, whyNoAnswerNamed,
+					"the turn concluded naming no answering response while its prose was drawn")
+			}
+		default:
+			id, known := s.answerRows[answer]
+			if known && r.restampFinalAnswer(s, id, answer) {
 				concluded.Answer = id
 				// THE GREEN FINAL-ANSWER ROW BECOMES SELECTABLE HERE, at the
 				// one site that names it — reply-to-a-past-response mode walks
@@ -157,16 +182,23 @@ func (r *resolver) concludedOutcome(s *wsState, success *conversationv1.AgentSuc
 				// (the terminal replays across planes) so the selectable set
 				// carries each answer once, in conclusion order, which is
 				// root-feed order.
+				//
+				// THE RE-STAMP IS WHAT MAKES THE GREEN APPEAR WITHOUT A LIVE
+				// EVENT, and it is the gate above rather than a statement after
+				// it: the response's frames drew this row before the terminal
+				// named it the answer, so it is on screen without the flag, and
+				// re-pushing it with final_answer=true is the whole of the
+				// border. History replay walks this same path, which is what
+				// makes the green survive a reconnect with no turn-ended event.
+				// When it answers false there is no drawn row to stand behind,
+				// which is exactly the NOT LANDED (b) case.
 				r.recordFinalAnswer(s, id, answer)
-				// RE-STAMP THE ANSWER ROW SO THE GREEN APPEARS WITHOUT A LIVE
-				// EVENT. The response's frames drew this row before the terminal
-				// named it the answer, so it is on screen without the flag; this
-				// re-pushes it with final_answer=true. Because history replay
-				// walks this same terminal path, a reloaded/replayed feed's
-				// answer row is re-stamped here too — the crux that makes the
-				// green survive a reconnect/reload with no live turn-ended event.
-				r.restampFinalAnswer(s, answer)
+				break
 			}
+			// NOT LANDED (b): the producer named an answer this resolver
+			// resolves to no drawn response row.
+			r.raiseAnswerFault(s, turn, answer, whyAnswerRowUnresolved,
+				"the turn's named answering response resolves to no drawn response row")
 		}
 		return concludedArm(concluded)
 	case *conversationv1.AgentSuccess_Interrupted:

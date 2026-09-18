@@ -33,6 +33,7 @@ func TestFaultFooterCellPartitionsEverySessionKind(t *testing.T) {
 		{"a headless classifier run that failed", KindClassifierFailed, FaultCell{FaultStatusNone, ""}},
 		{"a bounce disposition needing a human", KindBounceUnknown, FaultCell{FaultStatusNone, ""}},
 		{"a conversation a fresh bring-up left behind", KindConversationAbandoned, FaultCell{FaultStatusNone, ""}},
+		{"a turn whose answer did not land", KindFinalAnswerUnresolved, FaultCell{FaultStatusNone, ""}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
