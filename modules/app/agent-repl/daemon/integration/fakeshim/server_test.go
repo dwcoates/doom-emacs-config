@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"connectrpc.com/connect"
 )
 
 // TestRememberPushedBashKeysACreatedAnnouncementsStart covers the WatchBash
@@ -323,5 +327,60 @@ func TestAWatchOnARunThatIsStillGoingIsHandedNoEnding(t *testing.T) {
 	// Assert
 	if len(backlog) != 0 {
 		t.Fatalf("backlog = %v, want nothing for a run that has not ended", backlog)
+	}
+}
+
+// TestHibernateFailureProfileRefusesEveryCall covers the profile's standing
+// transport failure: it is in force from the fake's birth and does not run
+// out, which is what a test scripting a drain sweep's repeated attempts needs.
+func TestHibernateFailureProfileRefusesEveryCall(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{HibernateFailure: "transport blew up"}, nil)
+	req := connect.NewRequest(&shimv1.HibernateRequest{})
+
+	// Act
+	_, first := srv.Hibernate(context.Background(), req)
+	_, second := srv.Hibernate(context.Background(), req)
+
+	// Assert
+	if first == nil || second == nil {
+		t.Fatalf("Hibernate errors = (%v, %v), want the profile's failure on every call", first, second)
+	}
+}
+
+// TestHibernateTurnInFlightProfileAnswersTheTypedRefusal covers the other
+// profile arm: the shim's own turn_in_flight refusal rather than a transport
+// failure.
+func TestHibernateTurnInFlightProfileAnswersTheTypedRefusal(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{HibernateTurnInFlight: true}, nil)
+
+	// Act
+	resp, err := srv.Hibernate(context.Background(), connect.NewRequest(&shimv1.HibernateRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Hibernate = error %v, want the typed refusal", err)
+	}
+	if resp.Msg.GetError().GetTurnInFlight() == nil {
+		t.Fatalf("Hibernate = %v, want a turn_in_flight refusal", resp.Msg)
+	}
+}
+
+// TestAScriptedHibernateAnswerWinsOverTheProfile covers the precedence: a
+// scripted answer is the narrower instruction and is taken first.
+func TestAScriptedHibernateAnswerWinsOverTheProfile(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{HibernateTurnInFlight: true}, nil)
+	srv.queueAnswer(RPCHibernate, &shimv1.HibernateResponse{
+		Result: &shimv1.HibernateResponse_Success{Success: &shimv1.HibernateSuccess{}},
+	}, "")
+
+	// Act
+	resp, err := srv.Hibernate(context.Background(), connect.NewRequest(&shimv1.HibernateRequest{}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("Hibernate = (%v, %v), want the scripted success", resp.Msg, err)
 	}
 }

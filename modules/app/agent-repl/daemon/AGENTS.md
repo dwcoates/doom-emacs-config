@@ -31,10 +31,20 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   basis. Do not raise it without re-measuring: every test owns a real daemon
   process plus a fake shim, and at 16 that load pushed ordinary daemon steps
   past `harness.DefaultTimeout` in tests that are green at 8.
-  `TMPDIR=/tmp` IS REQUIRED on macOS: `t.TempDir()` otherwise roots the state
-  under `/var/folders/...`, and `<state>/sock/<workspace-id>.sock` then exceeds
-  the 103-byte unix socket path limit, so the daemon refuses the state root at
-  boot before anything else runs.
+  **Every run lives under ONE owner-locked run root** (`/tmp/arrun*`,
+  `integration/harness/runroot.go`): the built binaries, every state root,
+  and every `t.TempDir` (the harness points `TMPDIR` into it). The run holds an
+  flock on `<root>/owner.lock` for its whole life, and the kernel drops it
+  however the run ends, so the NEXT run reclaims a dead run's root and SIGKILLs
+  whatever is still running out of it — a `-timeout` panic or a SIGKILL skips
+  every defer and `t.Cleanup`, and before this a day of such runs filled the
+  disk and left daemons spinning. The root is under `/tmp` and short, so the
+  103-byte socket path budget holds without a `TMPDIR=/tmp` override.
+- **The suite bounds its own load**: `harness.DefaultDaemonSlots` (8,
+  `AGENT_REPL_ITEST_DAEMON_SLOTS`) top-level tests hold a live daemon at once,
+  whatever `-p`/`-parallel` the run was invoked with, because
+  `go test -tags integration ./...` otherwise runs up to `nproc x nproc`
+  daemons and every wait bound above was measured at eight.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1`. No test
   ever calls the vendor.
 - **Wait bounds are TIGHT, on purpose.** Every wait the harness performs is

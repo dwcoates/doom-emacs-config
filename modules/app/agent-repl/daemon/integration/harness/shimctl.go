@@ -36,6 +36,13 @@ type ShimProfile struct {
 	// `vendor_start_failed` refusal carrying this detail: the shim process is
 	// healthy and only the vendor failed to start inside it.
 	VendorStartFailed string `json:"vendor_start_failed,omitempty"`
+	// HibernateFailure makes every Hibernate answer a transport-level error
+	// with this detail; HibernateTurnInFlight makes every one answer the
+	// typed turn_in_flight refusal. Both are in force from the fake's birth,
+	// which a scripted answer filed after the daemon's first idle sweep is
+	// not. See the fake's own Profile for why that matters.
+	HibernateFailure      string `json:"hibernate_failure,omitempty"`
+	HibernateTurnInFlight bool   `json:"hibernate_turn_in_flight,omitempty"`
 	// HangStartSession makes the fake never answer StartSession, waiting out
 	// the caller's context instead. It is what pins a boot's own bring-up
 	// open on a workspace whose shim never answers.
