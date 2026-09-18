@@ -256,3 +256,38 @@ export function installClickExpand(
     afterToggle?.(section, expanded);
   });
 }
+
+/**
+ * The reader's expansions across a WHOLE PAGE, keyed by row id.
+ *
+ * `carryExpanded` carries one row's folds from the element a redraw replaces
+ * onto its successor, which is everything an UPSERT needs: the row keeps its
+ * place and only its drawing changes. A REPLACE (`applyPage("replace")` —
+ * reconnect, reload, compaction replay) tears every row down and rebuilds it,
+ * so there is no previous element to read back off; the rows' identities are
+ * all that survives, and this is the snapshot taken across that gap.
+ *
+ * The key is the row's own `FeedId` value, which the daemon keeps stable across
+ * a re-serve of the same conversation; the class:occurrence section keys inside
+ * one row are the same ones `carryExpanded` uses, so a single walk keys both.
+ */
+export function snapshotExpanded(bodies: Iterable<[string, HTMLElement]>): Map<string, string[]> {
+  const snapshot = new Map<string, string[]>();
+  for (const [id, body] of bodies) {
+    const keys = expandedKeys(cappedSectionsOf(body));
+    if (keys.length > 0) snapshot.set(id, keys);
+  }
+  return snapshot;
+}
+
+/**
+ * Drop every snapshot entry whose row is gone from the page that replaced it.
+ *
+ * A row the replace did not serve again is not coming back, and a key held for
+ * it would be a leak that outlives the conversation it described.
+ */
+export function retainRows(snapshot: Map<string, string[]>, live: ReadonlySet<string>): void {
+  for (const id of [...snapshot.keys()]) {
+    if (!live.has(id)) snapshot.delete(id);
+  }
+}
