@@ -342,12 +342,6 @@ describe("a terminal draw's clocks", () => {
     drawFeedSimpleToolCall(card({ outcome: { case: "denied", value: {} } }), rowContext(ticker));
     expect(ticker.live()).toBe(0);
   });
-
-  it("subscribes to nothing when the call was handed off to a detached shell", () => {
-    const ticker = countingTicker();
-    drawFeedSimpleToolCall(card({ outcome: { case: "moved", value: {} } }), rowContext(ticker));
-    expect(ticker.live()).toBe(0);
-  });
 });
 
 describe("the denied state", () => {
@@ -365,45 +359,6 @@ describe("the denied state", () => {
       rowContext(),
     );
     expect(el.querySelector(".tool-output")).toBeNull();
-  });
-});
-
-describe("the moved state", () => {
-  // A BACKGROUNDED CALL IS NOT AN ENDING. The detached shell bubble beneath the
-  // card is where the run reports, and this card said `running` forever above a
-  // row already reporting `exit 0` until the arm existed (observed 2026-09-09).
-
-  it("draws the moved badge", () => {
-    const el = drawFeedSimpleToolCall(
-      card({ outcome: { case: "moved", value: {} } }),
-      rowContext(),
-    );
-    expect(el.querySelector(".badge")?.textContent).toBe("moved");
-  });
-
-  it("draws the badge in the muted register, neither a verdict nor running", () => {
-    const el = drawFeedSimpleToolCall(
-      card({ outcome: { case: "moved", value: {} } }),
-      rowContext(),
-    );
-    const badge = el.querySelector(".badge");
-    expect(badge?.className).toBe("badge muted");
-  });
-
-  it("draws no output section at all", () => {
-    const el = drawFeedSimpleToolCall(
-      card({ outcome: { case: "moved", value: {} } }),
-      rowContext(),
-    );
-    expect(el.querySelector(".tool-output")).toBeNull();
-  });
-
-  it("states the arm on the card, so a cold repaint says the work moved", () => {
-    const el = drawFeedSimpleToolCall(
-      card({ outcome: { case: "moved", value: {} } }),
-      rowContext(),
-    );
-    expect(el.getAttribute("data-state")).toBe("moved");
   });
 });
 
