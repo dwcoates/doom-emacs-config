@@ -111,6 +111,18 @@ registered here sees every origin without enumerating any of them.
 Runs before `agent-repl-roster-update-functions\=' and only for rows that
 have a tab.  A first sighting is NOT a change (PREVIOUS is never nil).")
 
+(defvar agent-repl-roster-viewed-cleared-functions nil
+  "Abnormal hook run with WS per row whose VIEWED MARKER WAS CLEARED.
+
+The daemon is the single source of the viewed (partial) mode: it raises
+`RosterRowViewed' on a row when Emacs reports a dwell and clears it on any
+status change.  This hook fires on the present->absent edge of that marker,
+computed against the previous accepted push.  A restated marker is not a
+clear, and a first sighting without the marker is not a clear.
+
+Runs before `agent-repl-roster-update-functions\=' and only for rows that
+have a tab.")
+
 (defvar agent-repl-roster-bringup-functions nil
   "Abnormal hook run with (OPENED TOTAL FINISHED) as a reconcile opens tabs.
 
@@ -153,6 +165,11 @@ guess.")
   "Ref id -> the status arm keyword of the PREVIOUS accepted push.
 The finish edge is a comparison against this table, which is why it is
 updated only after the edges of a push have been computed.")
+
+(defvar agent-repl-roster--viewed-by-id (make-hash-table :test 'equal)
+  "Ref id -> non-nil when the PREVIOUS accepted push carried the viewed marker.
+The viewed-cleared edge is a comparison against this table, so it is
+replaced only after that edge has been computed.")
 
 (defvar agent-repl-roster--tab-order nil
   "Workspace names in roster walk order — the tab bar's order, strictly.
@@ -206,6 +223,17 @@ reach-through lives here once instead of at every reader."
 (defun agent-repl-roster-row-priority-label (row)
   "Return ROW's priority badge label, or nil when it is unprioritized."
   (plist-get (plist-get row :priority) :label))
+
+(defun agent-repl-roster-row-viewed-p (row)
+  "Return non-nil when ROW carries the viewed (partial) marker."
+  (and (plist-get row :viewed) t))
+
+(defun agent-repl-roster-viewed-for-ws (ws)
+  "Return the viewed marker of WS's current roster row, or nil.
+Nil before any push has carried a row for WS.  This is the ONLY input to
+the tab-bar's partial/full decision: the daemon owns the mode."
+  (let ((row (agent-repl-roster-row-for-ws ws)))
+    (and row (plist-get row :viewed))))
 
 ;;;; ---- The walk ---------------------------------------------------------
 
@@ -782,6 +810,35 @@ Returns the workspaces whose status changed."
                                ws previous current)))))
     (nreverse changed)))
 
+(defun agent-repl-roster--run-viewed-clears (entries)
+  "Run `agent-repl-roster-viewed-cleared-functions' per cleared viewed marker.
+A CLEAR is a row of ENTRIES that carried the marker in the previous
+accepted push and does not carry it now.  Only rows with a tab fire.
+Returns the workspaces whose marker cleared."
+  (let ((cleared nil))
+    (dolist (entry entries)
+      (let* ((row (plist-get entry :row))
+             (id (agent-repl-roster-row-id row)))
+        (when (and (gethash id agent-repl-roster--viewed-by-id)
+                   (not (agent-repl-roster-row-viewed-p row)))
+          (let ((ws (agent-repl--ws-by-ref-id id)))
+            (if (not ws)
+                (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
+                                 "elisp.roster.viewed-cleared: no tab id=%s" id)
+              (agent-repl--log ws "elisp.roster.viewed-cleared: ws=%s id=%s" ws id)
+              (push ws cleared)
+              (run-hook-with-args 'agent-repl-roster-viewed-cleared-functions ws))))))
+    (nreverse cleared)))
+
+(defun agent-repl-roster--record-viewed (entries)
+  "Replace the previous-viewed table from ENTRIES, keyed by ref id."
+  (clrhash agent-repl-roster--viewed-by-id)
+  (dolist (entry entries)
+    (let ((row (plist-get entry :row)))
+      (puthash (agent-repl-roster-row-id row)
+               (agent-repl-roster-row-viewed-p row)
+               agent-repl-roster--viewed-by-id))))
+
 ;;;; ---- The reactions ----------------------------------------------------
 
 (defun agent-repl-roster-notify-finished (ws)
@@ -854,6 +911,9 @@ dropped."
         ;; the LAST push left behind, which the record below replaces.
         (agent-repl-roster--run-status-changes roster)
         (agent-repl-roster--record-statuses entries)
+        ;; Same rule for the viewed marker: edge first, then record.
+        (agent-repl-roster--run-viewed-clears entries)
+        (agent-repl-roster--record-viewed entries)
         (agent-repl-roster-react-to-current roster)
         (run-hook-with-args 'agent-repl-roster-update-functions roster)
         (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
