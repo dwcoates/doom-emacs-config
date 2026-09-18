@@ -1357,6 +1357,40 @@ describe("createFeedController: mirroring the card's state onto the chrome", () 
   });
 });
 
+describe("createFeedController: the reader's expansions survive a redraw", () => {
+  /** A response renderer whose whole card is a capped, card-level fold. */
+  function foldingCard(): Partial<Parameters<typeof stubRenderers>[0]> {
+    return {
+      response: () => {
+        const el = document.createElement("div");
+        el.className = "stub-response tool-fold";
+        return el;
+      },
+    };
+  }
+
+  it("keeps a card-level fold the reader opened across a re-push of the row", () => {
+    // Arrange: the row is drawn, and the reader opens its fold.
+    const { controller, host } = fixture(harness(), {}, { renderers: foldingCard() });
+    controller.applyPage(page([responseRow("a")]), "replace");
+    host.querySelector<HTMLElement>(".tool-fold")?.classList.add("expanded");
+    // Act: the daemon re-pushes the SAME row — the upsert path.
+    controller.upsert(responseRow("a"));
+    // Assert: R2 — a push states the INITIAL fold and never un-toggles.
+    expect(host.querySelector(".tool-fold")?.classList.contains("expanded")).toBe(true);
+  });
+
+  it("leaves a fold the reader never opened collapsed across a re-push", () => {
+    // Arrange
+    const { controller, host } = fixture(harness(), {}, { renderers: foldingCard() });
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(responseRow("a"));
+    // Assert
+    expect(host.querySelector(".tool-fold")?.classList.contains("expanded")).toBe(false);
+  });
+});
+
 describe("createFeedController: a feed that is not the root", () => {
   it("names the feed it draws by its own id", () => {
     const { host } = fixture(harness(), {}, { feed: create(FeedIdSchema, { value: "b1" }) });
