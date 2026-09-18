@@ -82,6 +82,10 @@ type hooks struct {
 	// refuses a held claim on sight, so a suite proving the exclusivity ruling
 	// does not wait out an incumbent that is never going to depart.
 	ClaimWait time.Duration
+	// StateCheckEvery is the cadence of the serving daemon's check that its
+	// state root, daemon.lock and daemon.addr are still there; zero means
+	// stateRootCheckEvery.
+	StateCheckEvery time.Duration
 }
 
 // productionHooks are the real seams.
@@ -415,6 +419,23 @@ func run(ctx context.Context, opts options, h hooks) error {
 		defer loops.Done()
 		sequence.BringUp(serving, report.PendingBringUp)
 	}()
+	// AND THE STATE ROOT IS WATCHED FOR AS LONG AS IT IS SERVED. A loss ends
+	// the serving lifetime, and the exit reports it as the cause rather than
+	// as an orderly one. It joins with the loops above.
+	var lost standDownCause
+	loops.Add(1)
+	go func() {
+		defer loops.Done()
+		_ = rootWatch{
+			verify: claim.Verify,
+			every:  h.StateCheckEvery,
+			log:    log,
+			standDown: func(cause error) {
+				lost.set(cause)
+				stopServing()
+			},
+		}.run(serving)
+	}()
 	defer joinBackgroundLoops(&loops, loopJoinBound, log)
 	// AND THE QUEUE'S OWN GOROUTINES, for the same reason and on the same
 	// bound: a classification verdict and a background revival each read and
@@ -453,6 +474,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 			"error":   err.Error(),
 		})
 		return err
+	}
+	if cause := lost.get(); cause != nil {
+		return fmt.Errorf("claude-repld: stood down: %w", cause)
 	}
 	return nil
 }
