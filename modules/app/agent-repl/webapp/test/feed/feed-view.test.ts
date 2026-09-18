@@ -1594,3 +1594,72 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     expect(ticker.live()).toBe(1);
   });
 });
+
+// A FOLD SURVIVES A FULL PAGE REPLACE (owner ruling, 2026-09-18: a redraw never
+// un-toggles, whatever its shape). An upsert carries the reader's expansions
+// off the element it replaces; a replace has no such element, so the feed
+// snapshots them by row id across the teardown.
+
+describe("createFeedController: folds across a page replace", () => {
+  /** A fixture whose response rows draw one section of CLASSES apiece. */
+  function drawing(className: string): Fixture {
+    return fixture(harness(), {}, {
+      renderers: {
+        response: () => {
+          const el = document.createElement("div");
+          el.className = className;
+          return el;
+        },
+      },
+    });
+  }
+
+  /** The drawn fold of row ID, or null. */
+  function fold(host: HTMLElement, id: string, cls = "tool-fold"): HTMLElement | null {
+    return host.querySelector<HTMLElement>(`[data-feed-row="${id}"] .${cls}`);
+  }
+
+  it("keeps a fold the reader opened open across the replace", () => {
+    // Arrange
+    const { controller, host } = drawing("tool-card tool-fold");
+    controller.applyPage(page([responseRow("a")]), "replace");
+    fold(host, "a")?.classList.add("expanded");
+    // Act
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Assert
+    expect(fold(host, "a")?.classList.contains("expanded")).toBe(true);
+  });
+
+  it("leaves a fold the reader never opened closed across the replace", () => {
+    // Arrange
+    const { controller, host } = drawing("tool-card tool-fold");
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Assert
+    expect(fold(host, "a")?.classList.contains("expanded")).toBe(false);
+  });
+
+  it("retains no key for a row the replacing page dropped", () => {
+    // Arrange: the reader opens `a`, and the next page no longer serves it.
+    const { controller, host } = drawing("tool-card tool-fold");
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    fold(host, "a")?.classList.add("expanded");
+    controller.applyPage(page([responseRow("b")]), "replace");
+    // Act: `a` comes back later as a row nobody has opened.
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Assert
+    expect(fold(host, "a")?.classList.contains("expanded")).toBe(false);
+  });
+
+  it("keeps an expanded bubble's scroll box open across the replace", () => {
+    // Arrange: the 50vh response bubble rides the same carry path.
+    const { controller, host } = drawing("bubble bubble-scroll");
+    controller.applyPage(page([responseRow("a")]), "replace");
+    fold(host, "a", "bubble-scroll")?.classList.add("expanded");
+    // Act
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Assert
+    expect(fold(host, "a", "bubble-scroll")?.classList.contains("expanded")).toBe(true);
+  });
+});
