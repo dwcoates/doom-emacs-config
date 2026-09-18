@@ -96,7 +96,6 @@ import {
   skillUnit,
   subagentUnit,
   toolCallDeniedUnit,
-  toolCallMovedUnit,
   toolCallReturnedUnit,
   toolCallRunningUnit,
   turnEndedInterruptedRow,
@@ -173,7 +172,6 @@ describe("arm coverage", () => {
       "running",
       "returned",
       "denied",
-      "moved",
     ]);
   });
 
@@ -556,15 +554,6 @@ describe("a denied tool call", () => {
     const row = await drawRow(activityRow(toolCallDeniedUnit()));
     // Assert
     expect(row.dataset.state).toBe("denied");
-  });
-});
-
-describe("a tool call whose work moved to the background", () => {
-  it("carries the moved outcome", async () => {
-    // Arrange / Act
-    const row = await drawRow(activityRow(toolCallMovedUnit()));
-    // Assert
-    expect(row.dataset.state).toBe("moved");
   });
 });
 
