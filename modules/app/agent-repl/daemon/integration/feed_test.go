@@ -2698,6 +2698,13 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 // reaches the frontend frame for the vendor's OBSERVED response shape, where
 // the `[thinking, text]` response states its usage on the THINKING unit — the
 // unit for its first content block — and the prose unit states none.
+//
+// THE STAMP IS THE TURN'S OWN WORK, NOT THE CONTEXT WINDOW (481bcf6f8): fresh
+// new input (InputMisses.Unwritten) plus output (output_tokens), EXCLUDING the
+// two cached-context buckets — InputHits.Read is context REUSED, not produced
+// this turn, and InputMisses.Written is context being (re-)cached. Both are the
+// context window growing, which is the TOPBAR's figure and a different
+// resolver. See internal/resolve/feed/usage.go's file header.
 func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -2724,12 +2731,16 @@ func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 		}}},
 	}))
 
-	// Assert: the drawn bubble carries the API response's expensive sum.
+	// Assert: the drawn bubble carries this turn's own work — the 240 unwritten
+	// input tokens plus the 5,000 output tokens. The 900,000 cache reads and the
+	// 18,000 cache writes are the context window and are deliberately excluded:
+	// a turn that reuses a huge context did little work, and stamping it with
+	// the context's size says the opposite.
 	row := awaitRow(t, f, tail, "the stamped response bubble", func(r *frontendv1.FeedRow) bool {
 		return r.GetActivity().GetResponse().GetUsage() != nil
 	})
-	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "18.2k" {
-		t.Fatalf("the response's usage stamp = %q, want the cache-miss sum %q", got, "18.2k")
+	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "5.2k" {
+		t.Fatalf("the response's usage stamp = %q, want the turn's own work %q (fresh input + output, no cached context)", got, "5.2k")
 	}
 }
 
