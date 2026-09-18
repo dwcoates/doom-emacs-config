@@ -532,6 +532,14 @@ func hostFault(f wsm.Fault) (*agentreplv1.HostFault, bool) {
 				AdoptionWindow: f.Evidence["adoption_window"],
 			},
 		}
+	case health.KindFinalAnswerUnresolved:
+		out.Kind = &agentreplv1.HostFault_FinalAnswerUnresolved{
+			FinalAnswerUnresolved: &agentreplv1.SessionFaultFinalAnswerUnresolved{
+				Turn: f.Evidence["turn"],
+				Unit: f.Evidence["unit"],
+				Why:  f.Evidence["why"],
+			},
+		}
 	default:
 		return nil, false
 	}

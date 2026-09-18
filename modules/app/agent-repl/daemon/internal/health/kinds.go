@@ -71,6 +71,12 @@ const (
 	// KindStateUnreadable is the liveness self-check's own fault when the
 	// state client will not answer. It likewise has no typed arm.
 	KindStateUnreadable = "daemon_state_unreadable"
+	// KindFinalAnswerUnresolved is a turn that concluded with no green answer
+	// standing: the terminal named no answer while the turn drew response
+	// prose, the answer it named resolves to no drawn response row, or an open
+	// response fold went silent. The session is SERVING — the prose is on
+	// screen — so it never escalates the status; see footer.go's partition.
+	KindFinalAnswerUnresolved = "final_answer_unresolved"
 	// KindRelaunchResumeFailed is the LEGACY spelling the rollout controller
 	// used for a relaunch whose resume failed. It names the same class as
 	// KindResumeFailed and renders through the same arm; only records written
@@ -210,6 +216,14 @@ func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 		out.Kind = &agentreplv1.SessionFault_AdoptionWindowExpired{
 			AdoptionWindowExpired: &agentreplv1.SessionFaultAdoptionWindowExpired{
 				AdoptionWindow: f.Evidence["adoption_window"],
+			},
+		}
+	case KindFinalAnswerUnresolved:
+		out.Kind = &agentreplv1.SessionFault_FinalAnswerUnresolved{
+			FinalAnswerUnresolved: &agentreplv1.SessionFaultFinalAnswerUnresolved{
+				Turn: f.Evidence["turn"],
+				Unit: f.Evidence["unit"],
+				Why:  f.Evidence["why"],
 			},
 		}
 	default:

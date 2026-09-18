@@ -165,7 +165,7 @@ func (r *resolver) concludedOutcome(s *wsState, success *conversationv1.AgentSuc
 				// walks this same terminal path, a reloaded/replayed feed's
 				// answer row is re-stamped here too — the crux that makes the
 				// green survive a reconnect/reload with no live turn-ended event.
-				r.restampFinalAnswer(s, answer)
+				r.restampFinalAnswer(s, id, answer)
 			}
 		}
 		return concludedArm(concluded)

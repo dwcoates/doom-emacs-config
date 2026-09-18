@@ -107,6 +107,12 @@ var sessionFaultCells = map[string]FaultCell{
 	KindClassifierFailed:      {FaultStatusNone, ""},
 	KindBounceUnknown:         {FaultStatusNone, ""},
 	KindConversationAbandoned: {FaultStatusNone, ""},
+	// NON-ESCALATING for the same reason and one more: the session is healthy
+	// and the answer's prose is on screen. What is missing is the workspace's
+	// ability to POINT AT it, and `disconnected` would close the composer over
+	// a session that is serving perfectly. The three cases are told apart by
+	// the fault's own `why` evidence, which the arm carries.
+	KindFinalAnswerUnresolved: {FaultStatusNone, ""},
 }
 
 // daemonFaultCells is the partition for a DAEMON-scoped fault, which stands on
