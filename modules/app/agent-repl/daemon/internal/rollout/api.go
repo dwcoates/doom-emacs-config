@@ -222,6 +222,11 @@ type Deps struct {
 	StandDownWindow time.Duration
 	// Clock is the controller's view of time.
 	Clock Clock
+	// Lifetime is the daemon's serving lifetime. Work the controller runs past
+	// the rpc that started it -- the successor's retry of daemon.addr while the
+	// incumbent still holds the boot claim -- ends with it. Nil leaves such
+	// work bounded by the process alone.
+	Lifetime context.Context
 	// Log is the controller's logger.
 	Log dlog.Surfaces
 }

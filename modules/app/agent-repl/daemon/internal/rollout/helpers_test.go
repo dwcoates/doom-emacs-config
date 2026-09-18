@@ -58,6 +58,13 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
+// advance moves Now forward by d without firing anything.
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 func (c *fakeClock) After(d time.Duration) <-chan time.Time {
 	ch := make(chan time.Time, 1)
 	c.mu.Lock()
