@@ -15,7 +15,7 @@ GOTEST_PARALLEL ?= 8
 # with a 1.21s slowest package and a 0.19s slowest test, so per-test parallelism
 # would buy nothing measurable.
 test:
-	go build ./... && go vet ./... && go test ./... -count=1
+	go build ./... && go vet ./... && test -z "$$(gofmt -l .)" && go test ./... -count=1
 
 # The integration suite. TMPDIR=/tmp IS REQUIRED on macOS -- see AGENTS.md.
 integration:
