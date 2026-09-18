@@ -298,13 +298,12 @@ reads distinctly from :idle orange and :thinking red."
 
 (ert-deftest agent-repl-test-display-state-full-when-panels-open-and-not-view-demoted ()
   "A panels-open workspace with no view-dwell latch draws FULL.
-Demotion is LATCH-driven (`agent-repl--tab-dwell-demoted'), not a raw
+Demotion is driven by the roster row's `:viewed' marker, not a raw
 comparison against `:last-viewed-at' inside the hot redisplay path, so a
-stale `:last-viewed-at' does not by itself demote — only the dwell timer
-setting the latch does."
+stale `:last-viewed-at' does not by itself demote."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)))
+    (agent-repl-test--with-row-viewed
       (agent-repl--ws-put "ws1" :project-dir "/w/1")
       (agent-repl--ws-put "ws1" :last-viewed-at (time-subtract (current-time) 3600))
       (cl-letf (((symbol-function 'agent-repl--ws-render-status)
@@ -320,9 +319,9 @@ The status still shows on the bracket (`agent-repl--ws-bracket-state'),
 so this is the demotion, not a removal of the status."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)))
+    (agent-repl-test--with-row-viewed
       (agent-repl--ws-put "ws1" :project-dir "/w/1")
-      (puthash "ws1" t agent-repl--tab-dwell-demoted)
+      (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
       (cl-letf (((symbol-function 'agent-repl--ws-render-status)
                  (lambda (_ws) :ready))
                 ((symbol-function 'agent-repl--ws-agent-open-p)
@@ -337,9 +336,9 @@ The panels-closed suppression short-circuits before the dwell branch, so
 the latch cannot change a closed tab's already-partial extent."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal)))
+    (agent-repl-test--with-row-viewed
       (agent-repl--ws-put "ws1" :project-dir "/w/1")
-      (puthash "ws1" t agent-repl--tab-dwell-demoted)
+      (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
       (cl-letf (((symbol-function 'agent-repl--ws-render-status)
                  (lambda (_ws) :ready))
                 ((symbol-function 'agent-repl--ws-agent-open-p)
@@ -437,21 +436,34 @@ The daemon half of the display mode: a test asserts on this list rather
 than on a live rpc, so the PARTIAL path's report is verified without a
 connection.")
 
+(defvar agent-repl-test--row-viewed nil
+  "Workspace -> the stubbed roster row's decoded `:viewed' marker.")
+
+(defmacro agent-repl-test--with-row-viewed (&rest body)
+  "Run BODY with `agent-repl-roster-viewed-for-ws' reading a stub table.
+The table is `agent-repl-test--row-viewed'; putting a marker for a
+workspace stands in for a roster push whose row carries `RosterRowViewed'."
+  (declare (indent 0))
+  `(let ((agent-repl-test--row-viewed (make-hash-table :test 'equal)))
+     (cl-letf (((symbol-function 'agent-repl-roster-viewed-for-ws)
+                (lambda (ws) (gethash ws agent-repl-test--row-viewed))))
+       ,@body)))
+
 (defmacro agent-repl-test--with-dwell-state (&rest body)
   "Run BODY with fresh view-dwell state and every side effect stubbed.
 `run-with-timer' is stubbed so arming schedules nothing real, the logging
 sink is silenced, and `agent-repl-host-mark-viewed' records into
 `agent-repl-test--viewed-reports' instead of dialling the daemon."
   (declare (indent 0))
-  `(let ((agent-repl--tab-dwell-demoted (make-hash-table :test 'equal))
-         (agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal))
+  `(agent-repl-test--with-row-viewed
+   (let ((agent-repl--tab-dwell-armed-at (make-hash-table :test 'equal))
          (agent-repl--tab-dwell-timer nil)
          (agent-repl-test--viewed-reports nil))
      (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) 'stub-timer))
                ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl-host-mark-viewed)
                 (lambda (ws) (push ws agent-repl-test--viewed-reports) t)))
-       ,@body)))
+       ,@body))))
 
 (ert-deftest agent-repl-test-tab-dwell-demote-seconds-is-five ()
   "The dwell threshold is the owner-specified five seconds."
@@ -474,8 +486,10 @@ sink is silenced, and `agent-repl-host-mark-viewed' records into
           (should-not demoted)
           (should-not (agent-repl--tab-dwell-demoted-p "ws1")))))))
 
-(ert-deftest agent-repl-test-tab-dwell-note-demotes-at-deadline ()
-  "A workspace viewed at least the dwell demotes and repaints."
+(ert-deftest agent-repl-test-tab-dwell-note-reports-but-tab-stays-full-until-row-viewed ()
+  "A satisfied dwell reports mark-viewed, but the tab stays FULL.
+The daemon is the single source: the tab turns PARTIAL only once a roster
+row carrying the viewed marker arrives."
   ;; Arrange
   (agent-repl-test--with-dwell-state
     (let ((base (current-time))
@@ -491,7 +505,8 @@ sink is silenced, and `agent-repl-host-mark-viewed' records into
                         "ws1" (time-add base (seconds-to-time 5)))))
           ;; Assert
           (should demoted)
-          (should (agent-repl--tab-dwell-demoted-p "ws1"))
+          (should (equal agent-repl-test--viewed-reports '("ws1")))
+          (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
           (should (equal repainted 1)))))))
 
 (ert-deftest agent-repl-test-tab-dwell-note-does-not-demote-when-panels-closed ()
@@ -524,12 +539,11 @@ sink is silenced, and `agent-repl-host-mark-viewed' records into
                      "ws1" (time-add base (seconds-to-time 30))))
         (should-not (agent-repl--tab-dwell-demoted-p "ws1"))))))
 
-(ert-deftest agent-repl-test-tab-view-restore-full-clears-latch-and-rearms ()
-  "A restore clears the demotion (back to FULL) and restarts the 5s clock."
+(ert-deftest agent-repl-test-tab-view-restore-full-rearms-the-dwell ()
+  "A restore restarts the 5s clock; it touches no local mode state."
   ;; Arrange
   (agent-repl-test--with-dwell-state
     (let ((t0 (current-time)))
-      (puthash "ws1" t agent-repl--tab-dwell-demoted)
       (puthash "ws1" t0 agent-repl--tab-dwell-armed-at)
       (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
@@ -538,19 +552,18 @@ sink is silenced, and `agent-repl-host-mark-viewed' records into
         (let ((t1 (time-add t0 (seconds-to-time 100))))
           ;; Act: status update at t1 resets
           (agent-repl--tab-view-restore-full "ws1" t1)
-          ;; Assert: back to FULL, and the clock re-armed to t1
-          (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
+          ;; Assert: the clock re-armed to t1
           (should (equal (gethash "ws1" agent-repl--tab-dwell-armed-at) t1))
           ;; A note before the NEW deadline still holds full
           (should-not (agent-repl--tab-dwell-note
                        "ws1" (time-add t1 (seconds-to-time 4))))
           ;; ...and demotes again once the re-armed dwell elapses
           (should (agent-repl--tab-dwell-note
-                   "ws1" (time-add t1 (seconds-to-time 5))))
-          (should (agent-repl--tab-dwell-demoted-p "ws1")))))))
+                   "ws1" (time-add t1 (seconds-to-time 5)))))))))
 
-(ert-deftest agent-repl-test-tab-view-partial-latches-and-repaints ()
-  "The ONE staleness entry point latches PARTIAL and repaints the tab bar."
+(ert-deftest agent-repl-test-tab-view-partial-repaints-without-latching ()
+  "The ONE staleness entry point repaints but latches nothing locally.
+The tab stays FULL until the daemon's roster row carries the marker."
   ;; Arrange
   (agent-repl-test--with-dwell-state
     (let ((repainted 0))
@@ -559,7 +572,7 @@ sink is silenced, and `agent-repl-host-mark-viewed' records into
         ;; Act
         (agent-repl--tab-view-partial "ws1" "dwell")
         ;; Assert
-        (should (agent-repl--tab-dwell-demoted-p "ws1"))
+        (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
         (should (equal repainted 1))))))
 
 (ert-deftest agent-repl-test-tab-view-partial-reports-the-workspace-to-the-daemon ()
@@ -579,7 +592,7 @@ construction."
   "The restore reports NOTHING: the daemon originated the status change."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (puthash "ws1" t agent-repl--tab-dwell-demoted)
+    (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
     (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
@@ -587,25 +600,28 @@ construction."
       ;; Act
       (agent-repl--tab-view-restore-full "ws1" (current-time))
       ;; Assert
-      (should-not (agent-repl--tab-dwell-demoted-p "ws1"))
       (should-not agent-repl-test--viewed-reports))))
 
-(ert-deftest agent-repl-test-tab-view-restore-on-status-change-restores-full ()
-  "A status change on the roster hook restores that workspace to FULL."
+(ert-deftest agent-repl-test-tab-view-row-carrying-viewed-draws-partial ()
+  "A roster row carrying the viewed marker demotes the tab to PARTIAL."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (puthash "ws1" t agent-repl--tab-dwell-demoted)
-    (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
-      ;; Act
-      (agent-repl--tab-view-restore-on-status-change "ws1" :ready :thinking)
-      ;; Assert
-      (should-not (agent-repl--tab-dwell-demoted-p "ws1")))))
+    (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
+    ;; Act / Assert
+    (should (agent-repl--tab-dwell-demoted-p "ws1"))))
 
-(ert-deftest agent-repl-test-tab-view-restore-on-status-change-rearms-the-clock ()
-  "The restore re-arms the dwell from the new activity, not from activation."
+(ert-deftest agent-repl-test-tab-view-row-dropping-viewed-draws-full ()
+  "A roster row that no longer carries the viewed marker draws FULL."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
+    ;; Act
+    (remhash "ws1" agent-repl-test--row-viewed)
+    ;; Assert
+    (should-not (agent-repl--tab-dwell-demoted-p "ws1"))))
+
+(ert-deftest agent-repl-test-tab-view-restore-on-viewed-cleared-rearms-the-clock ()
+  "The viewed-cleared reaction re-arms the dwell from the new activity."
   ;; Arrange
   (agent-repl-test--with-dwell-state
     (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
@@ -613,18 +629,21 @@ construction."
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
       ;; Act
-      (agent-repl--tab-view-restore-on-status-change "ws1" :ready :thinking)
+      (agent-repl--tab-view-restore-on-viewed-cleared "ws1")
       ;; Assert
       (should (gethash "ws1" agent-repl--tab-dwell-armed-at)))))
 
-(ert-deftest agent-repl-test-tab-view-restore-hook-is-registered-on-status-changes ()
-  "The restore runs on the STATUS-CHANGE hook — every origin, one reaction.
-It is deliberately not on the plain roster-update hook: that one fires on
-every push, including the ones that restate a status nobody changed."
-  (should (memq #'agent-repl--tab-view-restore-on-status-change
-                agent-repl-roster-status-change-functions))
-  (should-not (memq #'agent-repl--tab-view-restore-on-status-change
-                    agent-repl-roster-update-functions)))
+(ert-deftest agent-repl-test-tab-view-restore-hook-is-registered-on-viewed-clears ()
+  "The restore runs on the VIEWED-CLEARED hook, the daemon's clear edge."
+  (should (memq #'agent-repl--tab-view-restore-on-viewed-cleared
+                agent-repl-roster-viewed-cleared-functions)))
+
+(ert-deftest agent-repl-test-no-local-view-demotion-latch-exists ()
+  "No local latch and no status-change reaction remain: the daemon owns the mode."
+  (should-not (boundp 'agent-repl--tab-dwell-demoted))
+  (should-not (fboundp 'agent-repl--tab-view-restore-on-status-change))
+  (should-not (memq 'agent-repl--tab-view-restore-on-status-change
+                    agent-repl-roster-status-change-functions)))
 
 (ert-deftest agent-repl-test-tab-dwell-on-activation-arms-the-clock ()
   "Activating a workspace stamps its armed-at so its dwell can begin."
@@ -659,7 +678,7 @@ still arm the clock."
 Only a status update resets; a plain activation just restarts the clock."
   ;; Arrange
   (agent-repl-test--with-dwell-state
-    (puthash "ws1" t agent-repl--tab-dwell-demoted)
+    (puthash "ws1" '(:viewed t) agent-repl-test--row-viewed)
     (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
