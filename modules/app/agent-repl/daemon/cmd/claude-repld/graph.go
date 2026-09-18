@@ -339,23 +339,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the image resolver: %w", err)
 	}
-	feedResolver, err := feed.New(feed.Deps{
-		Log:            p.Surfaces,
-		WorkspaceDir:   workspaceDir,
-		Painter:        painter,
-		StripSentinels: stripSentinels,
-		// An image reference is turned into a source on the daemon's own
-		// image origin (`path`) or answered verbatim (`url`); an unset arm
-		// is refused loudly rather than drawn as an empty src.
-		ResolveImage:  resolveImage,
-		PortedPrompts: portedPrompts,
-		// Zero leaves the resolver's own DefaultTailRetention in force; the
-		// flag and its environment knob are what make token_expired reachable.
-		TailRetention: p.Opts.feedTailRetention,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
-	}
 	// Zero leaves the resolver's own DefaultMomentaryDwell in force; the flag
 	// and its environment knob are what let a caller compress a window whose
 	// whole purpose is to be long enough for a person to read.
@@ -374,6 +357,30 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// path and sixteen did not. Every collaborator built below takes the
 	// decorated client, so a fault opened anywhere lands on the strip.
 	p.DB = health.ObserveFaults(p.DB, footerFaults{footerResolver}, p.Surfaces)
+
+	// THE FEED RESOLVER IS BUILT AFTER THE DECORATION, and that ordering is the
+	// wiring. It raises the `final_answer_unresolved` fault when a turn concludes
+	// with no green answer standing, and it must raise it into the SAME state
+	// client every other site raises into — the decorated one — or the fault
+	// would be recorded and reach no footer.
+	feedResolver, err := feed.New(feed.Deps{
+		Log:            p.Surfaces,
+		WorkspaceDir:   workspaceDir,
+		Painter:        painter,
+		StripSentinels: stripSentinels,
+		// An image reference is turned into a source on the daemon's own
+		// image origin (`path`) or answered verbatim (`url`); an unset arm
+		// is refused loudly rather than drawn as an empty src.
+		ResolveImage:  resolveImage,
+		PortedPrompts: portedPrompts,
+		Faults:        p.DB,
+		// Zero leaves the resolver's own DefaultTailRetention in force; the
+		// flag and its environment knob are what make token_expired reachable.
+		TailRetention: p.Opts.feedTailRetention,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
+	}
 
 	topbarResolver, err := topbar.New(colors, p.Surfaces)
 	if err != nil {
