@@ -331,6 +331,22 @@ topbar resolver's context tree) and `/status` (the daemon's build stamp plus
 the resolver's spliced account/model/mode facts) and fails loudly for every
 other recognized panel command.
 
+### The footer and the roster take ONE live-work set
+
+`sessionwatcher`'s `LiveWorkSet` is the SINGLE AUTHORITY for detached-work
+liveness on both surfaces: `publishLiveWorkLocked` hands the same value to the
+roster (`SidebarSink.OnLiveWorkChanged`, which retires `idle_async`) and to the
+footer (`FooterSink.OnLiveWorkChanged`, which retires a chip row and the
+`background` arm). The watcher reaps each item's watch at its own terminal and
+is the only party that knows an item has ENDED.
+
+NEITHER SURFACE MAY COUNT LIVENESS FOR ITSELF. The footer's frames supply a
+chip row's DESCRIPTION — label, command, tokens, start instant — and never its
+liveness; `background()` answers from the set, so an empty set is never a
+background arm. A footer that kept its own ledger reported a background task
+for a workspace the roster and the tab-bar both called ready, and the ledger
+had already been patched per delivery path twice before that.
+
 ## Deploy chain
 
 `bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →

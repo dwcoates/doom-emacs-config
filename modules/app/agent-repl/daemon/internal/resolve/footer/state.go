@@ -4,6 +4,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/sessionwatcher"
@@ -468,6 +469,21 @@ type wsState struct {
 	// id, so a shell that DETACHES from a unit can be described from the unit
 	// it detached from (the announcement carries no command of its own).
 	bashUnits map[string]*shellRow
+	// liveWork is the watcher's AUTHORITATIVE live-work set: the one party
+	// that reaps each detached item's watch at its terminal, and therefore the
+	// only one that can say a detached item has ENDED. It governs which
+	// detached rows stand and whether the strip's `background` arm may be
+	// raised at all; the frames the footer reads supply a row's DESCRIPTION,
+	// never its liveness.
+	liveWork sessionwatcher.LiveWorkSet
+	// liveWorkSeen reports whether the watcher has stated a set at all. Until
+	// it has, the announcement ledger is all the footer has; once it has, the
+	// set is the authority.
+	liveWorkSeen bool
+	// lastArm is the status arm the last published view carried, so a CHANGE
+	// of arm is recorded once rather than on every push.
+	lastArm string
+
 	// retiredWork are the detached handles that have already reached a
 	// terminal, so a REPLAY of the run's opening frames cannot count it live
 	// again.
@@ -512,6 +528,37 @@ func newWSState() *wsState {
 		retiredWork: map[string]struct{}{},
 		tok:         newTokenState(),
 	}
+}
+
+// detachedLive reports whether DETACHED work is running right now, which is
+// what the strip's `background` arm means. The watcher's set is the authority
+// once it has stated one; until then the footer's own rows are all it has.
+//
+// THE ROW COUNT IS NOT THE ANSWER, and that was the defect: a row whose
+// terminal never reached the footer in a form its ledger matched stood for the
+// rest of the session, and the strip reported a background task the roster —
+// which reads the watcher's set — said was over.
+func (s *wsState) detachedLive() bool {
+	if s.liveWorkSeen {
+		return !s.liveWork.Empty()
+	}
+	return len(s.agents)+len(s.shells)+len(s.monitors) > 0
+}
+
+// observeArm folds the published view's status arm in, answering the arm and
+// whether it CHANGED. The previous arm is answered too, so the record of a
+// change carries both ends of it.
+func (s *wsState) observeArm(view *frontendv1.FooterView) (arm string, changed bool, previous string) {
+	arm = statusName(view.GetStrip().GetStatus())
+	previous = s.lastArm
+	if previous == "" {
+		previous = "none"
+	}
+	if arm == s.lastArm {
+		return arm, false, previous
+	}
+	s.lastArm = arm
+	return arm, true, previous
 }
 
 // nextOrder mints the next panel order.

@@ -1065,18 +1065,19 @@ func TestTopbarContextPanelResolvesFromTheSameContextUsageFact(t *testing.T) {
 	}
 	row := ftFindContextCategory(panel, "system prompt")
 	if row == nil {
-		t.Fatalf("the /context panel = %v, want a system prompt category", panel.GetCategories())
+		t.Fatalf("the /context panel = %v, want a system prompt category", panel.GetSections())
 	}
 	if !strings.Contains(row.GetFigure(), "4") {
 		t.Fatalf("the system prompt category figure = %q, want the pushed 4000 tokens", row.GetFigure())
 	}
 }
 
-// ftFindContextCategory finds a /context panel category by label.
-func ftFindContextCategory(panel *frontendv1.ContextPanelView, label string) *frontendv1.ContextPanelCategory {
-	for _, category := range panel.GetCategories() {
-		if category.GetLabel() == label {
-			return category
+// ftFindContextCategory finds a /context panel top-level section by label. The
+// panel is a SECTION TREE: a vendor category is a top-level section row.
+func ftFindContextCategory(panel *frontendv1.ContextPanelView, label string) *frontendv1.ContextPanelSection {
+	for _, section := range panel.GetSections() {
+		if section.GetLabel() == label {
+			return section
 		}
 	}
 	return nil

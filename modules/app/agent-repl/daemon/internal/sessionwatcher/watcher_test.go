@@ -396,6 +396,46 @@ func TestTheRosterHearsTheEmptiedLiveWorkSet(t *testing.T) {
 	}
 }
 
+// TestTheFooterHearsTheEmptiedLiveWorkSet covers the FOOTER's half of the same
+// seam. The strip's `background` arm and the roster's `idle_async` arm are two
+// renderings of one fact, so the set that retires one must reach the other: a
+// footer told nothing decided liveness from its own frame ledger, and reported
+// a background task for work that had ended.
+func TestTheFooterHearsTheEmptiedLiveWorkSet(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorFailedActivity("act-1")))))
+
+	// Assert.
+	e := requireEvent(t, got, "footer.OnLiveWorkChanged")
+	if e.live == nil || !e.live.Empty() {
+		t.Fatalf("the footer was told %+v, want an empty live-work set", e.live)
+	}
+}
+
+// TestBothViewSinksHearOneLiveWorkSet is the fan-out itself: the roster and the
+// footer are handed the SAME value on the same edge, which is what makes a
+// disagreement between the two surfaces unrepresentable.
+func TestBothViewSinksHearOneLiveWorkSet(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: one detached item is announced.
+	got := h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", monitorWork()))))
+
+	// Assert.
+	roster := requireEvent(t, got, "sidebar.OnLiveWorkChanged")
+	footer := requireEvent(t, got, "footer.OnLiveWorkChanged")
+	if roster.live == nil || footer.live == nil {
+		t.Fatalf("a view sink was handed no set: roster %+v, footer %+v", roster.live, footer.live)
+	}
+	assertLiveWork(t, *roster.live, *footer.live)
+}
+
 // TestATerminalForUnannouncedWorkChangesNothing covers the levels rule: the
 // live set is the announcements and the terminals of what was announced, and
 // an unpaired terminal edge must not invent or retire membership.
@@ -470,7 +510,7 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	assertNames(t, got, []string{
 		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
 		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {
 		t.Fatal("a started session is not connected")
