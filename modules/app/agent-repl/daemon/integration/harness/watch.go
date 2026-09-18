@@ -129,8 +129,27 @@ func ExpectNoPush[T any](t *testing.T, s *Stream[T], probe time.Duration, what s
 // nothing is coming.
 const ProbeWindow = 500 * time.Millisecond
 
-// runStream pumps a Connect server stream onto a channel.
+// runStream pumps a Connect server stream onto a channel, carrying every
+// frame the stream delivers.
 func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) Push) *Stream[Push] {
+	t.Helper()
+	return runStreamSelecting(t, ctx, open, func(r *Resp) (Push, bool) { return pick(r), true })
+}
+
+// runStreamSelecting is runStream for a response message that carries MORE
+// THAN ONE KIND OF FRAME on one wire, where a picker alone cannot say "this
+// frame is not the one this stream is about".
+//
+// WatchFeed is the case that forced it. Its response carries three independent
+// arms -- `row`, `selection` and `feed_text_scale` (endpoint_watch_feed.proto)
+// -- and the feed_text_scale frame is pushed on EVERY open feed's watch, root
+// and sub-feed alike. A picker of `r.GetRow()` turned each of those into a nil
+// row on the row channel, so every negative probe in the suite read a zoom
+// frame as "a row was pushed" and reported `got a push <nil>, want none`.
+// SELECTING is the fix rather than dropping nils inside the picker: a stream
+// says which frames it is about, and a frame it is not about never reaches its
+// channel at all.
+func runStreamSelecting[Resp any, Push any](t *testing.T, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) (Push, bool)) *Stream[Push] {
 	t.Helper()
 	streamCtx, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
@@ -150,8 +169,12 @@ func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(
 		// costs nothing and never depends on a push.
 		headers <- stream.ResponseHeader()
 		for stream.Receive() {
+			v, ok := pick(stream.Msg())
+			if !ok {
+				continue
+			}
 			select {
-			case ch <- pick(stream.Msg()):
+			case ch <- v:
 			case <-streamCtx.Done():
 				errCh <- streamCtx.Err()
 				return
@@ -279,11 +302,16 @@ func (d *Daemon) WatchFeedOn(client interface {
 	WatchFeed(context.Context, *connect.Request[agentreplv1.WatchFeedRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error)
 }, token *agentreplv1.FeedWatchToken) *Stream[*frontendv1.FeedRow] {
 	d.t.Helper()
-	return runStream(d.t, d.ctx,
+	// ROW FRAMES ONLY. The response also carries `selection` and
+	// `feed_text_scale` frames, neither of which is a row; see
+	// runStreamSelecting.
+	return runStreamSelecting(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error) {
 			return client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{Watch: token}))
 		},
-		func(r *agentreplv1.WatchFeedResponse) *frontendv1.FeedRow { return r.GetRow() })
+		func(r *agentreplv1.WatchFeedResponse) (*frontendv1.FeedRow, bool) {
+			return r.GetRow(), r.GetRow() != nil
+		})
 }
 
 // WatchLogin opens the login pty's terminal stream.
