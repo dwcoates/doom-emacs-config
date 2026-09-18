@@ -287,6 +287,9 @@ message HostFault {
     SessionFaultDaemonStateUnreadable daemon_state_unreadable = 14;
     // A handover whose adoption window ran out with this workspace unclaimed.
     SessionFaultAdoptionWindowExpired adoption_window_expired = 15;
+    // A concluded turn whose answering response the feed could not stand
+    // behind, or an open response that went silent.
+    SessionFaultFinalAnswerUnresolved final_answer_unresolved = 16;
   }
 }
 
