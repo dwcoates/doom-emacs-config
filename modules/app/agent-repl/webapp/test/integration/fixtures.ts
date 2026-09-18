@@ -2079,7 +2079,16 @@ export const drainReason = (arm: DrainReasonArm): DrainReason =>
 export const SHUTDOWN_CAUSE_ARMS = ["selfMergeRollout", "scheduledDrain", "immediate"] as const;
 export type ShutdownCauseArm = (typeof SHUTDOWN_CAUSE_ARMS)[number];
 
-export const WATCH_DAEMON_PUSHES = ["shutdownAnnounced", "drainScheduled", "drainCancelled"] as const;
+export const WATCH_DAEMON_PUSHES = [
+  "shutdownAnnounced",
+  "drainScheduled",
+  "drainCancelled",
+  // A TOP-LEVEL arm this bundle has NO case for. It is covered by the skew
+  // tests rather than by a drawing test, because not drawing it is the
+  // contract: `unreachablePushArm` raises `UnknownPushArm`, and the stream
+  // pipeline skips it quietly rather than filing a bad frame.
+  "mutationProgress",
+] as const;
 
 export function shutdownAnnounced(init?: {
   address?: string;

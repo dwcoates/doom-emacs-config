@@ -262,6 +262,13 @@ export interface FakeDaemon {
   announceShutdown(init: Parameters<typeof shutdownAnnounced>[0]): void;
   scheduleDrain(atMs: bigint, reason: DrainReason): void;
   cancelDrain(): void;
+  /**
+   * Push WatchDaemon's `mutation_progress` — a TOP-LEVEL arm this bundle has no
+   * case for, which is exactly what makes it the suite's forward-compat skew
+   * probe: a newer daemon's arm must be skipped quietly, not drawn and not
+   * filed as a bad frame.
+   */
+  pushMutationProgress(opId: string): void;
 
   // --- the login pty -------------------------------------------------------
   /** The buffer WatchLoginTerminal replays before any live byte. */
@@ -1685,6 +1692,16 @@ export function createFakeDaemon(): FakeDaemon {
         undefined,
         undefined,
         create(WatchDaemonResponseSchema, { push: { case: "drainCancelled", value: {} } }),
+      );
+    },
+    pushMutationProgress(opId) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, {
+          push: { case: "mutationProgress", value: { opId } },
+        }),
       );
     },
 
