@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,11 +19,20 @@ const LoopbackHost = "127.0.0.1"
 // claim is the Claim implementation: the boot lock, the bound listener, and
 // the advertisement it may publish.
 type claim struct {
-	lock     *bootLock
 	ln       net.Listener
 	addrPath string
 	address  string
 	pid      int
+	// root is the state root's identity at bind, so Verify can tell a
+	// directory recreated at the same path from the one this claim lives in.
+	root os.FileInfo
+
+	// mu guards what Publish, Withdraw and Verify share across goroutines.
+	mu sync.Mutex
+	// lock is the held boot claim; nil for a successor until it publishes.
+	lock *bootLock
+	// published is true from a successful Publish until a Withdraw.
+	published bool
 }
 
 // pidLinePrefix marks the second line of a daemon.addr advertisement, which
@@ -139,12 +149,19 @@ func bindWith(addrPath string, port int, claimBoot bool, wait time.Duration) (Cl
 		release()
 		return nil, fmt.Errorf("bound listener address %q is not TCP", ln.Addr())
 	}
+	root, err := os.Stat(dir)
+	if err != nil {
+		ln.Close()
+		release()
+		return nil, fmt.Errorf("stat the state root %q: %w", dir, err)
+	}
 	return &claim{
 		lock:     lock,
 		ln:       ln,
 		addrPath: addrPath,
 		address:  net.JoinHostPort(LoopbackHost, strconv.Itoa(bound.Port)),
 		pid:      os.Getpid(),
+		root:     root,
 	}, nil
 }
 
@@ -167,6 +184,8 @@ func (c *claim) advertisement() string {
 // address or this one, never a half-written advertisement. The payload is the
 // address followed by "pid=<n>"; see ReadAdvertisement for the format.
 func (c *claim) Publish() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// A SUCCESSOR TAKES THE BOOT CLAIM WHEN IT TAKES OVER. It bound without
 	// one -- the incumbent held it -- and publishing daemon.addr is the moment
 	// it becomes the daemon of this state root. Failing to take it here is a
@@ -206,6 +225,7 @@ func (c *claim) Publish() error {
 		os.Remove(name)
 		return fmt.Errorf("atomically replace %q: %w", c.addrPath, err)
 	}
+	c.published = true
 	return nil
 }
 
@@ -222,6 +242,12 @@ func (c *claim) Publish() error {
 // Removing an absent file is success: an orderly exit that never published
 // still withdraws.
 func (c *claim) Withdraw() (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// THE ADVERTISEMENT IS NO LONGER THIS CLAIM'S TO VERIFY from the first
+	// call on, whatever the file then says: an orderly exit is taking it down,
+	// or a successor has already replaced it.
+	c.published = false
 	raw, err := os.ReadFile(c.addrPath)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -289,6 +315,8 @@ func dialLoopback(addr string) error {
 // withdraw the advertisement — a blue-green handover closes the incumbent's
 // listener while the successor's daemon.addr already stands.
 func (c *claim) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var firstErr error
 	if err := c.ln.Close(); err != nil {
 		firstErr = fmt.Errorf("close the daemon listener: %w", err)
@@ -300,4 +328,39 @@ func (c *claim) Close() error {
 		}
 	}
 	return firstErr
+}
+
+// Verify implements Claim.
+func (c *claim) Verify() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	dir := filepath.Dir(c.addrPath)
+	root, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return fmt.Errorf("%w: the state root %q is gone", ErrVanished, dir)
+	case err != nil:
+		return fmt.Errorf("stat the state root %q: %w", dir, err)
+	case !os.SameFile(root, c.root):
+		return fmt.Errorf("%w: the state root %q was replaced by another directory", ErrVanished, dir)
+	}
+	if c.lock != nil {
+		if err := c.lock.verify(); err != nil {
+			return err
+		}
+	}
+	if !c.published {
+		return nil
+	}
+	raw, err := os.ReadFile(c.addrPath)
+	switch {
+	case os.IsNotExist(err):
+		return fmt.Errorf("%w: daemon.addr %q is gone", ErrVanished, c.addrPath)
+	case err != nil:
+		return fmt.Errorf("read daemon.addr %q: %w", c.addrPath, err)
+	}
+	if named := ParseAdvertisement(string(raw)).Address; named != c.address {
+		return fmt.Errorf("%w: daemon.addr %q names %q, not this daemon's %q", ErrVanished, c.addrPath, named, c.address)
+	}
+	return nil
 }
