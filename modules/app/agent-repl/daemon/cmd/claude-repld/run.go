@@ -50,7 +50,7 @@ type process struct {
 	// drain's deadline and the handover's last transfer both leave through it
 	// — and it is handed to the graph rather than taken by it, because only
 	// the boot spine owns the lifetime.
-	Exit func()
+	Exit func(standDownReason)
 }
 
 // hooks are the seams the process-level tests drive. Production supplies the
@@ -292,6 +292,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// the handover's last transfer both end the process through it.
 	serving, stopServing := context.WithCancel(ctx)
 	defer stopServing()
+	// WHY IT ENDED is recorded by whoever ends it, as a typed reason: only a
+	// state-root loss stops the shims on the way out (see standDownShims).
+	var ended standDownRecord
 
 	built, err := h.Graph(serving, process{
 		Opts:      opts,
@@ -301,7 +304,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 		DB:        db,
 		Claim:     claim,
 		Instance:  wsm.NewInstanceID(),
-		Exit:      stopServing,
+		Exit: func(reason standDownReason) {
+			ended.record(reason, nil)
+			stopServing()
+		},
 	})
 	if err != nil {
 		log.Error("daemon.cmd.graph", "the component graph could not be built", dlog.Context{
@@ -422,7 +428,6 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// AND THE STATE ROOT IS WATCHED FOR AS LONG AS IT IS SERVED. A loss ends
 	// the serving lifetime, and the exit reports it as the cause rather than
 	// as an orderly one. It joins with the loops above.
-	var lost standDownCause
 	loops.Add(1)
 	go func() {
 		defer loops.Done()
@@ -431,7 +436,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 			every:  h.StateCheckEvery,
 			log:    log,
 			standDown: func(cause error) {
-				lost.set(cause)
+				ended.record(standDownStateRootLost, cause)
 				stopServing()
 			},
 		}.run(serving)
@@ -475,7 +480,9 @@ func run(ctx context.Context, opts options, h hooks) error {
 		})
 		return err
 	}
-	if cause := lost.get(); cause != nil {
+	reason, cause := ended.get()
+	standDownShims(ctx, reason, built.StopShims, log)
+	if cause != nil {
 		return fmt.Errorf("claude-repld: stood down: %w", cause)
 	}
 	return nil
