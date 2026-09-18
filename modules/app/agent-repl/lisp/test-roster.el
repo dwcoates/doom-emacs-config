@@ -100,6 +100,7 @@ whose calls are the observation."
            (agent-repl-roster--rows-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster-finish-functions nil)
+           (agent-repl-roster-status-change-functions nil)
            (agent-repl-roster-update-functions nil)
            (agent-repl-roster-bringup-functions nil)
            (agent-repl-host-last-selected-id nil)
@@ -1030,6 +1031,104 @@ user's next sidebar click."
                          "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
       ;; Assert
       (should (equal fired nil)))))
+
+
+;;;; ---- The status change ----
+
+(defmacro agent-repl-test-roster--recording-status-changes (var &rest body)
+  "Run BODY with the status-change hook recording (WS PREVIOUS CURRENT) onto VAR."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (add-hook 'agent-repl-roster-status-change-functions
+               (lambda (ws previous current) (push (list ws previous current) ,var)))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-a-changed-arm-announces-a-status-change ()
+  "A row whose arm moved announces the change, whatever moved it."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-status-changes changed
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :thinking))))))
+      ;; Assert
+      (should (equal changed '(("one" :ready :thinking)))))))
+
+(ert-deftest agent-repl-test-roster-a-restated-arm-is-no-status-change ()
+  "A re-push restating the same arm changed nothing and announces nothing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-status-changes changed
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (equal changed nil)))))
+
+(ert-deftest agent-repl-test-roster-a-first-sighting-is-no-status-change ()
+  "A row seen for the first time has moved away from nothing.
+The daemon applies the same rule to its own copy of this edge, so the two
+cannot disagree about what counts as new activity."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-status-changes changed
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (equal changed nil)))))
+
+(ert-deftest agent-repl-test-roster-a-settling-arm-announces-a-status-change-too ()
+  "The announcement is not the finish edge: EVERY changed arm announces.
+A finish edge is one KIND of status change, and a reaction that only ran
+on finishes would miss a workspace going back to work."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-status-changes changed
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :thinking))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :done))))))
+      ;; Assert
+      (should (equal changed '(("one" :thinking :done)))))))
+
+(ert-deftest agent-repl-test-roster-status-changes-are-announced-per-workspace ()
+  "Two rows changing in one push announce once each, not once for the push."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-status-changes changed
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                      (agent-repl-test-roster--row "b" "two" :ready))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :thinking)
+                                      (agent-repl-test-roster--row "b" "two" :done))))))
+      ;; Assert
+      (should (equal (sort (mapcar #'car changed) #'string<) '("one" "two"))))))
 
 (ert-deftest agent-repl-test-roster-idle-async-settles-the-turn ()
   "idle_async is SETTLED: no foreground turn runs, only detached work."
