@@ -38,7 +38,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	// stall fault is retracted BEFORE the conclusion below decides whether this
 	// terminal raises a fault of its own.
 	r.disarmTurnStalls(s, string(*turn))
-	r.clearStalledAnswerFault(s, "the turn's terminal arrived")
+	r.clearTurnStalledAnswerFault(s, string(*turn), "the turn's terminal arrived")
 
 	switch {
 	case success != nil:
