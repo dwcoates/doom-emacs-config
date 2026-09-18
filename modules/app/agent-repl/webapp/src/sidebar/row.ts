@@ -6,7 +6,9 @@
  * `frontend.v1.RosterRow` and every message is one box, so nothing here is
  * derived: the highlight comes from `RosterRowCurrent.current` (never from
  * comparing against `WorkspaceRoster.current`), the receded styling from
- * `RosterRowClosed.closed`, the badge from the resolver-composed label, and
+ * `RosterRowClosed.closed`, the display mode from `RosterRowViewed` (see
+ * `viewed.ts`, which owns the one rule that restores FULL), the badge from the
+ * resolver-composed label, and
  * the when-column from whichever arm the daemon chose — this end applies no
  * precedence of its own.
  *
@@ -38,6 +40,7 @@ import type {
   RosterRowWhenCreated,
   RosterRowWhenLastSelected,
   RosterRowWhenMerged,
+  RosterRowViewed,
   RosterRowWorkspace,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
@@ -157,6 +160,18 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   const label = document.createElement("span");
   label.className = "name";
   label.textContent = name;
+  // THE DISPLAY MODE IS THE NAME'S ALONE. `viewed.ts` decides it — the wire's
+  // marker unless this row's status has changed since the last draw, in which
+  // case FULL, on the same rule the daemon clears the marker by.
+  const mode = sc.viewed.modeFor(
+    workspace.id,
+    status.case,
+    u.viewed !== undefined && drawRosterRowViewed(u.viewed, `${path}.viewed`),
+  );
+  if (mode === "partial") {
+    label.classList.add("viewed");
+    ws.setAttribute("data-viewed", "true");
+  }
   line.appendChild(label);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at
@@ -218,6 +233,20 @@ export function drawRosterRowName(u: RosterRowName, path: string): string {
 export function drawRosterRowCurrent(u: RosterRowCurrent, path: string): boolean {
   void path;
   return u.current;
+}
+
+/**
+ * The VIEWED marker: the row's display mode, PARTIAL when it is present.
+ *
+ * The message is EMPTY — presence is the fact — so this answers `true` for a
+ * marker that is there at all. Whether the row actually DRAWS partial is not
+ * decided here: `viewed.ts` weighs it against the status change that restores
+ * FULL.
+ */
+export function drawRosterRowViewed(u: RosterRowViewed, path: string): boolean {
+  void u;
+  void path;
+  return true;
 }
 
 /** The receded styling: the workspace exists, its panes are dismissed. */

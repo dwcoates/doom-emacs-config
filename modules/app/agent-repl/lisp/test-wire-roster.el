@@ -61,6 +61,7 @@ status arm and whatever else the case is about."
                  '(:workspace (:workspace (:id "ws-1" :dir "/w/1"))
                    :attention nil
                    :priority nil
+                   :viewed nil
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
                    :current (:current nil)
@@ -68,6 +69,23 @@ status arm and whatever else the case is about."
                    :when nil
                    :detail (:branch nil :parent-branch nil :summary nil)
                    :closed (:closed nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-viewed-marker ()
+  "A row carrying `viewed' decodes it as PRESENT — the PARTIAL display mode."
+  (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-row
+                          (agent-repl-test-wire-roster--row
+                           "\"ready\":{}" "\"viewed\":{}"))
+                         :viewed)
+              t)))
+
+(ert-deftest agent-repl-test-wire-roster-row-viewed-carries-no-payload ()
+  "`RosterRowViewed' is EMPTY: a field inside it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"viewed\":{\"mode\":\"partial\"}"))
+                 '("RosterRowViewed" mode "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-every-status-arm ()
   "Every one of the declared status arms decodes to its own keyword."
