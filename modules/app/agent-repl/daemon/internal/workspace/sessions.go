@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -1875,6 +1876,21 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 		return nil, false
 	}
 	return &shimAdapter{client: session.client}, true
+}
+
+// Workspaces answers every workspace this fleet holds a session for, sorted.
+// It reads the fleet's own map, never the state client, so it still answers
+// when the store under the state root is gone -- the state-root-loss
+// stand-down walks it to stop every shim nothing will be left to adopt.
+func (f *Fleet) Workspaces() []ids.WorkspaceID {
+	f.mu.RLock()
+	out := make([]ids.WorkspaceID, 0, len(f.sessions))
+	for ws := range f.sessions {
+		out = append(out, ws)
+	}
+	f.mu.RUnlock()
+	slices.Sort(out)
+	return out
 }
 
 // CloseWatchers closes every live session's watcher and JOINS whatever sink
