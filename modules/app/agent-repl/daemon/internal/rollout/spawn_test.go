@@ -153,8 +153,10 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 	// been handed.
 	state := t.TempDir()
 	alive := filepath.Join(state, "alive")
+	pidFile := filepath.Join(state, "successor.pid")
 	script := filepath.Join(state, "successor.sh")
 	body := "#!/bin/sh\n" +
+		"printf '%s' \"$$\" > " + pidFile + "\n" +
 		"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
 		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" +
 		"trap 'exit 0' TERM\n" +
@@ -172,6 +174,7 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 	if _, err := spawner.Spawn(ctx, "127.0.0.1:7777"); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
+	reapSuccessor(t, pidFile)
 	before := spawnAliveLen(t, alive)
 	cancel()
 
@@ -189,6 +192,37 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+// reapSuccessor kills the stand-in successor and waits for it to be gone
+// before the TempDir cleanup runs (cleanups run last-registered first). A
+// successor still appending to its liveness file races RemoveAll and fails
+// the test with "directory not empty".
+func reapSuccessor(t *testing.T, pidFile string) {
+	t.Helper()
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read the successor's pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse the successor's pid %q: %v", raw, err)
+	}
+	t.Cleanup(func() {
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+			t.Errorf("kill the successor %d: %v", pid, err)
+			return
+		}
+		// Spawn's own goroutine reaps the child; ESRCH is that reap.
+		deadline := time.Now().Add(2 * time.Second)
+		for syscall.Kill(pid, 0) == nil {
+			if time.Now().After(deadline) {
+				t.Errorf("the successor %d was not reaped after SIGKILL", pid)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	})
 }
 
 // spawnAliveLen reports how much the stand-in successor has written so far.
