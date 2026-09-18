@@ -458,6 +458,62 @@ only when the work it names actually runs -- an already-live session emits no
 bring-up stage -- because a stage announcing work that is not happening is
 worse than no stage at all.
 
+## Final answer: landed, not landed, not timely
+
+A turn's terminal NAMES the response that answered it, and the feed draws that
+row with the green final-answer border. There are three outcomes, and only the
+first is silent (`internal/resolve/feed/finalanswer.go`, `turnended.go`).
+
+1. **LANDED.** The terminal (`AgentSuccess_Completed`) names an answer activity
+   id AND the resolver resolves it to a DRAWN, NON-THINKING response row. That
+   row is published `final_answer=true` — live and on history replay, which
+   walks the same terminal path (`recordFinalAnswer` / `restampFinalAnswer`).
+2. **NOT LANDED.** The terminal arrives and either (a) names no answer while
+   this turn drew response prose, or (b) names an answer with no resolvable
+   drawn row. The daemon records it at ERROR
+   (`daemon.feed.final_answer_unresolved`, with `turn`, `unit` and `why`) and
+   raises the `final_answer_unresolved` fault, which STANDS UNTIL THE NEXT TURN
+   STARTS. Both turn-start sites retire it, because a prompt replayed from
+   history opens a turn without passing `OnTurnOpened`.
+3. **NOT TIMELY.** An open response fold that has received no frame and no
+   terminal for `DefaultAnswerStall` (90s) raises the SAME fault kind with
+   `why` = `stalled`, cleared the instant a frame or the turn's terminal
+   arrives. The window is the injected `Deps.AfterFunc`, so tests advance a
+   virtual clock and never sleep.
+4. **Presentation is the FOOTER ONLY.** The bubble is never marked: the prose on
+   screen is exactly what the agent said, and a turn whose answer the workspace
+   cannot POINT AT is a fact about the workspace, not about the prose. The
+   fault draws through the fault chip every other kind draws through
+   (`FooterStatusActivityFault`, kind + a terse detail line composed by
+   `answerFaultLine`); no new visual treatment. The kind is NON-ESCALATING
+   (`health/footer.go`): the session is serving, and `disconnected` would close
+   the composer over a session that is perfectly healthy. Its three cases are
+   told apart by `why`, carried in
+   `SessionFaultFinalAnswerUnresolved`, never by the footer's substatus cell —
+   a substatus is legal only under a status the fault claims, and neither
+   claimable status would be true here.
+
+A CONTEXT-CUT DIRECTIVE and a turn that drew no prose at all are excluded from
+(2): neither ever had an answer to lose.
+
+**THE ALIASING RULE.** One prose block can reach the resolver under two
+divergent activity ids (the two store planes disagreeing on
+`<message.id>:<block index>`). The reconciliation keeps ONE row and retires the
+other fold — and the producer is free to name EITHER id as the turn's answer,
+because it knows nothing about which one this resolver kept. So a retired unit
+is **ALIASED onto the surviving row** (`aliasAnswerRow`), never deleted from
+`answerRows`: both ids name the same block, the surviving row is that block's
+row, and a lookup through either id lands on it. Deleting it is what made 24 of
+199 named answers in one 40-hour window resolve to nothing. The alias also means
+`answerRows[unit]` may name a row the named unit's own fold does not own, so
+`recordFinalAnswer` and `restampFinalAnswer` resolve the row's OWNING fold
+(`foldOfAnswer`) before reading its markdown or re-stamping it.
+
+The integration fakes conclude turns through `pushConcludedTurn`, which pushes
+the answering response block BEFORE the terminal that names it: a real producer
+never names an answer it did not emit, and a fake that pushes the terminal alone
+trips rule 2(b) — correctly.
+
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
