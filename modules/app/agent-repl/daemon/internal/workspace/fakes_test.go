@@ -895,27 +895,65 @@ func (f *fakeFooter) SetStartFailed(ws ids.WorkspaceID, failure *footer.StartFai
 type fakeSidebar struct {
 	sidebar.Resolver
 
+	// mu guards every field: concurrent selects tell the roster things from
+	// several goroutines at once.
+	mu         sync.Mutex
 	registries []sidebar.Registry
 	selected   []ids.WorkspaceID
 	viewed     []ids.WorkspaceID
+	// reviving records every REVIVING edge, in order.
+	reviving []revivingEdge
 	// calls records the ORDER the resolver was told things in, which is what
 	// decides whether a push carries a whole view or a half-refreshed one.
 	calls []string
 }
 
+// revivingEdge is one SetReviving call.
+type revivingEdge struct {
+	WS       ids.WorkspaceID
+	Reviving bool
+}
+
 func (s *fakeSidebar) SetRegistry(reg sidebar.Registry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.registries = append(s.registries, reg)
 	s.calls = append(s.calls, "registry")
 }
 
 func (s *fakeSidebar) SetSelected(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.selected = append(s.selected, ws)
 	s.calls = append(s.calls, "selected")
 }
 
 func (s *fakeSidebar) SetViewed(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.viewed = append(s.viewed, ws)
 	s.calls = append(s.calls, "viewed")
+}
+
+func (s *fakeSidebar) SetReviving(ws ids.WorkspaceID, reviving bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviving = append(s.reviving, revivingEdge{ws, reviving})
+	if reviving {
+		s.calls = append(s.calls, "reviving")
+	} else {
+		s.calls = append(s.calls, "revived")
+	}
+}
+
+// snapshot copies the recorded calls and selections under the lock, for a
+// test reading them while another goroutine may still be writing.
+func (s *fakeSidebar) snapshot() (calls []string, selected []ids.WorkspaceID, reviving []revivingEdge) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.calls...),
+		append([]ids.WorkspaceID(nil), s.selected...),
+		append([]revivingEdge(nil), s.reviving...)
 }
 
 // fakeHost is a HostRelay.
@@ -974,6 +1012,15 @@ type fakeSessions struct {
 	// does NOT wait. A nil detachHold runs the start inline.
 	detachEntered chan struct{}
 	detachHold    chan struct{}
+
+	// startEntered, when set, receives every workspace whose Start was
+	// entered, BEFORE it waits on startHold; startHold, when set, holds every
+	// Start until it is closed. startCalls counts every Start that got past
+	// the gate, failed ones included, under startMu.
+	startEntered chan ids.WorkspaceID
+	startHold    chan struct{}
+	startMu      sync.Mutex
+	startCalls   []ids.WorkspaceID
 }
 
 type stopCall struct {
@@ -986,6 +1033,18 @@ func newFakeSessions() *fakeSessions {
 }
 
 func (s *fakeSessions) Start(_ context.Context, ws ids.WorkspaceID) error {
+	// THE GATE: a test that arranged one learns the start was entered and
+	// holds it there until it releases, which is how an interleaving with a
+	// start in flight is arranged deterministically.
+	if s.startEntered != nil {
+		s.startEntered <- ws
+	}
+	if s.startHold != nil {
+		<-s.startHold
+	}
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+	s.startCalls = append(s.startCalls, ws)
 	if s.startErr != nil {
 		return s.startErr
 	}
@@ -1676,4 +1735,35 @@ func (f *fixture) hibernate(ws ids.WorkspaceID) {
 		Workspace: ws,
 		Terminal:  &wsm.SessionTerminal{Kind: wsm.TerminalHibernated, Detail: "idle past the cutoff", At: fixedNow},
 	}
+}
+
+// receive takes one value off ch, failing the test when none arrives inside
+// recordDeadline. A FAILURE bound, never a synchronization device: it returns
+// the moment the value lands.
+func receive[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(recordDeadline):
+		t.Fatalf("%s never happened", what)
+		var zero T
+		return zero
+	}
+}
+
+// gateStarts arms the fleet's start gate: every Start announces itself on the
+// returned channel and then holds until release is closed.
+func (f *fixture) gateStarts(buffer int) (entered <-chan ids.WorkspaceID, release chan struct{}) {
+	in := make(chan ids.WorkspaceID, buffer)
+	release = make(chan struct{})
+	f.fleet.startEntered, f.fleet.startHold = in, release
+	return in, release
+}
+
+// selectAsync runs Select on its own goroutine and answers its outcome.
+func (f *fixture) selectAsync(ctx context.Context, ws ids.WorkspaceID) <-chan error {
+	done := make(chan error, 1)
+	go func() { done <- f.verbs.Select(ctx, ws) }()
+	return done
 }

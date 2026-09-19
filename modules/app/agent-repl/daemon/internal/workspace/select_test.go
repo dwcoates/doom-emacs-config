@@ -3,9 +3,11 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -397,5 +399,250 @@ func TestMarkViewedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 	if len(f.sidebar.viewed) != 0 {
 		t.Fatalf("roster viewed reports = %v, want none for a refused mark", f.sidebar.viewed)
+	}
+}
+
+// ---- The selection goes first; the revival follows -------------------------
+//
+// Owner ruling, 2026-09-19: the selection is made current and pushed to the
+// roster BEFORE any revival, the row carries REVIVING while the revival runs,
+// and the stamped current reflects REQUEST order — never the order revivals
+// happen to finish in.
+
+func TestSelectTellsTheRosterInOrder(t *testing.T) {
+	cases := []struct {
+		name     string
+		parked   bool
+		startErr error
+		want     []string
+	}{
+		{name: "a live workspace", want: []string{"registry", "selected"}},
+		{name: "a parked workspace that revives", parked: true,
+			want: []string{"registry", "selected", "reviving", "revived"}},
+		{name: "a parked workspace whose revival fails", parked: true, startErr: errFake,
+			want: []string{"registry", "selected", "reviving", "revived"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			if tc.parked {
+				f.hibernate("w1")
+			}
+			f.fleet.startErr = tc.startErr
+
+			// Act.
+			_ = f.verbs.Select(context.Background(), "w1")
+
+			// Assert: the selection lands whole before the revival begins, and
+			// the marker is lowered however the revival ended.
+			calls, _, _ := f.sidebar.snapshot()
+			if !slices.Equal(calls, tc.want) {
+				t.Fatalf("roster calls = %v, want %v", calls, tc.want)
+			}
+		})
+	}
+}
+
+func TestSelectStampsTheSelectionBeforeTheRevivalStarts(t *testing.T) {
+	// Arrange: a parked workspace whose bring-up is held at the gate.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	entered, release := f.gateStarts(1)
+	done := f.selectAsync(context.Background(), "w1")
+
+	// Act: the revival has begun.
+	receive(t, entered, "the revival's Start")
+
+	// Assert: the selection is already current AND already on the roster.
+	_, selected, _ := f.sidebar.snapshot()
+	close(release)
+	if err := receive(t, done, "the select's answer"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if !slices.Equal(selected, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("roster selections while reviving = %v, want [w1]", selected)
+	}
+}
+
+func TestSelectMarksTheRowRevivingWhileTheRevivalRuns(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	entered, release := f.gateStarts(1)
+	done := f.selectAsync(context.Background(), "w1")
+
+	// Act.
+	receive(t, entered, "the revival's Start")
+
+	// Assert: the marker stands for the whole bring-up.
+	_, _, reviving := f.sidebar.snapshot()
+	close(release)
+	if err := receive(t, done, "the select's answer"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if !slices.Equal(reviving, []revivingEdge{{"w1", true}}) {
+		t.Fatalf("reviving edges during the bring-up = %v, want [{w1 true}]", reviving)
+	}
+}
+
+func TestSelectLowersTheRevivingMarkerWhenTheRevivalFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = errFake
+
+	// Act.
+	_ = f.verbs.Select(context.Background(), "w1")
+
+	// Assert: a failed bring-up is not still "coming back".
+	_, _, reviving := f.sidebar.snapshot()
+	if !slices.Equal(reviving, []revivingEdge{{"w1", true}, {"w1", false}}) {
+		t.Fatalf("reviving edges = %v, want raised then lowered", reviving)
+	}
+}
+
+func TestSelectAnswersTheRevivalFailureToTheCaller(t *testing.T) {
+	// Arrange: the selection is pushed before the revival, and the failure
+	// must still reach whoever asked.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = errFake
+
+	// Act.
+	err := f.verbs.Select(context.Background(), "w1")
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("Select() = %v, want the revival's failure", err)
+	}
+}
+
+func TestAFailedRevivalLeavesTheSelectionStanding(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = errFake
+
+	// Act.
+	_ = f.verbs.Select(context.Background(), "w1")
+
+	// Assert: the user DID switch; the error says what did not come up.
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1", f.db.current)
+	}
+}
+
+func TestSelectRaisesNoRevivingMarkerForALiveWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.live["w1"] = true
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if _, _, reviving := f.sidebar.snapshot(); len(reviving) != 0 {
+		t.Fatalf("reviving edges = %v, want none for a live workspace", reviving)
+	}
+}
+
+// arrangeSwitchDuringRevival selects parked workspace "slow" and, while its
+// bring-up is held at the gate, selects live workspace "fast": the user's
+// LAST switch. It answers the gate's release and the slow select's answer.
+func arrangeSwitchDuringRevival(t *testing.T) (*fixture, chan struct{}, <-chan error) {
+	t.Helper()
+	f := newFixture(t)
+	f.workspace("slow", t.TempDir())
+	f.workspace("fast", t.TempDir())
+	f.hibernate("slow")
+	f.fleet.live["fast"] = true
+	entered, release := f.gateStarts(1)
+	slow := f.selectAsync(context.Background(), "slow")
+	receive(t, entered, "the slow revival's Start")
+	if err := f.verbs.Select(context.Background(), "fast"); err != nil {
+		t.Fatalf("Select(fast): %v", err)
+	}
+	return f, release, slow
+}
+
+func TestSelectLandsOnTheLastRequestedWorkspaceWhileAnEarlierRevivalRuns(t *testing.T) {
+	// Arrange, Act: "fast" was requested after "slow", whose revival is still
+	// in flight.
+	f, release, slow := arrangeSwitchDuringRevival(t)
+	current := *f.db.current
+	_, selected, _ := f.sidebar.snapshot()
+	close(release)
+	if err := receive(t, slow, "the slow select's answer"); err != nil {
+		t.Fatalf("Select(slow): %v", err)
+	}
+
+	// Assert: the last request is current, in WSM and on the roster alike.
+	if current != "fast" {
+		t.Fatalf("current = %v, want fast", current)
+	}
+	if !slices.Equal(selected, []ids.WorkspaceID{"slow", "fast"}) {
+		t.Fatalf("roster selections = %v, want [slow fast]", selected)
+	}
+}
+
+func TestARevivalFinishingNeverRestampsTheSelection(t *testing.T) {
+	// Arrange.
+	f, release, slow := arrangeSwitchDuringRevival(t)
+
+	// Act: the earlier revival completes AFTER the later switch landed.
+	close(release)
+	if err := receive(t, slow, "the slow select's answer"); err != nil {
+		t.Fatalf("Select(slow): %v", err)
+	}
+
+	// Assert: nothing re-stamped "slow".
+	_, selected, _ := f.sidebar.snapshot()
+	if *f.db.current != "fast" {
+		t.Fatalf("current = %v, want fast: the revival's completion re-stamped it", *f.db.current)
+	}
+	if !slices.Equal(selected, []ids.WorkspaceID{"slow", "fast"}) {
+		t.Fatalf("roster selections = %v, want [slow fast]", selected)
+	}
+}
+
+func TestConcurrentSelectsOfAParkedWorkspaceStartOneSession(t *testing.T) {
+	// Arrange: the user switches to a parked workspace, and three more selects
+	// of it arrive while its bring-up is held at the gate.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	joined := make(chan ids.WorkspaceID, 3)
+	f.verbs.(*verbs).revivals.observeJoin = func(ws ids.WorkspaceID) { joined <- ws }
+	entered, release := f.gateStarts(4)
+	outcomes := []<-chan error{f.selectAsync(context.Background(), "w1")}
+	receive(t, entered, "the leading select's Start")
+	for range 3 {
+		outcomes = append(outcomes, f.selectAsync(context.Background(), "w1"))
+	}
+	for range 3 {
+		receive(t, joined, "a select joining the in-flight revival")
+	}
+
+	// Act.
+	close(release)
+	for _, outcome := range outcomes {
+		if err := receive(t, outcome, "a select's answer"); err != nil {
+			t.Fatalf("Select: %v", err)
+		}
+	}
+
+	// Assert: one bring-up for four selects.
+	if !slices.Equal(f.fleet.startCalls, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("starts = %v, want exactly one for w1", f.fleet.startCalls)
 	}
 }

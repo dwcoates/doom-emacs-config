@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -49,10 +50,99 @@ func (v *verbs) unpark(ws ids.WorkspaceID) {
 	v.deps.Footer.SetParked(ws, false)
 }
 
+// AT MOST ONE REVIVAL IS IN FLIGHT PER WORKSPACE. A bring-up takes the best
+// part of a second, and a user switching back and forth fires several selects
+// at one parked workspace inside it; each used to read "parked" (the terminal
+// clears only when the bring-up lands) and each called Sessions.Start, which
+// logged the workspace revived four times over for one switch. So the
+// decision AND the start are single-flight, keyed by workspace: the first
+// caller leads, and every caller arriving while it runs JOINS it — it starts
+// nothing of its own, waits for the leader's outcome, and answers that outcome
+// as its own. A caller arriving after the flight ended starts a fresh one,
+// which re-reads the park and finds a revived workspace awake.
+type revivalFlights struct {
+	mu       sync.Mutex
+	inFlight map[ids.WorkspaceID]*revivalFlight
+	// observeJoin, when set, is told every caller that JOINED a flight rather
+	// than leading one, after it has joined. It is the test seam that lets a
+	// test release the leader only once every joiner is provably waiting on
+	// it; production leaves it nil.
+	observeJoin func(ids.WorkspaceID)
+}
+
+// revivalFlight is one revival's outcome, published to its joiners when done
+// closes. The fields are written by the leader before the close and read by
+// joiners only after it.
+type revivalFlight struct {
+	done    chan struct{}
+	revived bool
+	err     error
+}
+
+// join returns the workspace's flight and whether the caller LEADS it: true
+// for a caller that found none in flight (it must run the revival and call
+// finish), false for one that found a flight already running.
+func (r *revivalFlights) join(ws ids.WorkspaceID) (*revivalFlight, bool) {
+	r.mu.Lock()
+	if flight, ok := r.inFlight[ws]; ok {
+		observe := r.observeJoin
+		r.mu.Unlock()
+		if observe != nil {
+			observe(ws)
+		}
+		return flight, false
+	}
+	if r.inFlight == nil {
+		r.inFlight = map[ids.WorkspaceID]*revivalFlight{}
+	}
+	flight := &revivalFlight{done: make(chan struct{})}
+	r.inFlight[ws] = flight
+	r.mu.Unlock()
+	return flight, true
+}
+
+// finish publishes the leader's outcome and retires the flight, so the next
+// caller leads a fresh one.
+func (r *revivalFlights) finish(ws ids.WorkspaceID, flight *revivalFlight, revived bool, err error) {
+	r.mu.Lock()
+	delete(r.inFlight, ws)
+	r.mu.Unlock()
+	flight.revived, flight.err = revived, err
+	close(flight.done)
+}
+
 // reviveIfParked brings a hibernated workspace's session back and lifts the
 // park. It reports whether a revival was performed, so the caller's own record
 // can say a look woke a workspace.
+//
+// SINGLE-FLIGHT PER WORKSPACE (see revivalFlights): a caller arriving while a
+// revival of the same workspace is in flight joins it and answers the
+// leader's outcome, a failure included, without starting anything itself.
+//
+// While the leader's Sessions.Start runs, the roster row carries the REVIVING
+// marker; it is lowered the moment Start returns, whichever way it returned,
+// so the row never says "coming back" about a session that already did or
+// never will.
 func (v *verbs) reviveIfParked(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
+	flight, leads := v.revivals.join(ws)
+	if !leads {
+		log.Debug(operation, "a revival of this workspace is already in flight; joining it", nil)
+		select {
+		case <-flight.done:
+			return flight.revived, flight.err
+		case <-ctx.Done():
+			log.Error(operation, "gave up waiting on the in-flight revival", dlog.Context{"cause": ctx.Err().Error()})
+			return false, fmt.Errorf("revive %q: await the in-flight revival: %w", ws, ctx.Err())
+		}
+	}
+	revived, err := v.revive(ctx, log, operation, ws)
+	v.revivals.finish(ws, flight, revived, err)
+	return revived, err
+}
+
+// revive is the leader's half of reviveIfParked: the park check and, for a
+// parked workspace, the bring-up under the REVIVING marker.
+func (v *verbs) revive(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
 	asleep, err := v.parked(ctx, ws)
 	if err != nil {
 		log.Error(operation, "could not tell whether the workspace was hibernated", dlog.Context{"cause": err.Error()})
@@ -61,7 +151,11 @@ func (v *verbs) reviveIfParked(ctx context.Context, log dlog.Logger, operation s
 	if !asleep {
 		return false, nil
 	}
-	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+	log.Info(operation, "reviving the hibernated workspace", nil)
+	v.deps.Sidebar.SetReviving(ws, true)
+	err = v.deps.Sessions.Start(ctx, ws)
+	v.deps.Sidebar.SetReviving(ws, false)
+	if err != nil {
 		log.Error(operation, "the hibernated workspace's session did not come back up", dlog.Context{"cause": err.Error()})
 		return false, fmt.Errorf("revive %q: start the session: %w", ws, err)
 	}
