@@ -83,6 +83,10 @@ type wsState struct {
 	// says nothing about the lifecycle. See `noteArm`, which is the one place
 	// it is cleared.
 	viewed bool
+	// reviving reports a revival of this workspace's parked session in
+	// flight (SetReviving). It is a marker beside the status, never an arm:
+	// it neither changes the arm nor clears the viewed marker.
+	reviving bool
 	// lastArm is the status arm last PUBLISHED for this workspace, which is
 	// what a status CHANGE is measured against.
 	lastArm string
