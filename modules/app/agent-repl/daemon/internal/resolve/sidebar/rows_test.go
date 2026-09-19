@@ -537,3 +537,84 @@ func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
 		t.Fatal("viewed = unset, want a neighbour's activity to leave this row PARTIAL")
 	}
 }
+
+// ---- The REVIVING marker: a parked session coming back up ------------------
+//
+// PRESENT while the workspace verbs hold a revival in flight, ABSENT
+// otherwise. It is a marker BESIDE the status: it neither moves the arm nor
+// clears the viewed marker.
+
+func TestRevivingMarkerFollowsTheRevivalEdges(t *testing.T) {
+	cases := []struct {
+		name  string
+		edges []bool
+		want  bool
+	}{
+		{name: "no revival was ever decided", edges: nil, want: false},
+		{name: "a revival is in flight", edges: []bool{true}, want: true},
+		{name: "the revival ended", edges: []bool{true, false}, want: false},
+		{name: "a lowered marker with no revival stays absent", edges: []bool{false}, want: false},
+		{name: "a second revival after the first ended", edges: []bool{true, false, true}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+
+			// Act.
+			for _, reviving := range tc.edges {
+				r.SetReviving(theWS, reviving)
+			}
+
+			// Assert: presence is the fact.
+			if got := onlyRow(t, r).GetReviving() != nil; got != tc.want {
+				t.Fatalf("reviving present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRevivingMarkerLeavesTheStatusArmAlone(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	before := statusName(onlyRow(t, r))
+
+	// Act.
+	r.SetReviving(theWS, true)
+
+	// Assert: the marker is not an arm and moves none.
+	if got := statusName(onlyRow(t, r)); got != before {
+		t.Fatalf("status = %q, want %q unchanged by the reviving marker", got, before)
+	}
+}
+
+func TestRevivingMarkerLeavesTheViewedMarkerStanding(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetViewed(theWS)
+
+	// Act.
+	r.SetReviving(theWS, true)
+
+	// Assert: only a STATUS change clears viewed, and this is not one.
+	if got := onlyRow(t, r).GetViewed(); got == nil {
+		t.Fatal("viewed = unset, want the reviving marker to leave the display mode alone")
+	}
+}
+
+func TestRevivingMarkerIsPerRow(t *testing.T) {
+	// Arrange: two workspaces.
+	r := arrange(t, workspace(string(theWS), "one"), workspace("w2", "two"))
+
+	// Act: only the other one revives.
+	r.SetReviving(ids.WorkspaceID("w2"), true)
+
+	// Assert.
+	row := rowFor(repoRows(t, latest(t, r)), string(theWS))
+	if row == nil {
+		t.Fatal("the workspace lost its row")
+	}
+	if got := row.GetReviving(); got != nil {
+		t.Fatalf("reviving = %v, want a neighbour's revival to leave this row unmarked", got)
+	}
+}

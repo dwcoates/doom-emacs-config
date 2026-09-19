@@ -258,6 +258,19 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 		nil, func(s *wsState) { s.viewed = true })
 }
 
+// SetReviving raises or lowers the workspace's REVIVING marker, which draws a
+// shimmer across the row's name while its parked session comes back up.
+//
+// Both edges are the workspace verbs' (reviveIfParked): the raise when a
+// revival is decided, the lower when it ends whichever way it ended. A marker
+// left standing past its revival would say "coming back" about a session that
+// already did, or never will.
+func (r *resolver) SetReviving(ws ids.WorkspaceID, reviving bool) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_reviving",
+		"the roster took the workspace's revival edge",
+		dlog.Context{"reviving": reviving}, func(s *wsState) { s.reviving = reviving })
+}
+
 // SetTurn installs the accepted turn.
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 	ctx := dlog.Context{"in_flight": turn != nil}
