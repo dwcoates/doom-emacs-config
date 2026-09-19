@@ -35,10 +35,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	closed := recedes(rec, session)
 
 	rowLog.Debug("daemon.sidebar.row", "the roster resolved a row", dlog.Context{
-		"status":  armName,
-		"current": current,
-		"closed":  closed,
-		"viewed":  s.viewed,
+		"status":   armName,
+		"current":  current,
+		"closed":   closed,
+		"viewed":   s.viewed,
+		"reviving": s.reviving,
 	})
 	if armChanged {
 		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
@@ -68,6 +69,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// FULL, exactly as `frontend.v1.RosterRowViewed` states it.
 	if s.viewed {
 		out.Viewed = &frontendv1.RosterRowViewed{}
+	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowReviving` states it: set
+	// while the revival is in flight, omitted otherwise.
+	if s.reviving {
+		out.Reviving = &frontendv1.RosterRowReviving{}
 	}
 	for _, child := range rc.tree.children[rec.ID] {
 		out.Children = append(out.Children, r.row(child, rc, rowLog))

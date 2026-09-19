@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
+import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -1450,5 +1451,49 @@ describe("regression: the response/prompt bubble collapse model", () => {
         expect(/\.bubble\.user\s*>\s*\.bubble-scroll/.test(sel)).toBe(false);
       }
     }
+  });
+});
+
+/**
+ * THE REVIVING SHIMMER'S STYLESHEET CONTRACT. The period the inline delays
+ * seek against, the pan range that keeps the text filled, and the
+ * reduced-motion stop all live only in the file.
+ */
+describe("the reviving shimmer's stylesheet contract", () => {
+  const selector = "#ws-sidebar .row .name.reviving";
+
+  /** Every rule for the shimmer's selector, in source order. */
+  function shimmerRules(): string[] {
+    return rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => rule.declarations);
+  }
+
+  it("runs at the period the inline delays are computed against", () => {
+    // Arrange / Act
+    const [base] = shimmerRules();
+
+    // Assert
+    expect(base).toContain(`ws-revive-shimmer ${REVIVE_SHIMMER_PERIOD_MS / 1000}s`);
+  });
+
+  it("pans only between 0% and 100%, so the gradient always covers the text", () => {
+    // Arrange / Act
+    const keyframes = /@keyframes ws-revive-shimmer \{([\s\S]*?)\n\}/.exec(stylesheet)?.[1] ?? "";
+    const positions = [...keyframes.matchAll(/background-position-x:\s*(-?\d+)%/g)].map((m) => Number(m[1]));
+
+    // Assert
+    expect(positions).toEqual([100, 0]);
+  });
+
+  it("stops the shimmer and its fill under prefers-reduced-motion", () => {
+    // Arrange / Act: the override is the LAST rule for the selector.
+    const rules = shimmerRules();
+    const override = rules[rules.length - 1] ?? "";
+
+    // Assert
+    expect(rules.length).toBe(2);
+    expect(override).toMatch(/animation:\s*none/);
+    expect(override).toMatch(/background-image:\s*none/);
   });
 });
