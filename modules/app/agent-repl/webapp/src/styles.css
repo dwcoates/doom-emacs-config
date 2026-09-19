@@ -819,6 +819,37 @@ body::after {
    workspace is doing — and the Emacs tab-bar draws the same distinction on the
    same message. `viewed.ts` decides which rows carry the class. */
 #ws-sidebar .row .name.viewed { color: var(--muted); }
+/* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
+   parked workspace's session back up. A SUBTLE shimmer on the NAME alone
+   (owner ruling, 2026-09-19): the text is painted through a gradient of its
+   own colour with one soft band of reduced ink, and the band ripples across
+   the text and rests off it at either end of the pass. `currentColor` keeps
+   whatever colour the name already has, so a PARTIAL (viewed) name shimmers
+   in its muted tone. The gradient is 250% of the box and pans only between 0%
+   and 100%, which keeps the image covering the text at every frame: a
+   position outside that range would leave glyphs with no fill at all.
+
+   The 2.4s period is duplicated in `REVIVE_SHIMMER_PERIOD_MS` (reviving.ts),
+   which every draw uses for a negative `animation-delay`, so a roster push
+   that rebuilds the row continues the pass rather than restarting it. The two
+   MUST stay equal. Reduced motion drops the shimmer entirely (see the
+   `prefers-reduced-motion` block). */
+#ws-sidebar .row .name.reviving {
+  background-image: linear-gradient(90deg,
+    currentColor 0%, currentColor 42%,
+    color-mix(in srgb, currentColor 40%, transparent) 50%,
+    currentColor 58%, currentColor 100%);
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ws-revive-shimmer 2.4s ease-in-out infinite;
+}
+@keyframes ws-revive-shimmer {
+  from { background-position-x: 100%; }
+  to { background-position-x: 0%; }
+}
 #ws-sidebar .row .when {
   margin-left: auto;
   color: var(--muted);
@@ -3163,6 +3194,15 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   .bubble.user[data-wave="working"] {
     animation: none;
     background-image: none;
+  }
+  /* The reviving shimmer STOPS, and its gradient fill goes with it so the
+     name is drawn in plain ink rather than through a parked band. The fact
+     it restates is transient and the row's status resolves the moment the
+     session is back. */
+  #ws-sidebar .row .name.reviving {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
   }
 }
 
