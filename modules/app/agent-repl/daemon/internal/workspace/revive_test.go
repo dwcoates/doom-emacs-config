@@ -3,8 +3,10 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -90,5 +92,146 @@ func TestUnparkLiftsTheParkFromBothSessionScopedViews(t *testing.T) {
 	}
 	if len(f.footer.parked) != 1 || f.footer.parked[0] {
 		t.Fatalf("footer parked = %v, want [false]", f.footer.parked)
+	}
+}
+
+// ---- Single flight: at most one revival in flight per workspace -----------
+
+// reviveAsync runs reviveIfParked on its own goroutine and answers its
+// outcome.
+func reviveAsync(f *fixture, ctx context.Context, ws ids.WorkspaceID) <-chan error {
+	done := make(chan error, 1)
+	v := f.verbs.(*verbs)
+	go func() {
+		_, err := v.reviveIfParked(ctx, f.log.logger, opSelect, ws)
+		done <- err
+	}()
+	return done
+}
+
+// arrangeJoinedFlight starts one leader revival of parked "w1", holds its
+// Start at the gate, and starts `joiners` more callers, returning once every
+// one of them has provably JOINED the leader's flight.
+func arrangeJoinedFlight(t *testing.T, f *fixture, joiners int, ctx context.Context) (chan struct{}, []<-chan error) {
+	t.Helper()
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	joined := make(chan ids.WorkspaceID, joiners)
+	f.verbs.(*verbs).revivals.observeJoin = func(ws ids.WorkspaceID) { joined <- ws }
+	entered, release := f.gateStarts(joiners + 1)
+	outcomes := []<-chan error{reviveAsync(f, context.Background(), "w1")}
+	receive(t, entered, "the leader's Start")
+	for range joiners {
+		outcomes = append(outcomes, reviveAsync(f, ctx, "w1"))
+	}
+	for range joiners {
+		receive(t, joined, "a caller joining the in-flight revival")
+	}
+	return release, outcomes
+}
+
+func TestConcurrentRevivalsOfOneWorkspaceStartOneSession(t *testing.T) {
+	// Arrange: one leader and four callers arriving while it runs.
+	f := newFixture(t)
+	release, outcomes := arrangeJoinedFlight(t, f, 4, context.Background())
+
+	// Act.
+	close(release)
+	for _, outcome := range outcomes {
+		if err := receive(t, outcome, "a revival's answer"); err != nil {
+			t.Fatalf("reviveIfParked: %v", err)
+		}
+	}
+
+	// Assert: exactly one restart, however many asked.
+	if !slices.Equal(f.fleet.startCalls, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("starts = %v, want exactly one for w1", f.fleet.startCalls)
+	}
+}
+
+func TestAJoinerAnswersTheLeadersFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.fleet.startErr = errFake
+	release, outcomes := arrangeJoinedFlight(t, f, 1, context.Background())
+
+	// Act.
+	close(release)
+	receive(t, outcomes[0], "the leader's answer")
+	err := receive(t, outcomes[1], "the joiner's answer")
+
+	// Assert: a failure reaches every caller that waited on it.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("joiner answered %v, want the leader's failure", err)
+	}
+}
+
+func TestAJoinerWhoseContextEndsStopsWaiting(t *testing.T) {
+	// Arrange: the joiner's caller goes away while the leader still runs.
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	release, outcomes := arrangeJoinedFlight(t, f, 1, ctx)
+
+	// Act.
+	cancel()
+	err := receive(t, outcomes[1], "the joiner's answer")
+	close(release)
+	receive(t, outcomes[0], "the leader's answer")
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("joiner answered %v, want its own cancellation", err)
+	}
+}
+
+func TestARevivalAfterTheFlightEndedLeadsAFreshOne(t *testing.T) {
+	// Arrange: one completed revival, and the workspace parked again since.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	v := f.verbs.(*verbs)
+	if _, err := v.reviveIfParked(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
+		t.Fatalf("first revival: %v", err)
+	}
+
+	// Act.
+	if _, err := v.reviveIfParked(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
+		t.Fatalf("second revival: %v", err)
+	}
+
+	// Assert: a retired flight is never joined.
+	if len(f.fleet.startCalls) != 2 {
+		t.Fatalf("starts = %v, want two sequential revivals", f.fleet.startCalls)
+	}
+}
+
+func TestRevivalsOfDifferentWorkspacesDoNotJoin(t *testing.T) {
+	// Arrange: two parked workspaces, both held at the gate. Their bring-ups
+	// fail once released, which keeps the two goroutines off the stub
+	// session-scoped views (unpark) they would otherwise both write at once;
+	// the subject here is only that both STARTS were entered.
+	f := newFixture(t)
+	f.fleet.startErr = errFake
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.hibernate("w1")
+	f.hibernate("w2")
+	entered, release := f.gateStarts(2)
+
+	// Act.
+	one := reviveAsync(f, context.Background(), "w1")
+	two := reviveAsync(f, context.Background(), "w2")
+	got := []ids.WorkspaceID{
+		receive(t, entered, "a Start"),
+		receive(t, entered, "the other Start"),
+	}
+	close(release)
+	receive(t, one, "w1's answer")
+	receive(t, two, "w2's answer")
+
+	// Assert: the flight is keyed by workspace.
+	slices.Sort(got)
+	if !slices.Equal(got, []ids.WorkspaceID{"w1", "w2"}) {
+		t.Fatalf("starts entered = %v, want one per workspace", got)
 	}
 }
