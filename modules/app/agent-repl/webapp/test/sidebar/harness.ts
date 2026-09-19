@@ -170,6 +170,8 @@ export function row(init: {
   attention?: boolean;
   /** The VIEWED marker: present means the daemon holds this row PARTIAL. */
   viewed?: boolean;
+  /** The REVIVING marker: present while the daemon revives this workspace. */
+  reviving?: boolean;
   priority?: string;
   /** The when-column's ARM; omitted leaves the column empty. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
@@ -187,6 +189,7 @@ export function row(init: {
     children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
+    ...(init.reviving === true ? { reviving: {} } : {}),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
 }

@@ -1042,3 +1042,58 @@ describe("the row's display mode", () => {
     expect(name.classList.contains("viewed")).toBe(false);
   });
 });
+
+describe("the reviving shimmer", () => {
+  it("shimmers the NAME while the daemon carries the reviving marker", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.classList.contains("reviving")).toBe(true);
+  });
+
+  it("leaves the NAME still once the marker is gone", () => {
+    // Arrange, Act: the daemon lowered the marker when the revival ended.
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.classList.contains("reviving")).toBe(false);
+  });
+
+  it("marks the whole row reviving for the hook contract", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R");
+
+    // Assert.
+    expect(drawn.getAttribute("data-reviving")).toBe("true");
+  });
+
+  it("leaves the status dot's tone untouched while reviving", () => {
+    // Arrange: the marker is not a status arm.
+    const sc = sidebarContext();
+
+    // Act.
+    const still = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    const reviving = drawRosterRow(row({ id: "ws-2", reviving: true }), sc, "R");
+
+    // Assert.
+    const dot = (el: HTMLElement): string =>
+      (el.querySelector(":scope > .row > .st") as HTMLElement).className;
+    expect(dot(reviving)).toBe(dot(still));
+  });
+
+  it("keeps the viewed mode alongside the shimmer", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", viewed: true, reviving: true }),
+      sidebarContext(),
+      "R",
+    );
+
+    // Assert: the two markers are independent.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.classList.contains("viewed")).toBe(true);
+  });
+});

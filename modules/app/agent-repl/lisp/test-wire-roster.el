@@ -62,6 +62,7 @@ status arm and whatever else the case is about."
                    :attention nil
                    :priority nil
                    :viewed nil
+                   :reviving nil
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
                    :current (:current nil)
@@ -86,6 +87,23 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"viewed\":{\"mode\":\"partial\"}"))
                  '("RosterRowViewed" mode "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-reviving-marker ()
+  "A row carrying `reviving' decodes it as PRESENT."
+  (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-row
+                          (agent-repl-test-wire-roster--row
+                           "\"ready\":{}" "\"reviving\":{}"))
+                         :reviving)
+              t)))
+
+(ert-deftest agent-repl-test-wire-roster-row-reviving-carries-no-payload ()
+  "`RosterRowReviving' is EMPTY: a field inside it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"reviving\":{\"since\":1}"))
+                 '("RosterRowReviving" since "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-every-status-arm ()
   "Every one of the declared status arms decodes to its own keyword."

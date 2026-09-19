@@ -9,35 +9,56 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// Select records the user's switch to a workspace. It does three things and
-// nothing else, and it is idempotent — selecting the current workspace again is
-// success:
+// Select records the user's switch to a workspace, and it is idempotent —
+// selecting the current workspace again is success. In this order:
 //
-//   - WSM records the selection instant, which is what "current" means;
-//   - the ATTENTION MARKER is cleared, because the user has now looked at what
-//     raised it;
-//   - the roster is told, so every webview's selection agrees at once.
+//  1. THE SELECTION, FIRST AND AT ONCE (selectCurrent): WSM records the
+//     selection instant, which is what "current" means; the ATTENTION MARKER
+//     is cleared, because the user has now looked at what raised it; and the
+//     roster is told, so every webview's selection agrees at once.
+//  2. THEN, IF THE WORKSPACE IS PARKED, THE REVIVAL. Switching to a workspace
+//     is looking at it, and an open workspace the user is looking at is never
+//     session-less (owner ruling, 2026-09-13). `reviveIfParked` is a no-op for
+//     anything the idle sweep did not stand down, so a select on a live
+//     workspace changes nothing but the selection.
 //
-// AND IT REVIVES A HIBERNATED WORKSPACE. Switching to a workspace is looking
-// at it, and an open workspace the user is looking at is never session-less
-// (owner ruling, 2026-09-13). It is not a fourth thing this verb does to a
-// LIVE workspace: `reviveIfParked` is a no-op for anything the idle sweep did
-// not stand down, so a select on a live workspace still changes nothing but
-// the selection.
+// THE SELECTION NEVER WAITS ON THE REVIVAL (owner ruling, 2026-09-19). A
+// bring-up takes most of a second, and the revival used to run first: the
+// sidebar lagged every switch by one to four seconds, and concurrent selects
+// stamped `current` in the order their revivals FINISHED, so a user's last
+// switch was overwritten by an earlier one whose bring-up happened to end
+// later. Now the selection is stamped on arrival, in request order, and
+// nothing after it touches `current` again: a revival that completes never
+// re-stamps anything. While the revival runs the row carries the REVIVING
+// marker.
+//
+// A REVIVAL THAT FAILS STILL FAILS THE SELECT, because a selected workspace
+// with no session is exactly the state the revival exists to abolish and
+// answering success would hide it. The selection it already made stands: the
+// user did switch, and the error says what did not come up.
 func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "SelectWorkspace", ws)
 	if err != nil {
 		return err
 	}
-	// THE REVIVAL GOES FIRST, before the selection is recorded: the roster
-	// republished below is what every client reads, and a roster pushed while
-	// the workspace still reads asleep would show the user the sleep they just
-	// ended. A revival that FAILS fails the select, because a selected
-	// workspace with no session is exactly the state this exists to abolish
-	// and answering success would hide it.
+	if err := v.selectCurrent(ctx, log, ws); err != nil {
+		return err
+	}
 	if _, err := v.reviveIfParked(ctx, log, opSelect, ws); err != nil {
 		return fmt.Errorf("select %q: %w", ws, err)
 	}
+	return nil
+}
+
+// selectCurrent is Select's selection section: stamp the selection, clear the
+// attention marker, push the roster. It holds the selection lock throughout,
+// so concurrent selects land WHOLE in the order they took it — a select's
+// read of the current workspace, its stamp and its roster push can never
+// interleave with another's, which would leave WSM naming one workspace and
+// the roster's selection another.
+func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+	v.selection.Lock()
+	defer v.selection.Unlock()
 
 	current, err := v.deps.DB.Current(ctx)
 	if err != nil {

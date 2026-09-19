@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -47,13 +48,23 @@ const (
 	opSelectAccount  = "daemon.workspace.select_account"
 )
 
-// verbs is the whole verb surface. It holds no state: every fact it reads is
+// verbs is the whole verb surface. It holds no FACTS: every fact it reads is
 // WSM's or a resolver's, so two verbs racing cannot disagree about a workspace.
+// What it does hold is coordination: the selection lock and the revival
+// flights, which order concurrent verbs without remembering anything.
 type verbs struct {
 	deps   Deps
 	load   PromptLoader
 	splice PromptSplicer
 	now    func() time.Time
+
+	// selection serializes Select's selection section — the read of the
+	// current workspace through the roster push — so two concurrent selects
+	// land whole, one after the other, and WSM's current and the roster's
+	// selection can never be left naming different workspaces.
+	selection sync.Mutex
+	// revivals holds at most one revival in flight per workspace.
+	revivals revivalFlights
 }
 
 // load resolves one workspace's durable record and its own logger. A REGISTERED
