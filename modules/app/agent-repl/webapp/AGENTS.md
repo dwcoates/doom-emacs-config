@@ -92,6 +92,7 @@ and are contract on the same terms:
 | `data-cold-gate-progress` | the cold-gate card's progress slot, inside `.hibernation-actions` | — (empty and `hidden` unless an answer is in flight AND the footer view carries a `compaction` activity; its text is the daemon's own line, verbatim) | cold-gate feedback, 2026-09-14 |
 | `data-status-wave` | the `.footer-status` cell whose arm means PROGRESS | `progress` (absent on every other status, and on the client's own composed disconnected strip); the word is then per-letter `.pfooter-wave-letter` spans inside one `.pfooter-status-word` | webapp/footer-status-wave |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
+| `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
 
 ## Commands
 

@@ -40,6 +40,7 @@ import type {
   RosterRowWhenCreated,
   RosterRowWhenLastSelected,
   RosterRowWhenMerged,
+  RosterRowReviving,
   RosterRowViewed,
   RosterRowWorkspace,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -49,6 +50,7 @@ import { formatTickedAge } from "../duration.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
+import { markReviving } from "./reviving.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
@@ -172,6 +174,11 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
+  // THE REVIVING SHIMMER IS THE NAME'S TOO, and only while the wire carries
+  // the marker: the daemon lowers it when the revival ends, whichever way.
+  if (u.reviving !== undefined && drawRosterRowReviving(u.reviving, `${path}.reviving`)) {
+    markReviving(ws, label);
+  }
   line.appendChild(label);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at
@@ -244,6 +251,17 @@ export function drawRosterRowCurrent(u: RosterRowCurrent, path: string): boolean
  * FULL.
  */
 export function drawRosterRowViewed(u: RosterRowViewed, path: string): boolean {
+  void u;
+  void path;
+  return true;
+}
+
+/**
+ * The REVIVING marker: the daemon is bringing this parked workspace's session
+ * back up. EMPTY — presence is the fact — so this answers `true` for a marker
+ * that is there at all; `reviving.ts` draws the shimmer.
+ */
+export function drawRosterRowReviving(u: RosterRowReviving, path: string): boolean {
   void u;
   void path;
   return true;

@@ -127,6 +127,19 @@ unknown fields, and refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowViewed" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-reviving (value)
+  "Decode VALUE as `RosterRowReviving' and return t.
+The REVIVING marker: the daemon is bringing this parked workspace's
+session back up.  EMPTY, and PRESENCE IS THE FACT, as for the markers
+above.
+
+EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The marker is the webapp
+sidebar's shimmer and not a status arm, so the tab-bar's status (which
+is the arm) is unaffected.  It is decoded because the codec refuses
+unknown fields, and refusing this one would drop every roster push."
+  (agent-repl-wire--decode-empty "RosterRowReviving" value)
+  t)
+
 ;;;; ---- The when column ----
 ;;
 ;; REGRESSION WATCH (2026-09-15): this strict decoder rejects the whole
@@ -413,13 +426,14 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed name current children when detail closed)
+  (append '(workspace attention priority viewed reviving name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 23 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
-Returns `(:workspace W :attention A :priority P :viewed V :name N :status
+Returns `(:workspace W :attention A :priority P :viewed V :reviving R
+:name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
@@ -438,6 +452,9 @@ the message tree preserved as the contract spells it."
            :viewed (agent-repl-wire--decode-optional-message
                     "RosterRow" 'viewed object
                     #'agent-repl-wire-decode-roster-row-viewed)
+           :reviving (agent-repl-wire--decode-optional-message
+                      "RosterRow" 'reviving object
+                      #'agent-repl-wire-decode-roster-row-reviving)
            :name (agent-repl-wire--decode-message
                   "RosterRow" 'name object
                   #'agent-repl-wire-decode-roster-row-name)

@@ -566,6 +566,40 @@ must not outlive a restart. The editor's tab-bar draws the same mode from its
 own latch, on the same reset rule; the module-root AGENTS.md section "The
 viewed mode" owns the cross-surface invariant.
 
+## SelectWorkspace: the selection first, then at most one revival per workspace
+
+Owner ruling, 2026-09-19. `Select` (internal/workspace/select.go) does its work
+in a fixed order, and the order is the contract:
+
+1. **The selection, at once.** `selectCurrent` reads the current workspace,
+   stamps `SetCurrent`, clears the attention marker, republishes the registry
+   and calls `Sidebar.SetSelected`, all under the verbs' `selection` lock, so
+   concurrent selects land WHOLE in the order they took it. Nothing after this
+   step touches `current`: **the stamped selection reflects REQUEST order, and
+   a revival completing never re-stamps it.** Before this ruling the revival
+   ran first, the sidebar lagged every switch by the bring-up (~0.75s each,
+   serialized), and concurrent selects stamped current in the order their
+   revivals finished, overwriting the user's last switch.
+2. **Then, if parked, the revival** (`reviveIfParked`, internal/workspace/
+   revive.go), with the roster row's `RosterRowReviving` marker raised for the
+   duration of `Sessions.Start` and lowered however Start returned. A failed
+   revival still fails the select: the error reaches the rpc caller, and the
+   selection it already made stands.
+
+**INVARIANT: AT MOST ONE RESTART IN FLIGHT PER WORKSPACE.** `reviveIfParked` is
+single-flight keyed by workspace (`revivalFlights`): the park check and the
+start run in the leader only, and every caller arriving while a revival is in
+flight JOINS it and answers the leader's outcome, a failure included, without
+calling `Sessions.Start` itself. A joiner whose own context ends stops waiting
+with that error; the leader carries on. A caller arriving after the flight
+retired leads a fresh one, which re-reads the park. Any new revive caller goes
+through `reviveIfParked` and inherits this; nothing in the verbs calls
+`Sessions.Start` for a parked workspace any other way. Covered by
+`TestConcurrentRevivalsOfOneWorkspaceStartOneSession` and
+`TestConcurrentSelectsOfAParkedWorkspaceStartOneSession` (a gated fake Start,
+N callers, exactly one Start), and the request-order landing by
+`TestARevivalFinishingNeverRestampsTheSelection`.
+
 ## A BROWSER page holds ONE stream; Emacs holds its own
 
 Every standing watch a webview holds is a SUBSCRIPTION on that page's single

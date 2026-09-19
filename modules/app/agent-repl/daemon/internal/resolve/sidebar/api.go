@@ -76,6 +76,11 @@ type Resolver interface {
 	// workspace. There is no lowering setter: the marker is cleared by the
 	// row's next status change, which is the reset rule every surface shares.
 	SetViewed(ws ids.WorkspaceID)
+	// SetReviving raises (true) or lowers (false) the workspace's REVIVING
+	// marker: its parked session is being brought back up. The workspace
+	// verbs raise it when they decide to revive and lower it when that revival
+	// ends, success or failure; it is not a status arm and clears nothing.
+	SetReviving(ws ids.WorkspaceID, reviving bool)
 	// SetTurn installs the accepted turn, nil when none is in flight. It is
 	// what raises `submitting` the instant StartTurn is accepted, and what
 	// tells a `/clear` and a compaction apart from an ordinary prompt — the
