@@ -3138,3 +3138,96 @@ func TestFleetWorkspacesAnswersTheHeldSessions(t *testing.T) {
 		})
 	}
 }
+
+// ---- THE LIVE-SHIM INVARIANT ----------------------------------------------
+//
+// A workspace whose shim is live in the fleet carries no terminal session
+// record. See retireTerminalRecord for what a stale one cost.
+
+// killedRecord arranges a workspace whose session record reads killed, the
+// shape a KillWorkspace leaves behind and nothing ever retired.
+func killedRecord(t *testing.T, f *fleetFixture, ws wsm.Workspace, kind string) {
+	t.Helper()
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1"}
+	if err := f.db.SetSessionTerminal(context.Background(), ws.ID, wsm.SessionTerminal{
+		Kind: kind, Detail: "KillWorkspace", At: fixedNow,
+	}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+}
+
+func TestAGateParkedBringUpRetiresAKilledSessionRecord(t *testing.T) {
+	// Arrange: the shim comes up and parks at its cold gate, so NO session
+	// facts are recorded — which is exactly how a killed record outlived the
+	// shim that replaced it.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	killedRecord(t, f, ws, "killed")
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if terminal := f.db.sessions[ws.ID].Terminal; terminal != nil {
+		t.Fatalf("terminal = %+v for a live gate-parked shim, want it retired", terminal)
+	}
+}
+
+func TestAStartedSessionRetiresAKilledSessionRecord(t *testing.T) {
+	// Arrange: the guard against the record's only other retirement — the
+	// facts a successful start records — ever ceasing to clear it.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	killedRecord(t, f, ws, "killed")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if terminal := f.db.sessions[ws.ID].Terminal; terminal != nil {
+		t.Fatalf("terminal = %+v for a started session, want it retired", terminal)
+	}
+}
+
+func TestABringUpDoesNotResurrectADeletedSession(t *testing.T) {
+	// Arrange: a forgotten workspace's cause of death is final, and no client
+	// comes up to argue with it — the bring-up refuses the deleted session
+	// before it spawns, so the retirement is never reached at all.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	killedRecord(t, f, ws, "deleted")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start = nil for a deleted session, want the refusal")
+	}
+	terminal := f.db.sessions[ws.ID].Terminal
+	if terminal == nil || terminal.Kind != "deleted" {
+		t.Fatalf("terminal = %+v after a refused bring-up, want the deletion kept", terminal)
+	}
+}
+
+func TestABringUpSurfacesAFailedTerminalRetirement(t *testing.T) {
+	// Arrange: the store refuses the retirement, which is a record that will
+	// go on calling a serving session dead.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	killedRecord(t, f, ws, "killed")
+	f.db.clearTerminalErr = errors.New("the store is unreadable")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the store is unreadable") {
+		t.Fatalf("Start = %v, want the failed retirement surfaced", err)
+	}
+}

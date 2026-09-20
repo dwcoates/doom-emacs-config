@@ -789,7 +789,9 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		// AN ADOPTED SHIM HAS ALREADY STARTED ITS ONE SESSION -- that is the
 		// premise of the whole branch -- so the entry says so, and every
 		// session-directed verb may address it.
-		f.remember(ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true})
+		if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
+			return err
+		}
 		if err := f.Install(ctx, ws, client); err != nil {
 			log.Error(opBringUp, "the adopted shim could not be installed", dlog.Context{"cause": err.Error()})
 			return fmt.Errorf("start session for %q: install the adopted shim: %w", ws, err)
@@ -838,7 +840,9 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		// the idle sweep skips the workspace instead of directing a shim that
 		// can only refuse `no_session`, and a teardown stops the process
 		// without asking it to end a session it never began.
-		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
+		if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID}); err != nil {
+			return err
+		}
 		f.publishHost(ws)
 		log.Info(opBringUp, "the session is parked at its cold gate", dlog.Context{
 			"shim_pid": client.PID(), "host_session_id": hostSessionID,
@@ -882,13 +886,17 @@ func (f *Fleet) sessionUp(
 	// know the session would answer "no live facts" for a workspace whose
 	// session record already exists, and the host view would be withheld with
 	// an invariant violation for a session that is coming up perfectly well.
-	f.remember(ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true})
+	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
+		return err
+	}
 	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID, sessionStarted: true})
+	if err := f.hold(ctx, log, ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
+		return err
+	}
 
 	if err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil"})
@@ -1981,6 +1989,30 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 // The close runs OFF the lock: it cancels the watcher's context, drains its
 // streams and joins its in-flight sink dispatch, none of which may hold the
 // fleet's lock.
+// hold is how the fleet BEGINS holding a live client for a workspace, and it
+// is what makes THE LIVE-SHIM INVARIANT structural rather than a step each
+// arrival has to remember to take: the workspace's terminal session record is
+// retired in the same breath as the client is installed, so no surface that
+// composes off the record can go on calling a serving workspace's session dead
+// (see retireTerminalRecord for what that cost).
+//
+// A RESTATEMENT OF THE SAME CLIENT IS NOT A NEW ARRIVAL. sessionUp states its
+// entry twice — once before the watcher opens, because the opening facts are
+// published synchronously against it, and once after, to carry the watcher —
+// and the record was already retired when that client arrived, so the second
+// statement writes nothing.
+func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, session *live) error {
+	f.mu.RLock()
+	previous, held := f.sessions[ws]
+	f.mu.RUnlock()
+	restated := held && previous != nil && previous.client == session.client
+	f.remember(ws, session)
+	if restated {
+		return nil
+	}
+	return retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws)
+}
+
 func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	f.mu.Lock()
 	previous, stood := f.sessions[ws]
