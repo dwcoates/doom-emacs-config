@@ -74,6 +74,8 @@ const (
 	ShimDetachForegroundProcedure = "/shim.v1.Shim/DetachForeground"
 	// ShimReadHistoryProcedure is the fully-qualified name of the Shim's ReadHistory RPC.
 	ShimReadHistoryProcedure = "/shim.v1.Shim/ReadHistory"
+	// ShimReadTranscriptsProcedure is the fully-qualified name of the Shim's ReadTranscripts RPC.
+	ShimReadTranscriptsProcedure = "/shim.v1.Shim/ReadTranscripts"
 	// ShimGatherTitleDigestProcedure is the fully-qualified name of the Shim's GatherTitleDigest RPC.
 	ShimGatherTitleDigestProcedure = "/shim.v1.Shim/GatherTitleDigest"
 )
@@ -98,6 +100,7 @@ var (
 	shimStopWorkflowMethodDescriptor             = shimServiceDescriptor.Methods().ByName("StopWorkflow")
 	shimDetachForegroundMethodDescriptor         = shimServiceDescriptor.Methods().ByName("DetachForeground")
 	shimReadHistoryMethodDescriptor              = shimServiceDescriptor.Methods().ByName("ReadHistory")
+	shimReadTranscriptsMethodDescriptor          = shimServiceDescriptor.Methods().ByName("ReadTranscripts")
 	shimGatherTitleDigestMethodDescriptor        = shimServiceDescriptor.Methods().ByName("GatherTitleDigest")
 )
 
@@ -159,6 +162,10 @@ type ShimClient interface {
 	// a page already received. Serves cold open, scroll-back, and the daemon's
 	// own catch-up after a restart alike.
 	ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error)
+	// Every conversation filed under this shim's working directory, read off
+	// the transcripts themselves. Spends nothing; see
+	// endpoint_read_transcripts.proto.
+	ReadTranscripts(context.Context, *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error)
 	// The prompts (and, after a /compact, the compaction summary) the daemon
 	// summarizes into a workspace title of its own when the vendor has written
 	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
@@ -278,6 +285,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			connect.WithSchema(shimReadHistoryMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		readTranscripts: connect.NewClient[v1.ReadTranscriptsRequest, v1.ReadTranscriptsResponse](
+			httpClient,
+			baseURL+ShimReadTranscriptsProcedure,
+			connect.WithSchema(shimReadTranscriptsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		gatherTitleDigest: connect.NewClient[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse](
 			httpClient,
 			baseURL+ShimGatherTitleDigestProcedure,
@@ -306,6 +319,7 @@ type shimClient struct {
 	stopWorkflow             *connect.Client[v1.StopWorkflowRequest, v1.StopWorkflowResponse]
 	detachForeground         *connect.Client[v1.DetachForegroundRequest, v1.DetachForegroundResponse]
 	readHistory              *connect.Client[v1.ReadHistoryRequest, v1.ReadHistoryResponse]
+	readTranscripts          *connect.Client[v1.ReadTranscriptsRequest, v1.ReadTranscriptsResponse]
 	gatherTitleDigest        *connect.Client[v1.GatherTitleDigestRequest, v1.GatherTitleDigestResponse]
 }
 
@@ -394,6 +408,11 @@ func (c *shimClient) ReadHistory(ctx context.Context, req *connect.Request[v1.Re
 	return c.readHistory.CallUnary(ctx, req)
 }
 
+// ReadTranscripts calls shim.v1.Shim.ReadTranscripts.
+func (c *shimClient) ReadTranscripts(ctx context.Context, req *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error) {
+	return c.readTranscripts.CallUnary(ctx, req)
+}
+
 // GatherTitleDigest calls shim.v1.Shim.GatherTitleDigest.
 func (c *shimClient) GatherTitleDigest(ctx context.Context, req *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {
 	return c.gatherTitleDigest.CallUnary(ctx, req)
@@ -457,6 +476,10 @@ type ShimHandler interface {
 	// a page already received. Serves cold open, scroll-back, and the daemon's
 	// own catch-up after a restart alike.
 	ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error)
+	// Every conversation filed under this shim's working directory, read off
+	// the transcripts themselves. Spends nothing; see
+	// endpoint_read_transcripts.proto.
+	ReadTranscripts(context.Context, *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error)
 	// The prompts (and, after a /compact, the compaction summary) the daemon
 	// summarizes into a workspace title of its own when the vendor has written
 	// no ai-title. Reads the transcript the shim owns; produces nothing and ends
@@ -572,6 +595,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		connect.WithSchema(shimReadHistoryMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimReadTranscriptsHandler := connect.NewUnaryHandler(
+		ShimReadTranscriptsProcedure,
+		svc.ReadTranscripts,
+		connect.WithSchema(shimReadTranscriptsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimGatherTitleDigestHandler := connect.NewUnaryHandler(
 		ShimGatherTitleDigestProcedure,
 		svc.GatherTitleDigest,
@@ -614,6 +643,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimDetachForegroundHandler.ServeHTTP(w, r)
 		case ShimReadHistoryProcedure:
 			shimReadHistoryHandler.ServeHTTP(w, r)
+		case ShimReadTranscriptsProcedure:
+			shimReadTranscriptsHandler.ServeHTTP(w, r)
 		case ShimGatherTitleDigestProcedure:
 			shimGatherTitleDigestHandler.ServeHTTP(w, r)
 		default:
@@ -691,6 +722,10 @@ func (UnimplementedShimHandler) DetachForeground(context.Context, *connect.Reque
 
 func (UnimplementedShimHandler) ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.ReadHistory is not implemented"))
+}
+
+func (UnimplementedShimHandler) ReadTranscripts(context.Context, *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.ReadTranscripts is not implemented"))
 }
 
 func (UnimplementedShimHandler) GatherTitleDigest(context.Context, *connect.Request[v1.GatherTitleDigestRequest]) (*connect.Response[v1.GatherTitleDigestResponse], error) {

@@ -959,3 +959,37 @@ func (s *requestLoggingServer) UnsubscribePage(
 	}()
 	return s.server.UnsubscribePage(ctx, req)
 }
+
+func (s *requestLoggingServer) ListWorkspaceTranscripts(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListWorkspaceTranscriptsRequest],
+) (resp *connect.Response[agentreplv1.ListWorkspaceTranscriptsResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "ListWorkspaceTranscripts", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.list_workspace_transcripts", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.list_workspace_transcripts", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.ListWorkspaceTranscripts(ctx, req)
+}
+
+func (s *requestLoggingServer) BindWorkspaceSession(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.BindWorkspaceSessionRequest],
+) (resp *connect.Response[agentreplv1.BindWorkspaceSessionResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "BindWorkspaceSession", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.bind_workspace_session", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.bind_workspace_session", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.BindWorkspaceSession(ctx, req)
+}

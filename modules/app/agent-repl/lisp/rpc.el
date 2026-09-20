@@ -67,6 +67,10 @@
 (declare-function agent-repl-wire-encode-register-repository-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-register-repository-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-open-workspace-request "wire-verbs" (request))
+(declare-function agent-repl-wire-encode-list-workspace-transcripts-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-list-workspace-transcripts-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-bind-workspace-session-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-bind-workspace-session-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-open-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-close-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-close-workspace-response "wire-verbs" (alist))
@@ -282,6 +286,25 @@ section, and every later create can name it.")
   agent-repl-wire-encode-open-workspace-request
   agent-repl-wire-decode-open-workspace-response
   "Re-open a closed workspace, named by the ref of its closed roster row.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-list-workspace-transcripts
+  "ListWorkspaceTranscripts"
+  agent-repl-wire-encode-list-workspace-transcripts-request
+  agent-repl-wire-decode-list-workspace-transcripts-response
+  "Ask for every vendor conversation filed under a workspace's own directory.
+PULL, NOT PUSH: the answer is a list a person reads once while choosing,
+and it costs nothing to ask -- the shim reads the transcripts\' own lines,
+starting no query and making no model call.  An EMPTY list is a success.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-bind-workspace-session
+  "BindWorkspaceSession"
+  agent-repl-wire-encode-bind-workspace-session-request
+  agent-repl-wire-decode-bind-workspace-session-response
+  "Point a workspace at a different vendor conversation in its own directory.
+IT IS A SESSION SWAP: the daemon ends the current session and starts one
+on the named conversation through the ORDINARY resume, so a cold
+conversation comes up parked at its cold gate.  The id is an ECHO of a
+value `ListWorkspaceTranscripts\' served; a client never invents one.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-close-workspace
   "CloseWorkspace"

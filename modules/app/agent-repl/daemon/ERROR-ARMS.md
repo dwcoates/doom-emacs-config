@@ -38,6 +38,7 @@ quiet check fills all five. The evidence is expressible; nothing is owed here.
 | Interrupt | `unknown_work` | the shim's `StopBashFailure.unknown_work`: the ADDRESSED detached shell is stale. As with `unknown_agent`, the fan-wide `all_agents` sweep skips it instead | workspace |
 | Interrupt | `live`, `not_the_open_turn`, `no_session` | the shim's `KillTurnFailure` cause, propagated by name | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `unspecified` | a shim failure whose `kind` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
+| BindWorkspaceSession | `no_session` | the bind validates against a FRESH listing, and only a live shim can read the transcripts — so a workspace whose session died between the listing and the choice has nothing to validate against. `BindWorkspaceSessionError` carries no `no_session` arm (`ListWorkspaceTranscriptsError` does), and answering `unknown_transcript` instead would tell the user their conversation is gone when it is the session that is | workspace |
 
 ## Landing-4 batch must also answer (e2e seam, project lead request)
 
