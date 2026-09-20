@@ -71,12 +71,16 @@
 (declare-function agent-repl-popup-open "agent-repl-popup" (path &optional line))
 (declare-function agent-repl-host-register "agent-repl-host" (conn dir on-done))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
-(declare-function agent-repl-verbs-select-minted "agent-repl-verbs" (ref))
+(declare-function agent-repl-verbs-select-minted "agent-repl-verbs"
+                  (ref &optional lander))
+(declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
+(declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-verbs--row-ref "agent-repl-verbs" (row))
 (declare-function agent-repl-verbs--row-closed-p "agent-repl-verbs" (row))
+(declare-function agent-repl-verbs--row-name "agent-repl-verbs" (row))
 (declare-function magit-current-section "magit-section" ())
 (declare-function magit-file-at-point "magit-git" (&optional expand assert))
 (declare-function magit-toplevel "magit-git" (&optional directory))
@@ -662,14 +666,155 @@ that is not a workspace arms nothing either -- there is no panel to show."
      (t
       (agent-repl--arm-landing-panels ws)))))
 
-(defun agent-repl-switch-to-project (&optional project)
-  "Switch to a live workspace, or to PROJECT.
+(defconst agent-repl--switch-state-affixes
+  '((:open . "")
+    (:closed . " (closed)")
+    (:not-here . " (not open here)"))
+  "Affix drawn after a switcher candidate for each state it can be in.
 
-With no argument, completes over the LIVE workspaces -- which the roster
-stream is the source of -- and switches to the chosen one.  A CLOSED
-workspace is not offered here: reopening one is `OpenWorkspace''s job
-and lives on `agent-repl-open-workspace', because it is a request to the
-daemon rather than an editor-local switch.
+A CLOSED WORKSPACE IS STILL A WORKSPACE YOU CAN SWITCH TO, so it is
+offered -- but picking it costs a daemon round trip and a session
+revival, which picking an open one does not.  The user is owed that
+difference before they press RET, and text is the whole of how it is
+said: no face, no styling, nothing the affix could disagree with when
+the row's real state changes underneath it.")
+
+(defun agent-repl--switch-candidates ()
+  "Return every KNOWN workspace the `SPC p p' switcher can land on.
+
+THE DAEMON'S ROSTER IS THE SOURCE OF WHAT EXISTS, so it is the source
+here (owner ruling, 2026-09-20).  The switcher used to complete over
+`agent-repl--live-ws-names' -- an entry in Emacs's own registry with no
+`:killed-at' tombstone -- which is the set of workspaces that happen to
+have a PERSPECTIVE IN THIS EMACS right now.  Three kinds of workspace
+are real and were unreachable through it: one that was closed or killed,
+one the daemon knows that this Emacs has not reconciled yet (a
+just-registered repo whose landing is still pending), and one with no
+local perspective yet for any other reason.
+
+Each entry is a plist:
+
+  :name   what the roster calls the row, or the workspace name
+  :dir    the workspace directory, used only to break a name collision
+  :ref    the daemon-minted `WorkspaceRef', the only openable identity
+  :ws     the local workspace name when one is standing, else nil
+  :state  `:open' (a tab is here), `:closed' (the roster says closed) or
+          `:not-here' (the daemon knows it, this Emacs has no tab)
+
+A LIVE LOCAL WORKSPACE THE ROSTER DOES NOT CARRY IS STILL OFFERED: the
+roster push and the registry are reconciled asynchronously, and the
+switcher must never drop a workspace the user is standing in because a
+push is in flight.  Pseudo perspectives stay out -- `main' and `none'
+are persp-mode's, not workspaces -- and `agent-repl--live-ws-names'
+excludes them at its source."
+  (let ((entries nil)
+        (claimed nil))
+    (dolist (row (agent-repl-verbs--all-rows))
+      (let* ((ref (agent-repl-verbs--row-ref row))
+             (id (plist-get ref :id)))
+        (when id
+          (let ((ws (agent-repl--ws-by-ref-id id)))
+            (when ws (push ws claimed))
+            (push (list :name (or (agent-repl-verbs--row-name row)
+                                  (plist-get ref :dir)
+                                  id)
+                        :dir (plist-get ref :dir)
+                        :ref ref
+                        :ws ws
+                        :state (cond (ws :open)
+                                     ((agent-repl-verbs--row-closed-p row) :closed)
+                                     (t :not-here)))
+                  entries)))))
+    (dolist (ws (agent-repl--live-ws-names))
+      (unless (member ws claimed)
+        (push (list :name ws
+                    :dir (agent-repl--ws-get ws :project-dir)
+                    :ref (agent-repl--ws-get ws :ref)
+                    :ws ws
+                    :state :open)
+              entries)))
+    (nreverse entries)))
+
+(defun agent-repl--switch-display-alist (entries)
+  "Return ENTRIES as an alist of (DISPLAY . ENTRY), in order.
+
+A DISPLAY STRING MUST BE UNIQUE, because `completing-read' answers with
+one and nothing else: NAMES COLLIDE ACROSS REPOS, and two rows sharing a
+name would make the second unreachable -- `assoc' would hand back the
+first every time.  A colliding name is qualified by its directory, which
+is the one thing that cannot collide; a name that is already unique is
+left alone rather than qualified for the sake of uniformity."
+  (let ((counts (make-hash-table :test 'equal)))
+    (dolist (entry entries)
+      (let ((name (plist-get entry :name)))
+        (puthash name (1+ (gethash name counts 0)) counts)))
+    (mapcar
+     (lambda (entry)
+       (let* ((name (plist-get entry :name))
+              (dir (plist-get entry :dir))
+              (base (if (and (> (gethash name counts 0) 1) dir)
+                        (format "%s [%s]" name dir)
+                      name)))
+         (cons (concat base
+                       (alist-get (plist-get entry :state)
+                                  agent-repl--switch-state-affixes ""))
+               entry)))
+     entries)))
+
+(defun agent-repl--switch-to-known-workspace ()
+  "Pick a known workspace and stand on it, opening it first if it is not here.
+
+AN OPEN WORKSPACE IS AN EDITOR-LOCAL SWITCH and nothing more: its
+perspective is standing, so `agent-repl--ws-switch' activates it.
+
+ANYTHING ELSE GOES THROUGH `OpenWorkspace', which is the ONE path that
+reopens a workspace -- the same verb `agent-repl-open-workspace' runs,
+with the same minibuffer progress reporting, so a revival that takes a
+shim spawn and a vendor resume says every stage it reaches.  There is
+deliberately no second open path here: a switcher that opened workspaces
+its own way would be a second mechanism to disagree with the first.
+
+THE LANDING IS BY IDENTITY, not by directory.  The tab is not here yet --
+it arrives on the roster push that the open provokes -- so the landing is
+registered with `agent-repl-verbs-select-minted' and fires when the tab
+does.  `agent-repl-verbs--land-on-tab' is the lander because the
+workspace's perspective carries the DAEMON's name, which need not be its
+directory's basename; landing by directory would let Doom mint a
+perspective of its own and re-point the workspace being left.
+
+A CANDIDATE WITH NO REF CANNOT BE OPENED and says so: the ref is
+daemon-minted and there is no spelling of it Emacs could construct."
+  (let ((candidates (agent-repl--switch-display-alist
+                     (agent-repl--switch-candidates))))
+    (unless candidates
+      (user-error "agent-repl: no known workspaces"))
+    (let* ((choice (completing-read "Switch to workspace: "
+                                    (mapcar #'car candidates) nil t))
+           (entry (cdr (assoc choice candidates)))
+           (ws (plist-get entry :ws))
+           (ref (plist-get entry :ref)))
+      (cond
+       (ws
+        (agent-repl--log ws "elisp.commands.switch-chosen ws=%s" ws)
+        (agent-repl--ws-switch ws))
+       (ref
+        (agent-repl--info (agent-repl--ws-current-log-name)
+                          "elisp.commands.switch-opens-absent name=%s id=%s"
+                          (plist-get entry :name) (plist-get ref :id))
+        (agent-repl-verb-open ref)
+        (agent-repl-verbs-select-minted ref #'agent-repl-verbs--land-on-tab))
+       (t
+        (agent-repl--warn (agent-repl--ws-current-log-name)
+                          "elisp.commands.switch-no-ref name=%S" choice)
+        (user-error "agent-repl: %s has no daemon identity to open" choice))))))
+
+(defun agent-repl-switch-to-project (&optional project)
+  "Switch to a known workspace, or to PROJECT.
+
+With no argument, completes over EVERY KNOWN workspace -- the daemon's
+roster is the source of what exists -- and stands on the chosen one,
+opening it first when it is closed or has no tab here.  See
+`agent-repl--switch-to-known-workspace'.
 
 With PROJECT (a project root path), switches to that project and opens
 its most recently accessed file.  Both steps are deferred onto one timer
@@ -698,13 +843,7 @@ two timers."
                    (find-file recent-file))
                (agent-repl--log scope
                                 "elisp.commands.switch-no-recent project=%s" project))))))
-    (let ((names (agent-repl--live-ws-names)))
-      (unless names
-        (user-error "agent-repl: no live workspaces"))
-      (let ((choice (completing-read "Switch to workspace: " names nil t)))
-        (agent-repl--log choice
-                         "elisp.commands.switch-chosen ws=%s" choice)
-        (agent-repl--ws-switch choice)))))
+    (agent-repl--switch-to-known-workspace)))
 
 (defvar agent-repl--opened-recent-cycle nil
   "Workspaces already visited by `agent-repl-open-most-recent-workspace'.
