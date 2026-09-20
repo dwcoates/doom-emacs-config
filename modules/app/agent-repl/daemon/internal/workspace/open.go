@@ -67,6 +67,17 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	}
 	if v.deps.Sessions.Live(ws) {
 		log.Debug(opOpen, "the session is already live", nil)
+		// AN OPEN RECONCILES; IT DOES NOT TRUST THE LIVENESS IT READ. A live
+		// session is the reason this verb starts nothing — and it is also the
+		// reason the record is never revisited on this path, which is how the
+		// open came to answer in under two milliseconds and leave the user
+		// with nothing: the workspace's session record still read `killed`
+		// from a KillWorkspace weeks earlier, the roster RECEDES a killed
+		// session's row, and Emacs gives a tab only to a row that is not
+		// receded. The open now leaves the record saying what the fleet says.
+		if err := retireTerminalRecord(ctx, log, v.deps.DB, opOpen, ws); err != nil {
+			return fmt.Errorf("open %q: %w", ws, err)
+		}
 	} else {
 		// THE SLOW STAGE. Reported only when a bring-up actually runs: a
 		// session already live waited for nothing, and a stage announcing
