@@ -301,6 +301,12 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; written against the removed frontend-state/frontend-uds transport, and
 ;; both did work that is now the daemon's outright: verbs.el replaces them
 ;; with thin wrappers over MergeWorkspace and CreateWorkspace.
+;; WHY: conversations.el is the `SPC j c' binding over
+;; ListWorkspaceTranscripts and BindWorkspaceSession.  It sits on rpc.el,
+;; verbs.el (the ref, the connection and the one send dispatcher) and
+;; mutation-progress.el (the bind's stages), all loaded above, and it must
+;; load before keybindings.el names its command.
+(agent-repl--load-module "conversations")
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")
 (agent-repl--load-module "emoji")

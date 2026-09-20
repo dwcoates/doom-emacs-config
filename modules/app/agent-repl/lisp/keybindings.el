@@ -206,6 +206,7 @@ Doom\='s `global-map\=' numerals structurally; see the commentary above."
        :desc "Workspace notes"                    "n"   #'agent-repl-notes-open
        :desc "Reload agent-repl config"            "R"   #'agent-repl-reload-config
        :desc "Register repository from file"       "."   #'agent-repl-register-repository
+       :desc "Bind workspace to a conversation"    "c"   #'agent-repl-bind-conversation
        (:prefix ("h" . "help")
         :desc "Copy workspace name" "y" #'agent-repl-copy-workspace-name)
        (:prefix ("e" . "explain")
