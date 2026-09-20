@@ -102,6 +102,9 @@ type fakeDB struct {
 	forgetReport wsm.ForgetReport
 	forgetErr    error
 	terminals    map[ids.WorkspaceID]wsm.SessionTerminal
+	// clearTerminalErr fails the terminal RETIREMENT, which the fake's own map
+	// cannot, so the live-shim invariant's failure arm is reachable.
+	clearTerminalErr error
 	// setTerminalErr fails the terminal write, which the fake's own map cannot.
 	// A workspace with no session row surfaces wsm.ErrNotFound here, and any
 	// other error stands for a real terminal-recording failure.
@@ -339,6 +342,31 @@ func (d *fakeDB) SetSessionTerminal(_ context.Context, id ids.WorkspaceID, t wsm
 		return d.setTerminalErr
 	}
 	d.terminals[id] = t
+	// THE TERMINAL LANDS ON THE SESSION ROW, as the store's does: every
+	// surface that recedes a killed row reads it back off the record, so a
+	// fake that kept the cause somewhere else could not tell the retirement
+	// apart from the kill never happening.
+	if session, ok := d.sessions[id]; ok {
+		session.Terminal = &t
+		d.sessions[id] = session
+	}
+	return nil
+}
+
+// ClearSessionTerminal retires the fake's terminal record, refusing a deleted
+// session exactly as the store does.
+func (d *fakeDB) ClearSessionTerminal(_ context.Context, id ids.WorkspaceID) error {
+	if d.clearTerminalErr != nil {
+		return d.clearTerminalErr
+	}
+	if t, ok := d.terminals[id]; ok && t.Kind == "deleted" {
+		return fmt.Errorf("fake: workspace %s: %w", id, wsm.ErrSessionDeleted)
+	}
+	delete(d.terminals, id)
+	if session, ok := d.sessions[id]; ok {
+		session.Terminal = nil
+		d.sessions[id] = session
+	}
 	return nil
 }
 
@@ -948,6 +976,14 @@ func (s *fakeSidebar) SetReviving(ws ids.WorkspaceID, reviving bool) {
 
 // snapshot copies the recorded calls and selections under the lock, for a
 // test reading them while another goroutine may still be writing.
+// snapshotRegistries is every registry the roster was handed, in order, read
+// under the fake's own lock.
+func (s *fakeSidebar) snapshotRegistries() []sidebar.Registry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]sidebar.Registry(nil), s.registries...)
+}
+
 func (s *fakeSidebar) snapshot() (calls []string, selected []ids.WorkspaceID, reviving []revivingEdge) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
