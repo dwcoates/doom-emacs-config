@@ -1376,6 +1376,11 @@ func (c *client) ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest
 	return unary(ctx, c, "read_history", req, validateReadHistoryRequest, c.rpc.ReadHistory)
 }
 
+// ReadTranscripts lists the conversations filed under the shim's directory.
+func (c *client) ReadTranscripts(ctx context.Context, req *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error) {
+	return unary(ctx, c, "read_transcripts", req, validateReadTranscriptsRequest, c.rpc.ReadTranscripts)
+}
+
 // GatherTitleDigest reads the transcript for a synthesized title's material.
 func (c *client) GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error) {
 	return unary(ctx, c, "gather_title_digest", req, validateGatherTitleDigestRequest, c.rpc.GatherTitleDigest)

@@ -123,6 +123,7 @@ const (
 	RPCStopBash                 = "StopBash"
 	RPCDetachForeground         = "DetachForeground"
 	RPCReadHistory              = "ReadHistory"
+	RPCReadTranscripts          = "ReadTranscripts"
 )
 
 // Stream families drop_stream severs.
