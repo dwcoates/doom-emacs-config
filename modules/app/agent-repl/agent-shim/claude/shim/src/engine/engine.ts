@@ -110,6 +110,14 @@ export interface Engine {
   /** One page of one agent's durable past, newest first. */
   readHistory(request: shimv1.ReadHistoryRequest): Promise<shimv1.ReadHistoryResponse>;
 
+  /**
+   * Every vendor conversation filed under this shim's working directory, read
+   * from the transcripts' own lines. Starts no query and makes no model call.
+   */
+  readTranscripts(
+    request: shimv1.ReadTranscriptsRequest,
+  ): Promise<shimv1.ReadTranscriptsResponse>;
+
   // ---- Title digest ----
 
   /**
@@ -205,6 +213,10 @@ export class NotImplementedEngine implements Engine {
 
   readHistory(): Promise<shimv1.ReadHistoryResponse> {
     return Promise.reject(unimplemented("ReadHistory"));
+  }
+
+  readTranscripts(): Promise<shimv1.ReadTranscriptsResponse> {
+    return Promise.reject(unimplemented("ReadTranscripts"));
   }
 
   gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {

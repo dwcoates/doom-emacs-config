@@ -34,6 +34,12 @@ import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
+import {
+  isClearEnvelope,
+  isCompactBoundary,
+  promptText,
+  type TitleDigestRecord,
+} from "../convert/title-digest.js";
 
 const LOGGER = bindLog({ component: "shim-engine-cold", operation: "shim.engine.cold" });
 
@@ -59,11 +65,33 @@ export function transcriptPath(configDir: string, cwd: string, vendorSessionId: 
   return path.join(configDir, "projects", cwdSlug(cwd), `${vendorSessionId}.jsonl`);
 }
 
+/**
+ * The OPENING WORDS cap: 120 characters.
+ *
+ * A chooser reads a LIST, one line per conversation, so the opening has to fit
+ * beside an age and a size on one line of a minibuffer completion — and a
+ * prompt's first sentence is what distinguishes it from its neighbours. 120 is
+ * wide enough for that sentence and narrow enough that a pasted stack trace
+ * cannot push the rest of the line off the screen.
+ */
+export const TRANSCRIPT_OPENING_MAX_CHARS = 120;
+
 /** What the transcript states about the conversation's last request. */
 export interface TranscriptFacts {
   /** Tokens the last request carried: cache reads + cache writes + fresh input. */
   readonly contextTokens: number;
-  /** When that request happened, in epoch milliseconds. */
+  /**
+   * Whether the transcript stated ANY usage at all.
+   *
+   * `contextTokens` is 0 both for a conversation that has never reached the
+   * model and for one whose last request carried nothing, and a chooser that
+   * cannot tell those apart ranks an unread conversation as the cheapest one.
+   * The cold gate keeps reading `contextTokens` alone — 0 is the right floor
+   * answer for it either way — and ReadTranscripts reads this to decide
+   * whether to SET the field at all.
+   */
+  readonly sawUsage: boolean;
+  /** When that request happened, in epoch milliseconds. 0 when it states none. */
   readonly lastRequestAtMs: number;
   /** The model that answered it, when the transcript states one. */
   readonly lastModel?: string;
@@ -71,6 +99,21 @@ export interface TranscriptFacts {
   readonly lastPermissionMode?: string;
   /** Which ephemeral tier that request bought. */
   readonly cacheTtlMs: number;
+  /**
+   * The conversation's opening words: the beginning of its FIRST user prompt,
+   * truncated to {@link TRANSCRIPT_OPENING_MAX_CHARS}. Absent when the
+   * transcript holds no user prompt.
+   */
+  readonly opening?: string;
+  /** How many user prompts the transcript holds. */
+  readonly prompts: number;
+  /**
+   * When the most recent context boundary was a CLEAR, the instant of that
+   * clear in epoch milliseconds. Absent when the most recent boundary is a
+   * compaction, or when there is no boundary at all — the same last-writer-wins
+   * rule `computeTitleDigest` applies to the same records.
+   */
+  readonly clearedAtMs?: number;
 }
 
 interface TranscriptUsage {
@@ -86,6 +129,13 @@ interface TranscriptLine {
   permissionMode?: string;
   message?: { model?: string; usage?: TranscriptUsage };
 }
+
+/**
+ * One parsed transcript record, read for BOTH the cold-gate facts and the
+ * chooser's facts in the same pass. The two views of a record are different
+ * fields of one line, never two reads of one file.
+ */
+type TranscriptRecord = TranscriptLine & TitleDigestRecord;
 
 /**
  * Read the transcript's facts, or answer absence when there is no transcript.
@@ -111,17 +161,21 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     throw err;
   }
   let contextTokens = 0;
+  let sawUsage = false;
   let lastRequestAtMs = 0;
   let lastModel: string | undefined;
   let lastPermissionMode: string | undefined;
   let cacheTtlMs = CACHE_TTL_5M_MS;
+  let opening: string | undefined;
+  let prompts = 0;
+  let clearedAtMs: number | undefined;
   let skipped = 0;
   for (const raw of contents.split("\n")) {
     const line = raw.trim();
     if (line === "") continue;
-    let record: TranscriptLine;
+    let record: TranscriptRecord;
     try {
-      record = JSON.parse(line) as TranscriptLine;
+      record = JSON.parse(line) as TranscriptRecord;
     } catch {
       skipped++;
       continue;
@@ -129,9 +183,23 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     if (record.type === "user" && typeof record.permissionMode === "string") {
       lastPermissionMode = record.permissionMode;
     }
+    // The boundary is LAST-WRITER-WINS in file order, exactly as the title
+    // digest reads it: a compaction after a clear means the conversation is no
+    // longer resuming empty.
+    if (isCompactBoundary(record)) {
+      clearedAtMs = undefined;
+    } else if (isClearEnvelope(record)) {
+      clearedAtMs = recordAtMs(record) ?? 0;
+    }
+    const prompt = promptText(record);
+    if (prompt !== undefined) {
+      prompts++;
+      opening ??= prompt.slice(0, TRANSCRIPT_OPENING_MAX_CHARS);
+    }
     if (record.type !== "assistant") continue;
     const usage = record.message?.usage;
     if (usage === undefined) continue;
+    sawUsage = true;
     contextTokens =
       (usage.cache_read_input_tokens ?? 0) +
       (usage.cache_creation_input_tokens ?? 0) +
@@ -155,13 +223,24 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
   }
   const facts: TranscriptFacts = {
     contextTokens,
+    sawUsage,
     lastRequestAtMs,
     cacheTtlMs,
+    prompts,
     ...(lastModel === undefined ? {} : { lastModel }),
     ...(lastPermissionMode === undefined ? {} : { lastPermissionMode }),
+    ...(opening === undefined ? {} : { opening }),
+    ...(clearedAtMs === undefined ? {} : { clearedAtMs }),
   };
   LOGGER.debug({ file, ...facts }, "read the cold-gate facts from the transcript");
   return facts;
+}
+
+/** A record's own timestamp in epoch milliseconds, when it states a legible one. */
+function recordAtMs(record: TranscriptRecord): number | undefined {
+  if (typeof record.timestamp !== "string") return undefined;
+  const at = Date.parse(record.timestamp);
+  return Number.isNaN(at) ? undefined : at;
 }
 
 /** Why a continuation would be cold, or absence when it would be warm. */

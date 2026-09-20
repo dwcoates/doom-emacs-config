@@ -31,6 +31,11 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, shimv1 } from "../proto.js";
 import type { TitleDigest } from "../convert/title-digest.js";
+import {
+  TRANSCRIPT_QUIET_AFTER_MS,
+  type TranscriptSummary,
+  type TranscriptsRead,
+} from "../engine/transcripts.js";
 
 // ---------------------------------------------------------------------------
 // StartSession
@@ -652,6 +657,83 @@ export function titleDigestRefused(
           cause.kind === "noTranscript"
             ? { case: "noTranscript", value: create(shimv1.GatherTitleDigestNoTranscriptSchema, {}) }
             : { case: "unreadable", value: create(shimv1.GatherTitleDigestUnreadableSchema, {}) },
+      }),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ReadTranscripts
+// ---------------------------------------------------------------------------
+
+/** One conversation as the wire states it, built from what its file stated. */
+function transcriptMessage(summary: TranscriptSummary): shimv1.Transcript {
+  const facts = summary.facts;
+  return create(shimv1.TranscriptSchema, {
+    vendorSessionId: summary.vendorSessionId,
+    // EVERY OPTIONAL FIELD IS LEFT UNSET WHEN THE TRANSCRIPT STATES NOTHING.
+    // A zero that cannot be told from an absence is how a chooser ends up
+    // ranking an unreadable conversation as the smallest one.
+    lastRequestAtMs: facts.lastRequestAtMs === 0 ? undefined : BigInt(facts.lastRequestAtMs),
+    contextTokens: facts.sawUsage ? BigInt(facts.contextTokens) : undefined,
+    lastModel:
+      facts.lastModel === undefined
+        ? undefined
+        : create(conversationv1.AgentModelSchema, { name: facts.lastModel }),
+    opening: facts.opening,
+    prompts: facts.prompts,
+    bound: summary.bound ? create(shimv1.TranscriptBoundSchema, {}) : undefined,
+    cleared:
+      facts.clearedAtMs === undefined
+        ? undefined
+        : create(shimv1.TranscriptClearedSchema, { atMs: BigInt(facts.clearedAtMs) }),
+    active:
+      summary.activeAtMs === undefined
+        ? undefined
+        : create(shimv1.TranscriptActiveSchema, {
+            atMs: BigInt(summary.activeAtMs),
+            quietAfterMs: BigInt(TRANSCRIPT_QUIET_AFTER_MS),
+          }),
+  });
+}
+
+/** The directory's conversations as the whole response the handler returns. */
+export function transcriptsRead(
+  transcripts: readonly TranscriptSummary[],
+): shimv1.ReadTranscriptsResponse {
+  return create(shimv1.ReadTranscriptsResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.ReadTranscriptsSuccessSchema, {
+        transcripts: transcripts.map(transcriptMessage),
+      }),
+    },
+  });
+}
+
+/** The refusal as the whole response the handler returns. */
+export function transcriptsRefused(
+  read: Extract<TranscriptsRead, { kind: "no_project_dir" | "unreadable" }>,
+): shimv1.ReadTranscriptsResponse {
+  return create(shimv1.ReadTranscriptsResponseSchema, {
+    result: {
+      case: "failure",
+      value: create(shimv1.ReadTranscriptsFailureSchema, {
+        cause:
+          read.kind === "no_project_dir"
+            ? {
+                case: "noProjectDir",
+                value: create(shimv1.ReadTranscriptsNoProjectDirSchema, {
+                  searchedPath: read.searchedPath,
+                }),
+              }
+            : {
+                case: "unreadable",
+                value: create(shimv1.ReadTranscriptsUnreadableSchema, {
+                  searchedPath: read.searchedPath,
+                  detail: read.detail,
+                }),
+              },
       }),
     },
   });

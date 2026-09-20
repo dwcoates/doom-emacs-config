@@ -14,6 +14,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import * as failures from "../../src/service/failures.js";
+import { TRANSCRIPT_QUIET_AFTER_MS, type TranscriptSummary } from "../../src/engine/transcripts.js";
 
 describe("startSessionFailure", () => {
   it.each([
@@ -580,5 +581,136 @@ describe("internalFromUnknown", () => {
 
     // Assert.
     expect(failure.code).toBe(Code.Internal);
+  });
+});
+
+describe("transcriptsRead", () => {
+  /** A summary with everything stated, which each case narrows. */
+  const FULL: TranscriptSummary = {
+    vendorSessionId: "s-1",
+    mtimeMs: 1_700_000_000_000,
+    bound: false,
+    facts: {
+      contextTokens: 4_242,
+      sawUsage: true,
+      lastRequestAtMs: 1_699_999_000_000,
+      cacheTtlMs: 300_000,
+      lastModel: "claude-opus-5",
+      opening: "explain hash tables",
+      prompts: 3,
+    },
+  };
+
+  /** The one transcript in the response, or a thrown explanation. */
+  function only(summary: TranscriptSummary): shimv1.Transcript {
+    const response = failures.transcriptsRead([summary]);
+    if (response.result.case !== "success") throw new Error("expected a success");
+    const [transcript] = response.result.value.transcripts;
+    if (transcript === undefined) throw new Error("expected one transcript");
+    return transcript;
+  }
+
+  it("answers an empty list as a SUCCESS", () => {
+    // Arrange, Act.
+    const response = failures.transcriptsRead([]);
+
+    // Assert: a directory with no transcripts is an answer, not a failure.
+    expect(response.result.case === "success" ? response.result.value.transcripts : undefined).toEqual([]);
+  });
+
+  it("carries the transcript's own figures", () => {
+    // Arrange, Act.
+    const transcript = only(FULL);
+
+    // Assert.
+    expect([
+      transcript.vendorSessionId,
+      transcript.contextTokens,
+      transcript.lastRequestAtMs,
+      transcript.lastModel?.name,
+      transcript.opening,
+      transcript.prompts,
+    ]).toEqual(["s-1", 4_242n, 1_699_999_000_000n, "claude-opus-5", "explain hash tables", 3]);
+  });
+
+  it("LEAVES context_tokens UNSET when the transcript stated no usage", () => {
+    // Arrange: a conversation that never reached the model.
+    const transcript = only({ ...FULL, facts: { ...FULL.facts, sawUsage: false, contextTokens: 0 } });
+
+    // Assert: a zero that cannot be told from an absence ranks it cheapest.
+    expect(transcript.contextTokens).toBeUndefined();
+  });
+
+  it("LEAVES last_request_at_ms UNSET when the transcript stated no request", () => {
+    // Arrange.
+    const transcript = only({ ...FULL, facts: { ...FULL.facts, lastRequestAtMs: 0 } });
+
+    // Assert.
+    expect(transcript.lastRequestAtMs).toBeUndefined();
+  });
+
+  it("sets the bound marker for this shim's own conversation", () => {
+    // Arrange, Act.
+    const transcript = only({ ...FULL, bound: true });
+
+    // Assert: presence is the fact.
+    expect(transcript.bound).toBeDefined();
+  });
+
+  it("leaves the bound marker absent for every other conversation", () => {
+    // Arrange, Act.
+    const transcript = only(FULL);
+
+    // Assert.
+    expect(transcript.bound).toBeUndefined();
+  });
+
+  it("states the clear's instant when the last boundary was a clear", () => {
+    // Arrange, Act.
+    const transcript = only({ ...FULL, facts: { ...FULL.facts, clearedAtMs: 1_699_000_000_000 } });
+
+    // Assert.
+    expect(transcript.cleared?.atMs).toBe(1_699_000_000_000n);
+  });
+
+  it("states the write instant AND the quiet rule for an active transcript", () => {
+    // Arrange, Act.
+    const transcript = only({ ...FULL, activeAtMs: 1_700_000_000_000 });
+
+    // Assert: the daemon's refusal names the rule it applied, not a verdict.
+    expect([transcript.active?.atMs, transcript.active?.quietAfterMs]).toEqual([
+      1_700_000_000_000n,
+      BigInt(TRANSCRIPT_QUIET_AFTER_MS),
+    ]);
+  });
+});
+
+describe("transcriptsRefused", () => {
+  it("states the no_project_dir arm with the path it searched", () => {
+    // Arrange, Act.
+    const response = failures.transcriptsRefused({ kind: "no_project_dir", searchedPath: "/p" });
+
+    // Assert.
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect([failure?.cause.case, failure?.cause.case === "noProjectDir" ? failure.cause.value.searchedPath : undefined]).toEqual([
+      "noProjectDir",
+      "/p",
+    ]);
+  });
+
+  it("states the unreadable arm with the read's own account", () => {
+    // Arrange, Act.
+    const response = failures.transcriptsRefused({
+      kind: "unreadable",
+      searchedPath: "/p",
+      detail: "EACCES",
+    });
+
+    // Assert.
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect([failure?.cause.case, failure?.cause.case === "unreadable" ? failure.cause.value.detail : undefined]).toEqual([
+      "unreadable",
+      "EACCES",
+    ]);
   });
 });
