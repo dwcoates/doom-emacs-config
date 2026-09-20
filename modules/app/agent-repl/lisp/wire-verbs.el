@@ -59,6 +59,8 @@
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-optional-string "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-optional-message "agent-repl-wire-common" (message-name field object decoder))
 (declare-function agent-repl-wire--decode-double "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
@@ -772,6 +774,350 @@ arm this codec does not know is refused as an unknown field."
    "OpenWorkspaceResponse" json
    #'agent-repl-wire-decode-open-workspace-response-success
    #'agent-repl-wire-decode-open-workspace-response-error))
+
+
+;;;; ---- ListWorkspaceTranscripts --------------------------------------
+
+(defun agent-repl-wire-encode-list-workspace-transcripts-request-workspace (ref)
+  "Encode ListWorkspaceTranscriptsRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-list-workspace-transcripts-request (request)
+  "Encode ListWorkspaceTranscriptsRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-list-workspace-transcripts-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-list-workspace-transcripts-request-workspace
+               (agent-repl-wire-verbs--require "ListWorkspaceTranscriptsRequest" "workspace"
+                                               (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-workspace-transcript-last-model (json)
+  "Decode WorkspaceTranscript's `last_model' use site from JSON.
+`conversation.v1.AgentModel' carries the model id and nothing else."
+  (let ((message "AgentModel"))
+    (agent-repl-wire-verbs--check-keys message json '(name))
+    (list :name (agent-repl-wire-verbs--decode-string message 'name json))))
+
+(defun agent-repl-wire-decode-workspace-transcript-current (json)
+  "Decode WorkspaceTranscriptCurrent from JSON.  Empty: presence IS the fact —
+this is the conversation the workspace runs NOW."
+  (agent-repl-wire-verbs--decode-empty "WorkspaceTranscriptCurrent" json)
+  t)
+
+(defun agent-repl-wire-decode-workspace-transcript-cleared (json)
+  "Decode WorkspaceTranscriptCleared from JSON into a plist (`:at-ms').
+The conversation's most recent boundary is a context clear, so it resumes
+empty rather than at `context_tokens'."
+  (let ((message "WorkspaceTranscriptCleared"))
+    (agent-repl-wire-verbs--check-keys message json '(atMs))
+    (list :at-ms (agent-repl-wire--decode-int64 message 'atMs json))))
+
+(defun agent-repl-wire-decode-workspace-transcript-active (json)
+  "Decode WorkspaceTranscriptActive from JSON into a plist (`:at-ms').
+Something is writing to the transcript right now; a bind is refused on it."
+  (let ((message "WorkspaceTranscriptActive"))
+    (agent-repl-wire-verbs--check-keys message json '(atMs))
+    (list :at-ms (agent-repl-wire--decode-int64 message 'atMs json))))
+
+(defun agent-repl-wire-decode-workspace-transcript-held (json)
+  "Decode WorkspaceTranscriptHeld from JSON into a plist (`:workspace').
+ANOTHER workspace in the daemon's registry is bound to this conversation,
+and the arm NAMES it so a client can say which."
+  (let ((message "WorkspaceTranscriptHeld"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-decode-workspace-ref
+                      (cdr (assq 'workspace json))))))
+
+(defun agent-repl-wire-decode-workspace-transcript (json)
+  "Decode one WorkspaceTranscript from JSON into a plist.
+Keys: `:vendor-session-id' `:last-request-at-ms' `:context-tokens'
+`:last-model' `:opening' `:prompts' `:current' `:cleared' `:active'
+`:held'.
+
+EVERY OPTIONAL FIELD DECODES TO nil WHEN THE TRANSCRIPT STATED NOTHING,
+never to a zero: a chooser that cannot tell an absence from a zero ranks
+the conversation nobody could read as the smallest one."
+  (let ((message "WorkspaceTranscript"))
+    (agent-repl-wire-verbs--check-keys
+     message json
+     '(vendorSessionId lastRequestAtMs contextTokens lastModel opening prompts
+       current cleared active held))
+    (list :vendor-session-id (agent-repl-wire-verbs--decode-string message 'vendorSessionId json)
+          :last-request-at-ms (when (assq 'lastRequestAtMs json)
+                                (agent-repl-wire--decode-int64 message 'lastRequestAtMs json))
+          :context-tokens (when (assq 'contextTokens json)
+                            (agent-repl-wire--decode-int64 message 'contextTokens json))
+          :last-model (agent-repl-wire--decode-optional-message
+                       message 'lastModel json
+                       #'agent-repl-wire-decode-workspace-transcript-last-model)
+          :opening (agent-repl-wire--decode-optional-string message 'opening json)
+          :prompts (agent-repl-wire--decode-uint32 message 'prompts json)
+          :current (agent-repl-wire--decode-optional-message
+                    message 'current json
+                    #'agent-repl-wire-decode-workspace-transcript-current)
+          :cleared (agent-repl-wire--decode-optional-message
+                    message 'cleared json
+                    #'agent-repl-wire-decode-workspace-transcript-cleared)
+          :active (agent-repl-wire--decode-optional-message
+                   message 'active json
+                   #'agent-repl-wire-decode-workspace-transcript-active)
+          :held (agent-repl-wire--decode-optional-message
+                 message 'held json
+                 #'agent-repl-wire-decode-workspace-transcript-held))))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-success (json)
+  "Decode ListWorkspaceTranscriptsSuccess from JSON into (:transcripts LIST).
+An EMPTY list is a success: a directory with no conversations is an answer."
+  (let ((message "ListWorkspaceTranscriptsSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(transcripts))
+    (list :transcripts (agent-repl-wire-verbs--decode-repeated
+                        message 'transcripts json
+                        #'agent-repl-wire-decode-workspace-transcript))))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-unknown-workspace (json)
+  "Decode ListWorkspaceTranscriptsUnknownWorkspace from JSON.  Empty."
+  (agent-repl-wire-verbs--decode-empty "ListWorkspaceTranscriptsUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-workspace-ref-mismatch (json)
+  "Decode ListWorkspaceTranscriptsWorkspaceRefMismatch from JSON (`:registry-dir')."
+  (let ((message "ListWorkspaceTranscriptsWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-transferring-away (json)
+  "Decode ListWorkspaceTranscriptsTransferringAway from JSON (`:address')."
+  (let ((message "ListWorkspaceTranscriptsTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string message 'address json))))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-no-session (json)
+  "Decode ListWorkspaceTranscriptsNoSession from JSON.  Empty: no live shim,
+and the shim is what reads the transcripts."
+  (agent-repl-wire-verbs--decode-empty "ListWorkspaceTranscriptsNoSession" json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-unreadable (json)
+  "Decode ListWorkspaceTranscriptsUnreadable from JSON.
+Into a plist (`:searched-path\' `:detail\')."
+  (let ((message "ListWorkspaceTranscriptsUnreadable"))
+    (agent-repl-wire-verbs--check-keys message json '(searchedPath detail))
+    (list :searched-path (agent-repl-wire-verbs--decode-string message 'searchedPath json)
+          :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-error-unknown-workspace (json)
+  "Decode ListWorkspaceTranscriptsError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-unknown-workspace json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-error-workspace-ref-mismatch (json)
+  "Decode ListWorkspaceTranscriptsError's `workspace_ref_mismatch' arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-error-transferring-away (json)
+  "Decode ListWorkspaceTranscriptsError's `transferring_away' arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-transferring-away json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-error-no-session (json)
+  "Decode ListWorkspaceTranscriptsError's `no_session' arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-no-session json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-error-unreadable (json)
+  "Decode ListWorkspaceTranscriptsError's `unreadable' arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-unreadable json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-error (json)
+  "Decode ListWorkspaceTranscriptsError from JSON.
+Into (:cause (:arm ARM :value V))."
+  (let ((message "ListWorkspaceTranscriptsError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway noSession unreadable))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-list-workspace-transcripts-error-unknown-workspace)
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-list-workspace-transcripts-error-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away #'agent-repl-wire-decode-list-workspace-transcripts-error-transferring-away)
+                 (list 'noSession :no-session #'agent-repl-wire-decode-list-workspace-transcripts-error-no-session)
+                 (list 'unreadable :unreadable #'agent-repl-wire-decode-list-workspace-transcripts-error-unreadable))))))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-response-success (json)
+  "Decode ListWorkspaceTranscriptsResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-success json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-response-error (json)
+  "Decode ListWorkspaceTranscriptsResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-list-workspace-transcripts-error json))
+
+(defun agent-repl-wire-decode-list-workspace-transcripts-response (json)
+  "Decode ListWorkspaceTranscriptsResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "ListWorkspaceTranscriptsResponse" json
+   #'agent-repl-wire-decode-list-workspace-transcripts-response-success
+   #'agent-repl-wire-decode-list-workspace-transcripts-response-error))
+
+
+;;;; ---- BindWorkspaceSession -------------------------------------------
+
+(defun agent-repl-wire-encode-bind-workspace-session-request-workspace (ref)
+  "Encode BindWorkspaceSessionRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-bind-workspace-session-request (request)
+  "Encode BindWorkspaceSessionRequest from plist REQUEST.
+REQUEST is (:workspace REF :vendor-session-id ID :op-id OP).  The vendor
+session id is an ECHO of a value ListWorkspaceTranscripts served: a client
+may not invent one, so a blank id is refused here rather than sent.  The
+OP ID IS OPTIONAL: present, the daemon also pushes the bind's stages on
+WatchDaemon keyed on it; absent, the bind emits no stages at all."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-bind-workspace-session-request")
+  (let ((out (list (cons 'workspace
+                         (agent-repl-wire-encode-bind-workspace-session-request-workspace
+                          (agent-repl-wire-verbs--require "BindWorkspaceSessionRequest" "workspace"
+                                                          (plist-get request :workspace))))
+                   (cons 'vendorSessionId
+                         (agent-repl-wire-verbs--require-string
+                          "BindWorkspaceSessionRequest" "vendor_session_id"
+                          (plist-get request :vendor-session-id))))))
+    (when (plist-get request :op-id)
+      (setq out (append out (list (cons 'opId (plist-get request :op-id))))))
+    out))
+
+(defun agent-repl-wire-decode-bind-workspace-session-success (json)
+  "Decode BindWorkspaceSessionSuccess from JSON.  Empty: every visible effect
+— the new feed, the topbar, the roster row — arrives on the streams."
+  (agent-repl-wire-verbs--decode-empty "BindWorkspaceSessionSuccess" json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-unknown-workspace (json)
+  "Decode BindWorkspaceSessionUnknownWorkspace from JSON.  Empty."
+  (agent-repl-wire-verbs--decode-empty "BindWorkspaceSessionUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-workspace-ref-mismatch (json)
+  "Decode BindWorkspaceSessionWorkspaceRefMismatch from JSON (`:registry-dir')."
+  (let ((message "BindWorkspaceSessionWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-transferring-away (json)
+  "Decode BindWorkspaceSessionTransferringAway from JSON (`:address')."
+  (let ((message "BindWorkspaceSessionTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string message 'address json))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-unknown-transcript (json)
+  "Decode BindWorkspaceSessionUnknownTranscript from JSON (`:vendor-session-id')."
+  (let ((message "BindWorkspaceSessionUnknownTranscript"))
+    (agent-repl-wire-verbs--check-keys message json '(vendorSessionId))
+    (list :vendor-session-id (agent-repl-wire-verbs--decode-string message 'vendorSessionId json))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-already-bound (json)
+  "Decode BindWorkspaceSessionAlreadyBound from JSON.  Empty: the workspace
+already runs that conversation and nothing was changed."
+  (agent-repl-wire-verbs--decode-empty "BindWorkspaceSessionAlreadyBound" json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-transcript-active (json)
+  "Decode BindWorkspaceSessionTranscriptActive from JSON (`:at-ms')."
+  (let ((message "BindWorkspaceSessionTranscriptActive"))
+    (agent-repl-wire-verbs--check-keys message json '(atMs))
+    (list :at-ms (agent-repl-wire--decode-int64 message 'atMs json))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-transcript-held (json)
+  "Decode BindWorkspaceSessionTranscriptHeld from JSON (`:workspace')."
+  (let ((message "BindWorkspaceSessionTranscriptHeld"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-decode-workspace-ref
+                      (cdr (assq 'workspace json))))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-turn-in-flight (json)
+  "Decode BindWorkspaceSessionTurnInFlight from JSON.  Empty: a bind is not an
+interrupt."
+  (agent-repl-wire-verbs--decode-empty "BindWorkspaceSessionTurnInFlight" json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-stop-failed (json)
+  "Decode BindWorkspaceSessionStopFailed from JSON (`:detail')."
+  (let ((message "BindWorkspaceSessionStopFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-start-failed (json)
+  "Decode BindWorkspaceSessionStartFailed from JSON (`:detail').
+THE BINDING STANDS: the record names the conversation the user chose, and
+the ordinary open path is what brings it up next."
+  (let ((message "BindWorkspaceSessionStartFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-unknown-workspace (json)
+  "Decode BindWorkspaceSessionError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-unknown-workspace json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-workspace-ref-mismatch (json)
+  "Decode BindWorkspaceSessionError's `workspace_ref_mismatch' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-transferring-away (json)
+  "Decode BindWorkspaceSessionError's `transferring_away' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-transferring-away json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-unknown-transcript (json)
+  "Decode BindWorkspaceSessionError's `unknown_transcript' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-unknown-transcript json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-already-bound (json)
+  "Decode BindWorkspaceSessionError's `already_bound' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-already-bound json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-transcript-active (json)
+  "Decode BindWorkspaceSessionError's `transcript_active' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-transcript-active json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-transcript-held (json)
+  "Decode BindWorkspaceSessionError's `transcript_held' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-transcript-held json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-turn-in-flight (json)
+  "Decode BindWorkspaceSessionError's `turn_in_flight' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-turn-in-flight json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-stop-failed (json)
+  "Decode BindWorkspaceSessionError's `stop_failed' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-stop-failed json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error-start-failed (json)
+  "Decode BindWorkspaceSessionError's `start_failed' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-start-failed json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-error (json)
+  "Decode BindWorkspaceSessionError from JSON into (:cause (:arm ARM :value V))."
+  (let ((message "BindWorkspaceSessionError"))
+    (agent-repl-wire-verbs--check-keys
+     message json
+     '(unknownWorkspace workspaceRefMismatch transferringAway unknownTranscript
+       alreadyBound transcriptActive transcriptHeld turnInFlight stopFailed startFailed))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-bind-workspace-session-error-unknown-workspace)
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-bind-workspace-session-error-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away #'agent-repl-wire-decode-bind-workspace-session-error-transferring-away)
+                 (list 'unknownTranscript :unknown-transcript #'agent-repl-wire-decode-bind-workspace-session-error-unknown-transcript)
+                 (list 'alreadyBound :already-bound #'agent-repl-wire-decode-bind-workspace-session-error-already-bound)
+                 (list 'transcriptActive :transcript-active #'agent-repl-wire-decode-bind-workspace-session-error-transcript-active)
+                 (list 'transcriptHeld :transcript-held #'agent-repl-wire-decode-bind-workspace-session-error-transcript-held)
+                 (list 'turnInFlight :turn-in-flight #'agent-repl-wire-decode-bind-workspace-session-error-turn-in-flight)
+                 (list 'stopFailed :stop-failed #'agent-repl-wire-decode-bind-workspace-session-error-stop-failed)
+                 (list 'startFailed :start-failed #'agent-repl-wire-decode-bind-workspace-session-error-start-failed))))))
+
+(defun agent-repl-wire-decode-bind-workspace-session-response-success (json)
+  "Decode BindWorkspaceSessionResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-success json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-response-error (json)
+  "Decode BindWorkspaceSessionResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-bind-workspace-session-error json))
+
+(defun agent-repl-wire-decode-bind-workspace-session-response (json)
+  "Decode BindWorkspaceSessionResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "BindWorkspaceSessionResponse" json
+   #'agent-repl-wire-decode-bind-workspace-session-response-success
+   #'agent-repl-wire-decode-bind-workspace-session-response-error))
 
 
 ;;;; ---- CloseWorkspace -------------------------------------------------
