@@ -336,6 +336,11 @@ func (f *fakeShim) ReadHistory(_ context.Context, _ *connect.Request[shimv1.Read
 	return connect.NewResponse(&shimv1.ReadHistoryResponse{}), nil
 }
 
+func (f *fakeShim) ReadTranscripts(_ context.Context, _ *connect.Request[shimv1.ReadTranscriptsRequest]) (*connect.Response[shimv1.ReadTranscriptsResponse], error) {
+	f.record("ReadTranscripts")
+	return connect.NewResponse(&shimv1.ReadTranscriptsResponse{}), nil
+}
+
 func (f *fakeShim) GatherTitleDigest(_ context.Context, _ *connect.Request[shimv1.GatherTitleDigestRequest]) (*connect.Response[shimv1.GatherTitleDigestResponse], error) {
 	f.record("GatherTitleDigest")
 	return connect.NewResponse(&shimv1.GatherTitleDigestResponse{}), nil

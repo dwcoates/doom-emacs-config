@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/account"
@@ -142,6 +144,38 @@ type OpenProgress interface {
 	Stage(OpenStage)
 }
 
+// BindStage is one stage a BindSession passes through while its rpc is in
+// flight. Like OpenStage it is the verb's own vocabulary, proto-free: the
+// caller maps it onto whatever channel carries progress.
+//
+// THE TERMINAL OUTCOME IS NOT A STAGE. A bind is answered synchronously by its
+// own rpc, so success and every refusal already reach the caller there; what
+// the answer cannot carry is the wait inside it, which is what these are.
+type BindStage int
+
+const (
+	// BindStageReadingTranscripts: the daemon is asking the workspace's shim
+	// for a fresh listing, which is what the choice is validated against.
+	BindStageReadingTranscripts BindStage = iota
+	// BindStageStoppingSession: the daemon is ending the current session. A
+	// bind is a session swap, and this is its first half.
+	BindStageStoppingSession
+	// BindStageRecordingBinding: the daemon is writing the chosen conversation
+	// onto the workspace's session record, which is what makes the choice
+	// survive a restart.
+	BindStageRecordingBinding
+	// BindStageStartingSession: the daemon is bringing the session up on the
+	// bound conversation through the ordinary resume. THE SLOW STAGE.
+	BindStageStartingSession
+)
+
+// BindProgress receives a BindSession's stage transitions in order. The
+// terminal outcome is NOT reported here: it is the verb's own return value,
+// which the caller maps. A bind with no reporter leaves this nil.
+type BindProgress interface {
+	Stage(BindStage)
+}
+
 // InterruptTarget names what an Interrupt aims at. Exactly one is set.
 type InterruptTarget struct {
 	// Turn interrupts the running turn: KillTurn{force: confirm}, with the
@@ -268,6 +302,18 @@ type Verbs interface {
 	// asks-settled hook, and Notify's counterpart: an answered ask is a SEEN
 	// notification, whether or not the workspace was ever selected.
 	AsksSettled(ctx context.Context, ws ids.WorkspaceID) error
+	// ListTranscripts answers every vendor conversation filed under the
+	// workspace's own directory, so a person can choose which one it runs.
+	// The shim reads them; the daemon adds the one fact it alone holds —
+	// which OTHER workspace already holds a conversation.
+	ListTranscripts(ctx context.Context, ws ids.WorkspaceID) ([]*agentreplv1.WorkspaceTranscript, error)
+	// BindSession points the workspace at a different conversation in its own
+	// directory: validated against a fresh listing, refused while a turn is in
+	// flight, then the session is stopped, the binding recorded, and a new
+	// session started through the ORDINARY resume path so a cold conversation
+	// parks at its cold gate. progress receives the bind's stages; nil reports
+	// nothing.
+	BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessionID string, progress BindProgress) error
 	// Resolve turns a client's echoed WorkspaceRef into a workspace, keying on
 	// `id` and REFUSING a ref whose `dir` disagrees with the registry.
 	Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm.Workspace, error)
@@ -393,6 +439,10 @@ type Shim interface {
 	Answer(ctx context.Context, agent *conversationv1.AgentId, answer *conversationv1.AgentAnswer) error
 	// KillSession ends the session, forced when the caller says so.
 	KillSession(ctx context.Context, force bool) error
+	// ReadTranscripts answers every vendor conversation filed under the
+	// workspace's own directory, as the shim read them. The WHOLE response
+	// travels, because its failure arms carry evidence no arm name holds.
+	ReadTranscripts(ctx context.Context) (*shimv1.ReadTranscriptsResponse, error)
 	// StandDown arms the shim client's stand-down latch for a teardown THIS
 	// DAEMON is ordering, answering whether it was armed.
 	//

@@ -2190,6 +2190,14 @@ func (a *shimAdapter) StopBash(ctx context.Context, work *conversationv1.Detache
 	return nil
 }
 
+// ReadTranscripts relays the shim's whole answer, arms and all. Unlike every
+// other method here it does NOT collapse a refusal into a ShimRefusal: the
+// failure's arms carry their own evidence — the path searched and the read's
+// account — and a collapse to a bare arm name and sentence would lose it.
+func (a *shimAdapter) ReadTranscripts(ctx context.Context) (*shimv1.ReadTranscriptsResponse, error) {
+	return a.client.ReadTranscripts(ctx, &shimv1.ReadTranscriptsRequest{})
+}
+
 // StandDown arms the client's stand-down latch. See Shim.StandDown.
 func (a *shimAdapter) StandDown() bool { return a.client.StandDown() }
 

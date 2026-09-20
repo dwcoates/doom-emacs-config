@@ -339,6 +339,10 @@ func (c *fakeClient) ReadHistory(context.Context, *shimv1.ReadHistoryRequest) (*
 	panic("sessionwatcher must not call ReadHistory")
 }
 
+func (c *fakeClient) ReadTranscripts(context.Context, *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error) {
+	panic("sessionwatcher must not call ReadTranscripts")
+}
+
 func (c *fakeClient) GatherTitleDigest(context.Context, *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error) {
 	panic("sessionwatcher must not call GatherTitleDigest")
 }
