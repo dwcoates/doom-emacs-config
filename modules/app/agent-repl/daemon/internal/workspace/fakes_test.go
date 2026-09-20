@@ -13,6 +13,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
@@ -1163,6 +1164,26 @@ type fakeShim struct {
 	// records whether the latch was armed before KillSession was asked.
 	stoodDown           int
 	standDownBeforeKill bool
+	// transcripts is the answer ReadTranscripts gives, and transcriptsErr the
+	// transport failure it gives instead.
+	transcripts    *shimv1.ReadTranscriptsResponse
+	transcriptsErr error
+	// transcriptReads counts the reads, so a bind can be shown to validate
+	// against a FRESH listing rather than a remembered one.
+	transcriptReads int
+}
+
+func (s *fakeShim) ReadTranscripts(context.Context) (*shimv1.ReadTranscriptsResponse, error) {
+	s.transcriptReads++
+	if s.transcriptsErr != nil {
+		return nil, s.transcriptsErr
+	}
+	if s.transcripts != nil {
+		return s.transcripts, nil
+	}
+	return &shimv1.ReadTranscriptsResponse{
+		Result: &shimv1.ReadTranscriptsResponse_Success{Success: &shimv1.ReadTranscriptsSuccess{}},
+	}, nil
 }
 
 type killedTurn struct {

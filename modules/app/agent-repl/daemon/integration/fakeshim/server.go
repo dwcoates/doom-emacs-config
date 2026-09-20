@@ -908,6 +908,21 @@ func (s *server) GatherTitleDigest(ctx context.Context, req *connect.Request[shi
 	}), nil
 }
 
+// ReadTranscripts answers an EMPTY list by default: a directory holding no
+// conversations is a success, and a fake with no scripted answer states the
+// one thing that is certainly true of a workspace nothing has run in.
+func (s *server) ReadTranscripts(ctx context.Context, req *connect.Request[shimv1.ReadTranscriptsRequest]) (*connect.Response[shimv1.ReadTranscriptsResponse], error) {
+	if err := s.enter(ctx, RPCReadTranscripts, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.ReadTranscriptsResponse, *shimv1.ReadTranscriptsResponse](s, RPCReadTranscripts); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.ReadTranscriptsResponse{
+		Result: &shimv1.ReadTranscriptsResponse_Success{Success: &shimv1.ReadTranscriptsSuccess{}},
+	}), nil
+}
+
 // The workflow verbs are kicked this wave: they answer the typed
 // not-implemented refusal and open nothing.
 func (s *server) GetWorkflow(ctx context.Context, req *connect.Request[shimv1.GetWorkflowRequest]) (*connect.Response[shimv1.GetWorkflowResponse], error) {

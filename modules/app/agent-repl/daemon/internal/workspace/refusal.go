@@ -171,6 +171,32 @@ const (
 	// close verb owns the quiet requirement it would otherwise have to
 	// duplicate or bypass.
 	ArmNotClosed = "not_closed"
+	// ArmUnreadable is a ListWorkspaceTranscripts whose shim could not read the
+	// vendor project directory. It carries the path and the read's own account.
+	ArmUnreadable = "unreadable"
+	// ArmUnknownTranscript is a BindWorkspaceSession naming an id no transcript
+	// in the workspace's directory carries.
+	ArmUnknownTranscript = "unknown_transcript"
+	// ArmAlreadyBound is a BindWorkspaceSession naming the conversation the
+	// workspace already runs. Nothing is changed.
+	ArmAlreadyBound = "already_bound"
+	// ArmTranscriptActive is a BindWorkspaceSession on a transcript something
+	// is writing to right now: two writers on one conversation is data loss.
+	ArmTranscriptActive = "transcript_active"
+	// ArmTranscriptHeld is a BindWorkspaceSession on a conversation another
+	// workspace in this daemon's registry is bound to.
+	ArmTranscriptHeld = "transcript_held"
+	// ArmTurnInFlight is a session-level verb asked for while a turn runs. A
+	// bind is not an interrupt.
+	ArmTurnInFlight = "turn_in_flight"
+	// ArmStopFailed is a BindWorkspaceSession whose current session would not
+	// end. It carries the stop's own account as `detail`.
+	ArmStopFailed = "stop_failed"
+	// ArmStartFailed is a BindWorkspaceSession whose session on the newly
+	// bound conversation would not come up. THE BINDING STANDS: the record
+	// names the conversation the user chose, and the ordinary open path brings
+	// it up next.
+	ArmStartFailed = "start_failed"
 	// ArmHasChildren is a ForgetWorkspace on a workspace other workspaces were
 	// spawned from. The schema nulls their parent_id rather than refusing, so
 	// the forget would silently flatten a fork's lineage. It carries the

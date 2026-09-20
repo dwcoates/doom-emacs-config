@@ -210,6 +210,20 @@ func validateRequestCommandSupportRequest(req *agentreplv1.RequestCommandSupport
 	return nil
 }
 
+// validateBindWorkspaceSessionRequest is BindWorkspaceSessionRequest's base
+// function. The vendor session id is an ECHO of a served value, so a blank one
+// is an illegal shape rather than an unknown_transcript: a client may not
+// invent one, and it certainly may not invent nothing.
+func validateBindWorkspaceSessionRequest(req *agentreplv1.BindWorkspaceSessionRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetVendorSessionId() == "" {
+		return invalid("vendor_session_id", "a vendor session id is required")
+	}
+	return nil
+}
+
 // validateOpenFeedRequest is OpenFeedRequest's base function.
 func validateOpenFeedRequest(req *agentreplv1.OpenFeedRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
