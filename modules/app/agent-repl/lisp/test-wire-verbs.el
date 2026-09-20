@@ -104,6 +104,8 @@ logging rung that never signals, so the stub is a no-op: the typed
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
      ("accepted" "error" "success"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
+    ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
+    ("agentrepl/v1/endpoint_bind_workspace_session.pb.go" "BindWorkspaceSessionResponse")
     ("agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceResponse")
     ("agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceResponse")
     ("agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceResponse")
@@ -2862,3 +2864,231 @@ always registers the main worktree, so an answer without it is not one."
                               (list :workspace agent-repl-test-wire-verbs--ref
                                     :op-id "op-42"))))
                   "op-42"))))
+
+
+;;;; ---- ListWorkspaceTranscripts ---------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-list-transcripts-request-is-the-bare-workspace ()
+  "The shim resolves the directory from its own identity, so the request names
+nothing but the workspace."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-encode-list-workspace-transcripts-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-transcripts-request-refuses-no-workspace ()
+  "A request built without the workspace it names is refused before it is sent."
+  (agent-repl-test-wire-verbs--with-common
+   (should-error (agent-repl-wire-encode-list-workspace-transcripts-request nil)
+                 :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-decodes-its-stated-figures ()
+  "Every figure the transcript stated reaches the chooser."
+  (agent-repl-test-wire-verbs--with-common
+   (let ((transcript (agent-repl-wire-decode-workspace-transcript
+                      (agent-repl-test-wire-verbs--parse
+                       "{\"vendorSessionId\":\"a\",\"lastRequestAtMs\":\"17\",\"contextTokens\":\"4242\",\"opening\":\"hi\",\"prompts\":3}"))))
+     (should (equal (list (plist-get transcript :vendor-session-id)
+                          (plist-get transcript :last-request-at-ms)
+                          (plist-get transcript :context-tokens)
+                          (plist-get transcript :opening)
+                          (plist-get transcript :prompts))
+                    (list "a" 17 4242 "hi" 3))))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-leaves-an-unstated-size-nil ()
+  "A zero that cannot be told from an absence ranks the unread conversation
+cheapest, so an absent `context_tokens' decodes to nil rather than 0."
+  (agent-repl-test-wire-verbs--with-common
+   (should-not (plist-get (agent-repl-wire-decode-workspace-transcript
+                           (agent-repl-test-wire-verbs--parse "{\"vendorSessionId\":\"a\"}"))
+                          :context-tokens))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-leaves-an-unstated-instant-nil ()
+  "An absent `last_request_at_ms' decodes to nil, never to the epoch."
+  (agent-repl-test-wire-verbs--with-common
+   (should-not (plist-get (agent-repl-wire-decode-workspace-transcript
+                           (agent-repl-test-wire-verbs--parse "{\"vendorSessionId\":\"a\"}"))
+                          :last-request-at-ms))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-leaves-an-unstated-opening-nil ()
+  "A transcript holding no user prompt states no opening."
+  (agent-repl-test-wire-verbs--with-common
+   (should-not (plist-get (agent-repl-wire-decode-workspace-transcript
+                           (agent-repl-test-wire-verbs--parse "{\"vendorSessionId\":\"a\"}"))
+                          :opening))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-decodes-the-current-marker ()
+  "Presence IS the fact: the empty message decodes to t, not to nil."
+  (agent-repl-test-wire-verbs--with-common
+   (should (eq (plist-get (agent-repl-wire-decode-workspace-transcript
+                           (agent-repl-test-wire-verbs--parse
+                            "{\"vendorSessionId\":\"a\",\"current\":{}}"))
+                          :current)
+               t))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-decodes-the-cleared-instant ()
+  "A cleared conversation carries when it was cleared."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (plist-get (agent-repl-wire-decode-workspace-transcript
+                              (agent-repl-test-wire-verbs--parse
+                               "{\"vendorSessionId\":\"a\",\"cleared\":{\"atMs\":\"5\"}}"))
+                             :cleared)
+                  '(:at-ms 5)))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-decodes-the-active-instant ()
+  "An active transcript carries when it was last appended to."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (plist-get (agent-repl-wire-decode-workspace-transcript
+                              (agent-repl-test-wire-verbs--parse
+                               "{\"vendorSessionId\":\"a\",\"active\":{\"atMs\":\"9\"}}"))
+                             :active)
+                  '(:at-ms 9)))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-decodes-the-holding-workspace ()
+  "The held marker NAMES the workspace rather than saying only that one holds it."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (plist-get (plist-get (agent-repl-wire-decode-workspace-transcript
+                                         (agent-repl-test-wire-verbs--parse
+                                          "{\"vendorSessionId\":\"a\",\"held\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                                        :held)
+                             :workspace)
+                  '(:id "ws-2" :dir "/w/two")))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-decodes-the-last-model ()
+  "The model that answered the last request reaches the chooser by name."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (plist-get (agent-repl-wire-decode-workspace-transcript
+                              (agent-repl-test-wire-verbs--parse
+                               "{\"vendorSessionId\":\"a\",\"lastModel\":{\"name\":\"claude-opus-5\"}}"))
+                             :last-model)
+                  '(:name "claude-opus-5")))))
+
+(ert-deftest agent-repl-test-wire-verbs-transcript-unknown-field-is-a-breach ()
+  "A field the daemon adds without being threaded here is loud, not dropped."
+  (agent-repl-test-wire-verbs--with-common
+   (should-error (agent-repl-wire-decode-workspace-transcript
+                  (agent-repl-test-wire-verbs--parse "{\"noSuchField\":1}"))
+                 :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-transcripts-empty-success ()
+  "An EMPTY list is a success: a directory with no conversations is an answer."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-list-workspace-transcripts-success
+                   (agent-repl-test-wire-verbs--parse "{}"))
+                  '(:transcripts nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-transcripts-error-unknown-arm-is-a-breach ()
+  "An arm this codec does not know is refused, never guessed at."
+  (agent-repl-test-wire-verbs--with-common
+   (should-error (agent-repl-wire-decode-list-workspace-transcripts-error
+                  (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                 :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-list-transcripts-error-unreadable-carries-its-evidence ()
+  "The arm carries the path and the read's own account, not only a sentence."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-list-workspace-transcripts-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"unreadable\":{\"searchedPath\":\"/p\",\"detail\":\"EACCES\"}}"))
+                  '(:cause (:arm :unreadable :value (:searched-path "/p" :detail "EACCES")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-list-transcripts-error-arms-pinned ()
+  "ListWorkspaceTranscriptsError's arm set is exactly what the schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_list_workspace_transcripts.pb.go"
+                        "ListWorkspaceTranscriptsError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
+                             "noSession" "unreadable")
+                       #'string<))))
+
+
+;;;; ---- BindWorkspaceSession -------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-bind-request-carries-the-echoed-id ()
+  "The id is an ECHO of a served value and rides the request verbatim."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (cdr (assq 'vendorSessionId
+                             (agent-repl-wire-encode-bind-workspace-session-request
+                              (list :workspace agent-repl-test-wire-verbs--ref
+                                    :vendor-session-id "conv-1"))))
+                  "conv-1"))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-request-refuses-a-blank-id ()
+  "A client may not invent an id, and it certainly may not invent nothing."
+  (agent-repl-test-wire-verbs--with-common
+   (should-error (agent-repl-wire-encode-bind-workspace-session-request
+                  (list :workspace agent-repl-test-wire-verbs--ref :vendor-session-id ""))
+                 :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-request-omits-an-absent-op-id ()
+  "A bind with no op id emits no stages, so it sends no op id."
+  (agent-repl-test-wire-verbs--with-common
+   (should-not (assq 'opId (agent-repl-wire-encode-bind-workspace-session-request
+                            (list :workspace agent-repl-test-wire-verbs--ref
+                                  :vendor-session-id "conv-1"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-request-carries-the-op-id ()
+  "An op id rides the request, which is what opts the bind into stage pushes."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (cdr (assq 'opId (agent-repl-wire-encode-bind-workspace-session-request
+                                    (list :workspace agent-repl-test-wire-verbs--ref
+                                          :vendor-session-id "conv-1"
+                                          :op-id "op-42"))))
+                  "op-42"))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-unknown-transcript-names-the-id ()
+  "The arm echoes the id that was asked for, so the client can name it."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-bind-workspace-session-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"unknownTranscript\":{\"vendorSessionId\":\"invented\"}}"))
+                  '(:cause (:arm :unknown-transcript :value (:vendor-session-id "invented")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-transcript-active-carries-the-instant ()
+  "Arrange, Act, Assert."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-bind-workspace-session-error
+                   (agent-repl-test-wire-verbs--parse "{\"transcriptActive\":{\"atMs\":\"7\"}}"))
+                  '(:cause (:arm :transcript-active :value (:at-ms 7)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-transcript-held-names-the-holder ()
+  "Arrange, Act, Assert."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-bind-workspace-session-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"transcriptHeld\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                  '(:cause (:arm :transcript-held
+                            :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-start-failed-carries-its-detail ()
+  "THE BINDING STANDS, and the arm says why the session did not come up."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-bind-workspace-session-error
+                   (agent-repl-test-wire-verbs--parse "{\"startFailed\":{\"detail\":\"nope\"}}"))
+                  '(:cause (:arm :start-failed :value (:detail "nope")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-already-bound-is-empty ()
+  "Arrange, Act, Assert: nothing was changed, so the arm carries nothing."
+  (agent-repl-test-wire-verbs--with-common
+   (should (equal (agent-repl-wire-decode-bind-workspace-session-error
+                   (agent-repl-test-wire-verbs--parse "{\"alreadyBound\":{}}"))
+                  '(:cause (:arm :already-bound :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-unknown-arm-is-a-breach ()
+  "An arm this codec does not know is refused, never guessed at."
+  (agent-repl-test-wire-verbs--with-common
+   (should-error (agent-repl-wire-decode-bind-workspace-session-error
+                  (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                 :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-bind-error-arms-pinned ()
+  "BindWorkspaceSessionError's arm set is exactly what the schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_bind_workspace_session.pb.go"
+                        "BindWorkspaceSessionError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
+                             "unknownTranscript" "alreadyBound" "transcriptActive"
+                             "transcriptHeld" "turnInFlight" "stopFailed" "startFailed")
+                       #'string<))))
