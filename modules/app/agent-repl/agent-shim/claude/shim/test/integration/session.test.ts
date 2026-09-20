@@ -41,6 +41,7 @@ import {
 } from "../integration-support/store.js";
 import {
   hibernateKind,
+  hibernateAcked,
   hibernateUntilAcked,
   killSessionCause,
   killSessionLive,
@@ -991,37 +992,30 @@ describe("Hibernate", () => {
     expect(hibernateKind(response)).toBe("turnInFlight");
   });
 
-  test("an idle session acks, having compacted the transcript (SYNTHETIC compaction fixture)", async () => {
-    // The daemon stands the shim down only AFTER the ack, so revival never pays
-    // a cold context — which is only true if the compaction really happened.
-    //
-    // GRADED AGAINST THE SYNTHETIC FIXTURE, NOT AGAINST A CAPTURE. The shim
-    // writes the compacted transcript itself and the compaction helper is
-    // synthetic BY RULING — no capture grounds the summarizer — so what this
-    // asserts is that the shim wrote the `compact_boundary` line its own
-    // fixture produces, at the ruled path. It does not assert that a real
-    // vendor's boundary looks like this one.
+  test("an idle session acks on the FIRST ask, writing no compaction boundary", async () => {
+    // THE OWNER'S RULING (2026-09-20). Hibernation stops the shim to free its
+    // memory and does nothing else, so the directive is single-phase again:
+    // one ask, one ack, and a transcript exactly as the conversation left it.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
 
-    await hibernateUntilAcked(() =>
+    const asks = await hibernateUntilAcked(() =>
       shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
-    const records = readTranscript(shim.dirs, started.vendorSessionId);
-    expect(
-      records.some(
-        (record) => record.type === "system" && record.subtype === "compact_boundary",
-      ),
-    ).toBe(true);
+    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+      (record) => record.type === "system" && record.subtype === "compact_boundary",
+    );
+    expect([asks, boundaries.length]).toEqual([1, 0]);
   });
 
-  test("a second hibernation of an unchanged transcript writes no second boundary", async () => {
+  test("a second hibernation is as cheap as the first, and still writes no boundary", async () => {
     // THE LOOP THIS GUARDS (owner's workspace, 2026-09-14). The idle sweep asks
-    // every five minutes, and while nothing made a second compaction a no-op it
-    // bought a whole vendor summary turn each time: thirteen boundaries and
-    // thirteen blocks of continuation notes in the feed in one morning.
+    // every five minutes, and while the directive compacted, each ask that did
+    // not end in a stand-down could buy a whole vendor summary turn: thirteen
+    // boundaries and thirteen blocks of continuation notes in one morning. A
+    // directive that asks the vendor for nothing cannot repeat anything.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
@@ -1036,14 +1030,14 @@ describe("Hibernate", () => {
     const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
-    expect([asks, boundaries.length]).toEqual([1, 1]);
+    expect([asks, boundaries.length]).toEqual([1, 0]);
   });
 
   test("KillSession after a hibernation still tears the session down and exits", async () => {
     // THE HANG THIS GUARDS. The daemon's idle cutoff calls Hibernate and then
-    // KillSession. Hibernate runs a throwaway compaction query; the teardown
-    // must still be able to settle every promise it awaits, or KillSession
-    // never returns and the shim outlives the session it was standing down.
+    // KillSession. While Hibernate ran a throwaway compaction query, the
+    // teardown awaited THAT query's loop and never returned. It runs no query
+    // at all now, and this is the assertion that keeps the pair settling.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
@@ -1475,52 +1469,52 @@ describe("KillSession force across TWO turns", () => {
 });
 
 describe("Hibernate and revival", () => {
-  test("a shim killed AFTER the ack revives without paying a cold context", async () => {
-    // THE WHOLE POINT OF HIBERNATE. The daemon stands the shim down only after
-    // the ack, and the ack means the transcript was compacted — so the revival
-    // is a warm resume with NO remediation, and the first page carries the cut
-    // the hibernation performed.
+  test("a shim killed AFTER the ack revives, and the hibernation cut nothing", async () => {
+    // WHAT HIBERNATION LEAVES BEHIND, now that it compacts nothing (owner's
+    // ruling, 2026-09-20): the conversation exactly as it stood. The revival
+    // is a real resume of the same vendor session, and the first page carries
+    // NO context cut from the stand-down, because none was performed.
     //
-    // GRADED AGAINST THE SYNTHETIC COMPACTION FIXTURE: the summarizer is
-    // synthetic by ruling, so what is asserted is the shim's own compaction
-    // being visible in the feed, not a vendor's.
+    // ABOVE THE COLD-GATE FLOOR ON PURPOSE. `!cold-seed` reports a context
+    // comfortably past it, so the resume is judged cold and asks — which is
+    // the gate doing its own job on its own terms, unchanged by this ruling
+    // and no longer pre-paid by the directive. `resumeSession` is therefore
+    // re-asked with the gate answered.
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
-    await hibernateUntilAcked(() =>
+    const asks = await hibernateUntilAcked(() =>
       first.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
-    // STOOD DOWN, NOT SIGKILLED. The ack says the compaction happened; the
-    // graceful stand-down is what the daemon does next, and it is the half
-    // that guarantees the rows describing the compaction actually landed.
+    expect(asks).toBe(1);
+    // STOOD DOWN, NOT SIGKILLED — the graceful half the daemon actually runs.
     expect((await first.standDown()).code).toBe(0);
 
     const second = await spawnShim({ reuse: first.dirs });
-    const response = await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
-
-    // NOT COLD, and no remediation was named: the hibernation already paid.
-    const revived = sessionStarted(response);
-    expect(revived.vendorSessionId).not.toBe("");
-    const watch = openStream((options) =>
-      second.clients.h1.watchAgent(watchAgentRequest(), options),
+    const response = await second.clients.h1.startSession(
+      resumeSession(started.vendorSessionId),
     );
-    const page = watchAgentPage(await watch.next());
-    const cuts = page.entries
-      .map((entry) => contextCutOf(entry))
-      .filter((cut): cut is conversationv1.ContextCut => cut !== null);
-    expect(cuts.some((cut) => cut.cut.case === "compacted")).toBe(true);
-    watch.close();
+
+    // THE GATE, NOT AN ACK. Hibernation pre-paid nothing, so a conversation
+    // this large meets the cold gate on revival like any other resume.
+    expect(startSessionCold(response).contextTokens).toBeGreaterThan(0n);
+    const boundaries = readTranscript(first.dirs, started.vendorSessionId).filter(
+      (record) => record.type === "system" && record.subtype === "compact_boundary",
+    );
+    expect(boundaries.length).toBe(0);
   });
 
-  test("Hibernate before any turn refuses compaction_failed, naming the missing transcript", async () => {
-    // There is nothing to compact, and acking would tell the daemon a cold
-    // revival had been prevented when nothing was done at all.
+  test("Hibernate before any turn acks, having nothing to stop but the shim", async () => {
+    // THERE IS NOTHING TO READ ANY MORE. While the directive compacted, a
+    // session with no transcript was a `compaction_failed` refusal naming the
+    // missing file. Freeing a shim's memory needs no transcript at all.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
     const response = await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {}));
 
-    expect(hibernateKind(response)).toBe("compactionFailed");
+    hibernateAcked(response);
+    expect(response.result.case).toBe("success");
   });
 });
 
