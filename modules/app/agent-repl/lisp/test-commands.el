@@ -817,8 +817,9 @@ routed to a sink that does not exist."
 
 (ert-deftest agent-repl-test-commands-switch-to-project-offers-no-pseudo-perspectives ()
   "The `SPC p p' switcher never offers \"main\" or \"none\" as a workspace.
-It completes over `agent-repl--live-ws-names', which excludes persp-mode's
-own perspectives at the source, so the candidates are real workspaces only."
+Its local-workspace source is `agent-repl--live-ws-names', which excludes
+persp-mode's own perspectives at the source, so the candidates are real
+workspaces only."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((persp-nil-name "none")
@@ -839,10 +840,195 @@ own perspectives at the source, so the candidates are real workspaces only."
       (should (equal offered '("real-ws"))))))
 
 (ert-deftest agent-repl-test-commands-switch-to-project-refuses-with-no-workspaces ()
-  "With nothing live there is nothing to switch to."
+  "With nothing known -- no roster row and nothing live -- there is
+nothing to switch to."
   (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
             ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil)))
     (should-error (agent-repl-switch-to-project) :type 'user-error)))
+
+;;;; ---- The `SPC p p' switcher offers EVERY KNOWN workspace ----
+
+;; The switcher used to complete over `agent-repl--live-ws-names': the
+;; workspaces with a perspective standing in THIS Emacs.  A closed
+;; workspace, one the daemon knows that no roster push has been reconciled
+;; for yet, and one with no local perspective are all real and were all
+;; unreachable.  The daemon's roster is the source of what exists, so it is
+;; the source of the candidate list (owner ruling, 2026-09-20).
+
+(defvar agent-repl-test-commands--offered nil
+  "Candidate strings the stubbed picker was handed.")
+
+(defvar agent-repl-test-commands--opened nil
+  "The `WorkspaceRef' the stubbed `OpenWorkspace' verb was handed.")
+
+(defvar agent-repl-test-commands--landed nil
+  "The (REF . LANDER) the stubbed pending landing was registered with.")
+
+(defun agent-repl-test-commands--pick (answer)
+  "Return a `completing-read' stub recording its candidates and answering ANSWER."
+  (lambda (_prompt candidates &rest _)
+    (setq agent-repl-test-commands--offered candidates)
+    answer))
+
+(defmacro agent-repl-test-commands--switcher (rows live &rest body)
+  "Run BODY with the roster carrying ROWS and LIVE the local live names.
+Binds `agent-repl-test-commands--offered' to the candidate strings the
+picker was handed, `--opened' to the ref `OpenWorkspace' was given,
+`--landed' to the (REF . LANDER) the pending landing was registered with
+and `--switched' to the workspace the editor-local switch stood on."
+  (declare (indent 2))
+  `(let ((agent-repl-roster-view (agent-repl-test-commands--roster ,rows))
+         (agent-repl-test-commands--offered nil)
+         (agent-repl-test-commands--opened nil)
+         (agent-repl-test-commands--landed nil)
+         (agent-repl-test-commands--switched nil))
+     (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () ,live))
+               ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+               ((symbol-function 'agent-repl--ws-switch)
+                (lambda (ws &rest _) (setq agent-repl-test-commands--switched ws)))
+               ((symbol-function 'agent-repl-verb-open)
+                (lambda (ref) (setq agent-repl-test-commands--opened ref)))
+               ((symbol-function 'agent-repl-verbs-select-minted)
+                (lambda (ref &optional lander)
+                  (setq agent-repl-test-commands--landed (cons ref lander)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-a-closed-workspace ()
+  "A closed workspace is a workspace you can switch to, so it is offered."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "shut (closed)")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--offered '("shut (closed)"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-a-workspace-with-no-tab-here ()
+  "The daemon knows it and this Emacs has not reconciled it: still offered."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "fresh" "id-fresh" 100)) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "fresh (not open here)")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--offered '("fresh (not open here)"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-a-local-workspace-off-the-roster ()
+  "A live local workspace no roster push carries yet is never dropped."
+  ;; Arrange
+  (agent-repl-test-commands--switcher nil '("local")
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "local")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--offered '("local"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-lists-an-open-workspace-once ()
+  "A roster row whose tab is standing here is ONE candidate, not two."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "here" "id-here" 100)) '("here")
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "here"))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "here")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--offered '("here"))))))
+
+(ert-deftest agent-repl-test-commands-switcher-leaves-an-open-workspace-unaffixed ()
+  "An open workspace carries no affix: it is the ordinary case."
+  ;; Arrange / Act
+  (let ((alist (agent-repl--switch-display-alist
+                '((:name "here" :dir "/tmp/here" :ref nil :ws "here" :state :open)))))
+    ;; Assert
+    (should (equal (mapcar #'car alist) '("here")))))
+
+(ert-deftest agent-repl-test-commands-switcher-qualifies-a-colliding-name ()
+  "Names collide across repos, and `completing-read' answers with the string."
+  ;; Arrange / Act
+  (let ((alist (agent-repl--switch-display-alist
+                '((:name "api" :dir "/a/api" :ref nil :ws "api" :state :open)
+                  (:name "api" :dir "/b/api" :ref nil :ws nil :state :closed)))))
+    ;; Assert
+    (should (equal (mapcar #'car alist) '("api [/a/api]" "api [/b/api] (closed)")))))
+
+(ert-deftest agent-repl-test-commands-switcher-switches-to-an-open-workspace ()
+  "An open workspace is an editor-local switch and nothing more."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "here" "id-here" 100)) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "here"))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "here")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--switched "here")))))
+
+(ert-deftest agent-repl-test-commands-switcher-never-opens-a-workspace-already-here ()
+  "Switching to a standing tab must cost no daemon round trip at all."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "here" "id-here" 100)) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "here"))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "here")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should-not agent-repl-test-commands--opened))))
+
+(ert-deftest agent-repl-test-commands-switcher-opens-a-workspace-with-no-tab ()
+  "A workspace that is not here is reopened through `OpenWorkspace' itself."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "shut (closed)")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal (plist-get agent-repl-test-commands--opened :id) "id-shut")))))
+
+(ert-deftest agent-repl-test-commands-switcher-lands-on-the-reopened-tab-by-identity ()
+  "The tab arrives on the roster push, so the landing waits for it BY REF."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "shut (closed)")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal (plist-get (car agent-repl-test-commands--landed) :id) "id-shut"))
+      (should (eq (cdr agent-repl-test-commands--landed)
+                  #'agent-repl-verbs--land-on-tab)))))
+
+(ert-deftest agent-repl-test-commands-switcher-refuses-a-candidate-with-no-ref ()
+  "The ref is daemon-minted: a candidate without one cannot be opened."
+  ;; Arrange
+  (agent-repl-test-commands--switcher nil nil
+    (cl-letf (((symbol-function 'agent-repl--switch-candidates)
+               (lambda () '((:name "orphan" :dir nil :ref nil :ws nil :state :closed))))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "orphan (closed)")))
+      ;; Act / Assert
+      (should-error (agent-repl-switch-to-project) :type 'user-error))))
 
 ;;;; ---- A project switch lands on the workspace's own panel ----
 
