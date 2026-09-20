@@ -446,9 +446,9 @@ holds is SUCCESS and says so (`already_known`), never a refusal.
 THE MAIN WORKTREE IS REGISTERED AS A WORKSPACE TOO (owner ruling, 2026-09-14:
 "I expect the main repo to be added as an actual workspace as well"). The first
 landing stopped at the repository row, and a repository with no workspace is
-NOT SELECTABLE: `SPC p p` (`agent-repl-switch-to-project`) completes over live
-workspaces, so registering the repository you were standing in still left you
-unable to switch to it.
+NOT SELECTABLE as a repository row: a repository with no workspace has no row
+`SPC p p` (`agent-repl-switch-to-project`) could offer, so registering the
+repository you were standing in still left you unable to switch to it.
 
 That registration is the SAME ONE `RegisterWorkspace` runs — `internal/workspace`'s
 unexported `register`, which both rpc bodies call — so the row gets the same
@@ -472,6 +472,41 @@ so the push is on the wire ahead of the ack rather than waiting for a later one.
 A repository whose section is drawn with NO rows is still an ordinary state
 (every workspace under it closed), so neither the daemon's roster resolver nor
 the webapp's rail may drop an empty section.
+
+## `SPC p p` offers EVERY KNOWN workspace, not only the live ones
+
+Owner ruling, 2026-09-20. `agent-repl-switch-to-project` with no argument is
+the one switcher, and its candidate list is built from THE DAEMON'S ROSTER
+(`agent-repl-verbs--all-rows`), which is the source of what exists. Emacs's
+own `agent-repl--workspaces` table is not: it holds the workspaces that have
+a PERSPECTIVE STANDING IN THIS EMACS, which excluded three real kinds of
+workspace the user could not otherwise reach — one that was closed or killed,
+one the daemon knows that no roster push has been reconciled into the table
+yet (a just-registered repo whose landing is still pending), and one with no
+local perspective for any other reason.
+
+A live local workspace the roster does not carry is still offered, because
+the push and the registry reconcile asynchronously and the switcher must
+never drop the workspace the user is standing in. persp-mode's own
+perspectives (`main`, `none`) are never candidates; `agent-repl--live-ws-names`
+excludes them at its source.
+
+Picking one is TWO behaviors and exactly two. A workspace whose tab is
+standing is an editor-local `agent-repl--ws-switch` and costs no round trip.
+Anything else goes through `agent-repl-verb-open` — the same `OpenWorkspace`
+verb `SPC TAB O` runs, with the same `mutation-progress.el` stage reporting —
+and the landing is registered with `agent-repl-verbs-select-minted` under
+`agent-repl-verbs--land-on-tab`, so it fires when the roster push brings the
+tab and lands BY IDENTITY rather than by directory. Never add a second open
+path here: a switcher that opened workspaces its own way is a second
+mechanism to disagree with the first.
+
+The candidate strings are plain text and must stay that way: an open
+workspace carries no affix, a closed one ` (closed)`, one the daemon knows
+but this Emacs has no tab for ` (not open here)`. A name that collides with
+another candidate's is qualified by its directory, because `completing-read`
+answers with the string and two identical strings make the second
+unreachable.
 
 ## Implementers do not judge proto design
 
