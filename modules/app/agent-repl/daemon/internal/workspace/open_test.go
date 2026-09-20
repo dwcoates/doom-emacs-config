@@ -492,3 +492,94 @@ func TestOpenReportsNoStageAfterAFailedBringUp(t *testing.T) {
 		t.Fatalf("stages = %v, want the last to be the bring-up", progress.stages)
 	}
 }
+
+// openWithAKilledRecord arranges the production shape the live-shim invariant
+// was written for: the daemon's fleet holds a live shim for the workspace, and
+// the durable session record still reads KILLED from a KillWorkspace nothing
+// ever retired.
+func openWithAKilledRecord(t *testing.T, terminal wsm.SessionTerminal) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.live["w1"] = true
+	f.db.sessions["w1"] = wsm.Session{Workspace: "w1", HostSessionID: "host-1", VendorSessionID: "vendor-1"}
+	if err := f.db.SetSessionTerminal(context.Background(), "w1", terminal); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+	return f
+}
+
+func TestOpenRetiresAStaleKilledSessionRecord(t *testing.T) {
+	// Arrange: a live session is why this verb starts nothing, and it was
+	// also why the record was never revisited — so the open answered in
+	// milliseconds and left the roster receding a workspace whose shim was
+	// serving.
+	f := openWithAKilledRecord(t, wsm.SessionTerminal{Kind: "killed", Detail: "KillWorkspace"})
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if terminal := f.db.sessions["w1"].Terminal; terminal != nil {
+		t.Fatalf("terminal = %+v after the open, want it retired", terminal)
+	}
+}
+
+func TestOpenRepublishesARosterRowThatDoesNotRecede(t *testing.T) {
+	// Arrange: the roster RECEDES a killed session's row and Emacs gives a tab
+	// only to a row that is not receded, so the record the republish carries
+	// is what decides whether the user gets a tab at all
+	// (internal/resolve/sidebar's `recedes`).
+	f := openWithAKilledRecord(t, wsm.SessionTerminal{Kind: "killed", Detail: "KillWorkspace"})
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	registries := f.sidebar.snapshotRegistries()
+	if len(registries) != 1 {
+		t.Fatalf("roster republishes = %d, want exactly one", len(registries))
+	}
+	sessions := registries[0].Sessions
+	if len(sessions) != 1 {
+		t.Fatalf("registry sessions = %+v, want the workspace's own record", sessions)
+	}
+	if sessions[0].Terminal != nil {
+		t.Fatalf("republished terminal = %+v, want a row that does not recede", sessions[0].Terminal)
+	}
+}
+
+func TestOpenDoesNotResurrectADeletedSession(t *testing.T) {
+	// Arrange: a deleted session's cause of death is final; the open leaves it
+	// standing rather than reconciling it away.
+	f := openWithAKilledRecord(t, wsm.SessionTerminal{Kind: "deleted", Detail: "forget"})
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	terminal := f.db.sessions["w1"].Terminal
+	if terminal == nil || terminal.Kind != "deleted" {
+		t.Fatalf("terminal = %+v after the open, want the deletion kept", terminal)
+	}
+}
+
+func TestOpenSurfacesAFailedTerminalRetirement(t *testing.T) {
+	// Arrange.
+	f := openWithAKilledRecord(t, wsm.SessionTerminal{Kind: "killed", Detail: "KillWorkspace"})
+	f.db.clearTerminalErr = errors.New("the store is unreadable")
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the store is unreadable") {
+		t.Fatalf("Open = %v, want the failed retirement surfaced", err)
+	}
+}

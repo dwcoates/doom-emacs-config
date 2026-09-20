@@ -135,6 +135,93 @@ func TestSetSessionTerminalRefusesReterminatingADeletedSession(t *testing.T) {
 	}
 }
 
+func TestClearSessionTerminalRetiresTheCause(t *testing.T) {
+	// Arrange: a killed session whose shim is live again.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	if err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "killed", Detail: "KillWorkspace", At: instant}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+
+	// Act
+	if err := s.ClearSessionTerminal(context.Background(), ws.ID); err != nil {
+		t.Fatalf("ClearSessionTerminal: %v", err)
+	}
+
+	// Assert
+	got, found, err := s.Session(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false after retiring a terminal, want the session kept")
+	}
+	if got.Terminal != nil {
+		t.Fatalf("terminal = %+v after the retirement, want nil", got.Terminal)
+	}
+}
+
+func TestClearSessionTerminalAcceptsAWorkspaceWithNoSession(t *testing.T) {
+	// Arrange: nothing was ever recorded, so no terminal stands.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.ClearSessionTerminal(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ClearSessionTerminal = %v, want the absent record accepted", err)
+	}
+}
+
+func TestClearSessionTerminalRefusesToResurrectADeletedSession(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	if err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "deleted", At: instant}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+
+	// Act
+	err := s.ClearSessionTerminal(context.Background(), ws.ID)
+
+	// Assert
+	if !errors.Is(err, ErrSessionDeleted) {
+		t.Fatalf("ClearSessionTerminal = %v, want ErrSessionDeleted", err)
+	}
+}
+
+func TestClearSessionTerminalKeepsADeletedSessionsCause(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	if err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "deleted", Detail: "forget", At: instant}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+
+	// Act
+	_ = s.ClearSessionTerminal(context.Background(), ws.ID)
+
+	// Assert
+	got, _, err := s.Session(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.Terminal == nil || got.Terminal.Kind != "deleted" {
+		t.Fatalf("terminal = %+v after a refused retirement, want the deletion kept", got.Terminal)
+	}
+}
+
 func TestTouchEngagementStampsTheIdleSweepsInput(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
