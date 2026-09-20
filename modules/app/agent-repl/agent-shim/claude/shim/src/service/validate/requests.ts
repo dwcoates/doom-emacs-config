@@ -216,6 +216,16 @@ export function validateGatherTitleDigestRequest(_request: shimv1.GatherTitleDig
   // Intentionally empty: an empty message has no illegal shape.
 }
 
+/**
+ * `shim.v1.ReadTranscriptsRequest` — the request carries no fields (the shim
+ * resolves the directory from its own identity), so there is nothing to
+ * reject. The validator exists so `routes.ts` treats this verb exactly like
+ * every other: validate, then delegate.
+ */
+export function validateReadTranscriptsRequest(_request: shimv1.ReadTranscriptsRequest): void {
+  // Intentionally empty: an empty message has no illegal shape.
+}
+
 /** `shim.v1.ReadHistoryRequest` — whose history, how much, and from where. */
 export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): void {
   try {

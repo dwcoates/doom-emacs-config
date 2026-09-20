@@ -94,6 +94,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("readHistory")(request);
       return create(shimv1.ReadHistoryResponseSchema, {});
     },
+    async readTranscripts(request) {
+      record("readTranscripts")(request);
+      return create(shimv1.ReadTranscriptsResponseSchema, {});
+    },
     async gatherTitleDigest(request) {
       record("gatherTitleDigest")(request);
       return create(shimv1.GatherTitleDigestResponseSchema, {});

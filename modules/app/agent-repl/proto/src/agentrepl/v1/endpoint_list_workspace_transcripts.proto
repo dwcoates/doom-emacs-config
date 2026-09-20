@@ -1,0 +1,135 @@
+// endpoint_list_workspace_transcripts.proto — ListWorkspaceTranscripts.
+// SIDEBAR section. Every vendor conversation that exists for a workspace's
+// directory, so a person can choose which one the workspace runs.
+//
+// A WORKSPACE IS BOUND TO ONE CONVERSATION, and until this verb the binding
+// was whatever the workspace happened to start with: a directory can hold many
+// conversations — every `/clear` files a new one, and a CLI run outside
+// agent-repl files its own — and only one of them was reachable.
+//
+// PULL, NOT PUSH. The answer is a list a person reads once while choosing;
+// nothing about it belongs on a standing stream, and a transcript set changes
+// only when a conversation is started or cleared.
+//
+// IT COSTS NOTHING TO ASK. The shim reads the transcripts' own lines; no query
+// is started and no model is called.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "conversation/v1/api.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListWorkspaceTranscriptsRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListWorkspaceTranscriptsResponse {
+  oneof result {
+    ListWorkspaceTranscriptsSuccess success = 1;
+    ListWorkspaceTranscriptsError error = 2;
+  }
+}
+
+// The conversations found, newest activity first. An EMPTY list is a success.
+message ListWorkspaceTranscriptsSuccess {
+  repeated WorkspaceTranscript transcripts = 1;
+}
+
+// One conversation the workspace could run, as the shim read it and the daemon
+// knows it.
+//
+// THE DAEMON ADDS ONLY WHAT IT ALONE KNOWS — which workspace, if any, a
+// conversation already belongs to. Everything else is the transcript's own
+// statement, relayed unchanged from shim.v1's Transcript so the two surfaces
+// cannot drift into disagreeing about one conversation.
+message WorkspaceTranscript {
+  // The vendor's own identity for the conversation.
+  string vendor_session_id = 1;
+  // When its last request happened, in epoch milliseconds. UNSET when the
+  // transcript states no request.
+  optional int64 last_request_at_ms = 2;
+  // What resuming it would cost to re-read: cache reads + cache writes +
+  // fresh input on the last request. UNSET when the transcript states none.
+  optional int64 context_tokens = 3;
+  // The model that answered the last request, when the transcript states one.
+  optional conversation.v1.AgentModel last_model = 4;
+  // The conversation's opening words, so the list reads as conversations
+  // rather than ids. UNSET when it holds no user prompt.
+  optional string opening = 5;
+  // How many user prompts it holds.
+  uint32 prompts = 6;
+  // Set when this is the conversation the workspace runs NOW. Presence is the
+  // fact.
+  optional WorkspaceTranscriptCurrent current = 7;
+  // Set when the conversation's most recent boundary is a context clear, so a
+  // chooser sees it resumes empty rather than at `context_tokens`.
+  optional WorkspaceTranscriptCleared cleared = 8;
+  // Set when something is writing to the transcript right now. BindWorkspace-
+  // Session refuses these: two writers on one conversation is data loss, and
+  // the commonest instance is the very CLI session a person is standing in.
+  optional WorkspaceTranscriptActive active = 9;
+  // Set when ANOTHER workspace in this daemon's registry is bound to this
+  // conversation — the one fact the daemon holds that the transcript cannot
+  // state. A bind is refused on it, because two workspaces driving one
+  // conversation is the same data loss by a different route.
+  optional WorkspaceTranscriptHeld held = 10;
+}
+
+message WorkspaceTranscriptCurrent {}
+
+message WorkspaceTranscriptCleared {
+  int64 at_ms = 1;
+}
+
+message WorkspaceTranscriptActive {
+  // When the file was last appended to, in epoch milliseconds.
+  int64 at_ms = 1;
+}
+
+message WorkspaceTranscriptHeld {
+  // The workspace that holds it, so the client names it rather than saying
+  // only that something does.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// Arms derived from the daemon's refusal sites.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are
+// Connect InvalidArgument, never an arm.
+message ListWorkspaceTranscriptsError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ListWorkspaceTranscriptsUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ListWorkspaceTranscriptsWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ListWorkspaceTranscriptsTransferringAway transferring_away = 3;
+    // The workspace has no live shim, and the shim is what reads the
+    // transcripts. A CLOSED workspace is opened before its conversations can
+    // be listed — the client's remedy, not a retry.
+    ListWorkspaceTranscriptsNoSession no_session = 4;
+    // The shim could not read the directory; `detail` is its own account.
+    ListWorkspaceTranscriptsUnreadable unreadable = 5;
+  }
+}
+
+message ListWorkspaceTranscriptsUnknownWorkspace {}
+message ListWorkspaceTranscriptsWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message ListWorkspaceTranscriptsTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message ListWorkspaceTranscriptsNoSession {}
+message ListWorkspaceTranscriptsUnreadable {
+  // The path that could not be read.
+  string searched_path = 1;
+  // The read's own account of the failure.
+  string detail = 2;
+}

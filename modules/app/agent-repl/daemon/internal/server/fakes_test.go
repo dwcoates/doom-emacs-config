@@ -221,6 +221,19 @@ type fakeVerbs struct {
 	openStages   []workspace.OpenStage
 	openProgress workspace.OpenProgress
 
+	// listTranscripts is what ListTranscripts answers, and
+	// listTranscriptsErr the refusal it answers instead.
+	listTranscripts    []*agentreplv1.WorkspaceTranscript
+	listTranscriptsErr error
+	// bindStages are replayed into whatever reporter the bind rpc armed;
+	// bindProgress is the reporter itself so a test can assert its absence,
+	// bindID the conversation the server resolved onto the verb, and bindErr
+	// the refusal the verb answers with.
+	bindStages   []workspace.BindStage
+	bindProgress workspace.BindProgress
+	bindID       string
+	bindErr      error
+
 	setModel    string
 	setModelErr error
 
@@ -291,6 +304,27 @@ func (f *fakeVerbs) Open(_ context.Context, _ ids.WorkspaceID, progress workspac
 		}
 	}
 	return f.openErr
+}
+
+func (f *fakeVerbs) ListTranscripts(context.Context, ids.WorkspaceID) ([]*agentreplv1.WorkspaceTranscript, error) {
+	if f.listTranscriptsErr != nil {
+		return nil, f.listTranscriptsErr
+	}
+	return f.listTranscripts, nil
+}
+
+// BindSession records the conversation the server resolved onto it and replays
+// its scripted stages, so a test can drive the server's progress relay without
+// a session fleet.
+func (f *fakeVerbs) BindSession(_ context.Context, _ ids.WorkspaceID, vendorSessionID string, progress workspace.BindProgress) error {
+	f.bindID = vendorSessionID
+	f.bindProgress = progress
+	for _, stage := range f.bindStages {
+		if progress != nil {
+			progress.Stage(stage)
+		}
+	}
+	return f.bindErr
 }
 
 func (f *fakeVerbs) SetPermissionMode(context.Context, ids.WorkspaceID, string) error {

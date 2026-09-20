@@ -30,6 +30,7 @@ import {
   validateKillSessionRequest,
   validateKillTurnRequest,
   validateReadHistoryRequest,
+  validateReadTranscriptsRequest,
   validateSetSessionModelRequest,
   validateSetSessionPermissionModeRequest,
   validateStartSessionRequest,
@@ -145,7 +146,7 @@ function reportUnhandled(rpc: string, error: unknown): unknown {
  *
  * Returns the router callback `connectNodeAdapter` consumes, so the wiring is
  * testable without a socket: a suite can build a router transport over this and
- * drive all seventeen verbs in-process.
+ * drive all eighteen verbs in-process.
  */
 export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
   return (router: ConnectRouter): void => {
@@ -268,6 +269,17 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("ReadHistory");
         validateReadHistoryRequest(request);
         return answering("ReadHistory", () => engine.readHistory(request));
+      },
+
+      /**
+       * Every conversation filed under this shim's working directory. It sits
+       * beside ReadHistory because it is the same kind of verb: a READ of
+       * what is already on disk, costing no query and no model call.
+       */
+      async readTranscripts(request) {
+        entered("ReadTranscripts");
+        validateReadTranscriptsRequest(request);
+        return answering("ReadTranscripts", () => engine.readTranscripts(request));
       },
 
       // ---- Title digest ----

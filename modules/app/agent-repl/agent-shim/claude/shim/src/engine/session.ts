@@ -69,10 +69,13 @@ import {
   startSessionRefused,
   startSessionStarted,
   titleDigestGathered,
+  transcriptsRead,
+  transcriptsRefused,
   titleDigestRefused,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
 import { readTitleDigest } from "./title-digest.js";
+import { readTranscripts } from "./transcripts.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
@@ -1166,6 +1169,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       case "unreadable":
         return titleDigestRefused({ kind: "unreadable" }, read.detail);
     }
+  }
+
+  /**
+   * Every conversation filed under this shim's working directory.
+   *
+   * IT ANSWERS THE DIRECTORY, NOT THE SESSION, so a shim with no identity yet
+   * still answers: the list is a fact about the working directory, and a
+   * session that has not named itself simply flags nothing as bound.
+   */
+  function readTranscriptsHere(): shimv1.ReadTranscriptsResponse {
+    const read = readTranscripts(
+      deps.env.configDir,
+      deps.env.cwd,
+      identity?.vendorSessionId,
+      deps.nowMs(),
+    );
+    return read.kind === "ok" ? transcriptsRead(read.transcripts) : transcriptsRefused(read);
   }
 
   async function pushContextUsage(): Promise<void> {
@@ -4262,6 +4282,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     stopBash: (request) => turns.stopBash(request),
     detachForeground: (request) => turns.detachForeground(request),
     readHistory: (request) => turns.readHistory(request),
+    readTranscripts: () => Promise.resolve(readTranscriptsHere()),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     resetKeepalives,
     standDown: async (reason: string) => {

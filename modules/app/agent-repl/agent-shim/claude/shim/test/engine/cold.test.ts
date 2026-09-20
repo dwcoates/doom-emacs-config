@@ -19,7 +19,9 @@ import {
   judgeCold,
   readTranscriptFacts,
   sessionCold,
+  TRANSCRIPT_OPENING_MAX_CHARS,
   transcriptPath,
+  type TranscriptFacts,
 } from "../../src/engine/cold.js";
 
 function transcript(lines: unknown[]): string {
@@ -131,16 +133,101 @@ describe("reading the transcript's facts", () => {
 
     expect(readTranscriptFacts(file)?.contextTokens).toBe(1102);
   });
+
+  it("states that it saw usage when an assistant line carried some", () => {
+    expect(readTranscriptFacts(transcript([assistant()]))?.sawUsage).toBe(true);
+  });
+
+  it("states that it saw NO usage when no assistant line carried any", () => {
+    // A zero that cannot be told from an absence ranks an unread conversation
+    // as the cheapest one.
+    const file = transcript([{ type: "user", message: { role: "user", content: "just asked" } }]);
+
+    expect(readTranscriptFacts(file)?.sawUsage).toBe(false);
+  });
+
+  it("takes the OPENING from the first user prompt, not the last", () => {
+    const file = transcript([
+      { type: "user", message: { role: "user", content: "explain hash tables" } },
+      { type: "user", message: { role: "user", content: "now the collisions" } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.opening).toBe("explain hash tables");
+  });
+
+  it("truncates the opening at the stated cap", () => {
+    const file = transcript([
+      { type: "user", message: { role: "user", content: "x".repeat(500) } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.opening).toBe("x".repeat(TRANSCRIPT_OPENING_MAX_CHARS));
+  });
+
+  it("states no opening when the transcript holds no user prompt", () => {
+    expect(readTranscriptFacts(transcript([assistant()]))?.opening).toBeUndefined();
+  });
+
+  it("counts the user prompts the transcript holds", () => {
+    const file = transcript([
+      { type: "user", message: { role: "user", content: "one" } },
+      assistant(),
+      { type: "user", message: { role: "user", content: "two" } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.prompts).toBe(2);
+  });
+
+  it("does not count a tool result as a prompt", () => {
+    const file = transcript([
+      { type: "user", message: { role: "user", content: "one" } },
+      { type: "user", message: { role: "user", content: [{ type: "tool_result", text: "out" }] } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.prompts).toBe(1);
+  });
+
+  it("reports the clear's instant when the last boundary is a clear", () => {
+    const file = transcript([
+      {
+        type: "user",
+        timestamp: "2026-08-29T11:00:00.000Z",
+        message: { role: "user", content: "<command-name>/clear</command-name>" },
+      },
+      { type: "user", message: { role: "user", content: "fresh start" } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.clearedAtMs).toBe(Date.parse("2026-08-29T11:00:00.000Z"));
+  });
+
+  it("reports NO clear when a compaction came after it", () => {
+    // Last-writer-wins: the conversation no longer resumes empty.
+    const file = transcript([
+      {
+        type: "user",
+        timestamp: "2026-08-29T11:00:00.000Z",
+        message: { role: "user", content: "<command-name>/clear</command-name>" },
+      },
+      { type: "system", subtype: "compact_boundary" },
+    ]);
+
+    expect(readTranscriptFacts(file)?.clearedAtMs).toBeUndefined();
+  });
+
+  it("reports no clear for a conversation that was never cut", () => {
+    expect(readTranscriptFacts(transcript([assistant()]))?.clearedAtMs).toBeUndefined();
+  });
 });
 
 // ABOVE THE COLD-GATE FLOOR ON PURPOSE. The gate does not ask below 70,000
 // tokens, so a fixture under it would make every judging case below read
 // "warm" for the floor's reason rather than the one it is testing.
-const FACTS = {
+const FACTS: TranscriptFacts = {
   contextTokens: 100_000,
+  sawUsage: true,
   lastRequestAtMs: 1_000_000,
   cacheTtlMs: CACHE_TTL_5M_MS,
   lastModel: "claude-opus-5",
+  prompts: 1,
 };
 
 describe("judging the cache", () => {
@@ -199,7 +286,7 @@ describe("the cold-gate floor", () => {
 
   const cases: ReadonlyArray<{
     readonly name: string;
-    readonly facts: typeof FACTS;
+    readonly facts: TranscriptFacts;
     readonly nowMs: number;
     readonly requestedModel: string | undefined;
     readonly expected: string | undefined;

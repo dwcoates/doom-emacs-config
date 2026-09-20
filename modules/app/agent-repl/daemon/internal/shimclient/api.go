@@ -177,6 +177,10 @@ type Client interface {
 	DetachForeground(ctx context.Context, req *shimv1.DetachForegroundRequest) (*shimv1.DetachForegroundResponse, error)
 	// ReadHistory pages an agent's history without opening a watch.
 	ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error)
+	// ReadTranscripts lists every vendor conversation filed under the shim's
+	// own working directory, read from the transcripts' own lines. It starts
+	// no query and makes no model call.
+	ReadTranscripts(ctx context.Context, req *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error)
 	// GatherTitleDigest reads the transcript for the material the daemon
 	// synthesizes a workspace title from when the vendor wrote no ai-title.
 	GatherTitleDigest(ctx context.Context, req *shimv1.GatherTitleDigestRequest) (*shimv1.GatherTitleDigestResponse, error)
