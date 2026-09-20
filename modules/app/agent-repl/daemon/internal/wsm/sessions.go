@@ -157,6 +157,46 @@ func (s *store) SetSessionTerminal(ctx context.Context, id WorkspaceID, t Sessio
 	})
 }
 
+// ClearSessionTerminal retires a workspace's terminal session record, and it
+// is the write behind THE LIVE-SHIM INVARIANT: a workspace whose shim is live
+// in the fleet carries no terminal session record. Nothing else retired one —
+// a killed session's cause of death stood in the row until some later
+// PutSession happened to compose a row with no terminal — so a workspace whose
+// shim came back up without re-recording its facts (a bring-up parked at a
+// cold gate does exactly that) went on reading KILLED to every surface that
+// composes off the record, and the roster receded a row whose shim was serving.
+//
+// It is stated as a POSTCONDITION, not as an edit: what it guarantees is that
+// the workspace carries no terminal afterwards. A workspace with no session row
+// at all already satisfies that, so it is not a refusal — there is no record to
+// retire, and the caller asked for none to stand.
+//
+// A DELETED SESSION IS NOT RESURRECTED. Deletion is final everywhere else a
+// terminal is written (PutSession, SetSessionTerminal), and retirement is no
+// exception: the refusal is ErrSessionDeleted and the row keeps its cause.
+func (s *store) ClearSessionTerminal(ctx context.Context, id WorkspaceID) error {
+	const op = "daemon.wsm.clear_session_terminal"
+	fields := dlog.Context{"workspace": string(id)}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var kind sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT terminal_kind FROM sessions WHERE workspace_id = ?`, id).Scan(&kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if kind.Valid && kind.String == terminalDeleted {
+			return fmt.Errorf("wsm: workspace %s: %w", id, ErrSessionDeleted)
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET terminal_kind = NULL, terminal_detail = NULL, terminal_at = NULL WHERE workspace_id = ?`, id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+}
+
 // TouchEngagement records last engagement — the idle sweep's input.
 func (s *store) TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error {
 	return s.write(ctx, "daemon.wsm.touch_engagement", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {

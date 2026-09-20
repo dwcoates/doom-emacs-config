@@ -76,6 +76,11 @@ type DB interface {
 	// SetSessionTerminal records a session's death with its cause. A deleted
 	// session refuses resurrection.
 	SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error
+	// ClearSessionTerminal retires a workspace's terminal session record, so
+	// a workspace whose shim is live carries none. A workspace with no
+	// session row has nothing to retire and is not a refusal; a deleted
+	// session is never resurrected.
+	ClearSessionTerminal(ctx context.Context, id WorkspaceID) error
 	// TouchEngagement records last engagement — the idle sweep's input.
 	TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error
 	// SetShimPID records, or clears with nil, the pid of the shim process
