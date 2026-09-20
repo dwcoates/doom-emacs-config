@@ -431,6 +431,25 @@ func TestRowDoesNotRecedeOnAnOrdinarySessionDeath(t *testing.T) {
 	}
 }
 
+func TestRowDoesNotRecedeOnceAKilledSessionsTerminalIsRetired(t *testing.T) {
+	// Arrange: the row-level consequence of the live-shim invariant — a
+	// workspace whose shim is live carries no terminal record, so the row it
+	// resolves to is one Emacs gives a tab. The record is present and its
+	// terminal retired, which is what a re-opened workspace's record looks
+	// like; a killed one beside it recedes (TestRowRecedesWhenTheSessionWasKilled).
+	r, _ := newResolver(t)
+	reg := registry(workspace("w1", "one"))
+	reg.Sessions = []wsm.Session{{Workspace: theWS}}
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	if onlyRow(t, r).GetClosed().GetClosed() {
+		t.Fatal("a session whose terminal was retired receded the row")
+	}
+}
+
 func TestRowDoesNotRecedeWhileTheWorkspaceIsOpen(t *testing.T) {
 	// Arrange, Act.
 	r, _ := newResolver(t)
