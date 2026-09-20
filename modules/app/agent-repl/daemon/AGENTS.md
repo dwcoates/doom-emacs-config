@@ -566,6 +566,51 @@ must not outlive a restart. The editor's tab-bar draws the same mode from its
 own latch, on the same reset rule; the module-root AGENTS.md section "The
 viewed mode" owns the cross-surface invariant.
 
+## THE LIVE-SHIM INVARIANT: a workspace whose shim is live carries NO terminal session record
+
+Owner ruling, 2026-09-20. A workspace's session row records a terminal — its
+cause of death — and three surfaces compose off it; the roster RECEDES a row
+whose session reads `killed`, and Emacs gives a tab only to a row that is not
+receded (`lisp/roster.el`'s `agent-repl-roster-desired-tabs`). So a stale
+terminal is not a cosmetic wrong: it is a workspace the user cannot reach.
+
+Nothing ever RETIRED one. The only write that cleared a terminal was a
+successful `PutSession`, which clears it incidentally, because the row it
+composes carries none. A bring-up that parks at a standing cold gate records no
+session facts at all — so workspace `3e2d9cadc6794e13`, killed on 2026-09-15,
+came up on 2026-09-20 with a live shim behind a standing gate and a record that
+still read `killed`: `OpenWorkspace` saw `Sessions.Live` and answered in under
+two milliseconds, the roster receded the row, no tab was drawn, and the gate the
+user had to answer lived in a workspace with no tab.
+
+The invariant is enforced STRUCTURALLY, at every place the daemon begins
+holding a live client, through ONE helper — `workspace.retireTerminalRecord`
+(`internal/workspace/terminalrecord.go`):
+
+- `Fleet.hold` (`internal/workspace/sessions.go`) is the ONLY way an entry
+  enters `Fleet.sessions` on the bring-up paths — the adopted shim, the session
+  parked at its cold gate, and the started session — and it retires the record
+  in the same breath. A restatement of the SAME client (sessionUp states its
+  entry twice, once before the watcher opens and once after) writes nothing.
+- `Fleet.Install` (`internal/workspace/fleet_rollout.go`) covers the ROTATION
+  path, because both things that follow an install can leave the record
+  untouched: an adoption records no facts, and the relaunch's `Resume` can park
+  at a cold gate.
+- `OpenWorkspace` RECONCILES rather than trusting the liveness it read: a live
+  session is the reason the verb starts nothing, and it was also the reason the
+  record was never revisited.
+
+The store write is `wsm.DB.ClearSessionTerminal`, stated as a POSTCONDITION —
+the workspace carries no terminal afterwards — so a workspace with no session
+row at all is not a refusal. **A DELETED session is never resurrected**: the
+store refuses with `ErrSessionDeleted`, and the helper treats that refusal as an
+outcome (recorded at INFO) rather than a failure, because a live client is not
+evidence against a deletion. Every other store failure is recorded at ERROR and
+returned, and it fails the bring-up or the open.
+
+`sidebar.recedes` is UNCHANGED: a genuinely killed session still recedes. The
+fix is that the record became accurate.
+
 ## SelectWorkspace: the selection first, then at most one revival per workspace
 
 Owner ruling, 2026-09-19. `Select` (internal/workspace/select.go) does its work

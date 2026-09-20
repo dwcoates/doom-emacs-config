@@ -347,6 +347,17 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// which rides every new WatchSession right after the opening diagnostics.
 	// The durable record is not consulted for the opening level any more —
 	// the shim is the authority on its own session.
+	// THE LIVE-SHIM INVARIANT on the ROTATION path. An installed client is the
+	// fleet holding a live shim for this workspace, and the two things that
+	// follow an install can both leave the record untouched: an adoption
+	// records no facts at all, and the relaunch's Resume parks at a cold gate
+	// without recording any either. Retiring here is what keeps a workspace
+	// whose shim is serving from reading killed to every surface that composes
+	// off the record. See retireTerminalRecord.
+	if err := f.retireTerminal(ctx, ws); err != nil {
+		return err
+	}
+
 	if err := f.watchInstalled(ctx, ws, c); err != nil {
 		return err
 	}
@@ -362,6 +373,19 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// attachment and its generation.
 	f.publishHost(ws)
 	return nil
+}
+
+// retireTerminal retires the workspace's terminal session record for a caller
+// that holds no resolved logger of its own; the workspace's log sink is
+// resolved from its record, and a record that cannot be read fails the call
+// rather than retiring nothing quietly.
+func (f *Fleet) retireTerminal(ctx context.Context, ws ids.WorkspaceID) error {
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("workspace: retire the terminal session record for %q: %w", ws, err)
+	}
+	log := f.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(ws)})
+	return retireTerminalRecord(ctx, log, f.deps.DB, opFleetRollout, ws)
 }
 
 // Adopt dials the workspace's ALREADY RUNNING shim without spawning — the
@@ -526,7 +550,9 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		})
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID, sessionStarted: true})
+	if err := f.hold(ctx, log, ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID, sessionStarted: true}); err != nil {
+		return rollout.Resumed{}, err
+	}
 	// A resume keeps the session's host identity: the process rotated, the
 	// session did not.
 	if err := f.recordFacts(ctx, log, ws, session, started, configDir, session.HostSessionID, c.PID()); err != nil {
