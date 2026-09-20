@@ -1,0 +1,123 @@
+// endpoint_bind_workspace_session.proto — BindWorkspaceSession. SIDEBAR
+// section. Point a workspace at a DIFFERENT vendor conversation in its own
+// directory, chosen from ListWorkspaceTranscripts.
+//
+// THE BINDING IS THE WORKSPACE'S, NOT THE SESSION'S. What changes is which
+// conversation the workspace's session record names, so the choice survives a
+// restart, a hibernation and a daemon handover exactly as the rest of that
+// record does.
+//
+// IT IS A SESSION SWAP, AND IT IS SAID SO. The daemon ends the current
+// session and starts one on the named conversation through the ORDINARY
+// resume — so a cold conversation is REFUSED with its cost and answered at
+// the cold gate, the same refusal a revival meets. Binding never pays for a
+// cold read silently.
+//
+// TWO WRITERS ON ONE CONVERSATION IS DATA LOSS, so a transcript another
+// process is driving, or another workspace already holds, is refused by name
+// rather than merged.
+//
+// A BIND IS NOT AN INTERRUPT: it is refused while a turn is in flight, as
+// every other session-level verb is.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message BindWorkspaceSessionRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The conversation to bind, as ListWorkspaceTranscripts reported it. An
+  // ECHO of a served value: a client may not invent one, and an id no listing
+  // named is refused as unknown_transcript rather than attempted.
+  string vendor_session_id = 2;
+  // A client-minted correlation id. OPTIONAL, and it changes nothing about
+  // how this rpc answers: supplying one asks the daemon to also push the
+  // bind's stages onto WatchDaemon keyed on it
+  // (workspace_mutation_progress.proto), so a client can report the wait
+  // rather than only its outcome. A bind with no op_id emits no stages.
+  string op_id = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message BindWorkspaceSessionResponse {
+  oneof result {
+    BindWorkspaceSessionSuccess success = 1;
+    BindWorkspaceSessionError error = 2;
+  }
+}
+
+// Bound; every visible effect — the new feed, the topbar, the roster row —
+// arrives on the streams.
+message BindWorkspaceSessionSuccess {}
+
+// Arms derived from the daemon's refusal sites.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are
+// Connect InvalidArgument, never an arm.
+//
+// A COLD CONVERSATION IS NOT AN ARM HERE. The bind succeeds and the session
+// comes up parked at its cold gate, which is where that question is already
+// asked and answered; a second way to ask it would be a second contract.
+message BindWorkspaceSessionError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    BindWorkspaceSessionUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    BindWorkspaceSessionWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    BindWorkspaceSessionTransferringAway transferring_away = 3;
+    // No transcript in the workspace's directory carries that id.
+    BindWorkspaceSessionUnknownTranscript unknown_transcript = 4;
+    // The workspace already runs that conversation; nothing was changed.
+    BindWorkspaceSessionAlreadyBound already_bound = 5;
+    // Something is writing to that transcript right now.
+    BindWorkspaceSessionTranscriptActive transcript_active = 6;
+    // Another workspace in this daemon's registry is bound to it.
+    BindWorkspaceSessionTranscriptHeld transcript_held = 7;
+    // A turn is in flight; end it or interrupt it first.
+    BindWorkspaceSessionTurnInFlight turn_in_flight = 8;
+    // The old session would not end.
+    BindWorkspaceSessionStopFailed stop_failed = 9;
+    // The session on the newly bound conversation would not come up. THE
+    // BINDING STANDS: the record names the conversation the user chose, and
+    // the ordinary open path is what brings it up next. A bind that silently
+    // reverted would leave the user looking at a workspace they did not ask
+    // for with nothing saying why.
+    BindWorkspaceSessionStartFailed start_failed = 10;
+  }
+}
+
+message BindWorkspaceSessionUnknownWorkspace {}
+message BindWorkspaceSessionWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message BindWorkspaceSessionTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message BindWorkspaceSessionUnknownTranscript {
+  // The id that was asked for, echoed so the client can name it.
+  string vendor_session_id = 1;
+}
+message BindWorkspaceSessionAlreadyBound {}
+message BindWorkspaceSessionTranscriptActive {
+  // When the file was last appended to, in epoch milliseconds.
+  int64 at_ms = 1;
+}
+message BindWorkspaceSessionTranscriptHeld {
+  // The workspace that holds it.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+message BindWorkspaceSessionTurnInFlight {}
+message BindWorkspaceSessionStopFailed {
+  // The stop's own account of the failure.
+  string detail = 1;
+}
+message BindWorkspaceSessionStartFailed {
+  // The start's own account of the failure.
+  string detail = 1;
+}
