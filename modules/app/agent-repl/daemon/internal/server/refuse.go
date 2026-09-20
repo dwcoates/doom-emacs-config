@@ -232,6 +232,17 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 			setListField(armMessage, field, value)
 			continue
 		}
+		// A MESSAGE-KIND FIELD IS SET BEFORE THE SCALAR SWITCH TOO, for the
+		// same reason a repeated one is: an arm whose evidence is itself a
+		// message — BindWorkspaceSessionTranscriptHeld's `workspace` — would
+		// otherwise fall through every scalar case and leave the arm naming
+		// nothing beside a sentence that names a workspace.
+		if field.Kind() == protoreflect.MessageKind {
+			if message, ok := value.(proto.Message); ok && message != nil {
+				armMessage.Set(field, protoreflect.ValueOfMessage(message.ProtoReflect()))
+			}
+			continue
+		}
 		switch field.Kind() {
 		case protoreflect.StringKind:
 			if text, ok := value.(string); ok {

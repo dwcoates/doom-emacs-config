@@ -78,8 +78,15 @@ const CLEAR_ENVELOPE = "<command-name>/clear</command-name>";
  */
 const COMMAND_ARTIFACT_PREFIXES = ["<command-name>", "<local-command-stdout>", "<local-command-caveat>"];
 
-/** Whether a record is a compaction boundary (the marker, not the summary). */
-function isCompactBoundary(r: TitleDigestRecord): boolean {
+/**
+ * Whether a record is a compaction boundary (the marker, not the summary).
+ *
+ * EXPORTED because `engine/cold.ts` decides the same question about the same
+ * records while reading a transcript for ReadTranscripts. A second spelling of
+ * "what is a boundary" is how two surfaces come to disagree about one
+ * conversation, so there is one.
+ */
+export function isCompactBoundary(r: TitleDigestRecord): boolean {
   return r.type === "system" && r.subtype === "compact_boundary";
 }
 
@@ -90,8 +97,13 @@ function userString(r: TitleDigestRecord): string | undefined {
   return typeof content === "string" ? content : undefined;
 }
 
-/** Whether a user string is a /clear command envelope. */
-function isClearEnvelope(r: TitleDigestRecord): boolean {
+/**
+ * Whether a user string is a /clear command envelope.
+ *
+ * EXPORTED for the same reason `isCompactBoundary` is: one spelling of the
+ * boundary rule, shared by the digest and by ReadTranscripts.
+ */
+export function isClearEnvelope(r: TitleDigestRecord): boolean {
   const s = userString(r);
   return s !== undefined && s.includes(CLEAR_ENVELOPE);
 }
