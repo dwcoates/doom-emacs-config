@@ -645,6 +645,30 @@ func TestBindSessionLeavesTheNEWBindingStandingWhenTheStartFailed(t *testing.T) 
 	}
 }
 
+func TestBindSessionFinishesTheSwapAfterTheCALLERGivesUp(t *testing.T) {
+	// Arrange: a bring-up can outlast a client's unary deadline, and a
+	// cancellation that reached the start left the workspace carrying the new
+	// binding with no session behind it.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"}, transcriptSpec{id: "b"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.fleet.onStop = cancel
+
+	// Act.
+	_ = f.verbs.BindSession(ctx, "w1", "b", nil)
+
+	// Assert: the start ran, and on a context the caller could not cancel.
+	if len(f.fleet.startCalls) != 1 {
+		t.Fatalf("start calls = %d, want the swap to finish the bring-up", len(f.fleet.startCalls))
+	}
+	if f.fleet.startCtxErr != nil {
+		t.Fatalf("start context = %v, want a live one the caller cannot cancel", f.fleet.startCtxErr)
+	}
+}
+
 func TestBindSessionRefusesNoSessionWhenNoShimIsLiveToList(t *testing.T) {
 	// Arrange: the choice is validated against a listing only a shim can give.
 	f := newFixture(t)

@@ -267,7 +267,7 @@ the user as the verb, the word refused, the arm keyword, and the fields."
 ;;;; ---- The one dispatcher ----------------------------------------------
 
 (cl-defun agent-repl-verbs--send (rpc conn request &key ws op on-success on-error
-                                      on-accepted on-transport-failure)
+                                      on-accepted on-transport-failure timeout)
   "Send REQUEST through RPC on CONN and dispatch the answer shapes.
 OP names the verb for the log.  ON-SUCCESS receives the decoded success
 value and is the ONLY place editor state changes.  ON-ERROR, when given,
@@ -281,7 +281,11 @@ ON-ERROR: nobody answering and the daemon refusing are different facts.
 ON-TRANSPORT-FAILURE, when given, receives the failure detail on that
 third path; it is for RETIRING STATE the verb armed before the send (a
 registered progress op has no other way to learn nothing is coming) and
-never for wording the failure, which this dispatcher owns."
+never for wording the failure, which this dispatcher owns.
+TIMEOUT, when given, overrides `agent-repl-connect-unary-timeout-seconds\='
+for this send -- for a verb whose work is a SESSION BRING-UP, which
+outlasts the default deadline often enough that the default would report
+a failure over work that is still running and will succeed."
   (let ((request-id (or (plist-get request :idempotency-key)
                         (agent-repl--next-log-request-id)))
         (log-ws (or ws agent-repl--global-log-scope)))
@@ -290,6 +294,7 @@ never for wording the failure, which this dispatcher owns."
      (lambda ()
        (agent-repl--info ws "elisp.verbs.send op=%s ws=%s" op ws)
        (funcall rpc conn request
+                :timeout timeout
                 :on-response
                 (lambda (response)
                   (agent-repl--with-log-context
