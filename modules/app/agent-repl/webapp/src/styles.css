@@ -45,8 +45,14 @@
      the band reads as a shadow passing UNDER the bubble's own color rather
      than as a second color competing with it, and faint enough that the text
      over it never dims. The dark theme deepens it, since a faint wash reads as
-     nothing on the dark bubble fills. */
-  --bubble-wave: color-mix(in srgb, #000000 7%, transparent);
+     nothing on the dark bubble fills.
+
+     OWNER RULING, 2026-09-21 ("make the glimmering 50% more intense"): the
+     wash was 7% black and is now 10.5% — exactly half again as much black in
+     the SAME band, so the glimmer reads stronger without its geometry, period
+     or phase changing at all. The dark theme's own wash takes the same +50%
+     (26% -> 39%), so the two themes stay one ruling rather than two. */
+  --bubble-wave: color-mix(in srgb, #000000 10.5%, transparent);
   /* The depth cue at the very bottom edge of the window (see body::after): a
      soft, upward-fading wash of black pinned across the full width, seating the
      GUI a plane BELOW the Emacs input window docked beneath it rather than
@@ -309,8 +315,10 @@
     --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
     /* Deeper than the light theme's wave: the same 7% black that reads as a
        passing shadow on the pale light-theme bubble is invisible on the dark
-       one, so the band carries more black to still register. */
-    --bubble-wave: color-mix(in srgb, #000000 26%, transparent);
+       one, so the band carries more black to still register. Carries the same
+       +50% the light theme's wash took on 2026-09-21 (26% -> 39%), so one
+       ruling moves both themes together. */
+    --bubble-wave: color-mix(in srgb, #000000 39%, transparent);
     /* Deeper than the light theme's bottom wash: a faint gradient reads as
        nothing against the dark feed, so the seam cue needs a heavier black to
        still register. Still kept just under the dark sidebar's black, so the

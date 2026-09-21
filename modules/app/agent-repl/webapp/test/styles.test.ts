@@ -119,6 +119,29 @@ function declarationsOf(selector: string): string | undefined {
   return rulesOf(stylesheet).find((rule) => rule.selectors.includes(selector))?.declarations;
 }
 
+/**
+ * The raw text of the `@media (prefers-color-scheme: dark)` block, found by
+ * balancing braces from its opening `{` — `rulesOf`'s flat scan cannot tell a
+ * media block's own `:root` apart from the top-level one, so a dark-theme
+ * override is asserted against this substring instead. Module scope because
+ * more than one suite below pins a dark-theme token.
+ */
+function darkThemeBlock(): string {
+  const start = stylesheet.indexOf("@media (prefers-color-scheme: dark)");
+  if (start === -1) throw new Error("no dark-theme media query found");
+  const openBrace = stylesheet.indexOf("{", start);
+  let depth = 0;
+  let i = openBrace;
+  for (; i < stylesheet.length; i++) {
+    if (stylesheet[i] === "{") depth++;
+    else if (stylesheet[i] === "}") {
+      depth--;
+      if (depth === 0) break;
+    }
+  }
+  return stylesheet.slice(openBrace + 1, i);
+}
+
 /** Every scroll box the ruling names, by the selector the sheet caps it with. */
 const SCROLL_BOXES: readonly string[] = [
   ".bubble > .bubble-scroll",
@@ -990,26 +1013,6 @@ describe("the cost corner's hover hit area", () => {
  * togglers is exactly what could drift apart.
  */
 describe("the prompt bubble's in-flight border", () => {
-  /** The raw text of the `@media (prefers-color-scheme: dark)` block, found
-   * by balancing braces from its opening `{` — `rulesOf`'s flat scan cannot
-   * tell a media block's own `:root` apart from the top-level one, so a dark
-   * -theme override is asserted against this substring instead. */
-  function darkThemeBlock(): string {
-    const start = stylesheet.indexOf("@media (prefers-color-scheme: dark)");
-    if (start === -1) throw new Error("no dark-theme media query found");
-    const openBrace = stylesheet.indexOf("{", start);
-    let depth = 0;
-    let i = openBrace;
-    for (; i < stylesheet.length; i++) {
-      if (stylesheet[i] === "{") depth++;
-      else if (stylesheet[i] === "}") {
-        depth--;
-        if (depth === 0) break;
-      }
-    }
-    return stylesheet.slice(openBrace + 1, i);
-  }
-
   it("reserves a 0.3px transparent border on every bubble, prompt included", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble");
@@ -1495,5 +1498,73 @@ describe("the reviving shimmer's stylesheet contract", () => {
     expect(rules.length).toBe(2);
     expect(override).toMatch(/animation:\s*none/);
     expect(override).toMatch(/background-image:\s*none/);
+  });
+});
+
+/**
+ * THE PROMPT GLIMMER'S INTENSITY (owner ruling, 2026-09-21: "make the
+ * glimmering in the webapp response bubbles 50% more intense").
+ *
+ * The glimmer's strength is ONE thing: how much black the `--bubble-wave`
+ * wash carries. Nothing else in the effect changes with intensity — the
+ * gradient's geometry, its 3.2s period and its phase are all held elsewhere —
+ * so the wash percentage is what an assertion can honestly pin, per theme.
+ * Both themes carry the same +50%, because one ruling moved both.
+ */
+describe("the prompt glimmer's intensity", () => {
+  /** The black percentage in a `--bubble-wave` declaration's color-mix. */
+  function wavePercent(block: string): number {
+    const declaration = /--bubble-wave:\s*color-mix\(in srgb,\s*#000000\s*([\d.]+)%/.exec(block);
+    if (declaration === null) throw new Error("no --bubble-wave color-mix found");
+    return Number(declaration[1]);
+  }
+
+  it("washes the light theme's band with 10.5% black, the ruling's +50% over 7%", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+
+    // Assert
+    expect(wavePercent(root)).toBeCloseTo(10.5, 5);
+  });
+
+  it("washes the dark theme's band with 39% black, the same +50% over 26%", () => {
+    // Arrange / Act
+    const dark = darkThemeBlock();
+
+    // Assert
+    expect(wavePercent(dark)).toBeCloseTo(39, 5);
+  });
+
+  it("keeps the dark theme's band the deeper of the two, as a dark fill needs", () => {
+    // Arrange / Act
+    const light = wavePercent(declarationsOf(":root") ?? "");
+    const dark = wavePercent(darkThemeBlock());
+
+    // Assert
+    expect(dark).toBeGreaterThan(light);
+  });
+
+  it("carries the intensity in the token alone, so the gradient rule is untouched by it", () => {
+    // Arrange / Act — the band's own rule names the token and no literal wash.
+    const waving = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes('.bubble.user[data-wave="working"]'),
+    );
+    const gradient = waving.find((rule) => /background-image/.test(rule.declarations))?.declarations ?? "";
+
+    // Assert
+    expect(gradient).toMatch(/var\(--bubble-wave\)/);
+    expect(gradient).not.toMatch(/color-mix/);
+  });
+
+  it("holds the 3.2s period the effect had before the intensity ruling", () => {
+    // Arrange / Act — intensity is the wash alone; the pass must not speed up.
+    const waving = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.includes('.bubble.user[data-wave="working"]'),
+    );
+
+    // Assert
+    expect(
+      waving.some((rule) => /animation:\s*bubble-wave 3\.2s linear infinite/.test(rule.declarations)),
+    ).toBe(true);
   });
 });
