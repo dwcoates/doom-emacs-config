@@ -759,3 +759,98 @@ func TestBindSessionReportsNoStageAfterARefusal(t *testing.T) {
 		t.Fatalf("stages = %+v, want only the read", progress.stages)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// BindSession: the feed
+// ---------------------------------------------------------------------------
+
+// THE BIND IS THE ONE VERB THAT CHANGES WHICH CONVERSATION A WORKSPACE RUNS,
+// so it is the one verb that empties the feed. Without it the previous
+// conversation's rows stand and the chosen conversation merely upserts
+// alongside them — a successful bind that drew nothing the user could see.
+
+func TestBindSessionEmptiesTheWorkspacesFeed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"}, transcriptSpec{id: "b"})
+
+	// Act.
+	if err := f.verbs.BindSession(context.Background(), "w1", "b", nil); err != nil {
+		t.Fatalf("BindSession: %v", err)
+	}
+
+	// Assert.
+	if got := f.feed.resets; len(got) != 1 || got[0] != "w1" {
+		t.Fatalf("feed resets = %+v, want one of w1", got)
+	}
+}
+
+func TestBindSessionEmptiesTheFeedAfterTheStopAndBeforeTheStart(t *testing.T) {
+	// Arrange: the order is the whole mechanism — emptying before the stop
+	// would let the dying session draw into the cleared feed, and emptying
+	// after the start would wipe the new conversation's own replay.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"}, transcriptSpec{id: "b"})
+	var stopsAtReset, startsAtReset int
+	f.feed.onReset = func() {
+		stopsAtReset = len(f.fleet.stopped)
+		startsAtReset = len(f.fleet.started)
+	}
+
+	// Act.
+	if err := f.verbs.BindSession(context.Background(), "w1", "b", nil); err != nil {
+		t.Fatalf("BindSession: %v", err)
+	}
+
+	// Assert.
+	if stopsAtReset != 1 {
+		t.Fatalf("stops at the reset = %d, want the old session already ended", stopsAtReset)
+	}
+	if startsAtReset != 0 {
+		t.Fatalf("starts at the reset = %d, want the new session not yet up", startsAtReset)
+	}
+}
+
+func TestBindSessionEmptiesNoFeedWhenItRefusesTheChoice(t *testing.T) {
+	// Arrange: the workspace already runs the chosen conversation.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"})
+
+	// Act.
+	err := f.verbs.BindSession(context.Background(), "w1", "a", nil)
+
+	// Assert: a refusal changes nothing, the feed least of all.
+	if refusedArm(err) != ArmAlreadyBound {
+		t.Fatalf("arm = %q, want %q", refusedArm(err), ArmAlreadyBound)
+	}
+	if len(f.feed.resets) != 0 {
+		t.Fatalf("feed resets = %+v, want none after a refusal", f.feed.resets)
+	}
+}
+
+func TestBindSessionEmptiesNoFeedWhenTheStopFailed(t *testing.T) {
+	// Arrange: the old session would not end, so the workspace still runs the
+	// conversation whose rows are on screen.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"}, transcriptSpec{id: "b"})
+	f.fleet.stopErr = errors.New("the shim would not go")
+
+	// Act.
+	err := f.verbs.BindSession(context.Background(), "w1", "b", nil)
+
+	// Assert.
+	if refusedArm(err) != ArmStopFailed {
+		t.Fatalf("arm = %q, want %q", refusedArm(err), ArmStopFailed)
+	}
+	if len(f.feed.resets) != 0 {
+		t.Fatalf("feed resets = %+v, want none when the stop failed", f.feed.resets)
+	}
+}
