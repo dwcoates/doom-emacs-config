@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_session.proto.
  */
 export const file_shim_v1_endpoint_start_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCKMAQoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBQhMKEV9jb2xkX3JlbWVkaWF0aW9uIoIBChRTdGFydFNlc3Npb25SZXNwb25zZRIvCgdzdWNjZXNzGAEgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25TdWNjZXNzSAASLwoHZmFpbHVyZRgCIAEoCzIcLnNoaW0udjEuU3RhcnRTZXNzaW9uRmFpbHVyZUgAQggKBnJlc3VsdCJHChNTdGFydFNlc3Npb25TdWNjZXNzEjAKB3Nlc3Npb24YASABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWQi6QIKE1N0YXJ0U2Vzc2lvbkZhaWx1cmUSLAoEY29sZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZEgAEkUKE3ZlbmRvcl9zdGFydF9mYWlsZWQYAyABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkSAASPgoPdW5rbm93bl9zZXNzaW9uGAQgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbkgAEj4KD2FscmVhZHlfc3RhcnRlZBgFIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWRIABJEChJjb252ZXJzYXRpb25fb3duZWQYBiABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlIh8KHVN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkIhwKGlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uIhwKGlN0YXJ0U2Vzc2lvbkFscmVhZHlTdGFydGVkIh8KHVN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCLJAQoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBEjAKBnJlYmluZBgDIAEoCzIbLnNoaW0udjEuU3RhcnRTZXNzaW9uUmViaW5kSAGIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb25CCQoHX3JlYmluZCIUChJTdGFydFNlc3Npb25SZWJpbmQiggEKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLlN0YXJ0U2Vzc2lvblN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0IkcKE1N0YXJ0U2Vzc2lvblN1Y2Nlc3MSMAoHc2Vzc2lvbhgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uU3RhcnRlZCLpAgoTU3RhcnRTZXNzaW9uRmFpbHVyZRIsCgRjb2xkGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkSAASRQoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgDIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWRIABI+Cg91bmtub3duX3Nlc3Npb24YBCABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uSAASPgoPYWxyZWFkeV9zdGFydGVkGAUgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZEgAEkQKEmNvbnZlcnNhdGlvbl9vd25lZBgGIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2UiHwodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWQiHAoaU3RhcnRTZXNzaW9uVW5rbm93blNlc3Npb24iHAoaU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWQiHwodU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session]);
 
 /**
  * What the daemon wants driven, and how. UNARY: the daemon persists the
@@ -127,6 +127,31 @@ export type StartSessionResume = Message<"shim.v1.StartSessionResume"> & {
    * @generated from field: optional conversation.v1.SessionColdRemediation cold_remediation = 2;
    */
   coldRemediation?: SessionColdRemediation | undefined;
+
+  /**
+   * Set when this resume REBINDS the workspace to a different conversation —
+   * the user chose it (BindWorkspaceSession), rather than the workspace
+   * continuing the one it was already on.
+   *
+   * WHY THE SHIM HAS TO BE TOLD. The shim keeps a persisted main AgentId per
+   * workspace — the BOOK every frame of the conversation is filed under and
+   * the one the daemon reads history from — and a plain resume deliberately
+   * keeps it whatever it already was, because a rotated resume handle must
+   * not make everything recorded before the rotation unreachable. A bind is
+   * the one resume where that rule is wrong: the workspace is now on a
+   * DIFFERENT conversation, and leaving the old book in place replays the old
+   * conversation's history over the new one and hides the chosen
+   * conversation's own pages entirely.
+   *
+   * So this arm says: adopt the resumed conversation's identity as the
+   * workspace's book. The shim resolves the resumed id to its ORIGINAL (a
+   * forked or rotated id answers from its link file) and persists that, so a
+   * bind to a rotated conversation lands on the book its records were filed
+   * under rather than minting a second name for it.
+   *
+   * @generated from field: optional shim.v1.StartSessionRebind rebind = 3;
+   */
+  rebind?: StartSessionRebind | undefined;
 };
 
 /**
@@ -135,6 +160,22 @@ export type StartSessionResume = Message<"shim.v1.StartSessionResume"> & {
  */
 export const StartSessionResumeSchema: GenMessage<StartSessionResume> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_session, 2);
+
+/**
+ * This resume is a rebind: the workspace's book becomes the resumed
+ * conversation's own. Presence is the fact.
+ *
+ * @generated from message shim.v1.StartSessionRebind
+ */
+export type StartSessionRebind = Message<"shim.v1.StartSessionRebind"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionRebind.
+ * Use `create(StartSessionRebindSchema)` to create a new message.
+ */
+export const StartSessionRebindSchema: GenMessage<StartSessionRebind> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 3);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -165,7 +206,7 @@ export type StartSessionResponse = Message<"shim.v1.StartSessionResponse"> & {
  * Use `create(StartSessionResponseSchema)` to create a new message.
  */
 export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 3);
+  messageDesc(file_shim_v1_endpoint_start_session, 4);
 
 /**
  * The session can accept a prompt.
@@ -193,7 +234,7 @@ export type StartSessionSuccess = Message<"shim.v1.StartSessionSuccess"> & {
  * Use `create(StartSessionSuccessSchema)` to create a new message.
  */
 export const StartSessionSuccessSchema: GenMessage<StartSessionSuccess> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 4);
+  messageDesc(file_shim_v1_endpoint_start_session, 5);
 
 /**
  * The session could not be opened as asked. THE ARM IS WHY.
@@ -262,7 +303,7 @@ export type StartSessionFailure = Message<"shim.v1.StartSessionFailure"> & {
  * Use `create(StartSessionFailureSchema)` to create a new message.
  */
 export const StartSessionFailureSchema: GenMessage<StartSessionFailure> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 5);
+  messageDesc(file_shim_v1_endpoint_start_session, 6);
 
 /**
  * @generated from message shim.v1.StartSessionVendorStartFailed
@@ -275,7 +316,7 @@ export type StartSessionVendorStartFailed = Message<"shim.v1.StartSessionVendorS
  * Use `create(StartSessionVendorStartFailedSchema)` to create a new message.
  */
 export const StartSessionVendorStartFailedSchema: GenMessage<StartSessionVendorStartFailed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 6);
+  messageDesc(file_shim_v1_endpoint_start_session, 7);
 
 /**
  * @generated from message shim.v1.StartSessionUnknownSession
@@ -288,7 +329,7 @@ export type StartSessionUnknownSession = Message<"shim.v1.StartSessionUnknownSes
  * Use `create(StartSessionUnknownSessionSchema)` to create a new message.
  */
 export const StartSessionUnknownSessionSchema: GenMessage<StartSessionUnknownSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 7);
+  messageDesc(file_shim_v1_endpoint_start_session, 8);
 
 /**
  * @generated from message shim.v1.StartSessionAlreadyStarted
@@ -301,7 +342,7 @@ export type StartSessionAlreadyStarted = Message<"shim.v1.StartSessionAlreadySta
  * Use `create(StartSessionAlreadyStartedSchema)` to create a new message.
  */
 export const StartSessionAlreadyStartedSchema: GenMessage<StartSessionAlreadyStarted> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 8);
+  messageDesc(file_shim_v1_endpoint_start_session, 9);
 
 /**
  * @generated from message shim.v1.StartSessionConversationOwned
@@ -314,5 +355,5 @@ export type StartSessionConversationOwned = Message<"shim.v1.StartSessionConvers
  * Use `create(StartSessionConversationOwnedSchema)` to create a new message.
  */
 export const StartSessionConversationOwnedSchema: GenMessage<StartSessionConversationOwned> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 9);
+  messageDesc(file_shim_v1_endpoint_start_session, 10);
 
