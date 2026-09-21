@@ -58,7 +58,31 @@ message StartSessionResume {
   // daemon's first attempt, which learns the cost before paying it. Set only
   // on the retry that follows a `cold` failure; a warm context ignores it.
   optional conversation.v1.SessionColdRemediation cold_remediation = 2;
+  // Set when this resume REBINDS the workspace to a different conversation —
+  // the user chose it (BindWorkspaceSession), rather than the workspace
+  // continuing the one it was already on.
+  //
+  // WHY THE SHIM HAS TO BE TOLD. The shim keeps a persisted main AgentId per
+  // workspace — the BOOK every frame of the conversation is filed under and
+  // the one the daemon reads history from — and a plain resume deliberately
+  // keeps it whatever it already was, because a rotated resume handle must
+  // not make everything recorded before the rotation unreachable. A bind is
+  // the one resume where that rule is wrong: the workspace is now on a
+  // DIFFERENT conversation, and leaving the old book in place replays the old
+  // conversation's history over the new one and hides the chosen
+  // conversation's own pages entirely.
+  //
+  // So this arm says: adopt the resumed conversation's identity as the
+  // workspace's book. The shim resolves the resumed id to its ORIGINAL (a
+  // forked or rotated id answers from its link file) and persists that, so a
+  // bind to a rotated conversation lands on the book its records were filed
+  // under rather than minting a second name for it.
+  optional StartSessionRebind rebind = 3;
 }
+
+// This resume is a rebind: the workspace's book becomes the resumed
+// conversation's own. Presence is the fact.
+message StartSessionRebind {}
 
 // THE ARM IS THE OUTCOME.
 message StartSessionResponse {
