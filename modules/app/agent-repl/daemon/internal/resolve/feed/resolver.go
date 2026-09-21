@@ -450,7 +450,18 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "ok"})
 		return s
 	}
-	s = &wsState{
+	s = newWSState(ws)
+	r.workspaces[ws] = s
+	return s
+}
+
+// newWSState is the ONE place a workspace's feed state is born, so a workspace
+// seen for the first time and a workspace RESET to empty (see reset.go) start
+// from the same zero. A field added to wsState is initialised here and is
+// therefore dropped by a reset without that reset having to name it — which is
+// what makes "the feed is as empty as one never opened" hold as the state grows.
+func newWSState(ws ids.WorkspaceID) *wsState {
+	return &wsState{
 		id:                   ws,
 		feeds:                map[string]*feedState{},
 		feedAddrs:            map[string]feedid.Feed{},
@@ -488,8 +499,6 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 
 		plane: planeLive,
 	}
-	r.workspaces[ws] = s
-	return s
 }
 
 // feed resolves one feed's state within a workspace, creating it on first
