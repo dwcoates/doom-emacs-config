@@ -89,7 +89,7 @@ func (c *controller) RollOut(ctx context.Context, rebuilt Rebuilt) (Acceptance, 
 	joining := c.joiningMode
 	c.mu.Unlock()
 	if joining {
-		c.log.Warn(opRollOut, "refused a rollout asked of a successor that is still joining", fields)
+		c.log.Info(opRollOut, "refused a rollout asked of a successor that is still joining", fields)
 		return Acceptance{}, ErrJoining
 	}
 
