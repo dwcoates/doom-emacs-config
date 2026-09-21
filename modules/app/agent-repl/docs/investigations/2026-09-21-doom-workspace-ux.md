@@ -407,3 +407,33 @@ opened or a transcript is selected (`SPC j c`), and only the first page.
   (`sdk.d.ts`, `PostCompactHookInput`). The shim registers no hooks today.
 - So the fix is: write the divider AT the boundary, and attach the summary from
   the `PostCompact` hook. The "next assistant prose" release condition goes.
+
+---
+
+## Fix 1 LANDED (2026-09-21): a deploy rolls out and never ends a turn
+
+- `RollOutBuild` + `deploy-all.sh` rolling out by default; see the changelog
+  line `deploy-rolls-out-never-restarts` and AGENTS.md "A deploy ROLLS OUT".
+- Proven live at 16:04:13: six workspaces handed to a successor daemon in 2 s,
+  every shim ADOPTED, none killed. e2e proves the invariant against a real
+  daemon: a rollout during a running turn leaves the turn running
+  (`e2e/rollout_e2e_test.go`).
+
+### What the first live handover showed (all belong to fixes already planned)
+
+- 270 `ClientLog` calls were refused `transferring_away` in the handover's one
+  second, and the refusal has no proto arm (fix 5). Log forwarders keep posting
+  to the daemon they were started against. THIS IS THE LIKELY ANSWER TO ITEM 6:
+  webapp records vanish when their forwarder is pointed at a daemon that no
+  longer serves the workspace. To confirm when fix 5 is done.
+- The held `/model fable` prompt re-submitted itself on reconnect and was
+  refused again (item 8): an "outage"-held prompt replays forever.
+- The successor REPLAYED HISTORY on adoption (`detached_unknown_unit`,
+  `row_without_identity`, `subagent_without_start` at 16:04:14). Adoption is
+  neither an open nor a bind, so under the owner's replay rule it must not
+  replay (fix 2).
+- Transfers and shim relaunches run SERIALLY (`completeHandover`,
+  `relaunchFleet`): a busy workspace delays the free ones queued behind it.
+  They stay served by the old daemon, so nothing is harmed, but the design says
+  "per workspace, independently". A separate defect, not yet scheduled.
+
