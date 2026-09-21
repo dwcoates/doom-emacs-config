@@ -399,6 +399,40 @@ runtimes a change touches, and the lead does not second-guess it.
 The one thing that stops a deploy is a suite that did not pass. A change whose
 tests are red is not landed in the first place.
 
+## A deploy ROLLS OUT; it never restarts, and it never ends a turn
+
+Owner ruling, standing (2026-09-21). `bin/deploy-all.sh` builds, then asks the
+DAEMON to put the build into service (`RollOutBuild`,
+`proto/src/agentrepl/v1/endpoint_roll_out_build.proto`). The daemon does what
+`docs/overhaul/daemon.md` item 10 specifies: a blue-green HANDOVER for a daemon
+change, a per-workspace shim RELAUNCH for a shim change, a `reload_webapp` push
+for a webapp change — every one of them at the workspace's FREENESS (no turn in
+flight, no live detached work), waited on for as long as it takes. A workspace
+mid-turn keeps being served by the outgoing daemon until its turn ends.
+
+THERE IS ONE ROLLOUT ENGINE AND TWO TRIGGERS. A self-merge reaches it through
+`rollout.Trigger` (classify the landed range, run the deploy chain, act); a
+deploy reaches it through `rollout.RollOut` (the chain states what it rebuilt,
+act). Both take the same per-subsystem action by the same precedence, so a
+deploy and a self-merge cannot roll out differently. Do not add a third path.
+
+`UpdateShutdownSchedule{now}` FORCES EVERY SESSION DOWN and is an operator's
+emergency stop. NO SCRIPT CALLS IT BY DEFAULT. `deploy-all.sh --restart` is the
+one way to reach it, it says in so many words that it ends every running turn,
+and it exists for two cases only: moving the runtime to another checkout's
+artifacts, and a daemon too old to answer `RollOutBuild`.
+
+A ROLLOUT IN FLIGHT IS NEVER STARTED AGAIN. A handover waiting on a busy
+workspace refuses a second one (`already_rolling_out`, naming the holdouts), and
+the deploy fails loudly rather than standing a second successor beside the
+first. Whether the daemon is owed a handover is a STAMP written when a rollout
+was accepted (`daemon/bin/.rolled-out-fingerprint`), never "did this build
+change the file": a `--no-bounce` run changes the file and rolls nothing out.
+
+Store and sidecar are launchd services the chain restarts itself, in the
+recorded safe order. A running shim rides a store restart out on its bounded
+retry buffer; the sidecar re-reads its files from its cursor.
+
 ## Every landed remediation gets a changelog line
 
 `docs/REMEDIATION-CHANGELOG.md` carries one brief line per landed remediation,

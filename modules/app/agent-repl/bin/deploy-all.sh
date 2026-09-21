@@ -26,35 +26,40 @@
 #  4b. revision gate   readiness-report.sh --require-ready webapp, run once
 #                       everything is built and BEFORE any kickstart or daemon
 #                       restart: a stale artifact must never be bounced into
-#   5. runtime bounce   first loads the runtime control plane from THIS
-#                       checkout so its artifact-root constants name the
-#                       binaries built above, then calls
-#                       `(agent-repl-runtime-restart-await)` via emacsclient.
-#                       This ordering is load-bearing for linked worktrees: the
-#                       running Emacs may have loaded the module from the main
-#                       worktree, and restarting before rebinding those paths
-#                       launches the main worktree's stale build.
+#   5. rollout          first loads the runtime control plane from THIS
+#                       checkout, then calls
+#                       `(agent-repl-runtime-rollout-await REBUILT)` via
+#                       emacsclient, naming what this run rebuilt (daemon, shim,
+#                       webapp). The DAEMON rolls it out: a blue-green handover
+#                       for a daemon change, a per-workspace shim relaunch for a
+#                       shim change, a `reload_webapp` push for a webapp change.
 #
-#                       The await form returns only on terminal completion (the
-#                       string `runtime-restart-complete`) and SIGNALS on
-#                       failure or timeout, so this script can never mistake a
-#                       dispatch for a finished deployment.
+#                       A ROLLOUT ENDS NO TURN. Every one of those actions
+#                       waits for the workspace's freeness (no turn in flight,
+#                       no live detached work) for as long as that takes; a busy
+#                       workspace keeps being served by the outgoing daemon
+#                       until its turn ends. That is the whole point of this
+#                       step, and why the forced restart below is opt-in.
 #
-#                       When no Emacs server is reachable the bounce is
-#                       explicitly deferred until Emacs startup. Once a server
-#                       is reachable, any restart failure still fails this
-#                       script loudly (exit 3).
+#                       The await form returns the rollout's ACCEPTANCE (a
+#                       string beginning `runtime-rollout-accepted`) and SIGNALS
+#                       on a refusal, a transport failure or a timeout, so this
+#                       script can never mistake a refused rollout for an
+#                       accepted one. A rollout already in flight is refused,
+#                       naming the workspaces it waits on.
 #
-#                       Surviving shims are NOT stopped here and no webview is
-#                       re-navigated here. The incoming daemon owns both: its
-#                       rollout controller bounces a shim whose reported build
-#                       identity is stale, and it pushes `reload_webapp` to the
-#                       clients that must reload. This script only reports what
-#                       moved.
-#  5b. daemon gate      readiness-report.sh --require-ready daemon, after the
-#                       Emacs coordinator observes a new process identity. A
-#                       stale running binary fails the deployment with its pid
-#                       and the deployed/source revision stamps.
+#                       When no Emacs server is reachable the rollout is
+#                       explicitly deferred until Emacs startup. Whether the
+#                       daemon needs a handover is decided by a stamp written at
+#                       the last accepted rollout (daemon/bin/
+#                       .rolled-out-fingerprint), never by "did this build change
+#                       the file" — a `--no-bounce` run changes the file and
+#                       rolls nothing out.
+#  5b. daemon gate      readiness-report.sh --require-ready daemon, POLLED up to
+#                       AGENT_REPL_HANDOVER_MAX seconds after a handover that
+#                       waits on nobody. A handover that IS waiting on a busy
+#                       workspace skips the gate and says so: it cannot pass
+#                       until that workspace is free.
 #   6. elisp reload     BY DEFAULT (no flag), hot-load the whole canonical
 #                       module set into the running Emacs, so a deploy live-
 #                       reloads Emacs (owner ruling 2026-09-14): the deployed
@@ -92,6 +97,10 @@
 #                  restart, and any elisp reload (pure build mode). Leaves the
 #                  deployed stamps untouched, so a later real run still sees
 #                  the freshly installed binaries as un-deployed and bounces.
+#   --restart      FORCE a restart instead of a rollout: the daemon is told to
+#                  shut down now, which ENDS EVERY RUNNING TURN. The operator's
+#                  emergency stop, and the only way to move the runtime to a
+#                  different checkout's artifacts. Never the default.
 #   --no-daemon-bounce
 #                  everything through step 4 (services ARE kickstarted), but
 #                  skip step 5's emacsclient restart and step 6's elisp reload.
@@ -111,6 +120,9 @@
 #                                  still absent (default 15). It is a STALL
 #                                  budget, not a deadline: a boot that is
 #                                  visibly working resets it.
+#   AGENT_REPL_HANDOVER_MAX        seconds a handover that waits on nobody may
+#                                  take to bring the successor up on the
+#                                  deployed build (default 90)
 #   AGENT_REPL_STORE_SOCK_MAX      the upper bound on the whole wait, however
 #                                  busy the store looks (default 180)
 
@@ -171,12 +183,14 @@ readonly VENDOR_GUARD_ENV=AGENT_REPL_FORBID_VENDOR_CALLS
 FORCE=0
 NO_BOUNCE=0
 NO_DAEMON_BOUNCE=0
+RESTART=0
 ELISP_RANGE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --force)     FORCE=1 ;;
         --no-bounce) NO_BOUNCE=1 ;;
         --no-daemon-bounce) NO_DAEMON_BOUNCE=1 ;;
+        --restart)   RESTART=1 ;;
         --elisp)     shift; ELISP_RANGE="${1:?--elisp needs a git range}" ;;
         *) echo "[deploy-all] unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -192,7 +206,11 @@ log() { echo "[deploy-all] $*"; }
 # did not have to: the form still loaded lisp/frontend-client.el after the
 # module was deleted, and every deploy died on it AFTER both services had been
 # kickstarted.
-PRELOAD_FILES=(lisp/daemon.el lisp/services.el)
+#
+# The wire codec and the rpc verbs come first because step 5 CALLS a verb
+# (RollOutBuild) that a running Emacs from before this deploy may not have: the
+# whole-module hot-reload is step 6, which is after the call.
+PRELOAD_FILES=(lisp/wire-verbs.el lisp/rpc.el lisp/daemon.el lisp/services.el)
 
 # FAIL ON A BROKEN PRELOAD BEFORE ANYTHING MOVES. A preload naming a file this
 # checkout does not have cannot be recovered from later in the run: by the time
@@ -246,6 +264,28 @@ verify_daemon_revision() {
     log "daemon: post-bounce revision gate passed"
 }
 
+# A HANDOVER NOBODY IS WAITING ON still takes a moment: the successor adopts
+# each workspace and the outgoing daemon exits after its bounded stand-down.
+# The gate is therefore POLLED, against a bound, rather than asked once — the
+# process the report must find is the successor, and asking before the old
+# daemon has exited finds the old one.
+HANDOVER_MAX="${AGENT_REPL_HANDOVER_MAX:-90}"
+await_daemon_revision() {
+    local waited=0 report=""
+    while [ "$waited" -lt "$HANDOVER_MAX" ]; do
+        if report="$("$READINESS_REPORT" --require-ready daemon 2>/dev/null)"; then
+            log "daemon: post-rollout revision gate passed (${waited}s after acceptance)"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "[deploy-all] the handover was accepted with nobody to wait on, but the successor is not serving the deployed build ${HANDOVER_MAX}s later:" >&2
+    printf '%s\n' "$report" >&2
+    echo "[deploy-all] deploy incomplete: read the daemon's daemon.rollout.* records for the transfer that did not finish" >&2
+    exit 3
+}
+
 # ---- 1. protobufs ----------------------------------------------------------
 log "proto: regenerating (make all)..."
 make -C "$ROOT/proto" all
@@ -271,7 +311,18 @@ shim_identity() {
     if [ -f "$SHIM_BUNDLE" ]; then binary_fingerprint "$SHIM_BUNDLE"; else echo "no-bundle"; fi
 }
 
+WEBAPP_ENTRY="$ROOT/webapp/dist/index.html"
+WEBAPP_STAMP="$ROOT/webapp/dist/.built-sha"
+
+# The webapp's identity, by the same two signals and for the same reason. The
+# entry point names every hashed asset it loads, so it moves when any of them do.
+webapp_identity() {
+    read_built_sha "$WEBAPP_STAMP" 2>/dev/null || echo "no-stamp"
+    if [ -f "$WEBAPP_ENTRY" ]; then binary_fingerprint "$WEBAPP_ENTRY"; else echo "no-entry"; fi
+}
+
 SHIM_BEFORE="$(shim_identity)"
+WEBAPP_BEFORE="$(webapp_identity)"
 
 if [ "$FORCE" -eq 1 ]; then
     "$THIS_DIR/build-frontend.sh" --force
@@ -288,6 +339,15 @@ else
     log "shim: bundle unchanged — surviving shims need no refresh"
 fi
 
+WEBAPP_AFTER="$(webapp_identity)"
+WEBAPP_CHANGED=0
+if [ "$WEBAPP_BEFORE" != "$WEBAPP_AFTER" ]; then
+    WEBAPP_CHANGED=1
+    log "webapp: assets moved since the last deploy — open webviews are told to reload"
+else
+    log "webapp: assets unchanged — open webviews need no reload"
+fi
+
 # ---- 3. daemon, forced (staleness cannot see proto regen) ------------------
 log "daemon: forced rebuild..."
 mkdir -p "$ROOT/daemon/bin"
@@ -295,6 +355,25 @@ mkdir -p "$ROOT/daemon/bin"
 write_built_sha "$ROOT/daemon/bin/.built-sha" "$ROOT"
 stamp_built_tree daemon "$ROOT/daemon/bin/.source-tree"
 log "daemon: done"
+
+# WHETHER THE RUNNING DAEMON IS SERVING THIS BINARY is a stamp written when a
+# rollout (or a restart) was ACCEPTED, never "did this build change the file".
+# Those are different questions, for the reason service_needs_bounce states: a
+# `--no-bounce` run installs a new binary and rolls nothing out, so the next
+# run's build is "unchanged" while the live daemon is still the old one. The
+# binary's mtime cannot answer it either — this step rewrites the file on every
+# deploy, identical or not. No stamp at all reads as stale: one handover, after
+# which the stamp exists.
+DAEMON_BIN="$ROOT/daemon/bin/claude-repld"
+DAEMON_ROLLED_OUT="$ROOT/daemon/bin/.rolled-out-fingerprint"
+DAEMON_FINGERPRINT="$(binary_fingerprint "$DAEMON_BIN")"
+DAEMON_CHANGED=0
+if [ ! -f "$DAEMON_ROLLED_OUT" ] || [ "$(cat "$DAEMON_ROLLED_OUT")" != "$DAEMON_FINGERPRINT" ]; then
+    DAEMON_CHANGED=1
+    log "daemon: the binary is not the one last rolled out — a handover is owed"
+else
+    log "daemon: the binary is the one last rolled out — no handover is owed"
+fi
 
 # ---- 4. store + sidecar ----------------------------------------------------
 # Build each into a staging path, install over the launchd-run copy only when
@@ -629,6 +708,23 @@ else
     # when this checkout's own before/after fingerprint is unchanged, so it
     # folds into the same REPORTED shim-changed signal (this script stops
     # nothing — the incoming daemon bounces each stale shim itself).
+    # WHICH CHECKOUT THE RUNNING EMACS LAUNCHES FROM IS READ BEFORE ANYTHING IS
+    # LOADED. The preload below REBINDS that root to this checkout, and a
+    # rollout refuses a moved root — so loading first and refusing second would
+    # leave the editor pointed at this checkout's artifacts with the daemon
+    # still running the other's, which is the state the refusal exists to
+    # prevent. The read is a plain variable reference and changes nothing.
+    ARTIFACT_ROOT_CHANGED=0
+    RUNNING_ROOT="$("$EMACSCLIENT" --eval "(and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root)" 2>/dev/null | tr -d '"')"
+    if [ "$RESTART" -eq 0 ] && [ -n "$RUNNING_ROOT" ] && [ "$RUNNING_ROOT" != "nil" ] \
+       && [ "${RUNNING_ROOT%/}" != "${ROOT%/}" ]; then
+        echo "[deploy-all] REFUSING to roll out: the running Emacs launches the runtime from ${RUNNING_ROOT%/}, not from $ROOT." >&2
+        echo "[deploy-all] A handover spawns the successor from the RUNNING daemon's own binary path, so it would bring" >&2
+        echo "[deploy-all] that checkout's build back up, not this one's. Nothing was loaded into the editor and nothing was rolled out." >&2
+        echo "[deploy-all] Remedy: deploy from ${RUNNING_ROOT%/}, or pass --restart to move the runtime to this checkout —" >&2
+        echo "[deploy-all] which ENDS EVERY RUNNING TURN." >&2
+        exit 3
+    fi
     ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
     PRELOAD_LOADS=""
     for rel in "${PRELOAD_FILES[@]}"; do
@@ -645,6 +741,7 @@ else
             ;;
         *artifact-root-changed*)
             SHIM_CHANGED=1
+            ARTIFACT_ROOT_CHANGED=1
             log "daemon: control plane loaded from $ROOT (artifact root changed — surviving shims will be rolled at their turn boundaries)"
             ;;
         *)
@@ -653,47 +750,117 @@ else
             ;;
     esac
 
-    # The await form takes no argument: what happens to surviving shims is the
-    # incoming daemon's decision, never a flag this script passes.
-    RESTART_FORM='(agent-repl-runtime-restart-await)'
-    if [ "$SHIM_CHANGED" -eq 1 ]; then
-        log "daemon: restarting and awaiting completion via emacsclient (the incoming daemon bounces each stale shim itself)..."
-    else
-        log "daemon: restarting and awaiting completion via emacsclient..."
-    fi
-    if ! RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)"; then
+    if [ "$RESTART" -eq 1 ]; then
+        # THE OPERATOR ASKED FOR A FORCED RESTART, in so many words. This is the
+        # one path that ENDS EVERY RUNNING TURN: the daemon is told to shut down
+        # now, which forces each session down rather than waiting on it. It is
+        # never the default and nothing but `--restart` reaches it.
+        log "daemon: --restart — FORCING a restart; every running turn is ended"
+        # The await form takes no argument: what happens to surviving shims is the
+        # incoming daemon's decision, never a flag this script passes.
+        RESTART_FORM='(agent-repl-runtime-restart-await)'
+        if [ "$SHIM_CHANGED" -eq 1 ]; then
+            log "daemon: restarting and awaiting completion via emacsclient (the incoming daemon bounces each stale shim itself)..."
+        else
+            log "daemon: restarting and awaiting completion via emacsclient..."
+        fi
+        if ! RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)"; then
+            case "$RESTART_OUT" in
+                *not\ restarted:*)
+                    echo "[deploy-all] daemon not restarted: $RESTART_OUT" >&2
+                    ;;
+                *)
+                    echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
+                    ;;
+            esac
+            exit 3
+        fi
         case "$RESTART_OUT" in
             *not\ restarted:*)
                 echo "[deploy-all] daemon not restarted: $RESTART_OUT" >&2
+                exit 3
+                ;;
+            *refusing*)
+                # emacsclient exits 0 even when the elisp signals; the refusal text
+                # is the only tell. A refused bounce means the deploy is NOT
+                # complete, so the refusal is surfaced verbatim rather than
+                # interpreted here.
+                echo "[deploy-all] daemon restart refused: $RESTART_OUT" >&2
+                exit 3
+                ;;
+            *runtime-restart-complete*)
                 ;;
             *)
-                echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
+                echo "[deploy-all] daemon restart returned no terminal completion: $RESTART_OUT" >&2
+                exit 3
                 ;;
         esac
-        exit 3
+        verify_daemon_revision
+        log "daemon: restart completed"
+        printf '%s\n' "$DAEMON_FINGERPRINT" > "$DAEMON_ROLLED_OUT"
+    else
+        # THE DEFAULT IS A ROLLOUT, AND A ROLLOUT ENDS NO TURN. The daemon is
+        # told what this run rebuilt and rolls it out itself: a blue-green
+        # handover for the daemon, a per-workspace relaunch for the shim, a
+        # reload for the webapp — each waiting on the workspace's freeness for
+        # as long as that takes. What comes back is the rollout's ACCEPTANCE.
+        if [ "$ARTIFACT_ROOT_CHANGED" -eq 1 ]; then
+            echo "[deploy-all] REFUSING to roll out: the running daemon was launched from another checkout's artifacts." >&2
+            echo "[deploy-all] A handover spawns the successor from the RUNNING daemon's own binary path, so it would bring" >&2
+            echo "[deploy-all] the other checkout's build back up, not this one's ($ROOT)." >&2
+            echo "[deploy-all] Remedy: deploy from the checkout the daemon runs from, or pass --restart to move the runtime" >&2
+            echo "[deploy-all] to this checkout — which ENDS EVERY RUNNING TURN." >&2
+            exit 3
+        fi
+        REBUILT=""
+        [ "$DAEMON_CHANGED" -eq 1 ] && REBUILT="$REBUILT :daemon t"
+        [ "$SHIM_CHANGED" -eq 1 ] && REBUILT="$REBUILT :shim t"
+        [ "$WEBAPP_CHANGED" -eq 1 ] && REBUILT="$REBUILT :webapp t"
+        if [ -z "$REBUILT" ]; then
+            log "rollout: nothing the daemon rolls out was rebuilt — the running stack already serves this build"
+        else
+            ROLLOUT_FORM="(agent-repl-runtime-rollout-await '($REBUILT ))"
+            log "rollout: asking the daemon to roll out$REBUILT at each workspace's freeness (no turn is ended)..."
+            if ! ROLLOUT_OUT="$("$EMACSCLIENT" --eval "$ROLLOUT_FORM" 2>&1)"; then
+                echo "[deploy-all] not rolled out: $ROLLOUT_OUT" >&2
+                exit 3
+            fi
+            case "$ROLLOUT_OUT" in
+                *not\ rolled\ out:*)
+                    # emacsclient exits 0 even when the elisp signals; the text
+                    # is the only tell.
+                    echo "[deploy-all] not rolled out: $ROLLOUT_OUT" >&2
+                    exit 3
+                    ;;
+                *runtime-rollout-accepted*)
+                    log "rollout: accepted — $(printf '%s' "$ROLLOUT_OUT" | tr -d '"')"
+                    ;;
+                *)
+                    echo "[deploy-all] the rollout returned no acceptance: $ROLLOUT_OUT" >&2
+                    exit 3
+                    ;;
+            esac
+            if [ "$DAEMON_CHANGED" -eq 1 ]; then
+                # THE STAMP IS WRITTEN AT ACCEPTANCE: from here the handover is
+                # the daemon's to finish, and a second deploy of this same
+                # binary must not ask for a second one.
+                printf '%s\n' "$DAEMON_FINGERPRINT" > "$DAEMON_ROLLED_OUT"
+                case "$ROLLOUT_OUT" in
+                    *"busy=0"*)
+                        # Nobody is being waited on, so the handover completes
+                        # within its own bounded stand-down and the successor
+                        # can be held to the revision gate.
+                        await_daemon_revision
+                        log "daemon: handed over to the new build"
+                        ;;
+                    *)
+                        log "daemon: the handover is WAITING on busy workspaces; each transfers as its turn ends, and the old daemon serves it until then"
+                        log "daemon: the post-rollout revision gate is skipped — it cannot pass until the last busy workspace is free"
+                        ;;
+                esac
+            fi
+        fi
     fi
-    case "$RESTART_OUT" in
-        *not\ restarted:*)
-            echo "[deploy-all] daemon not restarted: $RESTART_OUT" >&2
-            exit 3
-            ;;
-        *refusing*)
-            # emacsclient exits 0 even when the elisp signals; the refusal text
-            # is the only tell. A refused bounce means the deploy is NOT
-            # complete, so the refusal is surfaced verbatim rather than
-            # interpreted here.
-            echo "[deploy-all] daemon restart refused: $RESTART_OUT" >&2
-            exit 3
-            ;;
-        *runtime-restart-complete*)
-            ;;
-        *)
-            echo "[deploy-all] daemon restart returned no terminal completion: $RESTART_OUT" >&2
-            exit 3
-            ;;
-    esac
-    verify_daemon_revision
-    log "daemon: restart completed"
 
 fi
 
