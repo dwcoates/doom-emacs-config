@@ -743,6 +743,91 @@ wire."
                   :type 'agent-repl-wire-error)))
 
 
+;;;; ---- RollOutBuild ----------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-marker-is-an-empty-object ()
+  "A rebuilt subsystem rides the wire as an empty object: presence is the fact."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-roll-out-build-request '(:daemon t)))
+                   "{\"daemon\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-omits-what-was-not-rebuilt ()
+  "A subsystem that was not rebuilt is omitted, never sent as a false marker."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (mapcar #'car
+                           (agent-repl-wire-encode-roll-out-build-request
+                            '(:daemon nil :shim t :webapp t)))
+                   '(shim webapp)))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-naming-nothing-errors ()
+  "A request naming nothing rebuilt is malformed and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-roll-out-build-request '())
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-handover ()
+  "The handover arm carries how many workspaces transfer and how many are busy."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-roll-out-build-response
+                    '((success . ((handover . ((workspaces . 3) (busy . 1)))))))
+                   '(:arm :success
+                     :value (:action (:arm :handover
+                                      :value (:workspaces 3 :busy 1))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-free-handover ()
+  "protojson omits zero counts, so an absent `busy' decodes as zero."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get
+                    (plist-get (plist-get (plist-get
+                                           (agent-repl-wire-decode-roll-out-build-response
+                                            '((success . ((handover . ((workspaces . 2)))))))
+                                           :value)
+                                          :action)
+                               :value)
+                    :busy)
+                   0))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-shim-relaunch ()
+  "The shim-relaunch arm decodes under its own keyword."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-roll-out-build-response
+                    '((success . ((shimRelaunch . ((workspaces . 2) (busy . 2)))))))
+                   '(:arm :success
+                     :value (:action (:arm :shim-relaunch
+                                      :value (:workspaces 2 :busy 2))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-webapp-reload ()
+  "The webapp-reload arm carries how many webviews were told to reload."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-roll-out-build-response
+                    '((success . ((webappReload . ((webviews . 4)))))))
+                   '(:arm :success
+                     :value (:action (:arm :webapp-reload :value (:webviews 4))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-already-rolling-out ()
+  "A rollout in flight is an ANSWER naming the workspaces it still waits on."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-roll-out-build-response
+                    '((error . ((alreadyRollingOut . ((waitingOn . ("ws-a" "ws-b"))))))))
+                   '(:arm :error
+                     :value (:cause (:arm :already-rolling-out
+                                     :value (:waiting-on ("ws-a" "ws-b")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-joining ()
+  "A joining successor's refusal decodes as its own empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-roll-out-build-response
+                    '((error . ((joining . nil)))))
+                   '(:arm :error :value (:cause (:arm :joining :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-out-build-refuses-an-unknown-action ()
+  "A success arm this codec does not know is refused, never guessed at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-roll-out-build-response
+                   '((success . ((storeRestart . nil)))))
+                  :type 'agent-repl-wire-error)))
+
 ;;;; ---- UpdateShutdownSchedule ------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-schedule-at-ms-integer ()

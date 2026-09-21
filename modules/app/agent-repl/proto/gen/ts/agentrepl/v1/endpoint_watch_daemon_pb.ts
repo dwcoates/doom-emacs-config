@@ -179,7 +179,10 @@ export const DaemonShutdownCauseSchema: GenMessage<DaemonShutdownCause> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 3);
 
 /**
- * The doom self-merge triggered the blue-green rollout.
+ * A new build is being rolled out blue-green. Two things start one, and a
+ * client treats them alike: the doom self-merge (the arm's name), and the
+ * deploy chain's RollOutBuild (endpoint_roll_out_build.proto). Either way the
+ * announcement carries the successor's address and no turn is ended.
  *
  * @generated from message agentrepl.v1.DaemonShutdownSelfMergeRollout
  */

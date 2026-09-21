@@ -60,6 +60,13 @@ type Controller interface {
 	// action. Merge calls it only after lease release and terminal
 	// publication.
 	Trigger(ctx context.Context, landed []gitclient.Commit) error
+	// RollOut puts a build the deploy chain already produced into service:
+	// the caller states what it rebuilt, and the same per-subsystem action a
+	// self-merge takes is taken — waiting on freeness, never ending a turn.
+	// It answers the rollout's ACCEPTANCE; the unbounded half runs on the
+	// daemon's lifetime. It refuses with *ErrAlreadyRollingOut while a
+	// handover is in flight, and with ErrJoining on a joining successor.
+	RollOut(ctx context.Context, rebuilt Rebuilt) (Acceptance, error)
 	// Handover spawns the successor with --joining, announces the stand-down on
 	// WatchDaemon, transfers each workspace at freeness (quiesce, intent
 	// manifest, the `transferred` push), times the adoption window, and waits
