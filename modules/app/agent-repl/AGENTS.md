@@ -596,6 +596,35 @@ display mode on every surface. (Forward reference: a sibling section covers
 the viewed/partial display modes and demotion this restores from; read the two
 together.)
 
+## The webapp holds NO business logic; the daemon is the source of truth
+
+Owner ruling, standing (2026-09-21). The webapp is a RENDERER of what the
+daemon publishes, and as near as is reasonably possible it decides nothing.
+Every fact it draws — a status, a substatus, a count, a label, an ordering, a
+badge, whether a thing is live — is resolved by the daemon and pushed; the
+webapp turns the pushed arm into pixels and stops there.
+
+So a cross-surface invariant is NEVER repaired in the client. Reconciling the
+footer's status against the sidebar's in the webapp, so the two read the same,
+is forbidden even when it would make the screen look right: the invariant
+belongs to the daemon (see "Workspace status is a cross-surface invariant"),
+and a client-side fixup converts a daemon defect into a hidden one that every
+other consumer — Emacs, a second webview, a test — still has.
+
+The same rule governs anything that smells like a decision: inferring a state
+the daemon did not state, deriving one field from another, counting rows to
+label something, holding a shadow copy of daemon state to smooth a push over.
+When a surface needs a fact, the fact gets published.
+
+A surface that disagrees with another is a defect in whichever one departed
+from the published truth. It is fixed at the publisher, or at the consumer's
+reading of the publisher, and never by a correction layered on top.
+
+THE ONE STANDING EXCEPTION is the client's own link verdict: when the call to
+the daemon is what failed, no daemon can push that fact, so the webapp says it
+itself. It is written down in `webapp/AGENTS.md`, it is the only one, and a
+second exception is an owner ruling rather than a judgement call.
+
 ## An invisible action is a logging defect, not a test problem
 
 When a test, an investigation, or a person cannot tell from the logs what the
