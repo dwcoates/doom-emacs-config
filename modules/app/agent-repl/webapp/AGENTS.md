@@ -116,6 +116,18 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   arithmetic, no ANSI parsing, no per-tool knowledge. Whole-view pushes replace
   their unit whole; feed rows upsert by `FeedId`; nothing accumulates across
   pushes.
+- **NO BUSINESS LOGIC, EVER** (owner ruling, 2026-09-21). The daemon is the
+  source of truth and this is a renderer of it. The webapp does not decide
+  what is true: not a status, not a substatus, not a count, not whether
+  something is live, not an ordering. It draws the arm it was pushed.
+  In particular it NEVER repairs a cross-surface invariant — reconciling the
+  footer's status with the sidebar's here, so the screen reads consistently,
+  is forbidden, because that invariant is the daemon's to guarantee (root
+  `AGENTS.md`, "Workspace status is a cross-surface invariant") and a fixup
+  here hides the daemon's defect from Emacs and from every other consumer
+  while leaving it in place. A surface that looks wrong is reported to the
+  daemon and fixed there. When a view needs a fact it does not have, the fact
+  gets PUBLISHED; it is never inferred locally.
 - **THE ONE EXCEPTION TO IT: THE CLIENT'S LINK VERDICT** (owner ruling,
   2026-09-13, `docs/REALTEST-JUDGEMENT-CALLS.md`, "webapp-side failures reach
   the footer"). When a call to the daemon fails at THIS end, no daemon can push
