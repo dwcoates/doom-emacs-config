@@ -58,10 +58,26 @@ type Entry struct {
 	GitRoot string `json:"git_root"`
 	// Prompt is a create's or a prompt's text.
 	Prompt string `json:"prompt"`
-	// Workspace names an existing workspace by id.
+	// ProjectDir is THE CANONICAL WORKSPACE KEY: the absolute path of the
+	// target workspace's git worktree root.
+	//
+	// THE PRODUCER'S CONTRACT IS THE SOURCE OF TRUTH, and this reader conforms
+	// to it (owner ruling, 2026-09-21). The `/create-or-update-workspace`
+	// skill REQUIRES `project_dir` on every entry that targets an existing
+	// workspace — merge, prompt, close, open, send — and states that the
+	// `workspace` NAME beside it "is retained only as a display/logging field
+	// and is never used to resolve the target". This reader used to read the
+	// directory from `dir` alone and `workspace` as an ID, so every
+	// skill-dispatched merge was refused `unknown_workspace` and quarantined
+	// where nobody saw it (a one-shot's merge, 2026-09-21; 33 files by then).
+	ProjectDir string `json:"project_dir"`
+	// Workspace is the workspace's NAME when ProjectDir (or Dir) is set — for
+	// display and logging only, never for resolution. Only an entry that
+	// carries NO directory at all is resolved by it, as an id, which is what
+	// this module's own producers write.
 	Workspace string `json:"workspace"`
-	// Dir names an existing workspace by directory, which is what the older
-	// producers carry.
+	// Dir is the older spelling of ProjectDir, still written by producers that
+	// predate the skill's contract. ProjectDir wins when both are set.
 	Dir string `json:"dir"`
 	// ID is a task id.
 	ID string `json:"id"`
@@ -125,10 +141,19 @@ func (e Entry) Validate() error {
 
 // requireTarget refuses an entry that names no workspace at all.
 func (e Entry) requireTarget() error {
-	if e.Workspace == "" && e.Dir == "" {
-		return fmt.Errorf("%s: a workspace or a dir is required", e.Type)
+	if e.Workspace == "" && e.TargetDir() == "" {
+		return fmt.Errorf("%s: a project_dir (or a dir, or a workspace id) is required", e.Type)
 	}
 	return nil
+}
+
+// TargetDir is the directory that keys the entry's workspace: `project_dir`,
+// else the older `dir`, else empty.
+func (e Entry) TargetDir() string {
+	if e.ProjectDir != "" {
+		return e.ProjectDir
+	}
+	return e.Dir
 }
 
 // parse decodes one command file's whole array, all-or-nothing. Trailing bytes
