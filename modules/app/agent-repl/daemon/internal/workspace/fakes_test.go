@@ -840,6 +840,20 @@ type fakeFeed struct {
 	feed.Resolver
 
 	synthesized []*frontendv1.FeedRow
+	// resets is every workspace whose feed was emptied, in order.
+	resets []ids.WorkspaceID
+	// onReset runs AT the reset, which is how a test reads the swap's own
+	// progress as it stood when the feed was emptied — the ordering assertion
+	// with nothing to wait on.
+	onReset func()
+}
+
+// ResetWorkspace records the emptying and lets a test observe the moment.
+func (f *fakeFeed) ResetWorkspace(ws ids.WorkspaceID, _ string) {
+	f.resets = append(f.resets, ws)
+	if f.onReset != nil {
+		f.onReset()
+	}
 }
 
 func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *frontendv1.FeedRow) {

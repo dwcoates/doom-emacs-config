@@ -93,6 +93,15 @@ type Resolver interface {
 	// session's rows stamped with; nil restores the root feed.
 	SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress)
 
+	// ResetWorkspace empties one workspace's feed whole: every row of every
+	// feed is retired on the wire and every accumulation is dropped, so the
+	// workspace is as it would be if its feed had never been opened. It
+	// belongs to a BIND — the one verb that changes which vendor conversation
+	// a workspace runs — and to nothing else; a restart resumes the same
+	// conversation and keeps its rows. `because` is the sentence the record
+	// carries. reset.go states exactly what is dropped and what is kept.
+	ResetWorkspace(ws ids.WorkspaceID, because string)
+
 	// OnClearReceived draws a /clear's cleared divider the moment the daemon
 	// accepts it, BEFORE the shim round-trip: the red bar and the cleared feed
 	// appear instantly, and the shim's later ContextCut confirms the same row in
