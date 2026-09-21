@@ -130,6 +130,26 @@ func arrangeJoinedFlight(t *testing.T, f *fixture, joiners int, ctx context.Cont
 	return release, outcomes
 }
 
+func TestARevivalIsAPlainResumeAndNeverARebind(t *testing.T) {
+	// Arrange: a revival brings back the conversation the workspace is already
+	// on, so the shim keeps the book it persisted for it. Marking this a
+	// rebind would let a rotated resume handle become the book and orphan
+	// every record filed under the name it rotated away from.
+	f := newFixture(t)
+	release, outcomes := arrangeJoinedFlight(t, f, 0, context.Background())
+
+	// Act.
+	close(release)
+	if err := receive(t, outcomes[0], "the revival's answer"); err != nil {
+		t.Fatalf("reviveIfParked: %v", err)
+	}
+
+	// Assert.
+	if len(f.fleet.rebound) != 0 {
+		t.Fatalf("rebound starts = %+v, want none: a revival is a plain resume", f.fleet.rebound)
+	}
+}
+
 func TestConcurrentRevivalsOfOneWorkspaceStartOneSession(t *testing.T) {
 	// Arrange: one leader and four callers arriving while it runs.
 	f := newFixture(t)

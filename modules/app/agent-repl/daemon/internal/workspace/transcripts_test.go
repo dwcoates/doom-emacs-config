@@ -394,6 +394,26 @@ func TestBindSessionStartsTHROUGHTheOrdinaryResumePath(t *testing.T) {
 	}
 }
 
+func TestBindSessionStartsTheChosenConversationAsAREBIND(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"}, transcriptSpec{id: "b"})
+
+	// Act.
+	if err := f.verbs.BindSession(context.Background(), "w1", "b", nil); err != nil {
+		t.Fatalf("BindSession: %v", err)
+	}
+
+	// Assert: without the rebind the shim keeps the workspace's persisted book
+	// — conversation "a" — and the daemon reads that conversation's history
+	// back over the one the user chose, whose own pages never appear.
+	if got := f.fleet.rebound; len(got) != 1 || got[0] != "w1" {
+		t.Fatalf("rebound starts = %+v, want the bind's own start marked a rebind", got)
+	}
+}
+
 func TestBindSessionRecordsTheBindingBEFOREItStarts(t *testing.T) {
 	// Arrange: the source classifier reads the record, so the order is the
 	// whole mechanism by which the new conversation is the one resumed.

@@ -574,6 +574,13 @@ type ServedColdGate struct {
 type Sessions interface {
 	// Start brings a workspace's session up, spawning and starting it.
 	Start(ctx context.Context, ws ids.WorkspaceID) error
+	// StartRebound brings a workspace's session up after a
+	// BindWorkspaceSession has pointed it at a DIFFERENT conversation, and
+	// says so on the resume. It is the ONE start that does: the shim's book
+	// for the workspace is the conversation's identity, and only a bind may
+	// move it. BindSession is its only caller; everything else calls Start and
+	// stays a plain resume.
+	StartRebound(ctx context.Context, ws ids.WorkspaceID) error
 	// Stop ends a workspace's session, forced or graceful.
 	Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error
 	// StartDetached brings a workspace's session up OFF the caller's
