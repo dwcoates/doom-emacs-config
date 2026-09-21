@@ -439,9 +439,11 @@ would ever retire the registration."
 
 ;;;; ---- The command: every BIND refusal, by name ----
 ;;
-;; The verb dispatcher owns the wording: it names the arm keyword and the
-;; arm's own fields, so each case asserts the arm reached the user's line
-;; rather than re-testing the dispatcher's format.
+;; THE COMMAND OWNS THE WORDING for its own refusals, because they are what a
+;; person standing at the chooser has to act on -- so each case asserts the
+;; sentence that reached the user's line, on the FAILED phase that retires the
+;; progress the bind armed.  An arm this command has no sentence for still
+;; reads as its own keyword, which is the dispatcher's behaviour kept.
 
 (defmacro agent-repl-test-conversations--bind-refusal-names (arm fields expected)
   "Assert a bind refused with ARM carrying FIELDS names EXPECTED to the user."
@@ -450,41 +452,48 @@ would ever retire the registration."
         (list (agent-repl-test-conversations--transcript)))
        (agent-repl-test-conversations--bind-refusal ,arm ,fields)
      (agent-repl-bind-conversation)
-     (should (cl-some (lambda (line) (string-match-p ,expected line))
-                      agent-repl-test-conversations--messages))))
+     (should (cl-some (lambda (entry)
+                       (and (eq (car entry) :bind)
+                            (eq (cadr entry) :failed)
+                            (cl-some (lambda (d) (and (stringp d)
+                                                      (string-match-p ,expected d)))
+                                     (cddr entry))))
+                      agent-repl-test-conversations--progress))))
 
 (ert-deftest agent-repl-test-conversations-bind-unknown-transcript-is-named ()
   "Arrange, Act, Assert."
   (agent-repl-test-conversations--bind-refusal-names
-   :unknown-transcript (list :vendor-session-id "invented") "unknown-transcript"))
+   :unknown-transcript (list :vendor-session-id "invented") "no longer on disk"))
 
 (ert-deftest agent-repl-test-conversations-bind-already-bound-is-named ()
   "Arrange, Act, Assert."
-  (agent-repl-test-conversations--bind-refusal-names :already-bound nil "already-bound"))
+  (agent-repl-test-conversations--bind-refusal-names
+   :already-bound nil "already on that conversation"))
 
 (ert-deftest agent-repl-test-conversations-bind-transcript-active-is-named ()
   "Arrange, Act, Assert."
   (agent-repl-test-conversations--bind-refusal-names
-   :transcript-active (list :at-ms 1700000000000) "transcript-active"))
+   :transcript-active (list :at-ms 1700000000000) "writing to that conversation right now"))
 
 (ert-deftest agent-repl-test-conversations-bind-transcript-held-is-named ()
   "Arrange, Act, Assert."
   (agent-repl-test-conversations--bind-refusal-names
-   :transcript-held (list :workspace (list :id "ws-2" :dir "/tmp/ws-2")) "transcript-held"))
+   :transcript-held (list :workspace (list :id "ws-2" :dir "/tmp/ws-2")) "/tmp/ws-2"))
 
 (ert-deftest agent-repl-test-conversations-bind-turn-in-flight-is-named ()
   "Arrange, Act, Assert."
-  (agent-repl-test-conversations--bind-refusal-names :turn-in-flight nil "turn-in-flight"))
+  (agent-repl-test-conversations--bind-refusal-names
+   :turn-in-flight nil "a turn is in flight"))
 
 (ert-deftest agent-repl-test-conversations-bind-stop-failed-is-named ()
   "Arrange, Act, Assert."
   (agent-repl-test-conversations--bind-refusal-names
-   :stop-failed (list :detail "it would not die") "stop-failed"))
+   :stop-failed (list :detail "it would not die") "it would not die"))
 
 (ert-deftest agent-repl-test-conversations-bind-start-failed-is-named ()
   "Arrange, Act, Assert."
   (agent-repl-test-conversations--bind-refusal-names
-   :start-failed (list :detail "it would not come up") "start-failed"))
+   :start-failed (list :detail "it would not come up") "it would not come up"))
 
 (ert-deftest agent-repl-test-conversations-bind-unknown-workspace-is-named ()
   "Arrange, Act, Assert."
@@ -537,7 +546,7 @@ would ever retire the registration."
     ;; Act.
     (agent-repl-bind-conversation)
     ;; Assert.
-    (should (member (list :open :requested "ws-one")
+    (should (member (list :bind :requested "ws-one")
                     agent-repl-test-conversations--progress))))
 
 (ert-deftest agent-repl-test-conversations-outlasts-the-default-unary-deadline ()
