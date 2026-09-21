@@ -368,7 +368,10 @@ func (*DaemonShutdownCause_ScheduledDrain) isDaemonShutdownCause_Kind() {}
 
 func (*DaemonShutdownCause_Immediate) isDaemonShutdownCause_Kind() {}
 
-// The doom self-merge triggered the blue-green rollout.
+// A new build is being rolled out blue-green. Two things start one, and a
+// client treats them alike: the doom self-merge (the arm's name), and the
+// deploy chain's RollOutBuild (endpoint_roll_out_build.proto). Either way the
+// announcement carries the successor's address and no turn is ended.
 type DaemonShutdownSelfMergeRollout struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

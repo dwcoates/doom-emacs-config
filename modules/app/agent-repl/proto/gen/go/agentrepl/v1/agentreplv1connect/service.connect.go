@@ -136,6 +136,8 @@ const (
 	// AgentReplUpdateShutdownScheduleProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateShutdownSchedule RPC.
 	AgentReplUpdateShutdownScheduleProcedure = "/agentrepl.v1.AgentRepl/UpdateShutdownSchedule"
+	// AgentReplRollOutBuildProcedure is the fully-qualified name of the AgentRepl's RollOutBuild RPC.
+	AgentReplRollOutBuildProcedure = "/agentrepl.v1.AgentRepl/RollOutBuild"
 	// AgentReplUpdateMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateMergeQueue RPC.
 	AgentReplUpdateMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UpdateMergeQueue"
@@ -230,6 +232,7 @@ var (
 	agentReplUpdateHeldPromptMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UpdateHeldPrompt")
 	agentReplAnswerHeldOfferMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AnswerHeldOffer")
 	agentReplUpdateShutdownScheduleMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
+	agentReplRollOutBuildMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RollOutBuild")
 	agentReplUpdateMergeQueueMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
 	agentReplDaemonHealthMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
@@ -359,6 +362,10 @@ type AgentReplClient interface {
 	// The deploy tooling's drain-and-exit control. See
 	// endpoint_update_shutdown_schedule.proto.
 	UpdateShutdownSchedule(context.Context, *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error)
+	// Put a build the deploy chain already produced into service — a rollout
+	// that waits for freeness and never ends a turn. See
+	// endpoint_roll_out_build.proto.
+	RollOutBuild(context.Context, *connect.Request[v1.RollOutBuildRequest]) (*connect.Response[v1.RollOutBuildResponse], error)
 	// Operator control of the merge queue. See
 	// endpoint_update_merge_queue.proto.
 	UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error)
@@ -650,6 +657,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdateShutdownScheduleMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		rollOutBuild: connect.NewClient[v1.RollOutBuildRequest, v1.RollOutBuildResponse](
+			httpClient,
+			baseURL+AgentReplRollOutBuildProcedure,
+			connect.WithSchema(agentReplRollOutBuildMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		updateMergeQueue: connect.NewClient[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse](
 			httpClient,
 			baseURL+AgentReplUpdateMergeQueueProcedure,
@@ -817,6 +830,7 @@ type agentReplClient struct {
 	updateHeldPrompt         *connect.Client[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse]
 	answerHeldOffer          *connect.Client[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse]
 	updateShutdownSchedule   *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
+	rollOutBuild             *connect.Client[v1.RollOutBuildRequest, v1.RollOutBuildResponse]
 	updateMergeQueue         *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
 	daemonHealth             *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth            *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
@@ -1018,6 +1032,11 @@ func (c *agentReplClient) AnswerHeldOffer(ctx context.Context, req *connect.Requ
 // UpdateShutdownSchedule calls agentrepl.v1.AgentRepl.UpdateShutdownSchedule.
 func (c *agentReplClient) UpdateShutdownSchedule(ctx context.Context, req *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error) {
 	return c.updateShutdownSchedule.CallUnary(ctx, req)
+}
+
+// RollOutBuild calls agentrepl.v1.AgentRepl.RollOutBuild.
+func (c *agentReplClient) RollOutBuild(ctx context.Context, req *connect.Request[v1.RollOutBuildRequest]) (*connect.Response[v1.RollOutBuildResponse], error) {
+	return c.rollOutBuild.CallUnary(ctx, req)
 }
 
 // UpdateMergeQueue calls agentrepl.v1.AgentRepl.UpdateMergeQueue.
@@ -1231,6 +1250,10 @@ type AgentReplHandler interface {
 	// The deploy tooling's drain-and-exit control. See
 	// endpoint_update_shutdown_schedule.proto.
 	UpdateShutdownSchedule(context.Context, *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error)
+	// Put a build the deploy chain already produced into service — a rollout
+	// that waits for freeness and never ends a turn. See
+	// endpoint_roll_out_build.proto.
+	RollOutBuild(context.Context, *connect.Request[v1.RollOutBuildRequest]) (*connect.Response[v1.RollOutBuildResponse], error)
 	// Operator control of the merge queue. See
 	// endpoint_update_merge_queue.proto.
 	UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error)
@@ -1518,6 +1541,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdateShutdownScheduleMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplRollOutBuildHandler := connect.NewUnaryHandler(
+		AgentReplRollOutBuildProcedure,
+		svc.RollOutBuild,
+		connect.WithSchema(agentReplRollOutBuildMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplUpdateMergeQueueHandler := connect.NewUnaryHandler(
 		AgentReplUpdateMergeQueueProcedure,
 		svc.UpdateMergeQueue,
@@ -1718,6 +1747,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAnswerHeldOfferHandler.ServeHTTP(w, r)
 		case AgentReplUpdateShutdownScheduleProcedure:
 			agentReplUpdateShutdownScheduleHandler.ServeHTTP(w, r)
+		case AgentReplRollOutBuildProcedure:
+			agentReplRollOutBuildHandler.ServeHTTP(w, r)
 		case AgentReplUpdateMergeQueueProcedure:
 			agentReplUpdateMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplDaemonHealthProcedure:
@@ -1911,6 +1942,10 @@ func (UnimplementedAgentReplHandler) AnswerHeldOffer(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) UpdateShutdownSchedule(context.Context, *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateShutdownSchedule is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RollOutBuild(context.Context, *connect.Request[v1.RollOutBuildRequest]) (*connect.Response[v1.RollOutBuildResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RollOutBuild is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error) {
