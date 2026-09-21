@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"claude-repld/internal/ids"
 )
 
 // awaitExit blocks until the controller's orderly exit runs, which is the
@@ -44,6 +46,64 @@ func TestRollOutIsRefusedOnASuccessorThatIsStillJoining(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrJoining) {
 		t.Fatalf("err = %v, want ErrJoining", err)
+	}
+}
+
+func TestASuccessorStillJoining(t *testing.T) {
+	ws := ids.WorkspaceID("ws-handed-over")
+	cases := []struct {
+		name         string
+		joiningMode  bool
+		manifestSeen bool
+		joining      map[ids.WorkspaceID]bool
+		owned        map[ids.WorkspaceID]bool
+		want         bool
+	}{
+		{name: "a daemon that booted as the incumbent is never joining"},
+		{name: "a successor that has not read the manifest is joining", joiningMode: true, want: true},
+		{name: "a successor that does not yet own a handed workspace is joining", joiningMode: true, manifestSeen: true,
+			joining: map[ids.WorkspaceID]bool{ws: true}, want: true},
+		{name: "a successor that owns everything it was handed has finished joining", joiningMode: true, manifestSeen: true,
+			joining: map[ids.WorkspaceID]bool{ws: true}, owned: map[ids.WorkspaceID]bool{ws: true}},
+		{name: "a successor handed nothing has finished joining once it read the manifest", joiningMode: true, manifestSeen: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.c.mu.Lock()
+			h.c.joiningMode, h.c.manifestSeen = tc.joiningMode, tc.manifestSeen
+			h.c.joining, h.c.owned = tc.joining, tc.owned
+
+			// Act
+			got := h.c.stillJoiningLocked()
+			h.c.mu.Unlock()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("still joining = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASuccessorThatFinishedJoiningTakesTheNextRollOut(t *testing.T) {
+	// Arrange: a process that BOOTED as a successor and has since taken
+	// everything it was handed — every daemon after the first handover.
+	h := newHarness(t)
+	h.c.mu.Lock()
+	h.c.joiningMode, h.c.manifestSeen = true, true
+	h.c.mu.Unlock()
+
+	// Act
+	accepted, err := h.c.RollOut(context.Background(), Rebuilt{Webapp: true})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RollOut: %v, want it accepted: the successor is simply the daemon now", err)
+	}
+	if accepted.Action != ActionWebappReload {
+		t.Fatalf("action = %q, want %q", accepted.Action, ActionWebappReload)
 	}
 }
 
