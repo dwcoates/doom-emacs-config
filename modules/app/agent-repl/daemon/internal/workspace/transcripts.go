@@ -226,15 +226,26 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 		return cerr
 	}
 
+	// THE SWAP OUTLIVES THE CALLER. From here the verb stops a session,
+	// rewrites the workspace's binding and starts a session on it, and a
+	// client that hangs up mid-way — a unary deadline is the ordinary case,
+	// since a bring-up can outlast one — must not cut that sequence in half.
+	// It did: a 10s editor timeout cancelled the caller's context, the
+	// cancellation reached StartSession, and the workspace was left carrying
+	// the new binding with no session behind it. The answer still rides the
+	// REQUEST's context, so a caller that gave up is simply not told; the
+	// work itself finishes and the roster says so.
+	swap := context.WithoutCancel(ctx)
+
 	reportBindStage(progress, BindStageStoppingSession)
-	if err := v.deps.Sessions.Stop(ctx, ws, false); err != nil {
+	if err := v.deps.Sessions.Stop(swap, ws, false); err != nil {
 		return refuseWith(log, rpc, ArmStopFailed,
 			fmt.Sprintf("the current session would not end: %s", err.Error()), false,
 			map[string]any{"detail": err.Error()})
 	}
 
 	reportBindStage(progress, BindStageRecordingBinding)
-	if err := v.recordBinding(ctx, log, ws, vendorSessionID); err != nil {
+	if err := v.recordBinding(swap, log, ws, vendorSessionID); err != nil {
 		return err
 	}
 
@@ -243,14 +254,14 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	// its cost and answered at the cold gate — the same refusal a revival
 	// meets — rather than paid for behind the user's back.
 	reportBindStage(progress, BindStageStartingSession)
-	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+	if err := v.deps.Sessions.Start(swap, ws); err != nil {
 		return refuseWith(log, rpc, ArmStartFailed,
 			fmt.Sprintf("the session on the bound conversation would not come up: %s", err.Error()), false,
 			map[string]any{"detail": err.Error()})
 	}
 
 	log.Info(opBindSession, "bound the workspace to the chosen conversation", nil)
-	v.republishRegistry(ctx, log, opBindSession)
+	v.republishRegistry(swap, log, opBindSession)
 	return nil
 }
 

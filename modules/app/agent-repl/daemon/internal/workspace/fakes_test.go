@@ -1032,8 +1032,14 @@ type fakeSessions struct {
 	live     map[ids.WorkspaceID]bool
 	started  []ids.WorkspaceID
 	startErr error
-	stopped  []stopCall
-	stopErr  error
+	// onStop runs at the top of Stop; see Stop.
+	onStop func()
+	// startCtxErr records what the context handed to Start already said, so a
+	// test can tell a start that ran on a live context from one that ran on a
+	// cancelled one.
+	startCtxErr error
+	stopped     []stopCall
+	stopErr     error
 	// resumes are the cold-gate re-opens the fleet was asked for, and resumeErr
 	// is the refusal it answers with instead.
 	resumes   []ColdResume
@@ -1069,7 +1075,7 @@ func newFakeSessions() *fakeSessions {
 	return &fakeSessions{live: map[ids.WorkspaceID]bool{}}
 }
 
-func (s *fakeSessions) Start(_ context.Context, ws ids.WorkspaceID) error {
+func (s *fakeSessions) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// THE GATE: a test that arranged one learns the start was entered and
 	// holds it there until it releases, which is how an interleaving with a
 	// start in flight is arranged deterministically.
@@ -1081,6 +1087,7 @@ func (s *fakeSessions) Start(_ context.Context, ws ids.WorkspaceID) error {
 	}
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
+	s.startCtxErr = ctx.Err()
 	s.startCalls = append(s.startCalls, ws)
 	if s.startErr != nil {
 		return s.startErr
@@ -1116,6 +1123,12 @@ func (s *fakeSessions) StartDetached(ws ids.WorkspaceID, done func(error)) {
 }
 
 func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) error {
+	// Runs BEFORE anything else this fake does, so a test can cancel the
+	// caller's context at exactly the point a real client's deadline lapses:
+	// after the choice is validated and with the swap under way.
+	if s.onStop != nil {
+		s.onStop()
+	}
 	if s.stopErr != nil {
 		return s.stopErr
 	}
