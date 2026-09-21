@@ -270,12 +270,21 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	// half-emptied is a feed showing two conversations.
 	v.deps.Feed.ResetWorkspace(ws, "the workspace was bound to a different vendor conversation")
 
-	// THE ORDINARY RESUME PATH, and nothing else. The source classifier reads
-	// the record this verb just wrote, so a cold conversation is refused with
-	// its cost and answered at the cold gate — the same refusal a revival
+	// THE ORDINARY RESUME PATH, and one thing more. The source classifier
+	// reads the record this verb just wrote, so a cold conversation is refused
+	// with its cost and answered at the cold gate — the same refusal a revival
 	// meets — rather than paid for behind the user's back.
+	//
+	// WHAT THE ONE THING IS: the resume is marked a REBIND, and this is the
+	// only caller in the daemon that marks one. The shim keeps a persisted
+	// main AgentId per workspace — the book the daemon reads history under —
+	// and a plain resume keeps it, so that a rotated resume handle cannot
+	// orphan the records filed before the rotation. After a bind that rule
+	// replays the conversation the user just replaced and hides the chosen
+	// one's pages entirely, so the bind's own start tells the shim to adopt
+	// the chosen conversation's identity instead.
 	reportBindStage(progress, BindStageStartingSession)
-	if err := v.deps.Sessions.Start(swap, ws); err != nil {
+	if err := v.deps.Sessions.StartRebound(swap, ws); err != nil {
 		return refuseWith(log, rpc, ArmStartFailed,
 			fmt.Sprintf("the session on the bound conversation would not come up: %s", err.Error()), false,
 			map[string]any{"detail": err.Error()})

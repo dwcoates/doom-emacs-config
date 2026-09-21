@@ -132,6 +132,86 @@ describe("a resumed conversation", () => {
   });
 });
 
+describe("a REBOUND conversation", () => {
+  it("adopts the resumed conversation's id as the book, replacing the persisted one", async () => {
+    // Arrange. The workspace is on `original-1` and the user chose `chosen-9`.
+    const store = createAgentIdentityStore(scratch(), WORKSPACE);
+    await store.write("original-1");
+
+    // Act.
+    const identity = await SessionIdentity.resume(store, "chosen-9", { rebind: true });
+
+    // Assert. Keeping `original-1` here is what replayed the old
+    // conversation's history over the chosen one.
+    expect(identity.agentId.value).toBe("chosen-9");
+  });
+
+  it("adopts the ORIGINAL of a chosen conversation whose id rotated, not the handle", async () => {
+    // Arrange. `rotated-2` is a handle for the book `chosen-9`, and the
+    // workspace is currently on an unrelated conversation.
+    const state = scratch();
+    const chosen = await SessionIdentity.fresh(
+      createAgentIdentityStore(state, "other-ws"),
+      () => "chosen-9",
+    );
+    await chosen.rotate("rotated-2");
+    const store = createAgentIdentityStore(state, "other-ws");
+
+    // Act.
+    const identity = await SessionIdentity.resume(store, "rotated-2", { rebind: true });
+
+    // Assert. Adopting the handle would mint a second name for a book that
+    // already has one, and the records filed under `chosen-9` would be lost.
+    expect(identity.agentId.value).toBe("chosen-9");
+  });
+
+  it("persists the adopted book, so the next plain resume keeps it", async () => {
+    // Arrange.
+    const state = scratch();
+    const store = createAgentIdentityStore(state, WORKSPACE);
+    await store.write("original-1");
+
+    // Act.
+    await SessionIdentity.resume(store, "chosen-9", { rebind: true });
+
+    // Assert.
+    expect(await createAgentIdentityStore(state, WORKSPACE).read()).toBe("chosen-9");
+  });
+
+  it("still reports the resumed id as the vendor session id in force", async () => {
+    // Arrange. The handle is what the vendor resumes at; the book is not.
+    const state = scratch();
+    const chosen = await SessionIdentity.fresh(
+      createAgentIdentityStore(state, "other-ws"),
+      () => "chosen-9",
+    );
+    await chosen.rotate("rotated-2");
+
+    // Act.
+    const identity = await SessionIdentity.resume(
+      createAgentIdentityStore(state, "other-ws"),
+      "rotated-2",
+      { rebind: true },
+    );
+
+    // Assert.
+    expect(identity.vendorSessionId).toBe("rotated-2");
+  });
+
+  it("KEEPS the persisted id when the marker is absent, however the resume id differs", async () => {
+    // Arrange. This is the rule the rebind is the single exception to: a
+    // rotated handle must not orphan what was recorded before the rotation.
+    const store = createAgentIdentityStore(scratch(), WORKSPACE);
+    await store.write("original-1");
+
+    // Act.
+    const identity = await SessionIdentity.resume(store, "chosen-9", { rebind: false });
+
+    // Assert.
+    expect(identity.agentId.value).toBe("original-1");
+  });
+});
+
 describe("a vendor id rotation", () => {
   it("KEEPS the AgentId", async () => {
     const identity = await SessionIdentity.fresh(
@@ -214,6 +294,23 @@ describe("resolving a vendor id to its book, from files alone", () => {
 
   it("answers an unrotated id with itself", () => {
     expect(resolveOriginal(scratch(), WORKSPACE, "never-rotated")).toBe("never-rotated");
+  });
+
+  it("answers the same through the store, which is what a rebind asks", async () => {
+    // Arrange. The store carries the workspace's state directory, so a rebind
+    // resolves through it rather than re-deriving the path.
+    const state = scratch();
+    const identity = await SessionIdentity.fresh(
+      createAgentIdentityStore(state, WORKSPACE),
+      () => "original-1",
+    );
+    await identity.rotate("rotated-2");
+
+    // Act.
+    const resolved = createAgentIdentityStore(state, WORKSPACE).resolveOriginal("rotated-2");
+
+    // Assert.
+    expect(resolved).toBe("original-1");
   });
 });
 
