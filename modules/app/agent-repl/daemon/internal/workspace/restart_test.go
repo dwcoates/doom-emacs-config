@@ -144,3 +144,24 @@ func TestRestartSurfacesAForcedTurnKillFailure(t *testing.T) {
 		t.Fatalf("relaunches = %+v, want none after a failed force-end", f.rollout.relaunches)
 	}
 }
+
+// TestRestartEmptiesNoFeed pins the scope of the feed reset: a restart resumes
+// the SAME conversation, so its rows are still the conversation's and replaying
+// onto them is an upsert. Only a BIND — the one verb that changes which
+// conversation a workspace runs — empties the feed.
+func TestRestartEmptiesNoFeed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	f.rollout.awaitRelaunch(t)
+
+	// Assert.
+	if len(f.feed.resets) != 0 {
+		t.Fatalf("feed resets = %+v, want none: a restart keeps the conversation's rows", f.feed.resets)
+	}
+}
