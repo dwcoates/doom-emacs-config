@@ -192,6 +192,19 @@ describe("readTranscripts", () => {
     expect(found(transcripts, "live")?.activeAtMs).toBe(NOW_MS - 1_000);
   });
 
+  it("reports a WHOLE number of milliseconds for a sub-millisecond mtime", () => {
+    // Arrange: a filesystem records finer than a millisecond, and the wire
+    // field is an int64 — a float fails the whole verb at encode time.
+    const configDir = configDirWithProject();
+    transcript(configDir, "fractional", prompt("mid-thought"), NOW_MS - 1_000.5);
+
+    // Act.
+    const transcripts = ok(configDir);
+
+    // Assert.
+    expect(Number.isInteger(found(transcripts, "fractional")?.activeAtMs)).toBe(true);
+  });
+
   it("leaves a transcript quiet for longer than the window unflagged", () => {
     // Arrange.
     const configDir = configDirWithProject();
