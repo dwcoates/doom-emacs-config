@@ -315,22 +315,32 @@ func (i *ingress) applyPrompt(ctx context.Context, file string, index int, entry
 // goes through the verbs' own ref resolution, so the command-file channel is
 // held to the same dir-mismatch refusal as the wire.
 func (i *ingress) target(ctx context.Context, entry Entry) (ids.WorkspaceID, error) {
-	if entry.Workspace != "" {
-		record, err := i.deps.Verbs.Resolve(ctx, &workspacev1.WorkspaceRef{
-			Id:  entry.Workspace,
-			Dir: entry.Dir,
-		})
+	// THE DIRECTORY IS THE KEY, whenever the entry carries one. `workspace`
+	// beside it is the producer's display name and is never resolved: reading
+	// it as an id is what refused every skill-dispatched merge.
+	if dir := entry.TargetDir(); dir != "" {
+		if i.deps.DB == nil {
+			return "", fmt.Errorf("this entry names a directory and the ingress has no state client to resolve it with")
+		}
+		record, err := i.deps.DB.WorkspaceByDir(ctx, dir)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("no workspace is registered at %q: %w", dir, err)
+		}
+		// A `workspace` THAT IS ANOTHER WORKSPACE'S ID IS STILL A MISMATCH. A
+		// display name resolves to nothing and is ignored, as the contract
+		// says; but this module's own producers write an ID there, and an id
+		// that names a DIFFERENT workspace than the directory does is a
+		// request nobody can act on without guessing which half was meant.
+		if entry.Workspace != "" && entry.Workspace != string(record.ID) {
+			if other, err := i.deps.Verbs.Resolve(ctx, &workspacev1.WorkspaceRef{Id: entry.Workspace}); err == nil && other.ID != record.ID {
+				return "", fmt.Errorf("the entry's directory %q is workspace %q, but its workspace field names the id of %q", dir, record.ID, other.ID)
+			}
 		}
 		return record.ID, nil
 	}
-	if i.deps.DB == nil {
-		return "", fmt.Errorf("this entry names only a dir and the ingress has no state client to resolve it with")
-	}
-	record, err := i.deps.DB.WorkspaceByDir(ctx, entry.Dir)
+	record, err := i.deps.Verbs.Resolve(ctx, &workspacev1.WorkspaceRef{Id: entry.Workspace})
 	if err != nil {
-		return "", fmt.Errorf("no workspace is registered at %q: %w", entry.Dir, err)
+		return "", err
 	}
 	return record.ID, nil
 }

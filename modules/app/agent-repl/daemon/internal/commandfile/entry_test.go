@@ -16,6 +16,8 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "prompt", entry: Entry{Type: TypePrompt, Workspace: "w1", Prompt: "p"}},
 		{name: "send", entry: Entry{Type: TypeSend, Dir: "/tree", Prompt: "p"}},
 		{name: "merge", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
+		{name: "merge by the skill's project_dir", entry: Entry{Type: TypeMerge, Workspace: "a-display-name", ProjectDir: "/tree"}},
+		{name: "close by project_dir alone", entry: Entry{Type: TypeClose, ProjectDir: "/tree"}},
 		{name: "close", entry: Entry{Type: TypeClose, Dir: "/tree"}},
 		{name: "forget", entry: Entry{Type: TypeForget, Workspace: "w1"}},
 		{name: "open", entry: Entry{Type: TypeOpen, Workspace: "w1"}},
