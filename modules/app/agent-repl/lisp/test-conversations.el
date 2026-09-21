@@ -245,7 +245,8 @@ is in the list and never how the minibuffer behaves."
   `(let ((agent-repl-test-conversations--sent nil)
          (agent-repl-test-conversations--messages nil)
          (agent-repl-test-conversations--progress nil)
-         (agent-repl-test-conversations--forgotten nil))
+         (agent-repl-test-conversations--forgotten nil)
+         (agent-repl-test-conversations--timeouts nil))
      (cl-letf* (;; A STRING, as production's `agent-repl--ws-current-name' answers.
                 ;; A symbol here let `symbol-name' past the suite and into the
                 ;; user's hands, where the first stage signalled on it.
@@ -281,6 +282,8 @@ is in the list and never how the minibuffer behaves."
                  (lambda (&rest _) ,list-answer))
                 ((symbol-function 'agent-repl-rpc-bind-workspace-session)
                  (lambda (_conn request &rest keys)
+                   (push (plist-get keys :timeout)
+                         agent-repl-test-conversations--timeouts)
                    (push request agent-repl-test-conversations--sent)
                    (let ((answer ,bind-answer))
                      (if (plist-get answer :failure)
@@ -536,6 +539,19 @@ would ever retire the registration."
     ;; Assert.
     (should (member (list :open :requested "ws-one")
                     agent-repl-test-conversations--progress))))
+
+(ert-deftest agent-repl-test-conversations-outlasts-the-default-unary-deadline ()
+  "A bind is a session bring-up, and the default deadline calls one a failure."
+  ;; Arrange.
+  (agent-repl-test-conversations--with
+      (agent-repl-test-conversations--list-answer
+       (list (agent-repl-test-conversations--transcript)))
+      (list :arm :success :value nil)
+    ;; Act.
+    (agent-repl-bind-conversation)
+    ;; Assert.
+    (should (equal (car agent-repl-test-conversations--timeouts)
+                   agent-repl-conversations-bind-timeout-seconds))))
 
 (provide 'test-conversations)
 

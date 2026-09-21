@@ -172,6 +172,14 @@ this been an asynchronous send."
        (agent-repl--warn ws "elisp.conversations.unknown-response-arm ws=%s arm=%S" ws arm)
        (user-error "agent-repl: the daemon answered an unknown shape")))))
 
+(defconst agent-repl-conversations-bind-timeout-seconds 120
+  "How long a bind may take before the editor calls it a transport failure.
+
+A BIND IS A SESSION BRING-UP, and the default unary deadline is sized for
+a verb that answers from the daemon\='s own state.  At the default this
+reported a failure ten seconds into a bring-up that went on to succeed,
+leaving the user with an error over a workspace that bound correctly.")
+
 (defun agent-repl-conversations--bind (ws vendor-session-id)
   "Bind WS to VENDOR-SESSION-ID, reporting the daemon's stages as it goes.
 
@@ -193,6 +201,7 @@ channel, so nothing on the stream would ever retire the registration."
      #'agent-repl-rpc-bind-workspace-session (agent-repl-verbs--conn ws)
      (list :workspace ref :vendor-session-id vendor-session-id :op-id op-id)
      :ws ws :op "bind-conversation"
+     :timeout agent-repl-conversations-bind-timeout-seconds
      :on-success
      (lambda (_)
        (agent-repl-mutation-progress-forget op-id)
