@@ -180,6 +180,30 @@ a verb that answers from the daemon\='s own state.  At the default this
 reported a failure ten seconds into a bring-up that went on to succeed,
 leaving the user with an error over a workspace that bound correctly.")
 
+(defun agent-repl-conversations--refusal-sentence (value)
+  "Say in PLAIN WORDS why the daemon refused a bind, from VALUE.
+
+THE ARMS A PERSON CAN ACT ON ARE WORDED; everything else falls back to the
+arm\='s own keyword, which is what the generic dispatcher would have shown.
+An arm added to the proto and not to this table therefore still reads as
+itself rather than as nothing."
+  (let* ((arm (plist-get (plist-get value :cause) :arm))
+         (fields (plist-get (plist-get value :cause) :value)))
+    (pcase arm
+      (:transcript-active
+       "something is writing to that conversation right now — it is live somewhere else")
+      (:transcript-held
+       (format "another workspace is on that conversation: %s"
+               (or (plist-get (plist-get fields :workspace) :dir) "unnamed")))
+      (:already-bound "this workspace is already on that conversation")
+      (:turn-in-flight "a turn is in flight; end it or interrupt it first")
+      (:unknown-transcript "that conversation is no longer on disk")
+      (:start-failed
+       (format "the session would not come up: %s" (or (plist-get fields :detail) "unstated")))
+      (:stop-failed
+       (format "the current session would not end: %s" (or (plist-get fields :detail) "unstated")))
+      (_ (if arm (substring (symbol-name arm) 1) "unstated")))))
+
 (defun agent-repl-conversations--bind (ws vendor-session-id)
   "Bind WS to VENDOR-SESSION-ID, reporting the daemon's stages as it goes.
 
@@ -191,12 +215,12 @@ channel, so nothing on the stream would ever retire the registration."
     ;; Registered BEFORE the send, so a stage push cannot outrun its handler.
     (agent-repl-mutation-progress-register
      op-id
-     :on-stage (lambda (stage) (agent-repl-workspace-progress-report :open stage)))
+     :on-stage (lambda (stage) (agent-repl-workspace-progress-report :bind stage)))
     ;; WS IS ALREADY A STRING.  Workspace names are strings everywhere in this
     ;; package -- `agent-repl--ws-current-name' answers one -- so naming the
     ;; workspace through `symbol-name' signalled `wrong-type-argument symbolp'
     ;; on the very first stage, before the rpc was ever sent.
-    (agent-repl-workspace-progress-report :open :requested ws)
+    (agent-repl-workspace-progress-report :bind :requested ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-bind-workspace-session (agent-repl-verbs--conn ws)
      (list :workspace ref :vendor-session-id vendor-session-id :op-id op-id)
@@ -205,11 +229,20 @@ channel, so nothing on the stream would ever retire the registration."
      :on-success
      (lambda (_)
        (agent-repl-mutation-progress-forget op-id)
-       (agent-repl-workspace-progress-report :open :completed ws))
-     ;; The arm is NOT claimed (nil): every refusal is still worded by the
-     ;; shared dispatcher, which names the arm and its own fields.  All this
-     ;; does is retire an op no further stage will ever arrive for.
-     :on-error (lambda (_value) (agent-repl-mutation-progress-forget op-id) nil)
+       (agent-repl-workspace-progress-report :bind :completed ws))
+     ;; THE ARM IS CLAIMED, because a bind's refusals are the ones a person
+     ;; standing at the chooser has to act on -- and the dispatcher's generic
+     ;; wording ("transcript-active at-ms=1790003430717") names an epoch
+     ;; instant at somebody who asked for a conversation by its opening words.
+     ;; Claiming it also RETIRES THE PROGRESS LINE: unclaimed, the last thing
+     ;; the minibuffer said was that the bind had started, and the refusal
+     ;; scrolled past under it.
+     :on-error
+     (lambda (value)
+       (agent-repl-mutation-progress-forget op-id)
+       (agent-repl-workspace-progress-report
+        :bind :failed ws (agent-repl-conversations--refusal-sentence value))
+       t)
      :on-transport-failure
      (lambda (_detail) (agent-repl-mutation-progress-forget op-id)))))
 
