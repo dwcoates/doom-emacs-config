@@ -9,7 +9,9 @@
 //   - a free workspace is handed over at once, and the incumbent exits;
 //   - a workspace MID-TURN is waited on — its turn keeps running through the
 //     announcement — and is handed over only once the turn has ended;
-//   - a rollout already in flight refuses a second one, naming the holdout.
+//   - a rollout already in flight refuses a second one, naming the holdout;
+//   - a SUCCESSOR takes the next rollout in turn — every daemon after the first
+//     handover booted as a successor, so this is the ordinary case, not an edge.
 //
 // adoption_e2e_test.go covers the handover's own mechanics (the rendezvous,
 // refusal ordering, the successor's adoption) under the self-merge trigger.
@@ -163,5 +165,61 @@ func TestRollOutBuildWaitsOutARunningTurnAndEndsNothing(t *testing.T) {
 	// Assert: with the workspace free, the handover completes.
 	if code := w.AwaitExit(); code != 0 {
 		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 once the turn had ended", code)
+	}
+}
+
+func TestASuccessorTakesTheNextRollOut(t *testing.T) {
+	t.Parallel()
+	// Arrange: one completed handover, so the daemon now serving BOOTED AS A
+	// SUCCESSOR — which is every daemon a second deploy ever talks to. Found
+	// live on 2026-09-21: the first deploy after a handover was refused as
+	// `joining` by a daemon that had finished joining minutes before.
+	_, w := adSelfRepoWorld(t)
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	daemonStream := w.WatchDaemonStream()
+	defer daemonStream.Close()
+	if _, err := w.Client().RollOutBuild(w.Ctx(), roDaemonRebuilt()); err != nil {
+		t.Fatalf("first RollOutBuild: %v", err)
+	}
+	first := roAwaitAnnounced(t, w, daemonStream).GetAddress()
+	if code := w.AwaitExit(); code != 0 {
+		t.Fatalf("the first incumbent's exit code = %d, want an orderly 0", code)
+	}
+	adAwaitAddrFileChange(t, w.Daemon, first)
+	successor := adDial(first)
+
+	// Act: the next deploy asks the successor to roll out in turn.
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	announcements, err := successor.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	if err != nil {
+		t.Fatalf("WatchDaemon on the successor: %v", err)
+	}
+	defer announcements.Close()
+	resp, err := successor.RollOutBuild(w.Ctx(), roDaemonRebuilt())
+
+	// Assert: accepted as a handover, not refused as `joining`.
+	if err != nil {
+		t.Fatalf("RollOutBuild on the successor: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetHandover() == nil {
+		t.Fatalf("RollOutBuild on the successor = %v, want success.handover: it finished joining when it took the workspace", resp.Msg)
+	}
+
+	// Assert: it hands over to a THIRD daemon, which then serves the workspace.
+	second := ""
+	for second == "" && announcements.Receive() {
+		second = announcements.Msg().GetShutdownAnnounced().GetAddress()
+	}
+	if second == "" {
+		t.Fatalf("the successor never announced its own handover: %v", announcements.Err())
+	}
+	if second == first {
+		t.Fatalf("the second handover announced %q, the successor's own address", second)
+	}
+	adAwaitAddrFileChange(t, w.Daemon, second)
+	if _, err := adDial(second).SelectWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("SelectWorkspace on the third daemon = error %v, want the workspace served", err)
 	}
 }
