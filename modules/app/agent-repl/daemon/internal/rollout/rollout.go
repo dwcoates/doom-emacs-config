@@ -86,7 +86,7 @@ func (c *controller) RollOut(ctx context.Context, rebuilt Rebuilt) (Acceptance, 
 		return Acceptance{}, ErrNothingRebuilt
 	}
 	c.mu.Lock()
-	joining := c.joiningMode
+	joining := c.stillJoiningLocked()
 	c.mu.Unlock()
 	if joining {
 		c.log.Info(opRollOut, "refused a rollout asked of a successor that is still joining", fields)
@@ -173,6 +173,31 @@ func (c *controller) rollOutReload(ctx context.Context, fields dlog.Context) (Ac
 	c.log.Info(opRollOut, "accepted a rollout: every open webview was told to reload",
 		merge(fields, dlog.Context{"webviews": webviews}))
 	return Acceptance{Action: ActionWebappReload, Workspaces: webviews}, nil
+}
+
+// stillJoiningLocked reports whether this daemon is a successor that has NOT
+// yet taken everything it was handed.
+//
+// `joiningMode` ALONE IS NOT THE ANSWER, and reading it as one refused every
+// rollout a successor was ever asked for: it records how this process BOOTED,
+// and stays true for its whole life. A successor stops joining when it has
+// read the incumbent's manifest and owns every workspace that manifest named —
+// the same condition under which it advertises daemon.addr and becomes the
+// daemon every client dials. From then on it is simply the daemon, and the
+// next deploy's rollout is its to take. The caller holds c.mu.
+func (c *controller) stillJoiningLocked() bool {
+	if !c.joiningMode {
+		return false
+	}
+	if !c.manifestSeen {
+		return true
+	}
+	for ws := range c.joining {
+		if !c.owned[ws] {
+			return true
+		}
+	}
+	return false
 }
 
 // lifetime is the context the unbounded half of a rollout runs on: the
