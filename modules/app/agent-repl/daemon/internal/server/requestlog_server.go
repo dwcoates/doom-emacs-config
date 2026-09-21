@@ -547,6 +547,23 @@ func (s *requestLoggingServer) AnswerHeldOffer(
 	return s.server.AnswerHeldOffer(ctx, req)
 }
 
+func (s *requestLoggingServer) RollOutBuild(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RollOutBuildRequest],
+) (resp *connect.Response[agentreplv1.RollOutBuildResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "RollOutBuild", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.roll_out_build", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.roll_out_build", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.RollOutBuild(ctx, req)
+}
+
 func (s *requestLoggingServer) UpdateShutdownSchedule(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateShutdownScheduleRequest],

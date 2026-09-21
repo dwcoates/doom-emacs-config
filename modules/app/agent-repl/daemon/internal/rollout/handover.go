@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -30,18 +31,94 @@ const adoptionPoll = 25 * time.Millisecond
 // means; and a workspace is quiesced BEFORE it is detached, so nothing this
 // daemon is still doing races the successor's adoption.
 func (c *controller) Handover(ctx context.Context) error {
+	plan, err := c.beginHandover(ctx)
+	if err != nil {
+		return err
+	}
+	return c.completeHandover(ctx, plan)
+}
+
+// handoverPlan is what the announcement settled and the transfers run on: the
+// successor's address, the two lists `served` split, and the participants each
+// workspace had AT THE ANNOUNCEMENT.
+type handoverPlan struct {
+	successor      string
+	workspaces     []wsm.Workspace
+	untransferable []wsm.Workspace
+	snapshot       map[ids.WorkspaceID]Participants
+	fields         dlog.Context
+}
+
+// ErrAlreadyRollingOut refuses a second handover while one is in flight.
+//
+// A HANDOVER IN FLIGHT IS NEVER STARTED AGAIN. It may stand for as long as a
+// workspace stays busy, and its successor was spawned from the build on disk
+// when it began; a second handover would spawn a second successor beside the
+// first, and the two would race for every workspace this daemon releases.
+type ErrAlreadyRollingOut struct {
+	// WaitingOn is the workspaces the handover in flight has not transferred.
+	WaitingOn []ids.WorkspaceID
+}
+
+func (e *ErrAlreadyRollingOut) Error() string {
+	return fmt.Sprintf("rollout: a handover is already in flight, waiting on %d workspace(s)", len(e.WaitingOn))
+}
+
+// claimHandover raises the in-flight latch, or refuses naming what the
+// handover in flight is still waiting on. The latch is never lowered on
+// success: a handover that completes ends in this process's exit.
+func (c *controller) claimHandover() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.handingOver {
+		c.handingOver = true
+		return nil
+	}
+	var waiting []ids.WorkspaceID
+	for ws := range c.rendezvous {
+		if _, moved := c.transferred[ws]; !moved {
+			waiting = append(waiting, ws)
+		}
+	}
+	sort.Slice(waiting, func(i, j int) bool { return waiting[i] < waiting[j] })
+	return &ErrAlreadyRollingOut{WaitingOn: waiting}
+}
+
+// releaseHandover lowers the latch for a handover that FAILED BEFORE IT
+// ANNOUNCED ANYTHING, so the next attempt is not refused by one that never
+// began. Past the announcement the latch stands: clients have been told.
+func (c *controller) releaseHandover() {
+	c.mu.Lock()
+	c.handingOver = false
+	c.mu.Unlock()
+}
+
+// beginHandover is everything up to and including the announcement and the
+// intent manifest: SPAWN, list what is served, ANNOUNCE, snapshot, record.
+// It is bounded — nothing in it waits on a workspace — which is what lets a
+// caller answer "the rollout was accepted" before the unbounded part starts.
+func (c *controller) beginHandover(ctx context.Context) (*handoverPlan, error) {
+	if err := c.claimHandover(); err != nil {
+		// INFO, NOT WARN: the refusal is the contract's own answer to a caller
+		// that asked twice, and nothing about it is wrong with this daemon.
+		c.log.Info(opHandover, "refused a handover while one is already in flight",
+			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
+		return nil, err
+	}
 	successor, err := c.deps.Spawner.Spawn(ctx, c.deps.SelfAddress)
 	if err != nil {
+		c.releaseHandover()
 		c.log.Error(opHandover, "the successor did not come up; nothing was announced",
 			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
-		return fmt.Errorf("rollout: handover: spawn the successor: %w", err)
+		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
 	fields := dlog.Context{"successor": successor, "self_address": c.deps.SelfAddress}
 	c.log.Info(opHandover, "the successor is up in joining mode", fields)
 
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
-		return err
+		c.releaseHandover()
+		return nil, err
 	}
 
 	c.deps.Announcer.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{
@@ -77,12 +154,24 @@ func (c *controller) Handover(ctx context.Context) error {
 		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 
 	if err := c.writeManifest(ctx, c.manifest(ctx, successor, workspaces, snapshot)); err != nil {
-		return err
+		return nil, err
 	}
+	return &handoverPlan{
+		successor:      successor,
+		workspaces:     workspaces,
+		untransferable: untransferable,
+		snapshot:       snapshot,
+		fields:         fields,
+	}, nil
+}
 
+// completeHandover is the UNBOUNDED half: a per-workspace transfer at each
+// workspace's freeness, then the exit. It waits for as long as freeness takes.
+func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) error {
+	successor, fields := plan.successor, plan.fields
 	var windows sync.WaitGroup
-	for _, ws := range workspaces {
-		if err := c.transfer(ctx, ws, successor, snapshot[ws.ID], &windows); err != nil {
+	for _, ws := range plan.workspaces {
+		if err := c.transfer(ctx, ws, successor, plan.snapshot[ws.ID], &windows); err != nil {
 			return err
 		}
 	}
@@ -97,7 +186,7 @@ func (c *controller) Handover(ctx context.Context) error {
 	// NOTHING IS LEFT STANDING. Every workspace this daemon served has either
 	// moved to the successor above or is stood down here; the exit below owns
 	// no process either way.
-	c.standDownTheUntransferred(ctx, untransferable)
+	c.standDownTheUntransferred(ctx, plan.untransferable)
 
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
 	if err := c.deps.Exit(ctx); err != nil {

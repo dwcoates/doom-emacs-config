@@ -53,6 +53,8 @@ EOF
     # Exactly the control-plane files deploy-all's PRELOAD_FILES names, and no
     # others: a stub for a module the checkout does not have is how the harness
     # kept passing while every real deploy died loading lisp/frontend-client.el.
+    printf ';; stub wire codec\n' > "$mod/lisp/wire-verbs.el"
+    printf ';; stub rpc verbs\n' > "$mod/lisp/rpc.el"
     printf ';; stub daemon control plane\n' > "$mod/lisp/daemon.el"
     printf ';; stub runtime coordinator\n' > "$mod/lisp/services.el"
 
@@ -68,6 +70,14 @@ if [ -n "${BF_STUB_SHIM_CONTENT:-}" ]; then
     mkdir -p "$dist"
     printf '%s' "$BF_STUB_SHIM_CONTENT" > "$dist/main.js"
     printf '%s\n' "${BF_STUB_SHIM_SHA:-deadbeefcafe}" > "$dist/.built-sha"
+fi
+# BF_STUB_WEBAPP_CONTENT does the same for the webapp's entry point, which is
+# what deploy-all fingerprints to decide whether open webviews must reload.
+if [ -n "${BF_STUB_WEBAPP_CONTENT:-}" ]; then
+    wdist="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/webapp/dist"
+    mkdir -p "$wdist"
+    printf '%s' "$BF_STUB_WEBAPP_CONTENT" > "$wdist/index.html"
+    printf '%s\n' "deadbeefcafe" > "$wdist/.built-sha"
 fi
 EOF
     chmod +x "$mod/bin/build-frontend.sh"
@@ -217,6 +227,24 @@ case "$*" in
         echo \"\"${EC_STUB_ARTIFACT_ROOT_RESULT:-artifact-root-same}\"\"
         exit 0
         ;;
+    # WHICH CHECKOUT THE EDITOR LAUNCHES FROM, read before anything is loaded.
+    # Unset by default (a first-ever load); EC_STUB_RUNNING_ROOT names another.
+    *"(and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root)")
+        if [ -n "${EC_STUB_RUNNING_ROOT:-}" ]; then
+            printf '"%s"\n' "$EC_STUB_RUNNING_ROOT"
+        else
+            echo nil
+        fi
+        exit 0
+        ;;
+    *runtime-rollout-await*)
+        if [ "${EC_STUB_ROLLOUT_REFUSED:-0}" = "1" ]; then
+            echo "*ERROR*: agent-repl: not rolled out: a rollout is already in flight, waiting on ws-busy"
+            exit 1
+        fi
+        echo \"\"${EC_STUB_ROLLOUT_RESULT:-runtime-rollout-accepted action=handover workspaces=2 busy=0}\"\"
+        exit 0
+        ;;
     *runtime-restart-await*)
         if [ "${EC_STUB_NOT_RESTARTED:-0}" = "1" ]; then
             echo "*ERROR*: agent-repl: not restarted: no daemon link is available"
@@ -317,7 +345,7 @@ run_deploy() {
     # whole list as one assignment.
     # shellcheck disable=SC2086
     env PATH="$dir/stubs:/usr/bin:/bin" HOME="$dir/h" STUB_LOG="$STUB_LOG" \
-        AGENT_REPL_STORE_SOCK_TIMEOUT=2 AGENT_REPL_EMACSCLIENT=emacsclient \
+        AGENT_REPL_STORE_SOCK_TIMEOUT=2 AGENT_REPL_HANDOVER_MAX=2 AGENT_REPL_EMACSCLIENT=emacsclient \
         ${RUN_ENV:-} \
         bash "$dir/tree/modules/app/agent-repl/bin/deploy-all.sh" "$@" \
         > "$dir/stdout" 2> "$dir/stderr"
@@ -349,15 +377,17 @@ if [ "$RC" -eq 0 ] \
    && log_before "build-frontend" "go build -o .*claude-repld" \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
    && log_before "kickstart -k gui/.*shim-store" "bootstrap gui/.*shim-claude-sidecar" \
-   && log_before "load .*daemon.el" "runtime-restart" \
-   && log_before "load .*services.el" "runtime-restart" \
+   && log_before "load .*rpc.el" "runtime-rollout-await" \
+   && log_before "load .*daemon.el" "runtime-rollout-await" \
+   && log_before "load .*services.el" "runtime-rollout-await" \
+   && ! log_has "runtime-restart" \
    && ! log_has "frontend-client.el" \
-   && log_before "bootstrap gui/.*shim-claude-sidecar" "runtime-restart" \
+   && log_before "bootstrap gui/.*shim-claude-sidecar" "runtime-rollout-await" \
    && log_has "readiness-report --require-ready webapp" \
    && log_has "readiness-report --require-ready daemon" \
    && log_before "readiness-report --require-ready webapp" "kickstart -k gui/.*shim-store" \
-   && log_before "readiness-report --require-ready webapp" "runtime-restart" \
-   && log_before "runtime-restart" "readiness-report --require-ready daemon"; then
+   && log_before "readiness-report --require-ready webapp" "runtime-rollout-await" \
+   && log_before "runtime-rollout-await" "readiness-report --require-ready daemon"; then
     pass "fresh tree runs the full chain in dependency order"
 else
     fail "fresh tree runs the full chain in dependency order" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -431,20 +461,87 @@ else
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
-# --- 1b. a linked-worktree deploy binds its artifact root before restart ----
-# The running Emacs may have loaded the control plane from another checkout.
-# The deploy must move the runtime root before restarting; what happens to
-# surviving shims is then the incoming daemon's decision, not this script's.
-d="$TMP/t1b"; mkdir -p "$d"
-RUN_ENV="EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d"
+# --- 1b. a deploy from another checkout is REFUSED, loading nothing ---------
+# A handover spawns the successor from the RUNNING daemon's own binary, so a
+# rollout from a checkout the editor does not launch from would bring the other
+# checkout's build back up. It is refused BEFORE the control plane is loaded,
+# because the load is what rebinds the editor's root.
+d="$TMP/r1"; mkdir -p "$d"
+RUN_ENV="EC_STUB_RUNNING_ROOT=/somewhere/else/agent-repl/" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "REFUSING to roll out" "$d/stderr" \
+   && grep -q "/somewhere/else/agent-repl" "$d/stderr" \
+   && ! log_has "load .*daemon.el" \
+   && ! log_has "runtime-r[eo]"; then
+    pass "a rollout from a checkout the editor does not launch from is refused before anything is loaded"
+else
+    fail "a rollout from a checkout the editor does not launch from is refused before anything is loaded" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1bb. --restart moves the runtime to this checkout, root bound first ----
+d="$TMP/r2"; mkdir -p "$d"
+RUN_ENV="EC_STUB_RUNNING_ROOT=/somewhere/else/agent-repl/ EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d" --restart
 if [ "$RC" -eq 0 ] \
    && log_before "load .*daemon.el" "runtime-restart-await)" \
    && ! log_has "runtime-restart-await t" \
+   && ! log_has "runtime-rollout-await" \
    && grep -q "artifact root changed" "$d/stdout"; then
-    pass "a moved runtime artifact root is bound before the runtime restart"
+    pass "a moved runtime artifact root is bound before the forced restart"
 else
-    fail "a moved runtime artifact root is bound before the runtime restart" \
+    fail "a moved runtime artifact root is bound before the forced restart" \
          "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1c. the default deploy NEVER forces a restart --------------------------
+d="$TMP/r3"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "runtime-rollout-await" && ! log_has "runtime-restart"; then
+    pass "a plain deploy rolls out and never restarts the daemon"
+else
+    fail "a plain deploy rolls out and never restarts the daemon" "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1d. the rollout names what was rebuilt ---------------------------------
+# A fresh tree has never rolled a daemon out (no stamp) and its stub build
+# writes a shim bundle and a webapp entry that were not there before.
+d="$TMP/r4"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "runtime-rollout-await '( :daemon t"; then
+    pass "a daemon binary that was never rolled out is named in the rollout"
+else
+    fail "a daemon binary that was never rolled out is named in the rollout" "rc=$RC log: $(grep rollout "$STUB_LOG")"
+fi
+
+# --- 1e. an accepted handover stamps the binary it rolled out ---------------
+d="$TMP/r5"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
+STAMP="$d/tree/modules/app/agent-repl/daemon/bin/.rolled-out-fingerprint"
+if [ "$RC" -eq 0 ] && [ -f "$STAMP" ] \
+   && [ "$(cat "$STAMP")" = "$(shasum -a 256 "$d/tree/modules/app/agent-repl/daemon/bin/claude-repld" | cut -d' ' -f1)" ]; then
+    pass "an accepted handover stamps the fingerprint of the binary it rolled out"
+else
+    fail "an accepted handover stamps the fingerprint of the binary it rolled out" "rc=$RC"
+fi
+
+# --- 1f. a busy handover skips the gate it cannot pass, and says so ---------
+d="$TMP/r6"; mkdir -p "$d"
+RUN_ENV="EC_STUB_ROLLOUT_RESULT=runtime-rollout-accepted_action=handover_workspaces=2_busy=1" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && ! log_has "readiness-report --require-ready daemon" \
+   && grep -q "WAITING on busy workspaces" "$d/stdout"; then
+    pass "a handover waiting on a busy workspace skips the daemon gate and completes the deploy"
+else
+    fail "a handover waiting on a busy workspace skips the daemon gate and completes the deploy" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(grep readiness "$STUB_LOG")"
+fi
+
+# --- 1g. a rollout already in flight fails the deploy loudly ----------------
+d="$TMP/r7"; mkdir -p "$d"; RUN_ENV="EC_STUB_ROLLOUT_REFUSED=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "not rolled out" "$d/stderr" \
+   && grep -q "waiting on ws-busy" "$d/stderr" \
+   && [ ! -f "$d/tree/modules/app/agent-repl/daemon/bin/.rolled-out-fingerprint" ]; then
+    pass "a refused rollout exits 3 naming the holdout and stamps nothing"
+else
+    fail "a refused rollout exits 3 naming the holdout and stamps nothing" "rc=$RC stderr: $(cat "$d/stderr")"
 fi
 
 # Pre-seed an installed binary AND its deployed stamp, i.e. a service already
@@ -462,7 +559,7 @@ d="$TMP/t2"
 seed_deployed "$d" shim-store bin-v1
 seed_deployed "$d" shim-claude-sidecar bin-v1
 RUN_ENV="" run_deploy "$d"
-if [ "$RC" -eq 0 ] && ! log_has "launchctl" && log_has "runtime-restart"; then
+if [ "$RC" -eq 0 ] && ! log_has "launchctl" && log_has "runtime-rollout-await"; then
     pass "services already on the installed binary skip both kickstarts"
 else
     fail "services already on the installed binary skip both kickstarts" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -654,7 +751,7 @@ else
 fi
 
 # --- 6. refused daemon restart fails the deploy loudly ----------------------
-d="$TMP/t6"; mkdir -p "$d"; RUN_ENV="EC_STUB_REFUSE=1" run_deploy "$d"
+d="$TMP/t6"; mkdir -p "$d"; RUN_ENV="EC_STUB_REFUSE=1" run_deploy "$d" --restart
 if [ "$RC" -eq 3 ] && grep -q "daemon restart" "$d/stderr"; then
     pass "a refused daemon restart exits 3 with the refusal surfaced"
 else
@@ -662,7 +759,7 @@ else
 fi
 
 # --- 6b. pending dispatch is not terminal restart completion ---------------
-d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_RESULT=runtime-restart-pending" run_deploy "$d"
+d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_RESULT=runtime-restart-pending" run_deploy "$d" --restart
 if [ "$RC" -eq 3 ] \
    && grep -q "no terminal completion" "$d/stderr" \
    && log_before "readiness-report" "runtime-restart"; then
@@ -674,7 +771,7 @@ fi
 
 # --- 6bb. a reasoned non-restart is surfaced distinctly --------------------
 d="$TMP/t6bb"; mkdir -p "$d"
-RUN_ENV="EC_STUB_NOT_RESTARTED=1" run_deploy "$d"
+RUN_ENV="EC_STUB_NOT_RESTARTED=1" run_deploy "$d" --restart
 if [ "$RC" -eq 3 ] \
    && grep -q "daemon not restarted" "$d/stderr" \
    && grep -q "no daemon link is available" "$d/stderr"; then
@@ -688,7 +785,7 @@ fi
 d="$TMP/t6c"; mkdir -p "$d"
 RUN_ENV="READINESS_DAEMON_GATE_FAIL=1" run_deploy "$d"
 if [ "$RC" -eq 3 ] \
-   && grep -q "daemon post-bounce revision gate failed" "$d/stderr" \
+   && grep -q "the successor is not serving the deployed build" "$d/stderr" \
    && grep -q '"pid":31984' "$d/stderr" \
    && grep -q '"deployed_sha":"new-deployed-revision"' "$d/stderr" \
    && grep -q '"source_sha":"new-source-revision"' "$d/stderr" \
@@ -831,32 +928,60 @@ else
 fi
 
 # --- 13. a moved shim bundle is reported, and stops nothing here ------------
-# A survivor keeps running the previous bundle's code until the INCOMING
-# daemon's rollout-controller staleness check bounces it. The deploy reports
-# the move and passes no argument that would stop a shim.
+# A survivor keeps running the previous bundle's code until the DAEMON relaunches
+# it at its own workspace's freeness. The deploy NAMES the move in the rollout
+# and stops no shim itself: it restarts nothing and kills nothing.
 d="$TMP/t13"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_has "runtime-restart-await)" \
-   && ! log_has "runtime-restart-await t" \
-   && grep -q "the incoming daemon bounces each stale shim itself" "$d/stdout"; then
+   && log_has "runtime-rollout-await '(.* :shim t" \
+   && ! log_has "runtime-restart" \
+   && grep -q "shim: bundle moved since the last deploy" "$d/stdout"; then
     pass "a changed shim bundle is reported and the deploy stops no shim itself"
 else
     fail "a changed shim bundle is reported and the deploy stops no shim itself" \
-         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'runtime-restart[^)]*' "$STUB_LOG" | tail -1)"
+         "rc=$RC stdout: $(cat "$d/stdout") rollout=$(grep -o 'runtime-r[eo][^)]*' "$STUB_LOG" | tail -1)"
 fi
 
-# --- 14. an unchanged shim bundle stops nothing either ----------------------
-# The second deploy rebuilds the identical bundle, which is the ordinary case:
-# the restart form is argument-free whatever the bundle did.
+# --- 14. a second deploy of the SAME build rolls nothing out ----------------
+# The ordinary case of a deploy with nothing new in it: the daemon binary is the
+# one the first deploy's handover stamped, and neither bundle moved. The daemon
+# is not asked for anything — a rollout that names nothing is not a rollout.
 d="$TMP/t14"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "runtime-restart-await)" && ! log_has "runtime-restart-await t"; then
-    pass "an unchanged shim bundle still uses the argument-free restart form"
+if [ "$RC" -eq 0 ] \
+   && ! log_has "runtime-r[eo]" \
+   && grep -q "nothing the daemon rolls out was rebuilt" "$d/stdout"; then
+    pass "a second deploy of the same build asks the daemon for nothing"
 else
-    fail "an unchanged shim bundle still uses the argument-free restart form" \
-         "rc=$RC restart=$(grep -o 'runtime-restart[^)]*' "$STUB_LOG" | tail -1)"
+    fail "a second deploy of the same build asks the daemon for nothing" \
+         "rc=$RC rollout=$(grep -o 'runtime-r[eo][^)]*' "$STUB_LOG" | tail -1)"
+fi
+
+# --- 14b. a moved webapp is named, and nothing else is ----------------------
+d="$TMP/t14b"; mkdir -p "$d"
+RUN_ENV="BF_STUB_WEBAPP_CONTENT=entry-v1" run_deploy "$d"
+RUN_ENV="BF_STUB_WEBAPP_CONTENT=entry-v2" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "runtime-rollout-await '( :webapp t )"; then
+    pass "a webapp that moved on its own is the only thing the rollout names"
+else
+    fail "a webapp that moved on its own is the only thing the rollout names" \
+         "rc=$RC rollout=$(grep -o 'runtime-r[eo][^)]*' "$STUB_LOG" | tail -1)"
+fi
+
+# --- 14c. a binary built but never rolled out is still owed a handover ------
+# `--no-bounce` installs the new daemon binary and rolls nothing out. The next
+# real deploy rebuilds the identical file, and must NOT read "unchanged" as
+# "already serving": the stamp, not the build, is the authority.
+d="$TMP/t14c"; mkdir -p "$d"
+RUN_ENV="" run_deploy "$d" --no-bounce
+RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "runtime-rollout-await '( :daemon t"; then
+    pass "a daemon binary installed by --no-bounce is still handed over by the next deploy"
+else
+    fail "a daemon binary installed by --no-bounce is still handed over by the next deploy" \
+         "rc=$RC rollout=$(grep -o 'runtime-r[eo][^)]*' "$STUB_LOG" | tail -1)"
 fi
 
 # --- 15. a bundle changed WITHIN one revision is still DETECTED -------------
@@ -882,7 +1007,7 @@ d="$TMP/t16"; mkdir -p "$d"
 run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && ! log_has "refresh-webviews" \
-   && ! grep -q "webviews" "$d/stdout"; then
+   && ! log_has "reload-webview"; then
     pass "the deploy leaves the webview reload to the daemon"
 else
     fail "the deploy leaves the webview reload to the daemon" \
@@ -1001,7 +1126,7 @@ RUN_ENV="STORE_STUB_MODE=late STORE_STUB_LATE_POLLS=3" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && grep -q "store: socket appeared .*s after kickstart" "$d/stdout" \
    && log_has "bootstrap gui/.*shim-claude-sidecar" \
-   && log_has "runtime-restart"; then
+   && log_has "runtime-rollout-await"; then
     pass "a store socket that appears late but within the bound completes the deploy"
 else
     fail "a store socket that appears late but within the bound completes the deploy" \
@@ -1092,7 +1217,7 @@ fi
 d="$TMP/t35"; mkdir -p "$d"
 RUN_ENV="EC_STUB_GUARDED=1 AGENT_REPL_REALTEST_TAKEOVER=1" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_has 'runtime-restart' \
+   && log_has 'runtime-rollout-await' \
    && grep -q "AGENT_REPL_REALTEST_TAKEOVER=1 — restarting through the guarded Emacs (pid 31337)" "$d/stdout"; then
     pass "AGENT_REPL_REALTEST_TAKEOVER=1 lets a deploy restart through a guarded Emacs, and says so"
 else
@@ -1100,14 +1225,14 @@ else
          "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
-# --- 36. a guard-free Emacs is restarted through without a word ------------
+# --- 36. a guard-free Emacs is deployed through without a word -------------
 d="$TMP/t36"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_has 'runtime-restart' \
+   && log_has 'runtime-rollout-await' \
    && ! grep -q "REFUSING to restart the daemon" "$d/stderr"; then
-    pass "an Emacs that carries no vendor guard is restarted through as before"
+    pass "an Emacs that carries no vendor guard is deployed through as before"
 else
-    fail "an Emacs that carries no vendor guard is restarted through as before" \
+    fail "an Emacs that carries no vendor guard is deployed through as before" \
          "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 

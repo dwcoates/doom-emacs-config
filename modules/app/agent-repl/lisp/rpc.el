@@ -92,6 +92,8 @@
 (declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-interrupt-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-roll-out-build-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-roll-out-build-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-shutdown-schedule-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-shutdown-schedule-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-merge-queue-request "wire-verbs" (request))
@@ -396,6 +398,15 @@ with `confirm_agents' set.")
   agent-repl-wire-decode-update-shutdown-schedule-response
   "Schedule, cancel or immediately trigger the daemon's shutdown.
 This is how Emacs stops a daemon; Emacs never kills a daemon that answers.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-roll-out-build
+  "RollOutBuild"
+  agent-repl-wire-encode-roll-out-build-request
+  agent-repl-wire-decode-roll-out-build-response
+  "Put a build the deploy chain already produced into service.
+The daemon rolls it out at each workspace's freeness and ENDS NO TURN,
+which is why a deploy calls this and never `UpdateShutdownSchedule{now}'.
+The answer is the rollout's ACCEPTANCE, not its completion.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-update-merge-queue
   "UpdateMergeQueue"

@@ -296,3 +296,15 @@ func (s *fakeServer) UnsubscribePage(ctx context.Context, req *connect.Request[v
 	return nil, connect.NewError(connect.CodeUnimplemented,
 		fmt.Errorf("fakedaemon mocks only Emacs's streams; UnsubscribePage is the webapp's page mux"))
 }
+
+func (s *fakeServer) BindWorkspaceSession(ctx context.Context, req *connect.Request[v1.BindWorkspaceSessionRequest]) (*connect.Response[v1.BindWorkspaceSessionResponse], error) {
+	return handleUnary[v1.BindWorkspaceSessionRequest, v1.BindWorkspaceSessionResponse](ctx, s, "BindWorkspaceSession", req.Msg)
+}
+
+func (s *fakeServer) ListWorkspaceTranscripts(ctx context.Context, req *connect.Request[v1.ListWorkspaceTranscriptsRequest]) (*connect.Response[v1.ListWorkspaceTranscriptsResponse], error) {
+	return handleUnary[v1.ListWorkspaceTranscriptsRequest, v1.ListWorkspaceTranscriptsResponse](ctx, s, "ListWorkspaceTranscripts", req.Msg)
+}
+
+func (s *fakeServer) RollOutBuild(ctx context.Context, req *connect.Request[v1.RollOutBuildRequest]) (*connect.Response[v1.RollOutBuildResponse], error) {
+	return handleUnary[v1.RollOutBuildRequest, v1.RollOutBuildResponse](ctx, s, "RollOutBuild", req.Msg)
+}
