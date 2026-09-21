@@ -37,6 +37,14 @@
  *      file per rotated id, {@link vendorLinkPath}, naming the original. A
  *      file-plane reader resolves any transcript to its book with one stat
  *      instead of a scan, and the AgentId never moves.
+ *   4. REBIND. The ONE resume that replaces the persisted id, and only when
+ *      the daemon marks it (`shim.v1.StartSessionResume.rebind`): the user
+ *      chose a DIFFERENT conversation for this workspace, so the workspace's
+ *      book becomes that conversation's own — resolved to its original by
+ *      rule 3 first, so a bind to a rotated conversation lands on the book its
+ *      records are filed under. Rule 2's "keep what was persisted" is exactly
+ *      wrong here: keeping it replays the old conversation over the chosen one
+ *      and the chosen one's pages never appear.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -103,6 +111,16 @@ export interface AgentIdentityStore {
   write(originalVendorSessionId: string): Promise<void>;
   /** Record that `vendorSessionId` belongs to this conversation's book. */
   link(vendorSessionId: string): Promise<void>;
+  /**
+   * The book `vendorSessionId` belongs to — itself, or the original a rotation
+   * or fork linked it to.
+   *
+   * It is on the store rather than only free-standing because the store is
+   * what holds this workspace's state directory, and a REBIND has to ask the
+   * question before it can persist the answer. See {@link resolveOriginal},
+   * which is the reader this delegates to.
+   */
+  resolveOriginal(vendorSessionId: string): string;
   /**
    * Remove the persisted identity, because the start that minted it FAILED.
    *
@@ -189,6 +207,10 @@ export function createAgentIdentityStore(
       );
       return Promise.resolve();
     },
+
+    resolveOriginal(vendorSessionId: string): string {
+      return resolveOriginal(stateDir, workspaceKey, vendorSessionId);
+    },
   };
 }
 
@@ -220,6 +242,19 @@ export function resolveOriginal(
 /** Pre-mint a vendor session id for a fresh start (`Options.sessionId`). */
 export function mintVendorSessionId(): string {
   return randomUUID();
+}
+
+/** How a resume settles the workspace's book. */
+export interface ResumeOptions {
+  /**
+   * This resume REBINDS the workspace to the conversation it resumes, so the
+   * resumed conversation's identity becomes the workspace's book instead of
+   * the persisted one being kept. Set only by a daemon-side
+   * `BindWorkspaceSession`; every other resume leaves it unset and keeps the
+   * persisted id, which is what stops a rotated handle from orphaning the
+   * records filed before the rotation.
+   */
+  readonly rebind?: boolean;
 }
 
 /**
@@ -257,7 +292,12 @@ export class SessionIdentity {
    * the conversation was created under unless a rotation intervened, and a
    * rotation leaves a link file that {@link resolveOriginal} finds first.
    */
-  static async resume(store: AgentIdentityStore, resumeVendorSessionId: string): Promise<SessionIdentity> {
+  static async resume(
+    store: AgentIdentityStore,
+    resumeVendorSessionId: string,
+    options: ResumeOptions = {},
+  ): Promise<SessionIdentity> {
+    if (options.rebind === true) return SessionIdentity.rebind(store, resumeVendorSessionId);
     const persisted = await store.read();
     if (persisted === undefined) {
       LOGGER.info(
@@ -273,6 +313,39 @@ export class SessionIdentity {
     LOGGER.info(
       { original_vendor_session_id: persisted, vendor_session_id: resumeVendorSessionId, binding: "resume" },
       "resumed under the persisted main AgentId",
+    );
+    return identity;
+  }
+
+  /**
+   * A REBIND: the workspace is now on a DIFFERENT conversation, so the
+   * resumed conversation's own identity BECOMES this workspace's book.
+   *
+   * This is the one resume that overrides the persisted id, and only because
+   * the daemon said so (`shim.v1.StartSessionResume.rebind`). Keeping the old
+   * book here is what replayed the previous conversation's history over the
+   * chosen one and hid the chosen one's pages entirely.
+   *
+   * THE RESUMED ID IS RESOLVED TO ITS ORIGINAL FIRST. A conversation whose
+   * vendor id rotated has its records filed under the id it was created
+   * under, and its rotated handle answers from its link file; adopting the
+   * handle would mint a second name for a book that already has one.
+   */
+  private static async rebind(
+    store: AgentIdentityStore,
+    resumeVendorSessionId: string,
+  ): Promise<SessionIdentity> {
+    const original = store.resolveOriginal(resumeVendorSessionId);
+    await store.write(original);
+    const identity = new SessionIdentity(original, store);
+    identity.current = resumeVendorSessionId;
+    LOGGER.info(
+      {
+        original_vendor_session_id: original,
+        vendor_session_id: resumeVendorSessionId,
+        binding: "rebind",
+      },
+      "REBOUND the workspace's main AgentId to the resumed conversation's own book",
     );
     return identity;
   }
