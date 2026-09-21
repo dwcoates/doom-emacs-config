@@ -197,6 +197,10 @@ func (v *verbs) boundConversation(ctx context.Context, ws ids.WorkspaceID) (stri
 // parks at its cold gate exactly as a revival does — binding never pays for a
 // cold read silently.
 //
+// THE FEED IS RESET WITH IT. The chosen conversation is a DIFFERENT
+// conversation, so the workspace's feed is emptied between the stop and the
+// start and the resume draws into a feed with nothing standing in it.
+//
 // A FAILED START LEAVES THE NEW BINDING STANDING. The record names the
 // conversation the user chose and the ordinary open path is what brings it up
 // next; a bind that silently reverted would leave the user looking at a
@@ -248,6 +252,23 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	if err := v.recordBinding(swap, log, ws, vendorSessionID); err != nil {
 		return err
 	}
+
+	// THE FEED IS EMPTIED BEFORE THE NEW SESSION COMES UP. The feed resolver
+	// keys its rows per WORKSPACE, so without this the previous
+	// conversation's rows stand and the chosen conversation's replay merely
+	// upserts alongside them — a successful bind that placed no new row drew
+	// nothing at all, and the user was left looking at the conversation they
+	// had just replaced. The reset runs HERE, after the old session is stopped
+	// (so nothing is still writing rows into the feed) and before the new one
+	// is started (so the resume's replay populates an empty feed and the
+	// chosen conversation is the only thing on screen — a cold gate included,
+	// since the gate is raised by the start below).
+	//
+	// IT CANNOT BE CUT IN HALF BY A CALLER THAT HUNG UP: like every step of
+	// this swap it is reached only from the cancel-free `swap` sequence, and
+	// the reset itself takes no context at all, because an emptied feed
+	// half-emptied is a feed showing two conversations.
+	v.deps.Feed.ResetWorkspace(ws, "the workspace was bound to a different vendor conversation")
 
 	// THE ORDINARY RESUME PATH, and nothing else. The source classifier reads
 	// the record this verb just wrote, so a cold conversation is refused with
