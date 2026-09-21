@@ -6899,22 +6899,27 @@ body.draining #composer-input::placeholder {
 .feed-group-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.125rem;
-  padding: 0.05rem 0 0.15rem;
+  /* Scaled with the tabs it holds, by the same 1.25. */
+  gap: 0.156rem;
+  padding: 0.062rem 0 0.188rem;
   border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.25));
 }
 .feed-group-tab {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.125rem;
-  padding: 0.075rem 0.225rem;
+  /* A QUARTER BIGGER THAN THE STRIP'S FIRST SIZE (owner ruling, 2026-09-21:
+     the tabs were hard to see). Every dimension is scaled by the same 1.25 --
+     the type, the gap between icon and index, and both paddings -- so the tab
+     grows evenly rather than stretching in one direction. */
+  gap: 0.156rem;
+  padding: 0.094rem 0.281rem;
   border: 1px solid transparent;
   border-radius: 0.25rem;
   background: none;
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: 0.5em;
+  font-size: 0.625em;
 }
 .feed-group-tab:hover { background: rgba(128, 128, 128, 0.12); }
 .feed-group-tab.is-active {
