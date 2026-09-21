@@ -2300,6 +2300,88 @@ arm this codec does not know is refused as an unknown field."
    #'agent-repl-wire-decode-update-shutdown-schedule-response-error))
 
 
+;;;; ---- RollOutBuild ---------------------------------------------------
+
+(defun agent-repl-wire-encode-roll-out-build-request (request)
+  "Encode RollOutBuildRequest from plist REQUEST (:daemon B :shim B :webapp B).
+EACH REBUILT SUBSYSTEM IS AN EMPTY MARKER whose PRESENCE is the fact, so a
+nil key is omitted rather than sent and a set one is `nil', which
+serializes as `{}'; a request naming none is refused
+here, because the daemon would only refuse it as malformed."
+  (let ((daemon (plist-get request :daemon))
+        (shim (plist-get request :shim))
+        (webapp (plist-get request :webapp)))
+    (unless (or daemon shim webapp)
+      (agent-repl-wire-verbs--fail "RollOutBuildRequest" "daemon"
+                                   "at least one rebuilt subsystem is required"))
+    (append (when daemon (list (cons 'daemon nil)))
+            (when shim (list (cons 'shim nil)))
+            (when webapp (list (cons 'webapp nil))))))
+
+(defun agent-repl-wire-decode-roll-out-build-handover (json)
+  "Decode RollOutBuildHandover from JSON into (:workspaces N :busy N)."
+  (let ((message "RollOutBuildHandover"))
+    (agent-repl-wire-verbs--check-keys message json '(workspaces busy))
+    (list :workspaces (agent-repl-wire--decode-uint32 message 'workspaces json)
+          :busy (agent-repl-wire--decode-uint32 message 'busy json))))
+
+(defun agent-repl-wire-decode-roll-out-build-shim-relaunch (json)
+  "Decode RollOutBuildShimRelaunch from JSON into (:workspaces N :busy N)."
+  (let ((message "RollOutBuildShimRelaunch"))
+    (agent-repl-wire-verbs--check-keys message json '(workspaces busy))
+    (list :workspaces (agent-repl-wire--decode-uint32 message 'workspaces json)
+          :busy (agent-repl-wire--decode-uint32 message 'busy json))))
+
+(defun agent-repl-wire-decode-roll-out-build-webapp-reload (json)
+  "Decode RollOutBuildWebappReload from JSON into (:webviews N)."
+  (let ((message "RollOutBuildWebappReload"))
+    (agent-repl-wire-verbs--check-keys message json '(webviews))
+    (list :webviews (agent-repl-wire--decode-uint32 message 'webviews json))))
+
+(defun agent-repl-wire-decode-roll-out-build-success (json)
+  "Decode RollOutBuildSuccess from JSON into (:action (:arm ARM :value V)).
+THE ARM IS THE ACTION TAKEN, so an unset action is a contract breach."
+  (let ((message "RollOutBuildSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(handover shimRelaunch webappReload))
+    (list :action
+          (agent-repl-wire-verbs--decode-oneof
+           message "action" json
+           (list (list 'handover :handover #'agent-repl-wire-decode-roll-out-build-handover)
+                 (list 'shimRelaunch :shim-relaunch #'agent-repl-wire-decode-roll-out-build-shim-relaunch)
+                 (list 'webappReload :webapp-reload #'agent-repl-wire-decode-roll-out-build-webapp-reload))))))
+
+(defun agent-repl-wire-decode-roll-out-build-already-rolling-out (json)
+  "Decode RollOutBuildAlreadyRollingOut from JSON into (:waiting-on IDS)."
+  (let ((message "RollOutBuildAlreadyRollingOut"))
+    (agent-repl-wire-verbs--check-keys message json '(waitingOn))
+    (list :waiting-on
+          (agent-repl-wire-verbs--decode-repeated-string message 'waitingOn json))))
+
+(defun agent-repl-wire-decode-roll-out-build-joining (json)
+  "Decode RollOutBuildJoining from JSON.  Empty: the daemon is a joining successor."
+  (agent-repl-wire-verbs--decode-empty "RollOutBuildJoining" json))
+
+(defun agent-repl-wire-decode-roll-out-build-error (json)
+  "Decode RollOutBuildError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "RollOutBuildError"))
+    (agent-repl-wire-verbs--check-keys message json '(alreadyRollingOut joining))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'alreadyRollingOut :already-rolling-out
+                       #'agent-repl-wire-decode-roll-out-build-already-rolling-out)
+                 (list 'joining :joining #'agent-repl-wire-decode-roll-out-build-joining))))))
+
+(defun agent-repl-wire-decode-roll-out-build-response (json)
+  "Decode RollOutBuildResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "RollOutBuildResponse" json
+   #'agent-repl-wire-decode-roll-out-build-success
+   #'agent-repl-wire-decode-roll-out-build-error))
+
+
 ;;;; ---- UpdateMergeQueue -----------------------------------------------
 
 (defun agent-repl-wire-encode-update-merge-queue-pause-repository (ref)
