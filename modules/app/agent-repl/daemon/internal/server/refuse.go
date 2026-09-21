@@ -131,6 +131,8 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "no_transfer_announced", Reason: err.Error()}), true
 	case errors.Is(err, rollout.ErrNotYetAdopted):
 		return s.fill(refusal{Arm: "not_yet_adopted", Reason: err.Error()}), true
+	case errors.Is(err, rollout.ErrJoining):
+		return s.fill(refusal{Arm: "joining", Reason: err.Error()}), true
 	case errors.Is(err, rollout.ErrParticipantNotExpected):
 		return s.fill(refusal{Arm: "participant_not_expected", Reason: err.Error()}), true
 	}

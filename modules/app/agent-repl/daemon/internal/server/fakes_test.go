@@ -444,11 +444,20 @@ func (f *fakeDrain) ShutdownNow(_ context.Context, reason *agentreplv1.DrainReas
 	return nil
 }
 
-// fakeRollout answers the two adoption calls.
+// fakeRollout answers the two adoption calls and the deploy's rollout.
 type fakeRollout struct {
 	rollout.Controller
 	adoptHostErr error
 	adoptWebErr  error
+	// rolledOut is what the last RollOut was asked to roll out.
+	rolledOut  rollout.Rebuilt
+	accepted   rollout.Acceptance
+	rollOutErr error
+}
+
+func (f *fakeRollout) RollOut(_ context.Context, rebuilt rollout.Rebuilt) (rollout.Acceptance, error) {
+	f.rolledOut = rebuilt
+	return f.accepted, f.rollOutErr
 }
 
 func (f *fakeRollout) AdoptHost(context.Context, ids.WorkspaceID) error { return f.adoptHostErr }
