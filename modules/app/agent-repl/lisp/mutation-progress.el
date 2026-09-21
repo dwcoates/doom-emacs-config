@@ -58,6 +58,11 @@
      (:checking-build . "checking the workspace's build…")
      (:completed . "workspace opened: %s")
      (:failed . "opening the workspace FAILED: %s"))
+    (:bind
+     (:requested . "binding %s to the chosen conversation…")
+     (:starting-session . "starting the session on the chosen conversation…")
+     (:completed . "%s is now on the chosen conversation")
+     (:failed . "binding %s to that conversation FAILED: %s"))
     (:register
      (:requested . "registering directory %s…")
      (:completed . "workspace registered: %s")
