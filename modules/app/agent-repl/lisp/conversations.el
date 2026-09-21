@@ -184,7 +184,11 @@ channel, so nothing on the stream would ever retire the registration."
     (agent-repl-mutation-progress-register
      op-id
      :on-stage (lambda (stage) (agent-repl-workspace-progress-report :open stage)))
-    (agent-repl-workspace-progress-report :open :requested (symbol-name ws))
+    ;; WS IS ALREADY A STRING.  Workspace names are strings everywhere in this
+    ;; package -- `agent-repl--ws-current-name' answers one -- so naming the
+    ;; workspace through `symbol-name' signalled `wrong-type-argument symbolp'
+    ;; on the very first stage, before the rpc was ever sent.
+    (agent-repl-workspace-progress-report :open :requested ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-bind-workspace-session (agent-repl-verbs--conn ws)
      (list :workspace ref :vendor-session-id vendor-session-id :op-id op-id)
@@ -192,7 +196,7 @@ channel, so nothing on the stream would ever retire the registration."
      :on-success
      (lambda (_)
        (agent-repl-mutation-progress-forget op-id)
-       (agent-repl-workspace-progress-report :open :completed (symbol-name ws)))
+       (agent-repl-workspace-progress-report :open :completed ws))
      ;; The arm is NOT claimed (nil): every refusal is still worded by the
      ;; shared dispatcher, which names the arm and its own fields.  All this
      ;; does is retire an op no further stage will ever arrive for.
