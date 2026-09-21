@@ -169,7 +169,11 @@ function summarize(
 ): TranscriptSummary | undefined {
   let mtimeMs: number;
   try {
-    mtimeMs = statSync(file).mtimeMs;
+    // TRUNCATED, BECAUSE THE WIRE FIELD IS AN int64. `mtimeMs` is a FLOAT —
+    // a filesystem records sub-millisecond precision — and protobuf-es
+    // refuses a non-integer outright ("cannot be converted to a BigInt"),
+    // which failed the whole verb on the first transcript it stat'd.
+    mtimeMs = Math.trunc(statSync(file).mtimeMs);
   } catch (err) {
     LOGGER.info(
       { file, cause: err instanceof Error ? err.message : String(err) },
