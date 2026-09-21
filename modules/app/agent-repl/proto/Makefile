@@ -43,7 +43,16 @@ PROTOC_GEN_CONNECT_GO_VERSION := 1.17.0
 # The proto set is DISCOVERED from src/ so the Makefile can never hold a
 # stale hand-maintained list: every .proto under the six surface roots is
 # compiled, and a deleted file leaves the build the moment it leaves disk.
-PROTOS := $(shell cd src && find conversation frontend agentrepl workspace shim store -name '*.proto' | sort)
+#
+# EACH ROOT IS TESTED BEFORE IT IS SEARCHED, which is what keeps the discovery
+# QUIET where there is nothing to discover: scripts/test-check-generated.sh
+# drives these same targets against a FIXTURE tree that carries a src/ without
+# the surface roots under it, and the unguarded `find` reported one "No such
+# file or directory" per root on every such run. The set comes out identical in
+# the real tree; the guard only stops the empty case from saying so.
+PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace shim store; do \
+	  [ -d "$$root" ] && find "$$root" -name '*.proto'; \
+	done | sort)
 
 # The component tree the structural gates scan. Overridable so the gate
 # self-tests can drive the REAL targets against a fixture tree; the default is
