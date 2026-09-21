@@ -328,6 +328,87 @@ func TestApplyFileResolvesAnEntryNamingOnlyADirectory(t *testing.T) {
 	}
 }
 
+func TestApplyFileResolvesTheSkillsMergeByItsProjectDir(t *testing.T) {
+	// Arrange: VERBATIM what the /create-or-update-workspace skill wrote for a
+	// one-shot's merge on 2026-09-21 — the workspace's NAME beside the
+	// canonical `project_dir`. It was refused `unknown_workspace` and
+	// quarantined, because `workspace` was read as an id and `project_dir` was
+	// not read at all.
+	f := newFixture(t)
+	f.workspace("db6c528bba4043b4", "/worktrees/glimmer-intensity-boost")
+	path := f.write(t, "workspace_commands_skill.json",
+		`[{"type":"merge","workspace":"glimmer-intensity-boost","project_dir":"/worktrees/glimmer-intensity-boost"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.enqueued) != 1 || f.merge.enqueued[0] != "db6c528bba4043b4" {
+		t.Fatalf("enqueued merges = %v, want the one workspace at that project_dir", f.merge.enqueued)
+	}
+}
+
+func TestApplyFileNeverResolvesTheDisplayNameWhenADirectoryIsGiven(t *testing.T) {
+	// Arrange: the display name happens to BE another workspace's name. The
+	// contract says the name is never used to resolve, so the directory wins.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.workspace("w2", "/tree/w2")
+	path := f.write(t, "workspace_commands_name.json",
+		`[{"type":"close","workspace":"some-display-name","project_dir":"/tree/w2"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].WS != "w2" {
+		t.Fatalf("verb calls = %+v, want one close of the workspace at the directory", f.verbs.calls)
+	}
+}
+
+func TestApplyFilePrefersProjectDirOverTheOlderDir(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.workspace("w2", "/tree/w2")
+	path := f.write(t, "workspace_commands_both.json",
+		`[{"type":"close","project_dir":"/tree/w2","dir":"/tree/w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].WS != "w2" {
+		t.Fatalf("verb calls = %+v, want the project_dir's workspace", f.verbs.calls)
+	}
+}
+
+func TestApplyFileRefusesAnIdThatNamesADifferentWorkspaceThanTheDirectory(t *testing.T) {
+	// Arrange: an ID, not a display name — and it is another workspace's.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.workspace("w2", "/tree/w2")
+	path := f.write(t, "workspace_commands_cross.json",
+		`[{"type":"close","workspace":"w1","project_dir":"/tree/w2"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyFile(id of one workspace, directory of another) = nil error, want the refusal surfaced")
+	}
+	if len(f.verbs.calls) != 0 {
+		t.Fatalf("verb calls = %v, want none", verbNames(f.verbs.calls))
+	}
+}
+
 func TestApplyFileRefusesAnEntryWhoseDirDisagreesWithTheRegistry(t *testing.T) {
 	// Arrange: the command-file channel is held to the same mismatch refusal as
 	// the wire.
