@@ -377,6 +377,28 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## A landed change is DEPLOYED immediately, and nobody is asked first
+
+Owner ruling, standing (2026-09-21). The moment a change lands on master it is
+deployed with `bin/deploy-all.sh` — in the same breath, as part of landing it,
+never as a separate errand and never behind a question. "Landed" means merged
+or committed on master; a change that sits built-but-undeployed is a change the
+owner's editor is not running, and the running system is the one that matters.
+
+THE DEPLOY IS PART OF THE LANDING, not a follow-up to it. A merge that is not
+followed by a deploy is an unfinished merge: the owner then reads a defect out
+of a binary that predates the fix, and the diagnosis that follows is wasted on
+a system nobody is running. That has happened, which is why this is a rule and
+not a habit.
+
+Nothing about it is conditional. It is not asked about, not deferred to a
+quieter moment, not batched behind another change, and not skipped because the
+change "is only elisp" or "only the webapp" — `deploy-all.sh` knows which
+runtimes a change touches, and the lead does not second-guess it.
+
+The one thing that stops a deploy is a suite that did not pass. A change whose
+tests are red is not landed in the first place.
+
 ## Every landed remediation gets a changelog line
 
 `docs/REMEDIATION-CHANGELOG.md` carries one brief line per landed remediation,
