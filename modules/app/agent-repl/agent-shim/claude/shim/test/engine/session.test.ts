@@ -368,6 +368,7 @@ function freshRequestNoModel(): shimv1.StartSessionRequest {
 function resumeRequest(
   vendorSessionId: string,
   remediation?: conversationv1.SessionColdRemediation,
+  options: { rebind?: boolean } = {},
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     source: {
@@ -375,9 +376,27 @@ function resumeRequest(
       value: create(shimv1.StartSessionResumeSchema, {
         vendorSessionId,
         ...(remediation === undefined ? {} : { coldRemediation: remediation }),
+        ...(options.rebind === true
+          ? { rebind: create(shimv1.StartSessionRebindSchema, {}) }
+          : {}),
       }),
     },
   });
+}
+
+/** Persist a main AgentId for the harness's workspace, as an earlier session would. */
+function persistIdentity(h: Harness, originalVendorSessionId: string): void {
+  const file = agentIdPath(h.stateDir, workspaceLockKey(h.cwd));
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    JSON.stringify({
+      original_vendor_session_id: originalVendorSessionId,
+      workspace_key: workspaceLockKey(h.cwd),
+      minted_at_ms: 1,
+    }),
+    "utf8",
+  );
 }
 
 /**
@@ -1024,6 +1043,38 @@ describe("StartSession, resume", () => {
     await pending;
 
     expect(h.queries[0]?.spec.binding).toEqual({ kind: "resume", resumeSessionId: "resume-1" });
+  });
+
+  it("a resume MARKED as a rebind files rows under the RESUMED conversation's book", async () => {
+    // Arrange. The workspace's persisted book is another conversation's; the
+    // user chose `resume-1` through BindWorkspaceSession.
+    const h = harness({ nowMs: 1_000_100 });
+    persistIdentity(h, "a-previous-conversation");
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act.
+    const pending = h.engine.startSession(resumeRequest("resume-1", undefined, { rebind: true }));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    // Assert. The producer IS the book every row of this session lands on,
+    // and the daemon reads history under exactly that name.
+    expect(h.persistence.producer).toBe("resume-1");
+  });
+
+  it("an UNMARKED resume keeps the persisted book, so a restart cannot orphan its rows", async () => {
+    // Arrange. Identical to the rebind case but for the missing marker.
+    const h = harness({ nowMs: 1_000_100 });
+    persistIdentity(h, "a-previous-conversation");
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act.
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    // Assert.
+    expect(h.persistence.producer).toBe("a-previous-conversation");
   });
 
   it("RECOVERS the model the conversation was last running under", async () => {

@@ -477,6 +477,14 @@ type source struct {
 	// again. It is nil on every path but Fleet.ResumeCold: a bring-up names no
 	// remediation, which is exactly what makes the shim state the cost.
 	ColdRemediation *conversationv1.SessionColdRemediation
+	// Rebind marks the resume that follows a BindWorkspaceSession: the
+	// workspace was just pointed at a DIFFERENT conversation, so the shim
+	// adopts that conversation's identity as the workspace's book instead of
+	// keeping the persisted one. It is true on the Fleet.StartRebound path and
+	// nowhere else — every other bring-up is the workspace continuing the
+	// conversation it is already on, and marking those would let a rotated
+	// resume handle orphan the records filed before the rotation.
+	Rebind bool
 }
 
 // classifySource makes the FRESH-CONVERSATION decision, and it is the ONE
@@ -680,6 +688,30 @@ func (f *Fleet) noteConversationAbandoned(ctx context.Context, log dlog.Logger, 
 //     paying for it;
 //  5. record the session facts and start the watcher.
 func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
+	return f.start(ctx, ws, false)
+}
+
+// StartRebound is Start for the ONE start that follows a BindWorkspaceSession:
+// the workspace has just been pointed at a DIFFERENT conversation, and the
+// resume says so on the wire (`shim.v1.StartSessionResume.rebind`).
+//
+// WHY THE SHIM HAS TO BE TOLD, rather than inferring it from the record it is
+// handed: the shim keeps a persisted main AgentId per workspace — the book the
+// daemon reads history under — and a plain resume deliberately keeps whatever
+// was persisted, so that a rotated resume handle cannot orphan the records
+// filed before the rotation. That rule is right for every OTHER start and
+// wrong for exactly this one, and nothing in a resume request distinguishes
+// them but this.
+//
+// EVERY OTHER BRING-UP GOES THROUGH Start AND STAYS A PLAIN RESUME: a
+// revival, a restart, a rollout relaunch, a boot bring-up and a cold-gate
+// re-open are all the workspace continuing the conversation it is already on.
+func (f *Fleet) StartRebound(ctx context.Context, ws ids.WorkspaceID) error {
+	return f.start(ctx, ws, true)
+}
+
+// start is the one bring-up body. `rebind` is true only for StartRebound.
+func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) error {
 	// ONE START PER WORKSPACE AT A TIME, and it is a LOCK rather than the
 	// liveness check below because that check is a check-then-act: the session
 	// is remembered only after the shim is up, so two starts that overlap both
@@ -725,8 +757,14 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return refuse(log, "OpenWorkspace", ArmSessionDeleted, err.Error(), false)
 	}
+	// THE REBIND RIDES THE SOURCE, decided by the CALLER rather than the
+	// classifier: the classifier reads the durable record, which says which
+	// conversation the workspace is on and not whether the user has just
+	// changed it. A fresh start carries no resume to mark, so the marker is
+	// simply never composed for one.
+	src.Rebind = rebind
 	log.Debug(opBringUp, "decided how the session comes up", dlog.Context{
-		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID,
+		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID, "rebind": src.Rebind,
 	})
 
 	// THE ACCOUNT ROUTING IS DECIDED AT EVERY START (daemon.md 10a), never
@@ -1578,10 +1616,18 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			PermissionMode: permissionMode(session.PermissionMode),
 		}}
 	} else {
-		req.Source = &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
+		resume := &shimv1.StartSessionResume{
 			VendorSessionId: src.VendorSessionID,
 			ColdRemediation: src.ColdRemediation,
-		}}
+		}
+		if src.Rebind {
+			// PRESENCE IS THE FACT. The marker tells the shim to adopt this
+			// conversation's own identity as the workspace's book; without it
+			// the shim keeps the persisted one and the feed replays the
+			// conversation the user just replaced.
+			resume.Rebind = &shimv1.StartSessionRebind{}
+		}
+		req.Source = &shimv1.StartSessionRequest_Resume{Resume: resume}
 	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts

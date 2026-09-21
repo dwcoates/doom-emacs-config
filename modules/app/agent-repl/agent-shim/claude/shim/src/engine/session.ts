@@ -2746,9 +2746,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // apart from one an earlier session established, and the abandonment path
     // below may only discard the former.
     const identityWasPersisted = (await identityStore.read()) !== undefined;
+    // A REBIND IS A RESUME THAT MOVES THE BOOK. `rebind` is set only by a
+    // BindWorkspaceSession, and it is the one resume whose identity is the
+    // RESUMED conversation's rather than the workspace's persisted one — the
+    // workspace is on a different conversation now. Every other resume leaves
+    // it unset and keeps the persisted id.
+    const rebinding = source.case === "resume" && source.value.rebind !== undefined;
     identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
-      : await SessionIdentity.resume(identityStore, vendorSessionId);
+      : await SessionIdentity.resume(identityStore, vendorSessionId, { rebind: rebinding });
     // NAME THE WRITER BEFORE ANYTHING IS WRITTEN. A row is keyed by the
     // conversation's ORIGINAL vendor session id, which is exactly what the
     // identity just settled — and a write attempted before this raises rather

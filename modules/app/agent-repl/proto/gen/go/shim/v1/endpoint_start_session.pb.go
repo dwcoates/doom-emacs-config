@@ -196,8 +196,28 @@ type StartSessionResume struct {
 	// daemon's first attempt, which learns the cost before paying it. Set only
 	// on the retry that follows a `cold` failure; a warm context ignores it.
 	ColdRemediation *v1.SessionColdRemediation `protobuf:"bytes,2,opt,name=cold_remediation,json=coldRemediation,proto3,oneof" json:"cold_remediation,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Set when this resume REBINDS the workspace to a different conversation —
+	// the user chose it (BindWorkspaceSession), rather than the workspace
+	// continuing the one it was already on.
+	//
+	// WHY THE SHIM HAS TO BE TOLD. The shim keeps a persisted main AgentId per
+	// workspace — the BOOK every frame of the conversation is filed under and
+	// the one the daemon reads history from — and a plain resume deliberately
+	// keeps it whatever it already was, because a rotated resume handle must
+	// not make everything recorded before the rotation unreachable. A bind is
+	// the one resume where that rule is wrong: the workspace is now on a
+	// DIFFERENT conversation, and leaving the old book in place replays the old
+	// conversation's history over the new one and hides the chosen
+	// conversation's own pages entirely.
+	//
+	// So this arm says: adopt the resumed conversation's identity as the
+	// workspace's book. The shim resolves the resumed id to its ORIGINAL (a
+	// forked or rotated id answers from its link file) and persists that, so a
+	// bind to a rotated conversation lands on the book its records were filed
+	// under rather than minting a second name for it.
+	Rebind        *StartSessionRebind `protobuf:"bytes,3,opt,name=rebind,proto3,oneof" json:"rebind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StartSessionResume) Reset() {
@@ -244,6 +264,51 @@ func (x *StartSessionResume) GetColdRemediation() *v1.SessionColdRemediation {
 	return nil
 }
 
+func (x *StartSessionResume) GetRebind() *StartSessionRebind {
+	if x != nil {
+		return x.Rebind
+	}
+	return nil
+}
+
+// This resume is a rebind: the workspace's book becomes the resumed
+// conversation's own. Presence is the fact.
+type StartSessionRebind struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartSessionRebind) Reset() {
+	*x = StartSessionRebind{}
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartSessionRebind) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartSessionRebind) ProtoMessage() {}
+
+func (x *StartSessionRebind) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartSessionRebind.ProtoReflect.Descriptor instead.
+func (*StartSessionRebind) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{3}
+}
+
 // THE ARM IS THE OUTCOME.
 type StartSessionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -258,7 +323,7 @@ type StartSessionResponse struct {
 
 func (x *StartSessionResponse) Reset() {
 	*x = StartSessionResponse{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[3]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -270,7 +335,7 @@ func (x *StartSessionResponse) String() string {
 func (*StartSessionResponse) ProtoMessage() {}
 
 func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[3]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +348,7 @@ func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionResponse.ProtoReflect.Descriptor instead.
 func (*StartSessionResponse) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StartSessionResponse) GetResult() isStartSessionResponse_Result {
@@ -345,7 +410,7 @@ type StartSessionSuccess struct {
 
 func (x *StartSessionSuccess) Reset() {
 	*x = StartSessionSuccess{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -357,7 +422,7 @@ func (x *StartSessionSuccess) String() string {
 func (*StartSessionSuccess) ProtoMessage() {}
 
 func (x *StartSessionSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -370,7 +435,7 @@ func (x *StartSessionSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionSuccess.ProtoReflect.Descriptor instead.
 func (*StartSessionSuccess) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *StartSessionSuccess) GetSession() *v1.SessionStarted {
@@ -399,7 +464,7 @@ type StartSessionFailure struct {
 
 func (x *StartSessionFailure) Reset() {
 	*x = StartSessionFailure{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -411,7 +476,7 @@ func (x *StartSessionFailure) String() string {
 func (*StartSessionFailure) ProtoMessage() {}
 
 func (x *StartSessionFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -424,7 +489,7 @@ func (x *StartSessionFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionFailure.ProtoReflect.Descriptor instead.
 func (*StartSessionFailure) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *StartSessionFailure) GetCause() isStartSessionFailure_Cause {
@@ -536,7 +601,7 @@ type StartSessionVendorStartFailed struct {
 
 func (x *StartSessionVendorStartFailed) Reset() {
 	*x = StartSessionVendorStartFailed{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +613,7 @@ func (x *StartSessionVendorStartFailed) String() string {
 func (*StartSessionVendorStartFailed) ProtoMessage() {}
 
 func (x *StartSessionVendorStartFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +626,7 @@ func (x *StartSessionVendorStartFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionVendorStartFailed.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartFailed) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{6}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{7}
 }
 
 type StartSessionUnknownSession struct {
@@ -572,7 +637,7 @@ type StartSessionUnknownSession struct {
 
 func (x *StartSessionUnknownSession) Reset() {
 	*x = StartSessionUnknownSession{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +649,7 @@ func (x *StartSessionUnknownSession) String() string {
 func (*StartSessionUnknownSession) ProtoMessage() {}
 
 func (x *StartSessionUnknownSession) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +662,7 @@ func (x *StartSessionUnknownSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionUnknownSession.ProtoReflect.Descriptor instead.
 func (*StartSessionUnknownSession) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{7}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{8}
 }
 
 type StartSessionAlreadyStarted struct {
@@ -608,7 +673,7 @@ type StartSessionAlreadyStarted struct {
 
 func (x *StartSessionAlreadyStarted) Reset() {
 	*x = StartSessionAlreadyStarted{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -620,7 +685,7 @@ func (x *StartSessionAlreadyStarted) String() string {
 func (*StartSessionAlreadyStarted) ProtoMessage() {}
 
 func (x *StartSessionAlreadyStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -633,7 +698,7 @@ func (x *StartSessionAlreadyStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionAlreadyStarted.ProtoReflect.Descriptor instead.
 func (*StartSessionAlreadyStarted) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{9}
 }
 
 type StartSessionConversationOwned struct {
@@ -644,7 +709,7 @@ type StartSessionConversationOwned struct {
 
 func (x *StartSessionConversationOwned) Reset() {
 	*x = StartSessionConversationOwned{}
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -656,7 +721,7 @@ func (x *StartSessionConversationOwned) String() string {
 func (*StartSessionConversationOwned) ProtoMessage() {}
 
 func (x *StartSessionConversationOwned) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -669,7 +734,7 @@ func (x *StartSessionConversationOwned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionConversationOwned.ProtoReflect.Descriptor instead.
 func (*StartSessionConversationOwned) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{10}
 }
 
 var File_shim_v1_endpoint_start_session_proto protoreflect.FileDescriptor
@@ -684,11 +749,14 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x11StartSessionFresh\x126\n" +
 	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelH\x00R\x05model\x88\x01\x01\x12M\n" +
 	"\x0fpermission_mode\x18\x02 \x01(\v2$.conversation.v1.AgentPermissionModeR\x0epermissionModeB\b\n" +
-	"\x06_model\"\xae\x01\n" +
+	"\x06_model\"\xf3\x01\n" +
 	"\x12StartSessionResume\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12W\n" +
-	"\x10cold_remediation\x18\x02 \x01(\v2'.conversation.v1.SessionColdRemediationH\x00R\x0fcoldRemediation\x88\x01\x01B\x13\n" +
-	"\x11_cold_remediation\"\x94\x01\n" +
+	"\x10cold_remediation\x18\x02 \x01(\v2'.conversation.v1.SessionColdRemediationH\x00R\x0fcoldRemediation\x88\x01\x01\x128\n" +
+	"\x06rebind\x18\x03 \x01(\v2\x1b.shim.v1.StartSessionRebindH\x01R\x06rebind\x88\x01\x01B\x13\n" +
+	"\x11_cold_remediationB\t\n" +
+	"\a_rebind\"\x14\n" +
+	"\x12StartSessionRebind\"\x94\x01\n" +
 	"\x14StartSessionResponse\x128\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1c.shim.v1.StartSessionSuccessH\x00R\asuccess\x128\n" +
 	"\afailure\x18\x02 \x01(\v2\x1c.shim.v1.StartSessionFailureH\x00R\afailureB\b\n" +
@@ -720,43 +788,45 @@ func file_shim_v1_endpoint_start_session_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_start_session_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*StartSessionRequest)(nil),           // 0: shim.v1.StartSessionRequest
 	(*StartSessionFresh)(nil),             // 1: shim.v1.StartSessionFresh
 	(*StartSessionResume)(nil),            // 2: shim.v1.StartSessionResume
-	(*StartSessionResponse)(nil),          // 3: shim.v1.StartSessionResponse
-	(*StartSessionSuccess)(nil),           // 4: shim.v1.StartSessionSuccess
-	(*StartSessionFailure)(nil),           // 5: shim.v1.StartSessionFailure
-	(*StartSessionVendorStartFailed)(nil), // 6: shim.v1.StartSessionVendorStartFailed
-	(*StartSessionUnknownSession)(nil),    // 7: shim.v1.StartSessionUnknownSession
-	(*StartSessionAlreadyStarted)(nil),    // 8: shim.v1.StartSessionAlreadyStarted
-	(*StartSessionConversationOwned)(nil), // 9: shim.v1.StartSessionConversationOwned
-	(*v1.AgentModel)(nil),                 // 10: conversation.v1.AgentModel
-	(*v1.AgentPermissionMode)(nil),        // 11: conversation.v1.AgentPermissionMode
-	(*v1.SessionColdRemediation)(nil),     // 12: conversation.v1.SessionColdRemediation
-	(*v1.SessionStarted)(nil),             // 13: conversation.v1.SessionStarted
-	(*v1.SessionCold)(nil),                // 14: conversation.v1.SessionCold
+	(*StartSessionRebind)(nil),            // 3: shim.v1.StartSessionRebind
+	(*StartSessionResponse)(nil),          // 4: shim.v1.StartSessionResponse
+	(*StartSessionSuccess)(nil),           // 5: shim.v1.StartSessionSuccess
+	(*StartSessionFailure)(nil),           // 6: shim.v1.StartSessionFailure
+	(*StartSessionVendorStartFailed)(nil), // 7: shim.v1.StartSessionVendorStartFailed
+	(*StartSessionUnknownSession)(nil),    // 8: shim.v1.StartSessionUnknownSession
+	(*StartSessionAlreadyStarted)(nil),    // 9: shim.v1.StartSessionAlreadyStarted
+	(*StartSessionConversationOwned)(nil), // 10: shim.v1.StartSessionConversationOwned
+	(*v1.AgentModel)(nil),                 // 11: conversation.v1.AgentModel
+	(*v1.AgentPermissionMode)(nil),        // 12: conversation.v1.AgentPermissionMode
+	(*v1.SessionColdRemediation)(nil),     // 13: conversation.v1.SessionColdRemediation
+	(*v1.SessionStarted)(nil),             // 14: conversation.v1.SessionStarted
+	(*v1.SessionCold)(nil),                // 15: conversation.v1.SessionCold
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	1,  // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
 	2,  // 1: shim.v1.StartSessionRequest.resume:type_name -> shim.v1.StartSessionResume
-	10, // 2: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
-	11, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	12, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
-	4,  // 5: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
-	5,  // 6: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	13, // 7: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	14, // 8: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
-	6,  // 9: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
-	7,  // 10: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
-	8,  // 11: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
-	9,  // 12: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 2: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
+	12, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	13, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
+	3,  // 5: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
+	5,  // 6: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
+	6,  // 7: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
+	14, // 8: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	15, // 9: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	7,  // 10: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
+	8,  // 11: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
+	9,  // 12: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
+	10, // 13: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }
@@ -770,11 +840,11 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 	}
 	file_shim_v1_endpoint_start_session_proto_msgTypes[1].OneofWrappers = []any{}
 	file_shim_v1_endpoint_start_session_proto_msgTypes[2].OneofWrappers = []any{}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[3].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[4].OneofWrappers = []any{
 		(*StartSessionResponse_Success)(nil),
 		(*StartSessionResponse_Failure)(nil),
 	}
-	file_shim_v1_endpoint_start_session_proto_msgTypes[5].OneofWrappers = []any{
+	file_shim_v1_endpoint_start_session_proto_msgTypes[6].OneofWrappers = []any{
 		(*StartSessionFailure_Cold)(nil),
 		(*StartSessionFailure_VendorStartFailed)(nil),
 		(*StartSessionFailure_UnknownSession)(nil),
@@ -787,7 +857,7 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_start_session_proto_rawDesc), len(file_shim_v1_endpoint_start_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

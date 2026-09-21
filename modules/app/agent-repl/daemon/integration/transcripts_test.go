@@ -3,6 +3,8 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -126,5 +128,93 @@ func TestBindWorkspaceSessionRefusesAnIdNoTranscriptCarries(t *testing.T) {
 	// Assert.
 	if msg.GetError().GetUnknownTranscript().GetVendorSessionId() != "invented" {
 		t.Fatalf("result = %v, want unknown_transcript naming the invented id", msg.GetResult())
+	}
+}
+
+// TestBindWorkspaceSessionStartsTheChosenConversationAsARebind proves the whole
+// hop for the fix the bind exists for: the resume the daemon sends after a bind
+// carries `rebind`, which is what tells the shim to adopt the chosen
+// conversation's identity as the workspace's book. Without it the shim keeps
+// the workspace's persisted book and the daemon reads the PREVIOUS
+// conversation's history back over the one the user chose.
+func TestBindWorkspaceSessionStartsTheChosenConversationAsARebind(t *testing.T) {
+	// Arrange: the chosen conversation with the vendor transcript on disk that
+	// a real one would have left behind. Without the file the source
+	// classifier judges the conversation to have written nothing and brings
+	// the workspace up FRESH — and a fresh start carries no resume at all, so
+	// there would be nothing for the marker to ride.
+	f := newOpened(t, harness.Opts{})
+	seedVendorTranscript(t, f, "conversation-b")
+	answerTranscripts(f, &shimv1.Transcript{VendorSessionId: "conversation-b"})
+
+	// Act.
+	msg := bind(f, "conversation-b")
+
+	// Assert.
+	if msg.GetSuccess() == nil {
+		t.Fatalf("BindWorkspaceSession = %v, want a success", msg.GetResult())
+	}
+	// THE BIND STOPS ONE SHIM AND BRINGS ITS SUCCESSOR UP, so the assertion
+	// reads the shim's DURABLE request log rather than a control socket whose
+	// process the swap replaces underneath it. It keys on the CHOSEN
+	// conversation's id because the workspace's opening StartSession is already
+	// logged under the same verb.
+	req := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
+		"the StartSession the bind itself ran", req,
+		func() bool { return req.GetResume().GetVendorSessionId() == "conversation-b" })
+
+	if req.GetResume().GetRebind() == nil {
+		t.Fatalf("the bind's start = %v, want the resume marked a REBIND: without the marker the"+
+			" shim keeps the workspace's persisted book and replays the conversation the user replaced",
+			req.GetResume())
+	}
+}
+
+// TestARestartIsAPlainResumeAndLeavesTheWorkspacesBookWhereItIs is the other
+// half of the rule: the marker moves the shim's book, so a start that is NOT a
+// bind must never carry it. A restart resumes the conversation the workspace is
+// already on, and a rotated resume handle adopted as the book there would
+// orphan every record filed under the name it rotated away from.
+func TestARestartIsAPlainResumeAndLeavesTheWorkspacesBookWhereItIs(t *testing.T) {
+	// Arrange: an opened workspace with a transcript on disk, so its restart
+	// resumes rather than coming up fresh.
+	f := newOpened(t, harness.Opts{})
+	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
+		t.Fatalf("the opening StartSession = %v, want fresh", req)
+	}
+	seedVendorTranscript(t, f, f.shim.Info().VendorSessionID)
+
+	// Act.
+	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(),
+		connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = (%v, %v), want a success", resp, err)
+	}
+
+	// Assert.
+	req := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
+		"the restart's own StartSession", req,
+		func() bool { return req.GetResume() != nil })
+
+	if rebind := req.GetResume().GetRebind(); rebind != nil {
+		t.Fatalf("the restart's resume.rebind = %v, want the workspace's book left where it is", rebind)
+	}
+}
+
+// seedVendorTranscript writes the on-disk vendor transcript a conversation that
+// really ran would have left in the workspace's project directory. The source
+// classifier probes for it, and a conversation with no file is brought up FRESH
+// however the record names it.
+func seedVendorTranscript(t *testing.T, f *fixture, vendorSessionID string) {
+	t.Helper()
+	project := harness.ProjectDir(f.d.DefaultConfigDir, f.ws.GetDir())
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatalf("mkdir the workspace's project dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, vendorSessionID+".jsonl"),
+		[]byte(`{"type":"summary"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("seed the transcript for %q: %v", vendorSessionID, err)
 	}
 }

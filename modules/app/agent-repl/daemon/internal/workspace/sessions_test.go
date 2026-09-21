@@ -941,6 +941,71 @@ func TestStartResumesARecordedConversation(t *testing.T) {
 	}
 }
 
+// THE REBIND MARKER IS WHAT MOVES THE SHIM'S BOOK, so which starts carry it is
+// the whole behavior: a bind's start must, and every ordinary bring-up must
+// not — a marked restart would let a rotated resume handle become the book and
+// orphan everything recorded under the old name.
+func TestStartMarksTheResumeARebindOnlyWhenTheCallerIsABind(t *testing.T) {
+	tests := []struct {
+		name       string
+		start      func(*fleetFixture, ids.WorkspaceID) error
+		wantRebind bool
+	}{
+		{
+			name:       "an ordinary bring-up is a plain resume",
+			start:      func(f *fleetFixture, ws ids.WorkspaceID) error { return f.fleet.Start(context.Background(), ws) },
+			wantRebind: false,
+		},
+		{
+			name:       "the start a bind runs REBINDS the workspace's book",
+			start:      func(f *fleetFixture, ws ids.WorkspaceID) error { return f.fleet.StartRebound(context.Background(), ws) },
+			wantRebind: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+
+			// Act.
+			if err := test.start(f, ws.ID); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+
+			// Assert.
+			resume := f.client.requests[0].GetResume()
+			if resume == nil {
+				t.Fatalf("StartSession request = %v, want a resume", f.client.requests[0])
+			}
+			if got := resume.GetRebind() != nil; got != test.wantRebind {
+				t.Fatalf("resume.rebind present = %v, want %v", got, test.wantRebind)
+			}
+		})
+	}
+}
+
+func TestResumeColdDoesNotMarkTheReOpenARebind(t *testing.T) {
+	// Arrange: a workspace parked behind a standing cold gate. An answered gate
+	// is the SAME conversation being paid for, not a different one being
+	// chosen, so its re-open leaves the workspace's book exactly where it is.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if rebind := f.client.requests[1].GetResume().GetRebind(); rebind != nil {
+		t.Fatalf("re-open resume.rebind = %v, want the book left where it was", rebind)
+	}
+}
+
 func TestStartRefusesADeletedSession(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

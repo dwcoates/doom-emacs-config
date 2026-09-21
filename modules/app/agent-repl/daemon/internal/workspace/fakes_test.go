@@ -1078,6 +1078,11 @@ type fakeSessions struct {
 	startHold    chan struct{}
 	startMu      sync.Mutex
 	startCalls   []ids.WorkspaceID
+
+	// rebound is every workspace whose start was asked for as a REBIND — the
+	// start that follows a bind, and the only one that tells the shim to adopt
+	// the resumed conversation as the workspace's book.
+	rebound []ids.WorkspaceID
 }
 
 type stopCall struct {
@@ -1109,6 +1114,16 @@ func (s *fakeSessions) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	s.started = append(s.started, ws)
 	s.live[ws] = true
 	return nil
+}
+
+// StartRebound is Start, remembered separately: the distinction between the
+// two IS the behavior under test, so a fake that collapsed them would let a
+// bind that started a plain resume pass.
+func (s *fakeSessions) StartRebound(ctx context.Context, ws ids.WorkspaceID) error {
+	s.startMu.Lock()
+	s.rebound = append(s.rebound, ws)
+	s.startMu.Unlock()
+	return s.Start(ctx, ws)
 }
 
 // StartDetached runs the start INLINE and reports its outcome, which is what
