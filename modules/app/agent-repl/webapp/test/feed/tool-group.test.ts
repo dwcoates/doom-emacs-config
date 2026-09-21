@@ -269,10 +269,13 @@ describe("activateGroupedMember", () => {
 });
 
 describe("the tab strip's size (styles.css)", () => {
-  // Owner-prescribed: the tab strip and its tabs read about 50% smaller than
-  // before. Pinned here, alongside the module that draws them, so a future
-  // resize of `.feed-group-strip`/`.feed-group-tab` is a deliberate edit to
-  // this test rather than a silent drift.
+  // Owner-prescribed, in two rulings. The tabs were first halved (2026-09-20);
+  // at that size they were hard to see, so every dimension then grew by a
+  // QUARTER (2026-09-21) — the type, the icon gap and both paddings alike, so
+  // the tab scales evenly rather than stretching in one direction. Pinned here,
+  // alongside the module that draws them, so a future resize of
+  // `.feed-group-strip`/`.feed-group-tab` is a deliberate edit to this test
+  // rather than a silent drift.
   /** The declaration block for SELECTOR, exactly as it appears in the sheet. */
   function ruleBodyOf(selector: string): string {
     const pattern = new RegExp(
@@ -283,16 +286,16 @@ describe("the tab strip's size (styles.css)", () => {
     return match[1];
   }
 
-  it("halves the strip's gap and padding", () => {
+  it("grows the strip's gap and padding by a quarter", () => {
     const body = ruleBodyOf(".feed-group-strip");
-    expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.125rem\s*;/);
-    expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.05rem 0 0\.15rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.062rem 0 0\.188rem\s*;/);
   });
 
-  it("halves a tab's gap, padding and font-size", () => {
+  it("grows a tab's gap, padding and font-size by the same quarter", () => {
     const body = ruleBodyOf(".feed-group-tab");
-    expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.125rem\s*;/);
-    expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.075rem 0\.225rem\s*;/);
-    expect(body).toMatch(/(^|[;\s])font-size\s*:\s*0\.5em\s*;/);
+    expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.094rem 0\.281rem\s*;/);
+    expect(body).toMatch(/(^|[;\s])font-size\s*:\s*0\.625em\s*;/);
   });
 });
