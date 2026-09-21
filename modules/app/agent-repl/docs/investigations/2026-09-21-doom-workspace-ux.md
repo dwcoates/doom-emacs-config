@@ -437,3 +437,14 @@ opened or a transcript is selected (`SPC j c`), and only the first page.
   They stay served by the old daemon, so nothing is harmed, but the design says
   "per workspace, independently". A separate defect, not yet scheduled.
 
+### A defect the new path revealed, fixed the same day
+
+- The first deploy after the first live handover was REFUSED as `joining`:
+  `joiningMode` records how the process booted and is never cleared, so a
+  successor refused rollouts forever. Fixed (`stillJoiningLocked`), with a
+  second-generation handover e2e. Changelog: `successor-takes-the-next-rollout`.
+- STATE AT 2026-09-21 16:20: the fix is on master and NOT deployed. The running
+  daemon carries the bug, so it cannot be rolled out to; ONE forced restart
+  (`bin/deploy-all.sh --restart`, ends running turns — none were open when
+  checked) is owed. Every later deploy is a rollout.
+
