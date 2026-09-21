@@ -405,6 +405,93 @@ describe("createFeedController: a live removal drops the row", () => {
   });
 });
 
+// A FEED EMPTIED WHOLE. A workspace bound to a different vendor conversation
+// has its feed RESET daemon-side: every row is retired at once, each as an
+// ordinary removal on the same tail. The reader must end up looking at an
+// empty feed and then at the newly bound conversation alone — never at the
+// last rows of the conversation it no longer runs.
+
+describe("createFeedController: a feed emptied whole", () => {
+  it("draws nothing once every row has been removed", () => {
+    // Arrange.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a"), responseRow("b"), responseRow("c")]), "replace");
+    // Act.
+    for (const id of ["a", "b", "c"]) controller.upsert(removedRow(id));
+    // Assert.
+    expect(drawnIds(host)).toEqual([]);
+  });
+
+  it("draws the newly bound conversation alone after the emptying", () => {
+    // Arrange.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    for (const id of ["a", "b"]) controller.upsert(removedRow(id));
+    // Act.
+    controller.upsert(responseRow("new-1"));
+    // Assert.
+    expect(drawnIds(host)).toEqual(["new-1"]);
+  });
+
+  it("disposes every emptied row's bubble", () => {
+    // Arrange: two bubble rows, their disposals counted.
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([subagentRow("b1"), subagentRow("b2")]), "replace");
+    let disposals = 0;
+    for (const id of ["b1", "b2"]) {
+      const bubble = bubbles.get(id)!;
+      const inner = bubble.dispose.bind(bubble);
+      bubble.dispose = () => {
+        disposals += 1;
+        inner();
+      };
+    }
+    // Act.
+    for (const id of ["b1", "b2"]) controller.upsert(removedRow(id));
+    // Assert.
+    expect(disposals).toBe(2);
+  });
+
+  it("stops every emptied row's clocks", () => {
+    // Arrange: two running tool-call cards, each holding a live clock.
+    const ticker = countingTicker();
+    const { controller } = fixture(harness({ ticker }), {}, {
+      renderers: { simpleToolCall: drawFeedSimpleToolCall },
+    });
+    controller.applyPage(
+      page([toolCallRow("t1", "running"), toolCallRow("t2", "running")]),
+      "replace",
+    );
+    expect(ticker.live()).toBe(2);
+    // Act.
+    for (const id of ["t1", "t2"]) controller.upsert(removedRow(id));
+    // Assert.
+    expect(ticker.live()).toBe(0);
+  });
+
+  it("draws a row id the emptying dropped as a fresh row rather than twice", () => {
+    // Arrange: the new conversation happens to reuse an id of the old one.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    controller.upsert(removedRow("a"));
+    // Act.
+    controller.upsert(responseRow("a"));
+    // Assert.
+    expect(drawnIds(host)).toEqual(["a"]);
+  });
+
+  it("empties on a page that serves no rows at all", () => {
+    // Arrange: the reader re-opens the feed after the bind instead of
+    // streaming the removals, and the daemon serves it an empty newest page.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    // Act.
+    controller.applyPage(page([]), "replace");
+    // Assert.
+    expect(drawnIds(host)).toEqual([]);
+  });
+});
+
 // THE OVERSCAN WIRING: a row is handed to the pre-render buffer the moment its
 // chrome is born and handed back the moment the feed drops it, so the buffer
 // can force the layout of rows near the viewport without leaking a watch on a
