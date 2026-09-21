@@ -99,7 +99,9 @@ func (c *controller) releaseHandover() {
 // caller answer "the rollout was accepted" before the unbounded part starts.
 func (c *controller) beginHandover(ctx context.Context) (*handoverPlan, error) {
 	if err := c.claimHandover(); err != nil {
-		c.log.Warn(opHandover, "refused a handover while one is already in flight",
+		// INFO, NOT WARN: the refusal is the contract's own answer to a caller
+		// that asked twice, and nothing about it is wrong with this daemon.
+		c.log.Info(opHandover, "refused a handover while one is already in flight",
 			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
 		return nil, err
 	}
