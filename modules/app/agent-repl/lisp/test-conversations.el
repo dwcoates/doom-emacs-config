@@ -246,7 +246,10 @@ is in the list and never how the minibuffer behaves."
          (agent-repl-test-conversations--messages nil)
          (agent-repl-test-conversations--progress nil)
          (agent-repl-test-conversations--forgotten nil))
-     (cl-letf* (((symbol-function 'agent-repl--ws-current-name) (lambda () 'ws-one))
+     (cl-letf* (;; A STRING, as production's `agent-repl--ws-current-name' answers.
+                ;; A symbol here let `symbol-name' past the suite and into the
+                ;; user's hands, where the first stage signalled on it.
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
                 ((symbol-function 'agent-repl--ws-require-known) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl-verbs--ref)
                  (lambda (&rest _) (list :id "ws-id-1" :dir "/tmp/ws-1")))
@@ -520,6 +523,19 @@ would ever retire the registration."
     (agent-repl-bind-conversation)
     ;; Assert.
     (should (member "op-test-1" agent-repl-test-conversations--forgotten))))
+
+(ert-deftest agent-repl-test-conversations-names-the-workspace-as-a-string ()
+  "The requested stage names the workspace itself, never `symbol-name' of it."
+  ;; Arrange.
+  (agent-repl-test-conversations--with
+      (agent-repl-test-conversations--list-answer
+       (list (agent-repl-test-conversations--transcript)))
+      (list :arm :success :value nil)
+    ;; Act.
+    (agent-repl-bind-conversation)
+    ;; Assert.
+    (should (member (list :open :requested "ws-one")
+                    agent-repl-test-conversations--progress))))
 
 (provide 'test-conversations)
 
