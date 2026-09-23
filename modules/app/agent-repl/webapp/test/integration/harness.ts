@@ -251,21 +251,7 @@ function installShell(doc: Document): void {
 }
 
 /**
- * JSDOM HAS NO LAYOUT, so it implements no `Element.scrollIntoView`.
- *
- * The feed's reveal (a footer jump row, a breadcrumb) calls it, and without one
- * the whole reveal throws before it has marked the row it landed on. Like
- * `fetch`, this is a capability the environment is missing rather than a seam
- * in the app: scrolling is not observable under jsdom either way, and every
- * assertion about a jump is about what the page SAYS, not where it scrolled.
- */
-function installScrollIntoView(): void {
-  if (typeof Element.prototype.scrollIntoView === "function") return;
-  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-}
-
-/**
- * A TERMINAL FOR JSDOM, the second and last environment substitution.
+ * A TERMINAL FOR JSDOM, the one environment substitution besides `fetch`.
  *
  * xterm.js is a browser bundle: it reads `self` at import time, measures the
  * device pixel ratio through `window.matchMedia`, and paints through a canvas
@@ -458,7 +444,6 @@ async function mountApp(
   if (fake !== undefined) options.arrange?.(fake);
 
   installShell(document);
-  installScrollIntoView();
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.
@@ -558,7 +543,7 @@ async function mountApp(
   });
   handles.push(feed);
 
-  const footer = mountFooter(shell.footer, ctx, { revealRow: (id: FeedId) => feed.revealRow(id) });
+  const footer = mountFooter(shell.footer, ctx, { selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id) });
   handles.push(footer);
   // The per-bubble composers close on exactly these statuses (R7).
   footer.onStatus((statusCase) =>

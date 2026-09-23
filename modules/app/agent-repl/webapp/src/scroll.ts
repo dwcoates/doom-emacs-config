@@ -23,14 +23,21 @@
  * A purely horizontal wheel is always left to the browser (see
  * `armedWheelAction`), so a wide code block inside a section still pans.
  *
- * The feed's own tail-following metric (isPinnedToBottom) lives here too:
- * it is the other half of the same question of who owns the scroll
- * position, the user or the feed.
+ * The feed's own tail-follow owner lives here too: it is the other half of the
+ * same question of who owns the scroll position, the user or the feed.
+ *
+ * THE USER OWNS THE SCROLL (owner rule, 2026-09-23). This module is the ONE
+ * place anything writes a scroll position, and every write is either the
+ * reader's own input (the wheel redirect, a collapse click) or one of the
+ * closed set of named causes in `SCROLL_CAUSES`. A bubble's own scroll box has
+ * no implicit writer at all. `test/scroll.test.ts` scans every other source
+ * module and fails on any scroll write found outside this one.
  */
 import { ancestorMatching } from "./dom.js";
+import { log } from "./log.js";
 
-/** Slack below which the feed still counts as parked at its tail. */
-export const PIN_PX = 40;
+/** Slack below which a downward gesture still counts as arriving at the tail. */
+const PIN_PX = 40;
 
 /** Wheel deltaMode units (WheelEvent.DOM_DELTA_*). */
 const DELTA_LINE = 1;
@@ -53,31 +60,41 @@ export interface ScrollPosition {
 }
 
 /**
- * True when the box is parked at its tail (within PIN_PX of the bottom).
- * A pinned feed follows new content; an unpinned one holds the user's
- * place, so this is what a render consults before moving scrollTop.
+ * THE CLOSED SET OF IMPLICIT FEED-SCROLL CAUSES (owner rule, 2026-09-23).
+ *
+ * The feed moves without the reader's own scroll input for exactly these
+ * reasons, and for no other:
+ *
+ * - `promptSent`: a prompt this client sent was drawn; the feed parks at its
+ *   tail and follows until the reader scrolls away.
+ * - `selectionMoved`: the reader stepped the reply-to-a-past-response
+ *   selection by keybinding; the selected row is centered, and a cleared
+ *   selection returns to the tail.
+ * - `detachedWorkSelected`: the reader picked a detached-work item in the
+ *   expanded footer; the feed brings that item's card into view.
+ * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
+ *   a scroll change.
+ * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
+ *   lands at the tail, by the earlier owner ruling of 2026-09-23.
+ * - `prependCompensation`: older rows landing above the reader shift the view
+ *   by exactly their height, so the content under the reader stays put.
+ *
+ * Every move is recorded at DEBUG as `scroll.feed-moved` with its cause.
  */
-export function isPinnedToBottom(pos: ScrollPosition, pinPx: number = PIN_PX): boolean {
-  return pos.scrollHeight - pos.scrollTop - pos.clientHeight < pinPx;
-}
+export const SCROLL_CAUSES = [
+  "promptSent",
+  "selectionMoved",
+  "detachedWorkSelected",
+  "initialPlacement",
+  "replaceRestore",
+  "prependCompensation",
+] as const;
 
-/** The one mutable field parking a box at its tail touches. */
-export interface ScrollTail {
-  scrollTop: number;
-  scrollHeight: number;
-}
+/** One named reason the feed may move without the reader's scroll input. */
+export type ScrollCause = (typeof SCROLL_CAUSES)[number];
 
-/**
- * Put a scroll box at its tail in a single jump. Assigning scrollTop is
- * what makes it a jump rather than an animation: the tail is simply THERE
- * on the next frame, with no crawl down the history to watch. Every site
- * that wants the newest content on screen goes through here — the
- * restored-session render, the tail-following render, and the Emacs
- * host's workspace-switch snap (host.ts).
- */
-export function parkAtTail(box: ScrollTail): void {
-  box.scrollTop = box.scrollHeight;
-}
+/** The causes that land the feed at its tail and latch the follow. */
+type ParkCause = "promptSent" | "selectionMoved" | "initialPlacement" | "replaceRestore";
 
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
@@ -89,69 +106,49 @@ export type SubscribeResize = (onResize: () => void) => void;
 export type SubscribeInput = (onInput: () => void) => void;
 
 /** Everything the tail owner reads and writes on the box it guards. */
-export type ReanchorBox = ScrollTail & ScrollPosition;
+export type ReanchorBox = ScrollPosition;
 
 /**
- * THE SINGLE OWNER OF "SHOULD THE FEED BE FOLLOWING ITS TAIL".
+ * THE SINGLE OWNER OF THE FEED'S SCROLL POSITION.
  *
- * The feed's position used to be written by four parties that each derived the
- * answer for themselves — the render's fresh `isPinnedToBottom` sample, a
- * separate nested-view freeze flag, the resize re-anchor's own latch, and the
- * rebuild anchor's own pin test. Four derivations of one question is four
- * chances to disagree, and they did: a render sampling geometry while the user
- * was mid-gesture answered about the pixels rather than about the intent, and
- * parked the feed under them.
+ * Every implicit move of the feed is one of its cause-named methods, and
+ * nothing else in the webapp writes the feed's position. Its park and shift
+ * primitives are private, so a caller cannot move the feed without naming why.
  *
- * So intent is LATCHED here and nowhere else. Every mechanism that wants to
- * know asks `isFollowing()`; every mechanism that wants to move the feed calls
- * `park()` or `shift()`. Nothing else writes the feed's scrollTop toward the
- * tail, and nothing else reads geometry to decide whether it should.
+ * FOLLOW IS LATCHED, NEVER SAMPLED. Only a parking cause starts it: a sent
+ * prompt, a first placement, a replace, a cleared selection. The follow then
+ * keeps the tail on screen as later content arrives (`follow`, `onResize`),
+ * attributed to the cause that started it, until the READER scrolls away.
+ * The reader coming back to the tail does not restart it, and neither does
+ * geometry: an empty box is not "following" just because it is at its bottom.
  *
- * WHY LATCHED AND NOT SAMPLED. `isPinnedToBottom` has a PIN_PX slack band, and
- * the first moments of every upward gesture live inside it — a trackpad flick
- * begins with deltas of a few px. A render landing in that window sampled
- * "still pinned", parked at the tail, and undid the gesture; the user pushed
- * again, and got the erratic downward yank they reported. It hurt scrolling UP
- * far more than DOWN because leaving the tail is the only direction that has to
- * cross the band against a mechanism actively pulling the other way.
+ * WHY THE READER MUST HAVE DONE SOMETHING. The box writes its own position too
+ * -- `scrollTop` cannot sit past the end of the scrollable range, so content
+ * shrinking drags it down, and the drag is indistinguishable from a gesture
+ * upward by looking at the number. So a movement ends the follow ONLY once a
+ * real user input has reached the box (`onInput`): the clamp arrives with
+ * nothing behind it and is inert, and the gesture arrives with an input and
+ * ends the follow on its first upward pixel. Measured, from the hibernated
+ * tab's playbook under load: `scrollTop=52` with `scrollHeight=853
+ * clientHeight=637` and again `scrollHeight=1099` -- a clamp, held while 400px
+ * of new rows arrived beneath it.
  *
- * The latch's rule makes DIRECTION decisive rather than distance: any movement
- * of the box UP ends the follow, whatever the slack says, and only a movement
- * that arrives back AT the tail resumes it. There is no band for a gesture to
- * be trapped inside.
- *
- * WHY IT RECONCILES ON EVERY READ. A latch fed only by the scroll EVENT is
- * still stale where it matters most: the browser dispatches scroll
- * asynchronously, so a render running between the user's gesture and its event
- * would read the pre-gesture answer, see "following", and park the feed —
- * the same yank, now on a timing rather than a geometry mistake. `sync` closes
- * that window by comparing the box's live scrollTop against the last position
- * this owner knows about, so a read can never precede the movement it is
- * about.
- *
- * AND WHY A MOVEMENT IS NOT ENOUGH: THE READER MUST HAVE DONE SOMETHING. The
- * box writes its own position too — `scrollTop` cannot sit past the end of the
- * scrollable range, so content shrinking drags it down, and the drag is
- * indistinguishable from a gesture upward by looking at the number. Correcting
- * for that inside `sync` only works while the range is still short, and nothing
- * schedules `sync` there; a shrink and a regrowth between two reconciles leave
- * the position at the old bottom under a range that has moved on. So intent is
- * read off the box's position ONLY once a real user input has reached it
- * (`onInput`): the clamp arrives with nothing behind it and is inert, and the
- * gesture arrives with an input and ends the follow on its first upward pixel.
+ * WHY IT RECONCILES ON EVERY READ. The browser dispatches scroll
+ * asynchronously, so a render running between the reader's gesture and its
+ * event would read the pre-gesture answer and park the feed under them.
+ * `sync` compares the box's live position against the last one this owner
+ * knows about, so a read can never precede the movement it is about.
  */
 export class TailFollow {
-  private following: boolean;
+  private following = false;
+  /** The cause whose follow is standing, while one is. */
+  private cause: ParkCause | null = null;
   /** The last position this owner knows about: what it wrote, or what it saw. */
   private lastTop: number;
   /** Whether the READER has reached this box since the tail was last parked. */
   private touched = false;
 
-  constructor(
-    private readonly box: ReanchorBox,
-    private readonly pinPx: number = PIN_PX,
-  ) {
-    this.following = isPinnedToBottom(box, pinPx);
+  constructor(private readonly box: ReanchorBox) {
     this.lastTop = box.scrollTop;
   }
 
@@ -161,53 +158,60 @@ export class TailFollow {
     return this.following;
   }
 
-  /**
-   * Park the box at its tail and follow from here on. Every "show me the
-   * newest" act routes through this: the host's workspace-switch snap, the
-   * restored-session render, a freshly sent prompt (feed-view.ts's
-   * `parkOnSentPrompt`), a replaced page (feed-view.ts's `parkAfterReplace`), and
-   * a render that is following.
-   *
-   * It LATCHES the follow rather than only moving the pixels, which is what
-   * makes a workspace switch land at the bottom reliably: content that arrives
-   * after the snap (a deferred item upgrading, a board mounting, the relayout
-   * itself) is parked on again instead of being left as a gap the next render
-   * would have read as "the reader is scrolled up".
-   */
-  park(): void {
-    parkAtTail(this.box);
-    this.lastTop = this.box.scrollTop;
-    this.following = true;
-    // The reader's last input spoke about a position this park has replaced,
-    // so it stops speaking here (see `onInput`).
-    this.touched = false;
+  /** A prompt this client sent was drawn: park at the tail and follow. */
+  promptSent(): void {
+    this.park("promptSent");
+  }
+
+  /** A feed's first paint: land at the tail and follow. */
+  initialPlacement(): void {
+    this.park("initialPlacement");
+  }
+
+  /** A page replace (re-open after reconnect or handover): land at the tail and follow. */
+  replaceRestore(): void {
+    this.park("replaceRestore");
+  }
+
+  /** The reader cleared the reply selection: return to the tail and follow. */
+  selectionCleared(): void {
+    this.park("selectionMoved");
   }
 
   /**
-   * Move the box BY delta without changing the follow decision — a backfill
-   * that grew the feed above the viewport shifting the view by exactly that
-   * growth, so what the reader is looking at does not move.
-   *
-   * RELATIVE, because the growth is only ever known as a difference.
-   * Expressing it as "read the position, add, write it back" at the call site
-   * would read one box and write another the moment the two ever differ;
-   * keeping the whole arithmetic inside the owner makes them the
-   * same box by construction.
+   * The reader stepped the reply selection: stop following, so streaming rows
+   * cannot pull them off the selection, and center the selected row when the
+   * feed has drawn it (GEOMETRY null: nothing to center on).
    */
-  shift(delta: number): void {
-    this.sync();
-    this.box.scrollTop += delta;
-    this.lastTop = this.box.scrollTop;
+  selectionMoved(geometry: CenterGeometry | null): void {
+    this.release();
+    if (geometry !== null) this.shift("selectionMoved", centerDelta(geometry));
   }
 
   /**
-   * Stop following: the user deliberately opened content to read (a nested view
-   * inside a bubble), so streaming output must not pull the view off it. Only a
-   * return to the tail, or an explicit `park`, resumes following.
+   * The reader picked a detached-work item in the footer: stop following, and
+   * bring the item's card as far into view as fits (`revealDelta`).
    */
-  release(): void {
+  detachedWorkSelected(geometry: RevealGeometry): void {
+    this.release();
+    this.shift("detachedWorkSelected", revealDelta(geometry));
+  }
+
+  /**
+   * Older rows grew GROWN px above the reader: shift by exactly that, so the
+   * content under them stays put. A following reader is already at the tail,
+   * which the follow keeps, so nothing is added on top of it.
+   */
+  prependCompensation(grown: number): void {
+    if (this.isFollowing()) return;
+    this.shift("prependCompensation", grown);
+  }
+
+  /** Keep the tail on screen while a follow stands; nothing otherwise. */
+  follow(): void {
     this.sync();
-    this.following = false;
+    if (!this.following || this.cause === null) return;
+    this.park(this.cause);
   }
 
   /** A scroll event on the box. Everything it decides lives in `sync`. */
@@ -216,70 +220,21 @@ export class TailFollow {
   }
 
   /**
-   * A USER INPUT reached the box — a wheel, a touch, a pointer on its bar, a
+   * A USER INPUT reached the box -- a wheel, a touch, a pointer on its bar, a
    * key while something in it has focus. It decides nothing on its own; it is
    * what makes the NEXT movement of the box attributable to the reader.
-   *
-   * WHY THE LATCH NEEDS THIS, and it is a measured defect rather than a
-   * precaution. `sync` reads intent out of the box's position, and the box
-   * writes that position too: `scrollTop` can never sit past the end of the
-   * scrollable range, so content shrinking drags it down and the drag looks
-   * exactly like a gesture upward. `sync` corrects for that by lowering its
-   * baseline into the range — which works only if it is LOOKING while the range
-   * is still short. Nothing guarantees that it is. A shrink and a regrowth that
-   * land between two reconciles (a `ResizeObserver` reports one coalesced size
-   * per frame, and any forced layout inside the frame applies the clamp) leave
-   * the position at the OLD bottom under a range that has moved on, and the
-   * next reconcile reads a gesture nobody made. The follow then ends for good:
-   * only arriving back at the tail or an explicit `park` resumes it, and
-   * nothing parks a feed that is not following.
-   *
-   * Measured, from the hibernated tab's playbook under load: `scrollTop=52`
-   * with `scrollHeight=853 clientHeight=637` and again `scrollHeight=1099`,
-   * where 52 is exactly the reachable extent the feed had had one turn
-   * earlier -- a clamp, held while 400px of new rows arrived beneath it.
-   *
-   * So the reader must have DONE something before a movement may be read as
-   * theirs. A clamp arrives with no input behind it and is therefore inert,
-   * whatever the timing; a gesture arrives with one and the direction rule
-   * above applies to it verbatim, on the very first upward pixel.
    */
   onInput(): void {
     this.touched = true;
   }
 
   /**
-   * A resize of the box. A workspace switch relayouts the feed asynchronously
-   * relative to the lisp that triggered it, so the host's snap and the resize
-   * land in either order — a snap that lands FIRST is otherwise undone by the
-   * resize growing the scrollable height under a scrollTop that stays put.
-   * Re-parking on the resize removes the ordering question instead of betting
-   * on one order.
-   *
-   * IT RECONCILES FIRST, like every other entry point, and that is the whole
-   * of this method's history. It used to skip `sync` because a resize moves
-   * scrollTop by itself — a shrinking viewport clamps it downward — and a
-   * reconcile that read the clamp as a gesture would drop the follow the
-   * switch just asked for. Skipping the reconcile bought that at the price of
-   * being the ONE path where a stale `following` could park the feed: a reader
-   * who has already begun scrolling up is only known to have done so through
-   * `sync`, since the browser dispatches their scroll event asynchronously and
-   * may throttle it behind a whole layout. A resize landing in that window
-   * parked the feed back at its tail under the gesture — and a resize only
-   * lands there while the page is still laying itself out, which is why it was
-   * the first upward scroll after a load that got yanked and no later one.
-   *
-   * `sync` now attributes the clamp itself (see there), so the reason to skip
-   * it is gone and the window with it.
-   *
-   * IT IS ALSO WHAT THE CONTENT'S OWN SIZE REPORTS THROUGH. A box that keeps
-   * the same viewport while the rows inside it grow has moved its tail exactly
-   * as far as one that shrank, and the correction is identical — so the two
-   * arrive at the same method rather than at a twin that could drift from it.
+   * A resize of the box or of its content. A standing follow keeps the tail on
+   * the settled layout (the docked footer taking height, a deferred card
+   * settling); a reader who scrolled away is left exactly where they are.
    */
   onResize(): void {
-    this.sync();
-    if (this.following) this.park();
+    this.follow();
   }
 
   /** Wire the box's own events into the owner. */
@@ -293,40 +248,75 @@ export class TailFollow {
     subscribeInput(() => this.onInput());
   }
 
+  /** Land the box at its tail and latch the follow under CAUSE. */
+  private park(cause: ParkCause): void {
+    const from = this.box.scrollTop;
+    const wasFollowing = this.following && this.cause === cause;
+    this.box.scrollTop = this.box.scrollHeight;
+    this.lastTop = this.box.scrollTop;
+    this.following = true;
+    this.cause = cause;
+    // The reader's last input spoke about a position this park has replaced.
+    this.touched = false;
+    // A follow that found the box already at its tail moved nothing, and is
+    // not recorded; every cause's own act is, moved or not.
+    if (wasFollowing && this.lastTop === from) return;
+    recordMove(cause, from, this.lastTop, wasFollowing);
+  }
+
+  /** Move the box BY delta without starting a follow. */
+  private shift(cause: ScrollCause, delta: number): void {
+    this.sync();
+    const from = this.box.scrollTop;
+    if (delta !== 0) this.box.scrollTop += delta;
+    this.lastTop = this.box.scrollTop;
+    recordMove(cause, from, this.lastTop, false);
+  }
+
+  /** Stop following: only a parking cause starts it again. */
+  private release(): void {
+    this.sync();
+    this.following = false;
+    this.cause = null;
+  }
+
   /**
    * Fold any movement this owner did not write into the decision.
    *
    * A position equal to the last one it knows about decides nothing, which is
-   * what makes its own `park`/`shift` writes — and the scroll events the
-   * browser dispatches for them afterward — inert. Anything else is the reader,
-   * and the reader moving up ends the follow while only the reader arriving at
-   * the tail resumes it.
-   *
-   * THE BOX'S OWN CLAMP IS NOT THE READER, and reconciling against a baseline
-   * that ignored it is what made hydration attributable to them. scrollTop can
-   * never sit past the end of the scrollable range, so content SHRINKING —
-   * a deferred item settling to a smaller real height, a card collapsing, a
-   * relayout narrowing the feed — drags the position down with it, and a
-   * baseline still standing above the new range reads that drag as an upward
-   * gesture and ends a follow nobody ended. Lowering the baseline into the
-   * range first is what leaves only the reader on the other side of the
-   * comparison. Growth needs no such treatment and gets none: it moves
-   * scrollTop nowhere, so the clamp is the ONLY movement the box makes on its
-   * own and this is the whole of the correction.
+   * what makes its own writes -- and the scroll events the browser dispatches
+   * for them afterward -- inert. THE BOX'S OWN CLAMP IS NOT THE READER: content
+   * shrinking drags the position down, so the baseline is lowered into the
+   * reachable range first. A movement with the reader's input behind it ends
+   * the follow unless it went down to the tail; nothing here ever starts one.
    */
   private sync(): void {
     const reachable = Math.max(0, this.box.scrollHeight - this.box.clientHeight);
     if (this.lastTop > reachable) this.lastTop = reachable;
     const top = this.box.scrollTop;
     if (top === this.lastTop) return;
-    // AND ONLY THE READER IS ON THE OTHER SIDE OF THIS COMPARISON. A movement
-    // with no user input behind it is the box's own (see `onInput`), so it
-    // re-baselines and decides nothing.
-    if (this.touched) {
-      this.following = top > this.lastTop && isPinnedToBottom(this.box, this.pinPx);
+    // The reader's movement ends a standing follow unless it went DOWN and
+    // landed at the tail: any upward pixel ends it (a flick upward starts with
+    // a few px), and so does a downward one that stops short of the tail.
+    const stayed = top > this.lastTop && this.box.scrollHeight - top - this.box.clientHeight < PIN_PX;
+    if (this.touched && this.following && !stayed) {
+      log.debug("the reader scrolled away from the tail; the follow ends", {
+        operation: "scroll.follow-ended",
+        context: { cause: this.cause ?? "none", from: this.lastTop, to: top },
+      });
+      this.following = false;
+      this.cause = null;
     }
     this.lastTop = top;
   }
+}
+
+/** One implicit move of the feed, recorded with the cause that made it. */
+function recordMove(cause: ScrollCause, from: number, to: number, follow: boolean): void {
+  log.debug(`the feed moved for ${cause}`, {
+    operation: "scroll.feed-moved",
+    context: { cause, from, to, follow },
+  });
 }
 
 /**
@@ -350,24 +340,16 @@ export class TailFollow {
  * subscribed it to anything — the owner only ever heard about renders. This is
  * the subscription.
  *
- * A ResizeObserver reports the box's new size before paint, so a following
- * feed is re-parked on the settled viewport rather than a frame later; a
- * reader who scrolled away is left where they are, which is `onResize`'s own
- * rule and not re-decided here.
+ * A ResizeObserver reports the box's new size before paint, so a STANDING
+ * follow (one a named cause latched) is kept at the tail of the settled
+ * viewport rather than a frame later; a reader who scrolled away, or a feed no
+ * cause ever parked, is left exactly where it is -- `onResize`'s own rule.
  *
- * THE CONTENT HALF IS THE OTHER WAY THE TAIL GOES STALE, and it is the half
- * that outlived the footer fix. Watching only the box hears every change to
- * the VIEWPORT and none to what is inside it, yet `scrollHeight` growing under
- * a `scrollTop` nobody moved leaves the tail exactly as far below the fold as
- * a shrinking viewport does. The renders that append rows re-park themselves
- * (`feed-view.ts`'s followTail), so the growth that escapes is the growth NO
- * render performs: a bubble the wire pushed unfolded fetches its own page and
- * paints it into its panel milliseconds later (`bubble.ts`'s `initialFolded`
- * open), a deferred card settles to its real height, a font or a highlighted
- * block relayouts. Each of those grows the feed after the last park, and under
- * load — where the fetch behind that unfold is slowest — it is the LAST thing
- * that happens, so nothing follows it to correct the position. That is the
- * `awaitTailClearsFooter` failure that survived subscribing the box.
+ * THE CONTENT HALF IS THE OTHER WAY THE TAIL GOES STALE. `scrollHeight`
+ * growing under a `scrollTop` nobody moved leaves the tail as far below the
+ * fold as a shrinking viewport does: a deferred card settling to its real
+ * height, a bubble's sub-feed painting its page, a font relayout. A standing
+ * follow keeps the tail through those too.
  *
  * `scrollHeight` is not observable, but it is the sum of the box's children's
  * heights, so the children are what is watched — and the child set is kept in
@@ -438,30 +420,6 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
  */
 const READER_INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 
-/** Where a revealed node lands: flush with the top, or as little as possible. */
-export type RevealBlock = "start" | "nearest";
-
-/** The one method bringing a node into view needs. */
-export interface RevealTarget {
-  scrollIntoView(arg: { block: RevealBlock }): void;
-}
-
-/**
- * Bring NODE into view inside the feed. The single "show me this bubble"
- * primitive: the roster's agent reveal (render.ts), the keyboard cycle
- * (nav.ts), and any later match-stepping (iterative search) must agree on
- * the mechanic, or the feed lurches differently depending on which one
- * moved it.
- *
- * `start` puts the node flush with the top, for a jump ARRIVING from
- * elsewhere. `nearest` scrolls only as far as it must, which is what a
- * cycle wants: a target already fully on screen should not be yanked
- * anywhere, since the current-marker is what says where the cycle sits.
- */
-export function revealNode(node: RevealTarget, block: RevealBlock = "nearest"): void {
-  node.scrollIntoView({ block });
-}
-
 /**
  * The two boxes a reveal compares, in ONE coordinate system.
  *
@@ -488,18 +446,14 @@ export interface RevealGeometry {
  * How far the box must move for NODE to be as visible as it can be, WITHOUT
  * pushing the node's own top off the viewport.
  *
- * This is "expanding a bubble reveals what it expands", as an arithmetic. The
- * node is the sub-feed panel that just appeared beneath a bubble's head, so:
+ * This is the detached-work selection (`TailFollow.detachedWorkSelected`), as
+ * an arithmetic. The node is the card the reader picked in the footer:
  *
- * - a panel already wholly on screen is not moved at all (0), because a reader
- *   who can already see what they opened has nothing to be scrolled toward;
- * - a panel running BELOW the fold is scrolled up by exactly its overhang,
- *   capped at the panel's distance from the top of the viewport — the cap is
- *   what keeps the bubble's HEAD where it was, and it binds whenever the panel
- *   is taller than the viewport, where the best that fits is the panel's own
- *   top edge flush with the box's;
- * - a panel above the viewport top (a bubble opened while its head is scrolled
- *   off) is brought down to it.
+ * - a card already wholly on screen is not moved at all (0);
+ * - a card running BELOW the fold is scrolled up by exactly its overhang,
+ *   capped at the card's distance from the top of the viewport, so a card
+ *   taller than the viewport lands with its own top flush with the box's;
+ * - a card above the viewport top is brought down to it.
  *
  * Positive is downward, matching `scrollTop`.
  */
@@ -511,68 +465,11 @@ export function revealDelta(g: RevealGeometry): number {
   return Math.min(nodeBottom - boxBottom, g.nodeTop - g.boxTop);
 }
 
-/** What a reveal needs of the tail owner, and nothing more. */
-export interface RevealWriter {
-  shift(delta: number): void;
-  release(): void;
-}
-
-/**
- * WHAT A BUBBLE'S CARET DOES TO THE VIEW, as the one thing that may do it.
- *
- * Expanding a fold grows the feed BELOW the fold, and growth alone moves
- * nothing: the reader clicked a caret and the sub-feed it opened unrolled
- * entirely off the bottom of the screen (measured at the click: `below=208
- * scrollTop=40`). Revealing what an expansion revealed is therefore part of
- * expanding, not a separate courtesy — and it goes through the tail owner,
- * because a second party writing `scrollTop` is exactly the arrangement
- * `TailFollow` exists to prevent.
- *
- * TWO CASES, DECIDED BEFORE THE CLICK IS ACTED ON. A reader following the tail
- * stays following it: the expansion's new rows are the newest content, so the
- * tail re-lands and they are at the bottom of it. Anyone else is holding a
- * place, so the view moves by the least that puts the opened panel on screen
- * and the follow decision is left alone — `shift` is relative and decides
- * nothing, which is precisely why it is what a reveal uses.
- */
-export interface FeedReveal {
-  /** Was the feed following its tail when the caret was clicked? */
-  isFollowing(): boolean;
-  /** Re-land the tail, for a reader who was following it. */
-  park(): void;
-  /** Bring NODE as far into view as fits, for a reader who was not. */
-  reveal(node: HTMLElement): void;
-}
-
-/** Bind a REAL scroll box and its tail owner into the caret's view rule. */
-export function feedReveal(box: HTMLElement, tail: TailFollow): FeedReveal {
-  return {
-    isFollowing: () => tail.isFollowing(),
-    park: () => tail.park(),
-    reveal: (node) => revealInBox(box, node, tail),
-  };
-}
-
-/**
- * Move BOX so NODE is as visible as it fits, through TAIL.
- *
- * `release` first, which is the state this reader is now in whatever the
- * geometry says: they deliberately opened content to read, so streaming output
- * arriving into the feed underneath them must not pull the view off it. That is
- * the sentence `TailFollow.release` was written for, and until this call site
- * existed nothing in production said it.
- */
-export function revealInBox(box: HTMLElement, node: HTMLElement, tail: RevealWriter): void {
+/** Read BOX and NODE's reveal geometry off the live layout (reading moves nothing). */
+export function revealGeometry(box: Element, node: Element): RevealGeometry {
   const b = box.getBoundingClientRect();
   const n = node.getBoundingClientRect();
-  tail.release();
-  const delta = revealDelta({
-    boxTop: b.top,
-    boxHeight: b.height,
-    nodeTop: n.top,
-    nodeHeight: n.height,
-  });
-  if (delta !== 0) tail.shift(delta);
+  return { boxTop: b.top, boxHeight: b.height, nodeTop: n.top, nodeHeight: n.height };
 }
 
 /**
@@ -610,8 +507,7 @@ export interface CenterGeometry {
  * - a row so near the END that centering would scroll past the last reachable
  *   position is clamped at `scrollHeight - clientHeight`.
  *
- * Positive is downward, matching `scrollTop`, so the caller hands the result
- * straight to `TailFollow.shift`.
+ * Positive is downward, matching `scrollTop` (`TailFollow.selectionMoved`).
  */
 export function centerDelta(g: CenterGeometry): number {
   const idealTop = g.nodeOffsetTop - (g.clientHeight - g.nodeHeight) / 2;
@@ -768,9 +664,9 @@ export function installIntentScroll(feed: HTMLElement): { uninstall: () => void;
     if (delta === null) return;
     e.preventDefault();
     // NOT through TailFollow, and deliberately so: this IS the reader's own
-    // wheel, merely redirected off a section onto the feed. The owner reads it
-    // as the gesture it is — up ends the follow, back to the tail resumes it —
-    // exactly the treatment a wheel on the feed itself gets.
+    // wheel, merely redirected off a section onto the feed, so it is user input
+    // and no implicit cause. The owner reads it as the gesture it is (up ends
+    // the follow), exactly the treatment a wheel on the feed itself gets.
     feed.scrollTop += delta;
   };
 
@@ -797,3 +693,16 @@ export function installIntentScroll(feed: HTMLElement): { uninstall: () => void;
   };
 }
 
+/**
+ * THE READER COLLAPSED A SECTION: show its collapsed preview from the top.
+ *
+ * Owner ruling, 2026-09-15 (FIX3): "unselecting the expanded bubble should
+ * return it to the original state -- scrolled to the top, not where you left
+ * it". Collapsing clips the box and would otherwise keep whatever position the
+ * expanded view was left at. This runs ONLY from the reader's own collapse
+ * click (`installClickExpand`, expand.ts), so it is user input and not an
+ * implicit move: a bubble's scroll box has no other writer.
+ */
+export function collapseClicked(section: { scrollTop: number }): void {
+  section.scrollTop = 0;
+}
