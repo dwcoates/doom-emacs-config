@@ -37,9 +37,21 @@
  * lands between a tag and its text; an element too long to fit alone is split
  * with its tags closed at the end of one line and reopened at the start of the
  * next.
+ *
+ * THE COUNT IS THE DRAWN WIDTH BY CONSTRUCTION. A double-width character (an
+ * emoji above all) renders wider than two monospace columns in the webview's
+ * fonts, so every character the width model counts as two is drawn inside a
+ * `WIDE_CHAR_CLASS` box the stylesheet sizes to exactly `2ch` of the tree font.
  */
 
 import { escapeHtml, highlightCode } from "./highlight.js";
+
+/**
+ * The class of the inline box every double-width character of a tree line is
+ * drawn in. The stylesheet makes it exactly `2ch` wide in the tree's own font,
+ * which is the two columns `charWidth` counts it as.
+ */
+export const WIDE_CHAR_CLASS = "mp-wide";
 
 /**
  * The column limit used when the live width cannot be measured (a detached
@@ -1232,10 +1244,51 @@ function renderFenceBlock(segment: FenceSegment): string {
 
 function renderLine(l: RenderLine, inline: (escaped: string) => string): string {
   if (l.raw && l.body.trim() === "") return `<div class="mp-line mp-blank"></div>`;
+  const content = boxWideChars(inline(escapeHtml(l.body)));
   if (l.raw) {
-    return `<div class="mp-line"><span class="mp-content">${inline(escapeHtml(l.body))}</span></div>`;
+    return `<div class="mp-line"><span class="mp-content">${content}</span></div>`;
   }
-  return `<div class="mp-line"><span class="mp-prefix">${escapeHtml(
-    l.prefix,
-  )}</span><span class="mp-content">${inline(escapeHtml(l.body))}</span></div>`;
+  return `<div class="mp-line"><span class="mp-prefix">${boxWideChars(
+    escapeHtml(l.prefix),
+  )}</span><span class="mp-content">${content}</span></div>`;
+}
+
+/**
+ * Draw every character the width model counts as two columns inside a
+ * `WIDE_CHAR_CLASS` box, so the drawn width equals the counted width.
+ *
+ * HTML is the INPUT: only the text between tags is touched, so an attribute or
+ * a tag name is never split. A box holds its character plus the zero-width
+ * marks that follow it (the emoji variation selector above all), which is the
+ * cluster `charWidth` counts as two; a zero-width joiner stays OUTSIDE, so a
+ * joined sequence draws as the separate two-column glyphs the model counted.
+ */
+export function boxWideChars(html: string): string {
+  return html
+    .split(/(<[^>]*>)/)
+    .map((part, i) => (i % 2 === 1 ? part : boxWideText(part)))
+    .join("");
+}
+
+/** boxWideChars over one run of text that carries no tag. */
+function boxWideText(text: string): string {
+  const chars = [...text];
+  let out = "";
+  let i = 0;
+  while (i < chars.length) {
+    const next = i + 1 < chars.length ? chars[i + 1] : "";
+    if (charWidth(chars[i], next === VARIATION_SELECTOR_16) !== 2) {
+      out += chars[i];
+      i++;
+      continue;
+    }
+    let cluster = chars[i];
+    i++;
+    while (i < chars.length && chars[i] !== ZERO_WIDTH_JOINER && charWidth(chars[i], false) === 0) {
+      cluster += chars[i];
+      i++;
+    }
+    out += `<span class="${WIDE_CHAR_CLASS}">${cluster}</span>`;
+  }
+  return out;
 }
