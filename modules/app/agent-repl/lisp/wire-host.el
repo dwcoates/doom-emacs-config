@@ -963,11 +963,36 @@ arm this codec does not know is refused as an unknown field."
 
 ;;;; ---- WatchDaemon ----
 
+(defun agent-repl-wire-encode-watch-daemon-emacs (value)
+  "Encode `WatchDaemonEmacs' from the plist VALUE `(:elisp-build BUILD)'.
+The build is REQUIRED and never empty: a watch without it is refused,
+because a deploy could not tell whether this Emacs runs the checkout's
+elisp.  An empty one is refused HERE, before anything is sent."
+  (let ((build (plist-get value :elisp-build)))
+    (unless (stringp build)
+      (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required field is unset"))
+    (when (string-empty-p build)
+      (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required string is empty"))
+    (agent-repl-wire--encoded
+     "WatchDaemonEmacs"
+     (list (cons 'elispBuild (agent-repl-wire--encode-string
+                              "WatchDaemonEmacs" 'elispBuild build))))))
+
+(defun agent-repl-wire-encode-watch-daemon-request-emacs (value)
+  "Encode `WatchDaemonRequest''s `emacs' client arm from VALUE."
+  (agent-repl-wire-encode-watch-daemon-emacs value))
+
 (defun agent-repl-wire-encode-watch-daemon-request (value)
-  "Encode the WatchDaemonRequest from VALUE — empty: the stream is daemon-
-scoped."
+  "Encode the WatchDaemonRequest from VALUE `(:client ONEOF)'.
+THE ARM IS THE CLIENT, and it is REQUIRED.  Emacs only ever connects as
+`emacs', stating the elisp it has loaded; the `webview' arm is a
+browser's, so this codec has no spelling for it and refuses it as an
+unknown arm."
   (agent-repl-wire--encoded
-   "WatchDaemonRequest" (agent-repl-wire--encode-empty "WatchDaemonRequest" value)))
+   "WatchDaemonRequest"
+   (agent-repl-wire--encode-oneof
+    "WatchDaemonRequest" 'client (plist-get value :client)
+    '((:emacs emacs agent-repl-wire-encode-watch-daemon-request-emacs)))))
 
 (defun agent-repl-wire-decode-daemon-shutdown-self-merge-rollout (value)
   "Decode VALUE as the empty `DaemonShutdownSelfMergeRollout'."
@@ -1059,6 +1084,23 @@ The standing schedule, re-pushed to late subscribers."
            :reason (agent-repl-wire--decode-message
                     "DaemonDrainScheduled" 'reason object
                     #'agent-repl-wire-decode-daemon-drain-scheduled-reason)))))
+
+(defun agent-repl-wire-decode-daemon-reload-elisp (value)
+  "Decode VALUE as `DaemonReloadElisp', a plist `(:module-root :build)'.
+BOTH ARE REQUIRED: the root is what Emacs checks against its own before it
+loads anything, and the build is what it reports from then on.  An empty
+one is a contract breach, never a reload to attempt."
+  (let ((object (agent-repl-wire--object "DaemonReloadElisp" value)))
+    (agent-repl-wire--check-keys "DaemonReloadElisp" object '(moduleRoot build))
+    (let ((root (agent-repl-wire--decode-string "DaemonReloadElisp" 'moduleRoot object))
+          (build (agent-repl-wire--decode-string "DaemonReloadElisp" 'build object)))
+      (when (string-empty-p root)
+        (agent-repl-wire--fail "DaemonReloadElisp" 'moduleRoot "required string is empty"))
+      (when (string-empty-p build)
+        (agent-repl-wire--fail "DaemonReloadElisp" 'build "required string is empty"))
+      (agent-repl-wire--decoded
+       "DaemonReloadElisp"
+       (list :module-root root :build build)))))
 
 (defun agent-repl-wire-decode-daemon-drain-cancelled (value)
   "Decode VALUE as the empty `DaemonDrainCancelled' — presence is the fact."
@@ -1176,14 +1218,19 @@ it, and drops any it does not recognize."
      (drainScheduled :drain-scheduled agent-repl-wire-decode-daemon-drain-scheduled)
      (drainCancelled :drain-cancelled agent-repl-wire-decode-daemon-drain-cancelled)
      (mutationProgress :mutation-progress
-                       agent-repl-wire-decode-workspace-mutation-progress))))
+                       agent-repl-wire-decode-workspace-mutation-progress)
+     (reloadElisp :reload-elisp agent-repl-wire-decode-watch-daemon-response-reload-elisp))))
+
+(defun agent-repl-wire-decode-watch-daemon-response-reload-elisp (value)
+  "Decode `WatchDaemonResponse''s `reload_elisp' push arm VALUE."
+  (agent-repl-wire-decode-daemon-reload-elisp value))
 
 (defun agent-repl-wire-decode-watch-daemon-response (value)
   "Decode VALUE as `WatchDaemonResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchDaemonResponse" value)))
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
-     '(shutdownAnnounced drainScheduled drainCancelled mutationProgress))
+     '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))
