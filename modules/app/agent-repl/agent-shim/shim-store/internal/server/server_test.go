@@ -123,6 +123,10 @@ type fakeStore struct {
 
 	live    *storev1.GetLiveWorkSuccess
 	liveErr error
+	// liveFor is the session the last LiveWork call was scoped to, and
+	// liveAsked whether one was made at all.
+	liveFor   string
+	liveAsked bool
 
 	cursors      []*storev1.CursorState
 	cursorsErr   error
@@ -140,6 +144,12 @@ type fakeStore struct {
 	shapesWritten [][]*storev1.ShapeObservation
 
 	closed bool
+}
+
+// scopedLiveWork is a GetLiveWork request naming a session, which every
+// request must: the store never answers one unscoped.
+func scopedLiveWork() *storev1.GetLiveWorkRequest {
+	return &storev1.GetLiveWorkRequest{Session: &conversationv1.AgentId{Value: "main-1"}}
 }
 
 func newFakeStore() *fakeStore {
@@ -199,7 +209,11 @@ func (f *fakeStore) BashRun(context.Context, string) (BashRunReplay, error) {
 	return f.bashRun, f.bashRunErr
 }
 
-func (f *fakeStore) LiveWork(context.Context) (*storev1.GetLiveWorkSuccess, error) {
+func (f *fakeStore) LiveWork(_ context.Context, session string) (*storev1.GetLiveWorkSuccess, error) {
+	f.mu.Lock()
+	f.liveAsked = true
+	f.liveFor = session
+	f.mu.Unlock()
 	return f.live, f.liveErr
 }
 
@@ -1302,7 +1316,7 @@ func TestGetLiveWorkServesTheOpenObligations(t *testing.T) {
 	h := newHarness(t, store, 0)
 
 	// Act.
-	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(scopedLiveWork()))
 
 	// Assert.
 	if err != nil {
@@ -1313,21 +1327,103 @@ func TestGetLiveWorkServesTheOpenObligations(t *testing.T) {
 	}
 }
 
-func TestGetLiveWorkMapsAStorageFailureToTheFailureArm(t *testing.T) {
+func TestGetLiveWorkMapsAStorageFailureToTheStorageFailureArm(t *testing.T) {
 	// Arrange.
 	store := newFakeStore()
 	store.liveErr = fmt.Errorf("%w: scan failed", ErrStorage)
 	h := newHarness(t, store, 0)
 
 	// Act.
-	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(scopedLiveWork()))
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("GetLiveWork = %v, want nil", err)
 	}
-	if res.Msg.GetFailure() == nil {
-		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestGetLiveWorkMapsANilAnswerToTheStorageFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.live = nil
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(scopedLiveWork()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, want the storage_failure arm", res.Msg.GetResult())
+	}
+	if _, ok := findRecord(t, h.logs, "store.rpc.get-live-work", "error"); !ok {
+		t.Fatalf("records = %+v, want the error record this layer owns", records(t, h.logs))
+	}
+}
+
+func TestGetLiveWorkScopesTheStoreReadToTheRequestedSession(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(scopedLiveWork())); err != nil {
+		t.Fatalf("GetLiveWork = %v, want nil", err)
+	}
+
+	// Assert.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.liveFor != "main-1" {
+		t.Fatalf("store read scoped to %q, want main-1", store.liveFor)
+	}
+}
+
+func TestGetLiveWorkRefusesARequestNamingNoSession(t *testing.T) {
+	tests := []struct {
+		name    string
+		request *storev1.GetLiveWorkRequest
+	}{
+		{name: "session unset", request: &storev1.GetLiveWorkRequest{}},
+		{name: "session with an empty value", request: &storev1.GetLiveWorkRequest{Session: &conversationv1.AgentId{}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange. The store is shared by every session on the host, so an
+			// unscoped answer would hand this caller everyone's obligations.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(test.request))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("GetLiveWork = %v, want nil", err)
+			}
+			invalid := res.Msg.GetFailure().GetInvalidRequest()
+			if invalid == nil || invalid.GetField() != "session" {
+				t.Fatalf("result = %v, want invalid_request naming session", res.Msg.GetResult())
+			}
+			store.mu.Lock()
+			asked := store.liveAsked
+			store.mu.Unlock()
+			if asked {
+				t.Fatal("the store was queried for a refused request")
+			}
+			rec, ok := findRecord(t, h.logs, "store.rpc.get-live-work", "warn")
+			if !ok {
+				t.Fatalf("records = %+v, want one warn refusal record", records(t, h.logs))
+			}
+			if rec.Context["refusal_site"] != SiteSessionEmpty || rec.Context["refusal_kind"] != "invalid_request" {
+				t.Fatalf("refusal context = %v, want site %q kind invalid_request", rec.Context, SiteSessionEmpty)
+			}
+		})
 	}
 }
 
@@ -1583,7 +1679,7 @@ func TestServesOverHTTP11(t *testing.T) {
 	h := newHarness(t, newFakeStore(), 0)
 
 	// Act.
-	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(scopedLiveWork()))
 
 	// Assert.
 	if err != nil {
@@ -1605,7 +1701,7 @@ func TestServesOverH2CWithPriorKnowledge(t *testing.T) {
 
 	// Act.
 	res, err := storev1connect.NewShimStoreClient(client, ts.URL).GetLiveWork(
-		context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+		context.Background(), connect.NewRequest(scopedLiveWork()))
 
 	// Assert.
 	if err != nil {
@@ -1621,7 +1717,7 @@ func TestServesTheJSONCodec(t *testing.T) {
 	h := newHarness(t, newFakeStore(), 0)
 
 	// Act.
-	res, err := h.http.Post(h.url+storev1connect.ShimStoreGetLiveWorkProcedure, "application/json", strings.NewReader("{}"))
+	res, err := h.http.Post(h.url+storev1connect.ShimStoreGetLiveWorkProcedure, "application/json", strings.NewReader(`{"session":{"value":"main-1"}}`))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -1674,7 +1770,7 @@ func TestServesOverAUnixSocket(t *testing.T) {
 
 	// Act.
 	res, err := storev1connect.NewShimStoreClient(client, "http://store").GetLiveWork(
-		context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+		context.Background(), connect.NewRequest(scopedLiveWork()))
 
 	// Assert.
 	if err != nil {
