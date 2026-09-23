@@ -21,8 +21,12 @@ import (
 func TestMain(m *testing.M) {
 	// Nothing in this package reaches a vendor, and the flag says so out loud
 	// for every helper that checks it.
-	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
-	os.Unsetenv(EnvSlowQueryMs)
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
+	if err := os.Unsetenv(EnvSlowQueryMs); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 
