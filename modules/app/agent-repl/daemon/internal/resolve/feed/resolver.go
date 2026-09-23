@@ -213,6 +213,13 @@ type wsState struct {
 	// stream plane), and the same answer row must be appended once, not once
 	// per replay.
 	finalAnswerSeen map[string]bool
+	// endedTurns is every turn this resolver has seen END — its terminal drawn
+	// (or suppressed, for a confirmed /clear), its query died, or its prompt
+	// ported from a parent workspace where it had already ended. It is the one
+	// input to a prompt row's `working` flag (stampPromptWorking): a prompt
+	// works exactly while its turn is absent from this set. Never unlearned —
+	// turn ids are unique, and no turn ever resumes after its terminal.
+	endedTurns map[ids.TurnID]bool
 	// answerFault is the ONE standing `final_answer_unresolved` fault, nil when
 	// none stands. It is raised at a terminal whose answer did not land, or by
 	// an open response fold's stall window elapsing, and retracted when the next
@@ -499,6 +506,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		directiveUnits:       map[string]bool{},
 		answerRows:           map[string]*frontendv1.FeedId{},
 		finalAnswerSeen:      map[string]bool{},
+		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
 		stalls:               map[string]*stallState{},
 
@@ -658,6 +666,11 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 			dlog.Context{"feed": f.key, "row": id})
 		return
 	}
+	// A PROMPT ROW'S `working` IS STATED HERE, on the one path every producer's
+	// row takes — the resolver's own draws and the prompt queue's mirror alike —
+	// so no producer can publish a prompt that disagrees with the turn's
+	// lifecycle.
+	stampPromptWorking(s, snapshot)
 	existing, seen := f.rows[id]
 	if seen && proto.Equal(existing, snapshot) {
 		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream

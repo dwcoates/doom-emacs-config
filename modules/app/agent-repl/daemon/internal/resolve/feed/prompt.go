@@ -144,6 +144,58 @@ func (r *resolver) userPromptRow(
 	}
 }
 
+// ① THE PROMPT'S WORKING FLAG. FeedUserPrompt.working / FeedAgentPrompt.working
+// state whether the prompt's turn is still running — a DAEMON FACT the client
+// draws the prompt wave from verbatim. It has two edges and no others:
+//
+//   - SET from the row's first draw, by stampPromptWorking on every upsert of
+//     a prompt row whose turn has not ended;
+//   - UNSET at the turn's terminal, by settleTurnPrompts, which records the
+//     turn as ended and RE-PUBLISHES every prompt row stamped with it.
+//
+// An interim response or a final answer drawn before the terminal moves
+// neither edge: only the terminal ends the turn.
+
+// stampPromptWorking states on a prompt row whether its turn is working. A row
+// that is not a prompt is untouched; a prompt naming no turn is not working,
+// because there is no turn for it to be waiting on.
+func stampPromptWorking(s *wsState, row *frontendv1.FeedRow) {
+	turn := row.GetTurn().GetValue()
+	working := turn != "" && !s.endedTurns[ids.TurnID(turn)]
+	switch kind := row.GetRow().(type) {
+	case *frontendv1.FeedRow_UserPrompt:
+		kind.UserPrompt.Working = working
+	case *frontendv1.FeedRow_AgentPrompt:
+		kind.AgentPrompt.Working = working
+	}
+}
+
+// settleTurnPrompts is the turn's END for its prompts: the turn is recorded as
+// ended and every prompt row stamped with it, on every feed, is re-published so
+// its `working` flag falls on the same edge the terminal is drawn on. A row
+// already settled upserts to an equal snapshot, which upsert drops as churn, so
+// a terminal replayed across planes re-publishes nothing.
+func (r *resolver) settleTurnPrompts(s *wsState, turn ids.TurnID) {
+	s.endedTurns[turn] = true
+	settled := 0
+	for key, f := range s.feeds {
+		for _, id := range f.order {
+			row := f.rows[id]
+			if row.GetTurn().GetValue() != string(turn) {
+				continue
+			}
+			if !row.GetUserPrompt().GetWorking() && !row.GetAgentPrompt().GetWorking() {
+				continue
+			}
+			r.upsert(s, placement{feed: s.feedAddrs[key]}, row, !f.nonDurable[id])
+			settled++
+		}
+	}
+	r.logger(s.id).Debug("daemon.feed.turn_prompts_settled",
+		"the turn ended; its prompt rows were re-published no longer working",
+		dlog.Context{"turn": string(turn), "rows": settled})
+}
+
 // drawPortedPrompt draws one row of a FORK'S PORTED CONVERSATION: a question
 // the PARENT was asked, carried over under the child's own turn id.
 //
@@ -153,6 +205,11 @@ func (r *resolver) userPromptRow(
 // own rows with a turn that ended before it existed.
 func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
 	turn := &conversationv1.TurnId{Value: prompt.Turn}
+	// A PORTED TURN ENDED IN THE PARENT, so its prompt is drawn settled: no
+	// terminal for it will ever reach this workspace to end it here.
+	if prompt.Turn != "" {
+		s.endedTurns[ids.TurnID(prompt.Turn)] = true
+	}
 	at := r.place(s, nil)
 	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())
 	row := r.userPromptRow(s, at, turn, prompt.Origin, blocks)
