@@ -427,9 +427,17 @@ duration actually observed, never left at a tool default. Measured against
 |---|---|---|---|---|
 | unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
 | integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
+| `COLD_BOOT_TIMEOUT_MS` (`bootColdOnce`, `test/integration/harness.ts`) | 900ms (the hook bound) | 1800ms | 602ms at a load average of ~60 (971ms at 100-300) | a file's FIRST app boot compiles the whole app lazily, ~3-4x a warm boot; it is paid in a `beforeAll` so no test body carries it |
 | `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
 
-No per-site exception was needed: nothing in either suite (xterm/login
+**Every integration file that boots the app calls `bootColdOnce()` at its top
+level.** The first boot in an isolated file is its cold start, and under load
+it alone crossed the 900ms `testTimeout`, failing exactly the first test of
+each file. The helper pays it in a `beforeAll` under its own measured bound
+(above); `harness.self.test.ts` fails any file that calls `startHarness`
+without it.
+
+Apart from that cold boot, no per-site exception was needed: nothing in either suite (xterm/login
 terminal included) took long enough to need its own raised `timeout`. If a
 future test genuinely needs more than these globals, give it its own
 `{ timeout: ... }` with a one-line comment naming why, rather than raising
