@@ -19,12 +19,12 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/thinking-collapses-when-superseded` | `~/.config/doom-worktrees/thinking-collapses-when-superseded` | A thinking bubble shows in full until the next agent response in its feed. The daemon's `superseded` flag then collapses it to 2 lines. A user expansion is kept, and the collapse never moves the reader. | `a46d90f097aab0cae` | 17:55 |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | `a3cde9e9c734a7c27` | 18:20 |
+| `fix/follow-when-latest-visible` | `~/.config/doom-worktrees/follow-when-latest-visible` | Follow mode also turns ON whenever the latest feed entry (response, tool call, prompt, held prompt) is visible, including when the user scrolls back down. Nothing existing is removed, and an active reply selection suppresses it. | `a4a421ce6a960807f` | 18:35 |
 
 ## Still waiting on the owner
 
 - A proto decision: restate `summary` and `addressed_to` on `AgentSendMessageSuccess`/`Failure`, so an agent-message bubble keeps its body after replay.
 - A visual decision: `scrollbar-gutter: stable` on bubbles, so prose doesn't shift by the scrollbar's width when an expanded bubble starts scrolling.
-- Should reaching the bottom yourself turn follow mode back on?
 - The new name for "Release" (suggested: "Send now").
 - A retry of `SPC TAB f`, which now logs.
 
