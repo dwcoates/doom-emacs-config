@@ -14,6 +14,7 @@ import (
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/wsm"
 )
 
 func TestWatcherStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
@@ -1225,6 +1226,28 @@ func TestAPureAttachTakesTheSessionFactsFromTheReannouncement(t *testing.T) {
 	turn := h.w.TurnInFlight()
 	if turn == nil || *turn != ids.TurnID("turn-7") {
 		t.Fatalf("TurnInFlight() = %v, want the re-announced turn-7", turn)
+	}
+}
+
+// TestSessionFactsNeverReopenAnEndedTurn covers the session facts taking the
+// same guarded edge the queue's turn opening does: a turn whose end this
+// watcher already handed to every observer is not stood back up in flight by
+// facts naming it, because nothing would ever end it a second time.
+func TestSessionFactsNeverReopenAnEndedTurn(t *testing.T) {
+	// Arrange: a pure attach that has already seen turn-7 end.
+	h := newHarnessAttachingPurely(t)
+	h.w.mu.Lock()
+	h.w.rememberClosedTurnLocked("turn-7", wsm.CloseCompleted)
+	h.w.mu.Unlock()
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-7"))
+	h.sendSessionUpdate(t, compactingUpdate())
+	h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("TurnInFlight() = %v, want none: turn-7 already ended", *turn)
 	}
 }
 

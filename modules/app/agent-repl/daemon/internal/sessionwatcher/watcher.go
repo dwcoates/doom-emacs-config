@@ -453,12 +453,34 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 		w.log.Error("daemon.sessionwatcher.turn_opening_unidentified", "an opening turn named no id", nil)
 		return
 	}
-	opening := turn
+	w.standTurnLocked(turn, "daemon.sessionwatcher.turn_opening", "a turn is going to the shim")
+}
+
+// standTurnLocked is the ONE writer that puts a turn in flight, and its callers
+// are the edges that KNOW a turn is running: the queue handing a turn to the
+// shim (OnTurnOpening), the shim accepting it (OnTurnOpened), and the session's
+// own facts naming the turn already running at a start or adoption
+// (applySessionStartedLocked). No stream row opens a turn: rows can be served
+// again, and a re-served prompt row once stood a finished turn back up in
+// flight in this watcher alone — the queue held every later prompt behind it
+// while the turn record, the footer and the roster all called it closed.
+//
+// A TURN THAT ALREADY ENDED STAYS ENDED. Its end was already handed to every
+// observer, and nothing would ever end it a second time. It reports whether
+// the turn now stands in flight.
+func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bool {
+	if _, ended := w.closedTurns[turn]; ended {
+		w.log.Debug("daemon.sessionwatcher.turn_already_ended", "a turn that already ended was offered as in flight; it stays ended", dlog.Context{
+			"turn_id": string(turn), "source": operation,
+		})
+		return false
+	}
 	before := turnIDValue(w.turn)
-	w.turn = &opening
-	w.log.Debug("daemon.sessionwatcher.turn_opening", "a turn is going to the shim", dlog.Context{
+	w.turn = &turn
+	w.log.Debug(operation, message, dlog.Context{
 		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": string(turn),
 	})
+	return true
 }
 
 // OnTurnOpenFailed retires a turn the shim refused. It clears the record only
@@ -498,21 +520,13 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 	w.adoptMainAgentLocked(prompt.GetAgent(), "start_turn")
 	if turnID := prompt.GetId().GetValue(); turnID != "" {
 		turn := ids.TurnID(turnID)
-		if _, ended := w.closedTurns[turn]; ended {
-			// THE TURN IS ALREADY OVER. Its terminal beat StartTurn's response
-			// back — the very race OnTurnOpening exists for — and re-recording
-			// it here would stand a dead turn back up in flight, with no edge
-			// left to take it down again.
-			w.log.Debug("daemon.sessionwatcher.turn_opened_already_ended",
-				"the accepted turn had already ended before its acceptance was processed",
-				dlog.Context{"turn_id": turnID})
+		// THE TURN MAY ALREADY BE OVER. Its terminal can beat StartTurn's
+		// response back — the very race OnTurnOpening exists for — and
+		// re-recording it would stand a dead turn back up in flight, with no
+		// edge left to take it down again.
+		if !w.standTurnLocked(turn, "daemon.sessionwatcher.state_transition", "the accepted turn became the turn in flight") {
 			return
 		}
-		before := turnIDValue(w.turn)
-		w.turn = &turn
-		w.log.Debug("daemon.sessionwatcher.state_transition", "the accepted turn became the turn in flight", dlog.Context{
-			"state": "turn_in_flight", "before": before, "after": turnID,
-		})
 		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
 		// stream frame states that a turn was accepted.
 		w.sinks.Footer.OnTurnOpened(ws, turn)
@@ -1158,8 +1172,7 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 		w.sinks.Title.OnSessionStarted(w.ws)
 	}
 	if t := started.GetTurnInFlight(); t != nil {
-		turn := ids.TurnID(t.GetValue())
-		w.turn = &turn
+		w.standTurnLocked(ids.TurnID(t.GetValue()), "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight")
 	}
 }
 

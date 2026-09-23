@@ -260,20 +260,19 @@ func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntr
 }
 
 // routePromptLocked routes a prompt delivered to the watched agent. On the
-// MAIN watch a live prompt is also the turn opening: the prompt carries the
-// daemon's minted TurnId and names its recipient, which is the main agent.
+// MAIN watch a live prompt names its recipient, which is the main agent.
+//
+// A PROMPT ROW OPENS NO TURN. The turn in flight is the queue's to state
+// (OnTurnOpening, OnTurnOpened) or the session's facts' (a turn already
+// running at a start or adoption) — see standTurnLocked. A row can be served
+// again: when the store ends a standing watch, the shim re-opens the book and
+// re-serves rows it already served, and a re-served prompt row once stood a
+// finished turn back up in flight here while every other observer had closed it.
 func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentPrompt) {
 	if a.id == nil {
 		w.adoptMainAgentLocked(prompt.GetAgent(), "live_prompt")
-		if w.isMainAgent(prompt.GetAgent()) && prompt.GetId().GetValue() != "" {
-			turn := ids.TurnID(prompt.GetId().GetValue())
-			w.turn = &turn
-			w.log.Debug("daemon.sessionwatcher.turn_opened", "a turn is in flight", dlog.Context{
-				"turn_id": string(turn), "agent_id": prompt.GetAgent().GetValue(),
-			})
-		}
-		// The turn this prompt opened is recorded, so a terminal held for the
-		// naming can be replayed against it.
+		// The main agent is named, so a terminal held for the naming can be
+		// replayed against the turn the queue stated.
 		w.releaseHeldTerminalLocked()
 	}
 	w.log.Debug("daemon.sessionwatcher.prompt", "prompt routed to the feed", dlog.Context{
