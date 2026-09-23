@@ -487,6 +487,58 @@ func TestSubagentTerminalIsNotTheTurnsEnd(t *testing.T) {
 	}
 }
 
+// TestAReplayedTerminalNeverEndsTheOpenTurn covers the store-restart replay: the
+// shim re-opens a book from a pointer that walked backward and re-serves rows
+// it already served, among them the PREVIOUS turn's terminal. The frame names
+// no turn, so routing it would end whichever turn is open now. A terminal row
+// already served on the watch — live or on an opening page — is dropped whole.
+func TestAReplayedTerminalNeverEndsTheOpenTurn(t *testing.T) {
+	tests := []struct {
+		name string
+		// firstServing serves the old terminal row the first time.
+		firstServing func(h *harness)
+	}{
+		{
+			name: "a terminal first served live",
+			firstServing: func(h *harness) {
+				h.w.OnTurnOpening("ws-1", "turn-old")
+				h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-old-terminal"))
+				h.w.dispatching.Wait()
+			},
+		},
+		{
+			name: "a terminal first served on an opening page",
+			firstServing: func(h *harness) {
+				h.route(h.main, pageFrame(frameEntryAt("ptr-old-terminal", frameSuccess("main-1", completed()))))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+			tt.firstServing(h)
+			h.w.OnTurnOpening("ws-1", "turn-live")
+			h.drainNow()
+
+			// Act.
+			got := h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-old-terminal"))
+
+			// Assert.
+			assertNames(t, got, nil)
+			turn := h.w.TurnInFlight()
+			if turn == nil || *turn != ids.TurnID("turn-live") {
+				t.Fatalf("turn in flight = %v, want turn-live still running", turn)
+			}
+			if !h.hasRecord("info", "daemon.sessionwatcher.terminal_replayed") {
+				t.Fatal("the dropped replay has no info record")
+			}
+		})
+	}
+}
+
 // TestTurnCloseOf covers how each terminal arm closes a turn, including the
 // two that are answers rather than failures.
 func TestTurnCloseOf(t *testing.T) {

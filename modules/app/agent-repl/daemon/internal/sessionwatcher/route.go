@@ -205,6 +205,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 			w.known[watchKey(a.id)] = ptr
 		}
 	}
+	w.noteServedTerminalsLocked(a, page)
 	if a.id == nil {
 		for _, entry := range page.GetEntries() {
 			if prompt := entry.GetEntry().GetUserPrompt(); prompt != nil {
@@ -304,6 +305,19 @@ func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.Pee
 func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) {
 	agent := frame.GetAgentId()
 
+	if isTerminalFrame(frame) && w.terminalReplayedLocked(a, at) {
+		// A TERMINAL IS ROUTED ONCE. This row was already served on this
+		// watch — live, or on an opening page — so it is the shim re-serving
+		// its book after the store ended a standing watch, not an agent
+		// ending. The frame names no turn, so routing it would charge it to
+		// whichever turn is open NOW: that is how a store restart once ended
+		// a live turn with the previous turn's terminal (2026-09-23 12:38:36).
+		w.log.Info("daemon.sessionwatcher.terminal_replayed", "a terminal row already served was served again; it is dropped", dlog.Context{
+			"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": turnValue(w.turn),
+		})
+		return
+	}
+
 	switch {
 	case frame.GetUpdate() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetUpdate() != nil"})
@@ -322,6 +336,42 @@ func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.Age
 		w.log.Warn("daemon.sessionwatcher.agent_frame_unrouted", "an AgentFrame carried no result arm", dlog.Context{
 			"agent_id": agent.GetValue(),
 		})
+	}
+}
+
+// isTerminalFrame reports whether a frame is an agent's terminal.
+func isTerminalFrame(frame *conversationv1.AgentFrame) bool {
+	return frame.GetSuccess() != nil || frame.GetFailure() != nil
+}
+
+// terminalKey is a terminal row's identity on one watch.
+func terminalKey(a *agentWatch, at *conversationv1.HistoryPointer) string {
+	return watchKey(a.id) + "\x00" + at.GetValue()
+}
+
+// terminalReplayedLocked records a terminal row as served and reports whether
+// it had been served before. A row with no pointer has no identity to compare,
+// so it is never taken for a replay.
+func (w *watcher) terminalReplayedLocked(a *agentWatch, at *conversationv1.HistoryPointer) bool {
+	if at.GetValue() == "" {
+		return false
+	}
+	key := terminalKey(a, at)
+	if _, seen := w.seenTerminals[key]; seen {
+		return true
+	}
+	w.seenTerminals[key] = struct{}{}
+	return false
+}
+
+// noteServedTerminalsLocked records every terminal row an opening page
+// carries. The page's terminals are history and are never routed as edges; a
+// later re-serving of one of them on the live stream is a replay.
+func (w *watcher) noteServedTerminalsLocked(a *agentWatch, page *conversationv1.HistoryPage) {
+	for _, at := range page.GetEntries() {
+		if frame := at.GetEntry().GetAgentFrame(); frame != nil && isTerminalFrame(frame) {
+			w.terminalReplayedLocked(a, at.GetAt())
+		}
 	}
 }
 
