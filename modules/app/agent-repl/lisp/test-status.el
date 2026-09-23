@@ -588,6 +588,29 @@ construction."
       ;; Assert
       (should (equal agent-repl-test--viewed-reports '("ws1"))))))
 
+(ert-deftest agent-repl-test-tab-dwell-status-change-rearms-the-dwell ()
+  "A status change restarts the 5s clock from the moment it arrives.
+The daemon drops a dwell reported on a non-done row, so a turn that ran
+to done under the user's eyes must earn a fresh dwell on the done row."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (let ((t0 (time-subtract (current-time) (seconds-to-time 100))))
+      (puthash "ws1" t0 agent-repl--tab-dwell-armed-at)
+      (cl-letf (((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+        ;; Act
+        (agent-repl--tab-dwell-rearm-on-status-change "ws1" :thinking :done)
+        ;; Assert: the clock moved off t0 and a demotion timer is pending
+        (should-not (equal (gethash "ws1" agent-repl--tab-dwell-armed-at) t0))
+        (should (eq agent-repl--tab-dwell-timer 'stub-timer))))))
+
+(ert-deftest agent-repl-test-tab-dwell-status-change-reaction-is-registered ()
+  "The re-arm hangs off the roster's one status-change announcement."
+  ;; Arrange / Act / Assert
+  (should (memq #'agent-repl--tab-dwell-rearm-on-status-change
+                (default-value 'agent-repl-roster-status-change-functions))))
+
 (ert-deftest agent-repl-test-tab-view-restore-full-tells-the-daemon-nothing ()
   "The restore reports NOTHING: the daemon originated the status change."
   ;; Arrange

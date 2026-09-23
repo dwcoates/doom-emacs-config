@@ -3013,6 +3013,25 @@ to enumerate origins."
 (add-hook 'agent-repl-roster-viewed-cleared-functions
           #'agent-repl--tab-view-restore-on-viewed-cleared)
 
+(defun agent-repl--tab-dwell-rearm-on-status-change (ws previous current)
+  "Re-arm WS's view dwell because its status moved from PREVIOUS to CURRENT.
+Registered on `agent-repl-roster-status-change-functions'.
+
+The daemon holds the viewed marker on a DONE row only: a dwell reported
+while WS is thinking, waiting, severed or anything else is dropped, so
+there is no marker for the viewed-cleared edge to announce later.  Without
+this, a user who watched a turn run to done would have spent the one-shot
+dwell on the running turn, and the finished response would never go
+PARTIAL.  Every status change therefore restarts the clock, and the next
+report lands on whatever the row has become; whether it takes is the
+daemon's decision, never this one's."
+  (agent-repl--log ws "tab-view: dwell re-armed ws=%s reason=status-change from=%s to=%s"
+                   ws previous current)
+  (agent-repl--tab-dwell-arm ws (current-time)))
+
+(add-hook 'agent-repl-roster-status-change-functions
+          #'agent-repl--tab-dwell-rearm-on-status-change)
+
 (defun agent-repl--arm-state-poll-timer ()
   "Arm the tab-bar repaint heartbeat under the `:state-poll' key.
 Idempotent: `agent-repl--register-timer' cancels and replaces any timer
