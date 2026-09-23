@@ -202,8 +202,9 @@ func TestCompactionDirected(t *testing.T) {
 	turn := cpDriveObservingInProgress(t, w, ws, configDir, "!compact")
 
 	// Assert: the feed carries a separation divider compacting the context,
-	// whose summary is the assistant prose settleCompaction derived from
-	// (session.ts COMPACT: `conclude(ctx, summary)` — the same string).
+	// whose summary is the one the vendor's summary record states (session.ts
+	// COMPACT: `ctx.compactSummary(...)`, read by the shim's settleCompaction
+	// and by the sidecar off the transcript's isCompactSummary line alike).
 	rows := cpOpenFeedRows(t, w, ws)
 	compacted := cpFindCompactedSeparation(rows)
 	if compacted == nil {
