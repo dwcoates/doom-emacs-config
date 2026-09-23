@@ -1025,10 +1025,13 @@ may):
   reload_pushed | deferred_to_successor), or a `DeployError`
   (build_failed | already_deploying | already_rolling_out | joining |
   service_restart_failed | install_failed). BREAKING, owner-approved.
-- `WatchDaemonRequest.elisp_build` (REQUIRED): the connecting Emacs's loaded
-  elisp as a content hash, by the algorithm the field states.
+- `WatchDaemonRequest` names its client: a REQUIRED `oneof client {emacs
+  {elisp_build} | webview {}}` (the stream is held by Emacs and every
+  webview). `WatchDaemonEmacs.elisp_build` (REQUIRED) is the connecting
+  Emacs's loaded elisp as a content hash, by the algorithm the field states.
 - `WatchDaemonResponse.reload_elisp` (`DaemonReloadElisp{module_root, build}`):
-  the deploy's push that has Emacs hot-load the module set.
+  the deploy's push that has Emacs hot-load the module set, sent only on an
+  Emacs stream whose elisp_build is not the checkout's.
 - `WatchWebWorkspaceRequest.webapp_build` (REQUIRED): the page's own entry
   bundle hash.
 - `SessionDiagnostics.shim_build` (REQUIRED): the shim bundle's content hash,

@@ -23,16 +23,50 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_daemon.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_daemon: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGFlbW9uLnByb3RvEgxhZ2VudHJlcGwudjEiKQoSV2F0Y2hEYWVtb25SZXF1ZXN0EhMKC2VsaXNwX2J1aWxkGAEgASgJIt8CChNXYXRjaERhZW1vblJlc3BvbnNlEkMKEnNodXRkb3duX2Fubm91bmNlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkFubm91bmNlZEgAEj0KD2RyYWluX3NjaGVkdWxlZBgCIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpblNjaGVkdWxlZEgAEj0KD2RyYWluX2NhbmNlbGxlZBgDIAEoCzIiLmFnZW50cmVwbC52MS5EYWVtb25EcmFpbkNhbmNlbGxlZEgAEkQKEW11dGF0aW9uX3Byb2dyZXNzGAQgASgLMicuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3NIABI3CgxyZWxvYWRfZWxpc3AYBSABKAsyHy5hZ2VudHJlcGwudjEuRGFlbW9uUmVsb2FkRWxpc3BIAEIGCgRwdXNoIjcKEURhZW1vblJlbG9hZEVsaXNwEhMKC21vZHVsZV9yb290GAEgASgJEg0KBWJ1aWxkGAIgASgJIp8BChdEYWVtb25TaHV0ZG93bkFubm91bmNlZBIUCgdhZGRyZXNzGAEgASgJSACIAQESMAoFY2F1c2UYAiABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uU2h1dGRvd25DYXVzZRIaChJleHBlY3RlZF9vdXRhZ2VfbXMYAyABKAMSFAoMbWludGVkX2F0X21zGAQgASgDQgoKCF9hZGRyZXNzIuwBChNEYWVtb25TaHV0ZG93bkNhdXNlEkoKEnNlbGZfbWVyZ2Vfcm9sbG91dBgBIAEoCzIsLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93blNlbGZNZXJnZVJvbGxvdXRIABJFCg9zY2hlZHVsZWRfZHJhaW4YAiABKAsyKi5hZ2VudHJlcGwudjEuRGFlbW9uU2h1dGRvd25TY2hlZHVsZWREcmFpbkgAEjoKCWltbWVkaWF0ZRgDIAEoCzIlLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkltbWVkaWF0ZUgAQgYKBGtpbmQiIAoeRGFlbW9uU2h1dGRvd25TZWxmTWVyZ2VSb2xsb3V0IkkKHERhZW1vblNodXRkb3duU2NoZWR1bGVkRHJhaW4SKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIkQKF0RhZW1vblNodXRkb3duSW1tZWRpYXRlEikKBnJlYXNvbhgBIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiJQChREYWVtb25EcmFpblNjaGVkdWxlZBINCgVhdF9tcxgBIAEoAxIpCgZyZWFzb24YAiABKAsyGS5hZ2VudHJlcGwudjEuRHJhaW5SZWFzb24iFgoURGFlbW9uRHJhaW5DYW5jZWxsZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_drain_reason, file_agentrepl_v1_workspace_mutation_progress]);
+  fileDesc("CihhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZGFlbW9uLnByb3RvEgxhZ2VudHJlcGwudjEihAEKEldhdGNoRGFlbW9uUmVxdWVzdBIvCgVlbWFjcxgBIAEoCzIeLmFnZW50cmVwbC52MS5XYXRjaERhZW1vbkVtYWNzSAASMwoHd2VidmlldxgCIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaERhZW1vbldlYnZpZXdIAEIICgZjbGllbnQiJwoQV2F0Y2hEYWVtb25FbWFjcxITCgtlbGlzcF9idWlsZBgBIAEoCSIUChJXYXRjaERhZW1vbldlYnZpZXci3wIKE1dhdGNoRGFlbW9uUmVzcG9uc2USQwoSc2h1dGRvd25fYW5ub3VuY2VkGAEgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duQW5ub3VuY2VkSAASPQoPZHJhaW5fc2NoZWR1bGVkGAIgASgLMiIuYWdlbnRyZXBsLnYxLkRhZW1vbkRyYWluU2NoZWR1bGVkSAASPQoPZHJhaW5fY2FuY2VsbGVkGAMgASgLMiIuYWdlbnRyZXBsLnYxLkRhZW1vbkRyYWluQ2FuY2VsbGVkSAASRAoRbXV0YXRpb25fcHJvZ3Jlc3MYBCABKAsyJy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTXV0YXRpb25Qcm9ncmVzc0gAEjcKDHJlbG9hZF9lbGlzcBgFIAEoCzIfLmFnZW50cmVwbC52MS5EYWVtb25SZWxvYWRFbGlzcEgAQgYKBHB1c2giNwoRRGFlbW9uUmVsb2FkRWxpc3ASEwoLbW9kdWxlX3Jvb3QYASABKAkSDQoFYnVpbGQYAiABKAkinwEKF0RhZW1vblNodXRkb3duQW5ub3VuY2VkEhQKB2FkZHJlc3MYASABKAlIAIgBARIwCgVjYXVzZRgCIAEoCzIhLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93bkNhdXNlEhoKEmV4cGVjdGVkX291dGFnZV9tcxgDIAEoAxIUCgxtaW50ZWRfYXRfbXMYBCABKANCCgoIX2FkZHJlc3Mi7AEKE0RhZW1vblNodXRkb3duQ2F1c2USSgoSc2VsZl9tZXJnZV9yb2xsb3V0GAEgASgLMiwuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duU2VsZk1lcmdlUm9sbG91dEgAEkUKD3NjaGVkdWxlZF9kcmFpbhgCIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25TaHV0ZG93blNjaGVkdWxlZERyYWluSAASOgoJaW1tZWRpYXRlGAMgASgLMiUuYWdlbnRyZXBsLnYxLkRhZW1vblNodXRkb3duSW1tZWRpYXRlSABCBgoEa2luZCIgCh5EYWVtb25TaHV0ZG93blNlbGZNZXJnZVJvbGxvdXQiSQocRGFlbW9uU2h1dGRvd25TY2hlZHVsZWREcmFpbhIpCgZyZWFzb24YASABKAsyGS5hZ2VudHJlcGwudjEuRHJhaW5SZWFzb24iRAoXRGFlbW9uU2h1dGRvd25JbW1lZGlhdGUSKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIlAKFERhZW1vbkRyYWluU2NoZWR1bGVkEg0KBWF0X21zGAEgASgDEikKBnJlYXNvbhgCIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiIWChREYWVtb25EcmFpbkNhbmNlbGxlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_drain_reason, file_agentrepl_v1_workspace_mutation_progress]);
 
 /**
- * The stream is daemon-scoped, so there is nothing to address. What it carries
- * is the CONNECTING EMACS'S OWN BUILD, because every process reports its build
- * when it connects: it is what a deploy compares the checkout's elisp against.
+ * The stream is daemon-scoped, so there is nothing to address. It is held by
+ * Emacs AND by every webview (ruling R3), and what the request carries is WHO
+ * IS CONNECTING — because every process reports its build when it connects,
+ * and a deploy's elisp reload goes to Emacs's streams alone.
  *
  * @generated from message agentrepl.v1.WatchDaemonRequest
  */
 export type WatchDaemonRequest = Message<"agentrepl.v1.WatchDaemonRequest"> & {
+  /**
+   * THE ARM IS THE CLIENT. REQUIRED — a watch naming no client is refused.
+   *
+   * @generated from oneof agentrepl.v1.WatchDaemonRequest.client
+   */
+  client: {
+    /**
+     * @generated from field: agentrepl.v1.WatchDaemonEmacs emacs = 1;
+     */
+    value: WatchDaemonEmacs;
+    case: "emacs";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.WatchDaemonWebview webview = 2;
+     */
+    value: WatchDaemonWebview;
+    case: "webview";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.WatchDaemonRequest.
+ * Use `create(WatchDaemonRequestSchema)` to create a new message.
+ */
+export const WatchDaemonRequestSchema: GenMessage<WatchDaemonRequest> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 0);
+
+/**
+ * Emacs is connecting, and states the elisp it has loaded.
+ *
+ * @generated from message agentrepl.v1.WatchDaemonEmacs
+ */
+export type WatchDaemonEmacs = Message<"agentrepl.v1.WatchDaemonEmacs"> & {
   /**
    * THE ELISP THIS EMACS HAS LOADED, as a content hash. REQUIRED — a watch
    * without it is refused, because a deploy could not tell whether this Emacs
@@ -45,7 +79,8 @@ export type WatchDaemonRequest = Message<"agentrepl.v1.WatchDaemonRequest"> & {
    * where <module> is the name the loader is given (`core`, not
    * `lisp/core.el`) and <sha256> is the lowercase hex SHA-256 of that
    * module's `lisp/<module>.el` bytes. A module the loader names but whose
-   * file is absent contributes no line.
+   * file is absent contributes no line. `proto/vocab/elisp-build.json` holds
+   * both implementations to one answer.
    *
    * @generated from field: string elisp_build = 1;
    */
@@ -53,11 +88,27 @@ export type WatchDaemonRequest = Message<"agentrepl.v1.WatchDaemonRequest"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.WatchDaemonRequest.
- * Use `create(WatchDaemonRequestSchema)` to create a new message.
+ * Describes the message agentrepl.v1.WatchDaemonEmacs.
+ * Use `create(WatchDaemonEmacsSchema)` to create a new message.
  */
-export const WatchDaemonRequestSchema: GenMessage<WatchDaemonRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 0);
+export const WatchDaemonEmacsSchema: GenMessage<WatchDaemonEmacs> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 1);
+
+/**
+ * A webview is connecting. Presence is the fact: a webview reports its build
+ * per workspace, on WatchWebWorkspace, where a reload is addressed.
+ *
+ * @generated from message agentrepl.v1.WatchDaemonWebview
+ */
+export type WatchDaemonWebview = Message<"agentrepl.v1.WatchDaemonWebview"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WatchDaemonWebview.
+ * Use `create(WatchDaemonWebviewSchema)` to create a new message.
+ */
+export const WatchDaemonWebviewSchema: GenMessage<WatchDaemonWebview> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 2);
 
 /**
  * @generated from message agentrepl.v1.WatchDaemonResponse
@@ -109,10 +160,10 @@ export type WatchDaemonResponse = Message<"agentrepl.v1.WatchDaemonResponse"> & 
   } | {
     /**
      * A DEPLOY FOUND THIS EMACS ON OLDER ELISP: hot-load the module set, in
-     * config.el's load order, from the named root. A transient EVENT, like
-     * mutation_progress: it is pushed to the streams open at the deploy and
-     * never replayed to a late subscriber, whose own elisp_build is compared
-     * when it connects.
+     * config.el's load order, from the named root. Sent ONLY on an Emacs
+     * stream whose elisp_build is not the checkout's — never on a webview's —
+     * and never replayed to a late subscriber: a stream opened later states
+     * its own elisp_build, and a deploy that runs after it compares that.
      *
      * @generated from field: agentrepl.v1.DaemonReloadElisp reload_elisp = 5;
      */
@@ -126,7 +177,7 @@ export type WatchDaemonResponse = Message<"agentrepl.v1.WatchDaemonResponse"> & 
  * Use `create(WatchDaemonResponseSchema)` to create a new message.
  */
 export const WatchDaemonResponseSchema: GenMessage<WatchDaemonResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 1);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 3);
 
 /**
  * Hot-load the checkout's elisp. EMACS OWNS THE LOAD: the daemon has no route
@@ -167,7 +218,7 @@ export type DaemonReloadElisp = Message<"agentrepl.v1.DaemonReloadElisp"> & {
  * Use `create(DaemonReloadElispSchema)` to create a new message.
  */
 export const DaemonReloadElispSchema: GenMessage<DaemonReloadElisp> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 2);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 4);
 
 /**
  * @generated from message agentrepl.v1.DaemonShutdownAnnounced
@@ -211,7 +262,7 @@ export type DaemonShutdownAnnounced = Message<"agentrepl.v1.DaemonShutdownAnnoun
  * Use `create(DaemonShutdownAnnouncedSchema)` to create a new message.
  */
 export const DaemonShutdownAnnouncedSchema: GenMessage<DaemonShutdownAnnounced> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 3);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 5);
 
 /**
  * THE ARM IS THE CAUSE.
@@ -248,7 +299,7 @@ export type DaemonShutdownCause = Message<"agentrepl.v1.DaemonShutdownCause"> & 
  * Use `create(DaemonShutdownCauseSchema)` to create a new message.
  */
 export const DaemonShutdownCauseSchema: GenMessage<DaemonShutdownCause> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 4);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 6);
 
 /**
  * A new build is being rolled out blue-green. A deploy starts one
@@ -266,7 +317,7 @@ export type DaemonShutdownSelfMergeRollout = Message<"agentrepl.v1.DaemonShutdow
  * Use `create(DaemonShutdownSelfMergeRolloutSchema)` to create a new message.
  */
 export const DaemonShutdownSelfMergeRolloutSchema: GenMessage<DaemonShutdownSelfMergeRollout> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 5);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 7);
 
 /**
  * A scheduled drain reached its instant.
@@ -285,7 +336,7 @@ export type DaemonShutdownScheduledDrain = Message<"agentrepl.v1.DaemonShutdownS
  * Use `create(DaemonShutdownScheduledDrainSchema)` to create a new message.
  */
 export const DaemonShutdownScheduledDrainSchema: GenMessage<DaemonShutdownScheduledDrain> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 6);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 8);
 
 /**
  * UpdateShutdownSchedule{now}: an immediate operator shutdown.
@@ -304,7 +355,7 @@ export type DaemonShutdownImmediate = Message<"agentrepl.v1.DaemonShutdownImmedi
  * Use `create(DaemonShutdownImmediateSchema)` to create a new message.
  */
 export const DaemonShutdownImmediateSchema: GenMessage<DaemonShutdownImmediate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 7);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 9);
 
 /**
  * The standing drain schedule, pushed when armed (and re-pushed to late
@@ -333,7 +384,7 @@ export type DaemonDrainScheduled = Message<"agentrepl.v1.DaemonDrainScheduled"> 
  * Use `create(DaemonDrainScheduledSchema)` to create a new message.
  */
 export const DaemonDrainScheduledSchema: GenMessage<DaemonDrainScheduled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 8);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 10);
 
 /**
  * Presence is the fact: the schedule was cancelled.
@@ -348,5 +399,5 @@ export type DaemonDrainCancelled = Message<"agentrepl.v1.DaemonDrainCancelled"> 
  * Use `create(DaemonDrainCancelledSchema)` to create a new message.
  */
 export const DaemonDrainCancelledSchema: GenMessage<DaemonDrainCancelled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 9);
+  messageDesc(file_agentrepl_v1_endpoint_watch_daemon, 11);
 
