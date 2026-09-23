@@ -10,11 +10,11 @@
  * THE DEFECT. The canonical `log` methods refuse to emit without an installed sink -- `emit`
  * throws "the webapp logger is not installed" rather than discarding the
  * record -- and two of the boot's own steps log as their first statement:
- * `shellElements` announces the shell it is resolving, and
- * `mountFailureOverlay` announces its mount. Both ran BEFORE `setLogger`, so
- * every real page threw out of `boot` at the one moment `overlay` was still
- * null: the catch reported through `console.error`, and THE PAGE CAME UP
- * EMPTY AND SILENT -- no stream opened, no card drawn, nothing said.
+ * `shellElements` announces the shell it is resolving, and the failure
+ * surface announced its mount. Both ran BEFORE `setLogger`, so every real page
+ * threw out of `boot` at the one moment that surface was still null: the catch
+ * reported through `console.error`, and THE PAGE CAME UP EMPTY AND SILENT --
+ * no stream opened, no failure shown, nothing said.
  *
  * Observed in the e2e sandbox against the real daemon before it was fixed:
  * the bundle served and evaluated, the shell's four mount points sat
@@ -28,8 +28,8 @@
  *     invariant `boot` is itself responsible for establishing. So each test
  *     here takes it back OUT, which is the only way to run the boot against
  *     the state a real page hands it.
- *   - `main.test.ts` mocks the mounts, so `mountFailureOverlay` never
- *     reaches its own log line. Nothing here is mocked but the wire.
+ *   - `main.test.ts` mocks the mounts' streams. Nothing here is mocked but
+ *     the wire.
  *
  * The page's own shell comes from `index.html` itself, so this cannot drift
  * from the file the daemon serves.
@@ -55,7 +55,7 @@ import { shellHTML } from "./shell-html.js";
  *
  * A coverage run on a contended host exhausted six seconds while the other
  * two identical imports completed, so twelve seconds keeps a 2x scheduling
- * margin and leaves the inner two-second failure-card deadline enough room to
+ * margin and leaves the inner two-second failure-chip deadline enough room to
  * print its own diagnostic first. This is a per-site bound,
  * deliberately not a raised global: nothing else in the unit suite imports
  * its subject at run time, and the global stays sized for what it covers.
@@ -66,25 +66,36 @@ const BOOT_IMPORT_TIMEOUT_MS = 12_000;
 const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";
 
 /**
- * How long the boot is given to reach its failure card.
+ * How long the boot is given to reach its failure in the warning chip.
  *
  * The boot is asynchronous -- `main.ts` ends in `void boot()` -- so the
  * import returns before the failure path has run. Everything between here
- * and the card is one rejected fetch and a few microtasks, so this is a
+ * and the chip is one rejected fetch and a few microtasks, so this is a
  * ceiling on a hang rather than a duration anything is expected to take.
  */
 const BOOT_SETTLE_MS = 2000;
 
-/** The boot's failure card, once it exists. */
-async function awaitBootFailureCard(): Promise<Element> {
+/**
+ * The boot's failure as the topbar's warning chip shows it, once it stands:
+ * the chip's list is opened and the `bootFailed` row's detail read back.
+ */
+async function awaitBootFailureChip(): Promise<string> {
   const deadline = Date.now() + BOOT_SETTLE_MS;
   for (;;) {
-    const card = document.querySelector('#failure-overlay .failure-card[data-arm="bootFailed"]');
-    if (card !== null) return card;
+    const chip = document.querySelector<HTMLElement>(
+      '#topbar .topbar-warnings[data-local-arms~="bootFailed"]',
+    );
+    if (chip !== null) {
+      chip.querySelector<HTMLElement>(".topbar-warning-chip")?.click();
+      document
+        .querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')
+        ?.click();
+      return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";
+    }
     if (Date.now() > deadline) {
       throw new Error(
-        `the boot drew no failure card within ${BOOT_SETTLE_MS}ms; ` +
-          `the overlay holds ${document.querySelector("#failure-overlay")?.innerHTML ?? "<no overlay>"}`,
+        `the boot listed no failure in the warning chip within ${BOOT_SETTLE_MS}ms; ` +
+          `the topbar holds ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -140,7 +151,7 @@ await Promise.all([
   import("../src/topbar/topbar.js"),
   import("../src/tray/tray.js"),
   import("../src/failure/sink.js"),
-  import("../src/failure/overlay.js"),
+  import("../src/failure/local.js"),
   import("../src/rpc/client.js"),
   import("../src/rpc/context.js"),
   import("../src/rpc/page-address.js"),
@@ -183,9 +194,7 @@ describe("the webapp's boot against a real page", () => {
     // `main.ts` boots itself at import time; that top-level call IS the
     // production entry point, so importing it is how a page is booted.
     await import("../src/main.js");
-    const card = await awaitBootFailureCard();
-    expect(card.textContent).toContain("AdoptWebWorkspace");
-    expect(document.querySelector("#failure-overlay")?.hasAttribute("data-empty")).toBe(false);
+    expect(await awaitBootFailureChip()).toContain("AdoptWebWorkspace");
   }, BOOT_IMPORT_TIMEOUT_MS);
 
   it("never fails on the logger's own guard", async () => {
@@ -194,19 +203,19 @@ describe("the webapp's boot against a real page", () => {
     // which is what a reordering would reintroduce, and which the buggy
     // build reported through exactly this console path.
     await import("../src/main.js");
-    await awaitBootFailureCard();
+    await awaitBootFailureChip();
     const said = consoleError.mock.calls.flat().join(" ");
     expect(said).not.toContain("the webapp logger is not installed");
   }, BOOT_IMPORT_TIMEOUT_MS);
 
   it("re-raises the failure it drew, rather than ending quietly", async () => {
-    // The other half of "drew its failure": the card is what the READER sees,
-    // and this is what the BROWSER sees. A boot that drew the card and then
+    // The other half of "drew its failure": the chip is what the READER sees,
+    // and this is what the BROWSER sees. A boot that drew the failure and then
     // returned normally would leave a page that looks broken to a person and
     // healthy to every error reporter pointed at it.
     await import("../src/main.js");
-    await awaitBootFailureCard();
-    // The re-raise is scheduled on a microtask after the card is drawn.
+    await awaitBootFailureChip();
+    // The re-raise is scheduled on a microtask after the failure is drawn.
     await Promise.resolve();
     expect(reRaised.map((err) => String(err))).toEqual([
       expect.stringContaining("AdoptWebWorkspace") as unknown as string,

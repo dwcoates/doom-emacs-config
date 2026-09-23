@@ -5,6 +5,7 @@ import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { Ticker } from "../../src/clock.js";
+import type { LocalFailure } from "../../src/failure/local.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
@@ -72,11 +73,12 @@ export function appContext(
 export function topbarContext(
   ctx: AppContext = appContext(),
   openLogin: (control: HTMLElement) => void = () => undefined,
+  localFailures: () => readonly LocalFailure[] = () => [],
 ): { host: HTMLElement; tc: TopbarContext } {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
   const reveals = mountRevealLayer(host, GEOMETRY);
-  return { host, tc: { ctx, reveals, openLogin } };
+  return { host, tc: { ctx, reveals, openLogin, localFailures } };
 }
 
 /** The reveal currently drawn, or null. */

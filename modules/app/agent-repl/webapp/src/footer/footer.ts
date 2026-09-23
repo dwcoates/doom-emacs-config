@@ -37,7 +37,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import type { Handle } from "../failure/overlay.js";
+import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
