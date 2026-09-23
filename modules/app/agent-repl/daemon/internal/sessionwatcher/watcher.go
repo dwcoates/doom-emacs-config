@@ -666,6 +666,10 @@ func (w *watcher) publishLiveWorkLocked() {
 	// arm are two renderings of ONE fact, so they cannot be allowed to resolve
 	// from two ledgers.
 	w.sinks.Footer.OnLiveWorkChanged(w.ws, live)
+	// AND THE FEED: a detached shell's bubble settles when its run leaves the
+	// set, whichever of that, its own terminal or its call's result comes
+	// first, so a run nobody can see any more never draws as running.
+	w.sinks.Feed.OnLiveWorkChanged(w.ws, live)
 	// The live-work set is half of freeness, so every change to it is a
 	// freeness edge a lease holder may be waiting on.
 	w.signalFreenessLocked()

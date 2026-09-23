@@ -100,6 +100,10 @@ type wsState struct {
 	planUnits map[string]*planState
 	// shells is the detached-shell accumulation, keyed by detached work id.
 	shells map[string]*shellState
+	// liveShells is the detached shells the session watcher's live set held at
+	// its last publication, keyed by work id. A shell that leaves it without
+	// having settled is settled lost (settleShellsLeftLive).
+	liveShells map[string]struct{}
 	// detachedUnits are the units a detachment announced BEFORE this resolver
 	// had drawn them, kept so the placement survives the order the frames
 	// arrive in. A store replay is the ordinary case: a unit's row replays at
@@ -490,6 +494,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		plans:                map[string]*planState{},
 		planUnits:            map[string]*planState{},
 		shells:               map[string]*shellState{},
+		liveShells:           map[string]struct{}{},
 		detachedUnits:        map[string]string{},
 		subagents:            map[string]*subagentState{},
 		standing:             map[string]*conversationv1.AgentPermissionStanding{},
