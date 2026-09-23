@@ -49,6 +49,7 @@ import {
   type FeedId,
   type FeedPage,
   type FeedPageError,
+  type FeedResponse,
   type FeedSelection,
   type FeedTurnActivity,
   type FeedRow,
@@ -80,6 +81,33 @@ import {
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { setPromptWave } from "../breathing.js";
+
+/** A collapsing row's place, sampled before the redraw that collapses it. */
+interface CollapseSample {
+  id: string;
+  element: HTMLElement;
+  /** The scroll box's top edge. */
+  boxTop: number;
+  /** The row's bottom edge before the redraw. */
+  bottom: number;
+}
+
+/**
+ * Whether NEXT is the daemon's re-push of a thinking row it has just marked
+ * SUPERSEDED (`FeedResponse.superseded`): the flag the row was drawn without,
+ * now set. Read off the two pushed rows; nothing here decides it.
+ */
+function isSupersedeEdge(drawn: FeedRow, next: FeedRow): boolean {
+  const before = responseOf(drawn);
+  const after = responseOf(next);
+  return before !== null && after !== null && after.thinking && !before.superseded && after.superseded;
+}
+
+/** The response bubble a row carries, or null. */
+function responseOf(row: FeedRow): FeedResponse | null {
+  if (row.row.case !== "activity" || row.row.value.unit.case !== "response") return null;
+  return row.row.value.unit.value;
+}
 
 /** A bubble, as the controller holds it: an element plus its own lifecycle. */
 export interface BubbleLike extends Handle {
@@ -117,8 +145,11 @@ export interface FeedControllerOptions {
   bodyContext: RowContext;
   /** The bubble's own composer slot, when this build mounts one (R7). */
   composerSlot?: HTMLElement;
-  /** The page's scroll box and tail owner. Root feed only. */
-  scroll?: { box: ScrollPosition; tail: TailFollow };
+  /**
+   * The page's scroll box and tail owner. Root feed only. The box's own rect is
+   * read to tell whether a collapsing row lies above the viewport.
+   */
+  scroll?: { box: ScrollPosition & Pick<Element, "getBoundingClientRect">; tail: TailFollow };
   /**
    * The overscan buffer, rooted on the page's scroll box. One instance is
    * shared across the root feed and every sub-feed nested inside the same box,
@@ -446,10 +477,58 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       operation: known ? "feed.row-replaced" : "feed.row-appended",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
+    const collapsing = held !== undefined && isSupersedeEdge(held.row, row) ? sampleCollapse(id, held) : null;
     adopt(row, known ? -1 : order.length);
     truncateAtSeparation(row, id);
     announce();
+    keepPlaceAboveCollapse(collapsing);
     if (!known && isSentPrompt(row)) parkOnSentPrompt(id);
+  }
+
+  /**
+   * Sample where a row the daemon just marked superseded ends, BEFORE its
+   * redraw collapses it, with the scroll box's top edge. Null when the feed has
+   * no scroll box (a sub-feed; the same standing a prepend has there).
+   */
+  function sampleCollapse(id: string, held: RowState): CollapseSample | null {
+    if (opts.scroll === undefined) return null;
+    return {
+      id,
+      element: held.element,
+      boxTop: opts.scroll.box.getBoundingClientRect().top,
+      bottom: held.element.getBoundingClientRect().bottom,
+    };
+  }
+
+  /**
+   * KEEP THE READER'S CONTENT IN PLACE WHEN A THINKING BUBBLE ABOVE THEM
+   * COLLAPSES (owner rule, 2026-09-23). The daemon re-pushes a thinking row
+   * superseded once a later response lands, and its redraw drops it from the
+   * response cap to two lines. When it lay wholly above the viewport, everything
+   * the reader sees moved up by exactly the height it lost, so the view shifts
+   * by that, through the tail owner (`collapseCompensation`); a following reader
+   * was already kept at the tail by `announce`. The row the redraw DETACHED is an
+   * invariant violation (an upsert redraws a row in place), recorded as one.
+   */
+  function keepPlaceAboveCollapse(sample: CollapseSample | null): void {
+    if (opts.scroll === undefined || sample === null) return;
+    if (!sample.element.isConnected) {
+      log.error("a superseded row's redraw detached the row its collapse was measured from", {
+        operation: "feed.collapse-anchor-detached",
+        context: { feed: feedName(), row: sample.id },
+      });
+      return;
+    }
+    const after = sample.element.getBoundingClientRect().bottom;
+    log.debug(`a superseded row above ${sample.boxTop}px changed by ${after - sample.bottom}px`, {
+      operation: "feed.collapse-kept-place",
+      context: { feed: feedName(), row: sample.id, box_top: sample.boxTop, before: sample.bottom, after },
+    });
+    opts.scroll.tail.collapseCompensation({
+      boxTop: sample.boxTop,
+      rowBottomBefore: sample.bottom,
+      rowBottomAfter: after,
+    });
   }
 
   /**
