@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -707,4 +708,71 @@ func TestCancelKeepaliveRedriveIgnoresAMismatchedTurn(t *testing.T) {
 		t.Fatal("CancelKeepaliveRedrive(t1) = false, want the still-standing re-drive cancellable")
 	}
 	h.waitRedrives()
+}
+
+// AN INTERRUPT THAT RACES A RE-DRIVE'S OPENING ENDS ONLY THE TURN. The turn
+// opened in the same instant the user's interrupt cancelled it, so the queue
+// kills it, and the kill is UNFORCED: an interrupt never stops the turn's
+// detached work. A kill the shim refuses is recorded at ERROR with its cause.
+func TestARedriveThatOpensAsAnInterruptCancelsItIsKilledUnforced(t *testing.T) {
+	tests := []struct {
+		name       string
+		killErr    error
+		wantKills  []ids.TurnID
+		wantForces []bool
+		wantLevel  string
+		wantMsg    string
+		wantCause  any
+	}{
+		{
+			name:       "the kill lands unforced",
+			wantKills:  []ids.TurnID{"t1"},
+			wantForces: []bool{false},
+			wantLevel:  "info",
+			wantMsg:    "the re-driven turn opened as an interrupt cancelled it; stopping it",
+		},
+		{
+			name:      "a refused kill is recorded at error",
+			killErr:   errors.New("the shim refused the kill"),
+			wantLevel: "error",
+			wantMsg:   "could not stop the interrupt-cancelled turn that had just opened",
+			wantCause: "the shim refused the kill",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the first StartTurn collides with a keep-alive, and the
+			// re-drive's StartTurn is interrupted while it is opening the turn.
+			h := newHarness(t)
+			h.instantRedrive()
+			h.sender.killErr = tt.killErr
+			h.sender.startScript = []error{keepaliveCollisionErr{keepalive: true}, nil}
+			h.sender.startHook = func() {
+				if h.sender.attempts == 2 {
+					h.q.CancelKeepaliveRedrive(context.Background(), theWorkspace, "t1")
+				}
+			}
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.waitRedrives()
+
+			// Assert
+			if got := h.sender.killed(); !slices.Equal(got, tt.wantKills) {
+				t.Fatalf("killed turns = %v, want %v", got, tt.wantKills)
+			}
+			if got := h.sender.killedForces(); !slices.Equal(got, tt.wantForces) {
+				t.Fatalf("kill forces = %v, want %v: an interrupt's kill is never forced", got, tt.wantForces)
+			}
+			for _, r := range h.log.Records() {
+				if r.Level == tt.wantLevel && r.Operation == opDeliver && r.Message == tt.wantMsg &&
+					(tt.wantCause == nil || r.Context["cause"] == tt.wantCause) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %s %q", h.log.Records(), tt.wantLevel, tt.wantMsg)
+		})
+	}
 }
