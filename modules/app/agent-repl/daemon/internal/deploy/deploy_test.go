@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agentrepl/logging/buildreport"
@@ -294,6 +295,9 @@ func TestARefusedHandoverIsTheDeploysAnswer(t *testing.T) {
 	if !errors.As(err, &inFlight) {
 		t.Fatalf("Deploy = %v, want the handover's refusal", err)
 	}
+	if !logged(h.log, "error", opDecide, "the handover was not accepted") {
+		t.Fatalf("records = %+v, want the refused handover at ERROR", h.log.Records())
+	}
 }
 
 func TestStaleShimsGoToTheBounceRegistry(t *testing.T) {
@@ -380,11 +384,13 @@ func TestADeployIsRefused(t *testing.T) {
 		name    string
 		arrange func(h *harness)
 		want    func(error) bool
+		wantLog string
 	}{
 		{
 			name:    "by a successor still joining",
 			arrange: func(h *harness) { h.rollout.joining = true },
 			want:    func(err error) bool { return errors.Is(err, rollout.ErrJoining) },
+			wantLog: "refused a deploy asked of a successor still joining",
 		},
 		{
 			name:    "while a handover is in flight",
@@ -393,6 +399,7 @@ func TestADeployIsRefused(t *testing.T) {
 				var inFlight *rollout.ErrAlreadyRollingOut
 				return errors.As(err, &inFlight) && len(inFlight.WaitingOn) == 1
 			},
+			wantLog: "refused a deploy while a handover is in flight",
 		},
 	}
 	for _, tc := range tests {
@@ -411,7 +418,101 @@ func TestADeployIsRefused(t *testing.T) {
 			if h.builder.count() != 0 {
 				t.Fatalf("a refused deploy built")
 			}
+			if !logged(h.log, "info", opDeploy, tc.wantLog) {
+				t.Fatalf("records = %+v, want %q at INFO", h.log.Records(), tc.wantLog)
+			}
 		})
+	}
+}
+
+func TestAStagingDirectoryThatCannotBeMadeBuildsNothing(t *testing.T) {
+	// Arrange: the staging root's parent is a file.
+	h := newHarness(t)
+	blocker := filepath.Join(t.TempDir(), "file")
+	writeFile(t, blocker, "x")
+	h.d.deps.StagingRoot = filepath.Join(blocker, "staging")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "setup" {
+		t.Fatalf("Deploy = %v, want the setup step's failure", err)
+	}
+	if h.builder.count() != 0 {
+		t.Fatalf("a deploy with no staging directory built")
+	}
+	if !logged(h.log, "error", opDeploy, "could not create the staging directory") {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
+	}
+}
+
+func TestABuildThatStagedNoArtifactDeploysNothing(t *testing.T) {
+	// Arrange: the build "succeeds" and stages nothing at all.
+	h := newHarness(t)
+	h.builder.build = artifacts{}
+	h.builder.stageNothing = true
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "shim" {
+		t.Fatalf("Deploy = %v, want the first unhashable artifact named", err)
+	}
+	if got := readFile(t, h.live.ShimMain()); got != theOld.shim {
+		t.Fatalf("installed shim = %q, want the old one untouched", got)
+	}
+	if !logged(h.log, "error", opDeploy, "a staged artifact could not be hashed; NOTHING WAS DEPLOYED") {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
+	}
+}
+
+func TestAnUnlistableWorkspaceSetIsTheDeploysAnswer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.d.deps.Workspaces = func(context.Context) ([]ids.WorkspaceID, error) {
+		return nil, errors.New("state client closed")
+	}
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "state client closed") {
+		t.Fatalf("Deploy = %v, want the listing failure", err)
+	}
+	if !logged(h.log, "error", opDecide, "could not list the workspaces whose shims are judged") {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
+	}
+}
+
+func TestAnInstallFailureRestartsNothing(t *testing.T) {
+	// Arrange: the live daemon binary's directory is read-only, so the fresh
+	// daemon cannot be installed beside it.
+	h := newHarness(t)
+	dir := filepath.Dir(h.live.DaemonBin())
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *InstallFailed
+	if !errors.As(err, &failed) || failed.Component != ComponentDaemon {
+		t.Fatalf("Deploy = %v, want the daemon's install failure", err)
+	}
+	if len(h.services.Calls()) != 0 || len(h.rollout.handovers) != 0 {
+		t.Fatalf("services %v, handovers %v: want nothing restarted after a failed install", h.services.Calls(), h.rollout.handovers)
+	}
+	if !logged(h.log, "error", opInstall, "could not install the fresh build") ||
+		!logged(h.log, "error", opDeploy, "nothing was restarted") {
+		t.Fatalf("records = %+v, want the install failure and the deploy's stop at ERROR", h.log.Records())
 	}
 }
 
