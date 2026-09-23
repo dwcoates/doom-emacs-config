@@ -923,21 +923,25 @@ describe("createFeedController: the working prompt's thinking wave", () => {
 });
 
 describe("createFeedController: following the tail", () => {
-  /** A scroll box and a tail owner whose decisions the test dictates. */
-  function scrollStub(following: boolean) {
+  /**
+   * A scroll box and a tail owner whose decisions the test dictates. Every
+   * park records the rows drawn at that moment, so a test can say what was
+   * already painted when the feed moved.
+   */
+  function scrollStub(following: boolean, host: HTMLElement) {
     const acts: string[] = [];
-    const box = {
-      scrollTop: 0,
-      scrollHeight: 1000,
-      clientHeight: 100,
-      querySelector: () => null,
-    };
+    const parkedOver: string[][] = [];
+    const shifts: number[] = [];
+    const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100 };
     const tail = {
       isFollowing: () => following,
-      park: () => acts.push("park"),
-      place: () => acts.push("place"),
+      park: () => {
+        acts.push("park");
+        parkedOver.push(drawnIds(host));
+      },
+      shift: (delta: number) => shifts.push(delta),
     };
-    return { box, tail, acts };
+    return { box, tail, acts, parkedOver, shifts };
   }
 
   /** A controller wired to that box. */
@@ -945,7 +949,7 @@ describe("createFeedController: following the tail", () => {
     const h = harness();
     const host = document.createElement("div");
     document.body.replaceChildren(host);
-    const scroll = scrollStub(following);
+    const scroll = scrollStub(following, host);
     const controller = createFeedController({
       ctx: h.ctx,
       host,
@@ -962,7 +966,21 @@ describe("createFeedController: following the tail", () => {
       },
       scroll: { box: scroll.box, tail: scroll.tail as never },
     });
-    return { controller, acts: scroll.acts };
+    return { controller, host, ...scroll };
+  }
+
+  /**
+   * Lay row ID out 400px per row above it, as jsdom lays out nothing: a row's
+   * top moves down by 400 for every row that lands above it.
+   */
+  function layOutByIndex(host: HTMLElement, id: string): HTMLElement {
+    const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
+    if (el === null) throw new Error(`row ${id} is not drawn`);
+    el.getBoundingClientRect = () => {
+      const index = el.parentElement === null ? 0 : [...el.parentElement.children].indexOf(el);
+      return { top: 100 + 400 * index } as DOMRect;
+    };
+    return el;
   }
 
   it("pulls the view to the tail while the reader is following it", () => {
@@ -986,6 +1004,92 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("older")]), "prepend");
     expect(acts).toContain("park");
   });
+
+  it("parks a reader who was scrolled away at the tail after a replace", () => {
+    // Arrange — the reader is not following; a re-open replaces the page.
+    const { controller, acts } = scrolled(false);
+    // Act
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    // Assert — there is no saved spot: a replace lands at the tail.
+    expect(acts).toEqual(["park"]);
+  });
+
+  it("paints the replaced rows before it parks", () => {
+    // Arrange
+    const { controller, parkedOver } = scrolled(false);
+    // Act
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    // Assert
+    expect(parkedOver).toEqual([["a", "b"]]);
+  });
+
+  it("records the park a replace makes", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = scrolled(false);
+    // Act
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.replace-parked");
+    expect(record.context).toMatchObject({ feed: "root", rows: 1 });
+  });
+
+
+
+
+
+
+
+
+  it("keeps the reader's content in place when older rows land above it", () => {
+    // Arrange — `a` sits 100px down; the older row lands above it.
+    const { controller, host, shifts } = scrolled(false);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    layOutByIndex(host, "a");
+    // Act
+    controller.applyPage(page([responseRow("older")]), "prepend");
+    // Assert — the view moves down by exactly the 400px that grew above.
+    expect(shifts).toEqual([400]);
+  });
+
+  it("does not shift a following reader on a prepend", () => {
+    // Arrange
+    const { controller, host, shifts } = scrolled(true);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    layOutByIndex(host, "a");
+    // Act
+    controller.applyPage(page([responseRow("older")]), "prepend");
+    // Assert
+    expect(shifts).toEqual([]);
+  });
+
+  it("does not shift when a prepend lands on an empty feed", () => {
+    // Arrange
+    const { controller, shifts } = scrolled(false);
+    controller.applyPage(page([], { hasMore: true }), "replace");
+    // Act
+    controller.applyPage(page([responseRow("older")]), "prepend");
+    // Assert
+    expect(shifts).toEqual([]);
+  });
+
+  it("records an error, and does not shift, when a prepend detaches the measured row", async () => {
+    // Arrange — a listener that tears the first row out mid-page.
+    const capture = captureLogRecords();
+    const { controller, host, shifts } = scrolled(false);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const a = layOutByIndex(host, "a");
+    controller.onChange(() => a.remove());
+    // Act
+    controller.applyPage(page([responseRow("older")]), "prepend");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.prepend-anchor-detached");
+    expect({ level: record.level.case, context: record.context, shifts }).toEqual({
+      level: "error",
+      context: expect.objectContaining({ feed: "root", row: "a" }) as unknown,
+      shifts: [],
+    });
+  });
 });
 
 describe("createFeedController: the response selection", () => {
@@ -1008,7 +1112,6 @@ describe("createFeedController: the response selection", () => {
     const tail = {
       isFollowing: () => false,
       park: () => acts.push("park"),
-      place: () => acts.push("place"),
       release: () => acts.push("release"),
       shift: (delta: number) => shifts.push(delta),
     };
