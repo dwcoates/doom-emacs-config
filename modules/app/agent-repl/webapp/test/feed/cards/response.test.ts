@@ -365,6 +365,141 @@ describe("the usage corner's hover timestamp", () => {
   });
 });
 
+describe("the usage corner's slider markup", () => {
+  /** A response whose corner carries the token figure and the given settle instant. */
+  function withUsage(atMs: bigint) {
+    return response({
+      usage: { text: "12.4k", atMs },
+      result: { case: "success", value: { prose: { markdown: "done" } } },
+    });
+  }
+
+  /** The corner's structure as class names, children in document order. */
+  function shape(corner: Element): unknown {
+    return Array.from(corner.children).map((child) => ({
+      className: child.className,
+      children: Array.from(child.children).map((grandchild) => grandchild.className),
+    }));
+  }
+
+  it("carries the token text on the corner, for the width-reserving spacer", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    expect(corner.dataset.tokens).toBe("12.4k");
+  });
+
+  it("carries the token text on an arriving corner too", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(0n), rowContext());
+    // Assert
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    expect(corner.dataset.tokens).toBe("12.4k");
+  });
+
+  it("nests the token then the duration inside the one slider once settled", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert — the slider is the corner's only element, and the duration is
+    // the slider's only in-flow content besides the out-of-flow token.
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    expect(shape(corner)).toEqual([
+      { className: "usage-slider", children: ["usage-stamp", "usage-ago"] },
+    ]);
+  });
+
+  it("nests only the token inside an empty-width slider while arriving", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(0n), rowContext());
+    // Assert — no duration, so the slider has no in-flow content and the
+    // token stays at the right edge.
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    expect(shape(corner)).toEqual([{ className: "usage-slider", children: ["usage-stamp"] }]);
+  });
+
+  it("keeps the spacer's text and the visible token identical", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert — the reservation is the token's own text, so its width is the token's.
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    expect(corner.dataset.tokens).toBe(corner.querySelector(".usage-stamp")?.textContent);
+  });
+
+  it("keeps the markup unchanged as the live clock advances", async () => {
+    // Arrange
+    vi.setSystemTime(31_000);
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.appendChild(el);
+    const corner = el.querySelector(".usage-corner") as HTMLElement;
+    const before = shape(corner);
+    try {
+      // Act — the duration text grows ("30s ago" to "1m ago").
+      await vi.advanceTimersByTimeAsync(30_000);
+      // Assert
+      expect([corner.querySelector(".usage-ago")?.textContent, shape(corner)]).toEqual([
+        "1m ago",
+        before,
+      ]);
+    } finally {
+      el.remove();
+    }
+  });
+
+  it("collapses the slider by 100% of its own width", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.appendChild(el);
+    try {
+      // Act
+      const slider = el.querySelector(".usage-slider") as HTMLElement;
+      // Assert
+      expect(cascadedValue(slider, "transform")).toBe("translateX(100%)");
+    } finally {
+      el.remove();
+      teardown();
+    }
+  });
+
+  it("slides the slider to rest when the corner is revealed", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.appendChild(el);
+    try {
+      const corner = el.querySelector(".usage-corner") as HTMLElement;
+      // Act
+      corner.dispatchEvent(new Event("mouseenter"));
+      // Assert
+      const slider = el.querySelector(".usage-slider") as HTMLElement;
+      expect(cascadedValue(slider, "transform")).toBe("translateX(0)");
+    } finally {
+      el.remove();
+      teardown();
+    }
+  });
+
+  it("anchors the token to the slider's left edge", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(withUsage(0n), rowContext());
+    document.body.appendChild(el);
+    try {
+      // Act
+      const stamp = el.querySelector(".usage-stamp") as HTMLElement;
+      // Assert
+      expect([cascadedValue(stamp, "position"), cascadedValue(stamp, "right")]).toEqual([
+        "absolute",
+        "100%",
+      ]);
+    } finally {
+      el.remove();
+      teardown();
+    }
+  });
+});
+
 describe("the usage corner's first-line float", () => {
   /** A settled response whose corner carries a token figure and a settle instant. */
   function settled(atMs: bigint) {

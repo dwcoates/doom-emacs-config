@@ -839,7 +839,7 @@ describe("the cost corner's hover hit area", () => {
     // margin is ever transitioned (the reveal touches neither).
     expect(base).toMatch(/margin-left:\s*0\.35rem/);
     expect(base).not.toMatch(/max-width/);
-    expect(base).toMatch(/transition:[^;]*opacity[^;]*transform/s);
+    expect(base).toMatch(/transition:\s*opacity 0\.5s ease/);
     expect(base).not.toMatch(/transition:[^;]*(?:max-width|margin)/s);
   });
 
@@ -910,97 +910,146 @@ describe("the cost corner's hover hit area", () => {
     }
   });
 
-  it("collapses the token toward the right edge, not at its identity position (owner ruling, 2026-09-15: restored synchronized slide)", () => {
-    // Arrange / Act — the token's base (collapsed) transform must be a
-    // rightward translate by the shared slide distance, not `translateX(0)`
-    // or no transform at all.
-    const corner = declarationsOf(".usage-corner") ?? "";
-    const stamp = declarationsOf(".usage-stamp") ?? "";
-
-    // Assert — the corner declares the one shared distance, and the token's
-    // base transform uses that same variable rather than a literal or a
-    // no-op.
-    expect(corner).toMatch(/--usage-slide-distance:\s*[^;]+;/);
-    expect(stamp).toMatch(/transform:\s*translateX\(var\(--usage-slide-distance\)\)/);
-  });
-
-  it("collapses the duration off-right by the same shared distance the token collapses by", () => {
+  it("collapses the slider by 100% of its own width, the duration's width by construction", () => {
     // Arrange / Act
-    const corner = declarationsOf(".usage-corner") ?? "";
-    const ago = declarationsOf(".usage-ago") ?? "";
-    const stamp = declarationsOf(".usage-stamp") ?? "";
+    const slider = declarationsOf(".usage-slider") ?? "";
 
-    // Assert — both read `var(--usage-slide-distance)`, the single value
-    // declared once on the shared `.usage-corner` ancestor, so the two
-    // collapsed offsets are provably the same distance rather than two
-    // numbers that merely look similar.
-    expect(corner).toMatch(/--usage-slide-distance:\s*[^;]+;/);
-    expect(ago).toMatch(/transform:\s*translateX\(var\(--usage-slide-distance\)\)/);
-    expect(stamp).toMatch(/transform:\s*translateX\(var\(--usage-slide-distance\)\)/);
+    // Assert — a percentage transform on the element whose width is the
+    // duration, never a length.
+    expect(slider).toMatch(/transform:\s*translateX\(100%\)/);
   });
 
-  it("resolves both the token and the duration to translateX(0) under every reveal trigger", () => {
-    // Arrange / Act — the same trigger selectors that reveal the duration
-    // must also carry the token back to its resting (untranslated) position.
-    const triggers = [
-      ".bubble.assistant:hover",
-      ".bubble.assistant:focus-within",
-      ".usage-corner:hover",
-      ".usage-corner:focus-within",
-      ".usage-corner.usage-corner--revealed",
-    ];
+  it("declares no fixed-length slide distance anywhere in the sheet", () => {
+    // Arrange / Act
+    const withoutComments = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
 
     // Assert
-    for (const trigger of triggers) {
-      const stampRule = declarationsOf(`${trigger} .usage-stamp`) ?? "";
-      const agoRule = declarationsOf(`${trigger} .usage-ago`) ?? "";
-      expect(stampRule).toMatch(/transform:\s*translateX\(0\)/);
-      expect(agoRule).toMatch(/transform:\s*translateX\(0\)/);
-    }
+    expect(withoutComments).not.toMatch(/--usage-slide-distance/);
   });
 
-  it("transitions the token's transform on the same duration and easing as the duration's", () => {
+  it("gives the slider no in-flow content but the duration, so its width is the duration's", () => {
+    // Arrange / Act — the token is out of flow, so it adds nothing to the
+    // slider's width; the duration (with its gap) is all that remains.
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+
+    // Assert
+    expect(stamp).toMatch(/position:\s*absolute/);
+  });
+
+  it("anchors the token to the slider's left edge", () => {
+    // Arrange / Act
+    const slider = declarationsOf(".usage-slider") ?? "";
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+
+    // Assert — the slider is the token's containing block, and the token's
+    // right edge is the slider's left edge.
+    expect(slider).toMatch(/position:\s*relative/);
+    expect(stamp).toMatch(/right:\s*100%/);
+  });
+
+  it("gives the token no transform of its own, so it moves only with the slider", () => {
     // Arrange / Act
     const stamp = declarationsOf(".usage-stamp") ?? "";
-    const ago = declarationsOf(".usage-ago") ?? "";
 
-    // Assert — both carry `transform 0.5s ease`, so the slide is one
-    // synchronized motion rather than two animations that happen to overlap.
-    expect(stamp).toMatch(/transition:\s*transform 0\.5s ease/);
-    expect(ago).toMatch(/transition:[^;]*transform 0\.5s ease/s);
+    // Assert
+    expect(stamp).not.toMatch(/(?:^|[\s;])transform\s*:/);
+    expect(stamp).not.toMatch(/(?:^|[\s;])transition\s*:/);
   });
 
-  it("never animates the token's width, max-width, or margin, so the reserved footprint stays constant", () => {
-    // Arrange / Act — the token's base rule and every reveal-trigger rule
-    // targeting it.
-    const base = declarationsOf(".usage-stamp") ?? "";
-    const revealed = declarationsOf(".usage-corner.usage-corner--revealed .usage-stamp") ?? "";
+  it("reserves the token's width with a hidden in-flow copy of the token text", () => {
+    // Arrange / Act
+    const spacer = declarationsOf(".usage-corner::before") ?? "";
 
-    // Assert — only `transform`/`transition` change; no layout-affecting
-    // property is ever declared on the token, so the corner's floated
-    // footprint (token layout width + duration layout width, unaffected by
-    // `transform`) never changes and the first prose line never reflows.
-    for (const decls of [base, revealed]) {
-      expect(decls).not.toMatch(/(?:^|[\s;])width\s*:/);
-      expect(decls).not.toMatch(/(?:^|[\s;])max-width\s*:/);
-      expect(decls).not.toMatch(/(?:^|[\s;])margin/);
+    // Assert — the copy is the token text itself, never a guessed length.
+    expect(spacer).toMatch(/content:\s*attr\(data-tokens\)/);
+    expect(spacer).toMatch(/visibility:\s*hidden/);
+  });
+
+  it("sizes the token's spacer in the token's own font size and figures", () => {
+    // Arrange / Act
+    const spacer = declarationsOf(".usage-corner::before") ?? "";
+
+    // Assert
+    expect(spacer).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
+    expect(spacer).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it("keeps the token's text on one line so its zero-width anchor cannot wrap it", () => {
+    // Arrange / Act
+    const stamp = declarationsOf(".usage-stamp") ?? "";
+    const spacer = declarationsOf(".usage-corner::before") ?? "";
+
+    // Assert
+    expect(stamp).toMatch(/white-space:\s*nowrap/);
+    expect(spacer).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it.each([
+    ".bubble.assistant:hover",
+    ".bubble.assistant:focus-within",
+    ".usage-corner:hover",
+    ".usage-corner:focus-within",
+    ".usage-corner.usage-corner--revealed",
+  ])("slides the slider to translateX(0) under %s", (trigger) => {
+    // Arrange / Act
+    const slider = declarationsOf(`${trigger} .usage-slider`) ?? "";
+
+    // Assert
+    expect(slider).toMatch(/transform:\s*translateX\(0\)/);
+  });
+
+  it.each([
+    ".bubble.assistant:hover",
+    ".bubble.assistant:focus-within",
+    ".usage-corner:hover",
+    ".usage-corner:focus-within",
+    ".usage-corner.usage-corner--revealed",
+  ])("fades the duration in under %s", (trigger) => {
+    // Arrange / Act
+    const ago = declarationsOf(`${trigger} .usage-ago`) ?? "";
+
+    // Assert
+    expect(ago).toMatch(/opacity:\s*1/);
+  });
+
+  it("transitions the slide and the fade on the same half-second ease", () => {
+    // Arrange / Act
+    const slider = declarationsOf(".usage-slider") ?? "";
+    const ago = declarationsOf(".usage-ago") ?? "";
+
+    // Assert
+    expect(slider).toMatch(/transition:\s*transform 0\.5s ease/);
+    expect(ago).toMatch(/transition:\s*opacity 0\.5s ease/);
+  });
+
+  it("never sizes the slider or the token, so the reserved footprint stays constant", () => {
+    // Arrange / Act — the base rules and the revealed-state rules.
+    const decls = [
+      declarationsOf(".usage-slider") ?? "",
+      declarationsOf(".usage-corner.usage-corner--revealed .usage-slider") ?? "",
+      declarationsOf(".usage-stamp") ?? "",
+    ];
+
+    // Assert — only `transform` moves; no width, max-width or margin is
+    // declared, so the float's width is spacer + slider in both states.
+    for (const one of decls) {
+      expect(one).not.toMatch(/(?:^|[\s;])width\s*:/);
+      expect(one).not.toMatch(/(?:^|[\s;])max-width\s*:/);
+      expect(one).not.toMatch(/(?:^|[\s;])margin/);
     }
   });
 
-  it("disables the token's slide transition under reduced motion, alongside the duration's", () => {
+  it("disables the slide and the fade under reduced motion", () => {
     // Arrange / Act
     const reduced = rulesOf(stylesheet).find(
       (rule) =>
-        rule.selectors.includes(".usage-stamp") && rule.selectors.includes(".usage-ago"),
+        rule.selectors.includes(".usage-slider") && rule.selectors.includes(".usage-ago"),
     );
 
-    // Assert — the reduced-motion override lists both selectors together and
-    // drops the transition for both, so reduced motion leaves no slide on
-    // either half of the pair.
-    expect(reduced).toBeDefined();
+    // Assert
     expect(reduced?.declarations).toMatch(/transition:\s*none/);
   });
-})
+});
 
 /**
  * THE PROMPT BUBBLE'S IN-FLIGHT BORDER (owner ruling, 2026-09-15).
