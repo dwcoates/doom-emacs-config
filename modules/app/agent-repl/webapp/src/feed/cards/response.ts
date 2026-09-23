@@ -379,34 +379,38 @@ export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
  * The cost corner: the token figure, drawn verbatim, and — once the response
  * has SETTLED — the relative timestamp it reveals when hovered or focused.
  *
- * THE MARKUP IS BUILT SO THE REVEAL'S SLIDE IS THE DURATION'S WIDTH BY
- * CONSTRUCTION (the stylesheet's `.usage-corner` comment has the mechanism):
+ * THE MARKUP (the stylesheet's `.usage-corner` comment has the mechanism):
  *
  *   span.usage-corner[data-tokens=<token text>]   ::before is a hidden copy of
- *     span.usage-slider                           the token, reserving its width
+ *     span.usage-slider                           the token, in a fixed-width slot
  *       span.usage-stamp  <token text>            out of flow, at the slider's left
  *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content
  *
- * The slider's own width is the duration (plus its gap), and it is translated
- * by a percentage of that width, so the collapsed token sits exactly at the
- * right edge and the revealed token slides left exactly as far as the duration
- * needs. The corner's floated width is spacer + slider in both states, so the
- * first prose line that wraps around it never reflows on the reveal. The
+ * The slider is the duration's fixed-width slot (plus its gap), translated by
+ * a percentage of that width, so the collapsed token sits exactly at the right
+ * edge and the revealed token slides left by the slot. The corner's floated
+ * width is spacer + slider in every state, so the first prose line that wraps
+ * around it never reflows on the reveal, the tick or the settle. The
  * stylesheet owns the 0.5s transition; `prefers-reduced-motion` drops it. A
  * state class is toggled here too, so a keyboard focus reveals the same
  * timestamp a hover does.
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.
- * As it grows the slider grows with it, and the collapsed token stays put.
+ * The slot does not grow with it, so nothing around the corner moves.
  * The subscription is taken through `tick`, which marks the element, so the
  * feed's teardown of the bubble — a re-push replacing the row, or the turn-end
  * backstop that stops every clock in a settled turn — unsubscribes it with no
  * disposer to remember here.
  *
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
- * a corner with no settled instant has an empty slider, so the token sits at
- * the right edge and nothing slides.
+ * a corner with no settled instant has an empty slider, marked
+ * `data-arriving`, so the token sits at the right edge and nothing slides.
+ *
+ * NOTHING HERE CHANGES THE CORNER'S WIDTH (owner rule, 2026-09-23: the user
+ * owns the scroll). The token spacer and the duration slot are fixed widths in
+ * the stylesheet, so a growing figure, the clock's tick and the settle itself
+ * leave the float -- and the first prose line wrapped around it -- in place.
  */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
@@ -433,6 +437,9 @@ export function drawFeedResponseUsageStamp(
   stamp.textContent = u.text;
   slider.appendChild(stamp);
 
+  // The duration slot is reserved at a fixed width either way (styles.css);
+  // an arriving corner marks itself so its empty slot never slides out.
+  corner.toggleAttribute("data-arriving", atMs === 0);
   if (atMs > 0) {
     const ago = document.createElement("span");
     ago.className = "usage-ago";
