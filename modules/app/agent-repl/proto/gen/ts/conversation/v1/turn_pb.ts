@@ -120,7 +120,8 @@ export type TurnKilled = Message<"conversation.v1.TurnKilled"> & {
    */
   how: {
     /**
-     * Nothing it spawned was live; the main agent was interrupted.
+     * Only the main agent was interrupted: nothing it spawned was live, or
+     * the kill was not forced and what it spawned runs on.
      *
      * @generated from field: conversation.v1.TurnKilledAgentOnly agent_only = 1;
      */
@@ -184,6 +185,7 @@ export const TurnKilledForcedSchema: GenMessage<TurnKilledForced> = /*@__PURE__*
 
 /**
  * The turn could not be killed without force: work it spawned is live.
+ * NOT PRODUCED since 2026-09-23 (see shim.v1 KillTurnFailure.live).
  *
  * @generated from message conversation.v1.TurnLive
  */

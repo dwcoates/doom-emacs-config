@@ -303,6 +303,62 @@ const SUBAGENT_DETACHED_LIVE = scenario({
   },
 });
 
+const SUBAGENT_DETACHED_HOLD = scenario({
+  name: "subagent-detached-hold",
+  prompt: "!subagent-detached-hold",
+  emits:
+    "a detached `Agent` left LIVE, and then the turn that spawned it HOLDS: nothing further until an interrupt " +
+    "lands, which ends the turn the way an interrupted turn ends. Whether the agent survives that interrupt is " +
+    "the vendor's `perTaskStopAffordance` posture, never the scenario's",
+  writes: "the agent's `.meta.json` and `agent-<id>.jsonl`, its spool, and the main transcript's lines",
+  arms:
+    "AgentSubagent detached_work live UNDER AN OPEN TURN, and AgentInterrupted.by_user for the turn while the " +
+    "agent stays live",
+  async run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-detached-hold" }, "fake detached-subagent HOLD turn");
+    const description = "A sweep the turn keeps waiting beside";
+    const agentPrompt = "Sweep until told to stop.";
+    const call = ctx.toolUse("Agent", {
+      description,
+      prompt: agentPrompt,
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    });
+    const agentId = ctx.mintAgentTaskId();
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    const writer = ctx.files.subagent(agentId);
+    writer.writeMeta({
+      agentType: "general-purpose",
+      description,
+      toolUseId: call.toolUseId,
+      spawnDepth: 1,
+    });
+    writer.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: agentPrompt },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.toolResult(call, `Async agent launched successfully.\nagentId: ${agentId}`, {
+      isAsync: true,
+      status: "async_launched",
+      agentId,
+      description,
+      prompt: agentPrompt,
+      outputFile: ctx.files.spoolPathFor(agentId),
+      canReadOutputFile: true,
+    });
+    ctx.files.spool(agentId).append(writer.read());
+    ctx.assistant([{ type: "text", text: "Waiting beside the sweep…" }], { stopReason: null });
+    // The park is armed in the same synchronous run as the frame above, as
+    // `!hold`'s is, so a consumer that saw the frame can interrupt it.
+    await ctx.awaitInterrupt();
+    ctx.log.debug({ turn: ctx.turn }, "fake detached-subagent HOLD turn released by an interrupt");
+  },
+});
+
 const SUBAGENT_DETACHED_UTTERANCE = scenario({
   name: "subagent-detached-utterance",
   prompt: "!subagent-detached-utterance",
@@ -646,6 +702,7 @@ export const SUBAGENT_SCENARIOS = [
   SUBAGENT_DETACHED,
   SUBAGENT_INTERLEAVED,
   SUBAGENT_DETACHED_LIVE,
+  SUBAGENT_DETACHED_HOLD,
   SUBAGENT_DETACHED_UTTERANCE,
   SUBAGENT_FAILED,
   CANCEL_ALL,

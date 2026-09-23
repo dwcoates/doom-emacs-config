@@ -176,8 +176,8 @@ export const Shim: GenService<{
     output: typeof UpdateAgentResponseSchema;
   },
   /**
-   * END the turn: the agent and everything THIS turn spawned, transitively.
-   * Refuses while any of that is live unless forced, naming it.
+   * END the turn. Unforced, the synchronous turn only: detached work runs on.
+   * Forced, the agent and everything THIS turn spawned, transitively.
    *
    * @generated from rpc shim.v1.Shim.KillTurn
    */

@@ -206,6 +206,40 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 	_ = turn1
 }
 
+// An interjection is an INTERRUPT, and an interrupt ends only the synchronous
+// turn: the running turn's detached work — here a background subagent and a
+// background shell it spawned — runs on. The daemon's kill is unforced, it
+// stops nothing detached, and the interrupting prompt delivers at the turn's
+// real end.
+func TestAnInterjectionDeliversThePromptWhileTheTurnsDetachedWorkRunsOn(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the long task", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-2", "sleep 5")))
+	awaitLiveWork(t, f, 2)
+
+	// Act
+	resp2 := f.submit("stop and rebase instead", "k-stop", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+	killReq := f.shim.ExpectKillTurn()
+	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
+	st2 := f.shim.ExpectStartTurn()
+
+	// Assert
+	if killReq.GetForce() {
+		t.Fatal("the interjection's KillTurn was forced, want an unforced kill that spares detached work")
+	}
+	if st2.GetTurn().GetValue() != turn2.GetValue() {
+		t.Fatalf("StartTurn after the interrupted turn ended = turn %q, want the interjected turn %q", st2.GetTurn().GetValue(), turn2.GetValue())
+	}
+	if stops := f.shim.Count(harness.RPCStopBash) + f.shim.Count(harness.RPCUpdateAgent); stops != 0 {
+		t.Fatalf("the interjection issued %d stop(s) to detached work, want none", stops)
+	}
+}
+
 func TestHeldForTurnEndPromptsDeliverFifoAfterTheTurnEnds(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -1592,8 +1626,8 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 
 // TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation is the other side
 // of the challenge's contract: `live_agent_count` counts AGENTS, and a
-// detached shell is not one. It dies with the query like anything else, but
-// the user is not challenged over it.
+// detached shell is not one. The unconfirmed interrupt's kill is unforced, so
+// the shell runs on, and the user is not challenged over it.
 func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 	t.Parallel()
 	// Arrange

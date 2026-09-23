@@ -131,14 +131,6 @@ export function killTurnCause(response: shimv1.KillTurnResponse): string {
   return response.result.value.cause.case ?? "unset";
 }
 
-/** The live work a KillTurn refusal named. */
-export function killTurnLive(response: shimv1.KillTurnResponse): conversationv1.TurnLive {
-  if (response.result.case !== "failure" || response.result.value.cause.case !== "live") {
-    throw new Error(`KillTurn: expected failure.live, got ${killTurnCause(response)}`);
-  }
-  return response.result.value.cause.value;
-}
-
 /** How the session was killed. */
 export function sessionKilled(response: shimv1.KillSessionResponse): conversationv1.SessionKilled {
   if (response.result.case !== "success") {

@@ -72,7 +72,7 @@ import {
   DEFAULT_RETRY_POLICY,
   type PersistenceRetryPolicy,
 } from "./store/persistence.js";
-import { createRealQuery } from "./sdk/real-query.js";
+import { createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
 import { ensureWorkspaceTrusted } from "./trust.js";
 import { randomUUID } from "node:crypto";
@@ -748,6 +748,9 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
         // keep-alive rewind was unobservable on the vendor side: the shim's own
         // log said what it intended, which is not evidence the value arrived.
         ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+        // THE SAME DECLARATION THE REAL QUERY MAKES, so the mock's interrupt
+        // runs under the posture production runs under.
+        perTaskStopAffordance: PER_TASK_STOP_AFFORDANCE,
       }),
     );
   };

@@ -1,6 +1,8 @@
-// endpoint_kill_turn.proto — KillTurn: END the turn — the main agent AND
-// everything this turn spawned, transitively — and nothing else. Refuses
-// while any spawned work is live unless forced. Distinct from
+// endpoint_kill_turn.proto — KillTurn: END the turn. Unforced, it interrupts
+// the synchronous turn ONLY and leaves every item of detached work running
+// (background subagents, shells, monitors, workflows): detached work ends only
+// through its own per-task stop or a forced kill. Forced, it ends the main
+// agent AND everything this turn spawned, transitively. Distinct from
 // UpdateAgent.stop, which interrupts one agent alone and leaves what it
 // spawned running.
 
@@ -35,8 +37,11 @@ type KillTurnRequest struct {
 	Turn *v1.TurnId `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
 	// When true, the main agent is interrupted and everything this turn
 	// spawned — transitively — is stopped, each stream concluding with its
-	// `interrupted` arm first. When false, live spawned work is a refusal;
-	// with nothing spawned live, the main agent is simply interrupted.
+	// `interrupted` arm first. When false, ONLY the synchronous turn is
+	// interrupted: live spawned work is neither a refusal nor stopped, and it
+	// stays live with its streams open. A turn that has already closed has no
+	// synchronous part, so an unforced kill of one answers `no_turn_open`
+	// whatever it left running.
 	Force         bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -317,6 +322,9 @@ type isKillTurnFailure_Cause interface {
 
 type KillTurnFailure_Live struct {
 	// Work this turn spawned is live and force was not asked: here it is.
+	// NOT PRODUCED since 2026-09-23: an unforced kill interrupts the turn and
+	// leaves live work running rather than refusing. The arm is retained
+	// pending an owner ruling on its removal.
 	Live *v1.TurnLive `protobuf:"bytes,1,opt,name=live,proto3,oneof"`
 }
 

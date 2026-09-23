@@ -358,8 +358,8 @@ the narrower/alternate state**:
   one.
 - `!send-message-refused` — declared `SendMessage` refusal; no capture
   recorded one.
-- `!subagent-detached-live`, `!subagent-failed` — declared subagent states;
-  no capture recorded either.
+- `!subagent-detached-live`, `!subagent-detached-hold`, `!subagent-failed` —
+  declared subagent states; no capture recorded any of the three.
 - `!subagent-interleaved` — GROUNDED IN SHAPE by `subagent-detached` (the
   launch, the sidechain attribution and the completion notification), but the
   INTERLEAVING itself is ungrounded: no capture streams a subagent's response

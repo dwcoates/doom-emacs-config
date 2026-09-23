@@ -115,10 +115,11 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 
 	// THE CHALLENGE COUNTS LIVE AGENTS, AND ONLY THEM. The arm's field is
 	// `live_agent_count` and it means what it says: a detached SHELL is not an
-	// agent, so it neither raises the challenge nor is counted by it. A shell
-	// still dies with the query, and a confirmed interrupt still stops it —
-	// that is the `detached` count below, which is a different question from
-	// how many agents the user is being asked about.
+	// agent, so it neither raises the challenge nor is counted by it. An
+	// unconfirmed interrupt's kill is unforced, so it ends the synchronous turn
+	// only and the shell runs on; a confirmed interrupt stops it — that is the
+	// `detached` count below, which is a different question from how many
+	// agents the user is being asked about.
 	liveAgents := len(running.LiveWork.Agents)
 	detached := liveAgents + len(running.LiveWork.Shells)
 	if liveAgents > 0 && !confirm {
