@@ -68,13 +68,8 @@ import type {
 import { log } from "../../log.js";
 import { bubbleScroll } from "../bubble-scroll.js";
 import { formatAge } from "../../duration.js";
-import { renderMarkdown, inline } from "../../markdown.js";
-import {
-  DEFAULT_TREE_COLS,
-  findTreeRegion,
-  renderTreeHtml,
-  type TreeIssue,
-} from "../../metaprompt-tree.js";
+import { hasFencedTree, inline, renderMarkdown, type TreeCols } from "../../markdown.js";
+import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../../metaprompt-tree.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
 import { onDiscard, tick } from "../ticking.js";
@@ -153,8 +148,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 
   // The body is the CONTENT WRAPPER; the element appended to the bubble is the
   // scroll box that holds it (see bubble-scroll.ts).
-  const body = document.createElement("div");
-  body.className = "bubble-body";
+  const body = createResponseBody();
   const scroll = bubbleScroll(body);
 
   // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
@@ -275,7 +269,7 @@ export function drawFeedResponseUpdate(
   rc: RowContext,
   path: string,
   bubble: HTMLElement,
-  body: HTMLElement,
+  body: ResponseBody,
 ): number {
   const markdown = drawFeedResponseProse(requireMessage(u.prose, `${path}.prose`), `${path}.prose`);
   const resumed = revealedSoFar(rc.previous, markdown.length);
@@ -419,7 +413,7 @@ const logTreeIssue: TreeIssue = (message, context) => {
 };
 
 /**
- * Markdown → HTML, with the metaprompt TLDR tree WRAPPED to COLS columns.
+ * Markdown → HTML, with the metaprompt TLDR tree WRAPPED to the measured COLS.
  *
  * The tree arrives unwrapped, one physical line per branch; the wrapper
  * (metaprompt-tree.ts, a port of the daemon's treefmt) breaks every branch too
@@ -427,219 +421,282 @@ const logTreeIssue: TreeIssue = (message, context) => {
  * fills the bubble and re-flows when the bubble's width changes. Stray prose
  * around the tree keeps the markdown path — which itself wraps a fenced tree to
  * the same COLS — so a model that wrapped the tree in a sentence still reads
- * correctly.
+ * correctly. COLS is asked for only when a tree is actually drawn.
  */
-export function proseHtml(markdown: string, cols: number): string {
+export function proseHtml(markdown: string, cols: TreeCols): string {
   const region = findTreeRegion(markdown);
   if (region === null) return renderMarkdown(markdown, cols);
   const before = region.before.trim() === "" ? "" : renderMarkdown(region.before, cols);
   const after = region.after.trim() === "" ? "" : renderMarkdown(region.after, cols);
-  return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline, cols, logTreeIssue)}</div>${after}`;
+  return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline, cols(), logTreeIssue)}</div>${after}`;
 }
 
 /**
- * The column limit the tree wraps to: the MAXIMUM content width the bubble may
- * occupy divided by one monospace column, measured in the body's own font so the
- * count is true to the bubble's widest allowed line. A host that cannot lay out
- * (a detached body, a test with no layout engine) yields no measurement and
- * falls back to the default width.
+ * Whether drawing MARKDOWN needs a measured column budget: it holds a tree,
+ * bare or fenced. Prose that holds none draws the same at every width, so it
+ * can be drawn before the body has a containing block.
+ */
+export function proseNeedsWidth(markdown: string): boolean {
+  return findTreeRegion(markdown) !== null || hasFencedTree(markdown);
+}
+
+/** The operation every unmeasurable-width violation is recorded under. */
+export const TREE_WIDTH_UNMEASURABLE = "feed.cards.response.tree-width-unmeasurable";
+
+/**
+ * A tree's column budget could not be measured: record it once, with what was
+ * read, and fail. There is no default width to fall back to — a guessed width is
+ * how trees came to wrap at 105 columns inside bubbles with room for 140.
+ */
+function unmeasurable(reason: string, context: Record<string, unknown>): never {
+  log.error(`a metaprompt tree's column budget could not be measured: ${reason}`, {
+    operation: TREE_WIDTH_UNMEASURABLE,
+    context: { reason, ...context },
+  });
+  throw new Error(`metaprompt tree width unmeasurable: ${reason}`);
+}
+
+/** A computed length, which a laid-out element always reports in px. */
+function computedPx(el: Element, style: CSSStyleDeclaration, property: ComputedLength): number {
+  const value = style[property];
+  const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
+  if (px === null) {
+    unmeasurable("a computed length is not in px", { element: el.className, property, value });
+  }
+  return Number.parseFloat(px[1]);
+}
+
+/** The computed lengths the budget reads. */
+type ComputedLength =
+  | "paddingLeft"
+  | "paddingRight"
+  | "borderLeftWidth"
+  | "borderRightWidth"
+  | "marginLeft"
+  | "marginRight";
+
+/** One element's horizontal padding (plus border, when BORDER), from computed styles. */
+function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: boolean }): number {
+  const s = view.getComputedStyle(el);
+  let px = computedPx(el, s, "paddingLeft") + computedPx(el, s, "paddingRight");
+  if (parts.border) px += computedPx(el, s, "borderLeftWidth") + computedPx(el, s, "borderRightWidth");
+  if (parts.margin) px += computedPx(el, s, "marginLeft") + computedPx(el, s, "marginRight");
+  return px;
+}
+
+/**
+ * The column budget a tree in BODY wraps to: the body's content width WHEN THE
+ * BUBBLE IS AT ITS CAP, in columns of the tree's monospace font.
  *
- * REGRESSION WATCH (breadcrumb, per AGENTS.md): this once measured
- * `body.clientWidth` — the body's CURRENT rendered content-box width. But the
- * assistant bubble is `width: fit-content` under a max-width cap
- * (`.bubble.assistant`, `--agent-bubble-cap * 0.85` in styles.css), so
- * `fit-content` shrinks the bubble to its content and `clientWidth` measured the
- * ALREADY-shrunk width — a chicken-and-egg where the tree wrapped to fit the
- * narrow bubble, which kept the bubble narrow, so later trees wrapped
- * prematurely (narrower than an earlier bubble whose lines would fit). The port
- * that moved tree wrapping from the daemon (fixed max width) to the webapp lost
- * the "wrap to the MAX bubble width, never prematurely" invariant. The fix
- * measures against the resolved max-width cap, so `fit-content` sizes the bubble
- * to the true longest line and the tree wraps only when a line exceeds the cap.
- * This is a watch flag, not a lock.
+ * We never scroll horizontally; lines wider than the max bubble width wrap instead.
  *
- * REGRESSION WATCH (breadcrumb, per AGENTS.md): the cap MUST resolve at
- * synchronous first paint even while the bubble is DETACHED. `drawFeedResponse`
- * paints the body synchronously and feed-view attaches the row only AFTER it
- * returns, so at first paint the bubble has no attached parent — its percentage
- * `max-width` (`70.125%`) had no containing block to resolve against, the cap
- * came back null, and the tree wrapped to `DEFAULT_TREE_COLS` (105) and
- * OVERFLOWED the bubble. The on-attach `reflowOnResize` was supposed to correct
- * it, but its rAF is SUSPENDED while the webview is hidden/unfocused (Emacs
- * xwidget reports `visibilityState === "hidden"` when Emacs is not frontmost),
- * so the correction never ran and the overflow stuck. The fix resolves the cap
- * against an ALREADY-ATTACHED reference — the root `#feed` column the row will be
- * placed into — and reads the width-invariant chrome insets from computed styles
- * when there is no layout, so the FIRST synchronous frame already wraps at the
- * true cap with no dependency on a suspendable re-wrap. Do NOT reintroduce a
- * dependence on the bubble's own attached parent at first paint. This is a watch
- * flag, not a lock.
+ * The budget derives from the CAP ALONE — the bubble's `max-width` resolved
+ * against its containing block, less the bubble's fixed chrome summed from
+ * computed styles — and never from the bubble's current fit-content width, so
+ * a tree below the cap never wraps and a shrink cannot feed back into a re-wrap.
+ *
+ * It measures only a body that is IN THE DOCUMENT, and anything it cannot read
+ * is an invariant violation (`unmeasurable`), never a default.
+ *
+ * REGRESSION WATCH (breadcrumb, per AGENTS.md): this used to run while the
+ * bubble was still DETACHED (drawFeedResponse paints before feed-view attaches
+ * the row) and fall back to 105 columns when it read nothing. A real engine
+ * neither lays out nor styles a detached node — the character probe measured
+ * 0px and `getComputedStyle` answered empty strings — so EVERY first paint
+ * wrapped at the fallback, whatever the bubble's room. jsdom styles detached
+ * nodes and the unit suite stubbed geometry regardless of attachment, which is
+ * why the tests never saw it. The first paint of a tree now waits for the body
+ * to join the document (`createTreeWrap`). This is a watch flag, not a lock.
  */
 export function measureTreeCols(body: HTMLElement): number {
-  const doc = body.ownerDocument;
-  const view = doc?.defaultView;
-  if (view === null || view === undefined || typeof view.getComputedStyle !== "function") {
-    return DEFAULT_TREE_COLS;
-  }
-  const probe = doc.createElement("div");
+  if (!body.isConnected) unmeasurable("the bubble body is not in the document", {});
+  const view = body.ownerDocument.defaultView;
+  if (view === null) unmeasurable("the bubble body's document has no window", {});
+  const bubble = requireBubble(body);
+  const containing = containingBlockOf(bubble);
+
+  const probe = body.ownerDocument.createElement("div");
   probe.className = "mp-tree";
   probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
   probe.textContent = "0".repeat(100);
   body.appendChild(probe);
   const charPx = probe.getBoundingClientRect().width / 100;
   probe.remove();
-  const style = view.getComputedStyle(body);
-  const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
-  const contentPx = maxBodyContentPx(body, view) ?? body.clientWidth - pad;
-  if (!(charPx > 0) || !(contentPx > 0)) return DEFAULT_TREE_COLS;
-  return Math.max(1, Math.floor(contentPx / charPx));
-}
+  if (!(charPx > 0)) unmeasurable("the tree font's column measured no width", { char_px: charPx });
 
-/**
- * The body's content-box width WHEN THE BUBBLE IS AT ITS CAP — the width the
- * tree must wrap to, not the fit-content width it currently renders at.
- *
- * The cap is the bubble's resolved `max-width` (CSS stays the single source of
- * truth for the cap fraction; nothing here hardcodes it). `box-sizing:
- * border-box` is global (styles.css), so the cap constrains the bubble's BORDER
- * box, which is exactly `bubble.getBoundingClientRect().width`. The horizontal
- * insets from that border box down to the body's content box (the bubble's
- * border and padding, the scroll box's, and the body's padding) do NOT change
- * with content width, so they can be read from the CURRENT geometry and
- * subtracted from the cap: `capPx - (bubbleBorderBox - bodyContent)`.
- *
- * Returns `null` when there is no bubble ancestor, no resolvable cap, or no
- * layout — the caller then falls back to the legacy clientWidth measure (which
- * itself yields the DEFAULT_TREE_COLS fallback under a layout-less host).
- */
-function maxBodyContentPx(body: HTMLElement, view: Window): number | null {
-  const bubble = body.closest<HTMLElement>(".bubble");
-  if (bubble === null) return null;
-  const capPx = resolveMaxWidthPx(bubble, view);
-  if (capPx === null) return null;
-  const insets = bubbleInsetsPx(bubble, body, view);
-  if (insets === null) return null;
-  const contentPx = capPx - insets;
-  return contentPx > 0 ? contentPx : null;
-}
-
-/**
- * The width-invariant chrome between the bubble's border box and the body's
- * content box — the bubble's and the scroll box's border+padding, plus the
- * body's padding. It does not change with content, so when the bubble is LAID
- * OUT it is read cheaply from the current geometry (`bubbleBorderBox -
- * bodyContent`, exactly as it always was). At detached FIRST PAINT there is no
- * geometry (every rect is 0), so the same fixed chrome is summed from the
- * chain's computed border+padding instead — available without layout — so the
- * cap-based measure still holds on the first synchronous frame. Returns `null`
- * only when neither path yields a positive width.
- */
-function bubbleInsetsPx(bubble: HTMLElement, body: HTMLElement, view: Window): number | null {
-  const style = view.getComputedStyle(body);
-  const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
-  const bodyContent = body.clientWidth - pad;
-  const bubbleBorderBox = bubble.getBoundingClientRect().width;
-  if (bubbleBorderBox > 0 && bodyContent > 0) return bubbleBorderBox - bodyContent;
-  const fromStyles = chromeInsetsFromStyles(bubble, body, view);
-  return fromStyles > 0 ? fromStyles : null;
-}
-
-/**
- * The chrome insets summed from computed styles: every horizontal border and
- * padding from the body's content box out to (and including) the bubble's border
- * box. Used only when there is no layout to read them from (detached first
- * paint); the values are content-independent, so this equals the geometry
- * measure a laid-out bubble would give.
- */
-function chromeInsetsFromStyles(bubble: HTMLElement, body: HTMLElement, view: Window): number {
-  let insets = 0;
-  let el: HTMLElement | null = body;
-  while (el !== null) {
-    insets += borderPaddingXPx(el, view);
-    if (el === bubble) break;
-    el = el.parentElement;
+  const containingPx =
+    containing.clientWidth - insetXPx(containing, view, { border: false, margin: false });
+  if (!(containingPx > 0)) {
+    unmeasurable("the bubble's containing block has no width", { containing_px: containingPx });
   }
-  return insets;
+  const maxWidth = view.getComputedStyle(bubble).maxWidth;
+  const capPx = resolveCapPx(maxWidth, containingPx);
+  if (capPx === null) unmeasurable("the bubble's max-width does not resolve", { max_width: maxWidth });
+
+  // The fixed chrome from the bubble's border box in to the body's content box:
+  // every border and padding on the way, plus the margins of the boxes inside
+  // the bubble. None of it depends on content.
+  let chromePx = insetXPx(bubble, view, { border: true, margin: false });
+  for (let el: HTMLElement | null = body; el !== null && el !== bubble; el = el.parentElement) {
+    chromePx += insetXPx(el, view, { border: true, margin: true });
+  }
+
+  const contentPx = capPx - chromePx;
+  const cols = Math.floor(contentPx / charPx);
+  const context = { cols, char_px: charPx, cap_px: capPx, chrome_px: chromePx, containing_px: containingPx };
+  if (cols < 1) unmeasurable("the bubble's content width at its cap holds no column", context);
+  log.debug("measured a metaprompt tree's column budget", {
+    operation: "feed.cards.response.tree-cols",
+    context,
+  });
+  return cols;
 }
 
-/** One element's horizontal border + padding, from computed styles. */
-function borderPaddingXPx(el: HTMLElement, view: Window): number {
-  const s = view.getComputedStyle(el);
-  return (
-    (Number.parseFloat(s.paddingLeft) || 0) +
-    (Number.parseFloat(s.paddingRight) || 0) +
-    (Number.parseFloat(s.borderLeftWidth) || 0) +
-    (Number.parseFloat(s.borderRightWidth) || 0)
-  );
+/** The block the bubble's percentage cap resolves against: its parent. */
+function containingBlockOf(bubble: HTMLElement): HTMLElement {
+  const containing = bubble.parentElement;
+  if (containing === null) unmeasurable("the bubble has no containing block", {});
+  return containing;
 }
 
 /**
- * The bubble's `max-width`, resolved to px. Per CSSOM the resolved value of
- * `max-width` is the COMPUTED value (a percentage stays a percentage, a calc of
- * one percentage serializes as `calc(N%)`), not the used px — so a percentage is
- * resolved here against the bubble's containing block (its parent's content-box
- * width). A browser that hands back px instead is honored directly. Anything
- * else — `none`, an empty value, or a calc mixing units we cannot resolve with a
- * single containing-block multiply — returns `null` so the caller falls back.
- *
- * The containing block is normally the bubble's own parent's content-box width.
- * At synchronous FIRST PAINT the bubble is still DETACHED (see the REGRESSION
- * WATCH on `measureTreeCols`), so its parent has no layout; the percentage is
- * then resolved against an ALREADY-ATTACHED reference — the root feed column the
- * row will be placed into — whose content width equals that containing block.
+ * The bubble's `max-width`, resolved to px against CONTAININGPX. Per CSSOM the
+ * resolved value of `max-width` is the COMPUTED value (a percentage stays a
+ * percentage, a calc of one percentage serializes as `calc(N%)`), so a
+ * percentage is resolved here; a browser that hands back px is honored as is.
+ * Anything else answers `null`.
  */
-function resolveMaxWidthPx(bubble: HTMLElement, view: Window): number | null {
-  const mw = view.getComputedStyle(bubble).maxWidth;
-  if (mw === "" || mw === "none") return null;
-  const px = /^(-?[\d.]+)px$/.exec(mw);
+function resolveCapPx(maxWidth: string, containingPx: number): number | null {
+  const px = /^(-?[\d.]+)px$/.exec(maxWidth);
   if (px !== null) return Number.parseFloat(px[1]);
-  const pct = /^(?:calc\()?\s*(-?[\d.]+)%\s*\)?$/.exec(mw);
-  if (pct !== null) {
-    const own = bubble.parentElement?.clientWidth ?? 0;
-    const containing = own > 0 ? own : attachedContainingWidthPx(bubble.ownerDocument, view);
-    if (containing > 0) return (Number.parseFloat(pct[1]) / 100) * containing;
-  }
+  const pct = /^(?:calc\()?\s*(-?[\d.]+)%\s*\)?$/.exec(maxWidth);
+  if (pct !== null) return (Number.parseFloat(pct[1]) / 100) * containingPx;
   return null;
 }
 
-/**
- * The content-box width of the root feed column, read from the ALREADY-ATTACHED
- * `#feed` element. A row is placed into a `.feed-item` wrapper that fills this
- * column, so this width IS the containing block the bubble's percentage cap
- * resolves against once attached — which lets the cap resolve at synchronous
- * first paint, before the row is in the document. Returns 0 when no feed is
- * attached (a test with nothing staged, a truly layout-less host), so the caller
- * falls back to `DEFAULT_TREE_COLS`.
- */
-function attachedContainingWidthPx(doc: Document, view: Window): number {
-  const feed = doc.getElementById("feed");
-  if (feed === null) return 0;
-  const style = view.getComputedStyle(feed);
-  const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
-  const content = feed.clientWidth - pad;
-  return content > 0 ? content : 0;
+/** The tag of a response's body: a custom element, so it knows when it joins the document. */
+export const RESPONSE_BODY_TAG = "response-body";
+
+/** A response's body, which runs its hooks every time it joins the document. */
+export interface ResponseBody extends HTMLElement {
+  onConnect(hook: () => void): void;
 }
 
 /**
- * Re-run REPAINT whenever the body's width changes the column count. A
- * `ResizeObserver` reports the box's new size before paint; the recompute is
- * deferred to an animation frame so a burst of resizes coalesces, and it
- * repaints only when the integer column count actually moved, so a height-only
- * change (the prose growing) does no work. The observer is torn down with the
- * bubble through `stopTicking` (see ticking.ts), so it never outlives the body
- * it watches. A host with no `ResizeObserver` (a test) simply never re-wraps.
+ * The response body as a custom element. `connectedCallback` runs synchronously
+ * inside the DOM operation that attaches the row — before any frame is painted,
+ * and whether or not the webview is visible — which is what lets a tree's first
+ * paint wait for a containing block without ever showing a wrong-width frame.
  */
-function reflowOnResize(body: HTMLElement, repaint: (cols: number) => void, initialCols: number): void {
-  const view = body.ownerDocument?.defaultView;
-  if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
-  let lastCols = initialCols;
+function responseBodyClass(): CustomElementConstructor {
+  return class extends HTMLElement implements ResponseBody {
+    private readonly hooks: Array<() => void> = [];
+
+    onConnect(hook: () => void): void {
+      this.hooks.push(hook);
+    }
+
+    connectedCallback(): void {
+      for (const hook of this.hooks) hook();
+    }
+  };
+}
+
+/** A fresh response body, the custom element defined on first use. */
+export function createResponseBody(): ResponseBody {
+  if (customElements.get(RESPONSE_BODY_TAG) === undefined) {
+    customElements.define(RESPONSE_BODY_TAG, responseBodyClass());
+  }
+  const body = document.createElement(RESPONSE_BODY_TAG) as ResponseBody;
+  body.className = "bubble-body";
+  return body;
+}
+
+/** What a body's painters draw through, so a tree is only ever drawn at a measured width. */
+interface TreeWrap {
+  /** The body's measured column budget, measured on first ask after each attach. */
+  readonly cols: TreeCols;
+  /**
+   * Draw TEXT through DRAW: at once, unless TEXT holds a tree and the body is
+   * not in the document yet, in which case the draw runs the moment it joins.
+   * The latest draw is also what a width change re-runs.
+   */
+  paint(text: string, draw: () => void): void;
+}
+
+/**
+ * Keep BODY's tree wrapped to the cap for its whole life.
+ *
+ * The FIRST paint of a tree waits for the body to join the document, since only
+ * then is there a containing block to measure against. Every later attach (a
+ * tool-group re-arrange moves the row) re-measures, and a `ResizeObserver` on
+ * the CONTAINING BLOCK — the box the cap is a percentage of, not the
+ * fit-content body, which keeps its width when the column grows around a bubble
+ * below its cap — re-wraps when the column's width moves the budget. The
+ * observer is torn down with the body through `stopTicking` (see ticking.ts).
+ */
+function createTreeWrap(body: ResponseBody): TreeWrap {
+  let cols: number | null = null;
+  let latest: (() => void) | null = null;
+  let deferred = false;
+  let observer: ResizeObserver | null = null;
+
+  const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
+  const rewrap = (): void => {
+    const next = measureTreeCols(body);
+    if (next === cols) return;
+    cols = next;
+    latest?.();
+  };
+  const watch = (): void => {
+    if (observer === null) onDiscard(body, () => observer?.disconnect());
+    else observer.disconnect();
+    observer = observeContainingBlock(body, rewrap);
+  };
+
+  body.onConnect(() => {
+    if (deferred) {
+      deferred = false;
+      latest?.();
+    } else if (drawsTree()) {
+      rewrap();
+    }
+    if (drawsTree()) watch();
+  });
+
+  return {
+    cols: () => {
+      cols ??= measureTreeCols(body);
+      return cols;
+    },
+    paint(text, draw) {
+      latest = draw;
+      if (!body.isConnected && proseNeedsWidth(text)) {
+        deferred = true;
+        return;
+      }
+      draw();
+      if (body.isConnected && observer === null && drawsTree()) watch();
+    },
+  };
+}
+
+/**
+ * Run REWRAP whenever BODY's containing block changes size. The recompute is
+ * deferred to an animation frame so a burst of resizes coalesces and the
+ * repaint's own height change is not re-observed inside the same delivery; it
+ * repaints only when the integer column count moved.
+ */
+function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeObserver {
+  const view = body.ownerDocument.defaultView;
+  if (view === null || typeof view.ResizeObserver !== "function") {
+    unmeasurable("the page has no ResizeObserver to follow the column's width", {});
+  }
+  const containing = containingBlockOf(requireBubble(body));
   let scheduled = false;
   const recompute = (): void => {
     scheduled = false;
-    const cols = measureTreeCols(body);
-    if (cols === lastCols) return;
-    lastCols = cols;
-    repaint(cols);
+    rewrap();
   };
   const observer = new view.ResizeObserver(() => {
     if (scheduled) return;
@@ -648,28 +705,27 @@ function reflowOnResize(body: HTMLElement, repaint: (cols: number) => void, init
     if (raf !== undefined) raf(recompute);
     else recompute();
   });
-  observer.observe(body);
-  onDiscard(body, () => observer.disconnect());
+  observer.observe(containing);
+  return observer;
+}
+
+/** The bubble around BODY, which a drawn response body always has. */
+function requireBubble(body: HTMLElement): HTMLElement {
+  const bubble = body.closest<HTMLElement>(".bubble");
+  if (bubble === null) unmeasurable("the body has no bubble around it", {});
+  return bubble;
 }
 
 /**
- * Write the whole settled prose into the body and keep it wrapped to the live
- * width: paint once at the measured column count, then — ONLY when the prose
- * actually drew a tree — re-wrap on every width change through the SAME path.
- * Plain prose reflows on its own (CSS), so it takes no observer.
+ * Write the whole settled prose into the body, wrapped to the cap (see
+ * `createTreeWrap`). Plain prose reflows on its own (CSS), so it takes no
+ * observer and no measurement.
  */
-function paintWhole(body: HTMLElement, markdown: string): void {
-  const cols = measureTreeCols(body);
-  body.innerHTML = proseHtml(markdown, cols);
-  if (body.querySelector(".mp-tree") !== null) {
-    reflowOnResize(
-      body,
-      (next) => {
-        body.innerHTML = proseHtml(markdown, next);
-      },
-      cols,
-    );
-  }
+function paintWhole(body: ResponseBody, markdown: string): void {
+  const wrap = createTreeWrap(body);
+  wrap.paint(markdown, () => {
+    body.innerHTML = proseHtml(markdown, wrap.cols);
+  });
 }
 
 /** Record the shown length, so the next draw of this row resumes from it. */
@@ -811,33 +867,17 @@ function patchNode(existing: Node, want: Node): void {
  */
 function animate(
   bubble: HTMLElement,
-  body: HTMLElement,
+  body: ResponseBody,
   markdown: string,
   resumed: number,
   rc: RowContext,
 ): void {
   // The arriving prose wraps through the SAME path as the settled whole, at the
-  // same live width, so nothing shrinks or re-wraps when the final lands.
-  let cols = measureTreeCols(body);
-  let lastShown = resumed;
-  // Wire the resize re-wrap once a tree has actually been drawn (a resize
-  // mid-stream re-wraps the slice already shown), and never for plain prose,
-  // which reflows on its own.
-  let reflowWired = false;
-  const wireReflow = (): void => {
-    if (reflowWired || body.querySelector(".mp-tree") === null) return;
-    reflowWired = true;
-    reflowOnResize(
-      body,
-      (next) => {
-        cols = next;
-        paint(lastShown);
-      },
-      cols,
-    );
-  };
+  // same measured width, so nothing shrinks or re-wraps when the final lands. A
+  // width change re-runs the latest paint, re-wrapping the slice already shown.
+  const wrap = createTreeWrap(body);
   const paint = (shown: number): void => {
-    lastShown = shown;
+    const slice = markdown.slice(0, shown);
     // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
     // `body.replaceChildren(...proseHtml(slice).childNodes, freshIndicator())`
     // on EVERY animation frame — a full teardown and rebuild of the whole prose
@@ -852,11 +892,12 @@ function animate(
     // the same whole render `paintWhole` writes at settle, so the reveal never
     // diverges from the oracle. Do NOT reintroduce a whole-subtree rebuild per
     // frame. This is a watch flag, not a lock.
-    const target = document.createElement("div");
-    target.innerHTML = proseHtml(markdown.slice(0, shown), cols);
-    reconcileChildren(body, target, null);
+    wrap.paint(slice, () => {
+      const target = document.createElement("div");
+      target.innerHTML = proseHtml(slice, wrap.cols);
+      reconcileChildren(body, target, null);
+    });
     markRevealed(bubble, shown);
-    wireReflow();
   };
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
   if (frame === undefined) {

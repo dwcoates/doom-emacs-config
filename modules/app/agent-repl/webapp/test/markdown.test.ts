@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { inline, renderMarkdown } from "../src/markdown.js";
+import { describe, expect, it, vi } from "vitest";
+import { hasFencedTree, inline, renderMarkdown } from "../src/markdown.js";
 
 describe("renderMarkdown blocks", () => {
   it("renders headings at their level", () => {
@@ -239,29 +239,50 @@ describe("inline", () => {
   });
 });
 
+/** A plain fence whose body is a metaprompt tree. */
+const FENCED_TREE = ["```", "1 🔧 Fixed the thing", "├── 1.1 Detail one", "└── 1.2 Detail two", "```"].join("\n");
+
 describe("metaprompt trees in fences", () => {
-  it("renders a plain fence carrying a tree as hanging-indent lines", () => {
-    // Arrange
-    const text = [
-      "```",
-      "1 🔧 Fixed the thing",
-      "├── 1.1 Detail one",
-      "└── 1.2 Detail two",
-      "```",
-    ].join("\n");
+  it("renders a plain fence carrying a tree as hanging-indent lines when given a width", () => {
     // Act
-    const html = renderMarkdown(text);
+    const html = renderMarkdown(FENCED_TREE, () => 80);
     // Assert
     expect(html).toContain(`class="mp-tree"`);
     expect(html).toContain(`<span class="mp-prefix">├── 1.1 </span>`);
     expect(html).not.toContain("md-code");
   });
 
+  it("wraps a fenced tree to the width it was given", () => {
+    // Arrange — a budget narrower than branch 1.1's text.
+    const text = ["```", "1 🔧 Fixed the thing", "├── 1.1 Detail one runs long", "└── 1.2 Two", "```"].join("\n");
+    // Act
+    const html = renderMarkdown(text, () => 18);
+    // Assert — branch 1.1 took a continuation line.
+    expect(html.match(/class="mp-line"/g)?.length).toBeGreaterThan(3);
+  });
+
+  it("draws a fenced tree as a plain code block when no width was measured", () => {
+    // Act
+    const html = renderMarkdown(FENCED_TREE);
+    // Assert — no tree without a measured width, and no default width either.
+    expect(html).toContain("md-code");
+    expect(html).not.toContain("mp-tree");
+  });
+
+  it("never asks for a width when the document holds no tree", () => {
+    // Arrange
+    const cols = vi.fn(() => 80);
+    // Act
+    renderMarkdown("```\nplain code\n```\n\nand prose", cols);
+    // Assert
+    expect(cols).not.toHaveBeenCalled();
+  });
+
   it("keeps a language-tagged fence on the code path even if tree-shaped", () => {
     // Arrange — an explicit language wins over the tree heuristic.
     const text = "```text\n1 🔧 A\n├── 1.1 B\n```";
     // Act
-    const html = renderMarkdown(text);
+    const html = renderMarkdown(text, () => 80);
     // Assert
     expect(html).toContain("md-code");
     expect(html).not.toContain("mp-tree");
@@ -269,9 +290,21 @@ describe("metaprompt trees in fences", () => {
 
   it("keeps a plain non-tree fence on the code path", () => {
     // Act
-    const html = renderMarkdown("```\nplain code\nmore code\n```");
+    const html = renderMarkdown("```\nplain code\nmore code\n```", () => 80);
     // Assert
     expect(html).toContain("md-code");
     expect(html).not.toContain("mp-tree");
+  });
+});
+
+describe("hasFencedTree", () => {
+  it.each([
+    { name: "a plain fence carrying a tree", src: FENCED_TREE, want: true },
+    { name: "a language-tagged tree-shaped fence", src: "```text\n1 🔧 A\n├── 1.1 B\n```", want: false },
+    { name: "a plain non-tree fence", src: "```\nplain code\n```", want: false },
+    { name: "prose with no fence", src: "1 🔧 A\n├── 1.1 B", want: false },
+  ])("answers $want for $name", ({ src, want }) => {
+    // Act + Assert
+    expect(hasFencedTree(src)).toBe(want);
   });
 });

@@ -2,6 +2,7 @@ import { beforeAll } from "vitest";
 import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../../src/log.js";
 import { installResizeObserver } from "../resize-observer.js";
 import { installIntersectionObserver } from "../intersection-observer.js";
+import { installTreeLayout } from "../tree-layout.js";
 
 /**
  * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
@@ -17,6 +18,15 @@ installResizeObserver();
  * does not load `test/setup.ts`, so it installs the same substitution itself.
  */
 installIntersectionObserver();
+
+/**
+ * jsdom lays nothing out, and a response bubble that draws a metaprompt tree
+ * measures its column budget off the bubble's real geometry — there is no
+ * default width to wrap to. This stages that geometry (the stylesheet's 77% cap
+ * of a 1000px column, an 8px column) for the whole layer, the same kind of
+ * environment substitution as the two observers above.
+ */
+installTreeLayout();
 
 /**
  * THE LOGGER, INSTALLED BEFORE THE FIRST `beforeAll` MOUNTS.
