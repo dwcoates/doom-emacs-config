@@ -171,6 +171,12 @@ export interface FakeStore {
    */
   unservedArrived(arm: string): Promise<storev1.StoreUnservedItem>;
   /**
+   * Resolves with the first LANDED entry `matches` accepts, or at once if one
+   * already has — the awaitable form of "this row reached the store", for a
+   * test that must then read which arm it landed on.
+   */
+  entryLanded(matches: (entry: storev1.StoreEntry) => boolean): Promise<storev1.StoreEntry>;
+  /**
    * Every READ verb the store served, in order.
    *
    * `writes()` made the write plane observable and the read plane had no
@@ -223,6 +229,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const rowsByKey = new Map<string, StoredRow>();
   const watches = new Map<string, WatchSessionState>();
   const receivedWrites: storev1.WriteBatchRequest[] = [];
+  /** Every entry an ACCEPTED batch landed, in order, and who is waiting on one. */
+  const landedEntries: storev1.StoreEntry[] = [];
+  const landedWaiters = new Set<(entry: storev1.StoreEntry) => void>();
   /** The same batches with the verdict — see {@link FakeStore.writeBatches}. */
   const writeVerdicts: FakeStoreWrite[] = [];
   const sessionUpdateRows: conversationv1.SessionUpdate[] = [];
@@ -823,7 +832,11 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
             },
           });
         }
-        for (const entry of request.batch?.entries ?? []) landEntry(entry);
+        for (const entry of request.batch?.entries ?? []) {
+          landEntry(entry);
+          landedEntries.push(entry);
+          for (const wake of [...landedWaiters]) wake(entry);
+        }
         return create(storev1.WriteBatchResponseSchema, {
           result: { case: "success", value: create(storev1.WriteBatchSuccessSchema, {}) },
         });
@@ -887,6 +900,18 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     book: (agentId) => rowsOf(agentId).map(lineAt),
     sessionUpdates: () => [...sessionUpdateRows],
     unserved: () => [...unservedRows],
+    entryLanded: (matches) => {
+      const already = landedEntries.find(matches);
+      if (already !== undefined) return Promise.resolve(already);
+      return new Promise<storev1.StoreEntry>((resolve) => {
+        const wake = (entry: storev1.StoreEntry): void => {
+          if (!matches(entry)) return;
+          landedWaiters.delete(wake);
+          resolve(entry);
+        };
+        landedWaiters.add(wake);
+      });
+    },
     unservedArrived: (arm) => {
       const already = unservedRows.find((item) => item.unservedItem.case === arm);
       if (already !== undefined) return Promise.resolve(already);
