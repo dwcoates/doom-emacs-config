@@ -1789,11 +1789,11 @@ describe("the thinking bubble", () => {
 /**
  * THE THINKING BUBBLE'S TWO-LINE CAP (owner ruling, 2026-09-23). A collapsed
  * thinking bubble shows at most two lines, wearing the response bubble's own
- * fade + chevron (`has-more`) when it runs past them, and a click expands and
+ * fade (`has-more`) when it runs past them, and a click expands and
  * collapses it exactly as it does a response bubble.
  *
  * jsdom resolves the cascade but lays nothing out, so `layOut` stands in for
- * the layout engine: the box's content is LINES tall, and while the cascade
+ * the layout engine: the box's body is LINES tall, and while the cascade
  * hands the box its collapsed cap it shows at most `--cap-lines` of them (the
  * token resolved through `:root`, as the browser would); once the cascade hands
  * it the expanded 50vh ceiling the window is taken to hold every line. Every
@@ -1810,8 +1810,11 @@ describe("the thinking bubble's two-line cap", () => {
     return resolvedNumber(cascadedValue(document.documentElement, token[1] ?? ""));
   }
 
-  /** Give SCROLL content LINES tall, clipped by whatever cap the cascade hands it. */
+  /** Give SCROLL a body LINES tall, clipped by whatever cap the cascade hands it. */
   function layOut(scroll: HTMLElement, lines: number): void {
+    const body = scroll.querySelector(".bubble-body");
+    if (body === null) throw new Error("the drawn bubble's box holds no body");
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: lines * LINE_PX });
     Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: lines * LINE_PX });
     Object.defineProperty(scroll, "clientHeight", {
       configurable: true,
@@ -1864,7 +1867,7 @@ describe("the thinking bubble's two-line cap", () => {
     }
   });
 
-  it("wears the response bubble's fade and chevron when it runs past two lines", () => {
+  it("wears the response bubble's fade when it runs past two lines", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -1917,7 +1920,7 @@ describe("the thinking bubble's two-line cap", () => {
     }
   });
 
-  it("shows no fade or chevron on a thinking bubble that fits in two lines", () => {
+  it("shows no fade on a thinking bubble that fits in two lines", () => {
     // Arrange
     const teardown = installStylesheet();
     try {

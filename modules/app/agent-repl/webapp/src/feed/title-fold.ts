@@ -4,7 +4,8 @@
  * OWNER RULING, 2026-09-23: a tool-call bubble's TITLE is the command being run
  * ("$ cd /some/path && cat some_file.txt"). Collapsed, it is truncated after
  * TWO lines and — only when it actually overflows them — wears the same bottom
- * fade and centered chevron a response bubble wears for "more to expand".
+ * fade a response bubble wears for "more to expand" (the fade only, never a
+ * chevron: owner ruling, 2026-09-23).
  * Expanded, the whole title shows, alongside the card's output and details.
  *
  * Every title site goes through `foldTitle`, and nothing else caps a title: the
@@ -23,10 +24,10 @@
  * owns a title is `TITLE_FOLD_OPEN_SELECTOR` (bubble-more.ts), read by both the
  * measurer and the stylesheet.
  *
- * THE FADE AND THE CHEVRON ARE THE RESPONSE BUBBLE'S RULES, generalized to
+ * THE FADE IS THE RESPONSE BUBBLE'S RULE, generalized to
  * `.title-fold.has-more` (styles.css); the measurer is bubble-more.ts's, which
- * already served the response bubble. So there is one cap, one fade, one
- * chevron and one measurer, and this module only marks the element and arms
+ * already served the response bubble. So there is one cap, one fade and one
+ * measurer, and this module only marks the element and arms
  * the measurement on it.
  *
  * CALL IT LAST. A card whose draw ends terminal calls `stopTicking` on itself,
@@ -71,7 +72,7 @@ export function foldTitle(title: HTMLElement, owner: TitleFoldOwner): HTMLElemen
   const view = title.ownerDocument.defaultView;
   if (view === null || typeof view.ResizeObserver !== "function") {
     // Without an observer nothing ever measures this title, so an overflowing
-    // one would be clipped at two lines with no fade and no chevron to say so.
+    // one would be clipped at two lines with no fade to say so.
     log.error("a card title cannot measure its overflow: the page has no ResizeObserver", {
       operation: "feed.title-fold.unmeasured",
       context: { owner, element: title.className },
