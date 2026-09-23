@@ -22,6 +22,7 @@ import {
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
+  responseCapLines,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
@@ -1624,7 +1625,8 @@ describe("the thinking bubble", () => {
 
 /**
  * THE THINKING BUBBLE'S TWO-LINE CAP (owner ruling, 2026-09-23). A collapsed
- * thinking bubble shows at most two lines, wearing the response bubble's own
+ * thinking bubble the daemon marked SUPERSEDED (owner rule, 2026-09-23: a later
+ * response landed in its feed) shows at most two lines, wearing the response bubble's own
  * fade + chevron (`has-more`) when it runs past them, and a click expands and
  * collapses it exactly as it does a response bubble.
  *
@@ -1670,8 +1672,15 @@ describe("the thinking bubble's two-line cap", () => {
     return scroll;
   }
 
+  // The two-line form is the SUPERSEDED thinking bubble's: while a thinking
+  // bubble is the latest response it wears the shared response cap (see "the
+  // thinking bubble that is the latest response" below).
   function thinking(state: "update" | "success"): FeedResponse {
-    return response({ thinking: true, result: { case: state, value: { prose: { markdown: "weighing" } } } });
+    return response({
+      thinking: true,
+      superseded: true,
+      result: { case: state, value: { prose: { markdown: "weighing" } } },
+    });
   }
 
   it("caps a thinking bubble's scroll box at two lines", () => {
@@ -1799,6 +1808,94 @@ describe("the thinking bubble's two-line cap", () => {
         cascadedValue(scroll, "--bubble-cap-lines"),
         scroll.classList.contains(HAS_MORE_CLASS),
       ]).toEqual(["var(--feed-cap-lines)", false]);
+    } finally {
+      teardown();
+    }
+  });
+});
+
+describe("responseCapLines", () => {
+  it.each([
+    { name: "an ordinary response", thinking: false, superseded: false, want: "feed" },
+    { name: "a thinking bubble that is the latest response", thinking: true, superseded: false, want: "feed" },
+    { name: "a superseded thinking bubble", thinking: true, superseded: true, want: 2 },
+  ])("draws $name at cap $want", ({ thinking, superseded, want }) => {
+    // Arrange
+    const u = response({ thinking, superseded, result: { case: "success", value: { prose: { markdown: "x" } } } });
+    // Act
+    const got = responseCapLines(u);
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+/**
+ * THE THINKING BUBBLE THAT IS THE LATEST RESPONSE (owner rule, 2026-09-23). It
+ * is shown in full, at the ordinary response cap, until the daemon re-pushes it
+ * superseded; then it collapses to two lines, unless the reader expanded it.
+ */
+describe("the thinking bubble that is the latest response", () => {
+  function thinking(superseded: boolean): FeedResponse {
+    return response({
+      thinking: true,
+      superseded,
+      result: { case: "success", value: { prose: { markdown: "weighing" } } },
+    });
+  }
+
+  /** A drawn bubble in a feed host armed with click-to-expand, as feed.ts arms it. */
+  function mounted(u: FeedResponse): { host: HTMLElement; bubble: HTMLElement } {
+    const host = document.createElement("div");
+    installClickExpand(host, () => "", (section) => refreshHasMore(section));
+    const bubble = drawFeedResponse(u, rowContext());
+    host.append(bubble);
+    document.body.append(host);
+    return { host, bubble };
+  }
+
+  it("wears the shared response cap while it is not superseded", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const { bubble } = mounted(thinking(false));
+      // Assert
+      const scroll = bubble.querySelector(".bubble-scroll") as HTMLElement;
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("var(--feed-cap-lines)");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("collapses to two lines when a re-push marks it superseded", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const { bubble } = mounted(thinking(false));
+      // Act — the daemon re-pushes the row superseded; it redraws in place.
+      const redrawn = drawFeedResponse(thinking(true), rowContext(bubble));
+      // Assert
+      const scroll = redrawn.querySelector(".bubble-scroll") as HTMLElement;
+      expect([redrawn === bubble, cascadedValue(scroll, "--bubble-cap-lines")]).toEqual([true, "2"]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("stays expanded when the reader had opened it before it was superseded", () => {
+    // Arrange — the reader clicked the latest thinking bubble open.
+    const teardown = installStylesheet();
+    try {
+      const { bubble } = mounted(thinking(false));
+      (bubble.querySelector(".bubble-scroll") as HTMLElement).click();
+      // Act
+      const redrawn = drawFeedResponse(thinking(true), rowContext(bubble));
+      // Assert — only the default limit changed; the reader's toggle stands.
+      const scroll = redrawn.querySelector(".bubble-scroll") as HTMLElement;
+      expect([scroll.classList.contains(EXPANDED_CLASS), cascadedValue(scroll, "max-height")]).toEqual([
+        true,
+        "50vh",
+      ]);
     } finally {
       teardown();
     }
