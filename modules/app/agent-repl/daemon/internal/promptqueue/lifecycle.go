@@ -45,15 +45,24 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 
 	q.drainActs(ctx, ws, log)
 
-	if err := q.popAndDeliver(ctx, ws, log); err != nil {
+	delivered, err := q.popAndDeliver(ctx, ws, log)
+	if err != nil {
 		log.Error(opTurnEnded, "the next held prompt was not delivered", dlog.Context{"cause": err.Error()})
+		return
+	}
+	if !delivered {
+		// EVERY TURN END THAT REACHES THE QUEUE IS ON DISK. A delivery says so
+		// at INFO; without this, a turn end with nothing behind it left no
+		// record at all, and "the queue was never told" could not be told apart
+		// from "the queue was told and had nothing to do".
+		log.Info(opTurnEnded, "the turn ended; nothing is waiting to be delivered", nil)
 	}
 }
 
 // popAndDeliver delivers the next deliverable hold: the SEMANTIC HEAD an
 // interjection or a release installed, else the oldest standing hold no
-// daemon-side condition is holding.
-func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) error {
+// daemon-side condition is holding. It reports whether a hold was delivered.
+func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (bool, error) {
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
 	// PolicyHold stamps every standing hold and nextDeliverable filters those,
 	// but the merge's PolicyRefuse stamps none — it refuses NEW submissions —
@@ -63,23 +72,26 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 	lease, held, err := q.deps.DB.Lease(ctx, ws)
 	if err != nil {
 		log.Error(opTurnEnded, "could not read the occupancy lease before delivering", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("read the lease for %q: %w", ws, err)
+		return false, fmt.Errorf("read the lease for %q: %w", ws, err)
 	}
 	if held && lease.Policy == wsm.PolicyRefuse {
 		log.Debug(opTurnEnded, "a refusing lease stands; the held prompts wait for its release",
 			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
-		return nil
+		return false, nil
 	}
 	next, ok, err := q.nextDeliverable(ctx, ws)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ok {
 		log.Debug(opTurnEnded, "nothing is waiting to be delivered", nil)
-		return nil
+		return false, nil
 	}
 	log.Info(opTurnEnded, "delivering the next held prompt", dlog.Context{"next_turn": string(next.Turn)})
-	return q.deliverHeld(ctx, ws, next, log)
+	if err := q.deliverHeld(ctx, ws, next, log); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // nextDeliverable picks the hold a turn end delivers.
@@ -214,7 +226,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
-	if err := q.popAndDeliver(ctx, ws, log); err != nil {
+	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
 		log.Error(opLeaseChange, "the released hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
 }
