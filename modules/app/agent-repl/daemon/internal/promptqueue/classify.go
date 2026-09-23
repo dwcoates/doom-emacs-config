@@ -102,10 +102,33 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, l
 		return
 	}
 
-	runningText, err := q.runningText(ctx, sub.WS, running)
+	// THE QUEUE'S RUNNING TURN IS THE AUTHORITY on whether the session is
+	// busy: the watcher reported it in flight, and that turn's end is what
+	// drains the tray. A store that cannot show it as open is a DISAGREEMENT
+	// between the two — a defect, logged loudly — but it is never the
+	// prompt's problem. Delivering now would start a turn into a session the
+	// watcher says is busy; holding for the running turn's end keeps the
+	// prompt moving on the one event that is certain to come, so that is the
+	// verdict. What the model would have compared against is missing, so the
+	// model is not asked.
+	runningText, found, storeOpen, err := q.runningText(ctx, sub.WS, running)
 	if err != nil {
+		log.Error(opClassify, "could not read the open turns to judge against; the prompt waits for the running turn to end",
+			dlog.Context{"running_turn": string(running), "cause": err.Error()})
 		q.record(ctx, sub, wsm.Classification{
-			Arm: wsm.ArmClassificationError, Reason: err.Error(), At: q.deps.Now(),
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the running turn could not be read, so the prompt waits for it to end",
+			At:     q.deps.Now(),
+		}, log)
+		return
+	}
+	if !found {
+		log.Error(opClassify, "the queue's running turn is not open in the store; the prompt waits for the running turn to end",
+			dlog.Context{"running_turn": string(running), "store_open_turns": storeOpen})
+		q.record(ctx, sub, wsm.Classification{
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the running turn has no open record to compare against, so the prompt waits for it to end",
+			At:     q.deps.Now(),
 		}, log)
 		return
 	}
@@ -135,18 +158,22 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, l
 }
 
 // runningText reads the running turn's text, which is half of what the judge
-// compares.
-func (q *queue) runningText(ctx context.Context, ws ids.WorkspaceID, running ids.TurnID) (string, error) {
+// compares. found is false when the store holds no OPEN record of the running
+// turn, and storeOpen then names the turns it does hold open, as the evidence
+// of the disagreement.
+func (q *queue) runningText(ctx context.Context, ws ids.WorkspaceID, running ids.TurnID) (text string, found bool, storeOpen []string, err error) {
 	open, err := q.deps.DB.OpenTurns(ctx, ws)
 	if err != nil {
-		return "", fmt.Errorf("read the open turns on %q: %w", ws, err)
+		return "", false, nil, fmt.Errorf("read the open turns on %q: %w", ws, err)
 	}
+	storeOpen = make([]string, 0, len(open))
 	for _, turn := range open {
 		if turn.ID == running {
-			return turn.Text, nil
+			return turn.Text, true, nil, nil
 		}
+		storeOpen = append(storeOpen, string(turn.ID))
 	}
-	return "", fmt.Errorf("the running turn %q on %q has no durable record to compare against", running, ws)
+	return "", false, storeOpen, nil
 }
 
 // record stamps a verdict on the held prompt and re-pushes the tray.
