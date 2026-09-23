@@ -6,6 +6,7 @@ import (
 	"connectrpc.com/connect"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
@@ -1574,6 +1575,142 @@ func TestAClosingRowWithNoPointerIsRoutedAndRecorded(t *testing.T) {
 	ctx := h.recordContext(t, "error", "daemon.sessionwatcher.closing_unaddressed")
 	if ctx["closing"] != "context_cut" || ctx["agent_id"] != "main-1" {
 		t.Fatalf("the missing pointer's record = %v, want a context_cut of main-1", ctx)
+	}
+}
+
+// acceptTurn hands the watcher an accepted turn-1 whose opening page carries
+// the given entries under the given boundary.
+func acceptTurn(h *harness, page *conversationv1.HistoryPage) {
+	h.w.OnTurnOpening("ws-1", "turn-1")
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id: &conversationv1.TurnId{Value: "turn-1"}, Agent: agentID("main-1"),
+	}, page)
+}
+
+// TestATurnPageNeverWalksTheMainMarkBack covers the high-water mark StartTurn's
+// page may set: the main watch serves the turn's rows live and may be AHEAD of
+// the page, so the page moves the mark only when the watch holds none.
+func TestATurnPageNeverWalksTheMainMarkBack(t *testing.T) {
+	tests := []struct {
+		name string
+		// served is what the main watch was served before the page.
+		served func(w *watcher)
+		want   string
+	}{
+		{
+			name: "a mark the main watch holds stands",
+			served: func(w *watcher) {
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-live-2"))
+			},
+			want: "ptr-live-2",
+		},
+		{
+			name:   "a main watch served nothing takes the turn's row",
+			served: func(*watcher) {},
+			want:   "ptr-prompt-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.routeNow(tt.served)
+
+			// Act.
+			acceptTurn(h, &conversationv1.HistoryPage{Entries: []*conversationv1.HistoryEntryAt{
+				promptEntry("ptr-prompt-1", "turn-1", "main-1"),
+			}})
+
+			// Assert.
+			if got := h.w.MainKnownThrough().GetValue(); got != tt.want {
+				t.Fatalf("main mark = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestATurnOpeningReFiresNoHistory covers the owner's rule on the turn path at
+// the watcher: the accepted turn's page is the turn's own prompt row, and
+// handing it over draws that row and nothing else — no cut, no terminal, no
+// activity, no detached work re-resolved.
+func TestATurnOpeningReFiresNoHistory(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	acceptTurn(h, &conversationv1.HistoryPage{Entries: []*conversationv1.HistoryEntryAt{
+		promptEntry("ptr-prompt-1", "turn-1", "main-1"),
+	}})
+	got := h.drainNow()
+
+	// Assert.
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnHistoryPage", "footer.OnHistoryPage"})
+	if page := requireEvent(t, got, "feed.OnHistoryPage"); page.detail != "1" {
+		t.Fatalf("the turn page drew %s entries, want the prompt row alone", page.detail)
+	}
+}
+
+// TestTheFeedIsHandedABoundaryOnlyOnAFirstPage covers what a page's boundary
+// means to the feed: whether older history remains below the TOP of the book.
+// Only a watch's first page is read from there; a catch-up is bounded by its
+// pointer and a turn page by its one-row budget, so theirs say nothing.
+func TestTheFeedIsHandedABoundaryOnlyOnAFirstPage(t *testing.T) {
+	floor := &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}
+	more := &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{}}
+	tests := []struct {
+		name string
+		// act serves the page under test and answers what it provoked.
+		act  func(h *harness) []event
+		want string
+	}{
+		{
+			name: "a watch's first page keeps its floor",
+			act: func(h *harness) []event {
+				return h.route(h.main, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Page{
+					Page: &conversationv1.HistoryPage{Boundary: floor},
+				}})
+			},
+			want: "floor",
+		},
+		{
+			name: "a catch-up page's floor is withheld",
+			act: func(h *harness) []event {
+				h.quiet()
+				h.relink(t)
+				h.drainNow()
+				return h.route(h.main, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Page{
+					Page: &conversationv1.HistoryPage{Boundary: floor},
+				}})
+			},
+		},
+		{
+			name: "a turn page's more is withheld",
+			act: func(h *harness) []event {
+				acceptTurn(h, &conversationv1.HistoryPage{
+					Entries:  []*conversationv1.HistoryEntryAt{promptEntry("ptr-prompt-1", "turn-1", "main-1")},
+					Boundary: more,
+				})
+				return h.drainNow()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.drainNow()
+
+			// Act.
+			got := tt.act(h)
+
+			// Assert.
+			if page := requireEvent(t, got, "feed.OnHistoryPage"); page.boundary != tt.want {
+				t.Fatalf("the feed was handed boundary %q, want %q", page.boundary, tt.want)
+			}
+		})
 	}
 }
 
