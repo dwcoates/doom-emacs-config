@@ -11,23 +11,40 @@
 # artifact it would have produced and records that it fired. Tests then assert
 # WHICH artifacts the script decided to (re)build under each staleness scenario.
 #
-# The fixture is a scratch GIT repository, because staleness IS a git question
+# The fixture is a scratch repository, because staleness IS a git question
 # now: the script compares the source revision an artifact was built from
 # against the revision standing in the checkout. A "fresh" fixture is therefore
 # built artifacts PLUS the `.source-tree` stamps that say what they came from,
 # which is what make_fresh_artifacts writes.
 #
+# NO REAL GIT RUNS HERE (owner rule). The repository is bin/fake-git.sh's model
+# (history, index and working tree as files under <root>/.fakegit), installed as
+# the only `git` on PATH for the harness AND every script it runs; the harness
+# refuses to start if any other `git` would answer.
+#
 # Run with:   bash bin/test-build-frontend.sh
 
 set -euo pipefail
 
-# A pre-commit hook exports its live index to children. This harness owns only
-# scratch repositories, so inheriting that binding would let fixture `git add`
-# and `git commit` rewrite the caller's real staging index.
+# A pre-commit hook exports its live index to children. The fake git ignores
+# them, but nothing here should carry a binding to the caller's repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/build-frontend.sh"
+
+# The fake git, first on PATH for the whole run. Every invocation's argv is
+# recorded in FAKE_GIT_LOG.
+FAKE_GIT_BIN="$(mktemp -d)"
+cp "$THIS_DIR/fake-git.sh" "$FAKE_GIT_BIN/git"
+chmod +x "$FAKE_GIT_BIN/git"
+export PATH="$FAKE_GIT_BIN:$PATH"
+export FAKE_GIT_LOG="$FAKE_GIT_BIN/argv.log"
+trap 'rm -rf "$FAKE_GIT_BIN"' EXIT
+if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
+    echo "test-build-frontend.sh: the fake git is not the git on PATH; refusing to run real git" >&2
+    exit 2
+fi
 
 # The fixtures stamp themselves with the SAME functions the script under test
 # stamps with. Reimplementing the id here would let the harness agree with a
@@ -91,22 +108,18 @@ make_tree() {
     [ "$nogit" = "nogit" ] || commit_tree "$root"
 }
 
-# commit_tree ROOT — turn the fixture into a real checkout. Staleness is read
-# out of git, so there is nothing to assert without one.
+# commit_tree ROOT — turn the fixture into a (fake-git) checkout. Staleness is
+# read out of git, so there is nothing to assert without one.
 commit_tree() {
     local root="$1"
     # Mirror the real repo, where every build output is ignored
     # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
     # artifact a build just produced would itself make the tree "dirty" and
     # every build would read as stale forever.
-    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\n*.log\nout\nerr\n' > "$root/.gitignore"
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\nstaging/\n*.log\nout\nerr\n' > "$root/.gitignore"
     git -C "$root" init -q
-    git -C "$root" -c user.name=t -c user.email=t@example.com add -A
-    # The parent checkout installs an absolute shared hooksPath. Scratch
-    # fixture commits must not inherit and recursively run that repository's
-    # pre-commit suite.
-    git -C "$root" -c user.name=t -c user.email=t@example.com \
-        -c core.hooksPath=/dev/null commit -qm seed
+    git -C "$root" add -A
+    git -C "$root" commit -qm seed
 }
 
 # commit_change ROOT PATH CONTENT MESSAGE — land a committed source change, so
@@ -116,9 +129,8 @@ commit_change() {
     local root="$1" rel="$2" content="$3" msg="$4"
     mkdir -p "$(dirname "$root/$rel")"
     printf '%s\n' "$content" >> "$root/$rel"
-    git -C "$root" -c user.name=t -c user.email=t@example.com add -A
-    git -C "$root" -c user.name=t -c user.email=t@example.com \
-        -c core.hooksPath=/dev/null commit -qm "$msg"
+    git -C "$root" add -A
+    git -C "$root" commit -qm "$msg"
 }
 
 # tree_stamp_path ROOT NAME — where NAME's `.source-tree` stamp lives in a
@@ -1155,56 +1167,28 @@ t_in_place_go_builds_pass_buildvcs_false
 # THE STAGED LAYOUT IS A CONTRACT the daemon's deploy (daemon/internal/deploy)
 # reads, so every slot is pinned by path here.
 #
-# These fixtures use NO real git: a fake `git` on PATH answers the handful of
-# plumbing calls the script makes (toplevel, HEAD, ls-files, status) with fixed
-# values. Staging mode never consults staleness, so the only thing git feeds is
-# the stamps, and a fixed answer makes their expected content exact.
+# Staging mode never consults staleness, so the fixture's (fake) history feeds
+# only the stamps, and their expected content is read back off the same fake.
 
-FAKE_HEAD="0123456789abcdef0123456789abcdef01234567"
-
-# make_fake_git BINDIR — the fake git. Anything it does not model is an error,
-# so a new git call in the script fails the harness instead of passing on a
-# guess.
-make_fake_git() {
-    cat > "$1/git" <<EOF
-#!/usr/bin/env bash
-dir=""
-while [ \$# -gt 0 ]; do
-    case "\$1" in
-        -C) dir="\$2"; shift 2 ;;
-        -c) shift 2 ;;
-        *) break ;;
-    esac
-done
-case "\$1 \${2:-}" in
-    "rev-parse --show-toplevel") printf '%s\n' "\$dir" ;;
-    "rev-parse HEAD") printf '%s\n' "$FAKE_HEAD" ;;
-    "ls-files -s") printf '100644 %s 0\t%s\n' "$FAKE_HEAD" fake/source.go ;;
-    "status --porcelain") : ;;
-    *) printf 'fake git: unexpected invocation: %s\n' "\$*" >&2; exit 2 ;;
-esac
-EOF
-    chmod +x "$1/git"
-}
-
-# new_staging_root — a fixture with no git repository at all and the fake git
-# on PATH. Echoes the root.
+# new_staging_root — a committed fixture with no live artifacts. Echoes the root.
 new_staging_root() {
     local root; root="$(mktemp -d)"
-    make_tree "$root" nogit
+    make_tree "$root"
     make_stubs "$root/stubs"
-    make_fake_git "$root/stubs"
     : > "$root/stub.log"
     printf '%s' "$root"
 }
 
-# fake_source_tree NAME — the source-tree id the fake git yields for NAME,
-# computed by the SAME library function the script stamps with.
+# staging_head ROOT — the revision the fixture stands at.
+staging_head() { git -C "$1" rev-parse HEAD; }
+
+# fake_source_tree NAME — the source-tree id of NAME in STAGING_ROOT, computed
+# by the SAME library function the script stamps with.
 fake_source_tree() {
     local paths
     paths="$(deploy_stamp_system_paths "$1" "")"
     # shellcheck disable=SC2086
-    PATH="$STAGING_ROOT/stubs:$PATH" source_tree_id "$STAGING_ROOT" $paths
+    source_tree_id "$STAGING_ROOT" $paths
 }
 
 # live_files ROOT — every file standing in the fixture's LIVE artifact
@@ -1223,7 +1207,7 @@ t_out_stages_the_shim() {
     out="$root/staging"; dist="$out/agent-shim/claude/shim/dist"
     run_script "$root" --out "$out" shim >/dev/null
     if [ "$(cat "$dist/main.js" 2>/dev/null)" = built ] &&
-           [ "$(cat "$dist/.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$dist/.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
            [ "$(cat "$dist/.source-tree" 2>/dev/null)" = "$(fake_source_tree shim)" ]; then
         pass "staging: shim -> DIR/agent-shim/claude/shim/dist/main.js with its stamps"
     else
@@ -1238,7 +1222,7 @@ t_out_stages_the_webapp() {
     out="$root/staging"; dist="$out/webapp/dist"
     WEBAPP_ENTRY_HASH=StagedHash1 run_script "$root" --out "$out" webapp >/dev/null
     if [ -f "$dist/index.html" ] &&
-           [ "$(cat "$dist/.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$dist/.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
            [ "$(cat "$dist/.source-tree" 2>/dev/null)" = "$(fake_source_tree webapp)" ] &&
            [ "$(cat "$dist/.build-id" 2>/dev/null)" = StagedHash1 ] &&
            grep -qxF "npm run build -- --outDir $dist --emptyOutDir" "$root/stub.log"; then
@@ -1255,7 +1239,7 @@ t_out_stages_the_daemon() {
     out="$root/staging"; bin="$out/daemon/bin"
     run_script "$root" --out "$out" daemon >/dev/null
     if [ -f "$bin/claude-repld" ] &&
-           [ "$(cat "$bin/.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$bin/.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
            [ "$(cat "$bin/.source-tree" 2>/dev/null)" = "$(fake_source_tree daemon)" ]; then
         pass "staging: daemon -> DIR/daemon/bin/claude-repld with its stamps"
     else
@@ -1271,7 +1255,7 @@ t_out_stages_a_cache_bin_service() {
     out="$root/staging"; bin="$out/cache-bin"
     run_script "$root" --out "$out" "$target" >/dev/null
     if [ -f "$bin/$name" ] &&
-           [ "$(cat "$bin/.$name.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$bin/.$name.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
            [ "$(cat "$bin/.$name.source-tree" 2>/dev/null)" = "$(fake_source_tree "$name")" ]; then
         pass "staging: $target -> DIR/cache-bin/$name with its stamps"
     else
@@ -1294,23 +1278,12 @@ t_out_writes_nothing_live() {
     rm -rf "$root"
 }
 
-# In place, a fixture whose stamps match the (fake) source revision is fresh and
-# nothing builds. This is the control for the staging case below it: the same
-# fixture under --out must build every target.
-make_fake_fresh_live_artifacts() {
-    local root="$1" name paths
-    make_fresh_artifacts_files "$root"
-    for name in shim webapp daemon shim-store shim-claude-sidecar shim-lock; do
-        paths="$(deploy_stamp_system_paths "$name" "")"
-        # shellcheck disable=SC2086
-        write_source_tree "$(tree_stamp_path "$root" "$name")" \
-            "$(PATH="$root/stubs:$PATH" source_tree_id "$root" $paths)"
-    done
-}
-
+# In place, a fixture whose stamps match the source revision is fresh and
+# nothing builds, services included. This is the control for the staging case
+# below it: the same fixture under --out must build every target.
 t_in_place_fresh_fixture_builds_nothing() {
     local root; root="$(new_staging_root)"
-    make_fake_fresh_live_artifacts "$root"
+    make_fresh_artifacts "$root"
     run_script "$root" shim webapp daemon store sidecar lock >/dev/null
     if [ ! -s "$root/stub.log" ]; then
         pass "staleness: in place, fresh stamps still skip every build"
@@ -1326,7 +1299,7 @@ t_in_place_fresh_fixture_builds_nothing() {
 # consults a stamp, so every target builds again anyway.
 t_out_builds_fresh_targets_unconditionally() {
     local root; root="$(new_staging_root)"
-    make_fake_fresh_live_artifacts "$root"
+    make_fresh_artifacts "$root"
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
     : > "$root/stub.log"
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
