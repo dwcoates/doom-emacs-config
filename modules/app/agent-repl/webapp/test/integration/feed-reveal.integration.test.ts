@@ -1,19 +1,16 @@
 /**
- * EXPANDING A BUBBLE REVEALS WHAT IT EXPANDS — on the booted app.
+ * EXPANDING A BUBBLE NEVER MOVES THE FEED — on the booted app.
  *
- * The defect, measured at a caret click: `below=208 scrollTop=40`. A fold opens
- * BELOW the fold and growth moves nothing on its own, so the sub-feed the
- * reader had just asked for unrolled entirely off the bottom of the screen and
- * the click looked like it had done nothing but swap a glyph. `TailFollow`
- * already owned the feed's position and `release()` had been written for
- * exactly this reader — one who deliberately opened content to read — and
- * nothing in production had ever called it.
+ * Owner rule, 2026-09-23: THE USER OWNS THE SCROLL. The caret used to scroll
+ * the opened sub-feed into view for a reader holding a place, and to re-land
+ * the tail for a reader following it; both were implicit moves outside the
+ * closed set of scroll causes (scroll.ts `SCROLL_CAUSES`), and both are gone.
+ * What remains is the follow a named cause started: a standing follow keeps
+ * the tail when the grown content is reported, exactly as for any growth.
  *
  * WHAT IS ASSERTED HERE and not in the unit suite: that the caret of a bubble
  * built by the REAL mount, in the real shell, against a real sub-feed page,
- * moves the page's own `#feed-scroll`. The unit suite pins the arithmetic and
- * the caret's two cases in isolation; a mount that never handed the bubble the
- * scroll owner would pass every one of those and fail these.
+ * leaves the page's own `#feed-scroll` where it was.
  *
  * THE GEOMETRY IS SCRIPTED, exactly as test/integration/feed-tail.integration
  * .test.ts scripts it and for the same reason: jsdom lays nothing out, so a
@@ -23,6 +20,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startHarness, type Harness } from "./harness";
+import { fireResize } from "../resize-observer";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   WORKSPACE_ID,
@@ -110,23 +108,32 @@ async function bootWithBubble(scrollTop: number, panelTop: number) {
   return { top: () => top };
 }
 
-describe("the caret's reveal on the booted app", () => {
-  it("scrolls the opened sub-feed into view for a reader holding a place", async () => {
+describe("the caret on the booted app", () => {
+  it("does not scroll the opened sub-feed into view for a reader holding a place", async () => {
     // Arrange — 40px down, and the panel will hang from 250 in a 300px box.
     const view = await bootWithBubble(40, 250);
     // Act
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Assert — moved by exactly the 150px overhang, so the bubble's head stays
-    // where it was and every pixel of the panel that fits is on screen.
-    expect(view.top()).toBe(190);
+    // Assert — the reader scrolls to what they opened themselves.
+    expect(view.top()).toBe(40);
   });
 
-  it("re-lands the tail for a reader who was following it", async () => {
+  it("does not re-land the tail itself for a reader who was following it", async () => {
     // Arrange — parked at the tail: 1000 - 300 = 700.
     const view = await bootWithBubble(700, 250);
     // Act — the expansion grows the feed by the panel's 200px.
     await harness.click('[data-feed-row="bubble"] [data-expand]');
-    // Assert — the tail of the GROWN feed.
+    // Assert — the caret wrote nothing.
+    expect(view.top()).toBe(700);
+  });
+
+  it("keeps a standing follow at the tail once the grown content is reported", async () => {
+    // Arrange — the first placement's follow stands, parked at 700.
+    const view = await bootWithBubble(700, 250);
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    // Act — the content's size change reaches the tail owner.
+    fireResize(harness.shell.feed);
+    // Assert — the tail of the GROWN feed, under the first placement's follow.
     expect(view.top()).toBe(900);
   });
 });

@@ -231,6 +231,25 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   the page loaded. Every expanded subagent bubble opens another feed tail, so no
   fixed budget could have contained the count — which is why the guarantee is
   "one stream exists" rather than "few enough streams exist".
+- **THE USER OWNS THE SCROLL** (owner rule, 2026-09-23). `src/scroll.ts` is
+  the ONE module that writes a scroll position; `test/scroll.test.ts` scans
+  every other `src` module and fails on a `scrollTop`/`scrollLeft` assignment,
+  a `scrollIntoView`/`scrollTo`/`scrollBy` call, or a park/place/shift call.
+  A bubble's own scroll box (an expanded response, thinking, tool or async
+  bubble) has NO implicit writer: it moves only on the reader's input. The
+  feed moves implicitly only for the closed set `SCROLL_CAUSES` —
+  `promptSent`, `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
+  `replaceRestore`, `prependCompensation` — each a named `TailFollow` method,
+  each recorded at DEBUG as `scroll.feed-moved` with its cause. A follow starts
+  only from a parking cause and ends when the reader scrolls away; returning
+  to the tail does not restart it. The reader's own wheel redirect and
+  collapse click are input, not causes, and are the only other writes.
+  NOTHING MOVES A SCROLL BOX INDIRECTLY EITHER: a redraw never re-attaches an
+  element already in place (`placeChildren`, src/dom.ts), a response re-push
+  updates its bubble in place, a card holding a box the reader scrolled is
+  morphed rather than replaced (src/feed/keep-scroll.ts), an unchanged re-push
+  draws nothing, and anything repainted on a tick or toggled by a measurer
+  holds a fixed footprint (the cost corner, the shell clocks, `has-more`).
 - **A REDRAW NEVER UN-TOGGLES, WHATEVER ITS SHAPE** (owner ruling, 2026-09-18).
   The wire's fold is the INITIAL fold: an upsert carries the reader's open folds
   off the element it replaces (`carryExpanded`), and a full page replace —

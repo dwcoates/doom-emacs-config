@@ -24,10 +24,9 @@ import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
-  feedReveal,
   installIntentScroll,
   observeScrollBox,
-  revealNode,
+  revealGeometry,
 } from "../scroll.js";
 import {
   OpenFeedResponseSchema,
@@ -91,8 +90,12 @@ export interface FeedDeps {
 }
 
 export interface FeedHandle extends Handle {
-  /** Bring a row into view, opening whatever bubbles stand above it. */
-  readonly revealRow: (id: FeedId) => Promise<boolean>;
+  /**
+   * The reader picked a detached-work item in the expanded footer: open
+   * whatever bubbles stand above its card, mark it, and scroll it into view
+   * (`detachedWorkSelected`, one of the closed set of scroll causes).
+   */
+  readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
 }
 
 /** Mount the root feed into HOST. */
@@ -113,10 +116,6 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // a still cursor captures the next gesture and scrolling gets stuck in the
   // bubble (scroll.ts's installIntentScroll). No box, no sections to gate.
   const intentScroll = scrollBox === null ? null : installIntentScroll(scrollBox);
-  // The caret's view rule, bound ONCE for the whole universe of feeds: every
-  // bubble in it -- root-level, nested, merge or subagent -- is built by
-  // `bubbleFor` below, so they all obey the same one.
-  const reveal = scrollBox === null || tail === null ? undefined : feedReveal(scrollBox, tail);
   // THE OVERSCAN BUFFER, rooted on the same scroll box, blows the pre-render
   // band out to ~5 viewport heights so a row within it lays out at its true
   // height before the reader scrolls to it — the cure for the first-scroll
@@ -165,7 +164,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
 
   openWatch();
 
-  return { revealRow, dispose };
+  return { selectDetachedWork, dispose };
 
   /**
    * A context standing for THE FEED ITSELF, which is not a row.
@@ -322,7 +321,6 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       bubble: bubbleFor,
       composerFactory: deps.composerFactory,
       head: bubbleHead,
-      scroll: reveal,
       overscan: overscan ?? undefined,
     };
     if (unitCase(row) === "merge") {
@@ -344,10 +342,26 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // ---- reveal -----------------------------------------------------------
 
   /**
-   * Bring a row into view.
+   * Find a row and mark it, WITHOUT moving the feed: the breadcrumb and the
+   * hook's gated-call link open the bubbles above their target and mark it,
+   * and the reader scrolls to it themselves (owner rule, 2026-09-23: the user
+   * owns the scroll). Only the footer's detached-work selection scrolls.
+   */
+  function revealRow(id: FeedId): Promise<boolean> {
+    return reveal(id, false);
+  }
+
+  /** The footer's detached-work selection: find, mark and scroll to the card. */
+  function selectDetachedWork(id: FeedId): Promise<boolean> {
+    return reveal(id, true);
+  }
+
+  /**
+   * Bring a row onto the page and mark it; SCROLL says whether the feed then
+   * moves to it (the detached-work selection) or stays where the reader has it.
    *
    * FOUND FIRST: a row already drawn — on the root feed or inside any OPEN
-   * sub-feed — is simply scrolled to. Only when it is nowhere on screen is the
+   * sub-feed — is simply landed on. Only when it is nowhere on screen is the
    * daemon asked where it lives, and the answer is the page's BREADCRUMBS: the
    * chain of containers above it, outermost first, each of which is expanded in
    * turn before the row is looked for again.
@@ -357,10 +371,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
    * walk that cannot complete leaves the reader where they were rather than
    * moving them somewhere plausible.
    */
-  async function revealRow(id: FeedId): Promise<boolean> {
+  async function reveal(id: FeedId, scroll: boolean): Promise<boolean> {
     const here = findAcrossOpenFeeds(root, id);
     if (here !== null) {
-      land(here);
+      land(here, scroll);
       return true;
     }
     log.debug("the reveal target is not drawn; asking the daemon where it lives", {
@@ -416,7 +430,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       });
       return false;
     }
-    land(found);
+    land(found, scroll);
     return true;
   }
 
@@ -451,14 +465,19 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     return null;
   }
 
-  /** Scroll the row into view and mark it, briefly, as the one meant. */
-  function land(element: HTMLElement): void {
+  /** Mark the row, briefly, as the one meant; scroll to it when SCROLL says so. */
+  function land(element: HTMLElement, scroll: boolean): void {
     // A grouped member sits in an inactive tab is HIDDEN and has no layout box;
-    // bring its tab to the front before scrolling, so the reveal lands on a
-    // member that is actually on screen (tool-group.ts). A member outside any
-    // group is left alone.
+    // bring its tab to the front, so the landing is on a member that is
+    // actually drawn (tool-group.ts). A member outside any group is left alone.
     activateGroupedMember(element);
-    revealNode(element);
+    log.debug(`landed on a revealed row${scroll ? ", scrolling to it" : ""}`, {
+      operation: "feed.reveal-landed",
+      context: { row: element.getAttribute("data-feed-row") ?? "unset", scroll },
+    });
+    if (scroll && scrollBox !== null && tail !== null) {
+      tail.detachedWorkSelected(revealGeometry(scrollBox, element));
+    }
     element.classList.add(REVEAL_CLASS);
     // STATED, not only styled: "this is the row you asked for" is a fact about
     // the row while it stands, and a jump's caller has no other way to see that

@@ -133,7 +133,7 @@ describe("createToolGroupStore", () => {
     const store = createToolGroupStore();
     const members = [member("a"), member("b"), member("c")];
     // Act
-    const wrapper = store.place(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Assert: one group, three tabs, indices 1..3.
     const tabs = wrapper.querySelectorAll(".feed-group-tab");
     expect(tabs).toHaveLength(3);
@@ -149,10 +149,25 @@ describe("createToolGroupStore", () => {
     ]);
   });
 
+  it("re-attaches no member already in place when the run grows", () => {
+    // Arrange -- a re-attached member would lose the reader's scroll inside it.
+    const store = createToolGroupStore();
+    const members = [member("a"), member("b")];
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    const panel = wrapper.querySelector(".feed-group-panel");
+    if (panel === null) throw new Error("the group drew no panel");
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(panel, { childList: true });
+    // Act
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [...members, member("c")]);
+    // Assert
+    expect(observer.takeRecords().flatMap((record) => [...record.removedNodes])).toEqual([]);
+  });
+
   it("moves every member's own element into the group's panel", () => {
     const store = createToolGroupStore();
     const members = [member("a"), member("b")];
-    const wrapper = store.place(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     expect(wrapper.querySelector('.feed-group-panel > [data-feed-row="a"]')).toBe(
       members[0].element,
     );
@@ -161,7 +176,7 @@ describe("createToolGroupStore", () => {
   it("shows the NEWEST member of a brand-new group and hides the rest", () => {
     const store = createToolGroupStore();
     const members = [member("a"), member("b"), member("c")];
-    store.place(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     expect([members[0].element.hidden, members[1].element.hidden, members[2].element.hidden]).toEqual(
       [true, true, false],
     );
@@ -171,7 +186,7 @@ describe("createToolGroupStore", () => {
     // Arrange
     const store = createToolGroupStore();
     const members = [member("a"), member("b"), member("c")];
-    const wrapper = store.place(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Act: click the first tab.
     wrapper
       .querySelector<HTMLButtonElement>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)
@@ -186,9 +201,9 @@ describe("createToolGroupStore", () => {
     const fold = document.createElement("div");
     fold.className = "tool-fold expanded";
     const members = [member("a", fold), member("b")];
-    store.place(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
     // Act: a live append re-lays the group.
-    store.place(groupKey("tool:Bash", "a"), "tool:Bash", [...members, member("c")]);
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [...members, member("c")]);
     // Assert: the reader's expand is still on the same element.
     expect(fold.classList.contains("expanded")).toBe(true);
   });
@@ -199,11 +214,11 @@ describe("createToolGroupStore", () => {
     const a = member("a");
     const b = member("b");
     const key = groupKey("tool:Bash", "a");
-    const wrapper = store.place(key, "tool:Bash", [a, b]);
+    const wrapper = store.arrange(key, "tool:Bash", [a, b]);
     wrapper.querySelector<HTMLButtonElement>(`[${GROUP_TAB_MEMBER_ATTRIBUTE}="a"]`)?.click();
     // Act: a third same-kind card streams in and extends the run.
     const c = member("c");
-    store.place(key, "tool:Bash", [a, b, c]);
+    store.arrange(key, "tool:Bash", [a, b, c]);
     // Assert: the reader is still on a, not yanked onto the new newest.
     expect([a.element.hidden, c.element.hidden]).toEqual([false, true]);
   });
@@ -211,8 +226,8 @@ describe("createToolGroupStore", () => {
   it("reuses the SAME wrapper for a group placed again, so its state survives", () => {
     const store = createToolGroupStore();
     const key = groupKey("tool:Bash", "a");
-    const first = store.place(key, "tool:Bash", [member("a"), member("b")]);
-    const second = store.place(key, "tool:Bash", [member("a"), member("b"), member("c")]);
+    const first = store.arrange(key, "tool:Bash", [member("a"), member("b")]);
+    const second = store.arrange(key, "tool:Bash", [member("a"), member("b"), member("c")]);
     expect(second).toBe(first);
   });
 
@@ -220,7 +235,7 @@ describe("createToolGroupStore", () => {
     // Arrange: a group placed and kept through one pass.
     const store = createToolGroupStore();
     const host = document.createElement("div");
-    const wrapper = store.place(groupKey("tool:Bash", "a"), "tool:Bash", [
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
       member("a"),
       member("b"),
     ]);
@@ -240,7 +255,7 @@ describe("activateGroupedMember", () => {
     const store = createToolGroupStore();
     const a = member("a");
     const b = member("b");
-    store.place(groupKey("tool:Bash", "a"), "tool:Bash", [a, b]);
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [a, b]);
     expect(a.element.hidden).toBe(true);
     // Act: reveal lands on member a (an inactive tab).
     activateGroupedMember(a.element);
@@ -257,7 +272,7 @@ describe("activateGroupedMember", () => {
 
   it("does nothing for an element that is in a group but names no row", () => {
     const store = createToolGroupStore();
-    const wrapper = store.place(groupKey("tool:Bash", "a"), "tool:Bash", [
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [
       member("a"),
       member("b"),
     ]);
