@@ -8,7 +8,7 @@
  * collapsed, it shows its label and nothing of its body, which is the
  * abbreviated aside it has always been. It opens and closes through the one
  * toggle every bubble has (expand.ts: a click on the strip or the body toggles
- * the scroll box), wears the one has-more chevron, and its body is a markdown
+ * the scroll box), wears the one has-more fade, and its body is a markdown
  * slot the one body pipeline paints, so a tree in it wraps at the bubble's cap.
  */
 import { log } from "../../log.js";

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * THE STYLESHEET'S SELECTABILITY CONTRACT.
  *
@@ -364,8 +365,19 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
       rule.selectors.includes(`${selector}::-webkit-scrollbar`),
     );
 
-    // Assert
-    expect(sized?.declarations).toMatch(/width:\s*8px/);
+    // Assert — sized by the one gutter token the tree budget also reads.
+    expect(sized?.declarations).toMatch(/width:\s*var\(--scrollbar-gutter-width\)/);
+  });
+
+  it("declares the scrollbar gutter token once, in px", () => {
+    // Arrange / Act — every declaration of the token, on the column the
+    // bubbles hang in or anywhere else.
+    const declared = rulesOf(stylesheet).flatMap(
+      (rule) => rule.declarations.match(/--scrollbar-gutter-width:[^;]*/g) ?? [],
+    );
+
+    // Assert — px, because body.ts measures it and refuses anything else.
+    expect(declared).toEqual(["--scrollbar-gutter-width: 8px"]);
   });
 
   it.each(SCROLL_BOXES)("gives %s a track in the existing border token", (selector) => {
@@ -499,8 +511,9 @@ describe("the collapse/expand height model", () => {
 
 /**
  * THE "MORE BELOW" AFFORDANCE (owner ruling, 2026-09-15: "a signal that there's
- * more to reveal"). FIX2 draws a bottom fade + chevron on a collapsed
- * response/prompt bubble that overflows its cap, keyed entirely on `has-more`
+ * more to reveal"). FIX2 draws a bottom fade on a collapsed bubble that
+ * overflows its cap, keyed entirely on `has-more` — the fade ONLY, never a
+ * chevron (owner ruling, 2026-09-23)
  * (bubble-more.ts toggles the class). The signal is SCOPED to the two speaker
  * bubbles — never a tool-call section — and fades into each bubble's own bg.
  */
@@ -530,15 +543,22 @@ describe("the 'more below' affordance", () => {
     );
   });
 
-  it("centers a chevron on the bottom edge from has-more", () => {
-    // Arrange / Act
-    const chevron = declarationsOf(".bubble > .bubble-scroll.has-more::before");
+  it("draws no chevron from has-more: the fade is the whole signal", () => {
+    // Arrange / Act — every ::before a has-more rule draws, on any bubble or title.
+    const chevrons = rulesOf(stylesheet)
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => sel.includes(".has-more") && sel.endsWith("::before"));
 
-    // Assert — the ⌄ glyph (\2304), horizontally centered, click-through.
-    expect(chevron).toMatch(/content:\s*"\\2304"/);
-    expect(chevron).toMatch(/left:\s*50%/);
-    expect(chevron).toMatch(/transform:\s*translateX\(-50%\)/);
-    expect(chevron).toMatch(/pointer-events:\s*none/);
+    // Assert
+    expect(chevrons).toEqual([]);
+  });
+
+  it("draws no chevron glyph anywhere in the sheet", () => {
+    // Arrange / Act — the ⌄ glyph (\2304) the old chevron was.
+    const glyphs = rulesOf(stylesheet).filter((rule) => /\\2304/.test(rule.declarations));
+
+    // Assert
+    expect(glyphs.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
   it("draws the affordance only out of flow, so toggling has-more changes no layout", () => {
@@ -553,7 +573,7 @@ describe("the 'more below' affordance", () => {
       if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
       const positioned = /position:\s*absolute/.test(rule.declarations);
       // A rule that only repaints or re-places a pseudo-element the base rule
-      // already took out of flow (the zero-line cap's chevron at the strip's end).
+      // already took out of flow (the fade's per-kind gradient).
       const decorative = rule.declarations
         .split(";")
         .map((decl) => decl.split(":")[0]?.trim() ?? "")
@@ -1236,17 +1256,36 @@ describe("the cost corner", () => {
 });
 
 /**
- * THE PROMPT BUBBLE'S IN-FLIGHT BORDER (owner ruling, 2026-09-15).
- *
- * The border must appear exactly when the thinking glimmer starts and
- * disappear exactly when it ends, so it is keyed on the SAME
- * `data-wave="working"` attribute the glimmer itself reads (see
- * `armPromptWave` / `setPromptWave` in breathing.ts, drawn from the prompt
- * row's daemon-stated `working` flag) —
- * never a separate class or a second JS toggle, since two independent
- * togglers is exactly what could drift apart.
+ * THE PROMPT BORDERS (owner ruling, 2026-09-23). A border lands on a prompt
+ * once it is RECEIVED and stays: a user prompt wears the light purple
+ * permanently, in flight and after its turn resolves, independent of the
+ * working flag and its wave; an agent-to-agent prompt (the agent-addressed row
+ * and the peer message) wears the one amber; a held prompt in the tray wears
+ * none. Each case is asked of the stylesheet as the cascade would: which
+ * border-setting rules a bubble with that role, variant, wave and hook classes
+ * matches, beyond the base rule's transparent reservation.
  */
-describe("the prompt bubble's in-flight border", () => {
+describe("the prompt borders", () => {
+  /** The border declarations every non-base rule a bubble so marked matches sets, in source order. */
+  function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string[] {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return rulesOf(stylesheet)
+      .filter((rule) =>
+        rule.selectors.some((sel) => sel !== ".bubble" && sel.includes(".bubble") && !sel.includes("::") && el.matches(sel)),
+      )
+      .flatMap((rule) => rule.declarations.match(/(?:^|;)\s*border(?:-color)?\s*:[^;]*/g) ?? [])
+      .map((decl) => decl.replace(/^;?\s*/, "").trim());
+  }
+
+  /** A prompt bubble's attributes, waving or not. */
+  function prompt(variant: string, working: boolean): Record<string, string> {
+    const attrs: Record<string, string> = { "data-role": "prompt", "data-variant": variant };
+    if (working) attrs["data-wave"] = "working";
+    return attrs;
+  }
+
   it("reserves a 0.3px transparent border on every bubble, prompt included", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble");
@@ -1255,43 +1294,62 @@ describe("the prompt bubble's in-flight border", () => {
     expect(bubble).toMatch(/border:\s*0\.3px solid transparent/);
   });
 
-  it("defines the light-purple token in the light theme", () => {
+  it.each([
+    ["in flight", true],
+    ["after its turn resolves", false],
+  ] as const)("borders a user prompt in the light purple %s", (_label, working) => {
     // Arrange / Act
-    const root = declarationsOf(":root");
+    const borders = bordersOn(prompt("user", working), ["user"]);
 
     // Assert
-    expect(root).toMatch(/--prompt-live-border:\s*#[0-9a-fA-F]{3,6}/);
+    expect(borders).toEqual(["border-color: var(--prompt-live-border)"]);
   });
 
-  it("redefines the token for the dark theme", () => {
+  it.each([
+    ["an agent-addressed prompt in flight", "agent", true, ["user", "prompt-agent"]],
+    ["an agent-addressed prompt at rest", "agent", false, ["user", "prompt-agent"]],
+    ["a peer message", "peer", false, ["peer"]],
+  ] as const)("borders %s in the one agent amber", (_label, variant, working, hooks) => {
     // Arrange / Act
-    const dark = darkThemeBlock();
+    const borders = bordersOn(prompt(variant, working), hooks);
 
     // Assert
-    expect(dark).toMatch(/--prompt-live-border:\s*#[0-9a-fA-F]{3,6}/);
+    expect(borders).toEqual(["border: 1px solid var(--agent-prompt-border)"]);
   });
 
-  it("colors the border with the token only while data-wave is working", () => {
-    // Arrange / Act — the wave gradient and the border-color live in separate
-    // rules on the same selector, so every rule on it is checked rather than
-    // just the first `rulesOf` finds.
-    const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
+  it.each([
+    ["a prompt held behind the turn", ["held-right"]],
+    ["a prompt held by a bounce", ["held-right", "lease-card"]],
+    ["a prompt held by a keep-alive", ["held-right", "keep-alive-card"]],
+  ] as const)("gives %s no border", (_label, hooks) => {
+    // Arrange / Act
+    const borders = bordersOn(prompt("held", false), hooks);
+
+    // Assert
+    expect(borders).toEqual([]);
+  });
+
+  it("keys no border on the working wave", () => {
+    // Arrange / Act
+    const waving = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.some((sel) => sel.includes("data-wave")) && /(?:^|;)\s*border/.test(rule.declarations),
     );
 
     // Assert
-    expect(
-      waving.some((rule) => /border-color:\s*var\(--prompt-live-border\)/.test(rule.declarations)),
-    ).toBe(true);
+    expect(waving.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("sets no border-color on the settled (non-waving) prompt bubble", () => {
-    // Arrange / Act — the settled bubble only gets the base rule's
-    // transparent reservation; nothing recolors it back to --prompt-live-border.
-    const settled = declarationsOf('.bubble[data-role="prompt"]');
+  it.each([
+    ["--prompt-live-border", "light"],
+    ["--agent-prompt-border", "light"],
+    ["--prompt-live-border", "dark"],
+    ["--agent-prompt-border", "dark"],
+  ] as const)("defines %s in the %s theme", (token, theme) => {
+    // Arrange / Act
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
 
     // Assert
-    expect(settled).not.toMatch(/border-color/);
+    expect(block).toMatch(new RegExp(`${token}:\\s*#[0-9a-fA-F]{3,6}`));
   });
 });
 
@@ -1597,8 +1655,8 @@ describe("the card-level tool fold", () => {
  * THE TITLE FOLD (owner ruling, 2026-09-23). A tool card's TITLE — the shell
  * bubble's command, a tool call's input line, a skill's invocation, a hook's
  * headline, a subagent's description — is capped at two lines while the fold
- * that owns it is collapsed, and wears the response bubble's fade and chevron
- * when it overflows. It replaced the tool-call card's own input-line clamp
+ * that owns it is collapsed, and wears the response bubble's fade (never a
+ * chevron, owner ruling 2026-09-23) when it overflows. It replaced the tool-call card's own input-line clamp
  * (`.tool-fold:not(.expanded) > .bash-input` and its three siblings), which had
  * no fade; the input line is now one of the title fold's sites.
  */
@@ -1680,14 +1738,12 @@ describe("the title fold", () => {
     expect(fade?.selectors).toContain(".title-fold.has-more::after");
   });
 
-  it("draws the chevron from the response bubble's shared chevron rule", () => {
+  it("draws no chevron on a title", () => {
     // Arrange / Act
-    const chevron = rulesOf(stylesheet).find((r) =>
-      r.selectors.includes(".bubble > .bubble-scroll.has-more::before"),
-    );
+    const chevron = rulesOf(stylesheet).find((r) => r.selectors.includes(".title-fold.has-more::before"));
 
     // Assert
-    expect(chevron?.selectors).toContain(".title-fold.has-more::before");
+    expect(chevron).toBeUndefined();
   });
 
   it("fades a title into its own card's background", () => {
@@ -1924,13 +1980,13 @@ describe("the held prompt's collapse", () => {
     expect(folds.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("frames a held prompt in the dashed prompt blue, its variant's border", () => {
-    // Arrange / Act
+  it("frames a held prompt with no border of its variant's", () => {
+    // Arrange / Act — a held prompt is not yet received (owner ruling, 2026-09-23).
     const frames = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.includes('.bubble[data-variant="held"]') && /border:/.test(rule.declarations),
+      (rule) => rule.selectors.some((sel) => sel.includes('[data-variant="held"]')) && /border/.test(rule.declarations),
     );
     // Assert
-    expect(frames.map((rule) => rule.declarations.trim())).toEqual(["border: 1px dashed var(--user);"]);
+    expect(frames.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 });
 
