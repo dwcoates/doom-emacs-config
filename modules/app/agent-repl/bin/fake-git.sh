@@ -38,7 +38,15 @@ die() { printf 'fake git: %s\n' "$*" >&2; exit "${EXIT:-128}"; }
 CWD="$PWD"
 while [ $# -gt 0 ]; do
     case "$1" in
-        -C) CWD="$(cd "$2" 2>/dev/null && pwd)" || die "cannot change to '$2'"; shift 2 ;;
+        -C)
+            # An absolute directory is taken as given (no process); anything
+            # else is resolved the way `cd` would.
+            case "$2" in
+                /*) [ -d "$2" ] || die "cannot change to '$2'"; CWD="${2%/}"; [ -n "$CWD" ] || CWD=/ ;;
+                *) CWD="$(cd "$2" 2>/dev/null && pwd)" || die "cannot change to '$2'" ;;
+            esac
+            shift 2
+            ;;
         -c) shift 2 ;;
         *) break ;;
     esac
@@ -158,28 +166,37 @@ filter_snapshot() {
 
 # changed_paths A B — the paths whose entry differs between two snapshots.
 changed_paths() {
-    LC_ALL=C comm -3 <(LC_ALL=C sort "$1") <(LC_ALL=C sort "$2") |
-        awk -F'\t' '{ print $NF }' | LC_ALL=C sort -u
+    awk -F'\t' '
+        NR == FNR { blob[$2] = $1; next }
+        { if (!($2 in blob) || blob[$2] != $1) print $2; delete blob[$2] }
+        END { for (p in blob) print p }' "$1" "$2" | LC_ALL=C sort
 }
+
+# HEAD_SHA / HEAD_TREE — the current commit and its tree file, read once
+# without a process ("" and /dev/null before the first commit).
+HEAD_SHA=""
+HEAD_TREE=/dev/null
+load_head() {
+    HEAD_SHA=""
+    HEAD_TREE=/dev/null
+    if [ -f "$G/HEAD" ]; then
+        IFS= read -r HEAD_SHA < "$G/HEAD" || true
+        HEAD_TREE="$G/commits/$HEAD_SHA/tree"
+    fi
+}
+load_head
 
 head_sha() {
-    local sha
-    [ -f "$G/HEAD" ] || return 1
-    IFS= read -r sha < "$G/HEAD"
-    printf '%s\n' "$sha"
+    [ -n "$HEAD_SHA" ] || return 1
+    printf '%s\n' "$HEAD_SHA"
 }
 
-head_tree() {
-    local h
-    if h="$(head_sha)"; then cat "$G/commits/$h/tree"; fi
-    return 0
-}
+head_tree() { cat "$HEAD_TREE"; }
 
 # stage — record the worktree's entries for SPECS in the index, and their
 # content in the object store (revert restores from it).
 stage() {
-    local tmp blob path
-    tmp="$(mktemp)"
+    local tmp="$G/.stage.$$" blob path
     # Entries outside the spec stay as they are.
     while IFS=$'\t' read -r blob path; do
         path_matches "$path" || printf '%s\t%s\n' "$blob" "$path"
@@ -194,28 +211,27 @@ stage() {
 
 # commit_index MSG — snapshot the index as a new commit on HEAD.
 commit_index() {
-    local msg="$1" parent ct sha dir tmp_parent
-    parent="$(head_sha || true)"
-    tmp_parent="$(mktemp)"
-    head_tree > "$tmp_parent"
-    if cmp -s "$tmp_parent" "$G/index"; then
-        rm -f "$tmp_parent"
+    local msg="$1" ct sha dir changed="$G/.changed.$$"
+    changed_paths "$HEAD_TREE" "$G/index" > "$changed"
+    if [ ! -s "$changed" ]; then
+        rm -f "$changed"
         EXIT=1 die "nothing to commit, working tree clean"
     fi
     case "${GIT_COMMITTER_DATE:-}" in
         @*) ct="${GIT_COMMITTER_DATE#@}"; ct="${ct%% *}" ;;
         *) ct="$(date +%s)" ;;
     esac
-    sha="$( { printf '%s\n%s\n%s\n' "$parent" "$ct" "$msg"; cat "$G/index"; } | shasum -a 1 | cut -c1-40)"
+    read -r sha _ < <(
+        { printf '%s\n%s\n%s\n' "$HEAD_SHA" "$ct" "$msg"; cat "$G/index"; } | shasum -a 1)
     dir="$G/commits/$sha"
     mkdir -p "$dir"
     cp "$G/index" "$dir/tree"
-    changed_paths "$tmp_parent" "$G/index" > "$dir/changed"
-    rm -f "$tmp_parent"
-    printf '%s\n' "$parent" > "$dir/parent"
+    mv "$changed" "$dir/changed"
+    printf '%s\n' "$HEAD_SHA" > "$dir/parent"
     printf '%s\n' "$ct" > "$dir/ct"
     printf '%s\n' "$msg" > "$dir/msg"
     printf '%s\n' "$sha" > "$G/HEAD"
+    load_head
 }
 
 # commit_touches SHA — true when SHA changed a path SPECS selects.
@@ -227,7 +243,15 @@ commit_touches() {
     return 1
 }
 
-parent_of() { cat "$G/commits/$1/parent"; }
+# first_line FILE — FILE's first line, without a process (history walks call
+# this once per commit).
+first_line() {
+    local line=""
+    IFS= read -r line < "$1" || true
+    printf '%s\n' "$line"
+}
+
+parent_of() { first_line "$G/commits/$1/parent"; }
 
 resolve() {
     local rev="$1"
@@ -250,7 +274,7 @@ split_dashdash() {
 format_commit() { # FORMAT SHA
     local out="$1"
     out="${out//%H/$2}"
-    out="${out//%ct/$(cat "$G/commits/$2/ct")}"
+    out="${out//%ct/$(first_line "$G/commits/$2/ct")}"
     printf '%s\n' "$out"
 }
 
@@ -330,13 +354,13 @@ case "$CMD $*" in
                 format_commit "$fmt" "$sha"
                 break
             fi
-            sha="$(parent_of "$sha")"
+            IFS= read -r sha < "$G/commits/$sha/parent" || sha=""
         done
         ;;
     "show -s --format=%ct "*)
         [ "${#OPTS[@]}" -eq 3 ] || EXIT=2 die "unmodelled show form: $*"
         sha="$(resolve "${OPTS[2]}")" || die "bad object ${OPTS[2]}"
-        cat "$G/commits/$sha/ct"
+        first_line "$G/commits/$sha/ct"
         ;;
     "rev-list --count "*)
         [ "${#OPTS[@]}" -eq 2 ] || EXIT=2 die "unmodelled rev-list form: $*"
@@ -346,7 +370,7 @@ case "$CMD $*" in
         count=0
         while [ -n "$sha" ] && [ "$sha" != "$from" ]; do
             if [ "${#SPECS[@]}" -eq 0 ] || commit_touches "$sha"; then count=$((count + 1)); fi
-            sha="$(parent_of "$sha")"
+            IFS= read -r sha < "$G/commits/$sha/parent" || sha=""
         done
         printf '%s\n' "$count"
         ;;
