@@ -162,6 +162,7 @@ func (r *resolver) emptyFeed(f *feedState) int {
 	f.rank = map[string]rowRank{}
 	f.rows = map[string]*frontendv1.FeedRow{}
 	f.nonDurable = map[string]bool{}
+	f.superseded = map[string]bool{}
 	// THE TRUNCATION NOTICE GOES TOO. It says older history exists above the
 	// oldest row the replay delivered, and it was a statement about the
 	// conversation whose rows have just been retired.

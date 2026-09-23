@@ -65,7 +65,7 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { SAYS_ATTRIBUTE, drawBubble } from "../../bubble/draw.js";
+import { SAYS_ATTRIBUTE, drawBubble, type BubbleCapLines } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -201,7 +201,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       ...(corner === undefined ? {} : { corner }),
       content: [prose],
       footer: result.case === "error" ? [cutShortMarker()] : [],
-      capLines: u.thinking ? 2 : "feed",
+      capLines: responseCapLines(u),
     },
     rc.previous,
   );
@@ -218,6 +218,21 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const characters = markdown.length;
   recordDraw(u, rc, result.case, characters);
   return bubble;
+}
+
+/**
+ * The bubble's collapsed line limit, drawn verbatim from the daemon's flags.
+ *
+ * A THINKING BUBBLE IS SHOWN IN FULL WHILE IT IS THE LATEST AGENT RESPONSE
+ * (owner rule, 2026-09-23): the ordinary response cap until the daemon states
+ * that a later response landed in the same feed (`FeedResponse.superseded`),
+ * and the two-line thinking cap from then on. Whether it is superseded is the
+ * daemon's fact; nothing here looks at the rows around it. Only the DEFAULT
+ * limit changes: a bubble the reader expanded wears `.expanded` on its scroll
+ * box, which the in-place redraw keeps (src/bubble/draw.ts), so it stays open.
+ */
+export function responseCapLines(u: FeedResponse): BubbleCapLines {
+  return u.thinking && u.superseded ? 2 : "feed";
 }
 
 /**
