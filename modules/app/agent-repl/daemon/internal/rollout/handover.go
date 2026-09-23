@@ -50,6 +50,30 @@ func (e *ErrAlreadyRollingOut) Error() string {
 	return fmt.Sprintf("rollout: a handover is already in flight, waiting on %d workspace(s)", len(e.WaitingOn))
 }
 
+// RollingOut implements Controller: whether a handover is in flight, and the
+// workspaces it has not transferred yet.
+func (c *controller) RollingOut() ([]ids.WorkspaceID, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.handingOver {
+		return nil, false
+	}
+	return c.waitingLocked(), true
+}
+
+// waitingLocked lists the workspaces the handover in flight has not
+// transferred, sorted. The caller holds c.mu.
+func (c *controller) waitingLocked() []ids.WorkspaceID {
+	var waiting []ids.WorkspaceID
+	for ws := range c.rendezvous {
+		if _, moved := c.transferred[ws]; !moved {
+			waiting = append(waiting, ws)
+		}
+	}
+	sort.Slice(waiting, func(i, j int) bool { return waiting[i] < waiting[j] })
+	return waiting
+}
+
 // claimHandover raises the in-flight latch, or refuses naming what the
 // handover in flight is still waiting on. The latch is never lowered on
 // success: a handover that completes ends in this process's exit.
@@ -60,14 +84,7 @@ func (c *controller) claimHandover() error {
 		c.handingOver = true
 		return nil
 	}
-	var waiting []ids.WorkspaceID
-	for ws := range c.rendezvous {
-		if _, moved := c.transferred[ws]; !moved {
-			waiting = append(waiting, ws)
-		}
-	}
-	sort.Slice(waiting, func(i, j int) bool { return waiting[i] < waiting[j] })
-	return &ErrAlreadyRollingOut{WaitingOn: waiting}
+	return &ErrAlreadyRollingOut{WaitingOn: c.waitingLocked()}
 }
 
 // releaseHandover lowers the latch for a handover that FAILED BEFORE IT
