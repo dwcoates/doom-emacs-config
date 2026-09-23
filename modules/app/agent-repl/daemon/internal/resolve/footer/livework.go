@@ -41,7 +41,7 @@ type LiveWorkSet = sessionwatcher.LiveWorkSet
 // time is detached work that has just started, and each such change mints the
 // view's focus (see launchedWork and mintFocus).
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
-	var dropped, added []string
+	var dropped, added, readded []string
 	var minted *mintedFocus
 	r.mutate(ws, "daemon.footer.on_live_work_changed", "the footer took the live-work set",
 		dlog.Context{
@@ -50,7 +50,7 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 			minted = mintFocus(s, launchedWork(s, s.liveWork, live), live)
 			s.liveWork = live
 			s.liveWorkSeen = true
-			dropped, added = reconcileLiveWork(s, live, r.opts.clock.Now())
+			dropped, added, readded = reconcileLiveWork(s, live, r.opts.clock.Now())
 		})
 	r.workspaceLog(ws).Info("daemon.footer.live_work_taken",
 		"the footer took the watcher's live-work set as the authority for which detached work is live",
@@ -60,6 +60,12 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 			"monitors": len(live.Monitors),
 			"dropped":  dropped,
 			"added":    added,
+			// A MINIMAL ROW FOR A RUN WHOSE OWN TERMINAL THE FOOTER ALREADY
+			// SAW: the set still lists work the footer retired, so the row is
+			// re-opened with no description and no tokens (label "subagent",
+			// 0 tok) and nothing will ever describe it again. Named here so a
+			// zero-token row is explained by the log alone.
+			"readded_retired": readded,
 		})
 	if minted != nil {
 		r.workspaceLog(ws).Info("daemon.footer.focus_minted",
@@ -76,9 +82,10 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 // reconcileLiveWork makes the footer's DETACHED rows agree with the set: a row
 // the set does not list is dropped, and an id the set lists with no row of its
 // own gains a minimal one so the chip counts it while its descriptive frame is
-// still on its way. It answers what it dropped and what it added, for the
-// record the caller writes.
-func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, added []string) {
+// still on its way. It answers what it dropped and what it added, and which of
+// the added ids the footer had already seen settle, for the record the caller
+// writes.
+func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, added, readded []string) {
 	agents := agentIDSet(live.Agents)
 	shells := workIDSet(live.Shells)
 	monitors := workIDSet(live.Monitors)
@@ -130,8 +137,12 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 			label:        subagentLabel(nil),
 			startedAt:    now,
 			order:        s.nextOrder(),
+			provenance:   provenanceLiveWorkSet,
 		}
 		added = append(added, "agent:"+id)
+		if retiredAny(s, id) {
+			readded = append(readded, "agent:"+id)
+		}
 	}
 	for _, id := range sortedKeys(shells) {
 		if _, held := s.shells[id]; held {
@@ -139,6 +150,9 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		}
 		s.shells[id] = &shellRow{work: id, startedAt: now, order: s.nextOrder()}
 		added = append(added, "shell:"+id)
+		if retiredAny(s, id) {
+			readded = append(readded, "shell:"+id)
+		}
 	}
 	for _, id := range sortedKeys(monitors) {
 		if _, held := s.monitors[id]; held {
@@ -147,7 +161,7 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		s.monitors[id] = &monitorRow{unit: id, startedAt: now, order: s.nextOrder()}
 		added = append(added, "monitor:"+id)
 	}
-	return dropped, added
+	return dropped, added, readded
 }
 
 // heldAgentRow reports whether any agent row already stands for this id, under

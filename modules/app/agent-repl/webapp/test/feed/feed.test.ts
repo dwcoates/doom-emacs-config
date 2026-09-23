@@ -344,7 +344,7 @@ describe("mountFeed: selectDetachedWork", () => {
     row.getBoundingClientRect = rect(rowTop, 100);
   }
 
-  it("scrolls the feed to the selected detached-work card", async () => {
+  it("centers the selected detached-work card in the feed's viewport", async () => {
     // Arrange -- the card hangs 500..600 under a 300px viewport at 100.
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
@@ -352,8 +352,8 @@ describe("mountFeed: selectDetachedWork", () => {
     scripted(scroll, host, "r1", 500);
     // Act
     await feed.selectDetachedWork(feedId("r1"));
-    // Assert -- moved by the card's 300px overhang: 100 + 300.
-    expect(scroll.scrollTop).toBe(400);
+    // Assert -- its midpoint (550) onto the viewport's (150): 100 + 400.
+    expect(scroll.scrollTop).toBe(500);
   });
 
   it("does not scroll the feed for a breadcrumb's reveal", async () => {
@@ -403,6 +403,36 @@ describe("mountFeed: selectDetachedWork", () => {
     const revealed = await feed.selectDetachedWork(feedId("deep"));
     await settle();
     expect(revealed).toBe(true);
+  });
+
+  it("opens only the containers selecting a nested head requires, never the head itself", async () => {
+    // Arrange: a subagent (inner) spawned by a subagent (b1); the probe of the
+    // inner HEAD answers its own feed's crumbs, the head itself last.
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const h = harness({
+      channels,
+      openFeed: (req) => {
+        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed.value === "b1") return openSuccess(page([subagentRow("inner")]), tokenFor(req));
+        return openSuccess(
+          page([], { crumbs: [crumb("b1", "lead"), crumb("inner", "worker")] }),
+          tokenFor(req),
+        );
+      },
+    });
+    const { feed } = mount(h);
+    await settle();
+
+    // Act
+    const revealed = await feed.selectDetachedWork(feedId("inner"));
+    await settle();
+
+    // Assert: b1 was opened to reach the head; the head was probed once and
+    // never expanded.
+    expect({
+      revealed,
+      opened: h.calls.openFeed.map((req) => req.feed?.value),
+    }).toEqual({ revealed: true, opened: [undefined, "inner", "b1"] });
   });
 
   it("answers false when the target's feed cannot be opened (a shell bubble)", async () => {
