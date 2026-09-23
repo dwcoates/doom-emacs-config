@@ -33,7 +33,7 @@
 (declare-function agent-repl-wire--decode-repeated "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decoded "wire-common")
-(declare-function agent-repl-wire--encode-empty "wire-common")
+(declare-function agent-repl-wire--encode-oneof "wire-common")
 (declare-function agent-repl-wire--encode-string "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--fail "wire-common")

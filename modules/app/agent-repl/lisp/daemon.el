@@ -1314,8 +1314,9 @@ process\='s sentinel later.  So the restart\='s ensure spawns, and the
 predecessor\='s sentinel only then fires.  A clear at the spawn wiped the
 order before the exit it excused was ever recorded, and two orderly
 restarts (ordered by the deploy script the daemon\='s own Deploy has since
-replaced) were logged as unrequested exits at WARN (2026-09-13).  A t is still cleared on spawn: it names nobody, so it could
-otherwise excuse the new daemon.")
+replaced) were logged as unrequested exits at WARN (2026-09-13).  A t is
+still cleared on spawn: it names nobody, so it could otherwise excuse the
+new daemon.")
 
 (defconst agent-repl-daemon--exit-log-format
   "elisp.daemon.exited status=%S event=%s requested=%s"

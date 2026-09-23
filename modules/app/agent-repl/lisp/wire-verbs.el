@@ -2390,7 +2390,8 @@ unknown name are all contract breaches."
     (list :forced (agent-repl-wire--decode-bool message 'forced json))))
 
 (defun agent-repl-wire-decode-deploy-bounce-registered (json)
-  "Decode DeployBounceRegistered from JSON into (:turn-in-flight B :detached-work N)."
+  "Decode DeployBounceRegistered from JSON.
+Returns (:turn-in-flight B :detached-work N)."
   (let ((message "DeployBounceRegistered"))
     (agent-repl-wire-verbs--check-keys message json '(turnInFlight detachedWork))
     (list :turn-in-flight (agent-repl-wire--decode-bool message 'turnInFlight json)
@@ -2405,8 +2406,9 @@ unknown name are all contract breaches."
   (agent-repl-wire-decode-deploy-bounce-registered json))
 
 (defun agent-repl-wire-decode-deploy-shim-bounce (json)
-  "Decode DeployShimBounce from JSON into (:workspace ID :when (:arm ARM :value V)).
-The workspace is REQUIRED, and THE ARM IS WHEN, so an unset one is a breach."
+  "Decode DeployShimBounce from JSON.
+Returns (:workspace ID :when (:arm ARM :value V)).  The workspace is
+REQUIRED, and THE ARM IS WHEN, so an unset one is a breach."
   (let ((message "DeployShimBounce"))
     (agent-repl-wire-verbs--check-keys message json '(workspace bouncedNow registered))
     (list :workspace (agent-repl-wire-verbs--decode-required-string message 'workspace json)
