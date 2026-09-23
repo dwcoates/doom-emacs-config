@@ -43,6 +43,17 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		log.Error(opTurnEnded, "could not stamp the turn's close", dlog.Context{"cause": err.Error()})
 	}
 
+	// THE BOUNCE REGISTRY IS CHECKED FIRST, before anything queued is
+	// dispatched. A shim registered for a bounce that this turn end leaves
+	// free is bounced now, and the workspace DRAINS: the next prompt is held
+	// for the new shim rather than started on the one about to be stood down.
+	// Deciding it here, under the delivery lock, is what makes the race
+	// "a queued prompt starts a turn between is-free and bounce" impossible.
+	if q.checkRegistryLocked(ws, q.state(ws), log) {
+		log.Info(opTurnEnded, "the turn ended into a bounce; what is queued waits for the new shim", nil)
+		return
+	}
+
 	q.drainActs(ctx, ws, log)
 
 	delivered, err := q.popAndDeliver(ctx, ws, log)
@@ -63,6 +74,12 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 // interjection or a release installed, else the oldest standing hold no
 // daemon-side condition is holding. It reports whether a hold was delivered.
 func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (bool, error) {
+	// A DRAINING WORKSPACE DISPATCHES NOTHING: its bounce is replacing the
+	// shim, and the bounce's own finish delivers what is held.
+	if q.isDraining(ws) {
+		log.Debug(opTurnEnded, "the workspace is draining for a bounce; the held prompts wait for the new shim", nil)
+		return false, nil
+	}
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
 	// PolicyHold stamps every standing hold and nextDeliverable filters those,
 	// but the merge's PolicyRefuse stamps none — it refuses NEW submissions —
