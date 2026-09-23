@@ -174,8 +174,10 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
 /**
  * The card's hooks: `held-right` is the RAIL every held prompt wears (owner
  * ruling 1, 2026-09-13) — the hook the tray is found by; the rail itself is the
- * prompt role's — and a hold that is not the turn's names its frame, which is
- * the held variant's BORDER and nothing else.
+ * prompt role's — and a hold that is not the turn's is named by its hook.
+ * The hooks select NO border: a held prompt has none until it is received
+ * (owner ruling, 2026-09-23); they stay as the stable names the integration
+ * suite and the stylesheet's badge rules know a hold's kind by.
  */
 function holdCardHooks(hold: string | null): string[] {
   switch (hold) {
