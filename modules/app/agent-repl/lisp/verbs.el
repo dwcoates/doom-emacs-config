@@ -1584,23 +1584,60 @@ prompt alone: the repository is the current workspace's, off that repo's
 main branch, and the daemon mints the name.
 
 THE FORK IS SELECTED, exactly as a plain create is: you forked in order
-to work in the fork."
+to work in the fork.
+
+`agent-repl-fork-workspace-static\=' is the NAMED variant."
   (interactive)
-  (agent-repl-verbs--create-invoked 'agent-repl-fork-workspace)
-  (let* ((command 'agent-repl-fork-workspace)
+  (agent-repl-verbs--create-fork 'agent-repl-fork-workspace 'dynamic))
+
+(defun agent-repl-fork-workspace-static ()
+  "Fork the current workspace into a NAMED child (`SPC TAB F\='), no prompt.
+Exactly `agent-repl-fork-workspace\=' -- the repository is the current
+workspace\='s, the parent is the current workspace, the conversation is
+forked, the fork is SELECTED -- except it asks for a REQUIRED name instead
+of a prompt and sends NO initial prompt, so the fork comes up idle on the
+forked conversation.  It relates to the fork as `SPC TAB N\=' relates to
+`SPC TAB n\=', but it never asks for a repository: a fork\='s repository is
+its parent\='s by construction."
+  (interactive)
+  (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-static 'static))
+
+(defun agent-repl-verbs--create-fork (command mode)
+  "Fork the current workspace\='s conversation into a CHILD, in MODE.
+MODE is `dynamic\=' -- a prompt, and the daemon mints the name -- or
+`static\=', a REQUIRED name and no prompt at all.  Everything else is the
+fork\='s: the repository is the current workspace\='s, the parent is the
+current workspace, and the fork is selected.  Both fork commands share
+this body so the two spellings cannot drift apart.
+
+COMMAND is the interactive command running this body; its invocation is
+recorded before any question is asked, and a question it abandons is
+recorded before the abandonment propagates."
+  (agent-repl-verbs--create-invoked command)
+  (let* ((static (eq mode 'static))
          (repository (agent-repl-verbs--read-for
                       command 'repository
-                      (lambda () (agent-repl-verbs--dynamic-repository "a fork"))))
-         (prompt (agent-repl-verbs--read-for
-                  command 'prompt
-                  (lambda () (agent-repl-verbs--read-prompt "Initial prompt: "))))
+                      (lambda ()
+                        (agent-repl-verbs--dynamic-repository
+                         (if static "a named fork" "a fork")))))
+         (name (when static
+                 (agent-repl-verbs--read-for
+                  command 'name
+                  (lambda () (agent-repl-verbs--read-name "a named fork IS its name")))))
+         (prompt (unless static
+                   (agent-repl-verbs--read-for
+                    command 'prompt
+                    (lambda () (agent-repl-verbs--read-prompt "Initial prompt: ")))))
          (parent (agent-repl-verbs--ref (agent-repl--ws-current-name))))
-    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=dynamic")
-    (agent-repl-verb-create
-     repository :standard
-     :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
-     :parent parent :fork t
-     :select t)))
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=%s" mode)
+    (apply #'agent-repl-verb-create
+           repository :standard
+           :parent parent :fork t
+           :select t
+           (if static
+               (list :name name)
+             (list :initial-prompt
+                   (unless (string-empty-p (string-trim prompt)) prompt))))))
 
 ;;;; ---- One-shots --------------------------------------------------------
 ;;
