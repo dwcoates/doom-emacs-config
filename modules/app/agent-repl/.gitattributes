@@ -1,0 +1,3 @@
+# The remediation changelog is append-only: every landed fix adds one line, so
+# concurrent branches never truly conflict on it. Union-merge keeps both sides.
+docs/REMEDIATION-CHANGELOG.md merge=union
