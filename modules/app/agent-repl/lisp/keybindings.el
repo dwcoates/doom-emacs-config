@@ -132,6 +132,7 @@ the module."
        :desc "New child workspace" "c" #'agent-repl-create-child-workspace
        :desc "New named child workspace (no prompt)" "C" #'agent-repl-create-child-workspace-static
        :desc "Fork workspace + fork the conversation" "f" #'agent-repl-fork-workspace
+       :desc "Fork workspace, named (no prompt)" "F" #'agent-repl-fork-workspace-static
        :desc "New one-shot workspace" "o" #'agent-repl-create-oneshot
        :desc "Re-open a closed workspace" "O" #'agent-repl-open-workspace
        :desc "Merge current workspace (enqueue)" "M" #'agent-repl-merge-workspace

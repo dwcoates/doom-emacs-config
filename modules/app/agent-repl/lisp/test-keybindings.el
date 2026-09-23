@@ -36,6 +36,7 @@
                  agent-repl-create-child-workspace
                  agent-repl-create-child-workspace-static
                  agent-repl-fork-workspace
+                 agent-repl-fork-workspace-static
                  agent-repl-register-repository
                  agent-repl-set-priority))
     (should (commandp cmd))))
@@ -174,6 +175,43 @@ shadowing has to be structural: the mode's keymap is consulted before
           (agent-repl-workspace-numerals-mode 1)
           (should (eq (key-binding (kbd "M-2")) 'agent-repl-switch-to-workspace-2)))
       (use-global-map saved))))
+
+(defconst agent-repl-test-keybindings--source
+  (expand-file-name "keybindings.el"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The keybindings source the leader bindings are read off.")
+
+(defun agent-repl-test-keybindings--leader-prefix-binding (prefix key)
+  "Return the command keybindings.el binds to SPC PREFIX KEY, or nil.
+`map!' is a no-op stub under `emacs -Q', so the binding is read off the
+SOURCE: every top-level `(map! :leader (:prefix PREFIX ...))' form is
+walked for KEY followed by its #\\='COMMAND."
+  (let (found)
+    (with-temp-buffer
+      (insert-file-contents agent-repl-test-keybindings--source)
+      (goto-char (point-min))
+      (condition-case nil
+          (while (not found)
+            (let ((form (read (current-buffer))))
+              (when (and (eq (car-safe form) 'map!) (eq (cadr form) :leader))
+                (dolist (group (cddr form))
+                  (when (and (consp group) (eq (car group) :prefix)
+                             (equal (cadr group) prefix))
+                    (let ((tail (member key (cddr group))))
+                      (when (and tail (eq (car-safe (cadr tail)) 'function))
+                        (setq found (cadr (cadr tail))))))))))
+        (end-of-file nil)))
+    found))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-f-upper-is-the-named-fork ()
+  "`SPC TAB F\=' runs the named fork, beside `SPC TAB f\=' for the dynamic one."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "F")
+              'agent-repl-fork-workspace-static)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-f-is-the-dynamic-fork ()
+  "`SPC TAB f\=' still runs the dynamic fork: the named one is its OWN key."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "f")
+              'agent-repl-fork-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-leaves-m-0-to-doom ()
   "`M-0' is the one numeral the module does not claim."
