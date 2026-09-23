@@ -89,7 +89,7 @@ func TestRotationDoesNotSplitTheWatchedTail(t *testing.T) {
 	)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Act.
 	shim.write(ctx, t,

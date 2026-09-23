@@ -50,7 +50,7 @@ func TestBothHTTPVersionsServeTheSameStore(t *testing.T) {
 			assertTexts(t, "the page "+tc.label, pageTexts(opened.GetPage()), []string{tc.label})
 
 			stream := watchStream(ctx, t, cli, opened.GetWatch())
-			defer stream.Close()
+			defer closeOrFail(t, stream)
 			shim.write(ctx, t,
 				shim.agentEntry("w-"+tc.name+"-2", "u-"+tc.name+"-2",
 					frameLine(agentID("main"), responseFrame("main", "act-2", "tailed"))),
@@ -87,7 +87,7 @@ func TestJSONCodecServesARawPost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("raw JSON POST over the unix socket: %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeOrFail(t, resp.Body)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("reading the JSON response: %v", err)
