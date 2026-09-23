@@ -34,6 +34,7 @@ import { drawFeedMerge } from "./merge/merge.js";
 import { mergeBubbleBody } from "./merge/merge-body.js";
 import type { Handle } from "../failure/local.js";
 import { log } from "../log.js";
+import { placeChildren } from "../dom.js";
 import { stopTicking } from "./ticking.js";
 import {
   createToolGroupStore,
@@ -213,11 +214,13 @@ export const NEST_ATTRIBUTE = "data-nest";
  * THE DEFAULT BUBBLE BODY: a subagent bubble's rows, exactly as the feed draws
  * rows anywhere else.
  *
- * The whole body is redrawn on every change rather than diffed. The elements
- * themselves are the controller's and are REUSED (appending an element that is
- * already somewhere moves it), so a redraw is a re-ordering of existing nodes,
- * not a rebuild of them — which is what keeps a bubble's open folds, expanded
- * sections and live clocks across a push.
+ * The whole body is re-ARRANGED on every change, but never re-attached: the
+ * elements are the controller's and are REUSED, and `placeChildren` moves only
+ * an element that is out of place. A push therefore inserts what is new and
+ * leaves every row already in its place untouched in the document -- which is
+ * what keeps a bubble's open folds, expanded sections, live clocks AND the
+ * reader's scroll position inside them across a push (owner rule, 2026-09-23:
+ * the user owns the scroll).
  */
 export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   const breadcrumbs = document.createElement("div");
@@ -235,7 +238,8 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   const draw = (): void => {
     drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
     arrangeSubfeedRows(rows, view, groups);
-    if (view.composerSlot !== undefined) mount.append(view.composerSlot);
+    const slot = view.composerSlot;
+    if (slot !== undefined && mount.lastElementChild !== slot) mount.append(slot);
   };
 
   mount.append(rows);
@@ -321,10 +325,12 @@ export function arrangeSubfeedRows(
   // panel, still descendants of the host, so this descendant query still finds
   // them and a member merely regrouped is never mistaken for a dropped one.
   const before = [...host.querySelectorAll("[data-feed-row]")];
-  // Every nesting slot is emptied first, so a row that stopped being in the
-  // feed (deletion is ROW OMISSION on the next push) cannot linger inside a
-  // container that is still drawn.
-  for (const slot of host.querySelectorAll(`[${NEST_ATTRIBUTE}]`)) slot.replaceChildren();
+  // Every nesting slot drawn before this pass is re-placed at the end, empty if
+  // nothing lands in it now, so a row that stopped being in the feed (deletion
+  // is ROW OMISSION on the next push) cannot linger inside a container that is
+  // still drawn.
+  const nests = new Map<Element, HTMLElement[]>();
+  for (const slot of host.querySelectorAll(`[${NEST_ATTRIBUTE}]`)) nests.set(slot, []);
   const placed = new Map<string, HTMLElement>();
   const top: HTMLElement[] = [];
   const rows = view.rows();
@@ -376,10 +382,21 @@ export function arrangeSubfeedRows(
       i += 1;
       continue;
     }
-    nestSlot(container).append(el);
+    const slot = nestSlot(container);
+    const nested = nests.get(slot);
+    if (nested === undefined) nests.set(slot, [el]);
+    else nested.push(el);
     i += 1;
   }
-  host.replaceChildren(...top);
+  // NOTHING ALREADY IN PLACE IS RE-ATTACHED (see `placeChildren`): the top
+  // level first, then each nesting slot, whose container may itself have just
+  // been placed.
+  let moved = placeChildren(host, top);
+  for (const [slot, children] of nests) moved += placeChildren(slot, children);
+  log.debug(`arranged ${String(rows.length)} rows, moving ${String(moved)}`, {
+    operation: "feed.arrange",
+    context: { rows: rows.length, moved },
+  });
   // A group not placed this pass (its run broke, or its rows left the feed) is
   // disposed — after `replaceChildren`, so a member re-placed elsewhere is safely
   // out of the old group before it is torn down.
