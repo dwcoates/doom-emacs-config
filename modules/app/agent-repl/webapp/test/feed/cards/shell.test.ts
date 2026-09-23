@@ -26,6 +26,14 @@ import {
 import { TICKING_ATTRIBUTE } from "../../../src/feed/ticking.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { armsOf } from "../arms.js";
+import {
+  HAS_MORE_CLASS,
+  TITLE_FOLD_CLASS,
+  TITLE_FOLD_STANDALONE_CLASS,
+} from "../../../src/feed/bubble-more.js";
+import { fireResize } from "../../resize-observer.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { inBubbleFold, measureTitle } from "../title-measure.js";
 import { countingTicker, feedId, harness, rowContext, WORKSPACE } from "../harness.js";
 
 const ROW = "shell-1";
@@ -712,5 +720,111 @@ describe("the stop's unreadable answers", () => {
         frameHead: "InterruptResponse.result",
       },
     ]);
+  });
+});
+
+/**
+ * THE COMMAND IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the one
+ * two-line title fold (title-fold.ts), owned by the bubble's fold (bubble.ts).
+ */
+describe("drawFeedShellHead title fold", () => {
+  /** A head of SHELL seated in a collapsed bubble, and its command. */
+  function seated(u: FeedShell = shell()) {
+    const head = drawFeedShellHead(u, ctxFor().rc);
+    const bubble = inBubbleFold(head);
+    return { bubble, title: head.querySelector(".shell-command") as HTMLElement };
+  }
+
+  it("marks the command with the one title-fold class", () => {
+    // Arrange / Act
+    const { title } = seated();
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_CLASS)).toBe(true);
+  });
+
+  it("defers the command's fold to the bubble rather than making it its own", () => {
+    // Arrange / Act
+    const { title } = seated();
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_STANDALONE_CLASS)).toBe(false);
+  });
+
+  it("wears has-more when the command overflows its two lines", () => {
+    // Arrange
+    const { title } = seated();
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("keeps has-more off a command that fits its two lines", () => {
+    // Arrange
+    const { title } = seated();
+    measureTitle(title, false);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("drops has-more once the bubble is expanded", () => {
+    // Arrange
+    const { bubble, title } = seated();
+    measureTitle(title, true);
+    fireResize(title);
+    bubble.setAttribute("data-expanded", "true");
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("keeps measuring a settled head's command after the head's terminal stop", () => {
+    // Arrange
+    const { title } = seated(shell({ settled: { endedAtMs: 5000n, outcome: "completed", exit: 0 } }));
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("clamps the command to two lines while the bubble is collapsed", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = seated();
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+    } finally {
+      remove();
+    }
+  });
+
+  it("shows the whole command once the bubble is expanded", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble, title } = seated();
+      bubble.setAttribute("data-expanded", "true");
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("none");
+    } finally {
+      remove();
+    }
   });
 });

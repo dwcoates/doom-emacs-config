@@ -16,8 +16,8 @@ export function measureTitle(title: HTMLElement, overflow: boolean): void {
 
 /**
  * Seat HEAD in a connected, collapsed `.bubble-fold`, as bubble.ts does
- * (`.tool-card.bubble-fold > .tool-head.bubble-head > .bubble-head-slot`), and
- * answer the bubble.
+ * (`.tool-card.bubble-fold > .tool-head.bubble-head > .bubble-head-slot`), as
+ * the document body's only child, and answer the bubble.
  */
 export function inBubbleFold(head: HTMLElement): HTMLElement {
   const bubble = document.createElement("div");
@@ -30,6 +30,6 @@ export function inBubbleFold(head: HTMLElement): HTMLElement {
   slot.append(head);
   headLine.append(slot);
   bubble.append(headLine);
-  document.body.append(bubble);
+  document.body.replaceChildren(bubble);
   return bubble;
 }
