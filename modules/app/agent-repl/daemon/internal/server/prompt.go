@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/prompthandler"
+	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
 
@@ -87,7 +89,7 @@ func (s *server) SubmitPrompt(
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(bubbleRefused(refused))))
+			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(refused)))))
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -294,6 +296,12 @@ const (
 	// armBubbleRefused is the landed SubmitPromptError arm both shapes answer
 	// under.
 	armBubbleRefused = "bubble_refused"
+	// armModelNotInCatalog is SubmitPromptError.model_not_in_catalog: a `/model`
+	// act named a model the session's catalog does not hold.
+	armModelNotInCatalog = "model_not_in_catalog"
+	// armModelRefused is SubmitPromptError.model_refused: the vendor refused the
+	// model change a `/model` act asked for.
+	armModelRefused = "model_refused"
 	// bubbleKindNotDeliverable is the shim's UpdateAgentFailure.not_deliverable:
 	// the SDK has no route to the addressed subagent.
 	bubbleKindNotDeliverable = "not_deliverable"
@@ -305,6 +313,27 @@ const (
 // bubbleRefused folds the shim's two bubble-addressed submit refusals onto the
 // one landed arm, naming the kind as the arm's own nested oneof and keeping the
 // shim's sentence as `detail`. Any other refusal passes through untouched.
+// modelActRefused renames a refused `/model` act onto SubmitPrompt's own model
+// arms. The shim names its SetSessionModel refusals by ITS verb's arms
+// (`model_not_in_catalog`, `vendor_refused`), and `vendor_refused` is too
+// generic a name for a prompt-level answer: a client must be able to tell "the
+// model you asked for was refused" from any other refusal, and say so rather
+// than hold the prompt as if the daemon were unreachable. Every other refusal
+// passes through unchanged.
+func modelActRefused(err error, r refusal) refusal {
+	var shim *workspace.ShimRefusal
+	if !errors.As(err, &shim) || shim.Verb != "SetSessionModel" {
+		return r
+	}
+	switch shim.Arm {
+	case workspace.ArmShimModelNotInCatalog:
+		r.Arm = armModelNotInCatalog
+	case "vendor_refused":
+		r.Arm = armModelRefused
+	}
+	return r
+}
+
 func bubbleRefused(r refusal) refusal {
 	var kind string
 	switch r.Arm {

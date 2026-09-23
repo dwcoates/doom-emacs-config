@@ -1476,6 +1476,33 @@ describe("the vendor's API failure class reaching the terminal", () => {
     expect(failed.kind.case).toBe("billingError");
   });
 
+  it("carries the vendor's own sentence when the result states no errors", () => {
+    // Arrange
+    const sentence =
+      "API Error: 400 Claude Code 2.1.220 does not support this model; version 2.1.251 or newer is required.";
+    const noErrors = { ...(apiResult(400) as unknown as Record<string, unknown>), errors: [] } as unknown as SdkMessage;
+
+    // Act
+    const failed = apiKindOf([
+      assistant("msg-api", [{ type: "text", text: sentence }], { error: "invalid_request" }),
+      noErrors,
+    ]);
+
+    // Assert
+    expect(failed.message).toBe(sentence);
+  });
+
+  it("prefers the result's own errors over the notice's sentence", () => {
+    // Arrange + Act
+    const failed = apiKindOf([
+      assistant("msg-api", [{ type: "text", text: "the notice" }], { error: "invalid_request" }),
+      apiResult(400),
+    ]);
+
+    // Assert
+    expect(failed.message).toBe("the vendor said so");
+  });
+
   it("keeps the LAST class stated when a run failed several times", () => {
     // Arrange + Act
     const failed = apiKindOf([

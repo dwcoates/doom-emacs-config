@@ -115,6 +115,55 @@ describe("reading the transcript's facts", () => {
     expect(readTranscriptFacts(transcript([assistant()]))?.lastModel).toBe("claude-opus-5");
   });
 
+  it("never recovers the synthetic marker as the model", () => {
+    // Arrange: the CLI's own notice for a refused request comes after a real answer.
+    const file = transcript([
+      assistant(),
+      assistant({
+        isApiErrorMessage: true,
+        message: { model: "<synthetic>", usage: { input_tokens: 0, cache_read_input_tokens: 0 } },
+      }),
+    ]);
+
+    // Act + Assert
+    expect(readTranscriptFacts(file)?.lastModel).toBe("claude-opus-5");
+  });
+
+  it("never reads a CLI notice's zeroed usage as the conversation's size", () => {
+    // Arrange
+    const file = transcript([
+      assistant(),
+      assistant({
+        isApiErrorMessage: true,
+        message: { model: "<synthetic>", usage: { input_tokens: 0, cache_read_input_tokens: 0 } },
+      }),
+    ]);
+
+    // Act + Assert
+    expect(readTranscriptFacts(file)?.contextTokens).toBe(1102);
+  });
+
+  it("skips a synthetic record that is not flagged as an api error", () => {
+    // Arrange: a session-limit or stop notice carries the marker without the flag.
+    const file = transcript([
+      assistant(),
+      assistant({ message: { model: "<synthetic>", usage: { input_tokens: 0 } } }),
+    ]);
+
+    // Act + Assert
+    expect(readTranscriptFacts(file)?.lastModel).toBe("claude-opus-5");
+  });
+
+  it("recovers no model from a transcript that holds only CLI notices", () => {
+    // Arrange
+    const file = transcript([
+      assistant({ isApiErrorMessage: true, message: { model: "<synthetic>", usage: { input_tokens: 0 } } }),
+    ]);
+
+    // Act + Assert
+    expect(readTranscriptFacts(file)?.lastModel).toBeUndefined();
+  });
+
   it("recovers the permission mode from the last user record", () => {
     const file = transcript([
       { type: "user", permissionMode: "default" },

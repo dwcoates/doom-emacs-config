@@ -1087,6 +1087,27 @@ describe("StartSession, resume", () => {
     expect(h.queries[0]?.spec.model).toBe("claude-opus-5");
   });
 
+  it("never resumes on the synthetic marker the CLI wrote for a refused request", async () => {
+    // Arrange: a real answer, then the CLI's own notice for a refused request.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [
+      assistantLine(),
+      assistantLine({
+        uuid: "u-2",
+        isApiErrorMessage: true,
+        message: { model: "<synthetic>", usage: { input_tokens: 0, cache_read_input_tokens: 0 } },
+      }),
+    ]);
+
+    // Act
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1", model: "claude-opus-5" }));
+    await pending;
+
+    // Assert: the conversation's last REAL model, never the marker.
+    expect(h.queries[0]?.spec.model).toBe("claude-opus-5");
+  });
+
   it("RECOVERS the permission mode the last user record ran under", async () => {
     const h = harness({ nowMs: 1_000_100 });
     writeTranscript(h.configDir, h.cwd, "resume-1", [
@@ -3959,8 +3980,8 @@ describe("the context usage the vendor states, mapped field by field", () => {
   function fullUsage(overrides: Partial<ContextUsageLike> = {}): ContextUsageLike {
     return {
       categories: [
-        { name: "messages", tokens: 10, color: "#111", isDeferred: true },
-        { name: "tools", tokens: 20, color: "#222" },
+        { name: "messages", tokens: 10, color: "#111", isDeferred: true, kind: "deferred" },
+        { name: "tools", tokens: 20, color: "#222", kind: "used" },
       ],
       totalTokens: 100,
       maxTokens: 200,
