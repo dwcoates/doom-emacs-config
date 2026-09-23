@@ -955,7 +955,10 @@ never that the subroutine itself does the right thing with a directory."
   "The URL carries workspace identity plus the page's logging threshold.
 Kickoff ruling: \"The webview URL is `http://<daemon.addr>/?workspace=<id>
 &dir=<dir>'.\"  Logging adds `log_level'; no `composer' flag or other view
-state rides this suite's non-dev-mode mount."
+state rides this suite's non-dev-mode mount.  The HOST is the workspace's
+own `ws-<id>.localhost' on the daemon's port (2026-09-23): pages sharing
+the daemon's bare address shared WebKit's six-connection pool, and six
+standing page streams starved every later request."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
@@ -974,8 +977,9 @@ state rides this suite's non-dev-mode mount."
         (agent-repl-itest--wait-until (lambda () agent-repl-itest-webview-urls) nil
                                       "the webview mount to record a URL")
         (should (equal agent-repl-itest-webview-urls
-                       (list (format "http://%s/?workspace=%s&dir=%s&log_level=info"
-                                    (agent-repl-itest-daemon-address daemon)
+                       (list (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
+                                    (agent-repl--frontend-page-host-label (plist-get ref :id))
+                                    (car (last (split-string (agent-repl-itest-daemon-address daemon) ":")))
                                     (url-hexify-string (plist-get ref :id))
                                     (url-hexify-string (plist-get ref :dir))))))))))
 
@@ -1568,7 +1572,8 @@ adopt again on every later handover."
   "Adoption navigates the webview to the SUCCESSOR's address.
 fanout §7: host.el \"updates the workspace's `:conn' to the successor
 FIRST and then calls `agent-repl-frontend-reload-webview', so the webview
-navigates to `http://<successor>/?workspace=<id>&dir=<dir>'\".  The widget
+navigates to `http://<successor>/?workspace=<id>&dir=<dir>'\" — on the
+workspace's own `ws-<id>.localhost' host at the successor's port.  The widget
 is NAVIGATED, never remounted, so the observable is the URL the navigate
 was asked for."
   ;; Arrange: a mounted webview on the primary.
@@ -1605,8 +1610,9 @@ was asked for."
                                               "the webview redial")
                 (should (equal 1 (length navigated)))
                 (should (equal (car navigated)
-                               (format "http://%s/?workspace=%s&dir=%s&log_level=info"
-                                       (agent-repl-itest-daemon-address successor)
+                               (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
+                                       (agent-repl--frontend-page-host-label (plist-get ref :id))
+                                       (car (last (split-string (agent-repl-itest-daemon-address successor) ":")))
                                        (url-hexify-string (plist-get ref :id))
                                        (url-hexify-string (plist-get ref :dir)))))
                 ;; AND THE REST OF THE WALK IS AWAITED INSIDE THE STUBS.
@@ -2334,8 +2340,10 @@ is navigated rather than remounted."
                 (agent-repl-itest--await-call successor "RegisterWorkspace")
                 (agent-repl-itest--wait-until (lambda () navigated) nil
                                               "the webview to be re-pointed")
-                (should (string-prefix-p
-                         (format "http://%s/" (agent-repl-itest-daemon-address successor))
+                ;; The workspace's own page host, at the NEW daemon's port.
+                (should (string-match-p
+                         (format "\\`http://ws-[a-z0-9-]+\\.localhost:%s/"
+                                 (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
                          (car navigated))))
             (agent-repl-connect-close fresh)))))))
 
