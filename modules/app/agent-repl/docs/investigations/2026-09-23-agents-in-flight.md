@@ -18,10 +18,11 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/footer-rows-and-work-ids` | `~/.config/doom-worktrees/footer-rows-and-work-ids` | The detached-work id in every async bubble header. A footer row click either selects its entry or shows and logs "not on screen", never neither. The 0-token rows. The footer capped at 4 rows. ADDED: an async bubble shows only the last page, streams while open, and is WIPED on collapse. ADDED: selecting a footer entry CENTERS it in the feed. | `a0ac08889b72fae26` | 17:50 |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | `a3cde9e9c734a7c27` | 18:20 |
-| `fix/follow-when-latest-visible` | `~/.config/doom-worktrees/follow-when-latest-visible` | Follow mode also turns ON whenever the latest feed entry (response, tool call, prompt, held prompt) is visible, including when the user scrolls back down. Nothing existing is removed, and an active reply selection suppresses it. | `a4a421ce6a960807f` | 18:35 |
+| `fix/integration-cold-first-test` | `~/.config/doom-worktrees/integration-cold-first-test` | Root-cause the flaky integration tests (the first test in 6 files fails under load; 900ms bound). Measured cause, one shared cold-start helper, and green 5× under load. | `a77100b53ad11dbed` | 18:25 |
 
 ## Still waiting on the owner
 
+- Confirm that the latest-visible follow rule stays off while a reply selection is active.
 - A proto decision: restate `summary` and `addressed_to` on `AgentSendMessageSuccess`/`Failure`, so an agent-message bubble keeps its body after replay.
 - A visual decision: `scrollbar-gutter: stable` on bubbles, so prose doesn't shift by the scrollbar's width when an expanded bubble starts scrolling.
 - The new name for "Release" (suggested: "Send now").
@@ -29,6 +30,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Follow mode also turns on whenever the latest feed entry is visible, so scrolling back down resumes it. It's held off while a reply selection is active (`fix/follow-when-latest-visible`, 5443 tests pass).
 - A thinking bubble shows in full until superseded by the next agent response in its feed. The daemon's `FeedResponse.superseded` collapses it to 2 lines, a user expansion survives, and a collapse above the viewport never moves the reader (`fix/thinking-collapses-when-superseded`, 5405 tests pass).
 - The border ladder spreads: thinking is nearer red (#e3a008), mid-turn prose nearer yellow (#b0b00c), and a hue-monotonic test covers it (lead, 5383 tests pass).
 - Bubbles: the fade alone (no chevron), and `has-more` only when the body truly overflows. User prompts always purple, agent-to-agent prompts amber, held prompts unbordered. Trees wrap to the expanded width (`fix/bubble-borders-fade-wrap`, 5382 tests pass).
