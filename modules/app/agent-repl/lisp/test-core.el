@@ -349,6 +349,21 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("daemon.el" agent-repl-frontend-daemon-restart
      "agent-repl: not restarted: the accepted daemon stop never completed"
      "reports that interactive restart timed out before daemon departure")
+    ("elisp-build.el" agent-repl-elisp-reload-handle
+     "agent-repl: elisp reload REFUSED -- the deploy is for %s, this Emacs runs %s"
+     "tells the user a deploy's reload was refused because it names another checkout")
+    ("elisp-build.el" agent-repl--elisp-reload-report-heartbeat
+     "agent-repl: elisp reload left required timers unarmed: %s"
+     "tells the user the reload left the editor's heartbeat broken")
+    ("elisp-build.el" agent-repl--elisp-reload-run
+     "agent-repl: elisp reload FAILED -- %s names no module"
+     "tells the user the reload loaded nothing and why")
+    ("elisp-build.el" agent-repl--elisp-reload-run
+     "agent-repl: elisp reload FAILED -- %s could not be read: %s"
+     "tells the user the reload loaded nothing and why")
+    ("elisp-build.el" agent-repl--elisp-reload-run
+     "agent-repl: elisp reload: %d module(s) failed to load: %s"
+     "tells the user which modules the reload could not load")
     ("emoji.el" agent-repl-install-commit-emoji-hook
      "Backed up existing hook to %s"
      "reports the backup made by the interactive installer")
@@ -382,6 +397,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("input.el" agent-repl--input-on-error
      "agent-repl: %s%s"
      "tells the user their prompt met the cold gate and where to answer it")
+    ("input.el" agent-repl--input-on-error
+     "agent-repl: model change refused%s"
+     "tells the user their /model change was refused, in the refusal's own words")
     ("input.el" agent-repl--input-on-error
      "agent-repl: %s"
      "tells the user the workspace has no session yet and the daemon is starting one")
@@ -455,7 +473,11 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "merge-queue refused: the daemon's registry does not hold repository %S"
      "reports why the user's merge-queue command was refused")
     ("verbs.el" agent-repl-verb-merge-queue "agent-repl: merge queue %s"
-     "confirms the user's merge-queue command"))
+     "confirms the user's merge-queue command")
+    ("verbs.el" agent-repl-verbs--deploy-on-success "agent-repl: deploy%s: %s"
+     "reports every component's decision for the user's deploy command")
+    ("verbs.el" agent-repl-verbs--deploy-on-error "agent-repl: deploy refused: %s"
+     "reports why the user's deploy command was refused, with its detail"))
   "Every permitted production `message' call and its user-facing reason.")
 
 (ert-deftest agent-repl-test-message-sites-are-explicitly-user-facing ()
