@@ -23,11 +23,13 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { fireResize } from "../resize-observer";
 import { WORKSPACE_ID, footerView } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
