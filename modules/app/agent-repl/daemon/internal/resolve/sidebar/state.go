@@ -78,10 +78,10 @@ type wsState struct {
 	vendorBlocked bool
 
 	// viewed is the row's DISPLAY MODE: true once the editor reported that the
-	// user has SEEN this workspace (MarkWorkspaceViewed), false again the
-	// moment the row's status arm changes. It draws the row's name receded and
-	// says nothing about the lifecycle. See `noteArm`, which is the one place
-	// it is cleared.
+	// user has SEEN this workspace (MarkWorkspaceViewed) while it was DONE,
+	// false again the moment the row's status arm changes. It draws the row's
+	// name receded and says nothing about the lifecycle. It can only stand on
+	// a done row: see `noteArm`, which is the one place it is cleared.
 	viewed bool
 	// reviving reports a revival of this workspace's parked session in
 	// flight (SetReviving). It is a marker beside the status, never an arm:
@@ -127,8 +127,21 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	s.permissions = map[string]struct{}{}
 }
 
+// armDone is the one status arm the viewed marker may stand on.
+const armDone = "done"
+
 // noteArm records the arm being published for this workspace and reports
-// whether it CHANGED, clearing the viewed marker when it did.
+// whether it CHANGED, clearing the viewed marker when it did — and whenever
+// the arm is anything but done.
+//
+// VIEWED IS DONE-ONLY. "You have already seen this" is a claim about a
+// FINISHED response; every other arm is live work (thinking, a permission
+// ask) or an exceptional state (severed, dead, vendor_blocked, a merge
+// conflict) that must never be drawn deprioritized, however long the user
+// has looked at it. So a marker standing on any other arm is dropped here,
+// before the row is composed: a MarkWorkspaceViewed that lands while the
+// workspace is not done is refused in the same locked mutation that took it,
+// and PARTIAL is unrepresentable on a published non-done row.
 //
 // THE ONE PLACE THE VIEWED MARKER IS CLEARED, and it hangs off the render
 // rather than off any particular fact-setter deliberately: every origin of a
@@ -144,7 +157,7 @@ func (s *wsState) noteArm(arm string) bool {
 	changed := s.lastArmSeen && s.lastArm != arm
 	s.lastArm = arm
 	s.lastArmSeen = true
-	if changed {
+	if changed || arm != armDone {
 		s.viewed = false
 	}
 	return changed

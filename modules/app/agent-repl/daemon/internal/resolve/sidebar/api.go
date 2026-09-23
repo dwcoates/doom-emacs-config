@@ -73,7 +73,8 @@ type Resolver interface {
 	SetSelected(ws ids.WorkspaceID)
 	// SetViewed raises the workspace's VIEWED marker, which draws its row
 	// PARTIAL — the editor's report that the user has now SEEN this
-	// workspace. There is no lowering setter: the marker is cleared by the
+	// workspace. It takes only on a DONE row; a report on any other arm is
+	// dropped. There is no lowering setter: the marker is cleared by the
 	// row's next status change, which is the reset rule every surface shares.
 	SetViewed(ws ids.WorkspaceID)
 	// SetReviving raises (true) or lowers (false) the workspace's REVIVING
