@@ -67,15 +67,17 @@ export function drawFeedArtifact(u: FeedArtifact, rc: RowContext): HTMLElement {
     case "publishing":
       // The badge IS the state; there is no URL to draw yet, and an empty line
       // where one will appear would read as a page published to nowhere.
-      return agenticBubble({ state: state.case, heading, content: [badge(state.case)] });
+      return agenticBubble({ previous: rc.previous, state: state.case, heading, content: [badge(state.case)] });
     case "published":
       return agenticBubble({
+        previous: rc.previous,
         state: state.case,
         heading,
         content: [badge(state.case), drawFeedArtifactPublished(state.value, rc.ctx, `${PATH}.published`)],
       });
     case "failed":
       return agenticBubble({
+        previous: rc.previous,
         state: state.case,
         heading,
         content: [badge(state.case), drawFeedArtifactFailed(state.value, `${PATH}.failed`)],

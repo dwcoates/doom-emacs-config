@@ -175,3 +175,15 @@ describe("drawFeedUserPrompt: a tree the person typed", () => {
     expect(treeLineWidths(el)).toHaveLength(3);
   });
 });
+
+describe("drawFeedUserPrompt: a re-push", () => {
+  it("updates the previous draw in place, keeping its scroll box", () => {
+    // Arrange
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    const box = first.querySelector(".bubble-scroll");
+    // Act
+    const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]), first);
+    // Assert
+    expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
+  });
+});

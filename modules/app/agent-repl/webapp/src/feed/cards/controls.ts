@@ -148,6 +148,8 @@ export function agenticBubble(opts: {
   heading?: string;
   /** What the state draws under the heading. */
   content: readonly ChildNode[];
+  /** The row's previous draw, updated in place (drawBubble). */
+  previous?: HTMLElement;
 }): HTMLElement {
   const content: ChildNode[] = [];
   if (opts.heading !== undefined) {
@@ -157,12 +159,15 @@ export function agenticBubble(opts: {
     content.push(heading);
   }
   content.push(...opts.content);
-  return drawBubble({
-    role: "response",
-    variant: "agentic",
-    state: opts.state,
-    hooks: ["assistant", "md", AGENTIC_CLASS],
-    content,
-    capLines: "feed",
-  }).bubble;
+  return drawBubble(
+    {
+      role: "response",
+      variant: "agentic",
+      state: opts.state,
+      hooks: ["assistant", "md", AGENTIC_CLASS],
+      content,
+      capLines: "feed",
+    },
+    opts.previous,
+  ).bubble;
 }
