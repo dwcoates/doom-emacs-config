@@ -20,6 +20,7 @@ import {
   revealDelta,
   revealGeometry,
   centerDelta,
+  collapseDelta,
   observeScrollBox,
   latestEntryVisible,
   type RevealGeometry,
@@ -382,7 +383,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the seven causes the owner rule allows", () => {
+  it("names exactly the eight causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -391,6 +392,7 @@ describe("SCROLL_CAUSES", () => {
       "initialPlacement",
       "replaceRestore",
       "prependCompensation",
+      "collapseCompensation",
       "latestVisible",
     ]);
   });
@@ -753,6 +755,81 @@ describe("TailFollow.prependCompensation", () => {
     expect(await moves(capture)).toEqual([
       { cause: "prependCompensation", from: 100, to: 350, follow: false },
     ]);
+  });
+});
+
+/**
+ * A THINKING BUBBLE ABOVE THE READER COLLAPSING (owner rule, 2026-09-23): the
+ * view shifts by exactly the height it lost, so nothing under the reader moves.
+ * The box's top edge is at 100; the row ended at 90 and ends at 40 collapsed.
+ */
+describe("TailFollow.collapseCompensation", () => {
+  const above = { boxTop: 100, rowBottomBefore: 90, rowBottomAfter: 40 };
+
+  it("shifts a reader who is not following by exactly the height lost above them", () => {
+    // Arrange
+    const box = { scrollTop: 500, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.collapseCompensation(above);
+    // Assert
+    expect(box.scrollTop).toBe(450);
+  });
+
+  it("adds nothing on top of a standing follow", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.collapseCompensation(above);
+    // Assert
+    expect(f.box.scrollTop).toBe(1000);
+  });
+
+  it("moves nothing for a row the reader can see", () => {
+    // Arrange
+    const box = { scrollTop: 500, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.collapseCompensation({ boxTop: 100, rowBottomBefore: 250, rowBottomAfter: 200 });
+    // Assert
+    expect(box.scrollTop).toBe(500);
+  });
+
+  it("records nothing when the row's height did not change", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 500, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.collapseCompensation({ boxTop: 100, rowBottomBefore: 90, rowBottomAfter: 90 });
+    // Assert
+    expect(await moves(capture)).toEqual([]);
+  });
+
+  it("is recorded at DEBUG as collapseCompensation", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 500, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.collapseCompensation(above);
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "collapseCompensation", from: 500, to: 450, follow: false },
+    ]);
+  });
+});
+
+describe("collapseDelta", () => {
+  it.each([
+    { name: "a row wholly above the viewport moves the view by its change", before: 90, after: 40, want: -50 },
+    { name: "a row ending exactly at the viewport's top counts as above", before: 100, after: 60, want: -40 },
+    { name: "a row the reader can see any part of moves nothing", before: 101, after: 60, want: 0 },
+  ])("$name", ({ before, after, want }) => {
+    // Arrange
+    const g = { boxTop: 100, rowBottomBefore: before, rowBottomAfter: after };
+    // Act
+    const got = collapseDelta(g);
+    // Assert
+    expect(got).toBe(want);
   });
 });
 

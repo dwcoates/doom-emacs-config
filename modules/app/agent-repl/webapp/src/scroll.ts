@@ -78,6 +78,10 @@ export interface ScrollPosition {
  *   lands at the tail, by the earlier owner ruling of 2026-09-23.
  * - `prependCompensation`: older rows landing above the reader shift the view
  *   by exactly their height, so the content under the reader stays put.
+ * - `collapseCompensation`: a thinking bubble wholly ABOVE the reader collapsed
+ *   because the daemon marked it superseded (a later response landed in its
+ *   feed); the view shifts by exactly the height it lost, so the content under
+ *   the reader stays put. Same semantics as `prependCompensation`.
  * - `latestVisible`: the reader can SEE the feed's latest entry
  *   (`latestEntryVisible`), so the follow latches where the view already is.
  *   Latching moves nothing; later content then keeps the tail in view, and
@@ -92,6 +96,7 @@ export const SCROLL_CAUSES = [
   "initialPlacement",
   "replaceRestore",
   "prependCompensation",
+  "collapseCompensation",
   "latestVisible",
 ] as const;
 
@@ -265,6 +270,21 @@ export class TailFollow {
   prependCompensation(grown: number): void {
     if (this.isFollowing()) return;
     this.shift("prependCompensation", grown);
+  }
+
+  /**
+   * A thinking bubble collapsed when the daemon marked it superseded: when it
+   * lies wholly ABOVE the viewport, shift by exactly the height it lost, so the
+   * content under the reader stays put (`collapseDelta`). A following reader is
+   * already kept at the tail by the follow, so nothing is added on top of it; a
+   * bubble the reader can see, or one whose height did not change (the reader
+   * had expanded it), moves nothing and records nothing.
+   */
+  collapseCompensation(geometry: CollapseGeometry): void {
+    if (this.isFollowing()) return;
+    const delta = collapseDelta(geometry);
+    if (delta === 0) return;
+    this.shift("collapseCompensation", delta);
   }
 
   /**
@@ -574,6 +594,35 @@ export function revealGeometry(box: Element, node: Element): RevealGeometry {
   const b = box.getBoundingClientRect();
   const n = node.getBoundingClientRect();
   return { boxTop: b.top, boxHeight: b.height, nodeTop: n.top, nodeHeight: n.height };
+}
+
+/**
+ * What a collapse compensation reads: the scroll box's top edge and the
+ * collapsing row's bottom edge before and after its redraw, all in viewport
+ * coordinates (`getBoundingClientRect`), so their differences are scroll deltas.
+ */
+export interface CollapseGeometry {
+  /** The scroll box's own top edge. */
+  boxTop: number;
+  /** The row's bottom edge before the redraw that collapsed it. */
+  rowBottomBefore: number;
+  /** The row's bottom edge after it. */
+  rowBottomAfter: number;
+}
+
+/**
+ * How far the box must move for a collapse to leave the content under the
+ * reader where it was.
+ *
+ * Only a row that ended at or above the viewport's top edge is compensated:
+ * everything the reader sees sits below it, so it all moved by exactly the
+ * row's change in height, which is the change in its bottom edge (its top did
+ * not move). A row the reader can see any part of is not: the reader is
+ * watching it collapse. Negative is upward, matching `scrollTop`.
+ */
+export function collapseDelta(g: CollapseGeometry): number {
+  if (g.rowBottomBefore > g.boxTop) return 0;
+  return g.rowBottomAfter - g.rowBottomBefore;
 }
 
 /**
