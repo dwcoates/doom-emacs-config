@@ -1636,3 +1636,13 @@ func (h *harness) recordContext(t *testing.T, level, operation string) dlog.Cont
 	t.Fatalf("no %s/%s record was logged", level, operation)
 	return nil
 }
+
+// withTitle installs a recording title sink, under the watcher's own lock
+// because the stream goroutines read the sink set under it.
+func (h *harness) withTitle() *recordingTitleSink {
+	ts := &recordingTitleSink{}
+	h.w.mu.Lock()
+	h.w.sinks.Title = ts
+	h.w.mu.Unlock()
+	return ts
+}

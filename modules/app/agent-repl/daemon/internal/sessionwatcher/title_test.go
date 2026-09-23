@@ -53,8 +53,7 @@ func TestTheVendorsTitleStopsSynthesis(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	ts := &recordingTitleSink{}
-	h.w.sinks.Title = ts
+	ts := h.withTitle()
 
 	// Act.
 	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(titleUpdate()) })
@@ -69,8 +68,7 @@ func TestAClearResetsTheSynthesizer(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	ts := &recordingTitleSink{}
-	h.w.sinks.Title = ts
+	ts := h.withTitle()
 
 	// Act.
 	h.routeNow(func(w *watcher) {
@@ -87,8 +85,7 @@ func TestATurnEndTriggersSynthesis(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	ts := &recordingTitleSink{}
-	h.w.sinks.Title = ts
+	ts := h.withTitle()
 
 	// Act — a pending turn end flushes to both the lifecycle and title sinks.
 	h.routeNow(func(w *watcher) {
@@ -105,8 +102,7 @@ func TestASessionStartTriggersSynthesis(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	ts := &recordingTitleSink{}
-	h.w.sinks.Title = ts
+	ts := h.withTitle()
 
 	// Act — a resumed/adopted session names itself; the synthesizer is told.
 	h.routeNow(func(w *watcher) { w.applySessionStartedLocked(sessionStarted("")) })
