@@ -7,9 +7,10 @@
  *   - its ROLE, which is its side and its background: a prompt hangs on the
  *     right rail in blue, a response on the left rail in purple;
  *   - its VARIANT and STATE, which select its BORDER and nothing else (the
- *     thinking/pear/green/blue ladder, the compaction divider's own color, the
- *     held prompt's parked frame) — the one exception is the held prompt's
- *     grey-blue background, which the rulings name;
+ *     thinking/pear/green/blue ladder, the compaction divider's own color, a
+ *     user prompt's permanent purple, an agent-to-agent prompt's amber, and a
+ *     held prompt's NONE) — the one exception is the held prompt's grey-blue
+ *     background, which the rulings name;
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;

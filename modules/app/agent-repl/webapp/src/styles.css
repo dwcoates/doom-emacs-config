@@ -174,16 +174,20 @@
      unmistakable among the green answers around it. Only a final-response
      bubble is ever selected, so this is only ever seen replacing the green. */
   --selected-response: #2563eb;
-  /* The prompt bubble's own in-flight border: light purple, worn ONLY while
-     `data-wave="working"` is on the bubble (see `.bubble.user[data-wave=
-     "working"]` below and `armPromptWave` / `setPromptWave` in
-     breathing.ts, drawn from the prompt row's daemon-stated `working`
-     flag) — the SAME attribute that drives the
-     thinking-wave shadow band, so the border can never start or end a frame
-     out of step with the glimmer: one attribute, one lifecycle. Reads clearly
-     against the blue --user fill in this theme; the dark theme lifts it the
-     same way --final-response lifts for its own dark fill. */
+  /* The USER prompt bubble's border: light purple, worn PERMANENTLY (owner
+     ruling, 2026-09-23) — in flight and after its turn resolves alike, so it
+     is independent of the `working` flag and the wave. It used to be keyed on
+     `data-wave="working"` and vanish at the turn's terminal; the name is kept
+     because the token is the vocabulary other surfaces are written in. Reads
+     clearly against the blue --user fill in this theme; the dark theme lifts
+     it the same way --final-response lifts for its own dark fill. */
   --prompt-live-border: #c084fc;
+  /* THE AGENT-TO-AGENT PROMPT'S BORDER (owner ruling, 2026-09-23): the one
+     amber every prompt one agent addresses to another wears — the
+     agent-addressed prompt row (the lead's or any agent's send, and its
+     delivered copy) and the peer message alike. Its own token rather than
+     --async's, which means background work; the dark theme lifts it. */
+  --agent-prompt-border: #f59e0b;
   /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
      datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
@@ -367,6 +371,8 @@
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
     --prompt-live-border: #d8b4fe;
+    /* Brighter amber for the dark theme, as the other state borders lift. */
+    --agent-prompt-border: #fbbf24;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
     /* Brighter token yellow for the dark theme, so the figure reads on the
@@ -1508,17 +1514,22 @@ pre {
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
 }
-/* The in-flight prompt's light-purple border. Keyed on the SAME
-   `data-wave="working"` attribute the glimmer above reads, rather than a
-   separate class or JS toggle, so the two can never desync: whatever sets or
-   clears the attribute at the glimmer's own start/end drives this border too,
-   by construction. Only the color changes — `.bubble`'s base rule already
-   reserves the 0.3px border box for every bubble, so this never reflows the
-   feed. Static, not animated: the attribute's presence is itself the signal,
-   so it survives `prefers-reduced-motion` (which only stops the wave's
-   animation above) unchanged. */
-.bubble[data-role="prompt"][data-wave="working"] {
+/* THE PROMPT BORDERS (owner ruling, 2026-09-23). A border lands on a prompt
+   once it is RECEIVED — in flight or completed — and stays: none of these is
+   keyed on `data-wave`, so the turn resolving takes nothing away, and nothing
+   here animates. A HELD prompt in the tray has not been received and wears NO
+   border (only the base rule's transparent reservation).
+   The USER prompt wears the light purple, recoloring the 0.3px the base rule
+   already reserves, so it never reflows the feed. */
+.bubble[data-role="prompt"][data-variant="user"] {
   border-color: var(--prompt-live-border);
+}
+/* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
+   lead or any agent to another, on either end) and the peer message — is the
+   same blue prompt bubble in the one amber. */
+.bubble[data-role="prompt"][data-variant="agent"],
+.bubble[data-role="prompt"][data-variant="peer"] {
+  border: 1px solid var(--agent-prompt-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
@@ -2552,17 +2563,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    A queued message is PARKED, not active. It must read as plainly distinct
    from a live prompt bubble, so the user sees the message is waiting for later
    and is explicitly NOT interrupting the running turn unless escalated: its
-   grey-blue held fill and its DASHED frame (a solid one is the live bubble's)
-   carry that, and everything else is the one bubble's. */
-/* THE HELD PROMPT'S FRAME (owner rulings, 2026-09-23): a held prompt is a
-   prompt-role bubble (src/tray/held-prompt.ts) on the grey-blue held fill
-   (`--held-prompt-bg`), and its variant sets its BORDER: DASHED in the very
-   --user blue the live bubble fills with, so parked it still reads as the
-   user's own prompt held back. A hold that is not the turn's names its own
-   frame below. */
-.bubble[data-variant="held"] {
-  border: 1px dashed var(--user);
-}
+   grey-blue held fill carries that, and everything else is the one bubble's.
+   A HELD PROMPT HAS NO BORDER (owner ruling, 2026-09-23): a border lands only
+   once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
+   frame, the lease hold's amber and the keep-alive hold's teal are gone; the
+   hold's badge alone says what holds it. */
 .queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
 /* The status pill: "queued — classifying…" → "queued — waiting" or
    "interrupting…". An interrupt lights up in the in-flight orange the rest
@@ -2599,18 +2604,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* --- the drain-lease bubble (render.ts LeaseHeldCard) ---------------------
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
    shares the queued card's geometry (same column, same fit-content width) so
-   it sits in the feed as one more parked prompt, and departs from it in
-   the cue that carries meaning: the border goes SOLID in the merge/bounce
-   amber rather than dashed user-blue.
-   The dashed blue card means "waiting on the turn above you"; this one means
-   "waiting on the whole daemon", and the reader must not have to read the
-   badge to tell them apart. */
-.bubble[data-variant="held"].lease-card {
-  border: 1px solid var(--merge-border);
-}
-/* The badge says WHY, and takes the same amber so the pill and the frame
-   agree — it is never the classifier's grey, because no classification
-   happened. */
+   it sits in the feed as one more parked prompt. Its `.lease-card` hook once
+   selected a solid merge-amber frame; a held prompt has no border now (owner
+   ruling, 2026-09-23), so the badge carries the distinction. */
+/* The badge says WHY, in the merge/bounce amber — it is never the
+   classifier's grey, because no classification happened. */
 .queued-badge.lease {
   color: var(--merge-border);
   border-color: var(--merge-border);
@@ -2628,12 +2626,10 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    out of hibernation, so it belongs to that vocabulary, and it is the
    textbook teal case — nothing is wired to this prompt yet, and nothing is
    wrong. The amber is spent on coordinated daemon work (merges, bounces),
-   which this is not. */
-.bubble[data-variant="held"].keep-alive-card {
-  border: 1px solid var(--hibernated);
-}
-/* The badge takes the same teal so pill and frame agree. Never the
-   classifier's grey: no classification happened, and none will. */
+   which this is not. Its `.keep-alive-card` hook once selected a teal frame;
+   a held prompt has no border now (owner ruling, 2026-09-23). */
+/* The badge takes the hibernation teal. Never the classifier's grey: no
+   classification happened, and none will. */
 .queued-badge.keep-alive {
   color: var(--hibernated);
   border-color: var(--hibernated);
@@ -4595,8 +4591,6 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.7rem;
   color: var(--muted);
 }
-/* An AGENT-addressed prompt wears the orange border the schema names for it. */
-.bubble[data-role="prompt"][data-variant="agent"] { border: 1px solid var(--thinking); }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
 /* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
    it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
