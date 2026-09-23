@@ -249,14 +249,18 @@ func (t *Tailer) Commit(r PollResult) {
 }
 
 // readAt reads len(buf) bytes at off from path.
-func readAt(path string, buf []byte, off int64) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
+func readAt(path string, buf []byte, off int64) (err error) {
+	f, openErr := os.Open(path)
+	if openErr != nil {
+		return openErr
 	}
-	defer f.Close()
-	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
-		return fmt.Errorf("tail: reading %d bytes at %d from %s: %w", len(buf), off, path, err)
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("tail: close %s after reading it: %w", path, closeErr))
+		}
+	}()
+	if _, readErr := f.ReadAt(buf, off); readErr != nil && readErr != io.EOF {
+		return fmt.Errorf("tail: reading %d bytes at %d from %s: %w", len(buf), off, path, readErr)
 	}
 	return nil
 }
