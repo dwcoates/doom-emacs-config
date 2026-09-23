@@ -1807,3 +1807,19 @@ describe("no bubble content scrolls horizontally", () => {
     },
   );
 });
+
+describe("a double-width character in a tree", () => {
+  it("is drawn in an inline box exactly two columns of the tree font wide", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".mp-wide") ?? "";
+    // Assert
+    expect([/display:\s*inline-block/.test(rule), /width:\s*2ch/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("keeps the tree's own font, so `ch` is one of the tree's columns", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".mp-wide") ?? "";
+    // Assert — no font of its own to change what `ch` measures.
+    expect(rule).not.toMatch(/font/);
+  });
+});

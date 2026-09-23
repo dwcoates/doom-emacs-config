@@ -1814,6 +1814,9 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .mp-tree { font-family: ui-monospace, monospace; font-size: calc(0.85rem * var(--feed-text-scale)); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-prefix, .mp-content { white-space: pre-wrap; }
+/* A double-width character (an emoji above all) is drawn in a box exactly the
+   two columns the wrapper counts it as, whatever its glyph's own advance. */
+.mp-wide { display: inline-block; width: 2ch; text-align: center; }
 .mp-blank { height: 0.7em; }
 
 .thinking {
