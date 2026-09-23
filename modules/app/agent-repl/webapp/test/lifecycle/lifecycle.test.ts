@@ -44,9 +44,27 @@ import {
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { WebWorkspaceSessionIdentitySchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import { ForwardingLogger, bindLogContext, log, resetLoggingForTests, setLogger } from "../../src/log.js";
+import { WebappBuildUnknown } from "../../src/webapp-build.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
+
+/**
+ * `startLifecycle` reads THIS page's own build (`readWebappBuild`) before it
+ * opens anything, off the document's own built entry `<script>` tag — a tag
+ * the real page never runs without, since Vite writes it. Every test in this
+ * file gets the same stand-in so `startLifecycle` is called the way it is in
+ * production, and each test starts and ends with a clean `<head>`.
+ */
+beforeEach(() => {
+  const entry = document.createElement("script");
+  entry.setAttribute("type", "module");
+  entry.setAttribute("src", "/assets/index-testbuild.js");
+  document.head.append(entry);
+});
+afterEach(() => {
+  document.head.innerHTML = "";
+});
 
 /** Records every report/retract/suppress, so a test can assert the arms. */
 class RecordingSink implements FailureSink {
@@ -381,10 +399,11 @@ function lifecycleClient(script: {
   daemon?: () => AsyncIterable<WatchDaemonResponse>;
   adopt?: () => AdoptWebWorkspaceResponse;
 }) {
-  const state = { adoptCalls: 0 };
+  const state = { adoptCalls: 0, webRequests: [] as Array<{ webappBuild: string }> };
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
-      watchWebWorkspace: async function* () {
+      watchWebWorkspace: async function* (request) {
+        state.webRequests.push({ webappBuild: request.webappBuild });
         for await (const push of script.web?.() ?? []) {
           yield create(WatchWebWorkspaceResponseSchema, push as never);
         }
@@ -453,6 +472,19 @@ describe("startLifecycle: the handover", () => {
     handle.dispose();
   });
 
+  it("carries this page's own webapp build on the WatchWebWorkspace request", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client, state } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT: read off the entry tag `beforeEach` above wrote into the document.
+    expect(state.webRequests).toEqual([{ webappBuild: "testbuild" }]);
+  });
+
   it("quiesces the page, so nothing more is sent on this client", async () => {
     // ARRANGE
     const host = document.createElement("div");
@@ -493,6 +525,18 @@ describe("startLifecycle: the handover", () => {
     handle.dispose();
     // ASSERT
     expect(sink.reported.map((k) => k.kind.case)).not.toContain("daemonUnreachable");
+  });
+
+  it("throws rather than opening WatchWebWorkspace when the page has no built entry tag", async () => {
+    // ARRANGE: remove the entry tag `beforeEach` above wrote.
+    document.head.innerHTML = "";
+    const host = document.createElement("div");
+    const { client, state } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT + ASSERT
+    expect(() => startLifecycle(ctx, { drainBannerHost: host })).toThrow(WebappBuildUnknown);
+    await settle();
+    expect(state.webRequests).toEqual([]);
   });
 
   it("refuses a web-link push naming no arm", async () => {
