@@ -2,8 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTicker } from "../../src/clock.js";
 import {
+  DISCARD_ATTRIBUTE,
   TICKING_ATTRIBUTE,
+  onDiscard,
   replaceTicking,
+  stopClocks,
   stopTicking,
   tick,
 } from "../../src/feed/ticking.js";
@@ -161,5 +164,152 @@ describe("replaceTicking", () => {
     host.append(document.createElement("span"));
     replaceTicking(host);
     expect(host.children).toHaveLength(0);
+  });
+});
+
+describe("onDiscard", () => {
+  it("marks the element as holding a discard hook", () => {
+    // Arrange
+    const el = document.createElement("span");
+
+    // Act
+    onDiscard(el, () => {});
+
+    // Assert
+    expect(el.hasAttribute(DISCARD_ATTRIBUTE)).toBe(true);
+  });
+
+  it("never marks the element as ticking, since a hook is not a clock", () => {
+    // Arrange
+    const el = document.createElement("span");
+
+    // Act
+    onDiscard(el, () => {});
+
+    // Assert
+    expect(el.hasAttribute(TICKING_ATTRIBUTE)).toBe(false);
+  });
+
+  it("runs every hook one element registered when it is discarded", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const ran: string[] = [];
+    onDiscard(el, () => ran.push("a"));
+    onDiscard(el, () => ran.push("b"));
+
+    // Act
+    stopTicking(el);
+
+    // Assert
+    expect(ran).toEqual(["a", "b"]);
+  });
+
+  it("runs a descendant's hook when its ancestor is discarded", () => {
+    // Arrange
+    const row = document.createElement("div");
+    const box = document.createElement("div");
+    row.append(box);
+    let ran = 0;
+    onDiscard(box, () => (ran += 1));
+
+    // Act
+    stopTicking(row);
+
+    // Assert
+    expect(ran).toBe(1);
+  });
+
+  it("runs a hook once, however often its element is discarded", () => {
+    // Arrange
+    const el = document.createElement("span");
+    let ran = 0;
+    onDiscard(el, () => (ran += 1));
+
+    // Act
+    stopTicking(el);
+    stopTicking(el);
+
+    // Assert
+    expect(ran).toBe(1);
+  });
+
+  it("clears the marker once the hooks have run", () => {
+    // Arrange
+    const el = document.createElement("span");
+    onDiscard(el, () => {});
+
+    // Act
+    stopTicking(el);
+
+    // Assert
+    expect(el.hasAttribute(DISCARD_ATTRIBUTE)).toBe(false);
+  });
+
+  it("is not counted as a stopped clock by a discard", () => {
+    // Arrange
+    const el = document.createElement("span");
+    onDiscard(el, () => {});
+
+    // Act / Assert
+    expect(stopTicking(el)).toBe(0);
+  });
+});
+
+describe("stopClocks", () => {
+  it("unsubscribes a descendant's clock", () => {
+    // Arrange
+    const row = document.createElement("div");
+    const clock = document.createElement("span");
+    row.append(clock);
+    let ticks = 0;
+    tick(clock, createTicker(1000), () => (ticks += 1));
+
+    // Act
+    stopClocks(row);
+    vi.advanceTimersByTime(5000);
+
+    // Assert
+    expect(ticks).toBe(1);
+  });
+
+  it("counts the elements whose clocks it stopped", () => {
+    // Arrange
+    const row = document.createElement("div");
+    const clock = document.createElement("span");
+    row.append(clock);
+    tick(row, createTicker(1000), () => {});
+    tick(clock, createTicker(1000), () => {});
+
+    // Act / Assert
+    expect(stopClocks(row)).toBe(2);
+  });
+
+  it("leaves a discard hook in place, because the element stays on screen", () => {
+    // Arrange
+    const row = document.createElement("div");
+    const box = document.createElement("div");
+    row.append(box);
+    let ran = 0;
+    onDiscard(box, () => (ran += 1));
+
+    // Act
+    stopClocks(row);
+
+    // Assert
+    expect(ran).toBe(0);
+  });
+
+  it("leaves the hook for the discard that follows it", () => {
+    // Arrange
+    const row = document.createElement("div");
+    let ran = 0;
+    onDiscard(row, () => (ran += 1));
+    stopClocks(row);
+
+    // Act
+    stopTicking(row);
+
+    // Assert
+    expect(ran).toBe(1);
   });
 });
