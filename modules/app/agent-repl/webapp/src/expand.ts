@@ -17,6 +17,7 @@
  * makes lives in the pure helpers above it.
  */
 import { ancestorMatching } from "./dom.js";
+import { collapseClicked } from "./scroll.js";
 
 /**
  * Classes that mark a click-to-expand section — the thing the feed-wide click
@@ -251,13 +252,10 @@ export function installClickExpand(
     });
     if (section === null) return;
     const expanded = toggleExpanded(section);
-    // FIX3 (owner ruling, 2026-09-15: "unselecting the expanded bubble should
-    // return it to the original state — scrolled to the top, not where you left
-    // it"). Collapsing clips the box (overflow-y: hidden), which keeps whatever
-    // scrollTop the expanded view was left at and shows the box from there. Reset
-    // it so the next collapsed view — and a subsequent re-expand — starts at the
-    // top.
-    if (!expanded) section.scrollTop = 0;
+    // FIX3 (owner ruling, 2026-09-15): a collapse shows the preview from the
+    // top. The reader's own click is what moves the box, so the write lives in
+    // scroll.ts with every other scroll write (`collapseClicked`).
+    if (!expanded) collapseClicked(section);
     afterToggle?.(section, expanded);
   });
 }

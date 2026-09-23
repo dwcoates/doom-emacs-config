@@ -275,7 +275,7 @@ export async function boot(): Promise<void> {
     // prompt-wave-driver.ts for the whole account.
     createPromptWaveDriver().start();
 
-    const footer = mountFooter(shell.footer, ctx, { revealRow: (id) => feed.revealRow(id) });
+    const footer = mountFooter(shell.footer, ctx, { selectDetachedWork: (id) => feed.selectDetachedWork(id) });
     // THE GATE IS THE FOOTER'S OWN WORD (R7). A composer closes while the
     // workspace is merging, closing, or disconnected, and the sentence it
     // shows is the footer's status arm rather than a second vocabulary this

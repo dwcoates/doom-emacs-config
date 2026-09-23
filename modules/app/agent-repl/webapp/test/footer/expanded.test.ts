@@ -50,7 +50,7 @@ function drawPanel(
   const revealed: FeedId[] = [];
   const h = harness();
   const panel = drawFooterExpanded(view ?? expanded(init), selection, { ctx: h.ctx, stops: createStopControls(h.ctx),
-    revealRow: async (id) => {
+    selectDetachedWork: async (id) => {
       revealed.push(id);
       return reached;
     },
@@ -71,7 +71,7 @@ function activity(kindCase: string, kindValue: Record<string, unknown>): FooterA
 function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
   const h = harness();
   const panel = drawFooterExpanded(expanded(), "tokens", { ctx: h.ctx, stops: createStopControls(h.ctx),
-    revealRow: async () => true,
+    selectDetachedWork: async () => true,
     activity: kind,
   });
   if (panel === null) throw new Error("the panel was not drawn");
@@ -180,7 +180,7 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   it("draws NOTHING when no strip element is selected", () => {
     const h = harness();
     expect(
-      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx), revealRow: async () => true }),
+      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx), selectDetachedWork: async () => true }),
     ).toBeNull();
   });
 
@@ -199,7 +199,7 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
     const h = harness();
     expect(() =>
       drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", { ctx: h.ctx, stops: createStopControls(h.ctx),
-        revealRow: async () => true,
+        selectDetachedWork: async () => true,
       }),
     ).toThrow(MalformedView);
   });
@@ -437,7 +437,7 @@ describe("the agents panel", () => {
       drawFooterExpanded(expanded({ agents: [] }), "agents", {
         ctx: h.ctx,
         stops: createStopControls(h.ctx),
-        revealRow: async () => true,
+        selectDetachedWork: async () => true,
       }),
     ).toBeNull();
   });
@@ -455,7 +455,7 @@ describe("the agents panel", () => {
     const panel = drawFooterExpanded(expanded({ agents: [] }), "agents", {
       ctx: h.ctx,
       stops,
-      revealRow: async () => true,
+      selectDetachedWork: async () => true,
     });
     expect(panel).not.toBeNull();
     expect(panel?.querySelector(".footer-stop-note")?.textContent).toBe("stopped 4 agents");
@@ -680,7 +680,7 @@ describe("an arm this build has no case for", () => {
     // ACT / ASSERT
     expect(() =>
       drawFooterExpanded(expanded(), "sessions" as FooterPanel, { ctx: h.ctx, stops: createStopControls(h.ctx),
-        revealRow: async () => true,
+        selectDetachedWork: async () => true,
       }),
     ).toThrow(MalformedView);
   });
