@@ -165,6 +165,10 @@ type storeProcess struct {
 	dbPath     string
 	logPath    string
 	stderrPath string
+	// lockDir is AGENT_REPL_LOCK_DIR for the child: a per-test directory, so
+	// the boot's build-report write (agentrepl/logging/buildreport) never
+	// lands in the owner's real ~/.cache/agent-repl/run.
+	lockDir string
 
 	cmd  *exec.Cmd
 	done chan struct{}
@@ -196,6 +200,7 @@ func startStore(t *testing.T, opts storeOptions) *storeProcess {
 		dbPath:     opts.dbPath,
 		logPath:    opts.logPath,
 		stderrPath: filepath.Join(work, "shim-store.stderr"),
+		lockDir:    filepath.Join(work, "run"),
 	}
 	s.launch()
 	t.Cleanup(s.stop)
@@ -234,7 +239,7 @@ func (s *storeProcess) launch() {
 		envSocket = s.socket
 	}
 	cmd := exec.Command(storeBinary, args...)
-	cmd.Env = storeEnv(envSocket, s.opts.verbose)
+	cmd.Env = storeEnv(envSocket, s.lockDir, s.opts.verbose)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 
@@ -263,14 +268,19 @@ func (s *storeProcess) launch() {
 }
 
 // storeEnv is the child's environment: the private socket as the documented
-// default, the vendor-call guard on, and info logging unless the subject
-// asked for it.
-func storeEnv(socket string, verbose bool) []string {
-	env := make([]string, 0, len(os.Environ())+3)
+// default, the vendor-call guard on, info logging unless the subject asked
+// for it, and a private AGENT_REPL_LOCK_DIR.
+//
+// THE LOCK DIR IS NOT OPTIONAL. It is also where the boot's build report
+// (agentrepl/logging/buildreport) lands, and a real store spawned without it
+// would overwrite the owner's own ~/.cache/agent-repl/run/shim-store.build.json.
+func storeEnv(socket, lockDir string, verbose bool) []string {
+	env := make([]string, 0, len(os.Environ())+4)
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "AGENT_REPL_LOG_LEVEL=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_STORE_SOCKET=") ||
-			strings.HasPrefix(kv, "AGENT_REPL_FORBID_VENDOR_CALLS=") {
+			strings.HasPrefix(kv, "AGENT_REPL_FORBID_VENDOR_CALLS=") ||
+			strings.HasPrefix(kv, "AGENT_REPL_LOCK_DIR=") {
 			continue
 		}
 		env = append(env, kv)
@@ -278,12 +288,39 @@ func storeEnv(socket string, verbose bool) []string {
 	env = append(env,
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		"AGENT_REPL_LOCK_DIR="+lockDir,
 		"AGENT_REPL_LOG_LEVEL=info",
 	)
 	if verbose {
 		env[len(env)-1] = "AGENT_REPL_LOG_LEVEL=debug"
 	}
 	return env
+}
+
+// TestStoreEnvSetsAPrivateLockDir is the hermeticity regression: a real store
+// spawned by this harness must never resolve its boot build-report
+// (agentrepl/logging/buildreport) into the owner's real
+// ~/.cache/agent-repl/run, which AGENT_REPL_LOCK_DIR redirects.
+func TestStoreEnvSetsAPrivateLockDir(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_LOCK_DIR", "/should-never-survive")
+
+	// Act.
+	env := storeEnv("/tmp/store.sock", "/private/tmp/this-test-lock-dir", false)
+
+	// Assert.
+	var found int
+	for _, kv := range env {
+		if kv == "AGENT_REPL_LOCK_DIR=/private/tmp/this-test-lock-dir" {
+			found++
+		}
+		if kv == "AGENT_REPL_LOCK_DIR=/should-never-survive" {
+			t.Fatalf("env carried the ambient AGENT_REPL_LOCK_DIR instead of the harness's private one: %v", env)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("env = %v, want exactly one AGENT_REPL_LOCK_DIR entry naming the harness's private dir", env)
+	}
 }
 
 // awaitReady polls the socket under a deadline, failing at once if the process

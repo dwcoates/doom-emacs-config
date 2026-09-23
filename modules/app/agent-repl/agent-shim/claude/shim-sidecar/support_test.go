@@ -22,7 +22,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 
@@ -157,7 +159,11 @@ func shortSocket(t *testing.T) string {
 		t.Fatalf("generating socket suffix: %v", err)
 	}
 	path := filepath.Join(os.TempDir(), "ar-"+hex.EncodeToString(raw)+".sock")
-	t.Cleanup(func() { os.Remove(path) })
+	t.Cleanup(func() {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Errorf("removing socket %s: %v", path, err)
+		}
+	})
 	return path
 }
 
@@ -216,7 +222,9 @@ func (h *harness) serve(t *testing.T, store *fakeStore) {
 		_ = server.Serve(listener)
 	}()
 	t.Cleanup(func() {
-		server.Close()
+		if err := server.Close(); err != nil {
+			t.Errorf("closing the fake store's server: %v", err)
+		}
 		<-served
 	})
 }
