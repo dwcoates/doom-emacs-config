@@ -13,6 +13,9 @@ import { describe, expect, it } from "vitest";
 import {
   HAS_MORE_CLASS,
   MORE_BUBBLE_SELECTOR,
+  TITLE_FOLD_CLASS,
+  TITLE_FOLD_OPEN_SELECTOR,
+  installHasMore,
   overflowsCap,
   refreshHasMore,
   shouldShowMore,
@@ -192,5 +195,79 @@ describe("installHasMore: the box tracks its own overflow", () => {
 
     // Assert — nothing watches it any more, so firing throws.
     expect(() => fireResize(scroll)).toThrow();
+  });
+});
+
+/** A real title-fold element under an owner of the given shape. */
+function titleUnder(owner: "tool-fold" | "bubble-fold" | "none", open: boolean): HTMLElement {
+  const title = document.createElement("span");
+  title.className = TITLE_FOLD_CLASS;
+  Object.defineProperty(title, "clientHeight", { configurable: true, value: 40 });
+  Object.defineProperty(title, "scrollHeight", { configurable: true, value: 120 });
+  if (owner === "none") {
+    if (open) title.classList.add(EXPANDED_CLASS);
+    return title;
+  }
+  const card = document.createElement("div");
+  if (owner === "tool-fold") {
+    card.className = open ? "tool-card tool-fold expanded" : "tool-card tool-fold";
+    card.append(title);
+    return title;
+  }
+  card.className = "tool-card bubble-fold";
+  card.setAttribute("data-expanded", open ? "true" : "false");
+  const head = document.createElement("div");
+  head.className = "tool-head bubble-head";
+  head.append(title);
+  card.append(head);
+  return title;
+}
+
+describe("shouldShowMore: a card title is the other kind it serves", () => {
+  it.each([
+    ["a collapsed tool-fold card", "tool-fold", false, true],
+    ["an expanded tool-fold card", "tool-fold", true, false],
+    ["a collapsed bubble", "bubble-fold", false, true],
+    ["an expanded bubble", "bubble-fold", true, false],
+    ["a collapsed standalone title", "none", false, true],
+    ["an expanded standalone title", "none", true, false],
+  ] as const)("an overflowing title under %s shows: %s", (_label, owner, open, shows) => {
+    // Arrange
+    const title = titleUnder(owner, open);
+
+    // Act / Assert
+    expect(shouldShowMore(title)).toBe(shows);
+  });
+
+  it("never shows on a title that fits its two lines", () => {
+    // Arrange
+    const title = titleUnder("tool-fold", false);
+    Object.defineProperty(title, "scrollHeight", { configurable: true, value: 40 });
+
+    // Act / Assert
+    expect(shouldShowMore(title)).toBe(false);
+  });
+
+  it("reads each owner's open state through one selector list", () => {
+    // Arrange / Act / Assert — the stylesheet's lift rule lists the same three.
+    expect(TITLE_FOLD_OPEN_SELECTOR).toBe(
+      `.${TITLE_FOLD_CLASS}.${EXPANDED_CLASS}, .tool-fold.${EXPANDED_CLASS} .${TITLE_FOLD_CLASS}, ` +
+        `.bubble-fold[data-expanded="true"] > .bubble-head .${TITLE_FOLD_CLASS}`,
+    );
+  });
+});
+
+describe("installHasMore: a caller's refresh", () => {
+  it("runs the refresh the caller hands it on a resize", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const seen: HTMLElement[] = [];
+    installHasMore(box, (b) => seen.push(b));
+
+    // Act
+    fireResize(box);
+
+    // Assert
+    expect(seen).toEqual([box]);
   });
 });
