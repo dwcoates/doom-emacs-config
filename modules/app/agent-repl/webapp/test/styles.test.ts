@@ -1796,36 +1796,27 @@ describe("the feed viewport as the async bubble cap's size container", () => {
 });
 
 /**
- * THE HELD PROMPT'S ONE-LINE FOLD (owner ruling, 2026-09-23): collapsed, only
- * the first line shows, clamped to one row; expanded, only the whole prompt.
+ * THE HELD PROMPT IS A BUBBLE (owner rulings, 2026-09-23, superseding the
+ * one-line fold of the same day): it collapses at two lines through the one cap
+ * rule, and keeps no private fold of its own.
  */
-describe("the held prompt's one-line fold", () => {
-  it("hides the whole prompt while the fold is collapsed", () => {
+describe("the held prompt's collapse", () => {
+  it("keeps no private fold rule", () => {
     // Arrange / Act
-    const rule = declarationsOf(".held-fold:not(.expanded) > .queued-content");
+    const folds = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.held-(?:fold|line|foldable)\b|\.queued-content\b/.test(sel)),
+    );
     // Assert
-    expect(rule).toMatch(/display:\s*none/);
+    expect(folds.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("hides the first-line face once the fold is expanded", () => {
+  it("frames a held prompt in the dashed prompt blue, its variant's border", () => {
     // Arrange / Act
-    const rule = declarationsOf(".held-fold.expanded > .held-line");
+    const frames = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.includes('.bubble[data-variant="held"]') && /border:/.test(rule.declarations),
+    );
     // Assert
-    expect(rule).toMatch(/display:\s*none/);
-  });
-
-  it("clamps the first-line face to one row", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".held-line");
-    // Assert
-    expect(rule).toMatch(/-webkit-line-clamp:\s*1/);
-  });
-
-  it("wears the feed's zoom-in cursor only on a fold with more to show", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".held-fold.held-foldable");
-    // Assert
-    expect(rule).toMatch(/cursor:\s*zoom-in/);
+    expect(frames.map((rule) => rule.declarations.trim())).toEqual(["border: 1px dashed var(--user);"]);
   });
 });
 

@@ -2570,26 +2570,19 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 
 /* --- §2.13 in-flight message queue ----------------------------------------
-   A queued message is PARKED, not active. It must read as subdued and
-   plainly distinct from a live .bubble.user, so the user sees the message
-   is waiting for later and is explicitly NOT interrupting the running turn
-   unless escalated. Three cues carry that: the DASHED border (a solid one
-   is the live bubble's), the reduced OPACITY, and the muted card grey — the
-   opposite of the user bubble's saturated fill. The dash is drawn in the
-   very --user blue the live bubble fills with, so even parked the card reads
-   as the user's own prompt held back rather than a foreign chrome. It fits
-   its own text; WHICH RAIL it hangs on is `.held-right`'s to say, in the hold
-   tray's own section below, because that is a statement about whose words
-   these are and not about how a parked card is framed. */
-.queued-card {
-  width: fit-content;
+   A queued message is PARKED, not active. It must read as plainly distinct
+   from a live prompt bubble, so the user sees the message is waiting for later
+   and is explicitly NOT interrupting the running turn unless escalated: its
+   grey-blue held fill and its DASHED frame (a solid one is the live bubble's)
+   carry that, and everything else is the one bubble's. */
+/* THE HELD PROMPT'S FRAME (owner rulings, 2026-09-23): a held prompt is a
+   prompt-role bubble (src/tray/held-prompt.ts) on the grey-blue held fill
+   (`--held-prompt-bg`), and its variant sets its BORDER: DASHED in the very
+   --user blue the live bubble fills with, so parked it still reads as the
+   user's own prompt held back. A hold that is not the turn's names its own
+   frame below. */
+.bubble[data-variant="held"] {
   border: 1px dashed var(--user);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-  font-size: calc(0.85rem * var(--feed-text-scale));
-  opacity: 0.8;
 }
 .queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
 /* The status pill: "queued — classifying…" → "queued — waiting" or
@@ -2613,9 +2606,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   border-color: var(--muted);
   font-weight: 700;
 }
-/* The user's own words stay upright and legible at full color — the subdued
-   chrome is around them, not on them. */
-.queued-content { color: var(--fg); }
 /* The classifier's one-line reason reads as an aside: muted and italic. */
 .queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
@@ -2631,15 +2621,13 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
    shares the queued card's geometry (same column, same fit-content width) so
    it sits in the feed as one more parked prompt, and departs from it in
-   every cue that carries meaning: the border goes SOLID in the merge/bounce
-   amber rather than dashed user-blue, and the card carries the bounce wash.
+   the cue that carries meaning: the border goes SOLID in the merge/bounce
+   amber rather than dashed user-blue.
    The dashed blue card means "waiting on the turn above you"; this one means
    "waiting on the whole daemon", and the reader must not have to read the
    badge to tell them apart. */
-.queued-card.lease-card {
+.bubble[data-variant="held"].lease-card {
   border: 1px solid var(--merge-border);
-  background: var(--merge-card);
-  opacity: 1;
 }
 /* The badge says WHY, and takes the same amber so the pill and the frame
    agree — it is never the classifier's grey, because no classification
@@ -2662,10 +2650,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    textbook teal case — nothing is wired to this prompt yet, and nothing is
    wrong. The amber is spent on coordinated daemon work (merges, bounces),
    which this is not. */
-.queued-card.keep-alive-card {
+.bubble[data-variant="held"].keep-alive-card {
   border: 1px solid var(--hibernated);
-  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
-  opacity: 1;
 }
 /* The badge takes the same teal so pill and frame agree. Never the
    classifier's grey: no classification happened, and none will. */
@@ -2675,16 +2661,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   font-weight: 700;
 }
 
-/* --- The revival hold bubble (render.ts `RevivalHeldCard`) ---------------
-   A prompt parked behind a compact-first revival whose compaction has not
-   landed. Same shape and same hibernation teal as the keep-alive card above:
-   both are "held by the hibernation machinery, never classified, cannot be
-   forced", and a revival is that vocabulary's own event. */
-.queued-card.revival-card {
-  border: 1px solid var(--hibernated);
-  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
-  opacity: 1;
-}
 .queued-badge.revival {
   color: var(--hibernated);
   border-color: var(--hibernated);
@@ -4659,20 +4635,6 @@ bubble-body.bubble-body { display: block; }
 
 /* ---- hold tray (src/tray) ---------------------------------------------- */
 
-/* THE HELD PROMPT HANGS ON THE PROMPT RAIL (owner ruling 1, 2026-09-13). A
-   held prompt is the user's own words on their way to becoming a
-   `.bubble.user`, so it sits on the side that bubble sits on and obeys that
-   bubble's width rule — the same 60% cap and the same half-leftover right
-   margin, so a released prompt does not jump rails as it is released. It used
-   to hug the agent's LEFT rail, which said the wrong thing about whose words
-   these are. Only the rail changes: the parked frame, fill, opacity and
-   type are `.queued-card`'s and are untouched. */
-.queued-card.held-right {
-  max-width: 60%;
-  margin-left: auto;
-  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
-}
-
 /* The items list. Delimited by the one shared `.list-rows` rule, so a held
    prompt is separated from the next exactly as a footer panel's rows are. */
 .hold-tray-items > * + * { padding-top: 0.5rem; }
@@ -4716,28 +4678,6 @@ bubble-body.bubble-body { display: block; }
   content: "✓";
   margin-right: 0.2rem;
 }
-/* The prompt's own words, at full color inside the subdued chrome. */
-.queued-text > *:first-child { margin-top: 0; }
-.queued-text > *:last-child { margin-bottom: 0; }
-/* THE FIRST LINE ONLY, until the reader opens the prompt (owner ruling,
-   2026-09-23). Collapsed, the fold shows `.held-line` — the first line alone —
-   clamped to ONE ROW by the tool card's input-line clamp, and the whole prompt
-   (`.queued-content`) is not drawn; expanded, the reverse. The toggle is the
-   feed's own `.expanded` class and its zoom cursors, worn only by a fold with
-   something past its first line (`held-foldable`), so a prompt that fits
-   offers nothing to open. */
-.held-fold:not(.expanded) > .queued-content { display: none; }
-.held-fold.expanded > .held-line { display: none; }
-.held-line {
-  color: var(--fg);
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.held-line > * { margin-top: 0; margin-bottom: 0; }
-.held-fold.held-foldable { cursor: zoom-in; }
-.held-fold.held-foldable.expanded { cursor: zoom-out; }
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */
