@@ -7,18 +7,24 @@
 GOTEST_PARALLEL ?= 8
 GOTEST_TIMEOUT ?= 45m
 
+# EVERY TEST RECIPE RUNS UNDER $(BACKGROUND), bin/background.sh: the run and
+# every process it starts go to background priority, so test load cannot
+# starve the owner's live runtime. bin/test-background.sh's source scan fails
+# a test recipe that does not.
+BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
+
 .PHONY: test coverage perf perf-only perf-enforce perf-baseline
 
 # TMPDIR=/tmp IS REQUIRED on macOS -- the suite's unix socket paths do not fit
 # the 103-byte cap beneath the default per-user temp root.
 test:
-	TMPDIR=/tmp go test ./... -count=1 -timeout $(GOTEST_TIMEOUT) -parallel $(GOTEST_PARALLEL)
+	TMPDIR=/tmp $(BACKGROUND) go test ./... -count=1 -timeout $(GOTEST_TIMEOUT) -parallel $(GOTEST_PARALLEL)
 
 # The same run with coverage collection for the SPAWNED systems, merged and
 # reported per module. See ../bin/e2e-coverage.sh.
 coverage:
 	E2E_COVERAGE_PARALLEL=$(GOTEST_PARALLEL) E2E_COVERAGE_TIMEOUT=$(GOTEST_TIMEOUT) \
-		../bin/e2e-coverage.sh
+		$(BACKGROUND) ../bin/e2e-coverage.sh
 
 # ---------------------------------------------------------------------------
 # The perf phase — PERF-SPEC.md section D4.
@@ -45,7 +51,7 @@ perf: test perf-only
 # section I5 finding 17 for the measurement that settled that, and use
 # `perf-enforce` on a host quiet enough to hold it.
 perf-only:
-	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 go test ./... -tags perf -run 'TestPerf' -count=1 \
+	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 $(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=1 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
 
 # REWRITE the committed baselines from this run's measurement. Deliberate, by
@@ -62,7 +68,7 @@ perf-only:
 # section I5 finding 17.
 perf-baseline:
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=write \
-		go test ./... -tags perf -run 'TestPerf' -count=5 \
+		$(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=5 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
 
 # The perf phase with the >20% baseline regression check FAILING rather than
@@ -70,5 +76,5 @@ perf-baseline:
 # it fails on load, not on regressions.
 perf-enforce:
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=enforce \
-		go test ./... -tags perf -run 'TestPerf' -count=1 \
+		$(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=1 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v

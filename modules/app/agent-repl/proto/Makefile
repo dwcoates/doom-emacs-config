@@ -40,6 +40,12 @@ PROTOC_GEN_ES_VERSION := 2.14.1
 PROTOC_GEN_GO_VERSION := 1.36.11
 PROTOC_GEN_CONNECT_GO_VERSION := 1.17.0
 
+# EVERY TEST RECIPE RUNS UNDER $(BACKGROUND), bin/background.sh: the run and
+# every process it starts go to background priority, so test load cannot
+# starve the owner's live runtime. bin/test-background.sh's source scan fails
+# a test recipe that does not.
+BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
+
 # The proto set is DISCOVERED from src/ so the Makefile can never hold a
 # stale hand-maintained list: every .proto under the six surface roots is
 # compiled, and a deleted file leaves the build the moment it leaves disk.
@@ -129,7 +135,7 @@ conversation-isolation:
 	./scripts/check-conversation-isolation.sh $(ISOLATION_ROOT)
 
 test-check-conversation-isolation:
-	./scripts/test-check-conversation-isolation.sh
+	$(BACKGROUND) ./scripts/test-check-conversation-isolation.sh
 
 # Regenerate and compare with the exact pre-generation bytes. Comparing with
 # HEAD rejects a correct uncommitted schema edit, which makes the pre-commit
@@ -143,7 +149,7 @@ check-generated:
 	diff -ru "$$before" gen
 
 test-check-generated:
-	./scripts/test-check-generated.sh
+	$(BACKGROUND) ./scripts/test-check-generated.sh
 
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
 validate: lint test-check-conversation-isolation test-check-generated check-generated
@@ -156,7 +162,7 @@ validate: lint test-check-conversation-isolation test-check-generated check-gene
 # Makefile's `validate`, run first.  A list restated here drifted: it kept
 # naming `wire` after that module was deleted, and the script refused it.
 coverage:
-	../bin/report-nonlisp-coverage.sh
+	$(BACKGROUND) ../bin/report-nonlisp-coverage.sh
 
 clean:
 	rm -rf gen
