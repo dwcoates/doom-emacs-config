@@ -1128,6 +1128,22 @@ refusal can re-drive the very prompt that was refused."
          (agent-repl--input-flash ws agent-repl--input-cold-gate-flash)
          (message "agent-repl: %s%s" agent-repl--input-cold-gate-flash
                   (if (string-empty-p detail) "" (format " (%s)" detail)))))
+      ((or :model-not-in-catalog :model-refused)
+       ;; A `/model' ACT WAS REFUSED: the model is not in this session's
+       ;; catalog, or the vendor refused the change.  The act was not
+       ;; applied and the session runs on as before.  This is an ANSWER,
+       ;; never an outage -- before the arm existed the refusal left the
+       ;; daemon as a bare 400 and this composer HELD the prompt as if the
+       ;; daemon were unreachable, so nothing ran and nothing said why.
+       ;; Recorded at INFO (a refusal the user asked for, not a defect),
+       ;; not queued (a re-drive meets the same refusal), and the refusal's
+       ;; own sentence is shown verbatim.
+       (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+         (agent-repl--info ws "elisp.input.refused-model ws=%s origin=%S arm=%S detail=%s"
+                           ws origin arm detail)
+         (agent-repl--input-flash ws "model change refused")
+         (message "agent-repl: model change refused%s"
+                  (if (string-empty-p detail) "" (format " -- %s" detail)))))
       (:no-session
        ;; The workspace has NO SESSION AT ALL, which is the daemon's own
        ;; to bring up.  Like the cold gate this is an answer rather than a

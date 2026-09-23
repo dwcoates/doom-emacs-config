@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -12,6 +13,7 @@ import (
 
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/workspace"
 )
 
 // submitRequest is one well-formed submission.
@@ -507,5 +509,84 @@ func TestAColdGateRefusalCarriesTheGatesSentenceAlone(t *testing.T) {
 	// Assert.
 	if got.Reason != detail {
 		t.Fatalf("reason = %q, want the gate's sentence alone", got.Reason)
+	}
+}
+
+func TestARefusedModelActMapsOntoItsOwnArm(t *testing.T) {
+	cases := []struct {
+		name    string
+		shimArm string
+		want    string
+	}{
+		{"a model the catalog lacks", workspace.ArmShimModelNotInCatalog, "model_not_in_catalog"},
+		{"a model the vendor refused", "vendor_refused", "model_refused"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the queue wraps the shim's refusal as it returns it.
+			s := &server{}
+			err := fmt.Errorf("set model on %q: %w", "ws-1",
+				&workspace.ShimRefusal{Verb: "SetSessionModel", Arm: tc.shimArm, Detail: `"opus" is not in this session's model catalog`})
+			refused, _ := s.asRefusal(err)
+
+			// Act.
+			got := modelActRefused(err, refused)
+
+			// Assert.
+			if got.Arm != tc.want {
+				t.Fatalf("arm = %q, want %q", got.Arm, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnotherVerbsVendorRefusalIsNotAModelRefusal(t *testing.T) {
+	// Arrange: StartTurn's own vendor refusal is not about a model.
+	s := &server{}
+	err := &workspace.ShimRefusal{Verb: "StartTurn", Arm: "vendor_refused", Detail: "refused"}
+	refused, _ := s.asRefusal(err)
+
+	// Act.
+	got := modelActRefused(err, refused)
+
+	// Assert.
+	if got.Arm != "vendor_refused" {
+		t.Fatalf("arm = %q, want it left as vendor_refused", got.Arm)
+	}
+}
+
+func TestSubmitRefusalCarriesTheModelNotInCatalogArm(t *testing.T) {
+	// Arrange.
+	s := &server{}
+	log := &recordingLogger{}
+	resp := &agentreplv1.SubmitPromptResponse{}
+	detail := `"opus" is not in this session's model catalog`
+
+	// Act.
+	cerr := s.refuse(log, "SubmitPrompt", resp,
+		submitRefusal(s.fill(refusal{Arm: "model_not_in_catalog", Reason: detail})))
+
+	// Assert: an ANSWER the client can show, never a transport error it holds as an outage.
+	if cerr != nil {
+		t.Fatalf("refuse = %v, want the model_not_in_catalog arm encoded", cerr)
+	}
+	if got := resp.GetError().GetModelNotInCatalog().GetDetail(); got != detail {
+		t.Fatalf("model_not_in_catalog detail = %q, want the shim's sentence", got)
+	}
+}
+
+func TestSubmitRefusalCarriesTheModelRefusedArm(t *testing.T) {
+	// Arrange.
+	s := &server{}
+	log := &recordingLogger{}
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	cerr := s.refuse(log, "SubmitPrompt", resp,
+		submitRefusal(s.fill(refusal{Arm: "model_refused", Reason: "the vendor refused"})))
+
+	// Assert.
+	if cerr != nil || resp.GetError().GetModelRefused().GetDetail() != "the vendor refused" {
+		t.Fatalf("refuse = %v, error = %v, want the model_refused arm with its sentence", cerr, resp.GetError())
 	}
 }

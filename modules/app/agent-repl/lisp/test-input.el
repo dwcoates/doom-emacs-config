@@ -1467,6 +1467,56 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
                         :value (list :reason (list :arm :cold-gate
                                                    :value (list :detail detail))))))
 
+(defun agent-repl-test-input--model-refusal-answer (arm detail)
+  "Return a scripted refused-`/model' answer under ARM carrying DETAIL."
+  (list :response (list :arm :error
+                        :value (list :reason (list :arm arm
+                                                   :value (list :detail detail))))))
+
+(ert-deftest agent-repl-input-model-refusal-shows-the-refusals-own-sentence ()
+  "A refused `/model' act says why, in the refusal's own words."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--model-refusal-answer
+           :model-not-in-catalog "\"opus\" is not in this session's model catalog"))
+    (agent-repl-test-input--type "/model opus")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (seq-some (lambda (text)
+                        (string-match-p "model change refused -- \"opus\" is not in this session's model catalog"
+                                        text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-model-refusal-is-not-queued-as-an-outage ()
+  "A refused `/model' act is an answer: nothing is held for a re-drive."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          (agent-repl-test-input--model-refusal-answer :model-refused "refused"))
+    (agent-repl-test-input--type "/model opus")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-model-refusal-never-reaches-the-unknown-error-arm ()
+  "Both model arms are HANDLED, so the catch-all's ERROR record must not fire."
+  (dolist (arm '(:model-not-in-catalog :model-refused))
+    (agent-repl-test-input--with
+      ;; Arrange
+      (setq agent-repl-test-input--answer
+            (agent-repl-test-input--model-refusal-answer arm "refused"))
+      (agent-repl-test-input--type "/model opus")
+      ;; Act
+      (agent-repl-test-input--capturing-rungs
+        (agent-repl--send :user-sent)
+        ;; Assert
+        (should-not (agent-repl-test-input--rung-has-p
+                     agent-repl-test-input--error
+                     "elisp.input.unknown-error-arm"))))))
+
 (defconst agent-repl-test-input--no-session-answer
   '(:response (:arm :error :value (:reason (:arm :no-session :value nil))))
   "A scripted `no_session' refusal: a workspace with no session at all.")

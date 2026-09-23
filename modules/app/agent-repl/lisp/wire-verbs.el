@@ -2118,6 +2118,31 @@ switched on."
   "Decode SubmitPromptError's `cold_gate' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-cold-gate json))
 
+(defun agent-repl-wire-decode-submit-prompt-model-not-in-catalog (json)
+  "Decode SubmitPromptModelNotInCatalog from JSON into (`:detail').
+A `/model' act named a model the session's catalog does not hold; the act
+was not applied.  `detail' is the shim's own sentence naming the model,
+and is never switched on."
+  (let ((message "SubmitPromptModelNotInCatalog"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-submit-prompt-error-model-not-in-catalog (json)
+  "Decode SubmitPromptError's `model_not_in_catalog' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-model-not-in-catalog json))
+
+(defun agent-repl-wire-decode-submit-prompt-model-refused (json)
+  "Decode SubmitPromptModelRefused from JSON into (`:detail').
+The vendor refused the model change a `/model' act asked for.  `detail'
+is the vendor's own sentence, never switched on."
+  (let ((message "SubmitPromptModelRefused"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-submit-prompt-error-model-refused (json)
+  "Decode SubmitPromptError's `model_refused' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-model-refused json))
+
 (defun agent-repl-wire-decode-submit-prompt-error-duplicate-submission (json)
   "Decode SubmitPromptError's `duplicate_submission' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-duplicate-submission json))
@@ -2167,7 +2192,7 @@ logs, and is never switched on."
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -2181,7 +2206,9 @@ arm this codec does not know is refused as an unknown field."
          (list 'noSession :no-session #'agent-repl-wire-decode-submit-prompt-error-no-session)
          (list 'duplicateSubmission :duplicate-submission #'agent-repl-wire-decode-submit-prompt-error-duplicate-submission)
          (list 'bubbleRefused :bubble-refused #'agent-repl-wire-decode-submit-prompt-error-bubble-refused)
-         (list 'coldGate :cold-gate #'agent-repl-wire-decode-submit-prompt-error-cold-gate))))))
+         (list 'coldGate :cold-gate #'agent-repl-wire-decode-submit-prompt-error-cold-gate)
+         (list 'modelNotInCatalog :model-not-in-catalog #'agent-repl-wire-decode-submit-prompt-error-model-not-in-catalog)
+         (list 'modelRefused :model-refused #'agent-repl-wire-decode-submit-prompt-error-model-refused))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
