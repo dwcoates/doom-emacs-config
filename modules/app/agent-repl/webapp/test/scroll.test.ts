@@ -17,7 +17,7 @@ import {
   sectionFor,
   sectionTakesWheel,
   wheelDeltaPx,
-  revealDelta,
+  detachedWorkDelta,
   revealGeometry,
   centerDelta,
   observeScrollBox,
@@ -800,14 +800,14 @@ describe("TailFollow.selectionMoved", () => {
 });
 
 describe("TailFollow.detachedWorkSelected", () => {
-  it("brings a card below the fold up by exactly its overhang", () => {
-    // Arrange
+  it("centers a card below the fold in the viewport", () => {
+    // Arrange: a 200px card whose top is 250px down a 300px viewport.
     const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
     a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
-    // Assert
-    expect(box.scrollTop).toBe(250);
+    // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
+    expect(box.scrollTop).toBe(300);
   });
 
   it("ends a standing follow", () => {
@@ -827,7 +827,7 @@ describe("TailFollow.detachedWorkSelected", () => {
     a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
     // Assert
     expect(await moves(capture)).toEqual([
-      { cause: "detachedWorkSelected", from: 100, to: 250, follow: false },
+      { cause: "detachedWorkSelected", from: 100, to: 300, follow: false },
     ]);
   });
 });
@@ -1225,33 +1225,60 @@ describe("observeScrollBox", () => {
 });
 
 /**
- * THE DETACHED-WORK SELECTION'S ARITHMETIC: how far the feed moves to bring
- * the card the reader picked in the footer into view.
+ * THE DETACHED-WORK SELECTION'S ARITHMETIC: how far the feed moves to CENTER
+ * the card the reader picked in the footer (owner ruling, 2026-09-23).
  */
-describe("revealDelta", () => {
-  /** A 300px viewport starting at the top of the screen. */
-  const box = { boxTop: 0, boxHeight: 300 };
+describe("detachedWorkDelta", () => {
+  /** A 300px viewport at the top of the screen over a 1000px feed. */
+  const view = { boxTop: 0, boxHeight: 300 };
 
-  it("moves nothing for a panel already wholly on screen", () => {
-    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 100 })).toBe(0);
-  });
+  it.each([
+    {
+      name: "centers a card in the middle of the feed",
+      node: { nodeTop: 400, nodeHeight: 100 },
+      box: { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 },
+      // midpoint 450 onto 150: +300, inside the range.
+      want: 300,
+    },
+    {
+      name: "moves nothing for a card already centered",
+      node: { nodeTop: 100, nodeHeight: 100 },
+      box: { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 },
+      want: 0,
+    },
+    {
+      name: "clamps at the feed's TOP for a card near its start",
+      node: { nodeTop: 20, nodeHeight: 40 },
+      box: { scrollTop: 30, scrollHeight: 1000, clientHeight: 300 },
+      // centering asks -110, but the feed is only 30px from its start.
+      want: -30,
+    },
+    {
+      name: "clamps at the feed's BOTTOM for a card near its end",
+      node: { nodeTop: 250, nodeHeight: 40 },
+      box: { scrollTop: 650, scrollHeight: 1000, clientHeight: 300 },
+      // centering asks +120, but only 50px of range remain below.
+      want: 50,
+    },
+    {
+      name: "aligns a card taller than the viewport at the viewport's top",
+      node: { nodeTop: 180, nodeHeight: 900 },
+      box: { scrollTop: 0, scrollHeight: 3000, clientHeight: 300 },
+      want: 180,
+    },
+    {
+      name: "brings a card above the viewport down to center",
+      node: { nodeTop: -200, nodeHeight: 100 },
+      box: { scrollTop: 500, scrollHeight: 1000, clientHeight: 300 },
+      // midpoint -150 onto 150: -300.
+      want: -300,
+    },
+  ])("$name", ({ node, box, want }) => {
+    // Arrange, Act
+    const got = detachedWorkDelta({ ...view, ...node }, box);
 
-  it("moves by exactly the overhang for a panel running past the fold", () => {
-    expect(revealDelta({ ...box, nodeTop: 250, nodeHeight: 200 })).toBe(150);
-  });
-
-  it("stops at the panel's own top for a panel taller than the viewport", () => {
-    // Capped: the head above it stays on screen rather than being pushed off
-    // to chase a bottom edge that cannot fit anyway.
-    expect(revealDelta({ ...box, nodeTop: 80, nodeHeight: 900 })).toBe(80);
-  });
-
-  it("brings a panel above the viewport back down to its top", () => {
-    expect(revealDelta({ ...box, nodeTop: -50, nodeHeight: 100 })).toBe(-50);
-  });
-
-  it("counts a panel ending exactly at the fold as visible", () => {
-    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 200 })).toBe(0);
+    // Assert
+    expect(got).toBe(want);
   });
 });
 
