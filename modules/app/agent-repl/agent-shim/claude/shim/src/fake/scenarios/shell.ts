@@ -46,14 +46,31 @@ function backgroundingProse(taskId: string, outputPath: string): string {
 const BASH = scenario({
   name: "bash",
   prompt: "!bash [command]",
-  emits: "a foreground `Bash` tool_use, then its result — nothing in between, because foreground output is unobservable while running",
+  emits:
+    "a foreground `Bash` tool_use, its FOREGROUND task (`task_started` with `is_backgrounded: false`, the 0.3.280 " +
+    "shape), then its result and the task's completed `task_notification` — no output in between, because " +
+    "foreground output is unobservable while running",
   writes: "the tool_use line, the tool_result line with a `BashOutput`-shaped `toolUseResult`, the closing text line",
-  arms: "AgentBash.start + AgentBashSuccess.outcome=completed how=exited(0)",
+  arms:
+    "AgentBash.start + AgentBashSuccess.outcome=completed how=exited(0); the foreground task is NEVER detached " +
+    "work — no detachment, no live-set entry",
   run(ctx) {
     const command = ctx.args === "" ? "pwd; ls | head" : ctx.args;
     ctx.log.debug({ turn: ctx.turn, branch: "bash" }, "fake foreground bash turn");
     const call = ctx.toolUse("Bash", { command });
+    // EVERY `Bash` IS A TASK on the 0.3.280 vendor, a blocking one included:
+    // it starts in the foreground and concludes with its own result.
+    const taskId = ctx.mintShellTaskId();
+    ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: command, foreground: true });
     ctx.toolResult(call, "one\ntwo\n", bashResult({ stdout: "one\ntwo\n" }));
+    ctx.endTask(taskId);
+    ctx.systemMessage("task_notification", {
+      task_id: taskId,
+      tool_use_id: call.toolUseId,
+      status: "completed",
+      output_file: ctx.files.spoolPathFor(taskId),
+      summary: "Command completed",
+    });
     conclude(ctx, "Ran the command.");
   },
 });
@@ -122,11 +139,14 @@ const BASH_TIMEOUT = scenario({
     ctx.log.debug({ turn: ctx.turn, branch: "bash-timeout" }, "fake timed-out bash turn");
     const call = ctx.toolUse("Bash", { command: "sleep 600", timeout: 120_000 });
     const taskId = ctx.mintShellTaskId();
-    ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "sleep 600" });
-    ctx.announceLiveTasks();
+    // A FOREGROUND start: the call blocks on it until the timeout moves it.
+    ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "sleep 600", foreground: true });
     const spool = ctx.files.spool(taskId);
     spool.appendLine("still going");
     await ctx.tick();
+    // THE TIMEOUT MOVES IT: the level now lists it, and the result below is
+    // what states why.
+    ctx.markBackgrounded(taskId);
     ctx.toolResult(
       call,
       "",
@@ -412,8 +432,7 @@ const VENDOR_BACKGROUNDED = scenario({
     // Announced as a task BEFORE the detach so `backgroundTasks(toolUseId)` has
     // something to find: the vendor tracks a foreground shell as a task the
     // moment it starts, which is what makes it addressable at all.
-    ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "tail -f" });
-    ctx.announceLiveTasks();
+    ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "tail -f", foreground: true });
     ctx.files.spool(taskId).appendLine("first line before the detach");
     // PARK UNTIL THE VENDOR ACTUALLY DETACHES. The scenario cannot decide when
     // that happens — a caller's DetachForeground does — and emitting the

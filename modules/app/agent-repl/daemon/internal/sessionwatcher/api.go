@@ -136,6 +136,10 @@ type FeedSink interface {
 	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, addr OutputAddress)
 	// OnBash is one detached shell's progress.
 	OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash, addr OutputAddress)
+	// OnLiveWorkChanged republishes the AUTHORITATIVE live-work set. A
+	// detached shell that leaves it with no terminal of its own will never
+	// report again, so its bubble must not go on drawing it running.
+	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)
 	// OnSessionUpdate is a session-scoped fact that changes rows —
 	// query_died, compacting, identity_rotated.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
