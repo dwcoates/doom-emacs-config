@@ -410,8 +410,9 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 // `hold-spool`, 6,748 `tail-pickup`, 6,172 `boot-rewind` and 4,789
 // `lost-policy` INFO records, and rolled the 64 MB durable log five times over.
 // None of it is news: it is the same inverted-pyramid flood the rescan-driven
-// holds and the LOST tracker already level, arriving through the six operations
-// that read the corpus.
+// holds and the LOST tracker already level, arriving through the operations
+// that read the corpus — and, with them, the per-spool claim and skip decisions
+// a restart re-derives for every spool on disk.
 //
 // During catch-up each is stated at DEBUG and tallied; the window's end states
 // one INFO `catchup-summary` per operation carrying the count. After the window
@@ -420,6 +421,8 @@ var catchupOperations = []string{
 	"launch",
 	"record-spawn",
 	"hold-spool",
+	"spool-claim",
+	"spool-skip",
 	"tail-pickup",
 	"boot-rewind",
 	"lost-policy",

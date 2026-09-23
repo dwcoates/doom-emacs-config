@@ -87,8 +87,6 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 		// cursor-tailed like any other file, and its bytes land as DECLARED
 		// residue rather than being converted or dropped.
 		built = newDeclaredResidueHandler(workflowSpoolKind, handlerLog)
-	case tail.KindResidueSpool:
-		built = newResidueHandler("the spool's task id carries no a/b/w kind prefix, so no conversion could be selected for it", handlerLog)
 	default:
 		panic(fmt.Sprintf("sidecar: unsupported tail kind %d", kind))
 	}
@@ -203,21 +201,21 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 					LogVerbose("the vanished file's tailer is dropped now that its terminal has been stated")
 			}(lost.Path)
 		}
+		if lost.Kind == tail.KindResidueSpool {
+			// A RESIDUE SPOOL NAMES NO RUN. Its task-id prefix failed
+			// classification, so no unit was ever opened for it and there is
+			// nothing a terminal could settle. Such a spool is never read
+			// (held.go), so it is never watched and never tracked — which is why
+			// this is decided BEFORE the watcher lookup: a conclusion reaching
+			// here for one is stated as what it is, never as a run whose
+			// converter went missing, and never invents a run that never existed.
+			bound.With(logging.Context{Operation: "lost-terminal-residue"}).Log("the LOST file was residue and named no run, so there is no unit to settle (reason=%s)", lost.Reason)
+			continue
+		}
 		w, watched := s.watchers[lost.Path]
 		if !watched {
 			bound.With(logging.Context{Operation: "lost-terminal-unwatched", Level: "warn"}).Log(
 				"no terminal for the LOST run: its file is no longer watched, so no converter is left to spell one (reason=%s)", lost.Reason)
-			continue
-		}
-		if lost.Kind == tail.KindResidueSpool {
-			// A RESIDUE SPOOL NAMES NO RUN. Its task-id prefix failed
-			// classification, or no spawning call ever claimed it, so its bytes
-			// were ingested as residue and NO unit was ever opened for it —
-			// there is nothing downstream holding it open and nothing a terminal
-			// could settle. The conclusion is still worth stating (the reader
-			// did stop seeing the file); minting a terminal for it would invent
-			// a run that never existed.
-			bound.With(logging.Context{Operation: "lost-terminal-residue"}).Log("the LOST file was residue and named no run, so there is no unit to settle (reason=%s)", lost.Reason)
 			continue
 		}
 		sink, ok := w.tailer.Handler().(lostTerminalSink)
