@@ -513,6 +513,9 @@ func (s *server) watchDaemon(
 	if emacs := msg.GetEmacs(); emacs != nil {
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 	}
+	// The reported build is read into the record BEFORE the watcher is
+	// shared: once registered, a deploy's reload may move it under s.mu.
+	reported := w.elispBuild
 	s.addDaemonWatcher(w)
 	// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits for delivery
 	// or for the stream to be gone, never for a client that has stopped
@@ -520,7 +523,7 @@ func (s *server) watchDaemon(
 	defer s.removeDaemonWatcher(w)
 	s.acceptStream(ctx, "WatchDaemon")
 	s.log.Debug("WatchDaemon", "accepted a standing stream", dlog.Context{
-		"stream": w.id, "emacs": w.emacs, "elisp_build": w.elispBuild,
+		"stream": w.id, "emacs": w.emacs, "elisp_build": reported,
 	})
 
 	for {

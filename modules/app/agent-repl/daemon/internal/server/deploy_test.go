@@ -350,6 +350,22 @@ func TestTheElispReloadReachesOnlyTheNamedEmacsStream(t *testing.T) {
 	t.Fatalf("the Emacs stream ended without the reload: %v", emacs.Err())
 }
 
+func TestAnEmacsTheReloadReachedStandsAtThePushedBuild(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	openDaemonWatch(t, h, emacsWatch("older"), "sync-emacs")
+	s := h.Server.(*server)
+	stream := s.EmacsBuilds()[0].ID
+
+	// Act
+	s.PushReloadElisp([]string{stream}, "/root", "fresh")
+
+	// Assert: the next deploy finds it current and pushes nothing again.
+	if got := s.EmacsBuilds(); len(got) != 1 || got[0].Build != "fresh" {
+		t.Fatalf("EmacsBuilds = %+v, want the stream at the pushed build", got)
+	}
+}
+
 func TestAnOpenWebStreamReportsItsBuild(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
