@@ -78,6 +78,10 @@ export interface ScrollPosition {
  *   lands at the tail, by the earlier owner ruling of 2026-09-23.
  * - `prependCompensation`: older rows landing above the reader shift the view
  *   by exactly their height, so the content under the reader stays put.
+ * - `latestVisible`: the reader can SEE the feed's latest entry
+ *   (`latestEntryVisible`), so the follow latches where the view already is.
+ *   Latching moves nothing; later content then keeps the tail in view, and
+ *   those follow moves are recorded under this cause.
  *
  * Every move is recorded at DEBUG as `scroll.feed-moved` with its cause.
  */
@@ -88,13 +92,17 @@ export const SCROLL_CAUSES = [
   "initialPlacement",
   "replaceRestore",
   "prependCompensation",
+  "latestVisible",
 ] as const;
 
 /** One named reason the feed may move without the reader's scroll input. */
 export type ScrollCause = (typeof SCROLL_CAUSES)[number];
 
-/** The causes that land the feed at its tail and latch the follow. */
-type ParkCause = "promptSent" | "selectionMoved" | "initialPlacement" | "replaceRestore";
+/**
+ * The causes that latch the follow. All but `latestVisible` also land the feed
+ * at its tail; `latestVisible` latches where the view already stands.
+ */
+type ParkCause = "promptSent" | "selectionMoved" | "initialPlacement" | "replaceRestore" | "latestVisible";
 
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
@@ -109,6 +117,35 @@ export type SubscribeInput = (onInput: () => void) => void;
 export type ReanchorBox = ScrollPosition;
 
 /**
+ * Reading where the feed's LATEST ENTRY sits against the box's viewport, or
+ * null when the feed has no entry drawn at all. Reading moves nothing.
+ */
+export type ReadLatest = () => RevealGeometry | null;
+
+/**
+ * THE ONE DEFINITION OF "THE READER CAN SEE THE LATEST ENTRY" (owner rule,
+ * 2026-09-23): ANY part of the entry intersects the box's visible viewport. An
+ * entry whose bottom edge sits exactly on the viewport's top, or whose top
+ * edge sits exactly on its bottom, shows no pixel and is not visible.
+ *
+ * Geometry that is not a real layout (a non-finite edge, a negative height) is
+ * a fault in whatever read it, and is reported and thrown rather than guessed.
+ */
+export function latestEntryVisible(g: RevealGeometry): boolean {
+  const edges = [g.boxTop, g.boxHeight, g.nodeTop, g.nodeHeight];
+  if (!edges.every(Number.isFinite) || g.boxHeight < 0 || g.nodeHeight < 0) {
+    log.error("the latest entry's geometry is not a real layout", {
+      operation: "scroll.latest-geometry-invalid",
+      context: { ...g },
+    });
+    throw new Error(
+      `scroll: the latest entry's geometry is not a real layout (${JSON.stringify(g)})`,
+    );
+  }
+  return g.nodeTop < g.boxTop + g.boxHeight && g.nodeTop + g.nodeHeight > g.boxTop;
+}
+
+/**
  * THE SINGLE OWNER OF THE FEED'S SCROLL POSITION.
  *
  * Every implicit move of the feed is one of its cause-named methods, and
@@ -116,11 +153,19 @@ export type ReanchorBox = ScrollPosition;
  * primitives are private, so a caller cannot move the feed without naming why.
  *
  * FOLLOW IS LATCHED, NEVER SAMPLED. Only a parking cause starts it: a sent
- * prompt, a first placement, a replace, a cleared selection. The follow then
- * keeps the tail on screen as later content arrives (`follow`, `onResize`),
- * attributed to the cause that started it, until the READER scrolls away.
- * The reader coming back to the tail does not restart it, and neither does
- * geometry: an empty box is not "following" just because it is at its bottom.
+ * prompt, a first placement, a replace, a cleared selection -- or the reader
+ * being able to SEE the latest entry (`latestVisible`, owner rule 2026-09-23),
+ * checked on every scroll event, resize and row upsert. That last latch moves
+ * nothing: the view stays where the reader has it, and only LATER content is
+ * what the follow then keeps in view. The follow keeps the tail on screen as
+ * later content arrives (`follow`, `onResize`), attributed to the cause that
+ * started it, until the READER scrolls away. The bare position is not the
+ * test: an empty box is not "following" just because it is at its bottom.
+ *
+ * AN ACTIVE REPLY SELECTION HOLDS THE LATEST-VISIBLE LATCH OFF: `selectionMoved`
+ * released the tail so streaming rows cannot pull the reader off the selected
+ * response, and seeing the latest entry does not undo that. Clearing the
+ * selection parks (`selectionCleared`) as it always has.
  *
  * WHY THE READER MUST HAVE DONE SOMETHING. The box writes its own position too
  * -- `scrollTop` cannot sit past the end of the scrollable range, so content
@@ -147,8 +192,20 @@ export class TailFollow {
   private lastTop: number;
   /** Whether the READER has reached this box since the tail was last parked. */
   private touched = false;
+  /** Whether a reply selection is active, holding the latest-visible latch off. */
+  private selectionActive = false;
+  /** Whether the held-off latch was last reported, so it is reported once per spell. */
+  private heldOffReported = false;
 
-  constructor(private readonly box: ReanchorBox) {
+  /**
+   * READLATEST is where the feed's latest entry sits; a box with no feed to
+   * read (a fixture) has no latest entry, and the latest-visible latch never
+   * fires on it.
+   */
+  constructor(
+    private readonly box: ReanchorBox,
+    private readonly readLatest: ReadLatest = () => null,
+  ) {
     this.lastTop = box.scrollTop;
   }
 
@@ -175,6 +232,7 @@ export class TailFollow {
 
   /** The reader cleared the reply selection: return to the tail and follow. */
   selectionCleared(): void {
+    this.selectionActive = false;
     this.park("selectionMoved");
   }
 
@@ -184,6 +242,7 @@ export class TailFollow {
    * feed has drawn it (GEOMETRY null: nothing to center on).
    */
   selectionMoved(geometry: CenterGeometry | null): void {
+    this.selectionActive = true;
     this.release();
     if (geometry !== null) this.shift("selectionMoved", centerDelta(geometry));
   }
@@ -195,6 +254,7 @@ export class TailFollow {
   detachedWorkSelected(geometry: RevealGeometry): void {
     this.release();
     this.shift("detachedWorkSelected", revealDelta(geometry));
+    this.latchIfLatestVisible();
   }
 
   /**
@@ -207,16 +267,26 @@ export class TailFollow {
     this.shift("prependCompensation", grown);
   }
 
-  /** Keep the tail on screen while a follow stands; nothing otherwise. */
+  /**
+   * Keep the tail on screen while a follow stands. Without one, a latest entry
+   * the reader can see latches it where the view stands, moving nothing now.
+   */
   follow(): void {
     this.sync();
-    if (!this.following || this.cause === null) return;
+    if (!this.following || this.cause === null) {
+      this.latchIfLatestVisible();
+      return;
+    }
     this.park(this.cause);
   }
 
-  /** A scroll event on the box. Everything it decides lives in `sync`. */
+  /**
+   * A scroll event on the box: `sync` folds the movement in, then a latest
+   * entry the reader can see latches the follow.
+   */
   onScroll(): void {
     this.sync();
+    this.latchIfLatestVisible();
   }
 
   /**
@@ -273,6 +343,39 @@ export class TailFollow {
     recordMove(cause, from, this.lastTop, false);
   }
 
+  /**
+   * Latch the follow, moving nothing, when the reader can see the latest entry
+   * and no follow already stands -- unless an active reply selection holds it
+   * off, which is reported once each time it starts to.
+   */
+  private latchIfLatestVisible(): void {
+    if (this.following) return;
+    const latest = this.readLatest();
+    const visible = latest !== null && latestEntryVisible(latest);
+    if (!visible) {
+      this.heldOffReported = false;
+      return;
+    }
+    if (this.selectionActive) {
+      if (this.heldOffReported) return;
+      this.heldOffReported = true;
+      log.debug("the latest entry is visible, but an active reply selection holds the follow off", {
+        operation: "scroll.follow-held-by-selection",
+        context: { at: this.box.scrollTop },
+      });
+      return;
+    }
+    this.following = true;
+    this.cause = "latestVisible";
+    // The input that brought the entry into view has been spent on this latch.
+    this.touched = false;
+    this.lastTop = this.box.scrollTop;
+    log.debug("the reader can see the latest entry; the follow starts where the view stands", {
+      operation: "scroll.follow-started",
+      context: { cause: "latestVisible", at: this.lastTop },
+    });
+  }
+
   /** Stop following: only a parking cause starts it again. */
   private release(): void {
     this.sync();
@@ -288,7 +391,8 @@ export class TailFollow {
    * for them afterward -- inert. THE BOX'S OWN CLAMP IS NOT THE READER: content
    * shrinking drags the position down, so the baseline is lowered into the
    * reachable range first. A movement with the reader's input behind it ends
-   * the follow unless it went down to the tail; nothing here ever starts one.
+   * the follow unless it went down to the tail; nothing here ever starts one
+   * (the latest-visible latch is decided after it, by its callers).
    */
   private sync(): void {
     const reachable = Math.max(0, this.box.scrollHeight - this.box.clientHeight);
