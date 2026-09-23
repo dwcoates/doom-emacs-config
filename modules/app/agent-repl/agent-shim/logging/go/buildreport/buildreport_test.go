@@ -173,3 +173,35 @@ func TestSelfReportsThisProcess(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestResolveDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "the override wins", env: map[string]string{DirEnv: "/tmp/elsewhere"}, want: "/tmp/elsewhere"},
+		{name: "unset is the run directory", env: map[string]string{}, want: filepath.Join(home, ".cache", "agent-repl", "run")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			getenv := func(k string) string { return tc.env[k] }
+
+			// Act
+			got, err := ResolveDir(getenv)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ResolveDir: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("ResolveDir = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
