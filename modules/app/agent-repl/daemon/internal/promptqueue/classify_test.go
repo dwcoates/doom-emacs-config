@@ -369,6 +369,7 @@ func TestARefusedInterruptReturnsThePromptToHeld(t *testing.T) {
 	}{
 		{name: "the shim refuses the kill", arrange: func(h *harness) { h.sender.killErr = errors.New("the turn is not the open one") }},
 		{name: "the shim refuses a live turn", arrange: func(h *harness) { h.sender.killErr = liveRefusal{} }},
+		{name: "the shim finds no turn open", arrange: func(h *harness) { h.sender.killErr = noTurnOpenRefusal{} }},
 		{name: "the workspace has no session to send it to", arrange: func(h *harness) { h.noSession = true }},
 	}
 	for _, tt := range tests {
@@ -417,14 +418,39 @@ type liveRefusal struct{}
 func (liveRefusal) Error() string         { return "shim KillTurn refused: live" }
 func (liveRefusal) KillRefusedLive() bool { return true }
 
+// noTurnOpenRefusal is the fake's stand-in for the workspace package's KillTurn
+// refusal that found no turn open, matched structurally exactly as the real one
+// is.
+type noTurnOpenRefusal struct{}
+
+func (noTurnOpenRefusal) Error() string             { return "shim KillTurn refused: no_turn_open" }
+func (noTurnOpenRefusal) KillFoundNoTurnOpen() bool { return true }
+
 func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 	tests := []struct {
-		name  string
-		cause error
-		level string
+		name    string
+		cause   error
+		level   string
+		message string
 	}{
-		{name: "a live turn's refusal is an expected outcome", cause: liveRefusal{}, level: "info"},
-		{name: "any other refusal is unexpected", cause: errors.New("the turn is not the open one"), level: "warn"},
+		{
+			name:    "a turn that already ended is an expected race",
+			cause:   noTurnOpenRefusal{},
+			level:   "info",
+			message: "the running turn had already ended when the interrupt landed; the jump is stripped and the prompt waits for the turn's end",
+		},
+		{
+			name:    "a live refusal is a contract breach the shim no longer produces",
+			cause:   liveRefusal{},
+			level:   "warn",
+			message: "the shim refused an unforced interrupt as live, which its contract no longer produces; the jump is stripped and the prompt waits for the turn to end",
+		},
+		{
+			name:    "any other refusal is unexpected",
+			cause:   errors.New("the turn is not the open one"),
+			level:   "warn",
+			message: "the interrupt was refused; the jump is stripped and the prompt waits for the turn to end",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -439,14 +465,14 @@ func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
 			}
 			h.q.waitForClassifications()
 			// Assert.
-			var levels []string
+			var got []string
 			for _, r := range h.log.Records() {
 				if r.Operation == opInterject && r.Context["cause"] == tt.cause.Error() {
-					levels = append(levels, r.Level)
+					got = append(got, r.Level+": "+r.Message)
 				}
 			}
-			if len(levels) != 1 || levels[0] != tt.level {
-				t.Fatalf("refusal records at levels %v, want exactly one at %s", levels, tt.level)
+			if want := tt.level + ": " + tt.message; len(got) != 1 || got[0] != want {
+				t.Fatalf("refusal records = %q, want exactly %q", got, want)
 			}
 		})
 	}
