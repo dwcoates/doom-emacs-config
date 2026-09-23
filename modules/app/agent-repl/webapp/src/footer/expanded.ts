@@ -14,16 +14,23 @@
  * so a panel never counts its rows to label anything and a chip never reads a
  * panel.
  *
- * TWO PANELS JUMP AND THREE DO NOT. Agents and shells have feed bubbles, so
- * their rows carry the bubble's `FeedId` and reveal it; tasks, monitors and
- * crons have no bubble at all, so their rows carry no jump attribute rather
- * than a jump that would have nowhere to land.
+ * THE DETACHED-WORK ROWS JUMP; THE REST DO NOT. Agent, shell and monitor rows
+ * are detached work, and each carries the daemon's `FooterJump`: EITHER the
+ * entry's `FeedId` (the click selects it and the feed scrolls to it) OR the
+ * reason the daemon cannot name one (the click shows "not on screen" at the
+ * row and records why). Exactly one of the two happens on every click — a
+ * click that does neither is unrepresentable (see `jump`). Tasks and crons
+ * have no bubble at all, so their rows carry no jump.
+ *
+ * THE PANEL KEEPS ITS OWN SCROLL. It shows at most `EXPANDED_FOOTER_MAX_ROWS`
+ * rows and scrolls past that; the scroll is the reader's, so a push redraws
+ * the rows INSIDE the section it already drew (`previous`) rather than
+ * replacing the section, and nothing here writes a scroll position.
  *
  * CLOCKS TICK HERE TOO: an agent's runtime, a shell's runtime, a monitor's
  * runtime and a cron's next fire are all instants on the wire and durations on
  * screen, animated off the shared ticker.
  */
-import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type {
   FooterAgentRow,
   FooterAgentRowDescription,
@@ -41,6 +48,7 @@ import type {
   FooterExpandedShells,
   FooterExpandedTasks,
   FooterExpandedTokens,
+  FooterJump,
   FooterMonitorRow,
   FooterMonitorRowDescription,
   FooterMonitorRowRuntime,
@@ -53,10 +61,14 @@ import type {
   FooterTokensLineAlarm,
   FooterTokensLineVerdict,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { placeChildren } from "../dom.js";
 import { formatTickedElapsed } from "../duration.js";
-import { tick } from "../feed/ticking.js";
+import { frameUndecodable } from "../failure/sink.js";
+import { stopTicking, tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
@@ -79,13 +91,63 @@ export const FOOTER_PANELS: readonly FooterPanel[] = [
   "crons",
 ];
 
-/** How many rows the section shows before it scrolls its own content. */
-export const EXPANDED_FOOTER_MAX_ROWS = 8;
+/**
+ * How many rows the section shows before it scrolls its own content (owner
+ * ruling, 2026-09-23: at most four). The stylesheet reads it from the markup
+ * (`--pfooter-sheet-rows`), so the cap has one owner.
+ */
+export const EXPANDED_FOOTER_MAX_ROWS = 4;
+
+/**
+ * THE CLICK OUTCOMES THE FOOTER IS HOLDING, per row, across whole-view pushes.
+ *
+ * WHY IT IS STATE AND NOT A MARK ON THE ROW. The footer redraws whole on every
+ * push, and a live subagent's token count pushes continuously; a notice
+ * appended to the row element that was clicked landed on an element the next
+ * push had already thrown away, so the reader saw neither a selection nor a
+ * notice. The outcome is held HERE, keyed by the row, and every draw paints it
+ * — so it is on the glass from the redraw the click itself asks for.
+ *
+ * It stands while the row's jump still resolves the way it did when clicked,
+ * and goes when the row leaves the view, its jump changes, or a later click on
+ * it selects.
+ */
+export interface JumpNotices {
+  /** Whether a notice stands for KEY at RESOLUTION. */
+  standing(key: string, resolution: string): boolean;
+  /** Raise the notice for KEY, clicked at RESOLUTION. */
+  raise(key: string, resolution: string): void;
+  /** Drop KEY's notice. */
+  clear(key: string): void;
+  /** Drop every notice whose row is not in PRESENT. */
+  prune(present: ReadonlySet<string>): void;
+}
+
+/** The mount's one notice register. */
+export function createJumpNotices(): JumpNotices {
+  const held = new Map<string, string>();
+  return {
+    standing: (key, resolution) => held.get(key) === resolution,
+    raise: (key, resolution) => {
+      held.set(key, resolution);
+    },
+    clear: (key) => {
+      held.delete(key);
+    },
+    prune: (present) => {
+      for (const key of [...held.keys()]) if (!present.has(key)) held.delete(key);
+    },
+  };
+}
 
 /** What the panels need: the context to call and click through, and the jump. */
 export interface ExpandedDeps {
   ctx: AppContext;
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
+  /** The mount's click outcomes, painted on every draw. */
+  readonly notices: JumpNotices;
+  /** Redraw the footer from its last view, so a click's outcome is drawn. */
+  readonly redraw: () => void;
   /**
    * The activity line the strip is drawing right now, when there is one.
    *
@@ -115,8 +177,11 @@ export function drawFooterExpanded(
   u: FooterExpanded,
   selection: FooterPanel | null,
   deps: ExpandedDeps,
+  previous: HTMLElement | null = null,
 ): HTMLElement | null {
   if (selection === null) return null;
+  const panel = (name: FooterPanel, content: readonly HTMLElement[]): HTMLElement =>
+    drawSection(name, content, previous);
   const path = "FooterExpanded";
   log.debug(`drawing the expanded footer panel: ${selection}`, {
     operation: "footer.expanded",
@@ -180,14 +245,33 @@ export function drawFooterExpanded(
   }
 }
 
-/** The section shell: the baseline sheet, carrying its panel's name. */
-function panel(name: FooterPanel, content: readonly HTMLElement[]): HTMLElement {
-  const section = document.createElement("div");
-  section.className = "pfooter-sheet footer-expanded list-rows";
-  section.setAttribute("data-panel", name);
-  section.style.setProperty("--pfooter-sheet-rows", String(EXPANDED_FOOTER_MAX_ROWS));
-  if (content.length > EXPANDED_FOOTER_MAX_ROWS) section.classList.add("scrolls");
-  for (const el of content) section.appendChild(el);
+/**
+ * The section shell: the baseline sheet, carrying its panel's name.
+ *
+ * THE SAME PANEL'S SECTION IS REUSED. PREVIOUS is the section the last draw
+ * returned; when it is this panel's, its rows are replaced INSIDE it, so the
+ * section is never detached and its scroll box keeps the reader's position
+ * across the push (a detached and re-attached box resets to the top). Every
+ * dropped row is stopped first, so no clock outlives its element.
+ */
+function drawSection(
+  name: FooterPanel,
+  content: readonly HTMLElement[],
+  previous: HTMLElement | null,
+): HTMLElement {
+  const reuse = previous !== null && previous.getAttribute("data-panel") === name;
+  const section = reuse ? previous : document.createElement("div");
+  if (!reuse) {
+    section.className = "pfooter-sheet footer-expanded list-rows";
+    section.setAttribute("data-panel", name);
+    section.style.setProperty("--pfooter-sheet-rows", String(EXPANDED_FOOTER_MAX_ROWS));
+  }
+  section.classList.toggle("scrolls", content.length > EXPANDED_FOOTER_MAX_ROWS);
+  const kept = new Set<Node>(content);
+  for (const child of [...section.children]) {
+    if (!kept.has(child)) stopTicking(child);
+  }
+  placeChildren(section, content);
   return section;
 }
 
@@ -404,8 +488,7 @@ export function drawFooterAgentRow(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {
-  const target = requireMessage(u.target, `${path}.target`);
-  const row = jumpRow("agents", target, deps);
+  const row = jumpRow("agents", u.work, u.jump, deps, path);
   row.appendChild(glyph("agents", "⚙"));
   row.appendChild(drawFooterAgentRowLabel(requireMessage(u.label, `${path}.label`)));
   if (u.description !== undefined) {
@@ -419,7 +502,7 @@ export function drawFooterAgentRow(
   );
   figures.appendChild(caret());
   row.appendChild(figures);
-  return row;
+  return finishJumpRow(row);
 }
 
 /** The subagent's type label, verbatim. */
@@ -545,8 +628,7 @@ export function drawFooterShellRow(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {
-  const target = requireMessage(u.target, `${path}.target`);
-  const row = jumpRow("shells", target, deps);
+  const row = jumpRow("shells", u.work, u.jump, deps, path);
   row.appendChild(glyph("shells", "$"));
   row.appendChild(drawFooterShellRowCommand(requireMessage(u.command, `${path}.command`)));
   const figures = document.createElement("span");
@@ -556,7 +638,7 @@ export function drawFooterShellRow(
   );
   figures.appendChild(caret());
   row.appendChild(figures);
-  return row;
+  return finishJumpRow(row);
 }
 
 /** The command line, verbatim — what arrives is what is drawn. */
@@ -578,7 +660,11 @@ export function drawFooterShellRowRuntime(
 
 // ---- the monitors panel ---------------------------------------------------
 
-/** The live monitors. NOT jump targets: a monitor has no feed bubble. */
+/**
+ * The live monitors. Each is a jump row whose jump the daemon states as
+ * unresolved(no_feed_entry) — a monitor draws no feed entry — so a click says
+ * so at the row and records it rather than doing nothing.
+ */
 export function drawFooterExpandedMonitors(
   u: FooterExpandedMonitors,
   deps: ExpandedDeps,
@@ -594,7 +680,7 @@ export function drawFooterMonitorRow(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement {
-  const row = plainRow("monitors");
+  const row = jumpRow("monitors", u.work, u.jump, deps, path);
   row.appendChild(glyph("monitors", "◉"));
   row.appendChild(
     drawFooterMonitorRowDescription(requireMessage(u.description, `${path}.description`)),
@@ -609,8 +695,9 @@ export function drawFooterMonitorRow(
       `${path}.runtime`,
     ),
   );
+  figures.appendChild(caret());
   row.appendChild(figures);
-  return row;
+  return finishJumpRow(row);
 }
 
 /** What is being watched, verbatim. */
@@ -702,41 +789,171 @@ export function drawFooterCronRowNextFire(
 
 // ---- shared row parts -----------------------------------------------------
 
-/** A row that reveals a feed bubble when clicked. */
-function jumpRow(panelName: FooterPanel, target: FeedId, deps: ExpandedDeps): HTMLElement {
+/** The attribute naming a row's detached work, verbatim. */
+export const WORK_ID_ATTRIBUTE = "data-work-id";
+
+/** The attribute naming why a row's entry is unresolved (the reason arm). */
+export const JUMP_UNRESOLVED_ATTRIBUTE = "data-jump-unresolved";
+
+/**
+ * A detached-work row: a click target whose outcome the daemon's `FooterJump`
+ * decides.
+ *
+ * THE ARM IS READ AT DRAW, not at click: an unset jump, an unset arm or an
+ * unset reason is a `MalformedView` here, so a row that could not say where
+ * its click lands is never drawn as one that silently does nothing.
+ */
+function jumpRow(
+  panelName: FooterPanel,
+  workMsg: FooterJumpRowWork | undefined,
+  jumpMsg: FooterJump | undefined,
+  deps: ExpandedDeps,
+  path: string,
+): HTMLElement {
+  const work = requireMessage(workMsg, `${path}.work`).value;
+  const jump = requireMessage(jumpMsg, `${path}.jump`);
+  const target: JumpTarget = requireCase(jump.target, `${path}.jump.target`);
+  const resolution = jumpResolutionOf(target, `${path}.jump`);
+  const key = `${panelName}:${work}`;
   const row = plainRow(panelName);
   row.classList.add("footer-row-jump");
-  row.setAttribute("data-jump", target.value);
+  row.setAttribute(WORK_ID_ATTRIBUTE, work);
+  if (target.case === "entry") row.setAttribute("data-jump", target.value.value);
+  else row.setAttribute(JUMP_UNRESOLVED_ATTRIBUTE, resolution);
   row.setAttribute("role", "button");
   row.tabIndex = 0;
+  if (deps.notices.standing(key, resolution)) {
+    row.setAttribute("data-unreachable", "true");
+    row.setAttribute(NOTICE_PENDING, "");
+  }
   row.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void jump(row, target, deps);
+    void jump_({ panel: panelName, key, work, target, resolution }, deps);
   });
   return row;
 }
 
+/** The attribute a row carries between its draw and its finish when a notice stands. */
+const NOTICE_PENDING = "data-notice-pending";
+
 /**
- * Reveal the row's bubble, saying so at the row when it could not be reached.
- *
- * `selectDetachedWork` answers `false` for a target it could not get to — a jump into a
- * collapsed shell bubble degrades to scroll-if-rendered — and that answer is
- * surfaced at the row rather than swallowed, because the user just clicked and
- * nothing else on the page would tell them the click went nowhere.
+ * Close a jump row: the standing notice, if any, is the row's LAST element, so
+ * it reads after the figures exactly as the old in-place note did.
  */
-async function jump(row: HTMLElement, target: FeedId, deps: ExpandedDeps): Promise<void> {
-  row.removeAttribute("data-unreachable");
-  const reached = await deps.selectDetachedWork(target);
-  if (reached) return;
-  row.setAttribute("data-unreachable", "true");
+function finishJumpRow(row: HTMLElement): HTMLElement {
+  if (!row.hasAttribute(NOTICE_PENDING)) return row;
+  row.removeAttribute(NOTICE_PENDING);
   const note = document.createElement("span");
   note.className = "footer-row-unreachable";
   note.textContent = "not on screen";
   row.appendChild(note);
-  log.warn("a footer jump target could not be revealed", {
+  return row;
+}
+
+/** The generated work element's shape, whichever row kind carried it. */
+interface FooterJumpRowWork {
+  readonly value: string;
+}
+
+/** The jump arm as the click reads it. */
+type JumpTarget = Exclude<FooterJump["target"], { case: undefined }>;
+
+/** A click, with everything its outcome and its record need. */
+interface JumpClick {
+  readonly panel: FooterPanel;
+  readonly key: string;
+  readonly work: string;
+  readonly target: JumpTarget;
+  readonly resolution: string;
+}
+
+/** Name a jump for the record and the notice: "entry", or the reason arm. */
+function jumpResolutionOf(target: JumpTarget, path: string): string {
+  switch (target.case) {
+    case "entry":
+      return "entry";
+    case "unresolved":
+      return requireCase(target.value.reason, `${path}.unresolved.reason`).case;
+    default: {
+      const other: { case: string } = target;
+      return unreachableArm(`${path}.target`, other.case);
+    }
+  }
+}
+
+/**
+ * ONE CLICK, EXACTLY ONE OUTCOME (owner ruling, 2026-09-23): the entry is
+ * selected and the feed scrolls to it, OR the row says "not on screen" and the
+ * reason is recorded with the row's work id, kind and feed id. Never neither.
+ *
+ * - `entry`: the feed's detached-work selection (`selectDetachedWork`, the
+ *   `detachedWorkSelected` scroll cause). If it lands, any standing notice for
+ *   the row goes. If it does not — the reveal could not bring the entry onto
+ *   the page, the answer was unreadable, or the call threw — the notice is
+ *   raised: the entry is known and still not on screen.
+ * - `unresolved`: the daemon already said it cannot name the entry, so the
+ *   notice is raised at once and nothing is asked of the feed.
+ *
+ * Every failure is surfaced, never swallowed: an unreadable answer is logged
+ * at error and filed as `frame_undecodable` (the click guard's treatment), any
+ * other throw is logged at error with its cause, and in every case the notice
+ * is drawn and the unreachable record written.
+ */
+async function jump_(click: JumpClick, deps: ExpandedDeps): Promise<void> {
+  if (click.target.case === "unresolved") {
+    notice(click, deps, click.resolution);
+    return;
+  }
+  const entry = click.target.value;
+  let reached = false;
+  let failed = false;
+  try {
+    reached = await deps.selectDetachedWork(entry);
+  } catch (err) {
+    failed = true;
+    if (isMalformedView(err)) {
+      log.error(`the daemon's answer could not be read: ${err.message}`, {
+        operation: "footer.expanded.jump-undecodable",
+        context: { work_id: click.work, kind: click.panel, feed_id: entry.value, path: err.path, cause: err.detail },
+      });
+      deps.ctx.failures.report(frameUndecodable(err.detail, err.path));
+    } else {
+      log.error(`selecting a footer row's entry failed: ${String(err)}`, {
+        operation: "footer.expanded.jump-failed",
+        context: { work_id: click.work, kind: click.panel, feed_id: entry.value, cause: String(err) },
+      });
+    }
+  }
+  if (reached) {
+    log.debug("a footer detached-work row's entry was selected", {
+      operation: "footer.expanded.jump-selected",
+      context: { work_id: click.work, kind: click.panel, feed_id: entry.value },
+    });
+    deps.notices.clear(click.key);
+    deps.redraw();
+    return;
+  }
+  notice(click, deps, failed ? "entry_selection_failed" : "entry_not_revealed");
+}
+
+/**
+ * Raise the row's notice, redraw so it is on the glass NOW, and write the
+ * record a remediation reads: which work, which kind, which entry (if the
+ * daemon knew one), and why it is not on screen.
+ */
+function notice(click: JumpClick, deps: ExpandedDeps, reason: string): void {
+  deps.notices.raise(click.key, click.resolution);
+  log.warn("a footer detached-work row's entry is not on screen", {
     operation: "footer.expanded.jump-unreachable",
-    context: { target: target.value },
+    context: {
+      work_id: click.work,
+      kind: click.panel,
+      feed_id: click.target.case === "entry" ? click.target.value.value : "unresolved",
+      jump: click.resolution,
+      reason,
+    },
   });
+  deps.redraw();
 }
 
 /** A plain panel row, carrying the shared row hook. */
