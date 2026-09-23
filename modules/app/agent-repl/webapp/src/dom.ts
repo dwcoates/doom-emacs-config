@@ -46,7 +46,7 @@ export function ancestorMatching<T extends { parentElement: T | null }>(
  * nothing else, and a push that only redrew a row inside its chrome moves
  * nothing at all. Only a genuine reorder or reparent moves an element.
  */
-export function placeChildren(parent: Element, desired: readonly Element[]): number {
+export function placeChildren(parent: Element, desired: readonly ChildNode[]): number {
   const wanted = new Set<Node>(desired);
   for (const child of [...parent.childNodes]) {
     if (!wanted.has(child)) child.remove();
