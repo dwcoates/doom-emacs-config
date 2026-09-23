@@ -171,15 +171,22 @@ func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 // Footer: the tokens cell
 // ---------------------------------------------------------------------------
 
-func TestFooterTokensCellExcludesCacheReads(t *testing.T) {
+// ftPanelInput is the tokens panel's summed uncached-input line: the spend
+// across every agent. The strip's cell is the main agent's context growth, so
+// the uncached-spend contract is asserted here, on the panel.
+func ftPanelInput(v *frontendv1.FooterView) string {
+	return v.GetExpanded().GetTokens().GetInput().GetValue()
+}
+
+func TestFooterTokensPanelExcludesCacheReads(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn whose only usage is a huge cache READ and no misses.
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("first", "k-tok-a", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-a", ftUsage(0, 0, 500_000))))
-	readOnly := awaitFooter(t, f, footer, "the tokens cell after a cache-read-only response", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput().GetText() != ""
+	readOnly := awaitFooter(t, f, footer, "the tokens panel after a cache-read-only response", func(v *frontendv1.FooterView) bool {
+		return ftPanelInput(v) != ""
 	})
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	awaitFooter(t, f, footer, "idle.done after the first turn", func(v *frontendv1.FooterView) bool {
@@ -192,18 +199,18 @@ func TestFooterTokensCellExcludesCacheReads(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-b", ftUsage(250, 0, 500_000))))
 
-	// Assert: the cell changed — the diff can only be the miss, since the
+	// Assert: the line changed — the diff can only be the miss, since the
 	// cache-read figure (input_hits) is identical in both turns and a fresh
-	// turn resets the cell.
-	withMiss := awaitFooter(t, f, footer, "the tokens cell after the miss joins the same cache read", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput().GetText() != "" && v.GetStrip().GetTokens().GetInput().GetText() != readOnly.GetStrip().GetTokens().GetInput().GetText()
+	// turn resets the accounting.
+	withMiss := awaitFooter(t, f, footer, "the tokens panel after the miss joins the same cache read", func(v *frontendv1.FooterView) bool {
+		return ftPanelInput(v) != "" && ftPanelInput(v) != ftPanelInput(readOnly)
 	})
-	if withMiss.GetStrip().GetTokens().GetInput().GetText() == readOnly.GetStrip().GetTokens().GetInput().GetText() {
-		t.Fatalf("tokens cell unchanged by a real miss (%q); a cache-read-only figure must not already count it in", readOnly.GetStrip().GetTokens().GetInput().GetText())
+	if ftPanelInput(withMiss) == ftPanelInput(readOnly) {
+		t.Fatalf("panel input unchanged by a real miss (%q); a cache-read-only figure must not already count it in", ftPanelInput(readOnly))
 	}
 }
 
-func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing.T) {
+func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing.T) {
 	t.Parallel()
 	// Arrange: one API response whose usage is stamped on the FIRST unit
 	// only, per the envelope contract.
@@ -212,15 +219,15 @@ func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing
 	f.submit("go", "k-tok-dup", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act: the response's first unit carries usage — 1000 input tokens (all
-	// misses), so the canonical formatter's cell text is exactly "1k in".
+	// misses), so the canonical formatter's line is exactly "1k".
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-unit-1", ftUsage(1000, 0, 0))))
-	// The cell is ALWAYS populated (it reads "0 in" before any usage lands),
-	// so the usage-carrying push is the first one whose figure is not zero.
-	firstUnit := awaitFooter(t, f, footer, "the tokens cell after the usage-carrying unit", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput().GetText() != "" && v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
+	// The line is UNSET until usage lands, so the usage-carrying push is the
+	// first one with a figure.
+	firstUnit := awaitFooter(t, f, footer, "the tokens panel after the usage-carrying unit", func(v *frontendv1.FooterView) bool {
+		return ftPanelInput(v) != ""
 	})
-	if firstUnit.GetStrip().GetTokens().GetInput().GetText() != "1k in" {
-		t.Fatalf("tokens cell = %q for 1000 input tokens, want the canonical formatter's exact \"1k in\"", firstUnit.GetStrip().GetTokens().GetInput().GetText())
+	if ftPanelInput(firstUnit) != "1k" {
+		t.Fatalf("panel input = %q for 1000 input tokens, want the canonical formatter's exact \"1k\"", ftPanelInput(firstUnit))
 	}
 
 	// Act: the SAME response's second unit (a tool call in the same
@@ -233,18 +240,67 @@ func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing
 	}))
 
 	// Act: end the turn. A whole view identical to the last one is never
-	// pushed, so the turn's terminal is what makes the post-second-unit cell
+	// pushed, so the turn's terminal is what makes the post-second-unit line
 	// observable at all.
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 
-	// Assert: the cell is unchanged — a second unit of the SAME response
+	// Assert: the line is unchanged — a second unit of the SAME response
 	// leaving usage unset must not add a second charge.
 	stillOne := awaitFooter(t, f, footer, "the footer after the unstamped second unit", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
 	})
-	if stillOne.GetStrip().GetTokens().GetInput().GetText() != firstUnit.GetStrip().GetTokens().GetInput().GetText() {
-		t.Fatalf("tokens cell = %q after the second unit, want it unchanged at %q: usage rides exactly one unit per response",
-			stillOne.GetStrip().GetTokens().GetInput().GetText(), firstUnit.GetStrip().GetTokens().GetInput().GetText())
+	if ftPanelInput(stillOne) != ftPanelInput(firstUnit) {
+		t.Fatalf("panel input = %q after the second unit, want it unchanged at %q: usage rides exactly one unit per response",
+			ftPanelInput(stillOne), ftPanelInput(firstUnit))
+	}
+}
+
+func TestFooterTokensCellAndTopbarChipReadOneContextUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange: the context held before the turn is 100k, stated to both
+	// surfaces by one push; then a turn opens.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ftContextUsage(100_000))
+	awaitTopbar(t, f, topbar, "the context chip at the pre-turn 100k", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() == "100k"
+	})
+	f.submit("go", "k-tok-context", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	awaitFooter(t, f, footer, "the tokens cell at the turn's open", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetTokens().GetInput().GetText() == "0 in"
+	})
+
+	// Act: ONE mid-turn context_usage push, as the shim states after a main
+	// API response.
+	f.shim.PushSessionUpdate(ftContextUsage(118_200))
+
+	// Assert: the chip states the context held and the cell its growth since
+	// the turn opened, both from that one push.
+	chip := awaitTopbar(t, f, topbar, "the context chip after the mid-turn push", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() != "100k"
+	})
+	if chip.GetContext().GetText() != "118.2k" {
+		t.Fatalf("context chip = %q, want 118.2k", chip.GetContext().GetText())
+	}
+	cell := awaitFooter(t, f, footer, "the tokens cell after the mid-turn push", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
+	})
+	if cell.GetStrip().GetTokens().GetInput().GetText() != "18.2k in" {
+		t.Fatalf("tokens cell = %q, want 18.2k in: the chip's 118.2k less the 100k the turn opened on",
+			cell.GetStrip().GetTokens().GetInput().GetText())
+	}
+}
+
+// ftContextUsage is one context_usage push stating the context held.
+func ftContextUsage(total int64) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+			TotalTokens: total,
+			MaxTokens:   200_000,
+			Model:       "claude-opus-5",
+		}},
 	}
 }
 

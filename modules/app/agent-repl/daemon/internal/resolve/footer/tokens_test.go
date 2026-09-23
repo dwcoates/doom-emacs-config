@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
 )
 
 // usage builds one canonical token record.
@@ -48,7 +51,15 @@ func thinkingFrame(unit string, u *conversationv1.TokenUsage) *conversationv1.Ag
 	}
 }
 
-func TestTheCellShowsTheUncachedInputFigure(t *testing.T) {
+// panelInput is the panel's summed uncached-input line — the spend across
+// every agent, which is what the strip's cell used to show before it became
+// the main agent's context growth.
+func panelInput(t *testing.T, h *harness) string {
+	t.Helper()
+	return h.view(t).GetExpanded().GetTokens().GetInput().GetValue()
+}
+
+func TestThePanelSumsTheUncachedInputFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -58,9 +69,9 @@ func TestTheCellShowsTheUncachedInputFigure(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", usage(90_000, 18_000, 200, 500, 100)))
 
 	// Assert
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "18.2k in" {
-		t.Fatalf("cell = %q, want the input_misses total (written + unwritten)", got)
+	got := panelInput(t, h)
+	if got != "18.2k" {
+		t.Fatalf("panel input = %q, want the input_misses total (written + unwritten)", got)
 	}
 }
 
@@ -75,9 +86,9 @@ func TestUsageIsSummedAcrossTheTurnsUnits(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-2", "success", usage(0, 2_000, 0, 0, 0)))
 
 	// Assert
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "3k in" {
-		t.Fatalf("cell = %q, want 3k across two carrying units", got)
+	got := panelInput(t, h)
+	if got != "3k" {
+		t.Fatalf("panel input = %q, want 3k across two carrying units", got)
 	}
 }
 
@@ -94,9 +105,9 @@ func TestARepeatedFrameDoesNotDoubleCountItsUsage(t *testing.T) {
 	h.r.OnActivity(testWS, mainAgent, frame)
 
 	// Assert
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "5k in" {
-		t.Fatalf("cell = %q, want 5k: usage is keyed by unit and REPLACED, never added", got)
+	got := panelInput(t, h)
+	if got != "5k" {
+		t.Fatalf("panel input = %q, want 5k: usage is keyed by unit and REPLACED, never added", got)
 	}
 }
 
@@ -425,11 +436,11 @@ func TestALiveDetachedAgentsUsageSurvivesTheTurnReset(t *testing.T) {
 	// Act: a new main turn opens, which resets the turn's accounting.
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
-	// Assert: the detached agent is still burning that input, so its figure
-	// stands rather than falling back to the new turn's zero.
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "5k in" {
-		t.Fatalf("cell = %q, want the live detached agent's usage carried across the reset", got)
+	// Assert: the detached agent is still burning that input, so its spend
+	// stands in the panel rather than falling back to the new turn's nothing.
+	got := panelInput(t, h)
+	if got != "5k" {
+		t.Fatalf("panel input = %q, want the live detached agent's usage carried across the reset", got)
 	}
 }
 
@@ -446,10 +457,10 @@ func TestTheTurnResetKeepsTheDetachedAgentButDropsTheMainTurn(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
 	// Assert: the reset is SELECTIVE — the concluded turn's own units go, the
-	// live detached agent's stay, so the figure is the detached 5k alone.
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "5k in" {
-		t.Fatalf("cell = %q, want the detached 5k with the main turn's 3k wiped", got)
+	// live detached agent's stay, so the spend is the detached 5k alone.
+	got := panelInput(t, h)
+	if got != "5k" {
+		t.Fatalf("panel input = %q, want the detached 5k with the main turn's 3k wiped", got)
 	}
 }
 
@@ -463,11 +474,10 @@ func TestARetiredDetachedAgentsUsageStopsCounting(t *testing.T) {
 	// Act: the run reaches its own terminal.
 	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
 
-	// Assert: a settled run charges nothing more, so its units leave the figure
-	// rather than standing in it for the rest of the session.
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "0 in" {
-		t.Fatalf("cell = %q, want the retired detached agent's usage dropped", got)
+	// Assert: a settled run charges nothing more, so its background units leave
+	// the panel rather than standing in it for the rest of the session.
+	if got := panelInput(t, h); got != "" {
+		t.Fatalf("panel input = %q, want the retired detached agent's usage dropped", got)
 	}
 }
 
@@ -485,9 +495,9 @@ func TestADetachedAgentsUsageIsNotDoubleCountedAcrossAReset(t *testing.T) {
 
 	// Assert: the carried unit keeps its key, so the re-report UPSERTS rather
 	// than adding — 5k, never 10k.
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "5k in" {
-		t.Fatalf("cell = %q, want 5k: a carried unit is replaced, never added", got)
+	got := panelInput(t, h)
+	if got != "5k" {
+		t.Fatalf("panel input = %q, want 5k: a carried unit is replaced, never added", got)
 	}
 }
 
@@ -505,9 +515,8 @@ func TestAnInTurnSubagentsUsageDoesNotSurviveTheTurnReset(t *testing.T) {
 
 	// Assert: only DETACHED agents are carried; an in-turn subagent resets with
 	// the turn that owned it.
-	got := h.view(t).GetStrip().GetTokens().GetInput().GetText()
-	if got != "0 in" {
-		t.Fatalf("cell = %q, want the in-turn subagent's usage wiped with the turn", got)
+	if got := panelInput(t, h); got != "" {
+		t.Fatalf("panel input = %q, want the in-turn subagent's usage wiped with the turn", got)
 	}
 }
 
@@ -530,5 +539,594 @@ func TestTheCacheSplitIsDrawnOnItsOwnLines(t *testing.T) {
 	}
 	if panel.GetInput().GetValue() != "3.5k" {
 		t.Fatalf("input = %q, want written + unwritten", panel.GetInput().GetValue())
+	}
+}
+
+// ---- the cell: the main agent's context growth -----------------------------
+
+// contextReading is one context_usage push stating the context held.
+func contextReading(total int64) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ContextUsage{
+		ContextUsage: &conversationv1.SessionContextUsage{TotalTokens: total, MaxTokens: 200_000},
+	}}
+}
+
+// readContext pushes each reading in order.
+func readContext(h *harness, totals ...int64) {
+	for _, total := range totals {
+		h.r.OnSessionUpdate(testWS, contextReading(total))
+	}
+}
+
+// cellText is the strip's tokens cell figure.
+func cellText(t *testing.T, h *harness) string {
+	t.Helper()
+	return h.view(t).GetStrip().GetTokens().GetInput().GetText()
+}
+
+func TestTheCellIsTheMainAgentsContextGrowth(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    string
+	}{
+		{
+			name: "the growth since the turn opened",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				readContext(h, 118_200)
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "the main agent's own uncached spend is not the figure",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 90_000, 0, 0, 0)))
+				readContext(h, 118_200)
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "an in-turn subagent's spend is excluded",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", detachedAgent.GetValue(), "Explore", ""))
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("sub-1", "success", usage(0, 50_000, 0, 0, 0)))
+				readContext(h, 118_200)
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "a detached agent's spend is excluded",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 50_000, 0, 0, 0)))
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-2", "success", usage(0, 70_000, 0, 0, 0)))
+				readContext(h, 118_200)
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "a turn with no reading since it opened has grown nothing",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			},
+			want: "0 in",
+		},
+		{
+			name: "a turn opened before any reading takes its baseline from the first",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				readContext(h, 100_000, 101_000)
+			},
+			want: "1k in",
+		},
+		{
+			name: "the turn-open edge re-takes the baseline the accepted turn took",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				// The previous turn's closing reading lands after the prompt was
+				// accepted and before the vendor opened the turn.
+				readContext(h, 104_000)
+				h.r.OnTurnOpened(testWS, testTurnID)
+				readContext(h, 105_000)
+			},
+			want: "1k in",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got := cellText(t, h); got != tt.want {
+				t.Fatalf("cell = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheCellMovesWithEachMidTurnReading(t *testing.T) {
+	tests := []struct {
+		name     string
+		readings []int64
+		want     string
+	}{
+		{name: "the first reading after one response", readings: []int64{110_000}, want: "10k in"},
+		{name: "a later reading replaces it", readings: []int64{110_000, 125_000}, want: "25k in"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			readContext(h, 100_000)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			readContext(h, tt.readings...)
+
+			// Assert
+			if got := cellText(t, h); got != tt.want {
+				t.Fatalf("cell = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAContextCutRebasesTheGrowth(t *testing.T) {
+	tests := []struct {
+		name         string
+		act          func(h *harness)
+		wantCell     string
+		wantSinceCut bool
+	}{
+		{
+			name:         "a reading below the baseline is a cut, and the growth restarts from it",
+			act:          func(h *harness) { readContext(h, 150_000, 30_000) },
+			wantCell:     "0 in",
+			wantSinceCut: true,
+		},
+		{
+			name:         "growth after the cut is measured from the post-cut size",
+			act:          func(h *harness) { readContext(h, 150_000, 30_000, 35_000) },
+			wantCell:     "5k in",
+			wantSinceCut: true,
+		},
+		{
+			name:         "a reading at the baseline is no cut",
+			act:          func(h *harness) { readContext(h, 100_000) },
+			wantCell:     "0 in",
+			wantSinceCut: false,
+		},
+		{
+			name: "the next turn opens without the since-cut marker",
+			act: func(h *harness) {
+				readContext(h, 150_000, 30_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			},
+			wantCell:     "0 in",
+			wantSinceCut: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			readContext(h, 100_000)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			if got := cellText(t, h); got != tt.wantCell {
+				t.Fatalf("cell = %q, want %q", got, tt.wantCell)
+			}
+			sinceCut := h.view(t).GetExpanded().GetTokens().GetContextGrowth().GetSinceCut() != nil
+			if sinceCut != tt.wantSinceCut {
+				t.Fatalf("since-cut marker = %v, want %v", sinceCut, tt.wantSinceCut)
+			}
+		})
+	}
+}
+
+func TestTheIdleCellIsTheStatedDash(t *testing.T) {
+	turn := testTurnID
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{
+			name:    "no turn has ever run",
+			arrange: func(h *harness) { readContext(h, 100_000) },
+		},
+		{
+			name: "the turn ended",
+			arrange: func(h *harness) {
+				readContext(h, 100_000)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				readContext(h, 118_200)
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+			},
+		},
+		{
+			name: "a context cut ended the turn",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+				h.r.OnContextCut(testWS, mainAgent, compactedCut())
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got := cellText(t, h); got != "--" {
+				t.Fatalf("idle cell = %q, want the daemon's stated \"--\"", got)
+			}
+		})
+	}
+}
+
+func TestTheIdleCellStillOpensAPopulatedPanel(t *testing.T) {
+	turn := testTurnID
+	tests := []struct {
+		name  string
+		check func(t *testing.T, view *frontendv1.FooterView)
+	}{
+		{
+			name: "the panel still arrives",
+			check: func(t *testing.T, view *frontendv1.FooterView) {
+				if view.GetExpanded().GetTokens() == nil {
+					t.Fatalf("the idle footer shipped no tokens panel; the cell must still open one")
+				}
+			},
+		},
+		{
+			name: "the panel holds the most recent turn's growth",
+			check: func(t *testing.T, view *frontendv1.FooterView) {
+				if got := view.GetExpanded().GetTokens().GetContextGrowth().GetValue(); got != "18.2k" {
+					t.Fatalf("context growth = %q, want the ended turn's 18.2k", got)
+				}
+			},
+		},
+		{
+			name: "the panel holds the most recent turn's spend",
+			check: func(t *testing.T, view *frontendv1.FooterView) {
+				if got := view.GetExpanded().GetTokens().GetInput().GetValue(); got != "61k" {
+					t.Fatalf("panel input = %q, want the ended turn's 61k", got)
+				}
+			},
+		},
+		{
+			name: "the idle cell keeps the turn's alarm glyph",
+			check: func(t *testing.T, view *frontendv1.FooterView) {
+				if view.GetStrip().GetTokens().GetAlarm() == nil {
+					t.Fatalf("the idle cell dropped the alarm glyph; it stands until the next turn")
+				}
+			},
+		},
+		{
+			name: "the idle cell carries the settled turn's verdict",
+			check: func(t *testing.T, view *frontendv1.FooterView) {
+				if view.GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+					t.Fatalf("verdict = %v, want complete on the idle cell", view.GetStrip().GetTokens().GetVerdict())
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, WithTokenAlarmThreshold(20_000))
+			connected(h)
+			readContext(h, 100_000)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", usage(0, 61_000, 0, 0, 0)))
+			readContext(h, 118_200)
+
+			// Act
+			h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+			// Assert
+			tt.check(t, h.view(t))
+		})
+	}
+}
+
+func TestThePanelsContextGrowthIsUnsetBeforeAnyTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	readContext(h, 100_000)
+
+	// Assert
+	if v := h.view(t).GetExpanded().GetTokens().GetContextGrowth().Value; v != nil {
+		t.Fatalf("context growth = %q before any turn opened, want the empty slot", *v)
+	}
+}
+
+// ---- the panel: per-agent spend and its sum --------------------------------
+
+// arrangeThreeAgents spends on the main agent, an in-turn subagent and a
+// detached agent inside one turn. The subagent's usage arrives FIRST, so the
+// main entry's place is the ordering's own rule rather than arrival order.
+func arrangeThreeAgents(h *harness) {
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "general-purpose"))
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", sub.GetValue(), "Explore", "find the footer"))
+	h.r.OnActivity(testWS, sub, responseFrame("sub-1", "success", usage(4_000, 2_000, 500, 700, 0)))
+	h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(90_000, 18_000, 200, 1_500, 300)))
+	h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(1_000, 3_000, 0, 200, 0)))
+}
+
+func TestThePanelListsEachAgentsSpend(t *testing.T) {
+	type entry struct{ label, input, cacheRead, cacheWrite, output string }
+	tests := []struct {
+		name  string
+		index int
+		want  entry
+	}{
+		{name: "the main agent is listed first", index: 0, want: entry{"main", "18.2k", "90k", "18k", "1.5k"}},
+		{name: "an in-turn subagent is named by type and description", index: 1, want: entry{"Explore · find the footer", "2.5k", "4k", "2k", "700"}},
+		{name: "a detached agent is named by type", index: 2, want: entry{"general-purpose", "3k", "1k", "3k", "200"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			arrangeThreeAgents(h)
+
+			// Assert
+			agents := h.view(t).GetExpanded().GetTokens().GetAgents()
+			if len(agents) != 3 {
+				t.Fatalf("agents = %d entries, want 3", len(agents))
+			}
+			a := agents[tt.index]
+			got := entry{a.GetLabel(), a.GetInput().GetValue(), a.GetCacheRead().GetValue(), a.GetCacheWrite().GetValue(), a.GetOutput().GetValue()}
+			if got != tt.want {
+				t.Fatalf("agents[%d] = %+v, want %+v", tt.index, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestThePanelSumIsAcrossEveryAgent(t *testing.T) {
+	tests := []struct {
+		name string
+		line func(p *frontendv1.FooterExpandedTokens) string
+		want string
+	}{
+		{name: "uncached input", line: func(p *frontendv1.FooterExpandedTokens) string { return p.GetInput().GetValue() }, want: "23.7k"},
+		{name: "cache read", line: func(p *frontendv1.FooterExpandedTokens) string { return p.GetCacheRead().GetValue() }, want: "95k"},
+		{name: "cache write", line: func(p *frontendv1.FooterExpandedTokens) string { return p.GetCacheWrite().GetValue() }, want: "23k"},
+		{name: "output", line: func(p *frontendv1.FooterExpandedTokens) string { return p.GetOutput().GetValue() }, want: "2.4k"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			arrangeThreeAgents(h)
+
+			// Assert
+			if got := tt.line(h.view(t).GetExpanded().GetTokens()); got != tt.want {
+				t.Fatalf("%s sum = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestThePanelListsNoAgentBeforeAnyUsage(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert
+	if got := h.view(t).GetExpanded().GetTokens().GetAgents(); len(got) != 0 {
+		t.Fatalf("agents = %v, want none until some usage is known", got)
+	}
+}
+
+// agentLabels is the panel's per-agent entry names, in order.
+func agentLabels(t *testing.T, h *harness) []string {
+	t.Helper()
+	var out []string
+	for _, a := range h.view(t).GetExpanded().GetTokens().GetAgents() {
+		out = append(out, a.GetLabel())
+	}
+	return out
+}
+
+func TestDetachedSpendStaysInThePanelAcrossTurns(t *testing.T) {
+	turn := testTurnID
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    []string
+	}{
+		{
+			name: "a live detached agent's entry is carried into the next turn",
+			arrange: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "general-purpose"))
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 3_000, 0, 0, 0)))
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			},
+			want: []string{"general-purpose"},
+		},
+		{
+			name: "a live detached agent's idle spend is in the idle panel",
+			arrange: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "general-purpose"))
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 3_000, 0, 0, 0)))
+			},
+			want: []string{"general-purpose"},
+		},
+		{
+			name: "a retired detached agent's carried spend leaves the panel",
+			arrange: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "general-purpose"))
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 3_000, 0, 0, 0)))
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+			},
+			want: nil,
+		},
+		{
+			name: "an in-turn subagent's entry stays after it retires, until the next turn",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", sub.GetValue(), "Explore", ""))
+				h.r.OnActivity(testWS, sub, responseFrame("sub-1", "success", usage(0, 2_000, 0, 0, 0)))
+				h.r.OnAgentTerminal(testWS, sub, nil, completed(), nil)
+			},
+			want: []string{"Explore"},
+		},
+		{
+			name: "the next turn drops an ended in-turn subagent's entry",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", sub.GetValue(), "Explore", ""))
+				h.r.OnActivity(testWS, sub, responseFrame("sub-1", "success", usage(0, 2_000, 0, 0, 0)))
+				h.r.OnAgentTerminal(testWS, sub, nil, completed(), nil)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			got := agentLabels(t, h)
+			if len(got) != len(tt.want) {
+				t.Fatalf("agents = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("agents = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// ---- the reading's records, and the readings the contract cannot hold ------
+
+func TestContextReadingsAreRecorded(t *testing.T) {
+	tests := []struct {
+		name      string
+		act       func(h *harness)
+		level     string
+		operation string
+		wantCell  string
+	}{
+		{
+			name: "a reading with no payload is refused at WARN and the growth stands",
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ContextUsage{}})
+			},
+			level:     dlog.LevelWarn,
+			operation: "daemon.footer.context_usage_unreadable",
+			wantCell:  "10k in",
+		},
+		{
+			name:      "a negative reading is refused at WARN and the growth stands",
+			act:       func(h *harness) { readContext(h, -5) },
+			level:     dlog.LevelWarn,
+			operation: "daemon.footer.context_usage_unreadable",
+			wantCell:  "10k in",
+		},
+		{
+			name:      "a cut is recorded at INFO",
+			act:       func(h *harness) { readContext(h, 20_000) },
+			level:     dlog.LevelInfo,
+			operation: "daemon.footer.context_cut_rebased",
+			wantCell:  "0 in",
+		},
+		{
+			name:      "an ordinary reading is recorded at DEBUG",
+			act:       func(h *harness) { readContext(h, 112_000) },
+			level:     dlog.LevelDebug,
+			operation: "daemon.footer.context_held",
+			wantCell:  "12k in",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			readContext(h, 100_000)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			readContext(h, 110_000)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			if !hasLevel(h.log.Records(), tt.level, tt.operation) {
+				t.Fatalf("records = %+v, want %s %s", h.log.Records(), tt.level, tt.operation)
+			}
+			if got := cellText(t, h); got != tt.wantCell {
+				t.Fatalf("cell = %q, want %q", got, tt.wantCell)
+			}
+		})
+	}
+}
+
+func TestTheFirstReadingOfATurnWithNoBaselineIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	readContext(h, 100_000)
+
+	// Assert
+	if !hasLevel(h.log.Records(), dlog.LevelInfo, "daemon.footer.context_baseline_taken") {
+		t.Fatalf("records = %+v, want INFO daemon.footer.context_baseline_taken", h.log.Records())
 	}
 }
