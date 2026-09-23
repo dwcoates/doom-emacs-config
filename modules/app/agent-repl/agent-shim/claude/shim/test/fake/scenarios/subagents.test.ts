@@ -3,7 +3,11 @@
  * stream cannot: the `.meta.json` is the only source of a subagent's type,
  * description, spawning call and spawn depth.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+import { createFold } from "../../../src/convert/fold.js";
+import type { PersistEntry } from "../../../src/store/persistence.js";
+import { activityOf, foldContext, MAIN_AGENT } from "../../convert/fold-harness.js";
 import { matching } from "../../expect-shapes.js";
 
 import { driveScenario, ofType, toolUseResults } from "../harness.js";
@@ -455,5 +459,98 @@ describe("historical usage attributed to a nested subagent", () => {
       speed: "fast",
       inferenceGeo: "us-east-1",
     });
+  });
+});
+
+describe("a detached subagent streaming INTO the main agent's open blocks", () => {
+  /** Fold what the mock emitted through the REAL fold, and the log records it wrote. */
+  async function foldInterleaved(): Promise<{ entries: PersistEntry[]; logs: { message: string }[] }> {
+    const driven = await driveScenario(["!subagent-interleaved"]);
+    const fold = createFold();
+    const context = foldContext();
+    const before = vi.mocked(writeSync).mock.calls.length;
+    const entries = driven.messages.flatMap((message) => [
+      ...fold.onSdkMessage(message, context).entries,
+    ]);
+    const calls = vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
+    const logs = calls.map(
+      ([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { message: string },
+    );
+    return { entries, logs };
+  }
+
+  /** The distinct units of one kind a book holds. */
+  function unitsIn(entries: readonly PersistEntry[], main: boolean, kind: string): string[] {
+    const keys = entries
+      .filter((entry) => (entry.agentId.value === MAIN_AGENT.value) === main)
+      .filter((entry) => activityOf(entry)?.item.case === kind)
+      .map((entry) => entry.upsertKey);
+    return [...new Set(keys)];
+  }
+
+  it("really lands a subagent message_start between two deltas of a main block", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-interleaved"]);
+    const order = (driven.messages as unknown as Record<string, unknown>[])
+      .filter((m) => m.type === "stream_event")
+      .map((m) => ({ parent: m.parent_tool_use_id, event: (m.event as { type: string }).type }));
+    const lastIndexOf = (test: (e: (typeof order)[number]) => boolean, within: typeof order): number =>
+      within.reduce((last, e, at) => (test(e) ? at : last), -1);
+    const conclusionStart = lastIndexOf((e) => e.parent === null && e.event === "message_start", order);
+    const rest = order.slice(conclusionStart);
+
+    // Assert: after the conclusion's message_start, a subagent message_start
+    // precedes a later main delta.
+    const subagentStart = rest.findIndex((e) => e.parent !== null && e.event === "message_start");
+    const laterMainDelta = lastIndexOf((e) => e.parent === null && e.event === "content_block_delta", rest);
+    expect(subagentStart).toBeGreaterThan(0);
+    expect(laterMainDelta).toBeGreaterThan(subagentStart);
+  });
+
+  it("folds the main agent's concluding prose into exactly ONE main unit", async () => {
+    // Arrange + Act
+    const { entries } = await foldInterleaved();
+
+    // Assert
+    expect(unitsIn(entries, true, "response")).toHaveLength(1);
+  });
+
+  it("folds each main reasoning block into exactly ONE main unit", async () => {
+    // Arrange + Act: one reasoning block for the spawn's call, one for the conclusion.
+    const { entries } = await foldInterleaved();
+
+    // Assert
+    expect(unitsIn(entries, true, "thinking")).toHaveLength(2);
+  });
+
+  it("streams BOTH halves of each interleaved main block onto the main book", async () => {
+    // Arrange + Act: the conclusion's thinking and text blocks each stream two
+    // deltas, with a whole subagent response between them.
+    const { entries } = await foldInterleaved();
+
+    // Assert
+    const mainDeltas = entries.filter(
+      (entry) =>
+        entry.agentId.value === MAIN_AGENT.value &&
+        ["activity.thinking.update", "activity.response.update"].includes(entry.source.discriminator),
+    );
+    expect(mainDeltas).toHaveLength(4);
+  });
+
+  it("folds the subagent's two responses into its OWN book", async () => {
+    // Arrange + Act
+    const { entries } = await foldInterleaved();
+
+    // Assert
+    expect(unitsIn(entries, false, "response")).toHaveLength(2);
+  });
+
+  it("leaves no streamed unit started and unsettled", async () => {
+    // Arrange + Act
+    const { logs } = await foldInterleaved();
+
+    // Assert
+    expect(logs.filter((record) => record.message.startsWith("invariant violated: a streamed unit"))).toEqual([]);
   });
 });

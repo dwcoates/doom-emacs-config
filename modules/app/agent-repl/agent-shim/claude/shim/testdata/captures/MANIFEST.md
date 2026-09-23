@@ -360,6 +360,12 @@ the narrower/alternate state**:
   recorded one.
 - `!subagent-detached-live`, `!subagent-failed` — declared subagent states;
   no capture recorded either.
+- `!subagent-interleaved` — GROUNDED IN SHAPE by `subagent-detached` (the
+  launch, the sidechain attribution and the completion notification), but the
+  INTERLEAVING itself is ungrounded: no capture streams a subagent's response
+  into an open main block. The order mirrors a live session's logs, where a
+  background subagent's `message_start` arrived between two deltas of the main
+  agent's open thinking and text blocks.
 - `!perm-no-standing` — declared "ask offered no standing" arm; untested by
   any capture.
 - `!perm-undecidable` — a KNOWN-OPEN arm by the scenario's own doc comment:
