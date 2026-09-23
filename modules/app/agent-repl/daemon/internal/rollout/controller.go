@@ -110,6 +110,11 @@ type controller struct {
 	// raised before the successor is spawned and lowered only by a handover
 	// that failed before announcing anything.
 	handingOver bool
+	// staleBounces counts the per-workspace stale-shim relaunches a successor
+	// started when it became the incumbent. Each waits for its own
+	// workspace's freeness; the group is what lets a caller (a test) know the
+	// checks have all run to their end rather than guessing with a delay.
+	staleBounces sync.WaitGroup
 	// bouncedStamp is the reported shim build each workspace was LAST bounced
 	// for. It is what makes the build-staleness bounce fire ONCE per observed
 	// stamp: a relaunched shim that comes back reporting the same sha as the
