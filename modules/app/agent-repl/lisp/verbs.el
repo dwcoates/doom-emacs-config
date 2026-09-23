@@ -1439,7 +1439,42 @@ the obvious default rather than something to retype."
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
-(defun agent-repl-verbs--create-standard (mode child)
+(defconst agent-repl-verbs--create-log-scope
+  '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+  "The central log scope every creation command records under.
+A create runs before the workspace it makes exists, so it can own no
+workspace log of its own.")
+
+(defun agent-repl-verbs--create-invoked (command)
+  "Record that the creation COMMAND was invoked, before it asks anything.
+A create used to log nothing until its questions were answered, so a
+prompt that was abandoned, hidden or never shown left no trace at all and
+was indistinguishable from the command never running."
+  (agent-repl--info agent-repl-verbs--create-log-scope
+                    "elisp.verbs.create-invoked command=%s" command))
+
+(defun agent-repl-verbs--read-for (command read reader)
+  "Answer COMMAND's READ question by calling READER, recording a failed read.
+READ names the question (`repository\=', `name\=', `prompt\=').  A quit
+out of the minibuffer, or a `user-error\' refusing the read, is recorded
+with the signal and its message and then RE-SIGNALLED unchanged: the log
+says where the create stopped, and the caller still sees it stop."
+  (condition-case err
+      (funcall reader)
+    ((quit user-error)
+     (agent-repl--info agent-repl-verbs--create-log-scope
+                       "elisp.verbs.create-read-abandoned command=%s read=%s signal=%s detail=%S"
+                       command read (car err) (error-message-string err))
+     (signal (car err) (cdr err)))))
+
+(defun agent-repl-verbs--read-name (refusal)
+  "Read a REQUIRED workspace name, refusing a blank one with REFUSAL."
+  (let ((name (string-trim (read-string "Name: "))))
+    (when (string-empty-p name)
+      (user-error "agent-repl: %s" refusal))
+    name))
+
+(defun agent-repl-verbs--create-standard (command mode child)
   "Create a standard workspace in MODE, as a CHILD of the current one when set.
 MODE is `dynamic\=' -- a prompt and nothing else, the repository read off
 the current workspace\='s roster section -- or `static\=', which asks for a
@@ -1454,18 +1489,30 @@ spellings of one mode cannot drift apart.
 
 THE NEW WORKSPACE IS SELECTED.  Creating one is a statement about where
 you intend to work next, so this stands on it the moment the daemon
-answers -- the same step registering a directory takes."
-  (let* ((repository (if (eq mode 'static)
-                         (agent-repl-verbs--read-repository)
-                       (agent-repl-verbs--dynamic-repository "a dynamic create")))
-         (name (when (eq mode 'static) (string-trim (read-string "Name: "))))
-         (prompt (unless (eq mode 'static)
-                   (agent-repl-verbs--read-prompt "Initial prompt: ")))
+answers -- the same step registering a directory takes.
+
+COMMAND is the interactive command running this body; its invocation is
+recorded before any question is asked, and a question it abandons is
+recorded before the abandonment propagates."
+  (agent-repl-verbs--create-invoked command)
+  (let* ((static (eq mode 'static))
+         (repository (agent-repl-verbs--read-for
+                      command 'repository
+                      (lambda ()
+                        (if static
+                            (agent-repl-verbs--read-repository)
+                          (agent-repl-verbs--dynamic-repository "a dynamic create")))))
+         (name (when static
+                 (agent-repl-verbs--read-for
+                  command 'name
+                  (lambda () (agent-repl-verbs--read-name "a static workspace IS its name")))))
+         (prompt (unless static
+                   (agent-repl-verbs--read-for
+                    command 'prompt
+                    (lambda () (agent-repl-verbs--read-prompt "Initial prompt: ")))))
          (parent (when child
                    (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
-    (when (and (eq mode 'static) (string-empty-p name))
-      (user-error "agent-repl: a static workspace IS its name"))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-standard mode=%s child=%s"
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-standard mode=%s child=%s"
                       mode (and child t))
     (apply #'agent-repl-verb-create
            repository :standard
@@ -1490,7 +1537,7 @@ business (`agent-repl-create-workspace-static\=').
 
 THE NEW WORKSPACE IS SELECTED."
   (interactive)
-  (agent-repl-verbs--create-standard 'dynamic nil))
+  (agent-repl-verbs--create-standard 'agent-repl-create-workspace 'dynamic nil))
 
 (defun agent-repl-create-child-workspace ()
   "Create a dynamic CHILD workspace (`SPC TAB c\='): a prompt, and nothing else.
@@ -1501,7 +1548,7 @@ branch rather than the repo\='s main checkout.
 
 THE NEW WORKSPACE IS SELECTED."
   (interactive)
-  (agent-repl-verbs--create-standard 'dynamic t))
+  (agent-repl-verbs--create-standard 'agent-repl-create-child-workspace 'dynamic t))
 
 (defun agent-repl-create-workspace-static ()
   "Create a STATIC workspace (`SPC TAB N\='): a repository and a name, no prompt.
@@ -1515,7 +1562,7 @@ child variant.
 THE NEW WORKSPACE IS SELECTED, for the same reason the dynamic create\='s
 is."
   (interactive)
-  (agent-repl-verbs--create-standard 'static nil))
+  (agent-repl-verbs--create-standard 'agent-repl-create-workspace-static 'static nil))
 
 (defun agent-repl-create-child-workspace-static ()
   "Create a static CHILD workspace (`SPC TAB C\='): a repository and a name.
@@ -1525,7 +1572,7 @@ into the parent\='s worktree and branch.  It asks no prompt.
 
 THE NEW WORKSPACE IS SELECTED."
   (interactive)
-  (agent-repl-verbs--create-standard 'static t))
+  (agent-repl-verbs--create-standard 'agent-repl-create-child-workspace-static 'static t))
 
 (defun agent-repl-fork-workspace ()
   "Create a CHILD workspace forking the current one's conversation.
@@ -1539,10 +1586,16 @@ main branch, and the daemon mints the name.
 THE FORK IS SELECTED, exactly as a plain create is: you forked in order
 to work in the fork."
   (interactive)
-  (let* ((repository (agent-repl-verbs--dynamic-repository "a fork"))
-         (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
+  (agent-repl-verbs--create-invoked 'agent-repl-fork-workspace)
+  (let* ((command 'agent-repl-fork-workspace)
+         (repository (agent-repl-verbs--read-for
+                      command 'repository
+                      (lambda () (agent-repl-verbs--dynamic-repository "a fork"))))
+         (prompt (agent-repl-verbs--read-for
+                  command 'prompt
+                  (lambda () (agent-repl-verbs--read-prompt "Initial prompt: "))))
          (parent (agent-repl-verbs--ref (agent-repl--ws-current-name))))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-fork mode=dynamic")
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=dynamic")
     (agent-repl-verb-create
      repository :standard
      :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
@@ -1600,12 +1653,22 @@ out itself.
 
 A prefix argument PICK-MODEL asks for the model."
   (interactive "P")
-  (let ((repository (agent-repl-verbs--dynamic-repository "a one-shot"))
-        (prompt (agent-repl-verbs--read-prompt "One-shot commission: "))
-        (model (and pick-model (agent-repl-verbs--read-model))))
-    (when (string-empty-p (string-trim prompt))
-      (user-error "agent-repl: a one-shot IS its prompt"))
-    (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.create-one-shot mode=dynamic model=%S" model)
+  (agent-repl-verbs--create-invoked 'agent-repl-create-oneshot)
+  (let* ((command 'agent-repl-create-oneshot)
+         (repository (agent-repl-verbs--read-for
+                      command 'repository
+                      (lambda () (agent-repl-verbs--dynamic-repository "a one-shot"))))
+         (prompt (agent-repl-verbs--read-for
+                  command 'prompt
+                  (lambda ()
+                    (let ((text (agent-repl-verbs--read-prompt "One-shot commission: ")))
+                      (when (string-empty-p (string-trim text))
+                        (user-error "agent-repl: a one-shot IS its prompt"))
+                      text))))
+         (model (and pick-model
+                     (agent-repl-verbs--read-for
+                      command 'model #'agent-repl-verbs--read-model))))
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-one-shot mode=dynamic model=%S" model)
     (agent-repl-verb-create
      repository :one-shot
      :prompt prompt
