@@ -45,6 +45,8 @@ package e2e
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -87,49 +89,142 @@ func dbOpenRootFeed(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) ([]*fr
 	return success.GetPage().GetSuccess().GetRows(), stream
 }
 
-// dbAwaitDetachedShell drives a root feed (its already-served initial page,
-// then its tail) until a FeedRow.detached_shell whose drawn command line
-// contains `commandSubstring` reaches a state `settled` accepts, and answers
-// that shell plus whether a LIVE frame with non-empty spool text was
-// observed strictly before the settled one — the suite's own evidence that
-// the spool's incremental growth (daemon/internal/resolve/feed/subagent.go's
-// drawDetachedShell, fed by the real sidecar tailing the real spool file the
-// fake SDK wrote) was actually exercised, not merely that the final shape
-// happens to be right.
+// THE SHELL BUBBLE IS A FEED (feed.proto, FeedRow.shell_head and
+// FeedRow.detached_shell; landed by ac808eb57, "fold the detached shell into
+// ONE canonical bubble", 2026-09-14). A detached shell draws TWO rows, never
+// one:
+//
+//   - its HEAD (FeedRow.shell_head) on the PARENT feed — the command, the
+//     clock and the state (live or settled), and NO spool;
+//   - its spool BODY (FeedRow.detached_shell) on the shell's OWN sub-feed,
+//     which the head row's own FeedId addresses — OpenFeed on that id is what
+//     a client does when it expands the bubble.
+//
+// `detached_shell` is therefore never a top-level row, and a test that waits
+// for one on the root feed waits until its bound expires. That is exactly
+// what every detached test in this file did until the helpers below replaced
+// the one that looked for it; daemon/integration made the same correction in
+// e70d3068d.
+
+// dbShellHead answers the row's shell HEAD when its drawn command line
+// contains `commandSubstring`, and nil for any other row.
 //
 // Matching by command SUBSTRING rather than by FeedId: the row's FeedId is
 // daemon-minted and opaque, and this suite never decodes one — the drawn
 // command line is the one stable anchor a caller can name in advance.
-func dbAwaitDetachedShell(
+func dbShellHead(row *frontendv1.FeedRow, commandSubstring string) *frontendv1.FeedShell {
+	head := row.GetShellHead()
+	if head == nil || !strings.Contains(head.GetCommand().GetText(), commandSubstring) {
+		return nil
+	}
+	return head
+}
+
+// dbAwaitShellHead drives a root feed (its already-served initial page, then
+// its tail) until the shell HEAD whose command contains `commandSubstring`
+// reaches a state `accept` takes, and answers that head's ROW — the row, not
+// only the shell, because its FeedId is the address of the bubble's body.
+func dbAwaitShellHead(
 	t *testing.T,
 	ctx context.Context,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
-	commandSubstring string,
-	settled func(*frontendv1.FeedShellSettled) bool,
-) (shell *frontendv1.FeedShell, sawLiveGrowth bool) {
+	commandSubstring, what string,
+	accept func(*frontendv1.FeedShell) bool,
+) *frontendv1.FeedRow {
 	t.Helper()
 	check := func(row *frontendv1.FeedRow) bool {
-		sh := row.GetDetachedShell().GetShell()
-		if sh == nil || !strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
+		head := dbShellHead(row, commandSubstring)
+		return head != nil && accept(head)
+	}
+	// THE PAGE IS READ NEWEST-LAST, so the LAST matching row is the head as it
+	// now stands: an upserted head can appear once per push in a replayed
+	// page, and an earlier copy may be a state it has since left.
+	var found *frontendv1.FeedRow
+	for _, row := range initial {
+		if dbShellHead(row, commandSubstring) != nil {
+			found = row
+		}
+	}
+	if found != nil && check(found) {
+		return found
+	}
+	return harness.AwaitView(t, ctx, stream, what+" ("+commandSubstring+")", check)
+}
+
+// dbOpenShellBody opens a shell bubble's own sub-feed — addressed by the head
+// row's FeedId, exactly as a client expanding the bubble does — and answers
+// its initial page plus a tailing watch. The caller closes the stream.
+func dbOpenShellBody(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, head *frontendv1.FeedRow) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow]) {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{
+		Workspace: ws,
+		Feed:      head.GetId(),
+	}))
+	if err != nil {
+		t.Fatalf("OpenFeed(the shell bubble's sub-feed): %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed(the shell bubble's sub-feed) = %v, want success: the head's own FeedId addresses its body", opened.Msg)
+	}
+	return success.GetPage().GetSuccess().GetRows(), w.WatchFeedOn(w.Client(), success.GetWatch())
+}
+
+// dbAwaitShellSpool drives a shell bubble's sub-feed until its spool BODY
+// carries `spoolSubstring`, and answers the whole spool text as drawn.
+func dbAwaitShellSpool(
+	t *testing.T,
+	ctx context.Context,
+	initial []*frontendv1.FeedRow,
+	stream *harness.Stream[*frontendv1.FeedRow],
+	spoolSubstring string,
+) string {
+	t.Helper()
+	var spool string
+	check := func(row *frontendv1.FeedRow) bool {
+		body := row.GetDetachedShell().GetShell()
+		if body == nil || !strings.Contains(body.GetSpool().GetText(), spoolSubstring) {
 			return false
 		}
-		if sh.GetLive() != nil && sh.GetSpool().GetText() != "" {
-			sawLiveGrowth = true
-		}
-		if s := sh.GetSettled(); s != nil && settled(s) {
-			shell = sh
-			return true
-		}
-		return false
+		spool = body.GetSpool().GetText()
+		return true
 	}
 	for _, row := range initial {
 		if check(row) {
-			return
+			return spool
 		}
 	}
-	harness.AwaitView(t, ctx, stream, "a detached shell matching "+commandSubstring, check)
-	return
+	harness.AwaitView(t, ctx, stream, "the shell bubble's spool body carrying "+spoolSubstring, check)
+	return spool
+}
+
+// dbAwaitSettledShell waits for the shell whose command contains
+// `commandSubstring` to settle in a state `settled` accepts, then opens its
+// body and waits for the spool to carry `spoolSubstring`. It answers the
+// settled HEAD and the spool as the body draws it.
+//
+// THE BODY IS READ AFTER THE HEAD SETTLES, and that is enough: publishShell
+// (daemon/internal/resolve/feed/subagent.go) upserts the body on every push
+// the head gets, so the sub-feed's own page, opened now, already carries the
+// spool the settling push drew.
+func dbAwaitSettledShell(
+	t *testing.T,
+	ctx context.Context,
+	w *World,
+	ws *workspacev1.WorkspaceRef,
+	initial []*frontendv1.FeedRow,
+	stream *harness.Stream[*frontendv1.FeedRow],
+	commandSubstring string,
+	settled func(*frontendv1.FeedShellSettled) bool,
+	spoolSubstring string,
+) (head *frontendv1.FeedShell, spool string) {
+	t.Helper()
+	row := dbAwaitShellHead(t, ctx, initial, stream, commandSubstring, "a settled detached shell head",
+		func(sh *frontendv1.FeedShell) bool { return sh.GetSettled() != nil && settled(sh.GetSettled()) })
+	bodyInitial, body := dbOpenShellBody(t, w, ws, row)
+	defer body.Close()
+	return row.GetShellHead(), dbAwaitShellSpool(t, ctx, bodyInitial, body, spoolSubstring)
 }
 
 // dbExitedZero is the ordinary successful-shell-exit predicate every
@@ -140,7 +235,7 @@ func dbExitedZero(s *frontendv1.FeedShellSettled) bool {
 
 // dbAwaitSimpleToolCall drives a root feed until a FeedRow.activity.simple_tool_call
 // named `toolName` whose input line contains `inputSubstring` reaches
-// `returned` — the foreground counterpart of dbAwaitDetachedShell, for the
+// `returned` — the foreground counterpart of dbAwaitSettledShell, for the
 // tests that contrast a FOREGROUND bash round trip with the detached family
 // (#35-38 never detach at all).
 func dbAwaitSimpleToolCall(
@@ -182,20 +277,29 @@ func dbAwaitSimpleToolCall(
 // spool's three lines and its `EXIT=0` terminator on separate ticks — so the
 // turn's own terminal is not evidence the detached work is done; this test
 // watches the shell bubble independently of the turn.
+//
+// THE DETACH GATE IS WHAT MAKES "LIVE GROWTH" A FACT RATHER THAN A RACE. The
+// fake writes its whole spool within a few scheduler ticks, so without the
+// gate the sidecar may read all three lines and the terminator in ONE poll and
+// the bubble is never observably live-with-output at all. With
+// AGENT_REPL_FAKE_DETACH_GATE set (fake/index.ts's DETACH_GATE_PATH_ENV) the
+// run appends `line-1` and PARKS until this test creates the gate file, so the
+// body carrying `line-1` under a head that is still LIVE is guaranteed by
+// construction, and the rest of the spool and its settle can only follow the
+// test's own act.
 // ===========================================================================
 
 func TestBashDetachedStartAndComplete(t *testing.T) {
 	t.Parallel()
-	w := NewWorld(t, WorldOpts{})
+	gatePath := filepath.Join(t.TempDir(), "detach-gate")
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		ExtraEnv: []string{dbDetachGatePathEnv + "=" + gatePath},
+	}})
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
 	w.ExpectWarnings("daemon.health.open_fault")
 	ws := dbWorkspace(t, w)
 
-	// Opened BEFORE the prompt: a detached_shell row is an UPSERT (subagent.go's
-	// publishShell replaces the row whole on every push), so opening the watch
-	// only after the run finished could observe just the final settled push
-	// and never the intervening live-with-growing-spool ones this test must see.
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	defer stream.Close()
 
@@ -208,17 +312,41 @@ func TestBashDetachedStartAndComplete(t *testing.T) {
 	// BASH_DETACH's default command (no !bash-detach args): "for i in 1 2 3;
 	// do echo line-$i; sleep 1; done" — matched by a substring stable across
 	// the exact loop body.
-	shell, sawLiveGrowth := dbAwaitDetachedShell(t, ctx, initial, stream, "for i in 1 2 3", dbExitedZero)
-	if shell == nil {
-		t.Fatalf("no detached shell settled with exit 0 within %s", DefaultTimeout)
+	const command = "for i in 1 2 3"
+
+	// Assert: the bubble is drawn LIVE while the run is parked on the gate,
+	// and its body already carries the first line — incremental spool growth
+	// (the real sidecar tailing the real spool file the fake wrote) under a
+	// head that has not settled.
+	head := dbAwaitShellHead(t, ctx, initial, stream, command, "the live detached shell head",
+		func(sh *frontendv1.FeedShell) bool { return sh.GetLive() != nil })
+	bodyInitial, body := dbOpenShellBody(t, w, ws, head)
+	defer body.Close()
+	if got := dbAwaitShellSpool(t, ctx, bodyInitial, body, "line-1"); strings.Contains(got, "line-3") {
+		t.Fatalf("the parked run's spool body = %q already carries line-3; the detach gate did not hold the run", got)
 	}
-	if !sawLiveGrowth {
-		t.Errorf("never observed a live frame with non-empty spool text before settlement — incremental spool growth (the sidecar tailing the fake SDK's real spool file) was not exercised")
+
+	// Act: release the parked run.
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("e2e: creating this test's own detach gate %s: %v", gatePath, err)
 	}
-	if got := shell.GetSpool().GetText(); !strings.Contains(got, "line-3") {
-		t.Errorf("settled shell spool = %q, want it to contain the scenario's last appended line %q", got, "line-3")
+
+	// Assert: the head settles with exit 0, and the body grows to the last
+	// line the scenario appended.
+	settled := dbAwaitShellHead(t, ctx, nil, stream, command, "the detached shell head settled with exit 0",
+		func(sh *frontendv1.FeedShell) bool { return sh.GetSettled() != nil && dbExitedZero(sh.GetSettled()) })
+	if settled.GetId().GetValue() != head.GetId().GetValue() {
+		t.Errorf("the settled head is row %q, want the live head's own row %q: a settle re-pushes ONE head",
+			settled.GetId().GetValue(), head.GetId().GetValue())
 	}
+	dbAwaitShellSpool(t, ctx, nil, body, "line-3")
 }
+
+// dbDetachGatePathEnv is the fake vendor's detach gate
+// (agent-shim/claude/shim/src/fake/index.ts's DETACH_GATE_PATH_ENV): once set,
+// `bash-detach` appends its first spool line and parks until the named path
+// exists.
+const dbDetachGatePathEnv = "AGENT_REPL_FAKE_DETACH_GATE"
 
 // ===========================================================================
 // #32 — BashDetachExplicitPoll.
@@ -269,13 +397,9 @@ func TestBashDetachExplicitPoll(t *testing.T) {
 
 	// BASH_DETACH_POLL's default command (no args): "tail -f build.log"; the
 	// spool's last appended line before EXIT=0 is "done".
-	shell, _ := dbAwaitDetachedShell(t, ctx, initial, feedStream, "tail -f build.log", dbExitedZero)
-	if shell == nil {
-		t.Fatalf("no detached shell settled with exit 0 within %s", DefaultTimeout)
-	}
-	if got := shell.GetSpool().GetText(); !strings.Contains(got, "done") {
-		t.Errorf("settled shell spool = %q, want it to contain the scenario's last appended line %q", got, "done")
-	}
+	// The body is awaited carrying "done": a settled head alone would not say
+	// the spool's last line was ever drawn.
+	dbAwaitSettledShell(t, ctx, w, ws, initial, feedStream, "tail -f build.log", dbExitedZero, "done")
 
 	// The settled shell above is ordered AFTER both polls were converted, so
 	// every topbar view the exempt drop could ever have provoked has already
@@ -347,8 +471,8 @@ func TestBashForegroundCompleted(t *testing.T) {
 	}
 
 	for _, row := range initial {
-		if row.GetDetachedShell() != nil {
-			t.Errorf("an ordinary foreground bash round trip produced a detached_shell row: %v", row)
+		if row.GetShellHead() != nil || row.GetDetachedShell() != nil {
+			t.Errorf("an ordinary foreground bash round trip produced a detached shell bubble: %v", row)
 		}
 	}
 }
@@ -531,12 +655,9 @@ func TestBashDetachedNonzeroExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 
-	shell, _ := dbAwaitDetachedShell(t, ctx, initial, stream, "exit 3", func(s *frontendv1.FeedShellSettled) bool {
+	shell, spool := dbAwaitSettledShell(t, ctx, w, ws, initial, stream, "exit 3", func(s *frontendv1.FeedShellSettled) bool {
 		return s.GetOutcome() != nil
-	})
-	if shell == nil {
-		t.Fatalf("no detached shell for the failing command settled within %s", DefaultTimeout)
-	}
+	}, "error")
 	if shell.GetSettled().GetCompleted() == nil {
 		t.Errorf("settled outcome = %v, want completed: a non-zero exit is still a COMPLETED run "+
 			"(feed.proto, FeedShellSettled.outcome) — never the cancelled or lost arm",
@@ -548,8 +669,11 @@ func TestBashDetachedNonzeroExit(t *testing.T) {
 	if got := shell.GetSettled().GetExit().GetCode(); got != 3 {
 		t.Errorf("settled exit code = %d, want 3 (the scenario's own `EXIT=3` terminator)", got)
 	}
-	if got := shell.GetSpool().GetText(); !strings.Contains(got, "error") {
-		t.Errorf("settled shell spool = %q, want the scenario's one appended line (%q)", got, "error")
+	if shell.GetSpool() != nil {
+		t.Errorf("the settled head carries a spool %v, want none: the spool is the BODY row on the sub-feed", shell.GetSpool())
+	}
+	if !strings.Contains(spool, "error") {
+		t.Errorf("settled shell spool = %q, want the scenario's one appended line (%q)", spool, "error")
 	}
 }
 
@@ -600,10 +724,7 @@ func TestBashDetachedLiveNeverSettles(t *testing.T) {
 	defer cancel()
 
 	// Assert: the bubble is drawn LIVE, carrying the unterminated spool's line.
-	live := dbAwaitLiveDetachedShell(t, ctx, initial, stream, "sleep 100000", "partial output with no terminator")
-	if live.GetLive() == nil {
-		t.Fatalf("detached shell state = %v, want live", live.GetState())
-	}
+	dbAwaitLiveDetachedShell(t, ctx, w, ws, initial, stream, "sleep 100000", "partial output with no terminator")
 
 	// Assert: it never settles. A claim of absence necessarily waits out a
 	// bound rather than an event (harness.ProbeWindow, this suite's own
@@ -611,40 +732,27 @@ func TestBashDetachedLiveNeverSettles(t *testing.T) {
 	dbExpectShellNeverSettles(t, stream, "sleep 100000")
 }
 
-// dbAwaitLiveDetachedShell is dbAwaitDetachedShell's live counterpart: it
-// answers the first detached_shell row whose command matches and whose spool
-// already carries `spoolSubstring`, WITHOUT requiring a settled state — the
-// shape a run that never terminates can only ever reach.
+// dbAwaitLiveDetachedShell is dbAwaitSettledShell's live counterpart: it waits
+// for the head whose command matches to be drawn LIVE, then for its body to
+// carry `spoolSubstring`, and answers the head as it was when last seen live —
+// the shape a run that never terminates can only ever reach. It fails if the
+// head settles before the body carries the text.
 func dbAwaitLiveDetachedShell(
 	t *testing.T,
 	ctx context.Context,
+	w *World,
+	ws *workspacev1.WorkspaceRef,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
 	commandSubstring, spoolSubstring string,
 ) *frontendv1.FeedShell {
 	t.Helper()
-	var found *frontendv1.FeedShell
-	check := func(row *frontendv1.FeedRow) bool {
-		sh := row.GetDetachedShell().GetShell()
-		if sh == nil || !strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
-			return false
-		}
-		if !strings.Contains(sh.GetSpool().GetText(), spoolSubstring) {
-			return false
-		}
-		found = sh
-		return true
-	}
-	for _, row := range initial {
-		if check(row) {
-			return found
-		}
-	}
-	harness.AwaitView(t, ctx, stream, "a live detached shell for "+commandSubstring+" carrying "+spoolSubstring, check)
-	if found == nil {
-		t.Fatalf("no live detached shell for %q observed within %s", commandSubstring, DefaultTimeout)
-	}
-	return found
+	row := dbAwaitShellHead(t, ctx, initial, stream, commandSubstring, "a live detached shell head",
+		func(sh *frontendv1.FeedShell) bool { return sh.GetLive() != nil })
+	bodyInitial, body := dbOpenShellBody(t, w, ws, row)
+	defer body.Close()
+	dbAwaitShellSpool(t, ctx, bodyInitial, body, spoolSubstring)
+	return row.GetShellHead()
 }
 
 // dbExpectShellNeverSettles drains the feed for one probe window and fails if
@@ -659,8 +767,8 @@ func dbExpectShellNeverSettles(t *testing.T, stream *harness.Stream[*frontendv1.
 			if !ok {
 				return
 			}
-			sh := row.GetDetachedShell().GetShell()
-			if sh == nil || !strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
+			sh := dbShellHead(row, commandSubstring)
+			if sh == nil {
 				continue
 			}
 			if s := sh.GetSettled(); s != nil {
@@ -791,9 +899,8 @@ func dbExpectNoDetachedShell(t *testing.T, stream *harness.Stream[*frontendv1.Fe
 			if !ok {
 				return
 			}
-			sh := row.GetDetachedShell().GetShell()
-			if sh != nil && strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
-				t.Fatalf("a detached_shell row was drawn for the HELD FOREGROUND command %q: nothing detached "+
+			if dbShellHead(row, commandSubstring) != nil {
+				t.Fatalf("a detached shell bubble was drawn for the HELD FOREGROUND command %q: nothing detached "+
 					"it, and no daemon verb for DetachForeground exists on this branch", commandSubstring)
 			}
 		case <-timer.C:
@@ -913,9 +1020,8 @@ func dbExpectForegroundUnitHolds(t *testing.T, stream *harness.Stream[*frontendv
 			if !ok {
 				return
 			}
-			if sh := row.GetDetachedShell().GetShell(); sh != nil &&
-				strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
-				t.Fatalf("a detached_shell row was drawn for %q from the vendor's `task_started` alone: "+
+			if dbShellHead(row, commandSubstring) != nil {
+				t.Fatalf("a detached shell bubble was drawn for %q from the vendor's `task_started` alone: "+
 					"a shell task is not a detachment yet, and the Bash result is the one record that states "+
 					"the cause (convert/detached.ts)", commandSubstring)
 			}

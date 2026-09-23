@@ -612,6 +612,7 @@ func (q *fakeQueue) CancelKeepaliveRedrive(context.Context, ids.WorkspaceID, ids
 	return false
 }
 func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
+func (q *fakeQueue) Reviving(ids.WorkspaceID) bool                          { return false }
 func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
 	q.mu.Lock()
 	q.leaseEvents++

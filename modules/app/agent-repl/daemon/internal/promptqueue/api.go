@@ -219,6 +219,11 @@ type Queue interface {
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
 	// OnLeaseChanged re-evaluates every hold against the new lease policy.
 	OnLeaseChanged(ws ids.WorkspaceID)
+	// Reviving reports whether a background revival this queue started for
+	// the workspace is still in flight: from before its bring-up spawns a shim
+	// until the prompt it holds has been handed to that shim. The idle sweep
+	// reads it so it never hibernates the session a prompt is reviving.
+	Reviving(ws ids.WorkspaceID) bool
 	// RestoreHolds reloads every standing hold at boot, ALL-OR-NOTHING: a
 	// corrupt row fails the restore and nothing is loaded.
 	RestoreHolds(ctx context.Context) error

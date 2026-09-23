@@ -1777,3 +1777,37 @@ func TestARetiredDetachedHandleIsNeverReadmitted(t *testing.T) {
 		})
 	}
 }
+
+// A SPAWN MADE BY A DETACHED RUN IS NOT THE RUN. Its frames ride the run's own
+// stream, and addressing them by the run's handle rewrote the parent's footer
+// row with the child and retired it at the child's launch receipt.
+func TestANestedSpawnOnADetachedRunsStreamIsNotAddressedByTheRunsHandle(t *testing.T) {
+	tests := []struct {
+		name  string
+		frame *conversationv1.AgentActivity
+	}{
+		{name: "the nested spawn's start", frame: subagentActivity("nested-unit", "nested-agent")},
+		{name: "the nested spawn's settle", frame: settledSubagentActivity("nested-unit", false)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a detached run whose own stream has already started a
+			// nested spawn (so the unit is known to name another agent).
+			h := newHarness(t, Session{Started: sessionStarted("", createdWork("sub-1", subagentWork("sub-1")))})
+			open := h.client.nextAgentOpen(t)
+			h.route(open.stream, entryFrame(frameUpdate("sub-1", activityUpdate(subagentActivity("nested-unit", "nested-agent")))))
+			h.quiet()
+
+			// Act
+			got := h.route(open.stream, entryFrame(frameUpdate("sub-1", activityUpdate(tt.frame))))
+
+			// Assert
+			if _, routed := find(got, "footer.OnSubagent"); routed {
+				t.Fatalf("events = %v, want no footer.OnSubagent for a nested spawn's frame", names(got))
+			}
+			if live := h.w.LiveWork(); len(live.Agents) != 1 || live.Agents[0].GetValue() != "sub-1" {
+				t.Fatalf("live work = %v, want the parent run still live", live.Agents)
+			}
+		})
+	}
+}

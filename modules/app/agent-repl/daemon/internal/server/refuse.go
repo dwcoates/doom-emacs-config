@@ -411,6 +411,17 @@ func (s *server) resolveRefLogging(
 	default:
 		return resolved{}, nil, fmt.Errorf("%s: workspace %q: unknown serving standing %d", rpc, id, standing)
 	}
+	return s.resolveRegistered(ctx, rpc, ref)
+}
+
+// resolveRegistered resolves a workspace ref against the registry ALONE,
+// without the serving-standing gate resolveRefLogging puts in front of it.
+//
+// It exists for the one rpc whose answer must not depend on which daemon
+// serves the workspace: ClientLog (see subjectForClientLog). Every other rpc
+// is INTAKE and goes through the standing gate first.
+func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspacev1.WorkspaceRef) (resolved, *refusal, error) {
+	id := ids.WorkspaceID(ref.GetId())
 
 	// THE SHARED STATE IS NOT READ ONCE IT IS BEING TORN DOWN. Close() ends
 	// the server's lifetime BEFORE the state client is closed underneath it,
