@@ -21,12 +21,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ClientLogRecordSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { WORKSPACE_ID, armsOf } from "./fixtures";
 import { log } from "../../src/log";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
