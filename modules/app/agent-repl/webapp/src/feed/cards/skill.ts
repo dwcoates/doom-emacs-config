@@ -40,6 +40,7 @@ import { renderMarkdown } from "../../markdown.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
+import { foldTitle } from "../title-fold.js";
 
 const PATH = "FeedSkill";
 
@@ -68,8 +69,16 @@ export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
 
   const head = document.createElement("div");
   head.className = "tool-head";
+  // THE INVOCATION IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+  // two-line title fold. A LOADED card is a `.tool-fold` (below) and owns it; a
+  // card in any other state has no fold of its own, so the title is its own
+  // (title-fold.ts). No draw here stops the card's ticking, so folding it at
+  // once keeps its measurer.
   head.append(
-    drawFeedSkillInvocation(requireMessage(u.invocation, `${PATH}.invocation`), `${PATH}.invocation`),
+    foldTitle(
+      drawFeedSkillInvocation(requireMessage(u.invocation, `${PATH}.invocation`), `${PATH}.invocation`),
+      outcome.case === "loaded" ? "card" : "standalone",
+    ),
   );
   card.append(head);
 

@@ -12,6 +12,13 @@ import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { harness, rowContext } from "../harness.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import {
+  HAS_MORE_CLASS,
+  TITLE_FOLD_CLASS,
+  TITLE_FOLD_STANDALONE_CLASS,
+} from "../../../src/feed/bubble-more.js";
+import { fireResize } from "../../resize-observer.js";
+import { measureTitle } from "../title-measure.js";
 
 /**
  * The oneof as an INIT shape rather than a built message: the fixtures below
@@ -225,5 +232,157 @@ describe("drawFeedSkill malformed input", () => {
       value: {},
     };
     expect(() => drawFeedSkill(u, rc())).toThrow(MalformedView);
+  });
+});
+
+/**
+ * THE INVOCATION IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+ * two-line title fold (title-fold.ts). A loaded card is a `.tool-fold` and owns
+ * it; a card in any other arm has no fold, so the title is its own.
+ */
+describe("drawFeedSkill: the title fold", () => {
+  /** A connected card of OUTCOME, and its invocation line. */
+  function drawn(outcome: InitOfFeedSkill) {
+    const el = drawFeedSkill(skill(outcome), rc());
+    document.body.replaceChildren(el);
+    return { el, title: el.querySelector(".tool-head > .tool-name") as HTMLElement };
+  }
+
+  const UNFOLDED: { arm: string; outcome: InitOfFeedSkill }[] = [
+    { arm: "running", outcome: { case: "running", value: {} } },
+    { arm: "failed", outcome: { case: "failed", value: { text: "no such skill" } } },
+    { arm: "denied", outcome: { case: "denied", value: {} } },
+  ];
+
+  it("marks a loaded card's invocation with the one title-fold class", () => {
+    // Arrange / Act
+    const { title } = drawn(loaded("# doc"));
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_CLASS)).toBe(true);
+  });
+
+  it("defers a loaded card's title to the card's own fold", () => {
+    // Arrange / Act
+    const { title } = drawn(loaded("# doc"));
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_STANDALONE_CLASS)).toBe(false);
+  });
+
+  it.each(UNFOLDED)("makes a $arm card's title its own fold, since the card has none", ({ outcome }) => {
+    // Arrange / Act
+    const { title } = drawn(outcome);
+
+    // Assert
+    expect([...title.classList]).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
+  });
+
+  it("wears has-more when the invocation overflows its two lines", () => {
+    // Arrange
+    const { title } = drawn(loaded("# doc"));
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("keeps has-more off an invocation that fits its two lines", () => {
+    // Arrange
+    const { title } = drawn(loaded("# doc"));
+    measureTitle(title, false);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("drops has-more once a loaded card is expanded", () => {
+    // Arrange
+    const { el, title } = drawn(loaded("# doc"));
+    measureTitle(title, true);
+    fireResize(title);
+    el.classList.add(EXPANDED_CLASS);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("opens a standalone title with the feed-wide click, the one toggle", () => {
+    // Arrange
+    const { el, title } = drawn({ case: "running", value: {} });
+    const feed = document.createElement("div");
+    feed.append(el);
+    document.body.replaceChildren(feed);
+    installClickExpand(feed, () => "");
+
+    // Act
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Assert
+    expect(title.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("drops has-more once a standalone title is expanded", () => {
+    // Arrange
+    const { title } = drawn({ case: "running", value: {} });
+    measureTitle(title, true);
+    fireResize(title);
+    title.classList.add(EXPANDED_CLASS);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("clamps a collapsed card's invocation to two lines", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = drawn(loaded("# doc"));
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+    } finally {
+      remove();
+    }
+  });
+
+  it("shows the whole invocation once the loaded card is expanded", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { el, title } = drawn(loaded("# doc"));
+      el.classList.add(EXPANDED_CLASS);
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("none");
+    } finally {
+      remove();
+    }
+  });
+
+  it("lays an expanded standalone title out whole, not in the 50vh section box", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = drawn({ case: "running", value: {} });
+      title.classList.add(EXPANDED_CLASS);
+
+      // Act / Assert
+      expect(cascadedValue(title, "max-height")).toBe("none");
+    } finally {
+      remove();
+    }
   });
 });
