@@ -12,7 +12,7 @@
  * WHY A PATH AND A DETAIL RATHER THAN A SENTENCE. The `path` is where in the
  * message tree the refusal happened ("WatchFooterResponse.footer.status"), so
  * whoever debugs it can go straight to the producer's field; the `detail` is
- * what was wrong there. Both ride the failure overlay's frame_undecodable card
+ * what was wrong there. Both ride the warning chip's frame_undecodable row
  * and the log record verbatim, which is why they are separate fields and not
  * one pre-joined string.
  */

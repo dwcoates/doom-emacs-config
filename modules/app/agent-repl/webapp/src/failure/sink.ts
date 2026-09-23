@@ -8,9 +8,9 @@
  * observe. A failure this end wants to report that has no arm up there is a
  * failure this end has no standing to classify.
  *
- * REPORT AND RETRACT, KEYED ON THE ARM. A reconnect loop that appended a card
- * per attempt would bury the page under its own alarm, so a repeat report of
- * the SAME arm replaces its card. `daemon_unreachable` is WINDOW-SHAPED and is
+ * REPORT AND RETRACT, KEYED ON THE ARM. A reconnect loop that appended a row
+ * per attempt would bury the warning chip under its own alarm, so a repeat
+ * report of the SAME arm replaces its row. `daemon_unreachable` is WINDOW-SHAPED and is
  * retracted when the link comes back — a settled "lost the connection;
  * reconnecting" beside a visibly live feed reads as a standing fault.
  * `workspace_gone` and `stale_bundle` are deliberately unretractable: there is
@@ -27,7 +27,7 @@ import {
  * The arm names a frontend may mint, spelled once.
  *
  * These are the generated arm names, so a renamed arm fails the build here
- * rather than producing a card no surface has an entry for.
+ * rather than producing a row no surface has an entry for.
  */
 export const CLIENT_FAILURE_ARMS = [
   "daemonUnreachable",
@@ -46,21 +46,21 @@ export function isClientFailureArm(arm: string): arm is ClientFailureArm {
 }
 
 export interface FailureSink {
-  /** File (or replace) the card for KIND's arm. */
+  /** File (or replace) the warning chip's row for KIND's arm. */
   report(kind: FailureKind): void;
-  /** Remove ARM's card, if one stands. */
+  /** Remove ARM's row, if one stands. */
   retract(arm: ClientFailureArm): void;
   /**
-   * Hold ARM's card back until UNTILMS, because the failure is EXPECTED.
+   * Hold ARM's row back until UNTILMS, because the failure is EXPECTED.
    *
    * The one caller is the lifecycle's shutdown announcement: the daemon has
    * said it is going away and for how long, so the streams dying inside that
    * window is the announced event rather than news. Suppression hides the
-   * CARD and nothing else — the report is still logged, so a suppressed window
+   * ROW and nothing else — the report is still logged, so a suppressed window
    * is visible to whoever reads the log rather than erased.
    *
    * OPTIONAL on the interface because a sink that only collects (a test's, a
-   * headless one) has no card to hold back; the overlay implements it.
+   * headless one) has no row to hold back; `createLocalFailures` implements it.
    */
   suppress?(arm: ClientFailureArm, untilMs: number): void;
 }
@@ -68,11 +68,11 @@ export interface FailureSink {
 // ---------------------------------------------------------------------------
 // THE MINTING HELPERS.
 //
-// They live beside the interface rather than in `overlay.ts` because
+// They live beside the interface rather than in `local.ts` because
 // `src/rpc/streams.ts` mints two of them (frame_undecodable on a push it could
 // not read, daemon_unreachable on a stream that ended) and must not pull the
-// overlay's DOM in to do it. `overlay.ts` re-exports them, so a component that
-// only draws still imports one module.
+// failure set in to do it. `local.ts` re-exports them, so a component that
+// files and holds still imports one module.
 // ---------------------------------------------------------------------------
 
 /**
@@ -92,7 +92,7 @@ export function daemonUnreachable(closeCode: number, closeReason: string): Failu
 
 /**
  * A push could not be read and was skipped. Conversation may be missing as a
- * result, which is why it is a card rather than a log line.
+ * result, which is why it is a warning-chip row rather than a log line.
  */
 export function frameUndecodable(cause: string, frameHead: string): FailureKind {
   return create(FailureKindSchema, {
@@ -112,7 +112,7 @@ export function bootFailed(cause: string): FailureKind {
 /**
  * A control-plane request issued outside the component streams (a login, an
  * account switch) failed. WHAT names the request in the frontend's own words,
- * so repeats of DIFFERENT requests do not reconcile onto one card.
+ * so repeats of DIFFERENT requests do not reconcile onto one row.
  */
 export function controlPlaneFailed(what: string, cause: string): FailureKind {
   return create(FailureKindSchema, {
@@ -139,10 +139,10 @@ export function staleBundle(detail: string): FailureKind {
 }
 
 /**
- * The arms whose card DISAPPEARS when its window closes, rather than settling.
+ * The arms whose row DISAPPEARS when its window closes, rather than settling.
  *
  * Only `daemon_unreachable`: it reports a transport link that was momentarily
- * down and is now up again, so once the link is back the card names a
+ * down and is now up again, so once the link is back the row names a
  * condition that no longer exists beside a feed that is visibly live. The
  * other five either never resolve (`workspace_gone`, `stale_bundle`) or are
  * retracted by whoever filed them.
