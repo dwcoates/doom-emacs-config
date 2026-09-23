@@ -149,6 +149,21 @@ describe("createToolGroupStore", () => {
     ]);
   });
 
+  it("re-attaches no member already in place when the run grows", () => {
+    // Arrange -- a re-attached member would lose the reader's scroll inside it.
+    const store = createToolGroupStore();
+    const members = [member("a"), member("b")];
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", members);
+    const panel = wrapper.querySelector(".feed-group-panel");
+    if (panel === null) throw new Error("the group drew no panel");
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(panel, { childList: true });
+    // Act
+    store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [...members, member("c")]);
+    // Assert
+    expect(observer.takeRecords().flatMap((record) => [...record.removedNodes])).toEqual([]);
+  });
+
   it("moves every member's own element into the group's panel", () => {
     const store = createToolGroupStore();
     const members = [member("a"), member("b")];
