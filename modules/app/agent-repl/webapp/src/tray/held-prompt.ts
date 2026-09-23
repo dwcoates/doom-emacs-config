@@ -2,10 +2,14 @@
  * held-prompt — one prompt the daemon is holding, drawn as a parked card.
  *
  * A HELD PROMPT IS NOT A FEED ROW. It is daemon-owned pending intent the
- * vendor never saw, so it draws beside the conversation rather than in it, and
- * it draws SUBDUED: the whole point of the card is that the reader sees their
- * words have NOT reached the agent. That is the legacy queued-card treatment
- * (dashed user-blue border, muted card fill) and it is kept unchanged.
+ * vendor never saw, so it draws beside the conversation rather than in it. But
+ * it IS the prompt it will become, so it is drawn by the one bubble
+ * (src/bubble/draw.ts, owner rulings 2026-09-23): a prompt-role bubble on the
+ * prompt rail whose fill is the held grey with only a subtle blue hue — the
+ * reader sees their words have NOT reached the agent — whose header strip is
+ * its badges and queued age, whose content is what the user said, painted by
+ * the one body pipeline, and which collapses at TWO lines behind the one
+ * has-more fade, opened by the one toggle (expand.ts, armed on the tray).
  *
  * TWO INDEPENDENT AXES, TWO INDEPENDENT ARMS. `classification` says WHEN the
  * prompt runs relative to the turn in front of it; `hold` says WHAT ELSE is
@@ -64,10 +68,9 @@ import {
   type UpdateHeldPromptError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { formatTickedAge } from "../duration.js";
-import { CLICK_THROUGH_SELECTOR, EXPANDED_CLASS, expandAction, toggleExpanded } from "../expand.js";
-import { overflowsCap } from "../feed/bubble-more.js";
+import { markdownSlot } from "../bubble/body.js";
+import { drawBubble } from "../bubble/draw.js";
 import { log } from "../log.js";
-import { renderMarkdown } from "../markdown.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -102,7 +105,7 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
  * the literal `none` — absence stated rather than left to be inferred from a
  * missing attribute.
  */
-export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
+export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLElement): HTMLElement {
   const path = "HeldPrompt";
   const turn = requireMessage(u.turn, `${path}.turn`);
   const said = requireMessage(u.said, `${path}.said`);
@@ -117,34 +120,21 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
     },
   });
 
-  const card = document.createElement("div");
-  card.className = holdCardClass(hold === null ? null : hold.case);
-  card.setAttribute("data-held-turn", turn.value);
-  card.setAttribute("data-arm", classification.case);
-  card.setAttribute("data-hold", hold === null ? "none" : hold.case);
-
   const head = document.createElement("div");
   head.className = "queued-head";
-  card.appendChild(head);
 
   const verdict = drawClassification(classification, `${path}.classification`);
-  // The acceptance is STATE OF THE CARD, not of a marker that only exists once
-  // it is true: the arm that has an acceptance says which way it stands, and
-  // the arms that have none say nothing at all.
-  if (verdict.acceptedState !== null) {
-    card.setAttribute("data-accepted", verdict.acceptedState ? "true" : "false");
-  }
   head.appendChild(verdict.badge);
   if (verdict.accepted !== null) head.appendChild(verdict.accepted);
   head.appendChild(
     drawHeldPromptQueuedAt(requireMessage(u.queuedAt, `${path}.queued_at`), tc, `${path}.queued_at`),
   );
+  const content = drawUserSaid(said, `${path}.said`);
 
-  card.appendChild(drawHeldFold(said, `${path}.said`));
-  if (verdict.detail !== null) card.appendChild(verdict.detail);
-  if (hold !== null) card.appendChild(drawHold(hold, `${path}.hold`));
-
-  card.appendChild(
+  const footer: HTMLElement[] = [];
+  if (verdict.detail !== null) footer.push(verdict.detail);
+  if (hold !== null) footer.push(drawHold(hold, `${path}.hold`));
+  footer.push(
     drawHeldPromptActions({
       tc,
       turn,
@@ -154,29 +144,51 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
       accept: verdict.offersAccept,
     }),
   );
+
+  // PREVIOUS, this turn's card from the tray's last drawing, is updated in
+  // place (drawBubble), so a push never replaces the box a reader opened.
+  const card = drawBubble(
+    {
+      role: "prompt",
+      variant: "held",
+      hooks: holdCardHooks(hold === null ? null : hold.case),
+      working: false,
+      strip: [head],
+      content,
+      footer,
+      capLines: 2,
+    },
+    previous,
+  ).bubble;
+  card.setAttribute("data-held-turn", turn.value);
+  card.setAttribute("data-arm", classification.case);
+  card.setAttribute("data-hold", hold === null ? "none" : hold.case);
+  // The acceptance is STATE OF THE CARD, not of a marker that only exists once
+  // it is true: the arm that has an acceptance says which way it stands, and
+  // the arms that have none say nothing at all.
+  if (verdict.acceptedState === null) card.removeAttribute("data-accepted");
+  else card.setAttribute("data-accepted", verdict.acceptedState ? "true" : "false");
   return card;
 }
 
 /**
- * `held-right` is the RAIL, and every held prompt wears it (owner ruling 1,
- * 2026-09-13). A held prompt is the user's own prompt bubble before it is one,
- * so it hangs on the rail the released bubble will hang on — the same side and
- * the same max-width rule as `.bubble.user` — rather than on the agent's left
- * rail it used to borrow. Nothing else about the card changes: the frames below
- * still say WHAT is holding it.
+ * The card's hooks: `held-right` is the RAIL every held prompt wears (owner
+ * ruling 1, 2026-09-13) — the hook the tray is found by; the rail itself is the
+ * prompt role's — and a hold that is not the turn's names its frame, which is
+ * the held variant's BORDER and nothing else.
  */
-function holdCardClass(hold: string | null): string {
+function holdCardHooks(hold: string | null): string[] {
   switch (hold) {
     case null:
-      return "queued-card held-right";
+      return ["held-right"];
     case "shutdown":
     case "buildRefresh":
-      return "queued-card held-right lease-card";
+      return ["held-right", "lease-card"];
     default:
       // A keep-alive and a session bring-up are the same statement — the
       // machinery holds this, no classifier judged it, it cannot be forced —
-      // which is the card the revival hold always wore.
-      return "queued-card held-right keep-alive-card";
+      // which is the frame the revival hold always wore.
+      return ["held-right", "keep-alive-card"];
   }
 }
 
@@ -698,140 +710,23 @@ function holdLine(text: string): HTMLElement {
   return line;
 }
 
-/** The fold a held prompt's words sit in; `.expanded` on it shows them whole. */
-export const HELD_FOLD_CLASS = "held-fold";
-
-/** Worn by a fold with something past its first line: the one expand affordance. */
-export const HELD_FOLDABLE_CLASS = "held-foldable";
-
 /**
- * The prompt's words, FIRST LINE ONLY until the reader opens them (owner
- * ruling, 2026-09-23).
- *
- * TWO DRAWINGS, ONE SHOWN. The collapsed face is the first line on its own,
- * clamped to one row (`.held-line`); the expanded face is the whole prompt,
- * exactly as it always drew (`drawUserSaid`). The whole prompt cannot simply be
- * clamped instead: a soft line break renders inside one paragraph, so a
- * clamped whole would run the second line onto the first.
- *
- * THE FEED'S OWN FOLD. The toggle is the capped sections' `.expanded` class,
- * flipped by `toggleExpanded` under the same click decision (`expandAction`: a
- * link click or a text selection is not a toggle), and the one-row clamp is the
- * tool card's input-line clamp. The tray sits outside `#feed`, so the feed's
- * click handler never reaches it and the fold arms its own.
- *
- * A PROMPT THAT FITS NEEDS NO AFFORDANCE. The fold is foldable when there is a
- * second line or an attachment to hide, or when the first line itself overruns
- * its row — which only layout can say, so the line is re-measured whenever the
- * pointer enters the fold: the affordance is a cursor, seen only there, and a
- * listener on the card's own element needs no teardown.
- *
- * View state only: nothing about it reaches the daemon.
+ * What the user said: the bubble's content, block by block — a text block as a
+ * markdown slot the one body pipeline paints, an image by reference, and
+ * nothing where the schema says a block draws nothing.
  */
-export function drawHeldFold(said: UserSaid, path: string): HTMLElement {
-  const { first, more } = firstLineOf(said);
-  const fold = document.createElement("div");
-  fold.className = HELD_FOLD_CLASS;
-  const line = document.createElement("div");
-  line.className = "held-line md";
-  line.innerHTML = renderMarkdown(first);
-  fold.appendChild(line);
-  fold.appendChild(drawUserSaid(said, path));
-
-  const refresh = (): void => {
-    // Expanded, the line is hidden and measures nothing: the fold keeps the
-    // affordance it was opened with, so it can always be closed again.
-    if (fold.classList.contains(EXPANDED_CLASS)) return;
-    fold.classList.toggle(HELD_FOLDABLE_CLASS, more || overflowsCap(line));
-  };
-  refresh();
-  // The affordance is a cursor, which only a pointer over the fold can see, so
-  // entering it is when the line is measured against its row.
-  fold.addEventListener("pointerenter", refresh);
-  const view = fold.ownerDocument.defaultView;
-
-  fold.addEventListener("click", (event: MouseEvent) => {
-    if (!fold.classList.contains(HELD_FOLDABLE_CLASS)) return;
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    const section = expandAction({
-      section: fold,
-      interactive: target !== null && target.closest(CLICK_THROUGH_SELECTOR) !== null,
-      selectedText: view?.getSelection()?.toString() ?? "",
-    });
-    if (section === null) return;
-    const expanded = toggleExpanded(section);
-    log.debug("toggled a held prompt's fold", {
-      operation: "tray.held-prompt.fold",
-      context: { path, expanded },
-    });
-  });
-  return fold;
-}
-
-/**
- * The first line of what the user typed, and whether anything is left once it
- * is shown: a further line, or an attachment. Leading blank lines are not a
- * first line — a prompt that opens on one would otherwise collapse to nothing.
- */
-export function firstLineOf(said: UserSaid): { first: string; more: boolean } {
-  const text = spokenText(said).replace(/^(?:[ \t]*\r?\n)+/, "").trimEnd();
-  const breakAt = text.search(/\r?\n/);
-  const attached = (said.content?.blocks ?? []).some((block) => block.block.case === "image");
-  return {
-    first: breakAt < 0 ? text : text.slice(0, breakAt),
-    more: breakAt >= 0 || attached,
-  };
-}
-
-/**
- * The turns whose folds the reader has open under ROOT.
- *
- * The tray is WHOLE-LIST-REPLACED, so a push that re-serves a held prompt
- * (its classifier landing, say) draws a fresh, collapsed card. The reader's
- * open folds are read off the drawing a push replaces and re-applied to the
- * one that replaces it (`reopenHeldFolds`), keyed by the echoed turn.
- */
-export function openHeldTurns(root: ParentNode): Set<string> {
-  const open = new Set<string>();
-  for (const card of root.querySelectorAll<HTMLElement>("[data-held-turn]")) {
-    if (card.querySelector(`:scope > .${HELD_FOLD_CLASS}.${EXPANDED_CLASS}`) !== null) {
-      open.add(card.getAttribute("data-held-turn") ?? "");
-    }
-  }
-  return open;
-}
-
-/** Re-open, under ROOT, the folds of the turns in OPEN (from `openHeldTurns`). */
-export function reopenHeldFolds(root: ParentNode, open: ReadonlySet<string>): void {
-  if (open.size === 0) return;
-  for (const card of root.querySelectorAll<HTMLElement>("[data-held-turn]")) {
-    if (!open.has(card.getAttribute("data-held-turn") ?? "")) continue;
-    const fold = card.querySelector(`:scope > .${HELD_FOLD_CLASS}`);
-    fold?.classList.add(HELD_FOLDABLE_CLASS, EXPANDED_CLASS);
-  }
-}
-
-/**
- * What the user said, drawn.
- *
- * The feed's prompt row is feed-core's; this is the tray's own small body of
- * the same vocabulary. Duplicating it is deliberate — the two live in
- * different components, and the tray's version is a parked card's content, not
- * a bubble.
- */
-export function drawUserSaid(u: UserSaid, path: string): HTMLElement {
+export function drawUserSaid(u: UserSaid, path: string): HTMLElement[] {
   const content = requireMessage(u.content, `${path}.content`);
   log.debug("drawing what a user said", {
     operation: "tray.held-prompt.said",
     context: { path, blocks: content.blocks.length },
   });
-  const body = document.createElement("div");
-  body.className = "queued-content md";
+  const drawn: HTMLElement[] = [];
   for (const [index, block] of content.blocks.entries()) {
-    const drawn = drawUserContentBlock(block, `${path}.content.blocks[${index}]`);
-    if (drawn !== null) body.appendChild(drawn);
+    const el = drawUserContentBlock(block, `${path}.content.blocks[${index}]`);
+    if (el !== null) drawn.push(el);
   }
-  return body;
+  return drawn;
 }
 
 /** One block, or nothing where the schema says a block draws nothing. */
@@ -851,16 +746,13 @@ export function drawUserContentBlock(u: UserContentBlock, path: string): HTMLEle
   }
 }
 
-/** Words, as markdown — the same reading the feed gives a prompt. */
+/** Words, as markdown — a slot the one body pipeline paints, as a feed prompt's are. */
 export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
   log.debug("drawing a text block", {
     operation: "tray.held-prompt.text-block",
     context: { path, length: u.text.length },
   });
-  const text = document.createElement("div");
-  text.className = "queued-text";
-  text.innerHTML = renderMarkdown(u.text);
-  return text;
+  return markdownSlot("queued-text", u.text);
 }
 
 /**
