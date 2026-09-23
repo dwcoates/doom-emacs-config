@@ -74,7 +74,7 @@ TEST_ARGS=(-count=1 -timeout "$TIMEOUT" -parallel "$PARALLEL")
 
 log "running the e2e suite with coverage collection on"
 (
-    cd "$E2E_DIR"
+    cd "$E2E_DIR" || { log "cannot enter the e2e directory $E2E_DIR"; exit 1; }
     # TMPDIR=/tmp IS REQUIRED on macOS: the suite's unix sockets do not fit
     # the 103-byte path cap beneath the default per-user temp root.
     TMPDIR=/tmp AGENT_REPL_E2E_COVERAGE="$COVERAGE_ROOT" \
