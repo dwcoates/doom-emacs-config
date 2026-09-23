@@ -136,21 +136,21 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 	case kindRead:
 		return item(&conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{
 			Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
-				Path:      &conversationv1.ReadPath{Path: str(pick(input, "file_path", "path"))},
+				Path:      requestedPath(input),
 				StartedAt: startedAt(ts),
 			}},
 		}})
 	case kindWrite:
 		return item(&conversationv1.AgentActivity_Write{Write: &conversationv1.AgentWrite{
 			Result: &conversationv1.AgentWrite_Start{Start: &conversationv1.AgentWriteStart{
-				Path:      &conversationv1.ReadPath{Path: str(pick(input, "file_path", "path"))},
+				Path:      requestedPath(input),
 				StartedAt: startedAt(ts),
 			}},
 		}})
 	case kindEdit:
 		return item(&conversationv1.AgentActivity_Edit{Edit: &conversationv1.AgentEdit{
 			Result: &conversationv1.AgentEdit_Start{Start: &conversationv1.AgentEditStart{
-				Path:      &conversationv1.ReadPath{Path: str(pick(input, "file_path", "path"))},
+				Path:      requestedPath(input),
 				StartedAt: startedAt(ts),
 			}},
 		}})
@@ -184,7 +184,7 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 	case kindSkill:
 		return item(&conversationv1.AgentActivity_SkillUse{SkillUse: &conversationv1.AgentSkillUse{
 			Result: &conversationv1.AgentSkillUse_Start{Start: &conversationv1.AgentSkillUseStart{
-				Skill:     &conversationv1.AgentSkillName{Name: str(pick(input, "skill", "name", "command"))},
+				Skill:     &conversationv1.AgentSkillName{Name: requestedSkill(input)},
 				Args:      optionalString(pick(input, "args", "arguments")),
 				StartedAt: startedAt(ts),
 			}},
@@ -192,7 +192,7 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 	case kindSendMessage:
 		return item(&conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{
 			Result: &conversationv1.AgentSendMessage_Start{Start: &conversationv1.AgentSendMessageStart{
-				AddressedTo: str(pick(input, "to", "agent", "recipient")),
+				AddressedTo: sendAddressedTo(input),
 				Summary:     sendMessageSummary(input),
 				Body:        &conversationv1.AgentSendMessageBody{Text: str(pick(input, "message", "body"))},
 				StartedAt:   startedAt(ts),
@@ -261,7 +261,24 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 
 // ---------------------------------------------------------------------------
 // per-kind input readers
+//
+// ONE READER PER FACT, shared by a unit's start AND its settle. A settled frame
+// RESTATES what its start carried so it stands alone: the start and the settle
+// upsert one unit, so once the call settles its start is gone from the store,
+// and a replay drawing the settle alone must still name what the call acted on.
+// Reading it through the same function the start used is what keeps the two
+// from drifting.
 // ---------------------------------------------------------------------------
+
+// requestedPath is the file a Read, Write or Edit call named.
+func requestedPath(input map[string]any) *conversationv1.ReadPath {
+	return &conversationv1.ReadPath{Path: str(pick(input, "file_path", "path"))}
+}
+
+// sendAddressedTo is WHO a send's caller addressed, exactly as written.
+func sendAddressedTo(input map[string]any) string {
+	return str(pick(input, "to", "agent", "recipient"))
+}
 
 func grepQuery(input map[string]any) *conversationv1.AgentGrepQuery {
 	return &conversationv1.AgentGrepQuery{

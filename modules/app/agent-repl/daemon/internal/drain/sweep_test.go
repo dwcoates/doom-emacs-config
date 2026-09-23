@@ -159,6 +159,28 @@ func TestSweepDefersAnIdleSessionThatIsNotFree(t *testing.T) {
 	}
 }
 
+// TestSweepDefersASessionAPromptIsReviving pins that a session the prompt
+// queue is reviving is never hibernated: its record reads idle since the
+// engagement before the last hibernation until the revived prompt lands, and
+// standing it down there killed the shim the prompt was about to reach.
+func TestSweepDefersASessionAPromptIsReviving(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.reviving.Set(ws, true)
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 || len(h.stand.hibernated) != 0 {
+		t.Fatalf("hibernated = %v (directives %v), want the reviving session deferred", hibernated, h.stand.hibernated)
+	}
+}
+
 func TestSweepDefersOnATurnInFlightRefusal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

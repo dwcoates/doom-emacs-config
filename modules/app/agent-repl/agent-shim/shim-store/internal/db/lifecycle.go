@@ -331,12 +331,36 @@ type detachedRow struct {
 // knows the kind and the origin unit; the run's own frames know the run
 // identity and, for a `detached` origin, no kind at all. Letting either clobber
 // the other's half with a NULL would lose the only copy of it.
+//
+// A SPECIFIC KIND IS FINAL. The one change a kind may take is out of the
+// unspecific `detached` marker, into the kind a later write states. A write
+// naming a DIFFERENT specific kind than the row holds is a producer that
+// mistook the work for something else, and it never relabels the row: a shim
+// reconciliation that could not find a subagent's spawn unit in its book once
+// closed it with a SHELL terminal, and this upsert rewrote eight running
+// subagents and three monitors as `bash` (2026-09-23). The write still lands,
+// so the obligation it closes is closed, and the disagreement is recorded at
+// ERROR naming both kinds.
 func (d *DB) upsertDetachedWork(ctx context.Context, tx *sql.Tx, row detachedRow) error {
+	var standing string
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT kind FROM detached_work WHERE work_id = ?`, row.workID).Scan(&standing); {
+	case err == nil:
+		if standing != row.kind && standing != detachedKindDetached && row.kind != detachedKindDetached {
+			d.log.Log(logging.Fields{Operation: "store.db.detached-kind-conflict", Table: "detached_work", TaskID: row.workID, Level: "error"},
+				"a write named detached work %q as %s, but the record holds it as %s; the recorded kind stands",
+				row.workID, row.kind, standing)
+		}
+	case isNoRows(err):
+	default:
+		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{TaskID: row.workID},
+			storagef(err, "reading the recorded kind of detached work %q", row.workID))
+	}
 	const upsertSQL = `INSERT INTO detached_work (
 	    work_id, kind, origin_unit, owner_agent, announced_at_ms)
 	  VALUES (?,?,?,?,?)
 	  ON CONFLICT(work_id) DO UPDATE SET
-	    kind = CASE WHEN excluded.kind = ? THEN detached_work.kind ELSE excluded.kind END,
+	    kind = CASE WHEN detached_work.kind = ? THEN excluded.kind ELSE detached_work.kind END,
 	    origin_unit = COALESCE(excluded.origin_unit, detached_work.origin_unit),
 	    owner_agent = COALESCE(excluded.owner_agent, detached_work.owner_agent)`
 	_, err := tx.ExecContext(ctx, upsertSQL,

@@ -989,24 +989,24 @@ func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversation
 }
 
 // MintSubFeedHead records a bubble row's sub-feed and its crumb label.
-func (r *resolver) MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, sub feedid.Feed, label string) {
+func (r *resolver) MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	r.mintSubFeed(s, head, sub, label)
+	r.mintSubFeed(s, head, headFeed, sub, label)
 }
 
 // mintSubFeed is MintSubFeedHead's body, called with the lock held.
-func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, sub feedid.Feed, label string) {
+//
+// THE PARENT IS THE FEED THE HEAD IS DRAWN ON, STATED BY THE CALLER. It used to
+// be searched for among the rows already placed, which a subagent bubble mints
+// BEFORE its row is upserted — so a first compose found nothing and recorded
+// the ROOT as the parent of a bubble drawn on another subagent's sub-feed. The
+// crumb chain of a subagent of a subagent then stopped one level short, and a
+// footer jump to it walked from the root into a crumb the root does not hold.
+func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string) {
 	key := r.feedKey(s.id, sub)
-	parentKey := "root"
-	for existingKey, f := range s.feeds {
-		if _, ok := f.rows[head.GetValue()]; ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[head.GetValue()]; ok"})
-			parentKey = existingKey
-			break
-		}
-	}
+	parentKey := r.feedKey(s.id, headFeed)
 	s.subFeeds[key] = &subFeedHead{row: head, parentFeed: parentKey, label: label}
 	if sub.Agent != nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sub.Agent != nil"})
