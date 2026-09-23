@@ -432,8 +432,8 @@ function settleClear(
  *
  * `ContextCompacted.summary` is not optional — the feed shows the summary in the
  * cut's place, so the cut is not a hole — and the vendor states the boundary
- * FIRST. One boundary is held, and it is released by the very next assistant
- * prose, which is what that prose IS.
+ * FIRST. One boundary is held, and it is released by the very next MAIN-stream
+ * assistant prose, which is what that prose IS.
  */
 function settleCompaction(
   message: Extract<SdkMessage, { type: "assistant" }>,
@@ -442,6 +442,15 @@ function settleCompaction(
 ): readonly PersistEntry[] {
   const pending = state.pendingCompaction;
   if (pending === undefined) return [];
+  // THE BOUNDARY IS THE SESSION'S, so only the MAIN stream's prose is its
+  // summary: a background subagent's line can land between the two.
+  if (spawningCallOf(message.parent_tool_use_id) !== undefined) {
+    LOGGER.debug(
+      { parent_tool_use_id: message.parent_tool_use_id },
+      "a subagent's assistant message arrived while a compaction is held; it is not the summary",
+    );
+    return [];
+  }
   const content = (message.message as { content?: unknown } | undefined)?.content;
   const summary = Array.isArray(content)
     ? content
