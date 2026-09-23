@@ -70,7 +70,7 @@ func TestReplayingASupersededWriteDeliversNothingToAWatcher(t *testing.T) {
 	replayed := supersededPair(ctx, t, shim)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Act
 	shim.write(ctx, t, replayed)

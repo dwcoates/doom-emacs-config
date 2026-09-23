@@ -31,7 +31,7 @@ func stampedForeignSchema(t *testing.T, path string) {
 	if err != nil {
 		t.Fatalf("staging a foreign database: %v", err)
 	}
-	defer handle.Close()
+	defer closeOrFail(t, handle)
 	if _, err := handle.Exec(`CREATE TABLE schema_meta (version INTEGER NOT NULL);
 	  INSERT INTO schema_meta(version) VALUES (99);
 	  CREATE TABLE ancient_messages (session_id TEXT, seq INTEGER);
@@ -49,7 +49,7 @@ func stampedSupersededSchema(t *testing.T, path string) {
 	if err != nil {
 		t.Fatalf("staging a superseded database: %v", err)
 	}
-	defer handle.Close()
+	defer closeOrFail(t, handle)
 	if _, err := handle.Exec(fmt.Sprintf(`CREATE TABLE schema_meta (version INTEGER NOT NULL);
 	  INSERT INTO schema_meta(version) VALUES (%d);
 	  CREATE TABLE entry (id TEXT);`, db.SchemaVersion-1)); err != nil {

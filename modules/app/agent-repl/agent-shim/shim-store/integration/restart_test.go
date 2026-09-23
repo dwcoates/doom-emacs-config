@@ -72,7 +72,7 @@ func TestWatchTokensDoNotSurviveARestart(t *testing.T) {
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
 	stream := watchStream(after, t, store.client(), staleToken)
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 	assertWatchRefused(t, stream)
 }
 
@@ -97,7 +97,7 @@ func TestReopeningAfterARestartRecoversTheTail(t *testing.T) {
 	revived := store.client()
 	reopened := openSession(after, t, revived, "main", 10, highWater)
 	stream := watchStream(after, t, revived, reopened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	revivedShim := streamProducer(revived)
 	revivedShim.write(after, t,

@@ -81,7 +81,7 @@ func TestWatchIsRefusedAfterAPageOnlyOpen(t *testing.T) {
 
 	// Act.
 	stream := watchStream(ctx, t, cli, &storev1.AgentSessionToken{})
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Assert.
 	assertWatchRefused(t, stream)
@@ -106,7 +106,7 @@ func TestEmptyBookIsALegalOpen(t *testing.T) {
 	assertTexts(t, "an empty book's page", pageTexts(opened.GetPage()), nil)
 	assertPageFloor(t, opened.GetPage())
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 	shim := streamProducer(cli)
 	shim.write(ctx, t,
 		shim.agentEntry("w-empty-1", "u-empty-1", frameLine(agentID("main"), responseFrame("never-written-to", "act-1", "first ever"))),
@@ -131,7 +131,7 @@ func TestWatchIsPinnedExactlyAfterThePage(t *testing.T) {
 	// Act.
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 	shim.write(ctx, t,
 		shim.agentEntry("w-pin-b", "u-pin-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B"))),
 	)
@@ -162,7 +162,7 @@ func TestWriteRacingBetweenOpenAndWatchIsDeliveredExactlyOnce(t *testing.T) {
 		shim.agentEntry("w-race-b", "u-race-b", frameLine(agentID("main"), responseFrame("main", "act-b", "B"))),
 	)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 	shim.write(ctx, t,
 		shim.agentEntry("w-race-c", "u-race-c", frameLine(agentID("main"), responseFrame("main", "act-c", "C"))),
 	)
@@ -191,7 +191,7 @@ func TestUpsertOfAnOldLineStreamsAtItsOriginalPointer(t *testing.T) {
 	pointerOfA := pointers[1]
 
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Act: unit A settles — same upsert_key, a new write.
 	shim.write(ctx, t,
@@ -217,11 +217,11 @@ func TestWatchTokenIsSingleUse(t *testing.T) {
 	seedBook(ctx, t, streamProducer(cli), "main", "single-use")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	first := watchStream(ctx, t, cli, opened.GetWatch())
-	defer first.Close()
+	defer closeOrFail(t, first)
 
 	// Act.
 	second := watchStream(ctx, t, cli, opened.GetWatch())
-	defer second.Close()
+	defer closeOrFail(t, second)
 
 	// Assert.
 	assertWatchRefused(t, second)
@@ -327,7 +327,7 @@ func TestUnknownWatchTokenIsRefused(t *testing.T) {
 
 	// Act.
 	stream := watchStream(ctx, t, cli, &storev1.AgentSessionToken{Value: "0123456789abcdef0123456789abcdef"})
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Assert.
 	assertWatchRefused(t, stream)
@@ -352,12 +352,12 @@ func TestAConsumedWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	seedBook(ctx, t, streamProducer(cli), "main", "consumed")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	first := watchStream(ctx, t, cli, opened.GetWatch())
-	defer first.Close()
+	defer closeOrFail(t, first)
 	mark := store.logMark()
 
 	// Act.
 	second := watchStream(ctx, t, cli, opened.GetWatch())
-	defer second.Close()
+	defer closeOrFail(t, second)
 
 	// Assert.
 	assertWatchRefused(t, second)
@@ -387,7 +387,7 @@ func TestAPostRestartWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
 	stream := watchStream(after, t, store.client(), staleToken)
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Assert.
 	assertWatchRefused(t, stream)
