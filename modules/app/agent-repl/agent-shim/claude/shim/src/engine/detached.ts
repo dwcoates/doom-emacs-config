@@ -29,12 +29,26 @@
  * "is anything running" — but it produces no bubble and no announcement, which
  * is exactly the split {@link LiveWorkTable.announceable} draws.
  *
+ * FOREGROUND WORK IS KNOWN, NEVER LIVE. The vendor tracks a blocking `Bash`
+ * call and a synchronous spawn as a task too (`is_backgrounded: false`), and
+ * the one rule in `convert/detached.ts` — the same one the converter announces
+ * by — decides when such a task becomes detached work: a patch or its own tool
+ * result moving it. Until then it is held APART from the live set, only so the
+ * move can be recognized and a subagent's ask can still be routed to its book;
+ * it is never announced, never in `SessionLive`/`TurnLive`, never a WatchBash
+ * run and never part of `KillTurn`'s refusal set.
+ *
  * WHAT A STOP ACTUALLY IS. `query.stopTask` — the SDK's native per-task stop.
  * There is no process to kill at this boundary: detached work runs INSIDE the
  * agent binary, not as a child of the shim, so the shim owns no process
  * boundary that could reach it.
  */
 import { bindLog } from "../log.js";
+import {
+  patchBackgrounds,
+  resultBackgroundTaskId,
+  startedInForeground,
+} from "../convert/detached.js";
 import { detachedWorkId } from "../convert/ids.js";
 import type { conversationv1 } from "../proto.js";
 import type {
@@ -88,8 +102,25 @@ export interface LiveWorkEntry {
  */
 const RETIRED_HANDLES_REMEMBERED = 64;
 
+/**
+ * How many FOREGROUND tasks the table remembers at once.
+ *
+ * Constant size for the same reason as the retired ring: a foreground task
+ * normally leaves at its own notification, but nothing lets one that never
+ * concludes grow the table without end. The oldest is forgotten first; a move
+ * to the background it can no longer be matched to still arrives on the
+ * vendor's level, which creates the live entry from what it states.
+ */
+const FOREGROUND_TASKS_REMEMBERED = 256;
+
 export class LiveWorkTable {
   private readonly entries = new Map<string, LiveWorkEntry>();
+
+  /**
+   * Work that started in the FOREGROUND and has not moved: known, never live.
+   * Insertion-ordered, so the bound forgets the oldest first.
+   */
+  private readonly foreground = new Map<string, LiveWorkEntry>();
 
   /**
    * The most recently retired WIRE handles, oldest first.
@@ -130,7 +161,21 @@ export class LiveWorkTable {
       ...(message.task_type === undefined ? {} : { taskType: message.task_type }),
       ...(message.subagent_type === undefined ? {} : { subagentType: message.subagent_type }),
       ...(turnId === undefined ? {} : { turnId }),
+      ...(message.is_backgrounded === undefined ? {} : { backgrounded: message.is_backgrounded }),
     };
+    if (startedInForeground(message)) {
+      this.holdForeground(entry);
+      LOGGER.debug(
+        {
+          task_id: entry.taskId,
+          tool_use_id: entry.toolUseId ?? "",
+          task_type: entry.taskType ?? "",
+          turn_id: entry.turnId ?? "",
+        },
+        "a task started in the foreground; it is tracked apart and is not live detached work",
+      );
+      return entry;
+    }
     this.entries.set(entry.taskId, entry);
     LOGGER.info(
       {
@@ -147,6 +192,8 @@ export class LiveWorkTable {
 
   /** A patch to one task. Unknown ids are ignored, loudly. */
   onTaskUpdated(message: SdkTaskUpdatedMessage): LiveWorkEntry | undefined {
+    const held = this.foreground.get(message.task_id);
+    if (held !== undefined) return this.onForegroundUpdated(held, message);
     const existing = this.entries.get(message.task_id);
     if (existing === undefined) {
       LOGGER.debug(
@@ -175,8 +222,88 @@ export class LiveWorkTable {
     return updated;
   }
 
+  /** A patch to foreground work: applied, and a move to the background makes it live. */
+  private onForegroundUpdated(
+    held: LiveWorkEntry,
+    message: SdkTaskUpdatedMessage,
+  ): LiveWorkEntry | undefined {
+    const updated: LiveWorkEntry = {
+      ...held,
+      ...(message.patch.description === undefined ? {} : { description: message.patch.description }),
+      ...(message.patch.status === undefined ? {} : { status: message.patch.status }),
+    };
+    if (patchBackgrounds(message.patch)) return this.promote(updated, "task_updated");
+    this.foreground.set(updated.taskId, updated);
+    LOGGER.debug(
+      { task_id: updated.taskId, status: updated.status ?? "" },
+      "applied a state transition to foreground work; it stays out of the live set",
+    );
+    return undefined;
+  }
+
+  /**
+   * A tool result arrived. When it says its work MOVED to the background, the
+   * foreground task it names becomes live detached work.
+   */
+  onToolResult(structured: unknown): LiveWorkEntry | undefined {
+    const taskId = resultBackgroundTaskId(structured);
+    if (taskId === undefined) return undefined;
+    const held = this.foreground.get(taskId);
+    if (held === undefined) {
+      LOGGER.logVerbose(
+        { task_id: taskId, live: this.entries.has(taskId) },
+        "a tool result named backgrounded work that is not held as foreground work; nothing to move",
+      );
+      return undefined;
+    }
+    return this.promote(held, "tool_result");
+  }
+
+  /** Foreground work moved to the background: it leaves the held set and joins the live one. */
+  private promote(entry: LiveWorkEntry, via: string): LiveWorkEntry {
+    this.foreground.delete(entry.taskId);
+    const live: LiveWorkEntry = { ...entry, backgrounded: true };
+    this.entries.set(live.taskId, live);
+    LOGGER.info(
+      {
+        task_id: live.taskId,
+        tool_use_id: live.toolUseId ?? "",
+        task_type: live.taskType ?? "",
+        skip_transcript: live.skipTranscript,
+        turn_id: live.turnId ?? "",
+        via,
+      },
+      "foreground work moved to the background; recorded a live detached-work item and its spawn provenance",
+    );
+    return live;
+  }
+
+  /** Hold one foreground task, forgetting the oldest beyond the bound. */
+  private holdForeground(entry: LiveWorkEntry): void {
+    this.foreground.delete(entry.taskId);
+    this.foreground.set(entry.taskId, entry);
+    while (this.foreground.size > FOREGROUND_TASKS_REMEMBERED) {
+      const [oldest] = this.foreground.keys();
+      if (oldest === undefined) break;
+      this.foreground.delete(oldest);
+      LOGGER.debug(
+        { task_id: oldest, bound: FOREGROUND_TASKS_REMEMBERED },
+        "the foreground-task bound was reached; the oldest held foreground task is forgotten",
+      );
+    }
+  }
+
   /** A task concluded. Its terminal fact is the vendor's; the entry leaves the set. */
   onTaskNotification(message: SdkTaskNotificationMessage): LiveWorkEntry | undefined {
+    if (this.foreground.delete(message.task_id)) {
+      // NOTHING RETIRES: the work was never announced, so there is no handle a
+      // consumer could still be holding.
+      LOGGER.debug(
+        { task_id: message.task_id, status: message.status },
+        "foreground work concluded without ever becoming detached work",
+      );
+      return undefined;
+    }
     const existing = this.entries.get(message.task_id);
     this.entries.delete(message.task_id);
     this.retire(existing);
@@ -198,7 +325,12 @@ export class LiveWorkTable {
   onLevel(message: SdkBackgroundTasksChangedMessage): void {
     const next = new Map<string, LiveWorkEntry>();
     for (const task of message.tasks) {
-      const existing = this.entries.get(task.task_id);
+      // A LEVEL NAMES ONLY BACKGROUND WORK, so a held foreground task it names
+      // has moved — and it keeps everything its start stated.
+      const held = this.foreground.get(task.task_id);
+      const existing =
+        this.entries.get(task.task_id) ??
+        (held === undefined ? undefined : this.promote(held, "background_tasks_changed"));
       next.set(
         task.task_id,
         existing === undefined
@@ -226,6 +358,17 @@ export class LiveWorkTable {
   /** One item by its work id. */
   get(taskId: string): LiveWorkEntry | undefined {
     return this.entries.get(taskId);
+  }
+
+  /**
+   * A task by its vendor id, LIVE OR FOREGROUND.
+   *
+   * For the lookups that translate the vendor's task id into the spawning call
+   * — a subagent's ask routed to its book, a task frame joined to its unit — and
+   * never for liveness: foreground work is not live work.
+   */
+  tracked(taskId: string): LiveWorkEntry | undefined {
+    return this.entries.get(taskId) ?? this.foreground.get(taskId);
   }
 
   /** The item a tool call spawned, if it is still live. */

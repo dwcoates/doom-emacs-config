@@ -13,6 +13,7 @@ import type {
   SdkBackgroundTasksChangedMessage,
   SdkTaskNotificationMessage,
   SdkTaskStartedMessage,
+  SdkTaskUpdatedMessage,
 } from "../../src/sdk/types.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
@@ -344,5 +345,203 @@ describe("what the retired-handle memory holds", () => {
     }
 
     expect([table.retired("toolu_0"), table.retired("toolu_64")]).toEqual([false, true]);
+  });
+});
+
+describe("foreground work, which is never detached work", () => {
+  // THE 0.3.280 VENDOR starts a task for EVERY `Bash` call and every
+  // synchronous spawn, stating `is_backgrounded: false` for the ones whose
+  // spawning call is blocking on them. Recording those as live detached work
+  // drew every ordinary shell call as a detached shell that never settled.
+  const KINDS = [{ kind: "local_bash" }, { kind: "local_agent" }];
+
+  const updated = (patch: SdkTaskUpdatedMessage["patch"]): SdkTaskUpdatedMessage => ({
+    type: "system",
+    subtype: "task_updated",
+    task_id: "b01",
+    patch,
+    uuid: "00000000-0000-4000-8000-000000000004",
+    session_id: "s-1",
+  });
+
+  const concluded: SdkTaskNotificationMessage = {
+    type: "system",
+    subtype: "task_notification",
+    task_id: "b01",
+    status: "completed",
+    output_file: "",
+    summary: "",
+    uuid: "00000000-0000-4000-8000-000000000005",
+    session_id: "s-1",
+  };
+
+  it.each(KINDS)("keeps a $kind that started in the foreground out of the live set", ({ kind }) => {
+    // Arrange.
+    const table = new LiveWorkTable();
+
+    // Act.
+    table.onTaskStarted(started({ task_type: kind, is_backgrounded: false }), "turn-1");
+
+    // Assert.
+    expect(table.workIds().map((id) => id.value)).toEqual([]);
+  });
+
+  it.each(KINDS)("records no live detached-work item for a $kind that started in the foreground", ({ kind }) => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    table.onTaskStarted(started({ task_type: kind, is_backgrounded: false }));
+
+    // Assert.
+    expect(
+      logRecordsSince(before).filter((record) => String(record.message).includes("live detached-work item")),
+    ).toEqual([]);
+  });
+
+  it.each(KINDS)("admits a $kind that started backgrounded", ({ kind }) => {
+    // Arrange.
+    const table = new LiveWorkTable();
+
+    // Act.
+    table.onTaskStarted(started({ task_type: kind, is_backgrounded: true }));
+
+    // Assert.
+    expect(table.workIds().map((id) => id.value)).toEqual(["toolu_1"]);
+  });
+
+  it.each(KINDS)("admits a foreground $kind once a patch moves it to the background", ({ kind }) => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: kind, is_backgrounded: false }));
+
+    // Act.
+    table.onTaskUpdated(updated({ is_backgrounded: true }));
+
+    // Assert.
+    expect(table.workIds().map((id) => id.value)).toEqual(["toolu_1"]);
+  });
+
+  it("keeps a foreground task out of the live set through a patch that does not move it", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }));
+
+    // Act.
+    table.onTaskUpdated(updated({ status: "running" }));
+
+    // Assert.
+    expect(table.get("b01")).toBeUndefined();
+  });
+
+  it("admits a foreground shell once its own tool result says it moved", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }));
+
+    // Act.
+    table.onToolResult({ stdout: "", backgroundTaskId: "b01", timedOutAfterMs: 120_000 });
+
+    // Assert.
+    expect(table.byToolUseId("toolu_1")?.backgrounded).toBe(true);
+  });
+
+  it("leaves a foreground shell out of the live set when its tool result says it ENDED", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }));
+
+    // Act.
+    table.onToolResult({ stdout: "one\n", stderr: "", interrupted: false });
+
+    // Assert.
+    expect(table.byToolUseId("toolu_1")).toBeUndefined();
+  });
+
+  it("admits a foreground task the vendor's level names, keeping the call its start stated", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }));
+
+    // Act.
+    table.onLevel(level([{ task_id: "b01", task_type: "local_bash", description: "run the build" }]));
+
+    // Assert.
+    expect(table.get("b01")?.toolUseId).toBe("toolu_1");
+  });
+
+  it("keeps a foreground task held through a level that does not name it", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }));
+    table.onLevel(level([]));
+
+    // Act.
+    table.onTaskUpdated(updated({ is_backgrounded: true }));
+
+    // Assert.
+    expect(table.get("b01")?.taskId).toBe("b01");
+  });
+
+  it("retires no handle when foreground work concludes, because none was ever announced", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }));
+
+    // Act.
+    table.onTaskNotification(concluded);
+
+    // Assert.
+    expect(table.retired("toolu_1")).toBe(false);
+  });
+
+  it("forgets foreground work once it concludes", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ task_type: "local_agent", is_backgrounded: false }));
+
+    // Act.
+    table.onTaskNotification(concluded);
+
+    // Assert.
+    expect(table.tracked("b01")).toBeUndefined();
+  });
+
+  it("still translates a foreground task's id to its spawning call", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+
+    // Act.
+    table.onTaskStarted(started({ task_type: "local_agent", is_backgrounded: false }));
+
+    // Assert.
+    expect(table.tracked("b01")?.toolUseId).toBe("toolu_1");
+  });
+
+  it("leaves foreground work out of the set KillTurn names", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+
+    // Act.
+    table.onTaskStarted(started({ task_type: "local_bash", is_backgrounded: false }), "turn-1");
+
+    // Assert.
+    expect(table.spawnedBy("turn-1")).toEqual([]);
+  });
+
+  it("FORGETS the oldest held foreground task once the bound is reached", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+
+    // Act.
+    for (let index = 0; index < 257; index += 1) {
+      table.onTaskStarted(
+        started({ task_id: `b${index}`, tool_use_id: `toolu_${index}`, task_type: "local_bash", is_backgrounded: false }),
+      );
+    }
+
+    // Assert.
+    expect([table.tracked("b0"), table.tracked("b256")?.taskId]).toEqual([undefined, "b256"]);
   });
 });
