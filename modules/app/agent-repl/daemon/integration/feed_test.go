@@ -1211,6 +1211,41 @@ func TestASendMessageDrawsAnAgentPromptOnTheSendersFeed(t *testing.T) {
 	}
 }
 
+// A SETTLED SEND STANDS ALONE. A replay serves a send's latest frame alone (the
+// store keeps one row per unit), so the settle, with no start ever pushed, must
+// draw the address and the summary it restates rather than an empty body.
+func TestASettledSendAloneDrawsItsRestatedAddressAndSummary(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-send-settled", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the settle alone.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("send-settled"),
+		Item: &conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{Result: &conversationv1.AgentSendMessage_Success{
+			Success: &conversationv1.AgentSendMessageSuccess{
+				RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"},
+				AddressedTo:      "vetter",
+				Summary:          &conversationv1.AgentSendMessageSummary{Text: "Scroll fix landed; merge master in"},
+			},
+		}}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the settled send's agent prompt", func(r *frontendv1.FeedRow) bool {
+		return r.GetAgentPrompt() != nil
+	})
+	if addr := row.GetAgentPrompt().GetAddress().GetText(); addr != "→ vetter" {
+		t.Fatalf("the send's address line = %q, want the restated recipient", addr)
+	}
+	blocks := row.GetAgentPrompt().GetBody().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText().GetText() != "Scroll fix landed; merge master in" {
+		t.Fatalf("the send's body = %v, want the restated summary", blocks)
+	}
+}
+
 // ==========================================================================
 // Plan mode.
 // ==========================================================================
