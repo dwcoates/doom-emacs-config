@@ -458,6 +458,38 @@ describe("the usage corner's slider markup", () => {
     expect(shape(corner)).toEqual([{ className: "usage-slider", children: ["usage-stamp"] }]);
   });
 
+  it("marks an arriving corner, so its empty slot never slides out", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(0n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(true);
+  });
+
+  it("does not mark a settled corner as arriving", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(false);
+  });
+
+  it("reserves the same slot width arriving and settled, so the settle moves nothing", () => {
+    // Arrange -- the real stylesheet.
+    const teardown = installStylesheet();
+    const arrivingEl = drawFeedResponse(withUsage(0n), rowContext());
+    const settledEl = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.append(arrivingEl, settledEl);
+    try {
+      // Act
+      const widths = [arrivingEl, settledEl].map((el) =>
+        cascadedValue(el.querySelector(".usage-slider") as HTMLElement, "width"),
+      );
+      // Assert
+      expect([widths[0] === widths[1], widths[0] !== "" && widths[0] !== "auto"]).toEqual([true, true]);
+    } finally {
+      teardown();
+    }
+  });
+
   it("keeps the spacer's text and the visible token identical", () => {
     // Arrange / Act
     const el = drawFeedResponse(withUsage(1_000n), rowContext());

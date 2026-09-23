@@ -1026,10 +1026,10 @@ describe("the cost corner's hover hit area", () => {
     expect(ago).toMatch(/transition:\s*opacity 0\.5s ease/);
   });
 
-  it("never sizes the slider or the token, so the reserved footprint stays constant", () => {
-    // Arrange / Act — the base rules and the revealed-state rules.
+  it("never re-sizes the slider when revealed, nor the token, so the reserved footprint stays constant", () => {
+    // Arrange / Act — the revealed-state rule and the token's rule. (The base
+    // slider rule now FIXES the slot's width, below: owner rule 2026-09-23.)
     const decls = [
-      declarationsOf(".usage-slider") ?? "",
       declarationsOf(".usage-corner.usage-corner--revealed .usage-slider") ?? "",
       declarationsOf(".usage-stamp") ?? "",
     ];
@@ -1041,6 +1041,39 @@ describe("the cost corner's hover hit area", () => {
       expect(one).not.toMatch(/(?:^|[\s;])max-width\s*:/);
       expect(one).not.toMatch(/(?:^|[\s;])margin/);
     }
+  });
+
+  it("fixes the duration slot's width, so the live clock never moves the float", () => {
+    // Arrange / Act — THE USER OWNS THE SCROLL (owner rule, 2026-09-23): a
+    // slot as wide as its text reflowed the first prose line on every tick.
+    const slider = declarationsOf(".usage-slider") ?? "";
+
+    // Assert
+    expect(slider).toMatch(/(?:^|[\s;])width:\s*calc\(0\.35rem \+ 11ch \* 0\.85\)/);
+  });
+
+  it("fixes the token spacer's width, so a growing figure never moves the float", () => {
+    // Arrange / Act
+    const spacer = declarationsOf(".usage-corner::before") ?? "";
+
+    // Assert
+    expect(spacer).toMatch(/(?:^|[\s;])width:\s*6ch/);
+  });
+
+  it("draws the duration in fixed-width figures", () => {
+    // Arrange / Act
+    const ago = declarationsOf(".usage-ago") ?? "";
+
+    // Assert
+    expect(ago).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it("never slides an arriving corner's empty slot out, whatever reveals it", () => {
+    // Arrange / Act
+    const arriving = declarationsOf(".bubble.assistant .usage-corner[data-arriving] .usage-slider") ?? "";
+
+    // Assert
+    expect(arriving).toMatch(/transform:\s*translateX\(100%\)/);
   });
 
   it("disables the slide and the fade under reduced motion", () => {
