@@ -1476,6 +1476,24 @@ describe("the vendor's API failure class reaching the terminal", () => {
     expect(failed.kind.case).toBe("billingError");
   });
 
+  it("ignores a SUBAGENT's failed assistant message, whose request is not the turn's", () => {
+    // Arrange
+    const withoutSubagent = apiKindOf([apiRetry("rate_limit", 549), apiResult(null)]);
+
+    // Act
+    const failed = apiKindOf([
+      apiRetry("rate_limit", 549),
+      assistant("msg-sub-api", [{ type: "text", text: "billing" }], {
+        error: "billing_error",
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      apiResult(null),
+    ]);
+
+    // Assert
+    expect(failed.kind.case).toBe(withoutSubagent.kind.case);
+  });
+
   it("carries the vendor's own sentence when the result states no errors", () => {
     // Arrange
     const sentence =
@@ -1750,5 +1768,174 @@ describe("remembering the vendor's API failure class", () => {
     );
     expect(held?.verbosity).toBe("verbose");
     expect(held?.context.vendor_error).toBe("rate_limit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where the fold ends each stream's block state.
+// ---------------------------------------------------------------------------
+
+describe("where the fold ends a stream", () => {
+  const SPAWN = "toolu_spawn";
+  const UNSETTLED =
+    "invariant violated: a streamed unit was started and never settled; its row stays unsettled";
+
+  /** A stream event on the stream `parent` names. */
+  function streamOn(parent: string | null, event: Record<string, unknown>): SdkMessage {
+    return {
+      type: "stream_event",
+      uuid: `uuid-${String(event.type)}`,
+      session_id: "session-1",
+      parent_tool_use_id: parent,
+      event,
+    } as unknown as SdkMessage;
+  }
+
+  /** A response on the stream `parent` names that opens a text block and never settles it. */
+  function strandedBlock(parent: string | null, messageId: string): SdkMessage[] {
+    return [
+      streamOn(parent, { type: "message_start", message: { id: messageId } }),
+      streamOn(parent, { type: "content_block_start", index: 0, content_block: { type: "text" } }),
+    ];
+  }
+
+  /** The `detected_at` of every unsettled-unit report folding `messages` wrote. */
+  function unsettledDetectedAt(messages: readonly SdkMessage[]): unknown[] {
+    const fold = createFold();
+    mockedWriteSync.mockClear();
+    for (const message of messages) fold.onSdkMessage(message, foldContext());
+    return persistedRecords()
+      .filter((record) => record.message === UNSETTLED)
+      .map((record) => record.context.detected_at);
+  }
+
+  it("ends a subagent's stream at the spawn's CONCLUDING tool_result", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      toolResult(SPAWN, { status: "completed", content: [] }),
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["agent_end"]);
+  });
+
+  it("does NOT end a subagent's stream at a LAUNCH RECEIPT", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      toolResult(SPAWN, { status: "async_launched", isAsync: true }),
+    ]);
+
+    // Assert.
+    expect(detected).toEqual([]);
+  });
+
+  it("ends a backgrounded subagent's stream at the task_notification naming its call", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "a0000000000000001",
+        tool_use_id: SPAWN,
+        status: "completed",
+        output_file: "/tmp/out",
+        summary: "done",
+        uuid: "uuid-notification",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["agent_end"]);
+  });
+
+  it("ends the main stream at the turn's result", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(null, "msg_main"),
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "done",
+        uuid: "uuid-result",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["turn_end"]);
+  });
+
+  it("does NOT end a subagent's stream at the turn's result", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "done",
+        uuid: "uuid-result",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual([]);
+  });
+});
+
+describe("a subagent's prose arriving while a compaction boundary is held", () => {
+  const boundary = {
+    type: "system",
+    subtype: "compact_boundary",
+    compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
+    uuid: "uuid-boundary-interleaved",
+    session_id: "session-1",
+  } as unknown as SdkMessage;
+
+  it("is NOT taken as the summary", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(boundary, foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      assistant("msg-subagent", [{ type: "text", text: "subagent prose" }], {
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(output.entries.map((entry) => entry.upsertKey)).toEqual(["activity:msg-subagent:0"]);
+  });
+
+  it("leaves the cut held for the MAIN stream's summary", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(boundary, foldContext());
+    fold.onSdkMessage(
+      assistant("msg-subagent", [{ type: "text", text: "subagent prose" }], {
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      foldContext(),
+    );
+
+    // Act.
+    const output = fold.onSdkMessage(
+      assistant("msg-summary", [], { message: { content: "the main summary" } }),
+      foldContext(),
+    );
+
+    // Assert.
+    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const cut = update.value as conversationv1.ContextCut;
+    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe("the main summary");
   });
 });
