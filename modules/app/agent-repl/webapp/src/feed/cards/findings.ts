@@ -87,7 +87,7 @@ export function drawFeedFindings(u: FeedFindings, rc: RowContext): HTMLElement {
   // The list's own shape is the only "state" this message has, and a reader
   // scanning for the empty case should not have to count rows to find it.
   if (u.rows.length === 0) {
-    return agenticBubble({ state: "empty", heading, content: [nothingFound()] });
+    return agenticBubble({ previous: rc.previous, state: "empty", heading, content: [nothingFound()] });
   }
 
   const list = document.createElement("div");
@@ -95,7 +95,7 @@ export function drawFeedFindings(u: FeedFindings, rc: RowContext): HTMLElement {
   u.rows.forEach((row, index) => {
     list.append(drawFeedFindingsRow(row, rc, index, `${PATH}.rows[${index}]`));
   });
-  return agenticBubble({ state: "findings", heading, content: [list] });
+  return agenticBubble({ previous: rc.previous, state: "findings", heading, content: [list] });
 }
 
 /** The composed heading line, drawn verbatim. */

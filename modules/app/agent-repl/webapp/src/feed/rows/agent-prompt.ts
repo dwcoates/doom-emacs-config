@@ -48,7 +48,7 @@ export const DELIVERY_WORDS = {
  * orange marker class, with the composed address line where the user kind
  * draws its author.
  */
-export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
+export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement): HTMLElement {
   log.info("drawing an agent prompt row", {
     operation: "feed.draw-agent-prompt",
     context: {},
@@ -58,16 +58,20 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
   const footer = msg.delivery.case === undefined ? [] : [drawFeedAgentPromptDelivery(msg.delivery)];
   // The address line is the metadata strip and the body hangs in the shared
   // scroll box beneath it, exactly as a person's own prompt does.
-  return drawBubble({
-    role: "prompt",
-    variant: "agent",
-    hooks: ["user", "prompt-agent"],
-    working: msg.working,
-    strip: [drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`))],
-    content: drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
-    footer,
-    capLines: "feed",
-  }).bubble;
+  // PREVIOUS, the row's last draw, is updated in place (drawBubble).
+  return drawBubble(
+    {
+      role: "prompt",
+      variant: "agent",
+      hooks: ["user", "prompt-agent"],
+      working: msg.working,
+      strip: [drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`))],
+      content: drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
+      footer,
+      capLines: "feed",
+    },
+    previous,
+  ).bubble;
 }
 
 /**

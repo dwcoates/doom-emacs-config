@@ -255,3 +255,26 @@ describe("a tree in the plan", () => {
     expect(treeLineWidths(el)).toHaveLength(3);
   });
 });
+
+describe("a re-push of the plan", () => {
+  it("updates the previous draw in place, keeping its scroll box", () => {
+    // Arrange
+    const h = harness();
+    const first = drawFeedPlan(plan({ case: "planning", value: {} }), h.rc);
+    const box = first.querySelector(".bubble-scroll");
+    // Act
+    const again = drawFeedPlan(plan(planned("# the plan")), { ...h.rc, previous: first });
+    // Assert
+    expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
+  });
+
+  it("carries the new state's content", () => {
+    // Arrange
+    const h = harness();
+    const first = drawFeedPlan(plan({ case: "planning", value: {} }), h.rc);
+    // Act
+    drawFeedPlan(plan(planned("# the plan")), { ...h.rc, previous: first });
+    // Assert
+    expect([first.getAttribute("data-state"), first.querySelector(".plan-planning")]).toEqual(["planned", null]);
+  });
+});
