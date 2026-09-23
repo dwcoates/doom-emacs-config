@@ -38,7 +38,8 @@ const (
 	// ArmShimAlreadyEnded is a detached shell that has already finished.
 	ArmShimAlreadyEnded = "already_ended"
 	// ArmShimTurnLive is a kill the shim refused because the turn is still
-	// live.
+	// live. KillTurn no longer produces it (an unforced kill spares detached
+	// work); KillSession still does.
 	ArmShimTurnLive = "live"
 	// ArmShimNotTheOpenTurn is a kill naming a turn that is not the open one.
 	ArmShimNotTheOpenTurn = "not_the_open_turn"
@@ -102,13 +103,23 @@ func (r *ShimRefusal) KeepaliveTurnAlreadyOpen() bool {
 }
 
 // KillRefusedLive reports that this refusal is a KillTurn the shim declined
-// because the turn is still LIVE — it spawned detached work the shim will not
-// tear down under an ordinary interrupt. It is an expected domain outcome, not
-// a fault: the prompt queue matches it structurally (via a package-local
-// interface, as it does KeepaliveTurnAlreadyOpen) so a refused interjection
-// is narrated at the level its nature earns.
+// because the turn is still LIVE. The shim no longer produces it: an unforced
+// kill interrupts the synchronous turn and leaves detached work running. So
+// one arriving is a CONTRACT BREACH, and the prompt queue matches it
+// structurally (via a package-local interface, as it does
+// KeepaliveTurnAlreadyOpen) to name the breach rather than bury it among
+// ordinary refusals.
 func (r *ShimRefusal) KillRefusedLive() bool {
 	return r.Verb == "KillTurn" && r.Arm == ArmShimTurnLive
+}
+
+// KillFoundNoTurnOpen reports that this refusal is a KillTurn that found no
+// turn open: the turn it named had already ended, or had closed leaving only
+// detached work, which an unforced kill never stops. For an interjection that
+// is an expected race, not a fault — the turn ended on its own — and the
+// prompt queue matches it structurally to narrate it at info.
+func (r *ShimRefusal) KillFoundNoTurnOpen() bool {
+	return r.Verb == "KillTurn" && r.Arm == ArmShimNoTurnOpen
 }
 
 // Error renders the verb, the arm and the shim's own words, because the
