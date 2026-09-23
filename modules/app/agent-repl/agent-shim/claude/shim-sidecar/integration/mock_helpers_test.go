@@ -245,6 +245,10 @@ func startVendorStore() (string, func(), error) {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+filepath.Join(dir, "lock"),
 	)
 	// Its output is kept, not printed: no subject owns it, and interleaving it
 	// with 133 scenarios' output would be noise. A failure to START is reported

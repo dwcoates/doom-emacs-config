@@ -765,6 +765,10 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	cmd.Env = append(cmd.Env,
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+filepath.Join(opts.StateDir, "lock"),
 	)
 	hasLogLevel := false
 	for _, value := range opts.ExtraEnv {
@@ -932,6 +936,10 @@ func startRealStoreAt(t *testing.T, socket, dbPath string) *realStore {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+filepath.Join(t.TempDir(), "lock"),
 	)
 	captured := captureChild(t, "the real store (log: "+logPath+")")
 	cmd.Stdout = captured
