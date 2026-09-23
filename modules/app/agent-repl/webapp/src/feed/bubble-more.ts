@@ -4,9 +4,9 @@
  *
  * FIX2 (owner ruling, 2026-09-15): the owner asked for "a signal that there's
  * more to reveal" on the response and prompt bubbles. When a bubble is collapsed
- * and its content actually overflows the cap (`scrollHeight > clientHeight` on
- * the `.bubble-scroll` box), the box wears `has-more`; the stylesheet draws a
- * bottom fade into the bubble's own background from that class — the fade
+ * and its body's rendered lines actually run past the cap
+ * (`hidesContentBeyondCap`), the `.bubble-scroll` box wears `has-more`; the
+ * stylesheet draws a bottom fade into the bubble's own background from that class — the fade
  * ONLY, never a chevron (owner ruling, 2026-09-23). Every bubble's scroll box
  * is served (owner ruling, 2026-09-23: one measurer for every blue and purple
  * bubble) — never a tool-call section or any other capped box — which is what
@@ -26,7 +26,9 @@
  * driven from the expand toggle, since a short-window expand leaves the box the
  * same height and so fires no resize).
  */
+import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
 import { EXPANDED_CLASS } from "../expand.js";
+import { log } from "../log.js";
 import { onDiscard } from "./ticking.js";
 
 /** The class the stylesheet turns into the bottom fade. */
@@ -82,63 +84,101 @@ export const TITLE_FOLD_OPEN_SELECTOR = [
   `.bubble-fold[data-expanded="true"] > .bubble-head .${TITLE_FOLD_CLASS}`,
 ].join(", ");
 
-/** The box as the measurement sees it: its overflow, its state, its identity. */
-export interface MoreBox {
-  classList: {
-    add(name: string): void;
-    remove(name: string): void;
-    contains(name: string): boolean;
-  };
-  matches(selector: string): boolean;
-  scrollHeight: number;
-  clientHeight: number;
-}
-
-/** True when the content is taller than the box can show at its current cap. */
+/** True when a title's text is taller than its two-line clamp can show. */
 export function overflowsCap(box: { scrollHeight: number; clientHeight: number }): boolean {
   return box.scrollHeight > box.clientHeight;
 }
 
+/** The class of the one bubble body (src/bubble/body.ts), as its box holds it. */
+const BODY_SELECTOR = `:scope > .${BUBBLE_BODY_CLASS}`;
+
+/** The operation a has-more measurement that cannot be taken is recorded under. */
+export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
+
 /**
- * One kind of box the affordance serves: the selector a box is recognized by,
- * and when that box's FOLD is open. The affordance only ever points at content
- * a collapsed fold is hiding, so each kind states whose fold it reads.
+ * True when a bubble's scroll box ACTUALLY HIDES CONTENT: its body — the
+ * rendered lines — is taller than the box shows at its collapsed cap
+ * (`--bubble-cap-lines` lines, or the 50vh ceiling, whichever is less).
+ *
+ * STRUCTURAL, NOT A PIXEL READING (owner ruling, 2026-09-23). This used to be
+ * the box's own `scrollHeight > clientHeight`, and `scrollHeight` is the box's
+ * SCROLLABLE OVERFLOW: every descendant's border box, not only its lines. The
+ * response's usage corner (styles.css `.usage-corner`) floats inside the box
+ * with a `0.4rem` vertical padding cancelled by `-0.4rem` margins — a hit area
+ * that is cancelled in LAYOUT (its margin box is one line) but not in the
+ * overflow, so its border box hangs `0.4rem` above the box's top and `0.4rem`
+ * below its first line. On a one-line answer ("?") that bottom edge sat a few
+ * px below the body's one line, `scrollHeight` beat `clientHeight`, and a
+ * bubble with nothing hidden drew "more below". The body holds exactly the
+ * rendered lines and nothing floated beside them, so the comparison is lines
+ * against the cap: a bubble at or under its cap never wears the fade, whatever
+ * decoration its box carries.
+ *
+ * A bubble box with no body is not a bubble this app drew: an invariant
+ * violation, recorded once and thrown, never read as "nothing hidden".
  */
-interface MoreKind {
-  readonly selector: string;
-  isOpen(box: MoreBox): boolean;
+export function hidesContentBeyondCap(box: HTMLElement): boolean {
+  const body = box.querySelector<HTMLElement>(BODY_SELECTOR);
+  if (body === null) {
+    log.error("a bubble's has-more cannot be measured: its scroll box holds no body", {
+      operation: HAS_MORE_UNMEASURABLE,
+      context: { box: box.className, children: box.childElementCount },
+    });
+    throw new Error("has-more unmeasurable: the bubble's scroll box holds no body");
+  }
+  return body.offsetHeight > box.clientHeight;
 }
 
 /**
- * Every kind of box that may wear `has-more`, and nothing else. A response or
- * prompt bubble's scroll box is its own fold: it is open when it is `.expanded`.
+ * One kind of box the affordance serves: the selector a box is recognized by,
+ * when that box's FOLD is open, and whether it hides content. The affordance
+ * only ever points at content a collapsed fold is hiding, so each kind states
+ * whose fold it reads and what it measures.
+ */
+interface MoreKind {
+  readonly selector: string;
+  isOpen(box: HTMLElement): boolean;
+  hidesContent(box: HTMLElement): boolean;
+}
+
+/**
+ * Every kind of box that may wear `has-more`, and nothing else. A bubble's
+ * scroll box is its own fold (open when it is `.expanded`) and measures its
+ * body's lines against its cap; a title fold measures its clamped text.
  */
 const MORE_KINDS: readonly MoreKind[] = [
   {
     selector: MORE_BUBBLE_SELECTOR,
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
+    hidesContent: hidesContentBeyondCap,
   },
   {
     selector: `.${TITLE_FOLD_CLASS}`,
     isOpen: (box) => box.matches(TITLE_FOLD_OPEN_SELECTOR),
+    hidesContent: overflowsCap,
   },
 ];
 
 /**
  * True when the box should wear `has-more`: it is one of the kinds the
- * affordance serves, its fold is COLLAPSED, and its content overflows the cap.
- * An open fold never shows it (the whole content is reachable), and a box that
- * fits its cap has nothing below the fold to point at.
+ * affordance serves, its fold is COLLAPSED, and it hides content. An open fold
+ * never shows it (the whole content is reachable), and a box that fits its cap
+ * has nothing below the fold to point at.
  */
-export function shouldShowMore(box: MoreBox): boolean {
+export function shouldShowMore(box: HTMLElement): boolean {
   const kind = MORE_KINDS.find((k) => box.matches(k.selector));
-  return kind !== undefined && !kind.isOpen(box) && overflowsCap(box);
+  return kind !== undefined && !kind.isOpen(box) && kind.hidesContent(box);
 }
 
 /** Add or drop `has-more` on BOX to match its current overflow and state. */
-export function refreshHasMore(box: MoreBox): void {
+export function refreshHasMore(box: HTMLElement): void {
   if (shouldShowMore(box)) box.classList.add(HAS_MORE_CLASS);
   else box.classList.remove(HAS_MORE_CLASS);
+}
+
+/** The content a bubble's scroll box holds: its body, never the corner beside it. */
+export function bubbleBodyOf(scroll: HTMLElement): Element | null {
+  return scroll.querySelector(BODY_SELECTOR);
 }
 
 /**
@@ -151,11 +191,15 @@ export function refreshHasMore(box: MoreBox): void {
  * with none installed) simply never auto-refreshes; the expand toggle's
  * synchronous refresh still keeps it correct across a click. REFRESH is what a
  * resize runs, `refreshHasMore` unless the caller wraps it (title-fold.ts adds
- * its orphan check).
+ * its orphan check). CONTENT names the child whose growth moves the answer —
+ * a bubble's box passes `bubbleBodyOf`, since a response's usage corner sits
+ * BEFORE its body and a first-child reading followed the corner instead, so a
+ * body growing past a cap the box had already reached was never re-measured.
  */
 export function installHasMore(
   scroll: HTMLElement,
   refresh: (box: HTMLElement) => void = refreshHasMore,
+  content: (box: HTMLElement) => Element | null = (box) => box.firstElementChild,
 ): void {
   const view = scroll.ownerDocument?.defaultView;
   if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
@@ -165,10 +209,10 @@ export function installHasMore(
   // is scrolled inside hands it a new body (keep-scroll.ts), and the observer
   // must measure the body the box now holds rather than the one it was built
   // with.
-  let body = scroll.firstElementChild;
+  let body = content(scroll);
   if (body !== null) observer.observe(body);
   const retarget = (): void => {
-    const next = scroll.firstElementChild;
+    const next = content(scroll);
     if (next === body) return;
     if (body !== null) observer.unobserve(body);
     body = next;
