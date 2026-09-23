@@ -153,7 +153,56 @@ agent panel it is, with no special-casing left to carve out."
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
       (should (equal (agent-repl--frontend-home-origin "alpha")
-                     "http://127.0.0.1:7777")))))
+                     "http://ws-ws-1.localhost:7777")))))
+
+;; Page hosts: one per workspace, so pages never share a connection pool.
+
+(ert-deftest agent-repl-test-frontend-page-host-is-the-workspace-id ()
+  "A real (hex) workspace id names its own page host, readable as is."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "3e2d9cadc6794e13" :dir "/w") "127.0.0.1:61878"
+      ;; Act / Assert
+      (should (string-prefix-p "http://ws-3e2d9cadc6794e13.localhost:61878/"
+                               (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-page-hosts-differ-per-workspace ()
+  "Two workspaces on one daemon never share a page host."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (first second)
+      (agent-repl-test-frontend--with-ref '(:id "aaaa" :dir "/a") "127.0.0.1:1"
+        (setq first (agent-repl--frontend-home-origin "alpha")))
+      (agent-repl-test-frontend--with-ref '(:id "bbbb" :dir "/b") "127.0.0.1:1"
+        (setq second (agent-repl--frontend-home-origin "alpha")))
+      ;; Act / Assert
+      (should-not (equal first second)))))
+
+(ert-deftest agent-repl-test-frontend-page-host-hashes-an-id-that-is-not-a-label ()
+  "An id that is not a DNS label is hashed into one, never used raw."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "a b/c" :dir "/w") "127.0.0.1:1"
+      ;; Act / Assert
+      (should (string-match-p "\\`http://ws-[0-9a-f]\\{16\\}\\.localhost:1/"
+                              (agent-repl-frontend-webview-url "alpha"))))))
+
+(ert-deftest agent-repl-test-frontend-page-host-refuses-a-non-loopback-daemon ()
+  "A localhost page host for a daemon that is not on loopback would address the wrong machine."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "10.0.0.5:7777"
+      ;; Act / Assert
+      (should-error (agent-repl-frontend-webview-url "alpha")))))
+
+(ert-deftest agent-repl-test-frontend-home-origin-is-nil-without-a-ref ()
+  "A workspace with no ref has no page host to be at home on."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+              ((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-home-origin "alpha")))))
 
 (ert-deftest agent-repl-test-frontend-home-origin-is-nil-without-a-connection ()
   "A workspace whose daemon cannot be named has no home to be at."
@@ -179,7 +228,16 @@ agent panel it is, with no special-casing left to carve out."
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
       (should (agent-repl--frontend-webview-at-home-p
-               "alpha" "http://127.0.0.1:7777/other?workspace=someone-else")))))
+               "alpha" "http://ws-ws-1.localhost:7777/other?workspace=someone-else")))))
+
+(ert-deftest agent-repl-test-frontend-a-page-on-the-bare-daemon-address-is-not-home ()
+  "A page still on the daemon's bare address shares the connection pool and must move."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-webview-at-home-p
+                   "alpha" "http://127.0.0.1:7777/?workspace=ws-1")))))
 
 (ert-deftest agent-repl-test-frontend-at-home-refuses-another-daemons-port ()
   "A page served by a DIFFERENT daemon is astray, however similar its host."
@@ -1142,7 +1200,7 @@ accessor would not reach the code under test."
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w/one") "127.0.0.1:7777"
       ;; Act / Assert
       (should (equal (agent-repl-frontend-webview-url "alpha")
-                     "http://127.0.0.1:7777/?workspace=ws-1&dir=%2Fw%2Fone&log_level=info")))))
+                     "http://ws-ws-1.localhost:7777/?workspace=ws-1&dir=%2Fw%2Fone&log_level=info")))))
 
 (ert-deftest agent-repl-test-frontend-url-hexifies-the-id ()
   "An opaque id is echoed verbatim, URL-encoded — never parsed or rebuilt."
@@ -1233,7 +1291,7 @@ accessor would not reach the code under test."
                 (agent-repl-frontend-reload-webview "alpha")
                 ;; Assert
                 (should (equal navigated
-                               "http://127.0.0.1:9/?workspace=ws-1&dir=%2Fw&log_level=info")))))
+                               "http://ws-ws-1.localhost:9/?workspace=ws-1&dir=%2Fw&log_level=info")))))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-frontend-reload-does-not-remount-the-buffer ()
