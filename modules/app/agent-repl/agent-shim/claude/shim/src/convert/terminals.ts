@@ -51,6 +51,14 @@ export interface VendorApiError {
   readonly errorClass?: string;
   /** The wait the vendor stated, in millis, when it stated one. */
   readonly retryAfterMs?: number;
+  /**
+   * The vendor's own sentence for the failure, from the error notice the CLI
+   * wrote as an assistant message ("Claude Code 2.1.220 does not support this
+   * model; version 2.1.251 or newer is required"). The `result` usually carries
+   * no `errors` for an API failure, and without this the failure card said
+   * "the model or resource does not exist" and nothing about WHICH or WHY.
+   */
+  readonly sentence?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +443,7 @@ export function convertResult(
     // the failing token belonged to, and the model, all on one greppable line.
     // NO CREDENTIAL VALUE IS LOGGED: the config-dir is a path, and the sentence
     // is redacted of any token shape before it is bounded.
-    const vendorMessage = errors[errors.length - 1] ?? "";
+    const vendorMessage = errors[errors.length - 1] ?? vendorApiError.sentence ?? "";
     LOGGER.info(
       {
         operation: classifyVendorApiFailure(status, vendorApiError.errorClass, vendorMessage),
@@ -456,7 +464,7 @@ export function convertResult(
         failure: {
           case: "apiRequestFailed",
           value: apiRequestFailed(
-            errors[errors.length - 1] ?? "the vendor API failed the request",
+            vendorMessage === "" ? "the vendor API failed the request" : vendorMessage,
             status,
             vendorApiError,
           ),
