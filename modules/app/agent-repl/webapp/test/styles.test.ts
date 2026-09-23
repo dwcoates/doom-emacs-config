@@ -1586,11 +1586,27 @@ describe("the feed viewport as the async bubble cap's size container", () => {
 });
 
 /**
- * THE WARNING CHIP IS THE ONE PLACE AN ERROR SHOWS (owner ruling, 2026-09-23).
- * The client-local failure overlay it replaced — cards drawn over the page —
- * left no rule behind.
+ * THE WARNING CHIP IS RED, AND IS THE ONE PLACE AN ERROR SHOWS (owner ruling,
+ * 2026-09-23). The chip took the alarm `--err`, and the client-local failure
+ * overlay it replaced — cards drawn over the page — left no rule behind.
  */
 describe("the warning chip as the one error surface", () => {
+  it("paints the chip in the alarm red: the LAST color the cascade reaches it with is --err", () => {
+    // Arrange — every non-hover rule naming the chip that sets its color, in
+    // file order; with equal specificity the last one is what paints it.
+    const coloring = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.includes(".topbar-warning-chip") &&
+        /(?:^|[\s;{])color\s*:/.test(rule.declarations),
+    );
+
+    // Act
+    const last = coloring.at(-1)?.declarations ?? "";
+
+    // Assert
+    expect(last).toMatch(/(?:^|[\s;{])color\s*:\s*var\(--err\)\s*(?:;|$)/);
+  });
+
   it("carries no rule for a failure overlay", () => {
     // Arrange / Act
     const overlay = rulesOf(stylesheet).filter((rule) =>
