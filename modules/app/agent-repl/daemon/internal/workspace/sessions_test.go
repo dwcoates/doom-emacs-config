@@ -350,7 +350,7 @@ func coldResponse() *shimv1.StartSessionResponse {
 // fleetFixture is one arranged Fleet plus the fakes behind it.
 type fleetFixture struct {
 	// bundle is the installed shim bundle every spawn holds.
-	bundle *fakeBundle
+	bundle     *fakeBundle
 	fleet      *Fleet
 	db         *fakeDB
 	accounts   *fakeAccounts
