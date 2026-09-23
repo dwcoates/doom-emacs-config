@@ -72,6 +72,7 @@ import { registerWorkspaceMoved } from "../rpc/moved.js";
 import { msOf, requireCase, requireMessage, unreachableArm, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
+import { readWebappBuild } from "../webapp-build.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -138,6 +139,12 @@ export function bindSessionIdentity(identity: WebWorkspaceSessionIdentity): void
 export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   log.debug("starting the page lifecycle", { operation: "lifecycle.start" });
 
+  // READ ONCE PER PAGE LOAD. The build cannot change under a running page —
+  // it is the entry bundle THIS page is executing — so it is read exactly
+  // once here and reused on every `WatchWebWorkspace` open the stream retries
+  // into, rather than re-parsed from the DOM on every reconnect.
+  const webappBuild = readWebappBuild();
+
   const banner = mountBanner(deps.drainBannerHost, ctx);
 
   const onMoved = (address: string): void => {
@@ -162,7 +169,8 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   const webLink = watchStream(ctx, {
     name: "WatchWebWorkspace",
     schema: WatchWebWorkspaceResponseSchema,
-    open: (_client, signal) => ctx.streams.watch("webWorkspace", { workspace: ctx.workspace }, signal),
+    open: (_client, signal) =>
+      ctx.streams.watch("webWorkspace", { workspace: ctx.workspace, webappBuild }, signal),
     onPush: (response) => {
       const push = requireCase(response.push, "WatchWebWorkspaceResponse.push");
       switch (push.case) {
