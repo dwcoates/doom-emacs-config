@@ -2,6 +2,7 @@ package feed
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -179,6 +180,37 @@ func (r *resolver) failureImageForm(s *wsState, failure *conversationv1.AgentToo
 		return imageForm(&frontendv1.FeedImageBlock{Src: src, Alt: alt})
 	}
 	return nil
+}
+
+// errSettleNotRestated is a settled frame that restated nothing of its call,
+// arriving with no start held to draw it from. It draws NO ROW: a card with an
+// empty input line (or a send with an empty body) is the defect the settle's
+// restatement exists to prevent. The sink records it once, at ERROR.
+var errSettleNotRestated = errors.New("feed: a settled frame restated nothing of its call, and no start was held to draw it from")
+
+// restatedOrHeld answers what a SETTLED frame draws its input from.
+//
+// THE SETTLE STANDS ALONE (conversation/v1/agent_activity.proto): a call's
+// start and its settle upsert ONE unit, and the store keeps one row per unit,
+// so a replay (a workspace open, a transcript select) serves the settle with no
+// start beside it. Every settled arm therefore restates what its start carried,
+// and that restatement is what is drawn.
+//
+// A SETTLE THAT RESTATES NOTHING IS AN INVARIANT VIOLATION by its producer. It
+// is recorded at ERROR either way: when this process held the start it is drawn
+// from what the start said, and when it did not the frame draws no row at all,
+// answered as errSettleNotRestated.
+func (r *resolver) restatedOrHeld(s *wsState, u *unitState, unitID, kind, restated, held string) (string, error) {
+	if restated != "" {
+		return restated, nil
+	}
+	if !u.startHeld {
+		return "", fmt.Errorf("%w (unit %s, kind %s)", errSettleNotRestated, unitID, kind)
+	}
+	r.logger(s.id).Error("daemon.feed.settle_not_restated",
+		"a settled frame restated nothing of its call; it is drawn from the start this process held",
+		dlog.Context{"unit": unitID, "kind": kind})
+	return held, nil
 }
 
 // failureSettledMs is the instant a failed call settled, zero when none was
