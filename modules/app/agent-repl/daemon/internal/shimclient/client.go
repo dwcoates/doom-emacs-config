@@ -1433,13 +1433,28 @@ func unary[Req any, Resp any](
 // still returned; only the record's level changes.
 type quietOpenKey struct{}
 
-// refusedOpen records a refused stream open at the level the context calls for.
-func (c *client) refusedOpen(ctx context.Context, operation, message string, fields dlog.Context) {
+// refusedOpen records a refused stream open at the level the refusal calls
+// for.
+//
+// A SEMANTIC REFUSAL IS AN ANSWER, NOT A FAULT. not_found and
+// failed_precondition are a serving shim saying it holds no such handle (yet):
+// the transport is fine, and only the CALLER knows whether the handle was
+// expected. The session watcher rules on exactly that (openRefusedLocked: INFO
+// for an expected handle it will re-open, WARN plus a lifecycle fault for one
+// nothing announced), so recording the same refusal at ERROR here reported an
+// ordinary branch as a failure. It is recorded at INFO, and the error is still
+// returned whole. Every other code is a failed open and stays at ERROR.
+func (c *client) refusedOpen(ctx context.Context, operation string, err error, fields dlog.Context) {
 	if quiet, _ := ctx.Value(quietOpenKey{}).(bool); quiet {
-		c.log.Debug(operation, message, fields)
+		c.log.Debug(operation, "shim stream refused", fields)
 		return
 	}
-	c.log.Error(operation, message, fields)
+	switch connect.CodeOf(err) {
+	case connect.CodeNotFound, connect.CodeFailedPrecondition:
+		c.log.Info(operation, "the shim refused the stream open: it holds no such handle; the caller rules on whether that was expected", fields)
+		return
+	}
+	c.log.Error(operation, "shim stream refused", fields)
 }
 
 // openStream is every watch verb's body. A Connect error on the OPEN is
@@ -1467,7 +1482,7 @@ func openStream[Req any, W any, T any](
 	stream, err := open(streamCtx, connect.NewRequest(req))
 	if err != nil {
 		cancel()
-		c.refusedOpen(ctx, operation, "shim stream refused", dlog.Context{
+		c.refusedOpen(ctx, operation, err, dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
 		})
 		return nil, &StreamOpenError{Procedure: verb, Err: err}
@@ -1482,7 +1497,7 @@ func openStream[Req any, W any, T any](
 		if err == nil {
 			err = io.EOF
 		}
-		c.refusedOpen(ctx, operation, "shim stream refused", dlog.Context{
+		c.refusedOpen(ctx, operation, err, dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
 		})
 		return nil, &StreamOpenError{Procedure: verb, Err: err}
