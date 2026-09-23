@@ -1572,9 +1572,11 @@ func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1conn
 	return failure
 }
 
-func liveWork(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient) *storev1.GetLiveWorkSuccess {
+// liveWork reads ONE SESSION's open obligations: the store is shared by every
+// session, so every read names the main agent whose lineage it asks about.
+func liveWork(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, session string) *storev1.GetLiveWorkSuccess {
 	t.Helper()
-	resp, err := cli.GetLiveWork(ctx, connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+	resp, err := cli.GetLiveWork(ctx, connect.NewRequest(&storev1.GetLiveWorkRequest{Session: agentID(session)}))
 	if err != nil {
 		t.Fatalf("GetLiveWork transport error: %v", err)
 	}

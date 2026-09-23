@@ -534,6 +534,24 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   RECORD — a start was written and no terminal ever was — so it is timeless and
   cannot go stale. Main agents are never listed; `live_workflows` is empty this
   wave.
+- **`GetLiveWork` IS SCOPED TO ONE SESSION, AND NEVER ANSWERED UNSCOPED.** This
+  store serves every workspace and session on the host, and the shim writes a
+  closing terminal for every item its own vendor does not hold — so on
+  2026-09-23 an unscoped answer let one workspace's start reap five running
+  subagents of another. The request's REQUIRED `session` is the caller's main
+  agent; a request without it is refused (`session_empty`, `invalid_request`
+  naming `session`) before any statement runs. The answer is that session's
+  LINEAGE: `sessionLineageCTE` (`internal/db/live.go`) is the ONE place that
+  decides ownership — the main agent plus every agent reached transitively
+  through `spawned_by_agent`, or through `spawned_by_workflow` via the
+  workflow's `workflow.spawner_agent` or its `detached_work.owner_agent` — and
+  detached work counts when its `owner_agent` is in that set.
+- **AN OPEN OBLIGATION NO LINEAGE REACHES IS NEVER GUESSED INTO ONE.** A live
+  `detached_work` row with a NULL `owner_agent`, or a live agent whose spawn
+  column names a spawner the record does not hold, is excluded from every
+  answer and written at ERROR (`store.db.live-work.unscoped`) naming each row,
+  on every read that finds it. A live agent with NEITHER spawn column is
+  indistinguishable from another session's main agent and is not reportable.
 
 ## Refusal sites
 
@@ -548,7 +566,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `token_empty`, `unknown_watch_token`, `file_id_empty`, `run_empty`,
 `unknown_bash_run`, `store_refused_request`, `upsert_changes_identity`,
 `page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
-`database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
+`session_empty`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
 `listen_occupied`.
 
 - **THE SITE IS NOT THE ARM.** A site says which of the store's many checks said
@@ -565,7 +583,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
   the store — `internal/db` for anything inside an entry, `internal/server` for
   the request around it — and every path is walkable from the message the
   producer sent, so a caller never has to guess the top of it. The forms are:
-  request-level (`producer`, `batch`, `agent`, `book`, `page_size`,
+  request-level (`producer`, `batch`, `agent`, `book`, `session`, `page_size`,
   `known_through`, `after`, `watch`, `run`, `file_id`, `work`); batch-level
   (`cursor_advance.file_id`); and entry-level, always rooted at
   `entries[i]` — `entries[i].write_id`, `entries[i].upsert_key`,
@@ -581,7 +599,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
   names no position); `OpenAgentSession`
   invalid_request|stale_pointer|storage_failure|unknown_agent; `ReadAgentPage`
   all three; `GetLiveWork`
-  storage_failure only, because it takes no request fields; `GetSidecarCursors`
+  invalid_request|storage_failure (the request must name its session); `GetSidecarCursors`
   invalid_request|storage_failure; `GetWorkflow` not_implemented, the one honest
   arm while nothing routes into the workflow table.
 

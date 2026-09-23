@@ -59,6 +59,7 @@ const (
 	SitePageBookMismatch      = db.SitePageBookMismatch
 	SiteResidueRawUnset       = db.SiteResidueRawUnset
 	SiteUnknownAgent          = db.SiteUnknownAgent
+	SiteSessionEmpty          = db.SiteSessionEmpty
 )
 
 // refusalClass is WHICH FAILURE ARM a refusal becomes.
@@ -390,6 +391,17 @@ func validateWatchAgentSessionRequest(req *storev1.WatchAgentSessionRequest) *re
 func validateWatchBashRunRequest(req *storev1.WatchBashRunRequest) *refusal {
 	if req.GetRun() == nil || req.GetRun().GetValue() == "" {
 		return refuse(SiteRunEmpty, "run", "run: an AgentActivityId with no value addresses no run")
+	}
+	return nil
+}
+
+// validateGetLiveWorkRequest is the use site for GetLiveWork: `session` is
+// REQUIRED. The store is shared by every session on the host, and the shim
+// closes every obligation its own vendor does not hold, so an unscoped answer
+// would make one session's start close another session's running work.
+func validateGetLiveWorkRequest(req *storev1.GetLiveWorkRequest) *refusal {
+	if req.GetSession() == nil || req.GetSession().GetValue() == "" {
+		return refuse(SiteSessionEmpty, "session", "session: GetLiveWork names no session, and the store never answers it unscoped")
 	}
 	return nil
 }

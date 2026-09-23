@@ -2,28 +2,73 @@ package db
 
 import (
 	"context"
+	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
 
-// LiveWork answers the open obligations: everything the record says started and
-// holds no terminal for.
+// sessionLineageCTE is THE ONE PLACE the store decides which agents belong to
+// a session. Every scoped read binds the session's main agent id as its single
+// argument and selects from `lineage`, so no second query can disagree with it
+// about ownership.
+//
+// THE STORE IS SHARED BY EVERY SESSION ON THE HOST, so "open in the record" is
+// not "open in this session". The lineage is the main agent itself plus every
+// agent reached from it transitively through the declared spawn columns:
+//
+//   - `agent.spawned_by_agent` — a subagent (at any depth) names its spawner;
+//   - `agent.spawned_by_workflow` — an agent a workflow spawned names that
+//     workflow, which reaches the lineage through the workflow's own declared
+//     owner: the `workflow` row's `spawner_agent`, or the workflow's
+//     `detached_work` join row's `owner_agent`.
+//
+// NOTHING IS INFERRED. A row whose spawn or owner column is NULL is reached by
+// no lineage at all; it is not guessed into one (see liveWorkGaps).
+//
+// UNION, not UNION ALL, so a cycle in corrupt data terminates rather than
+// recursing forever.
+const sessionLineageCTE = `WITH RECURSIVE lineage(agent_id) AS (
+    SELECT ?
+    UNION
+    SELECT a.agent_id FROM agent a JOIN lineage l ON a.spawned_by_agent = l.agent_id
+    UNION
+    SELECT a.agent_id FROM agent a
+      JOIN workflow f ON a.spawned_by_workflow = f.run_agent_id
+      JOIN lineage l ON f.spawner_agent = l.agent_id
+    UNION
+    SELECT a.agent_id FROM agent a
+      JOIN detached_work w ON a.spawned_by_workflow = w.work_id
+      JOIN lineage l ON w.owner_agent = l.agent_id
+  )`
+
+// LiveWork answers ONE SESSION'S open obligations: everything the record says
+// started and holds no terminal for, within the lineage of `session` — the
+// caller's main agent.
 //
 // IT IS A CLAIM ABOUT THE RECORD, NOT ABOUT THE WORLD — "a start was written and
 // no terminal ever was" — which is timeless and cannot go stale. The shim
 // resolves each item at session start, re-adopting what survived and writing the
 // closing terminal for what did not, so the set shrinks to empty either way.
-func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) {
-	base := logging.Fields{Operation: "store.db.live-work", Table: "agent"}
+//
+// IT IS NEVER ANSWERED UNSCOPED. The shim writes a closing terminal for every
+// item its own vendor does not hold, so an answer spanning sessions made one
+// session's start close another session's running work (2026-09-23: opening a
+// workspace reaped five running subagents of another). An empty session is
+// refused before any statement runs.
+func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWorkSuccess, error) {
+	base := logging.Fields{Operation: "store.db.live-work", Table: "agent", AgentID: session}
+	if session == "" {
+		return nil, d.refuse(base, invalidSitef(SiteSessionEmpty, "session", "session: an unscoped live-work read would hand one session every other session's obligations to close"))
+	}
 	started := d.mono()
 	success := &storev1.GetLiveWorkSuccess{}
 
-	// MAIN AGENTS ARE NEVER LISTED. A main agent's liveness is the SESSION's
+	// THE MAIN AGENT IS NEVER LISTED. A main agent's liveness is the SESSION's
 	// liveness, which the shim knows without asking; listing it would hand the
-	// shim an obligation to resolve against itself. The filter is the spawn
-	// columns: a main agent is the one row with neither.
+	// shim an obligation to resolve against itself. It is the lineage's root and
+	// the one member excluded here.
 	//
 	// THE ORDER IS THE STORE'S OWN. `started_at_ms` is written from the store's
 	// clock and from nowhere else (internal/db/lifecycle.go), so this compares
@@ -31,11 +76,11 @@ func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) 
 	// transaction. It once also held a producer's instant, which made the
 	// ordering a comparison across the store's, the shim's and the vendor's
 	// clocks; the agent id breaks a tie so the listing is fixed either way.
-	const agentsSQL = `SELECT agent_id FROM agent
-	  WHERE ended_at_ms IS NULL
-	    AND (spawned_by_agent IS NOT NULL OR spawned_by_workflow IS NOT NULL)
-	  ORDER BY started_at_ms ASC, agent_id ASC`
-	agents, err := d.scanStrings(ctx, agentsSQL)
+	const agentsSQL = sessionLineageCTE + `
+	  SELECT a.agent_id FROM agent a JOIN lineage l ON a.agent_id = l.agent_id
+	  WHERE a.ended_at_ms IS NULL AND a.agent_id != ?
+	  ORDER BY a.started_at_ms ASC, a.agent_id ASC`
+	agents, err := d.scanStrings(ctx, agentsSQL, session, session)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "scanning live agents"))
 	}
@@ -46,10 +91,15 @@ func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) 
 	// live_workflows stays EMPTY this wave: nothing is routed into the workflow
 	// table, so a non-empty answer could only be invented.
 
-	const detachedSQL = `SELECT work_id FROM detached_work
-	  WHERE ended_at_ms IS NULL AND kind != ?
-	  ORDER BY announced_at_ms ASC, work_id ASC`
-	detached, err := d.scanStrings(ctx, detachedSQL, detachedKindWorkflow)
+	if err := d.liveWorkGaps(ctx, base); err != nil {
+		return nil, err
+	}
+
+	const detachedSQL = sessionLineageCTE + `
+	  SELECT w.work_id FROM detached_work w JOIN lineage l ON w.owner_agent = l.agent_id
+	  WHERE w.ended_at_ms IS NULL AND w.kind != ?
+	  ORDER BY w.announced_at_ms ASC, w.work_id ASC`
+	detached, err := d.scanStrings(ctx, detachedSQL, session, detachedKindWorkflow)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "scanning live detached work"))
 	}
@@ -62,6 +112,55 @@ func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) 
 	d.log.LogVerbose(base, "live work read agents=%d workflows=%d detached=%d",
 		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetached))
 	return success, nil
+}
+
+// liveWorkGaps records every OPEN obligation that NO session's lineage can
+// reach — the invariant gap a scoped read cannot answer for.
+//
+// Such a row is excluded from every session's answer, because putting it in one
+// would be a guess about whose it is, and the guess is exactly the defect the
+// scoping exists to remove. But an open obligation nobody is asked to resolve
+// never gets its terminal, so the gap is not silent: it is written at ERROR
+// through the store's canonical logger, naming every row.
+//
+// Two shapes are unreachable by construction:
+//
+//   - a live `detached_work` row (not a workflow, which this wave serves
+//     nowhere) whose `owner_agent` is NULL;
+//   - a live agent whose spawn column names a spawner the record does not
+//     hold — a `spawned_by_agent` with no agent row, or a `spawned_by_workflow`
+//     naming neither a workflow row nor a detached-work row.
+//
+// A live agent with NEITHER spawn column is indistinguishable from another
+// session's main agent, which is legitimately rootless, so it is not a gap the
+// store can name.
+func (d *DB) liveWorkGaps(ctx context.Context, base logging.Fields) error {
+	const gapsSQL = `
+	  SELECT 'detached_work:' || work_id FROM detached_work
+	  WHERE ended_at_ms IS NULL AND kind != ? AND owner_agent IS NULL
+	  UNION ALL
+	  SELECT 'agent:' || a.agent_id FROM agent a
+	  WHERE a.ended_at_ms IS NULL AND (
+	    (a.spawned_by_agent IS NOT NULL
+	      AND NOT EXISTS (SELECT 1 FROM agent p WHERE p.agent_id = a.spawned_by_agent))
+	    OR (a.spawned_by_workflow IS NOT NULL
+	      AND NOT EXISTS (SELECT 1 FROM workflow f WHERE f.run_agent_id = a.spawned_by_workflow)
+	      AND NOT EXISTS (SELECT 1 FROM detached_work w WHERE w.work_id = a.spawned_by_workflow)))
+	  ORDER BY 1`
+	gaps, err := d.scanStrings(ctx, gapsSQL, detachedKindWorkflow)
+	if err != nil {
+		return d.refuse(base, storagef(err, "scanning live work no session's lineage reaches"))
+	}
+	if len(gaps) == 0 {
+		d.log.LogVerbose(base, "every open obligation in the record is reachable from some session's lineage")
+		return nil
+	}
+	fields := base
+	fields.Operation = "store.db.live-work.unscoped"
+	fields.Level = "error"
+	d.log.Log(fields, "invariant gap: %d open obligation(s) name no owner any session's lineage reaches, so no session is asked to resolve them: %s",
+		len(gaps), strings.Join(gaps, ", "))
+	return nil
 }
 
 // Cursors answers the sidecar's startup recovery: every persisted cursor, or
