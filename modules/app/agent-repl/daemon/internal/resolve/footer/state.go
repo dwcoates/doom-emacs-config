@@ -500,6 +500,13 @@ type wsState struct {
 	// its terminal is final, so a start after a terminal is a second telling
 	// of a finished run rather than a new one.
 	retiredWork map[string]struct{}
+	// adoptedWork are the detached items the watcher took up by ADOPTION and
+	// the set has not listed yet, so the set change that lists them does not
+	// read as a launch. See markAdopted.
+	adoptedWork map[string]struct{}
+	// focus is the expanded panel the last launch of detached work named, and
+	// the generation it was minted under. See mintFocus.
+	focus focusState
 	// seq mints the panel orders so a row's place is its arrival order.
 	seq int
 }
@@ -526,6 +533,7 @@ func newWSState() *wsState {
 		crons:       map[string]*cronRow{},
 		bashUnits:   map[string]*shellRow{},
 		retiredWork: map[string]struct{}{},
+		adoptedWork: map[string]struct{}{},
 		tok:         newTokenState(),
 	}
 }

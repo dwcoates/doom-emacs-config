@@ -416,6 +416,34 @@ func TestTheFooterHearsTheEmptiedLiveWorkSet(t *testing.T) {
 	}
 }
 
+// TestTheFooterHearsAnAdoptedItemWithNoAnnouncer pins the premise the footer's
+// launch focus rests on: an item the session says is ALREADY live reaches the
+// footer with no announcing agent, and before the set that lists it, so the
+// footer can tell an adoption from a launch.
+func TestTheFooterHearsAnAdoptedItemWithNoAnnouncer(t *testing.T) {
+	// Arrange / Act: the watcher starts on a session with one live shell.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	h.client.nextBashOpen(t)
+
+	// Assert.
+	got := h.rec.drain()
+	announced, ok := find(got, "footer.OnDetachedWork")
+	if !ok {
+		t.Fatalf("the footer never heard the adopted item; saw %v", names(got))
+	}
+	if announced.agent != "" {
+		t.Fatalf("the adopted item reached the footer announced by %q, want no announcer", announced.agent)
+	}
+	for _, e := range got {
+		if e.name() == "footer.OnDetachedWork" {
+			break
+		}
+		if e.name() == "footer.OnLiveWorkChanged" && e.live != nil && len(e.live.Shells) > 0 {
+			t.Fatalf("the footer was handed a set listing the adopted item before its announcement; saw %v", names(got))
+		}
+	}
+}
+
 // TestBothViewSinksHearOneLiveWorkSet is the fan-out itself: the roster and the
 // footer are handed the SAME value on the same edge, which is what makes a
 // disagreement between the two surfaces unrepresentable.
