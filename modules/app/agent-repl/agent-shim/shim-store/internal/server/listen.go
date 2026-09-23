@@ -76,10 +76,23 @@ func Listen(path string, log *logging.Logger) (net.Listener, error) {
 		return nil, fmt.Errorf("shim-store server: listen on unix socket %q: %w", absolute, err)
 	}
 	if err := os.Chmod(absolute, 0o600); err != nil {
-		listener.Close()
 		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "restricting the socket to its owner failed: %v", err)
-		return nil, fmt.Errorf("shim-store server: restrict socket %q to its owner: %w", absolute, err)
+		return nil, abandonListener(listener, absolute, fmt.Errorf("shim-store server: restrict socket %q to its owner: %w", absolute, err), log)
 	}
 	log.Log(logging.Fields{Operation: "store.listen", Socket: absolute}, "listening on the store socket")
 	return listener, nil
+}
+
+// abandonListener closes a listener whose setup failed after it was bound, and
+// returns the error Listen reports. The setup failure is the cause; a failure
+// to close on top of it is a second, separate fault — it can leave the socket
+// bound or its file on disk — so it gets its own error record and is joined
+// onto the cause rather than dropped.
+func abandonListener(listener net.Listener, absolute string, cause error, log *logging.Logger) error {
+	closeErr := listener.Close()
+	if closeErr == nil {
+		return cause
+	}
+	log.Log(logging.Fields{Operation: "store.listen.abandon", Level: "error", Socket: absolute}, "closing the listener after its setup failed also failed: %v", closeErr)
+	return errors.Join(cause, fmt.Errorf("shim-store server: close abandoned listener on %q: %w", absolute, closeErr))
 }
