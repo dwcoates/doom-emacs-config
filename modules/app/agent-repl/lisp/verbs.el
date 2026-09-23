@@ -1150,7 +1150,7 @@ One log record per component outcome, then one echo-area line naming every
 component's decision."
   (let ((components (plist-get value :components)))
     (dolist (outcome components)
-      (agent-repl--info nil "elisp.verbs.deploy-component component=%s build=%s decision=%S detail=%S"
+      (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-component component=%s build=%s decision=%S detail=%S"
                         (agent-repl-verbs--deploy-component-name (plist-get outcome :component))
                         (plist-get outcome :build)
                         (plist-get (plist-get outcome :outcome) :arm)
@@ -1198,7 +1198,7 @@ component's decision."
 Every arm is an ERROR record carrying its fields and an echo-area line
 carrying its detail."
   (let ((cause (plist-get value :cause)))
-    (agent-repl--error nil "elisp.verbs.deploy-refused arm=%S fields=%S"
+    (agent-repl--error '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-refused arm=%S fields=%S"
                        (plist-get cause :arm) (plist-get cause :value))
     (message "agent-repl: deploy refused: %s"
              (agent-repl-verbs--deploy-refusal-sentence cause))
@@ -1217,9 +1217,9 @@ component; every refusal is reported loudly with its detail."
     (when (and force
                (not (yes-or-no-p
                      "A forced deploy ends every running turn in an out-of-date workspace.  Deploy anyway? ")))
-      (agent-repl--info nil "elisp.verbs.deploy-force-declined")
+      (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-force-declined")
       (user-error "agent-repl: forced deploy cancelled"))
-    (agent-repl--info nil "elisp.verbs.deploy-requested force=%s" force)
+    (agent-repl--info '(:agent-repl-central "a deploy is daemon administration spanning every workspace") "elisp.verbs.deploy-requested force=%s" force)
     (agent-repl-verbs--send
      #'agent-repl-rpc-deploy (agent-repl-verbs--conn)
      (list :force force)
