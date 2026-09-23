@@ -435,6 +435,19 @@ export interface FakeQueryOpts {
   readonly gitBranch?: string;
   /** Ends the fake stream when the session stands down. */
   readonly abortSignal?: AbortSignal;
+  /**
+   * `Options.perTaskStopAffordance`, as the consumer declared it.
+   *
+   * THE CLI'S INTERRUPT SEMANTICS HANG ON IT, so the mock models both. Declared,
+   * `interrupt()` ends the turn and spares every running background agent and
+   * workflow; the consumer stops those one at a time through `stopTask`.
+   * ABSENT (or false), the CLI fails closed and `interrupt()` stops every
+   * background agent and workflow too — each with its own
+   * `task_notification{status:"stopped"}` — which is exactly how an ordinary
+   * interjection once took every live subagent down with it. Shells and
+   * monitors are not named by the declaration and are untouched either way.
+   */
+  readonly perTaskStopAffordance?: boolean;
 }
 
 /**
@@ -1442,6 +1455,53 @@ export function createFakeQuery(
     out.fail(err);
   });
 
+  /**
+   * End one live task the way the CLI does, whoever asked: its own
+   * `task_notification{status:"stopped"}`, the re-announced live set, and the
+   * `agents_killed` record when the set empties.
+   */
+  const stopLiveTask = (live: LiveTask, summary: string): void => {
+    liveTasks.delete(live.taskId);
+    // A stopped SHELL's spool gets its terminator: the tailer's only way to
+    // learn the run ended is the EXIT line, and 143 is SIGTERM's exit code.
+    //
+    // AN AGENT'S SPOOL NEVER DOES. An agent spool is the agent's own JSONL
+    // and carries no terminator at all, so an `EXIT=` line written into one
+    // is a line no real tree contains — and a reader that learned to parse it
+    // would be built against a shape the vendor never produces. The kind is
+    // read off the task id, which is the vendor's own distinction (`b<hex>`
+    // shell runs, `a<hex>` agents).
+    if (isShellTaskId(live.taskId) && files.unfinishedSpools().includes(live.taskId)) {
+      files.spool(live.taskId).finish(143);
+    } else if (files.unfinishedSpools().includes(live.taskId)) {
+      LOGGER.info(
+        { claude_session_id: sessionUuid, task_id: live.taskId },
+        "fake vendor stopped an AGENT task; its spool is left unterminated, as an agent spool always is",
+      );
+    }
+    systemMessage("task_notification", {
+      task_id: live.taskId,
+      tool_use_id: live.toolUseId,
+      status: "stopped",
+      output_file: files.spoolPathFor(live.taskId),
+      summary,
+    });
+    announceLiveTasks();
+    // THE FAN-WIDE CANCEL'S OWN RECORD. `agents_killed` states that the live
+    // set EMPTIED, which no individual stop can know, so it is written here
+    // rather than by a scenario. The corpus carries it as a bare system line
+    // with no payload beyond the envelope.
+    if (liveTasks.size === 0) {
+      files.transcript.append({
+        type: "system",
+        subtype: "agents_killed",
+        isMeta: false,
+        uuid: opts.newUuid(),
+        timestamp: nowIso(),
+      });
+    }
+  };
+
   const iterator = out[Symbol.asyncIterator]();
   return {
     [Symbol.asyncIterator]: () => iterator,
@@ -1458,7 +1518,23 @@ export function createFakeQuery(
       const release = releaseInterrupt;
       releaseInterrupt = null;
       release?.();
-      LOGGER.info({ claude_session_id: sessionUuid, turn }, "fake vendor interrupt accepted");
+      if (opts.perTaskStopAffordance === true) {
+        LOGGER.info(
+          { claude_session_id: sessionUuid, turn, spared: [...liveTasks.keys()] },
+          "fake vendor interrupt accepted; the per-task stop is declared, so every background task is spared",
+        );
+        return { still_queued: [] };
+      }
+      // FAIL CLOSED, as the CLI does without the declaration: the interrupt
+      // takes every background agent and workflow down with the turn.
+      const reaped = [...liveTasks.values()].filter(
+        (task) => task.kind === "local_agent" || task.kind === "local_workflow",
+      );
+      for (const task of reaped) stopLiveTask(task, "Task stopped by an interrupt");
+      LOGGER.info(
+        { claude_session_id: sessionUuid, turn, stopped: reaped.map((task) => task.taskId) },
+        "fake vendor interrupt accepted; no per-task stop was declared, so every background agent and workflow was stopped with it",
+      );
       return { still_queued: [] };
     },
 
@@ -1530,45 +1606,7 @@ export function createFakeQuery(
         );
         return;
       }
-      liveTasks.delete(taskId);
-      // A stopped SHELL's spool gets its terminator: the tailer's only way to
-      // learn the run ended is the EXIT line, and 143 is SIGTERM's exit code.
-      //
-      // AN AGENT'S SPOOL NEVER DOES. An agent spool is the agent's own JSONL
-      // and carries no terminator at all, so an `EXIT=` line written into one
-      // is a line no real tree contains — and a reader that learned to parse it
-      // would be built against a shape the vendor never produces. The kind is
-      // read off the task id, which is the vendor's own distinction (`b<hex>`
-      // shell runs, `a<hex>` agents).
-      if (isShellTaskId(taskId) && files.unfinishedSpools().includes(taskId)) {
-        files.spool(taskId).finish(143);
-      } else if (files.unfinishedSpools().includes(taskId)) {
-        LOGGER.info(
-          { claude_session_id: sessionUuid, task_id: taskId },
-          "fake vendor stopped an AGENT task; its spool is left unterminated, as an agent spool always is",
-        );
-      }
-      systemMessage("task_notification", {
-        task_id: taskId,
-        tool_use_id: live.toolUseId,
-        status: "stopped",
-        output_file: files.spoolPathFor(taskId),
-        summary: "Task stopped by request",
-      });
-      announceLiveTasks();
-      // THE FAN-WIDE CANCEL'S OWN RECORD. `agents_killed` states that the live
-      // set EMPTIED, which no individual stop can know, so it is written here
-      // rather than by a scenario. The corpus carries it as a bare system line
-      // with no payload beyond the envelope.
-      if (liveTasks.size === 0) {
-        files.transcript.append({
-          type: "system",
-          subtype: "agents_killed",
-          isMeta: false,
-          uuid: opts.newUuid(),
-          timestamp: nowIso(),
-        });
-      }
+      stopLiveTask(live, "Task stopped by request");
       LOGGER.info(
         { claude_session_id: sessionUuid, task_id: taskId, tool_use_id: live.toolUseId },
         "fake vendor stop_task stopped a live task",

@@ -307,6 +307,66 @@ describe("interrupt", () => {
   });
 });
 
+/**
+ * The CLI's interrupt, both ways the consumer can declare it. `!cancel-all`
+ * leaves two background agents and a background shell live after its turn.
+ */
+describe("interrupt and the per-task stop declaration", () => {
+  /** Wait for `!cancel-all`'s turn to conclude, then interrupt. */
+  const interruptAfterTheTurn = async (
+    query: { interrupt: () => Promise<unknown> },
+    _prompts: unknown,
+    messages: Record<string, unknown>[],
+  ): Promise<void> => {
+    for (let i = 0; i < 64 && !messages.some((m) => m.type === "result"); i++) {
+      await new Promise((r) => setImmediate(r));
+    }
+    if (!messages.some((m) => m.type === "result")) throw new Error("the turn never concluded");
+    await query.interrupt();
+  };
+
+  /** Every task id the drive started, by kind. */
+  const started = (driven: Awaited<ReturnType<typeof driveScenario>>, kind: string): string[] =>
+    driven.messages
+      .filter((m) => (m as Record<string, unknown>).subtype === "task_started")
+      .filter((m) => (m as Record<string, unknown>).task_type === kind)
+      .map((m) => String((m as Record<string, unknown>).task_id));
+
+  /** Every task id the drive reported stopped. */
+  const stopped = (driven: Awaited<ReturnType<typeof driveScenario>>): string[] =>
+    driven.messages
+      .filter((m) => (m as Record<string, unknown>).subtype === "task_notification")
+      .filter((m) => (m as Record<string, unknown>).status === "stopped")
+      .map((m) => String((m as Record<string, unknown>).task_id));
+
+  it("spares every background task when the per-task stop is declared", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!cancel-all"], {
+      opts: { perTaskStopAffordance: true },
+      during: interruptAfterTheTurn,
+    });
+
+    // Assert
+    expect(stopped(driven)).toEqual([]);
+  });
+
+  it("stops every background agent when the per-task stop is not declared", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!cancel-all"], { during: interruptAfterTheTurn });
+
+    // Assert
+    expect(stopped(driven)).toEqual(started(driven, "local_agent"));
+  });
+
+  it("leaves a background shell running even when the per-task stop is not declared", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!cancel-all"], { during: interruptAfterTheTurn });
+
+    // Assert
+    expect(stopped(driven)).not.toContain(started(driven, "local_bash")[0]);
+  });
+});
+
 describe("setModel", () => {
   it("makes the NEXT assistant message report the new model", async () => {
     // Arrange + Act
