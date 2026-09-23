@@ -959,6 +959,8 @@ type harness struct {
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
 	displaced *Displaced
+	// freeness answers the admission's freeness wait; free by default.
+	freeness *fakeFreeness
 	// parkedTurns answers ParkedRoute, consumed in order.
 	parkedTurns []ids.TurnID
 	// parkedSaid records what guidance was delivered.
@@ -974,6 +976,45 @@ type harness struct {
 
 	mu  sync.Mutex
 	now time.Time
+}
+
+// fakeFreeness is the fleet's freeness. A busy workspace's AwaitFree signals
+// `waiting` on entry and then blocks until `release` is closed or ctx ends,
+// answering awaitErr, so a test observes the held merge on a channel rather
+// than on elapsed time.
+type fakeFreeness struct {
+	busy     bool
+	awaitErr error
+	waiting  chan struct{}
+	release  chan struct{}
+
+	mu      sync.Mutex
+	awaited int
+}
+
+func (f *fakeFreeness) Free(ids.WorkspaceID) bool { return !f.busy }
+
+func (f *fakeFreeness) AwaitFree(ctx context.Context, _ ids.WorkspaceID) error {
+	f.mu.Lock()
+	f.awaited++
+	f.mu.Unlock()
+	if f.waiting != nil {
+		close(f.waiting)
+	}
+	if f.release != nil {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return f.awaitErr
+}
+
+func (f *fakeFreeness) awaits() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.awaited
 }
 
 // fakeRollout records the self-reload trigger and when it fired.
@@ -1055,6 +1096,7 @@ func newHarness(t *testing.T) *harness {
 		briefs:    map[string][]string{},
 		policy:    map[string]string{},
 		policyErr: map[string]error{},
+		freeness:  &fakeFreeness{},
 	}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
@@ -1133,6 +1175,7 @@ func (h *harness) deps() Deps {
 			}
 			return *h.displaced, true, nil
 		},
+		Freeness:          h.freeness,
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {

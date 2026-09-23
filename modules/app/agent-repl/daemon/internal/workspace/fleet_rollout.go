@@ -125,6 +125,12 @@ type Displaced struct {
 // turn left running underneath it would be racing the holder for the same
 // conversation. It reports false when nothing was in flight, which is the
 // ordinary case.
+//
+// THE TURN IS ENDED, NEVER ITS DETACHED WORK. The kill is UNFORCED: the user
+// asked for a merge, not for their background agents, shells and monitors to
+// stop, and detached work ends only by its own per-task stop or a forced kill
+// the user explicitly asked for. A holder that needs the session quiet waits
+// for it to fall free (Fleet.AwaitFree) rather than killing what runs there.
 func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displaced, bool, error) {
 	f.mu.RLock()
 	session, ok := f.sessions[ws]
@@ -162,7 +168,7 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displ
 	}
 	// THE MARK GOES DOWN BEFORE THE KILL. A kill that landed with no durable
 	// mark would end the user's turn and leave nothing to put back.
-	if err := (&shimAdapter{client: session.client}).KillTurn(ctx, *inFlight, true); err != nil {
+	if err := (&shimAdapter{client: session.client}).KillTurn(ctx, *inFlight, false); err != nil {
 		// The kill failing does NOT unmark the turn: it is still the turn the
 		// holder displaced, and putting it back at release is right either way.
 		f.deps.Log.Global().Warn(opFleetRollout, "the displaced turn could not be ended", dlog.Context{

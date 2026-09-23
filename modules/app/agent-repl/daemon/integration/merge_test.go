@@ -1941,3 +1941,63 @@ func mergeDequeueOffer(tray *frontendv1.DaemonHoldTray) *frontendv1.HeldOffer {
 	}
 	return nil
 }
+
+// TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork covers
+// the rule that an interrupt ends only the synchronous turn, at the merge's
+// admission. The displaced turn has a background subagent running: the merge
+// ends the turn with an UNFORCED KillTurn, stops nothing detached, and waits
+// for the workspace to fall free before it drives the session. Only once the
+// subagent settles does the merge proceed, land, and put the displaced turn
+// back exactly once.
+func TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork(t *testing.T) {
+	t.Parallel()
+	// Arrange: a clean self-repo merge target whose running turn spawned a
+	// background subagent that is still live.
+	f, d, _, script := mergeCleanRepo(t)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	workspaceLog := harness.WorkspaceLogPath(f.ws.GetDir(), "daemon")
+	f.submit("keep going", "k-displace-detached", origin)
+	f.shim.ExpectStartTurn()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
+	d.AwaitLogRecord(workspaceLog, "the live subagent", func(r harness.LogRecord) bool {
+		agents, ok := r.Context["agents"].(float64)
+		return r.Operation == "daemon.sessionwatcher.live_work" && ok && agents == 1
+	})
+	beforeMerge := f.shim.Count(harness.RPCStartTurn)
+
+	// Act: the merge admits over the running turn, and is seen waiting on the
+	// live subagent before the subagent settles.
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	killReq := f.shim.ExpectKillTurn()
+	d.AwaitLogRecord(workspaceLog, "the merge waiting for the workspace to fall free", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.merge.await_free" && strings.HasPrefix(r.Message, "the merge waits")
+	})
+	stopsWhileWaiting := f.shim.Count(harness.RPCStopBash) + f.shim.Count(harness.RPCUpdateAgent)
+	startsWhileWaiting := f.shim.Count(harness.RPCStartTurn)
+	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
+	resubmit, turns := f.shim.ExpectStartTurnWithCount()
+
+	// Assert
+	if killReq.GetForce() {
+		t.Fatal("the displaced turn's KillTurn was forced, want an unforced kill that spares its detached work")
+	}
+	if stopsWhileWaiting != 0 {
+		t.Fatalf("the merge issued %d stop(s) to detached work, want none", stopsWhileWaiting)
+	}
+	if startsWhileWaiting != beforeMerge {
+		t.Fatalf("StartTurns while the merge waited = %d, want %d: nothing drives the session until it falls free", startsWhileWaiting, beforeMerge)
+	}
+	if turns != beforeMerge+1 {
+		t.Fatalf("StartTurn count once the resubmission arrived = %d, want exactly %d", turns, beforeMerge+1)
+	}
+	if got := text(resubmit.GetSaid()); got != "keep going" {
+		t.Fatalf("the resubmitted turn's StartTurn.said = %q, want the displaced turn's own text %q", got, "keep going")
+	}
+	if resubmit.GetOrigin() != mergeDisplacedResumeOrigin {
+		t.Fatalf("the resubmitted turn's StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME", resubmit.GetOrigin())
+	}
+}
