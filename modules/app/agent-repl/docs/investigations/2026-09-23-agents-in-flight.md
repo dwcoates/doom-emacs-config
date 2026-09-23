@@ -12,10 +12,10 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a9939024139796b9d` | 17:50 |
+| `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | (agent done; waiting on the child `ad454b522817243f4` porting e2e in `feat/dod-e2e`, which must merge into this branch before landing) | 17:50 |
 | `fix/e2e-all-green` | `~/.config/doom-worktrees/e2e-all-green` | REVIVED (4 commits plus uncommitted work): e2e to green. | `a915f8a8d5e7424ee` | 17:50 |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
-| `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | `a3cde9e9c734a7c27` | 18:20 |
+| `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | (agent completed twice with NO report; 6 commits, clean; the lead verifies the suites, then merges) | 18:20 |
 | `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
 | `feat/held-prompt-compact-badges` | `~/.config/doom-worktrees/held-prompt-compact-badges` | Held prompts collapse to 2 lines, with details and buttons only when expanded, at half the normal max width. Statuses are colored badges (waiting red, interrupting green, the rest mapped). ADDED: a held prompt landing jumps the feed to the bottom and follows, like a sent prompt. | `afb5bccb8f702f5d3` | 18:55 |
 | `fix/sidecar-no-unrendered-spools` | `~/.config/doom-worktrees/sidecar-no-unrendered-spools` | The sidecar stops storing unclaimed task spools and duplicate transcript symlinks as residue. Rendered spools are bounded. | `a8d17efda472949bd` | 19:05 |
@@ -23,8 +23,15 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/store-interactive-writes-first` | `~/.config/doom-worktrees/store-interactive-writes-first` | A two-tier store writer (interactive shim writes before bulk sidecar writes), bounded bulk batches, per-class metrics, and a look at the 163s write. | `a708d3073a6905327` | 19:05 |
 | `feat/edit-held-prompt` | `~/.config/doom-worktrees/edit-held-prompt` | An Edit button on the held card. The editing claim holds that prompt and everything after it. The content goes to the Emacs input (existing text saved to history), and a send replaces it and reclassifies. | `ac1c20bc246a27fba` | 19:05 |
 
+## Queued for dispatch once the load drops (found by the deploy agent)
+
+- `rollout/handover.go` `beginHandover`: if `served()` fails after the spawn, the successor is leaked and the next deploy spawns a second one, which races for the manifest. If `writeManifest` fails, the latch never releases. `SuccessorSpawner` needs a stop handle.
+- The idle sweep hibernates a session that is being revived for a pending prompt. This is a production race behind the integration flake `TestAParkedWorkspacesFooterIsIdle…`.
+- A shim that dies with work recorded in flight produces no freeness edge, so its registered bounce waits until the workspace is revived.
+
 ## Still waiting on the owner
 
+- The proto keeps a `DaemonFault.deploy_script_failed` arm with no raise site now that the script is gone. Remove it?
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
 - Background priority vs. the tight test timeouts: under `taskpolicy -b` on a loaded machine, suites time out (900ms tests, 1800ms cold boot). Which gives way?
 - Proto: footer rows retired field tag 1 (`FeedId target`), a removal rather than an addition. Confirm.
