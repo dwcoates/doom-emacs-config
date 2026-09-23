@@ -14,6 +14,7 @@ import {
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANTS,
   BUBBLE_VARIANT_ATTRIBUTE,
+  SAYS_ATTRIBUTE,
   drawBubble,
   type BubbleCapLines,
   type BubbleSpec,
@@ -183,5 +184,136 @@ describe("drawBubble: the structure every kind shares", () => {
     const { bubble } = drawBubble(spec("user"));
     // Assert
     expect(bubble.querySelector(`.${BUBBLE_STRIP_CLASS}`)).toBeNull();
+  });
+});
+
+describe("drawBubble: a redraw given its previous draw updates it in place", () => {
+  it("returns the previous bubble itself", () => {
+    // Arrange
+    const first = drawBubble(spec("user")).bubble;
+    // Act
+    const again = drawBubble(spec("user"), first).bubble;
+    // Assert
+    expect(again).toBe(first);
+  });
+
+  it("keeps the scroll box and the body", () => {
+    // Arrange
+    const first = drawBubble(spec("response"));
+    // Act
+    const again = drawBubble(spec("response", { state: "success" }), first.bubble);
+    // Assert
+    expect(again.body).toBe(first.body);
+  });
+
+  it("draws a fresh bubble over a previous draw of the other role", () => {
+    // Arrange
+    const prompt = drawBubble(spec("user")).bubble;
+    // Act
+    const response = drawBubble(spec("response"), prompt).bubble;
+    // Assert
+    expect(response).not.toBe(prompt);
+  });
+
+  it("draws a fresh bubble over an element this module did not draw", () => {
+    // Arrange
+    const stranger = document.createElement("div");
+    stranger.className = "bubble";
+    stranger.setAttribute(BUBBLE_ROLE_ATTRIBUTE, "prompt");
+    // Act
+    const drawn = drawBubble(spec("user"), stranger).bubble;
+    // Assert
+    expect(drawn).not.toBe(stranger);
+  });
+
+  it("takes back a hook class the new spec no longer carries", () => {
+    // Arrange
+    const first = drawBubble(spec("response", { hooks: ["final-response"] })).bubble;
+    // Act
+    drawBubble(spec("response"), first);
+    // Assert
+    expect(first.classList.contains("final-response")).toBe(false);
+  });
+
+  it("leaves a class no spec gave it, the controller's own", () => {
+    // Arrange
+    const first = drawBubble(spec("response", { hooks: ["final-response"] })).bubble;
+    first.classList.add("response-selected");
+    // Act
+    drawBubble(spec("response", { hooks: ["final-response"] }), first);
+    // Assert
+    expect(first.classList.contains("response-selected")).toBe(true);
+  });
+
+  it("drops a state the new spec does not carry", () => {
+    // Arrange
+    const first = drawBubble(spec("response", { state: "update" })).bubble;
+    // Act
+    drawBubble(spec("response"), first);
+    // Assert
+    expect(first.hasAttribute("data-state")).toBe(false);
+  });
+
+  it("keeps the wave's phase when only the working flag moved", () => {
+    // Arrange
+    const first = drawBubble(spec("user")).bubble;
+    const phase = first.style.animationDelay;
+    // Act
+    drawBubble({ ...spec("user"), working: true } as BubbleSpec, first);
+    // Assert
+    expect([first.style.animationDelay, first.getAttribute(PROMPT_WAVE_ATTRIBUTE)]).toEqual([
+      phase,
+      PROMPT_WAVE_WORKING,
+    ]);
+  });
+
+  it("keeps a strip element that says the same thing", () => {
+    // Arrange
+    const first = drawBubble(spec("agent", { strip: [el("address", "→ Explore")] })).bubble;
+    const address = first.querySelector(".address");
+    // Act
+    drawBubble(spec("agent", { strip: [el("address", "→ Explore")] }), first);
+    // Assert
+    expect(first.querySelector(".address")).toBe(address);
+  });
+
+  it("replaces a strip element whose words changed", () => {
+    // Arrange
+    const first = drawBubble(spec("agent", { strip: [el("address", "→ Explore")] })).bubble;
+    // Act
+    drawBubble(spec("agent", { strip: [el("address", "→ Plan")] }), first);
+    // Assert
+    expect(first.querySelector(".address")?.textContent).toBe("→ Plan");
+  });
+
+  it("keeps a corner whose stated words did not change, whatever its clock shows", () => {
+    // Arrange
+    const corner = el("usage-corner", "1.2k");
+    corner.setAttribute(SAYS_ATTRIBUTE, "1.2k|0");
+    const first = drawBubble(spec("response", { corner })).bubble;
+    const again = el("usage-corner", "1.2k (ticked)");
+    again.setAttribute(SAYS_ATTRIBUTE, "1.2k|0");
+    // Act
+    drawBubble(spec("response", { corner: again }), first);
+    // Assert
+    expect(first.querySelector(".usage-corner")).toBe(corner);
+  });
+
+  it("drops a footer element the new spec does not draw", () => {
+    // Arrange
+    const first = drawBubble(spec("response", { footer: [el("response-cut-short-marker")] })).bubble;
+    // Act
+    drawBubble(spec("response"), first);
+    // Assert
+    expect(first.querySelector(".response-cut-short-marker")).toBeNull();
+  });
+
+  it("keeps the strip above the box and the footer below it", () => {
+    // Arrange
+    const first = drawBubble(spec("agent", { strip: [el("address", "a")] })).bubble;
+    // Act
+    drawBubble(spec("agent", { strip: [el("address", "b")], footer: [el("delivery")] }), first);
+    // Assert
+    expect([...first.children].map((c) => c.classList[0])).toEqual(["address", BUBBLE_SCROLL_CLASS, "delivery"]);
   });
 });
