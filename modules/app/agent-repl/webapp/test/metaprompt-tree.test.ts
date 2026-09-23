@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as metapromptTree from "../src/metaprompt-tree.js";
 import {
   WIDE_CHAR_CLASS,
   boxWideChars,
@@ -11,6 +12,7 @@ import {
   TreeOverflowError,
   visibleWidth,
 } from "../src/metaprompt-tree.js";
+import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
 const TREE = [
   "Response (✏️ changes made)",
@@ -450,6 +452,33 @@ describe("renderTreeHtml", () => {
     // Assert — the tag is escaped inside the code block, not rendered.
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
+  });
+});
+
+describe("renderTreeHtml's column budget", () => {
+  it("exports no default width to fall back to", () => {
+    // Act + Assert
+    expect(Object.keys(metapromptTree)).not.toContain("DEFAULT_TREE_COLS");
+  });
+
+  it.each([
+    { name: "zero", width: 0 },
+    { name: "a negative width", width: -3 },
+    { name: "a fractional width", width: 40.5 },
+    { name: "NaN", width: Number.NaN },
+  ])("refuses $name rather than guessing a width", ({ width }) => {
+    // Act + Assert
+    expect(() => renderTreeHtml("├── 1.1 Detail", identity, width)).toThrow(RangeError);
+  });
+
+  it("records the refused width through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    expect(() => renderTreeHtml("├── 1.1 Detail", identity, 0)).toThrow(RangeError);
+    // Assert
+    const record = await forwardedRecord(capture, "metaprompt-tree.invalid-width");
+    expect([record.level.case, record.context]).toEqual(["error", expect.objectContaining({ width: 0 })]);
   });
 });
 

@@ -42,9 +42,14 @@
  * emoji above all) renders wider than two monospace columns in the webview's
  * fonts, so every character the width model counts as two is drawn inside a
  * `WIDE_CHAR_CLASS` box the stylesheet sizes to exactly `2ch` of the tree font.
+ *
+ * THERE IS NO DEFAULT WIDTH. The caller measures the column budget; a width
+ * that is not a positive whole number of columns is refused loudly, never
+ * replaced by a guess.
  */
 
 import { escapeHtml, highlightCode } from "./highlight.js";
+import { log } from "./log.js";
 
 /**
  * The class of the inline box every double-width character of a tree line is
@@ -52,14 +57,6 @@ import { escapeHtml, highlightCode } from "./highlight.js";
  * which is the two columns `charWidth` counts it as.
  */
 export const WIDE_CHAR_CLASS = "mp-wide";
-
-/**
- * The column limit used when the live width cannot be measured (a detached
- * bubble, a test host with no layout). It is the daemon formatter's own former
- * default, so an unmeasurable render falls back to what the daemon used to
- * serve rather than to a broken width.
- */
-export const DEFAULT_TREE_COLS = 105;
 
 // ---------------------------------------------------------------------------
 // Cheap line classification (detection only)
@@ -1112,7 +1109,14 @@ export function renderTreeHtml(
   width: number,
   onIssue?: TreeIssue,
 ): string {
-  const cols = width > 0 ? width : DEFAULT_TREE_COLS;
+  if (!Number.isInteger(width) || width < 1) {
+    log.error("a metaprompt tree was handed a column budget that is not a positive whole number", {
+      operation: "metaprompt-tree.invalid-width",
+      context: { width },
+    });
+    throw new RangeError(`metaprompt tree: column budget must be a positive integer, got ${String(width)}`);
+  }
+  const cols = width;
   const segments = splitTreeSegments(text.split("\n"));
   const parts: string[] = [];
   let overflowCount = 0;

@@ -49,11 +49,11 @@ export const MARKDOWN_SHOWCASE = [
 ].join("\n");
 
 /**
- * The webapp's fallback wrap width for a metaprompt tree
- * (webapp/src/metaprompt-tree.ts's `DEFAULT_TREE_COLS`, used when the bubble's
- * live width cannot be measured). The showcase carries branches WIDER than this
- * so that the webapp's wrap is exercised by every consumer that draws `!md`;
- * the test beside this scenario pins that the showcase still does.
+ * A column width at least as wide as any bubble the webapp's test layouts
+ * measure a metaprompt tree's budget in (webapp/test/tree-layout.ts). The
+ * showcase carries branches WIDER than this so that the webapp's wrap is
+ * exercised by every consumer that draws `!md`; the test beside this scenario
+ * pins that the showcase still does.
  */
 export const WEBAPP_TREE_WRAP_COLUMNS = 105;
 
