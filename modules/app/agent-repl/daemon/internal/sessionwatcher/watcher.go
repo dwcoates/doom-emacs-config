@@ -168,6 +168,19 @@ type watcher struct {
 	// memory would re-open exactly the hole it closes for the oldest rows.
 	seenClosings map[string]struct{}
 
+	// retiredWork is every detached-work HANDLE this watcher reaped at its
+	// terminal. A retired handle is never live again: the contract retires a
+	// handle at its run's end, by equality, and a later announcement for it is
+	// a RE-SERVING — the vendor's end-of-run notification upserts the
+	// announcement row to add the output path, and that upsert rides the live
+	// watch again. Re-admitting it put a finished run back in the live set,
+	// re-opened its watch and re-placed its whole sub-feed, and its settle then
+	// dropped it a millisecond later: the footer's "added agent" churn. The
+	// footer holds the same rule for the same reason (chips.go retiredWork).
+	//
+	// UNBOUNDED BY DESIGN, as seenClosings is: one entry per detached run.
+	retiredWork map[string]struct{}
+
 	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
 	// started records that the session facts have been taken up, from
 	// StartSession's answer or the shim's re-announcement. It is what makes a
@@ -298,6 +311,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		facts:       map[string]*activityFact{},
 
 		seenClosings: map[string]struct{}{},
+		retiredWork:  map[string]struct{}{},
 		unseenAsks:   map[string]struct{}{},
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))

@@ -1576,3 +1576,67 @@ func TestAClosingRowWithNoPointerIsRoutedAndRecorded(t *testing.T) {
 		t.Fatalf("the missing pointer's record = %v, want a context_cut of main-1", ctx)
 	}
 }
+
+// TestARetiredDetachedHandleIsNeverReadmitted covers the "added agent" churn:
+// the vendor's end-of-run notification upserts the announcement row, and that
+// row rides the live watch AFTER the run settled. It still reaches the views,
+// but the work stays out of the live set and no watch is re-opened for it.
+func TestARetiredDetachedHandleIsNeverReadmitted(t *testing.T) {
+	tests := []struct {
+		name string
+		// settle brings the harness to a settled handle and answers the
+		// re-served announcement.
+		settle func(t *testing.T) (*harness, *conversationv1.AgentDetachedWork)
+	}{
+		{
+			name: "a settled subagent",
+			settle: func(t *testing.T) (*harness, *conversationv1.AgentDetachedWork) {
+				h := detachedSubagentHarness(t)
+				h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", false)))))
+				return h, detachedWork("w-1", "spawn-1")
+			},
+		},
+		{
+			name: "a settled shell",
+			settle: func(t *testing.T) (*harness, *conversationv1.AgentDetachedWork) {
+				h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-2", bashWork()))})
+				h.client.nextBashOpen(t)
+				h.quiet()
+				entry := h.shellWatchFor("w-2")
+				h.routeNow(func(w *watcher) {
+					w.routeBashLocked(entry, &conversationv1.AgentBash{
+						Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+					})
+				})
+				return h, createdWork("w-2", bashWork())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h, again := tt.settle(t)
+			if !h.w.LiveWork().Empty() {
+				t.Fatalf("live work = %+v before the re-serving, want it settled", h.w.LiveWork())
+			}
+
+			// Act.
+			got := h.route(h.main, entryFrame(frameDetached("main-1", again)))
+
+			// Assert.
+			requireEvent(t, got, "feed.OnDetachedWork")
+			if _, published := find(got, "lifecycle.OnLiveWorkChanged"); published {
+				t.Fatalf("the re-served announcement republished the live set: %v", names(got))
+			}
+			if !h.w.LiveWork().Empty() {
+				t.Fatalf("live work = %+v, want the settled work kept out", h.w.LiveWork())
+			}
+			h.client.noAgentOpen(t)
+			h.client.noBashOpen(t)
+			if !h.hasRecord("debug", "daemon.sessionwatcher.detached_work_retired") {
+				t.Fatal("the re-served announcement left no debug record")
+			}
+		})
+	}
+}

@@ -137,6 +137,9 @@ func (w *watcher) dropAllLiveWorkLocked() bool {
 	for key := range w.shells {
 		w.reapShellLocked(key)
 	}
+	for key := range w.monitors {
+		w.retiredWork[key] = struct{}{}
+	}
 	w.monitors = map[string]*conversationv1.DetachedWorkId{}
 	return changed
 }
@@ -965,6 +968,16 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		"work_id": handle.GetValue(), "kind": kind.String(), "agent_id": agent.GetValue(),
 	})
 
+	if _, retired := w.retiredWork[handle.GetValue()]; retired && handle.GetValue() != "" {
+		// A RETIRED HANDLE STAYS RETIRED. The views above took the row (the
+		// feed wants the output path an end-of-run upsert adds), but the work
+		// is over and nothing here re-opens it. See watcher.retiredWork.
+		w.log.Debug("daemon.sessionwatcher.detached_work_retired", "an announcement for work that already settled; it stays out of the live set", dlog.Context{
+			"work_id": handle.GetValue(), "kind": kind.String(), "agent_id": agent.GetValue(),
+		})
+		return
+	}
+
 	switch kind {
 	case kindSubagent:
 		if agent.GetValue() == "" {
@@ -1159,6 +1172,9 @@ func (w *watcher) reapAgentLocked(key string) bool {
 	}
 	entry.done = true
 	delete(w.agents, key)
+	if entry.work.GetValue() != "" {
+		w.retiredWork[entry.work.GetValue()] = struct{}{}
+	}
 	if entry.stream != nil {
 		stream := entry.stream
 		entry.stream = nil
@@ -1176,6 +1192,7 @@ func (w *watcher) reapShellLocked(key string) bool {
 	}
 	entry.done = true
 	delete(w.shells, key)
+	w.retiredWork[key] = struct{}{}
 	if entry.stream != nil {
 		stream := entry.stream
 		entry.stream = nil
@@ -1209,6 +1226,7 @@ func (w *watcher) reapEndedMonitorLocked(act *conversationv1.AgentActivity) {
 		return
 	}
 	delete(w.monitors, key)
+	w.retiredWork[key] = struct{}{}
 	w.log.Debug("daemon.sessionwatcher.reap", "a monitor was retired", dlog.Context{
 		"work_id": key,
 	})
