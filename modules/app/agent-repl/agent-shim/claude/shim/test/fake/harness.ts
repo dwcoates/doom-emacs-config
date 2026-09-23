@@ -86,6 +86,11 @@ export interface DriveOptions {
   readonly opts?: Partial<FakeQueryOpts>;
   /** Resume this vendor session instead of starting fresh. */
   readonly resume?: string;
+  /**
+   * The client `uuid` each send carries, by prompt index — what the shim puts
+   * on its keep-alive send. A prompt with none (or past the list) carries none.
+   */
+  readonly clientUuids?: readonly (string | undefined)[];
 }
 
 /** A prompt iterable a test can push into while the query runs. */
@@ -155,8 +160,16 @@ export async function driveScenario(
 
   const query = createFakeQuery(
     (async function* () {
+      let index = 0;
       for await (const { text } of feeder.messages()) {
-        yield { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null } as never;
+        const uuid = options.clientUuids?.[index];
+        index++;
+        yield {
+          type: "user",
+          message: { role: "user", content: text },
+          parent_tool_use_id: null,
+          ...(uuid === undefined ? {} : { uuid }),
+        } as never;
       }
     })(),
     options.canUseTool ?? ALLOW,
