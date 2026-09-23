@@ -191,6 +191,9 @@ func TestAFailedReadDrawsItsErrorTextWithTheFailedBadge(t *testing.T) {
 	h := newHarness(t)
 	h.send(activityOf("unit-1", &conversationv1.AgentRead{
 		Result: &conversationv1.AgentRead_Failure{Failure: &conversationv1.AgentReadFailure{
+			// A settled frame restates what its call named (the contract);
+			// without it the frame is a producer fault and draws no row.
+			Path: &conversationv1.ReadPath{Path: "/tmp/missing"},
 			Error: &conversationv1.AgentToolFailure{
 				Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
 					Block: &conversationv1.ToolResultContentBlock_Text{
@@ -216,6 +219,9 @@ func TestAFailedReadDrawsItsErrorTextWithTheFailedBadge(t *testing.T) {
 func failedReadWith(blocks ...*conversationv1.ToolResultContentBlock) *conversationv1.AgentActivity {
 	return activityOf("unit-1", &conversationv1.AgentRead{
 		Result: &conversationv1.AgentRead_Failure{Failure: &conversationv1.AgentReadFailure{
+			// A settled frame restates what its call named (the contract);
+			// without it the frame is a producer fault and draws no row.
+			Path: &conversationv1.ReadPath{Path: "/tmp/missing"},
 			Error: &conversationv1.AgentToolFailure{
 				Content:   &conversationv1.ToolResultContent{Blocks: blocks},
 				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000},
@@ -742,6 +748,8 @@ func TestAFailedShellCallReturnedFailed(t *testing.T) {
 	h := newHarness(t)
 	h.send(activityOf("unit-1", &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{
+			// A settled frame restates what its call named (the contract).
+			Command: &conversationv1.AgentBashCommand{Line: "make"},
 			Error: &conversationv1.AgentToolFailure{
 				Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
 					Block: &conversationv1.ToolResultContentBlock_Text{
@@ -1324,5 +1332,145 @@ func TestAMovedCallsNonTerminalFrameLeavesTheHeadLive(t *testing.T) {
 	// Assert.
 	if h.shellHead().GetLive() == nil {
 		t.Fatalf("state = %T, want the head still live", h.shellHead().GetState())
+	}
+}
+
+// ---- A REPLAYED FAILURE STANDS ALONE ----
+//
+// A call's start and its settle upsert one unit, and the store keeps one row per
+// unit, so a replay serves a failed call's settle with no start beside it. Each
+// failure arm restates what its start named, and the card's input line is drawn
+// from that restatement.
+
+// replayedFailures is each tool family's failure arm restating `input`, or
+// restating nothing when `input` is empty, with no start ever delivered.
+func replayedFailures(input string) []struct {
+	name string
+	act  *conversationv1.AgentActivity
+} {
+	failure := &conversationv1.AgentToolFailure{
+		Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{
+			textResultBlock("it did not work"),
+		}},
+	}
+	var (
+		path    *conversationv1.ReadPath
+		grep    *conversationv1.AgentGrepQuery
+		glob    *conversationv1.AgentGlobQuery
+		command *conversationv1.AgentBashCommand
+		search  *conversationv1.AgentWebSearchQuery
+	)
+	if input != "" {
+		path = &conversationv1.ReadPath{Path: input}
+		grep = &conversationv1.AgentGrepQuery{Pattern: input}
+		glob = &conversationv1.AgentGlobQuery{Pattern: input}
+		command = &conversationv1.AgentBashCommand{Line: input}
+		search = &conversationv1.AgentWebSearchQuery{Terms: input}
+	}
+	return []struct {
+		name string
+		act  *conversationv1.AgentActivity
+	}{
+		{"read", activityOf("unit-1", &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Failure{
+			Failure: &conversationv1.AgentReadFailure{Error: failure, Path: path}}})},
+		{"write", activityOf("unit-1", &conversationv1.AgentWrite{Result: &conversationv1.AgentWrite_Failure{
+			Failure: &conversationv1.AgentWriteFailure{Error: failure, Path: path}}})},
+		{"edit", activityOf("unit-1", &conversationv1.AgentEdit{Result: &conversationv1.AgentEdit_Failure{
+			Failure: &conversationv1.AgentEditFailure{Error: failure, Path: path}}})},
+		{"grep", activityOf("unit-1", &conversationv1.AgentGrep{Result: &conversationv1.AgentGrep_Failure{
+			Failure: &conversationv1.AgentGrepFailure{Error: failure, Query: grep}}})},
+		{"glob", activityOf("unit-1", &conversationv1.AgentGlob{Result: &conversationv1.AgentGlob_Failure{
+			Failure: &conversationv1.AgentGlobFailure{Error: failure, Query: glob}}})},
+		{"bash", activityOf("unit-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{
+			Failure: &conversationv1.AgentBashFailure{Error: failure, Command: command}}})},
+		{"web search", activityOf("unit-1", &conversationv1.AgentWebSearch{Result: &conversationv1.AgentWebSearch_Failure{
+			Failure: &conversationv1.AgentWebSearchFailure{Failure: failure, Query: search}}})},
+	}
+}
+
+func TestAReplayedFailureDrawsTheInputItRestated(t *testing.T) {
+	for _, tc := range replayedFailures("internal/feed/row.go") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: the settle alone, as a replay serves it.
+			h.send(tc.act)
+
+			// Assert.
+			if got := h.card().GetInput().GetText(); got != "internal/feed/row.go" {
+				t.Fatalf("input = %q, want the restated input", got)
+			}
+		})
+	}
+}
+
+func TestAReplayedFailureRestatingNothingDrawsNoCard(t *testing.T) {
+	for _, tc := range replayedFailures("") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.send(tc.act)
+
+			// Assert: no card with an empty input line is drawn.
+			if rows := h.rows(rootFeed()); len(rows) != 0 {
+				t.Fatalf("rows = %d, want 0: an unrestated failure must not draw an empty card", len(rows))
+			}
+		})
+	}
+}
+
+func TestAReplayedFailureRestatingNothingIsRecordedAtError(t *testing.T) {
+	for _, tc := range replayedFailures("") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.send(tc.act)
+
+			// Assert.
+			if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
+				t.Fatalf("records = %+v, want an ERROR daemon.feed.activity_undrawable", h.records())
+			}
+		})
+	}
+}
+
+func TestAFailureRestatingNothingIsDrawnFromTheStartHeld(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path: &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+		}},
+	}))
+
+	// Act.
+	h.send(replayedFailures("")[0].act)
+
+	// Assert.
+	if got := h.card().GetInput().GetText(); got != "internal/feed/row.go" {
+		t.Fatalf("input = %q, want the held start's path", got)
+	}
+}
+
+func TestAFailureRestatingNothingIsRecordedAtErrorWithTheStartHeld(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path: &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+		}},
+	}))
+
+	// Act.
+	h.send(replayedFailures("")[0].act)
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
 	}
 }
