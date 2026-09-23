@@ -31,6 +31,18 @@ func (c *controller) Join(ctx context.Context) error {
 	c.joiningMode = true
 	c.mu.Unlock()
 
+	// THE TAKEOVER IS KEYED ON THE INCUMBENT'S EXIT, NOT ON EVERY RENDEZVOUS
+	// FINISHING. It used to be triggered only by an adoption that left every
+	// joining workspace owned — so ONE workspace whose adoption never
+	// completed (closed mid-handover; its window expired on the incumbent)
+	// kept this daemon joining forever, with no daemon.addr written at all:
+	// every later rollout was refused and nothing could find the daemon.
+	lifetime := c.deps.Lifetime
+	if lifetime == nil {
+		lifetime = context.WithoutCancel(ctx)
+	}
+	go c.awaitIncumbentExit(lifetime)
+
 	found, err := c.joinFromManifest(ctx)
 	if err != nil {
 		return err
@@ -449,6 +461,20 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 // no surviving shim to adopt.
 func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source string) error {
 	fields := dlog.Context{"workspace": string(ws), "source": source}
+	// AN ADOPTION IN FLIGHT IS NEVER STARTED AGAIN for the same workspace: the
+	// takeover's straggler pass skips whatever is marked here, so a rendezvous
+	// still waiting on the serving release is left to finish on its own.
+	c.mu.Lock()
+	if c.adopting == nil {
+		c.adopting = map[ids.WorkspaceID]bool{}
+	}
+	c.adopting[ws] = true
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.adopting, ws)
+		c.mu.Unlock()
+	}()
 	outgoing, err := c.outgoingDaemon(ws)
 	if err != nil {
 		c.log.Error(opAdopt, "could not resolve the incumbent serving owner", withCause(fields, err))
@@ -526,7 +552,10 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.owned = map[ids.WorkspaceID]bool{}
 	}
 	c.owned[ws] = true
-	complete := len(c.joining) > 0
+	// ONLY A JOINING DAEMON ADVERTISES FROM HERE: once it has taken over
+	// (becomeIncumbent), daemon.addr is already written and a late adoption
+	// finishing must not write it a second time.
+	complete := c.joiningMode && len(c.joining) > 0
 	for joined := range c.joining {
 		if !c.owned[joined] {
 			complete = false
@@ -785,13 +814,80 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	c.mu.Lock()
 	was := c.joiningMode
 	c.joiningMode = false
+	signal := c.tookOverSignalLocked()
 	c.mu.Unlock()
+	defer func() {
+		select {
+		case <-signal:
+		default:
+			close(signal)
+		}
+	}()
 	if !was {
 		return
 	}
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+	c.adoptStragglers(fields)
 	c.bounceStaleFleet(fields)
+}
+
+// tookOverSignalLocked answers the channel that closes when this daemon takes
+// over. Callers hold c.mu.
+func (c *controller) tookOverSignalLocked() chan struct{} {
+	if c.tookOver == nil {
+		c.tookOver = make(chan struct{})
+	}
+	return c.tookOver
+}
+
+// tookOverSignal is tookOverSignalLocked for a caller that does not hold c.mu.
+func (c *controller) tookOverSignal() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tookOverSignalLocked()
+}
+
+// adoptStragglers takes every workspace that was being handed over but never
+// finished its rendezvous. The incumbent is gone, so nobody else can serve it:
+// it is OWNED from this instant (a request for it gets this daemon's answer,
+// never not_yet_adopted), and its running shim, if one survived, is adopted
+// through the same path a headless workspace takes. An adoption that fails is
+// that workspace's own logged error; the workspace stays owned either way.
+func (c *controller) adoptStragglers(fields dlog.Context) {
+	c.mu.Lock()
+	var stragglers []ids.WorkspaceID
+	for ws := range c.joining {
+		if !c.owned[ws] && !c.adopting[ws] {
+			stragglers = append(stragglers, ws)
+		}
+	}
+	if c.owned == nil {
+		c.owned = map[ids.WorkspaceID]bool{}
+	}
+	for _, ws := range stragglers {
+		c.owned[ws] = true
+	}
+	c.mu.Unlock()
+	if len(stragglers) == 0 {
+		return
+	}
+	lifetime := c.deps.Lifetime
+	if lifetime == nil {
+		lifetime = context.Background()
+	}
+	c.log.Info(opAdopt, "adopting the workspaces whose handover never finished",
+		merge(fields, dlog.Context{"workspaces": len(stragglers)}))
+	for _, ws := range stragglers {
+		c.stragglerAdoptions.Add(1)
+		go func(ws ids.WorkspaceID) {
+			defer c.stragglerAdoptions.Done()
+			if err := c.adopt(lifetime, ws, "straggler"); err != nil {
+				c.log.Error(opAdopt, "a workspace whose handover never finished could not have its session adopted; it is served without one",
+					withCause(merge(fields, dlog.Context{"workspace": string(ws)}), err))
+			}
+		}(ws)
+	}
 }
 
 // bounceStaleFleet relaunches every adopted shim that runs an older build than
@@ -866,6 +962,60 @@ func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
 				withCause(merge(fields, dlog.Context{"attempts": attempt + 1, "held": held.String()}), err))
 		}
 	}
+}
+
+// awaitIncumbentExit writes daemon.addr the moment the outgoing daemon lets go
+// of the boot claim, and then takes over.
+//
+// The claim is released by the incumbent's EXIT, so a successful write is the
+// proof that no other daemon serves anything. It waits as long as the handover
+// does — a busy workspace can hold the incumbent for an hour — so unlike
+// retryAdvertise it never reports a claim held "too long": a long handover is
+// ordinary. It retries on the same capped backoff, and a failure that is not a
+// held claim ends it loudly.
+func (c *controller) awaitIncumbentExit(ctx context.Context) {
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-ctx.Done():
+			c.log.Debug(opAdopt, "the daemon's lifetime ended before the incumbent exited", nil)
+			return
+		case <-c.deps.Clock.After(incumbentExitDelay(attempt)):
+		}
+		if c.deps.WriteDaemonAddr == nil {
+			return
+		}
+		err := c.deps.WriteDaemonAddr(ctx)
+		if err == nil {
+			c.log.Info(opAdopt, "the incumbent exited; wrote daemon.addr", dlog.Context{"attempts": attempt})
+			c.becomeIncumbent(nil)
+			return
+		}
+		if !errors.Is(err, daemonaddr.ErrClaimed) {
+			c.log.Error(opAdopt, "daemon.addr could not be written; not retrying a failure that is not a held boot claim",
+				withCause(dlog.Context{"attempts": attempt}, err))
+			return
+		}
+	}
+}
+
+// The exit watcher's backoff. Its OWN cadence, slower than the adoption
+// polls: an incumbent's exit is a rare edge that may be an hour away, and a
+// successor has nothing to gain from asking every 25ms.
+const (
+	incumbentExitPollInitial = 150 * time.Millisecond
+	incumbentExitPollCeiling = 2400 * time.Millisecond
+)
+
+// incumbentExitDelay is the wait before the watcher's nth look.
+func incumbentExitDelay(n int) time.Duration {
+	delay := incumbentExitPollInitial
+	for i := 1; i < n && delay < incumbentExitPollCeiling; i++ {
+		delay *= 2
+	}
+	if delay > incumbentExitPollCeiling {
+		return incumbentExitPollCeiling
+	}
+	return delay
 }
 
 // releaseHeadless undoes a headless claim whose adoption failed.
