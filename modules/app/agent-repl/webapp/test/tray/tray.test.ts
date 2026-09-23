@@ -90,6 +90,22 @@ const promptItem = (turn: string): DaemonHoldItem =>
     },
   });
 
+/** A held prompt on TURN whose words run to a second line. */
+const multiLineItem = (turn: string): DaemonHoldItem =>
+  create(DaemonHoldItemSchema, {
+    item: {
+      case: "prompt",
+      value: {
+        turn: { value: turn },
+        said: {
+          content: { blocks: [{ block: { case: "text", value: { text: "first\nsecond" } } }] },
+        },
+        queuedAt: { atMs: BigInt(NOW) },
+        classification: { case: "classifying", value: {} },
+      },
+    },
+  });
+
 const offerItem = (): DaemonHoldItem =>
   create(DaemonHoldItemSchema, {
     item: {
@@ -228,5 +244,49 @@ describe("mountHoldTray", () => {
     handle.dispose();
     expect(host.childElementCount).toBe(0);
     expect(ticker.subscribers()).toBe(0);
+  });
+
+  it("keeps a held prompt's open fold open across a push that re-serves it", async () => {
+    // Arrange — the second push waits until the reader has opened the fold.
+    const host = document.createElement("section");
+    let opened!: () => void;
+    const reader = new Promise<void>((resolve) => (opened = resolve));
+    const ctx = streamingContext(async function* () {
+      yield tray([multiLineItem("t1")]);
+      await reader;
+      yield tray([multiLineItem("t1")]);
+    });
+    const handle = mountHoldTray(host, ctx);
+    await settle();
+    host.querySelector<HTMLElement>(".held-fold")?.click();
+    // Act
+    opened();
+    await settle();
+    // Assert — a fresh card, still open.
+    expect(host.querySelector('[data-held-turn="t1"] > .held-fold')?.classList.contains("expanded"))
+      .toBe(true);
+    handle.dispose();
+  });
+
+  it("does not open another turn's fold on the push after one was opened", async () => {
+    // Arrange
+    const host = document.createElement("section");
+    let opened!: () => void;
+    const reader = new Promise<void>((resolve) => (opened = resolve));
+    const ctx = streamingContext(async function* () {
+      yield tray([multiLineItem("t1")]);
+      await reader;
+      yield tray([multiLineItem("t2")]);
+    });
+    const handle = mountHoldTray(host, ctx);
+    await settle();
+    host.querySelector<HTMLElement>(".held-fold")?.click();
+    // Act
+    opened();
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-held-turn="t2"] > .held-fold')?.classList.contains("expanded"))
+      .toBe(false);
+    handle.dispose();
   });
 });

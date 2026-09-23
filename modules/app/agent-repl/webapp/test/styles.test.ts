@@ -1593,3 +1593,37 @@ describe("the feed viewport as the async bubble cap's size container", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * THE HELD PROMPT'S ONE-LINE FOLD (owner ruling, 2026-09-23): collapsed, only
+ * the first line shows, clamped to one row; expanded, only the whole prompt.
+ */
+describe("the held prompt's one-line fold", () => {
+  it("hides the whole prompt while the fold is collapsed", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".held-fold:not(.expanded) > .queued-content");
+    // Assert
+    expect(rule).toMatch(/display:\s*none/);
+  });
+
+  it("hides the first-line face once the fold is expanded", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".held-fold.expanded > .held-line");
+    // Assert
+    expect(rule).toMatch(/display:\s*none/);
+  });
+
+  it("clamps the first-line face to one row", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".held-line");
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*1/);
+  });
+
+  it("wears the feed's zoom-in cursor only on a fold with more to show", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".held-fold.held-foldable");
+    // Assert
+    expect(rule).toMatch(/cursor:\s*zoom-in/);
+  });
+});

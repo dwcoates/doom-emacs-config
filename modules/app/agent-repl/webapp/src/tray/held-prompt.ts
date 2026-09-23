@@ -64,6 +64,8 @@ import {
   type UpdateHeldPromptError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { formatTickedAge } from "../duration.js";
+import { CLICK_THROUGH_SELECTOR, EXPANDED_CLASS, expandAction, toggleExpanded } from "../expand.js";
+import { overflowsCap } from "../feed/bubble-more.js";
 import { log } from "../log.js";
 import { renderMarkdown } from "../markdown.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -138,7 +140,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
     drawHeldPromptQueuedAt(requireMessage(u.queuedAt, `${path}.queued_at`), tc, `${path}.queued_at`),
   );
 
-  card.appendChild(drawUserSaid(said, `${path}.said`));
+  card.appendChild(drawHeldFold(said, `${path}.said`));
   if (verdict.detail !== null) card.appendChild(verdict.detail);
   if (hold !== null) card.appendChild(drawHold(hold, `${path}.hold`));
 
@@ -480,7 +482,8 @@ interface ActionSpec {
 export type HeldAction = "release" | "drop" | "accept";
 
 /**
- * The entry's controls: release, drop, and — on one arm only — accept.
+ * The entry's controls: release, drop (labelled "Cancel"), and — on one arm
+ * only — accept.
  *
  * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the three actions
  * are mutually exclusive answers about one entry, and a drop landing while a
@@ -512,7 +515,10 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     release.classList.add("queued-action-unlikely");
   }
   actions.appendChild(release);
-  actions.appendChild(actionButton("drop", "Drop", spec));
+  // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
+  // takes back a prompt they sent, and the text comes back to the composer. The
+  // wire verb is still `drop`, and so are the hooks it is found by.
+  actions.appendChild(actionButton("drop", "Cancel", spec));
   if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   return actions;
 }
@@ -690,6 +696,119 @@ function holdLine(text: string): HTMLElement {
   line.className = "lease-reason";
   line.textContent = text;
   return line;
+}
+
+/** The fold a held prompt's words sit in; `.expanded` on it shows them whole. */
+export const HELD_FOLD_CLASS = "held-fold";
+
+/** Worn by a fold with something past its first line: the one expand affordance. */
+export const HELD_FOLDABLE_CLASS = "held-foldable";
+
+/**
+ * The prompt's words, FIRST LINE ONLY until the reader opens them (owner
+ * ruling, 2026-09-23).
+ *
+ * TWO DRAWINGS, ONE SHOWN. The collapsed face is the first line on its own,
+ * clamped to one row (`.held-line`); the expanded face is the whole prompt,
+ * exactly as it always drew (`drawUserSaid`). The whole prompt cannot simply be
+ * clamped instead: a soft line break renders inside one paragraph, so a
+ * clamped whole would run the second line onto the first.
+ *
+ * THE FEED'S OWN FOLD. The toggle is the capped sections' `.expanded` class,
+ * flipped by `toggleExpanded` under the same click decision (`expandAction`: a
+ * link click or a text selection is not a toggle), and the one-row clamp is the
+ * tool card's input-line clamp. The tray sits outside `#feed`, so the feed's
+ * click handler never reaches it and the fold arms its own.
+ *
+ * A PROMPT THAT FITS NEEDS NO AFFORDANCE. The fold is foldable when there is a
+ * second line or an attachment to hide, or when the first line itself overruns
+ * its row — which only layout can say, so the line is re-measured whenever the
+ * pointer enters the fold: the affordance is a cursor, seen only there, and a
+ * listener on the card's own element needs no teardown.
+ *
+ * View state only: nothing about it reaches the daemon.
+ */
+export function drawHeldFold(said: UserSaid, path: string): HTMLElement {
+  const { first, more } = firstLineOf(said);
+  const fold = document.createElement("div");
+  fold.className = HELD_FOLD_CLASS;
+  const line = document.createElement("div");
+  line.className = "held-line md";
+  line.innerHTML = renderMarkdown(first);
+  fold.appendChild(line);
+  fold.appendChild(drawUserSaid(said, path));
+
+  const refresh = (): void => {
+    // Expanded, the line is hidden and measures nothing: the fold keeps the
+    // affordance it was opened with, so it can always be closed again.
+    if (fold.classList.contains(EXPANDED_CLASS)) return;
+    fold.classList.toggle(HELD_FOLDABLE_CLASS, more || overflowsCap(line));
+  };
+  refresh();
+  // The affordance is a cursor, which only a pointer over the fold can see, so
+  // entering it is when the line is measured against its row.
+  fold.addEventListener("pointerenter", refresh);
+  const view = fold.ownerDocument.defaultView;
+
+  fold.addEventListener("click", (event: MouseEvent) => {
+    if (!fold.classList.contains(HELD_FOLDABLE_CLASS)) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const section = expandAction({
+      section: fold,
+      interactive: target !== null && target.closest(CLICK_THROUGH_SELECTOR) !== null,
+      selectedText: view?.getSelection()?.toString() ?? "",
+    });
+    if (section === null) return;
+    const expanded = toggleExpanded(section);
+    log.debug("toggled a held prompt's fold", {
+      operation: "tray.held-prompt.fold",
+      context: { path, expanded },
+    });
+  });
+  return fold;
+}
+
+/**
+ * The first line of what the user typed, and whether anything is left once it
+ * is shown: a further line, or an attachment. Leading blank lines are not a
+ * first line — a prompt that opens on one would otherwise collapse to nothing.
+ */
+export function firstLineOf(said: UserSaid): { first: string; more: boolean } {
+  const text = spokenText(said).replace(/^(?:[ \t]*\r?\n)+/, "").trimEnd();
+  const breakAt = text.search(/\r?\n/);
+  const attached = (said.content?.blocks ?? []).some((block) => block.block.case === "image");
+  return {
+    first: breakAt < 0 ? text : text.slice(0, breakAt),
+    more: breakAt >= 0 || attached,
+  };
+}
+
+/**
+ * The turns whose folds the reader has open under ROOT.
+ *
+ * The tray is WHOLE-LIST-REPLACED, so a push that re-serves a held prompt
+ * (its classifier landing, say) draws a fresh, collapsed card. The reader's
+ * open folds are read off the drawing a push replaces and re-applied to the
+ * one that replaces it (`reopenHeldFolds`), keyed by the echoed turn.
+ */
+export function openHeldTurns(root: ParentNode): Set<string> {
+  const open = new Set<string>();
+  for (const card of root.querySelectorAll<HTMLElement>("[data-held-turn]")) {
+    if (card.querySelector(`:scope > .${HELD_FOLD_CLASS}.${EXPANDED_CLASS}`) !== null) {
+      open.add(card.getAttribute("data-held-turn") ?? "");
+    }
+  }
+  return open;
+}
+
+/** Re-open, under ROOT, the folds of the turns in OPEN (from `openHeldTurns`). */
+export function reopenHeldFolds(root: ParentNode, open: ReadonlySet<string>): void {
+  if (open.size === 0) return;
+  for (const card of root.querySelectorAll<HTMLElement>("[data-held-turn]")) {
+    if (!open.has(card.getAttribute("data-held-turn") ?? "")) continue;
+    const fold = card.querySelector(`:scope > .${HELD_FOLD_CLASS}`);
+    fold?.classList.add(HELD_FOLDABLE_CLASS, EXPANDED_CLASS);
+  }
 }
 
 /**
