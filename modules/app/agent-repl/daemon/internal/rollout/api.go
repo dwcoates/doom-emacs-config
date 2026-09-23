@@ -82,6 +82,9 @@ type Controller interface {
 	// Joining reports that this daemon is a successor still joining: it serves
 	// nothing yet, so it has nothing to deploy onto.
 	Joining() bool
+	// RollingOut reports whether a handover is in flight, and the workspaces it
+	// has not transferred yet.
+	RollingOut() ([]ids.WorkspaceID, bool)
 	// Join is the JOINING daemon's half: read the intent manifest, reconcile it
 	// against the kernel locks, arm the rendezvous, and adopt every headless
 	// workspace at once. A daemon that is not joining finds no manifest and
