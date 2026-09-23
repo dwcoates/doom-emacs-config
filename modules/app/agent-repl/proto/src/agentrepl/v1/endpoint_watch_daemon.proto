@@ -16,10 +16,20 @@ import "agentrepl/v1/workspace_mutation_progress.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// The stream is daemon-scoped, so there is nothing to address. What it carries
-// is the CONNECTING EMACS'S OWN BUILD, because every process reports its build
-// when it connects: it is what a deploy compares the checkout's elisp against.
+// The stream is daemon-scoped, so there is nothing to address. It is held by
+// Emacs AND by every webview (ruling R3), and what the request carries is WHO
+// IS CONNECTING — because every process reports its build when it connects,
+// and a deploy's elisp reload goes to Emacs's streams alone.
 message WatchDaemonRequest {
+  // THE ARM IS THE CLIENT. REQUIRED — a watch naming no client is refused.
+  oneof client {
+    WatchDaemonEmacs emacs = 1;
+    WatchDaemonWebview webview = 2;
+  }
+}
+
+// Emacs is connecting, and states the elisp it has loaded.
+message WatchDaemonEmacs {
   // THE ELISP THIS EMACS HAS LOADED, as a content hash. REQUIRED — a watch
   // without it is refused, because a deploy could not tell whether this Emacs
   // runs the checkout's elisp.
@@ -31,9 +41,14 @@ message WatchDaemonRequest {
   // where <module> is the name the loader is given (`core`, not
   // `lisp/core.el`) and <sha256> is the lowercase hex SHA-256 of that
   // module's `lisp/<module>.el` bytes. A module the loader names but whose
-  // file is absent contributes no line.
+  // file is absent contributes no line. `proto/vocab/elisp-build.json` holds
+  // both implementations to one answer.
   string elisp_build = 1;
 }
+
+// A webview is connecting. Presence is the fact: a webview reports its build
+// per workspace, on WatchWebWorkspace, where a reload is addressed.
+message WatchDaemonWebview {}
 
 message WatchDaemonResponse {
   oneof push {
@@ -54,10 +69,10 @@ message WatchDaemonResponse {
     // the state arms is never handed a stale progress event in their place.
     WorkspaceMutationProgress mutation_progress = 4;
     // A DEPLOY FOUND THIS EMACS ON OLDER ELISP: hot-load the module set, in
-    // config.el's load order, from the named root. A transient EVENT, like
-    // mutation_progress: it is pushed to the streams open at the deploy and
-    // never replayed to a late subscriber, whose own elisp_build is compared
-    // when it connects.
+    // config.el's load order, from the named root. Sent ONLY on an Emacs
+    // stream whose elisp_build is not the checkout's — never on a webview's —
+    // and never replayed to a late subscriber: a stream opened later states
+    // its own elisp_build, and a deploy that runs after it compares that.
     DaemonReloadElisp reload_elisp = 5;
   }
 }
