@@ -322,6 +322,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       composerFactory: deps.composerFactory,
       head: bubbleHead,
       overscan: overscan ?? undefined,
+      scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     };
     if (unitCase(row) === "merge") {
       return mountBubble({

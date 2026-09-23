@@ -78,8 +78,10 @@ export interface ScrollPosition {
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
  *   lands at the tail, by the earlier owner ruling of 2026-09-23.
- * - `prependCompensation`: older rows landing above the reader shift the view
- *   by exactly their height, so the content under the reader stays put.
+ * - `prependCompensation`: content above the reader changed height — older
+ *   rows landing above, or a bubble whose sub-feed lies wholly above the
+ *   viewport collapsing — and the view shifts by exactly that, so the content
+ *   under the reader stays put.
  *
  * Every move is recorded at DEBUG as `scroll.feed-moved` with its cause.
  */
@@ -200,9 +202,11 @@ export class TailFollow {
   }
 
   /**
-   * Older rows grew GROWN px above the reader: shift by exactly that, so the
-   * content under them stays put. A following reader is already at the tail,
-   * which the follow keeps, so nothing is added on top of it.
+   * The content above the reader changed by GROWN px (older rows landing: a
+   * positive figure; a sub-feed wholly above the viewport collapsing: a
+   * negative one): shift by exactly that, so the content under them stays put.
+   * A following reader is already at the tail, which the follow keeps, so
+   * nothing is added on top of it.
    */
   prependCompensation(grown: number): void {
     if (this.isFollowing()) return;
