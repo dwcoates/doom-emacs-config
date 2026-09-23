@@ -35,7 +35,7 @@ import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, prose, settledAt, type FrameOrigin } from "./entries.js";
-import { subagentBook, type FoldContext } from "./fold-context.js";
+import { bookFor, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
@@ -170,22 +170,6 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
         ? BigInt(Math.trunc(reasoning))
         : 0n,
   });
-}
-
-// ---------------------------------------------------------------------------
-// Which agent a message belongs to
-// ---------------------------------------------------------------------------
-
-/**
- * The book a vendor message's frames belong to.
- *
- * `parent_tool_use_id` names the CALL that spawned the agent, never the agent,
- * and the pinned SDK stream states no agent id anywhere — so the resolution is
- * {@link subagentBook}, the ONE function that mints it.
- */
-function bookFor(context: FoldContext, parentToolUseId: string | null): conversationv1.AgentId {
-  if (parentToolUseId === null || parentToolUseId === "") return context.mainAgentId;
-  return subagentBook(context, parentToolUseId);
 }
 
 // ---------------------------------------------------------------------------

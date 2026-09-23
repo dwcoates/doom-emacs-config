@@ -60,6 +60,32 @@ export function subagentBook(
   return subagentId(spawningToolUseId);
 }
 
+/**
+ * THE ONE RULE for which stream a vendor message rides: the spawning call a
+ * subagent's message names, or `undefined` for the MAIN agent's own stream.
+ *
+ * The vendor spells "no parent" as `null`, and a loosely-read record may spell
+ * it as an absent or empty field; all three are the main stream. The book
+ * ({@link bookFor}), the stream's block state and every "top-level only" join
+ * the fold keeps resolve through this, so no two of them can disagree about
+ * which agent a message belongs to.
+ */
+export function spawningCallOf(parentToolUseId: unknown): string | undefined {
+  return typeof parentToolUseId === "string" && parentToolUseId !== "" ? parentToolUseId : undefined;
+}
+
+/**
+ * The book a vendor message's frames belong to.
+ *
+ * `parent_tool_use_id` names the CALL that spawned the agent, never the agent,
+ * and the pinned SDK stream states no agent id anywhere — so a subagent's book
+ * is {@link subagentBook}, the ONE function that mints it.
+ */
+export function bookFor(context: FoldContext, parentToolUseId: unknown): conversationv1.AgentId {
+  const spawningCall = spawningCallOf(parentToolUseId);
+  return spawningCall === undefined ? context.mainAgentId : subagentBook(context, spawningCall);
+}
+
 /** The MCP server names the session knows, or none when the engine states none. */
 export function mcpServerNames(context: FoldContext): readonly string[] {
   return context.mcpServerNames?.() ?? [];
