@@ -36,7 +36,7 @@ const PATH = "FeedUserPrompt";
  * row's body wholesale and a fresh node restarts a CSS animation at 0%, so
  * without the delay every redraw would jump the band back to the left edge.
  */
-export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
+export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement): HTMLElement {
   log.info("drawing a user prompt row", {
     operation: "feed.draw-user-prompt",
     context: { arm: msg.result.case ?? "unset" },
@@ -50,17 +50,22 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   const result = requireCase(msg.result, `${PATH}.result`);
   switch (result.case) {
     case "success":
-      return drawBubble({
-        role: "prompt",
-        variant: "user",
-        hooks: ["user"],
-        working: msg.working,
-        content: drawFeedUserPromptBody(
-          requireMessage(result.value.body, `${PATH}.success.body`),
-          `${PATH}.success.body`,
-        ),
-        capLines: "feed",
-      }).bubble;
+      // PREVIOUS, the row's last draw, is updated in place (drawBubble), so a
+      // re-push never replaces the box a reader is scrolled inside.
+      return drawBubble(
+        {
+          role: "prompt",
+          variant: "user",
+          hooks: ["user"],
+          working: msg.working,
+          content: drawFeedUserPromptBody(
+            requireMessage(result.value.body, `${PATH}.success.body`),
+            `${PATH}.success.body`,
+          ),
+          capLines: "feed",
+        },
+        previous,
+      ).bubble;
     default:
       return unreachableArm(`${PATH}.result`, result.case);
   }

@@ -183,3 +183,14 @@ describe("drawFeedAgentPrompt: its spec", () => {
     expect(el.querySelector(".prompt-address")?.classList.contains(BUBBLE_STRIP_CLASS)).toBe(true);
   });
 });
+
+describe("drawFeedAgentPrompt: a re-push", () => {
+  it("updates the previous draw in place", () => {
+    // Arrange
+    const first = drawFeedAgentPrompt(agentPrompt());
+    // Act
+    const again = drawFeedAgentPrompt(agentPrompt(), first);
+    // Assert
+    expect(again).toBe(first);
+  });
+});
