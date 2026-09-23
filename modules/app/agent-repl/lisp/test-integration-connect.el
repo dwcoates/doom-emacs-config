@@ -30,6 +30,13 @@
 (declare-function agent-repl-connect-stream "connect")
 (declare-function agent-repl-connect-stream-cancel "connect")
 
+(defconst agent-repl-itest-connect--watch-daemon-body
+  (json-serialize '((emacs . ((elispBuild . "itest-elisp-build")))))
+  "The WatchDaemon body these transport scenarios send.
+The request names its client and an Emacs client states its elisp build:
+the daemon (and the fake) refuse one that does not, and these scenarios
+are about the transport, not that refusal.")
+
 ;;;; ---- Scenario 1: discovery and the unary round trip ----
 
 (ert-deftest agent-repl-itest-connect-reads-the-published-daemon-addr ()
@@ -266,7 +273,7 @@ is swallowed without a trace in the production log."
       (unwind-protect
           (progn
             (agent-repl-connect-stream
-             conn "WatchDaemon" (json-serialize '())
+             conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
              (lambda (msg)
                (if first-call
                    (progn (setq first-call nil) (error "on-push boom"))
@@ -297,7 +304,7 @@ lists either subscription afterward."
     (let ((outcomes-a nil) (outcomes-b nil)
           (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (agent-repl-connect-stream
-       conn "WatchDaemon" (json-serialize '())
+       conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
        (lambda (_push) nil)
        (lambda (outcome) (push outcome outcomes-a)))
       (agent-repl-connect-stream
@@ -325,7 +332,7 @@ ON-CLOSE is a FUNCTION, not a symbol: this file is lexically bound, so a
 `symbol-value' indirection would miss the caller's `let' binding entirely
 and every close assertion would wait on a variable nothing ever wrote."
   (agent-repl-connect-stream
-   conn "WatchDaemon" (json-serialize '())
+   conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
    (lambda (_push) nil)
    on-close))
 
@@ -438,7 +445,7 @@ but the order within one stream."
       (unwind-protect
           (progn
             (agent-repl-connect-stream
-             conn "WatchDaemon" (json-serialize '())
+             conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
              (lambda (push) (push push pushes))
              (lambda (_outcome) nil))
             (agent-repl-itest--await-subscriber daemon "daemon")
@@ -651,7 +658,7 @@ past it would be a subscriber production believes it does not have."
       (let ((detail
              (condition-case err
                  (progn (agent-repl-connect-stream
-                         conn "WatchDaemon" (json-serialize '())
+                         conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
                          (lambda (_push) nil)
                          (lambda (_outcome) nil))
                         nil)
@@ -683,7 +690,7 @@ more than once, or never runs at all."
           (progn
             ;; Act.
             (agent-repl-connect-stream
-             conn "WatchDaemon" (json-serialize '())
+             conn "WatchDaemon" agent-repl-itest-connect--watch-daemon-body
              (lambda (_push) (push :push events))
              (lambda (_outcome) nil)
              (lambda () (push :open events)))

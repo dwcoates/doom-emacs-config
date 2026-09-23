@@ -957,6 +957,20 @@ as if it were understood."
       ;; Assert
       (should (equal (cdr (assq :drain agent-repl-test-link--hooks)) (list nil))))))
 
+(ert-deftest agent-repl-test-link-reload-elisp-push-reaches-the-reload-handler ()
+  "A deploy's `reload_elisp' push is handed to elisp-build.el, value intact."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (handled nil))
+      (cl-letf (((symbol-function 'agent-repl-elisp-reload-handle)
+                 (lambda (reload) (push reload handled))))
+        ;; Act
+        (agent-repl-test-link--push
+         conn (list :arm :reload-elisp :value '(:module-root "/r/" :build "b1"))))
+      ;; Assert
+      (should (equal handled '((:module-root "/r/" :build "b1")))))))
+
 ;;;; ---- Refusals ----
 
 (ert-deftest agent-repl-test-link-unknown-push-arm-is-an-error ()
