@@ -188,3 +188,19 @@ func TestAnUnreadablePortedConversationIsRecorded(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed ported-conversation read recorded", h.log.Records())
 	}
 }
+
+// A PORTED PROMPT'S TURN ENDED IN THE PARENT: no terminal for it will ever
+// reach the fork, so it is drawn settled.
+func TestAPortedPromptIsNotWorking(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ported = []PortedPrompt{{Turn: "parent-turn", Text: "what is 2+2", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}}
+
+	// Act.
+	h.replay(historyPage(&conversationv1.HistoryFloor{}))
+
+	// Assert.
+	if h.promptWorking("parent-turn") {
+		t.Fatal("a ported prompt is working")
+	}
+}
