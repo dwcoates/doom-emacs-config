@@ -900,20 +900,23 @@ describe("the not-on-screen record", () => {
       row: { ...AGENT_ROW, jump: unresolvedFor("notDrawn") },
       panel: "agents" as const,
       want: { work_id: "work-a", kind: "agents", feed_id: "unresolved", jump: "notDrawn", reason: "notDrawn" },
+      level: "warn",
     },
     {
       name: "a known entry that did not land names the entry it tried",
       row: AGENT_ROW,
       panel: "agents" as const,
       want: { work_id: "work-a", kind: "agents", feed_id: "bubble-1", jump: "entry", reason: "entry_not_revealed" },
+      level: "warn",
     },
     {
       name: "a monitor names why it has no entry",
       row: MONITOR_ROW,
       panel: "monitors" as const,
       want: { work_id: "work-m", kind: "monitors", feed_id: "unresolved", jump: "noFeedEntry", reason: "noFeedEntry" },
+      level: "info",
     },
-  ])("$name", async ({ row, panel, want }) => {
+  ])("$name", async ({ row, panel, want, level }) => {
     // Arrange
     const capture = captureLogRecords();
     const drawn = drawPanel(panel, { [panel]: [row] }, false);
@@ -923,7 +926,7 @@ describe("the not-on-screen record", () => {
 
     // Assert
     const record = await forwardedRecord(capture, "footer.expanded.jump-unreachable");
-    expect(record.level.case).toBe("warn");
+    expect(record.level.case).toBe(level);
     for (const [key, value] of Object.entries(want)) expect(field(record, key)).toBe(value);
   });
 
