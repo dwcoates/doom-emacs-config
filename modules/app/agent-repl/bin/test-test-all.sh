@@ -432,6 +432,25 @@ test_roster_matches_the_run_block() {
     fi
 }
 
+# test-all.sh times each coverage component as its own suite, so its loop
+# restates the coverage script's default components. The script's
+# ALL_COMPONENTS is the source of truth; a name here the script refuses fails
+# the run, and a name the script gained but this loop lacks is never run.
+test_component_loop_matches_the_coverage_script() {
+    local looped owned
+    looped="$(sed -n 's/^for component in \(.*\); do$/\1/p' "$SCRIPT_SRC" |
+        tr ' ' '\n' | grep -v '^$' | sort)"
+    owned="$(sed -n 's/^ALL_COMPONENTS=(\(.*\))$/\1/p' \
+        "$THIS_DIR/report-nonlisp-coverage.sh" | tr ' ' '\n' | grep -v '^$' | sort)"
+
+    if [ -n "$owned" ] && [ "$looped" = "$owned" ]; then
+        pass "the component loop runs exactly the coverage script's components"
+    else
+        fail "the component loop runs exactly the coverage script's components"
+        printf '  looped:\n%s\n  owned:\n%s\n' "$looped" "$owned" >&2
+    fi
+}
+
 # A suite that cannot meet its precondition exits 77. The distinction this
 # pins is the whole reason 77 exists: the run must stay GREEN (a missing
 # container is not a defect in the change under test) while the output still
@@ -546,6 +565,7 @@ test_unknown_suite_fails_before_running_suites
 test_empty_suites_list_fails_before_running_suites
 test_suites_records_only_the_suites_it_ran
 test_roster_matches_the_run_block
+test_component_loop_matches_the_coverage_script
 test_declined_suite_does_not_fail_the_run
 test_declined_suite_is_named_in_the_output
 test_declined_suite_is_never_recorded
