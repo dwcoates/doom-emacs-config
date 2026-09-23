@@ -24,6 +24,27 @@ func TestOnTurnEndedStampsTheTurnsClose(t *testing.T) {
 	}
 }
 
+// TestOnTurnEndedWithNothingHeldIsRecordedAtInfo covers the turn end that
+// delivers nothing: it still leaves an INFO record, so a turn end reaching the
+// queue is always visible on disk and "the queue was never told" cannot be
+// confused with "the queue was told and had nothing to do".
+func TestOnTurnEndedWithNothingHeldIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	beforeRecords := len(h.log.Records())
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	for _, record := range h.log.Records()[beforeRecords:] {
+		if record.Level == "info" && record.Operation == "daemon.promptqueue.turn_ended" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an info daemon.promptqueue.turn_ended", h.log.Records()[beforeRecords:])
+}
+
 func TestOnTurnEndedClearsTheInterruptingStatus(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
