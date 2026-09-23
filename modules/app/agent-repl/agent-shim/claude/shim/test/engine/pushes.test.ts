@@ -93,7 +93,7 @@ async function take(
 
 describe("opening a stream", () => {
   it("delivers diagnostics FIRST", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
 
     const [first] = await take(pushes.subscribe(), 1);
 
@@ -101,7 +101,7 @@ describe("opening a stream", () => {
   });
 
   it("reports healthy when nothing has faulted", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
 
     const [first] = await take(pushes.subscribe(), 1);
 
@@ -110,8 +110,33 @@ describe("opening a stream", () => {
     );
   });
 
+  it("carries the shim's build identity on the opening diagnostics frame", async () => {
+    // An inert shim -- no session started, no faults recorded -- still opens
+    // every WatchSession with a diagnostics frame stamped with its own build,
+    // since that is the only readiness signal the daemon's deploy can compare
+    // against a freshly built bundle before any session exists.
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+
+    const [first] = await take(pushes.subscribe(), 1);
+
+    expect(first?.update.case === "diagnostics" ? first.update.value.shimBuild : undefined).toBe(
+      "test-build-sha",
+    );
+  });
+
+  it("carries the shim's build identity on every subsequent diagnostics restatement", () => {
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+
+    pushes.fault(fault("the store went away"));
+    const restated = pushes.diagnostics();
+
+    expect(restated.update.case === "diagnostics" ? restated.update.value.shimBuild : undefined).toBe(
+      "test-build-sha",
+    );
+  });
+
   it("gives a SECOND concurrent subscriber diagnostics first too", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const first = pushes.subscribe();
     await take(first, 1);
 
@@ -121,7 +146,7 @@ describe("opening a stream", () => {
   });
 
   it("reports unhealthy with the faults kept since start", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.fault(fault("the store went away"));
 
     const [first] = await take(pushes.subscribe(), 1);
@@ -134,7 +159,7 @@ describe("opening a stream", () => {
   });
 
   it("catches a late joiner up on the current model", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(modelChanged("claude-opus-5"));
 
     const taken = await take(pushes.subscribe(), 2);
@@ -145,7 +170,7 @@ describe("opening a stream", () => {
   it("does not replay an event arm to a late joiner", async () => {
     // Two identical compactions are two compactions; replaying one to a late
     // joiner would announce a compaction that is not happening.
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(compacting());
 
     const taken = await take(pushes.subscribe(), 1);
@@ -154,7 +179,7 @@ describe("opening a stream", () => {
   });
 
   it("counts its subscribers", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.subscribe();
     pushes.subscribe();
 
@@ -162,9 +187,18 @@ describe("opening a stream", () => {
   });
 });
 
+describe("construction", () => {
+  it("refuses to build with an empty shim build identity", () => {
+    // SessionDiagnostics.shim_build is REQUIRED on every frame; an empty
+    // string here would otherwise ride the wire as a malformed frame, so the
+    // construction site fails loudly instead of silently proceeding.
+    expect(() => new SessionPushes(() => 1, "")).toThrow(/shimBuildSha is required/);
+  });
+});
+
 describe("pushing", () => {
   it("reaches an attached consumer", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const stream = pushes.subscribe();
     pushes.push(modelChanged("claude-opus-5"));
 
@@ -174,28 +208,28 @@ describe("pushing", () => {
   });
 
   it("DROPS an unchanged replayed arm", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(modelChanged("claude-opus-5"));
 
     expect(pushes.push(modelChanged("claude-opus-5"))).toBe(false);
   });
 
   it("delivers a CHANGED replayed arm", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(modelChanged("claude-opus-5"));
 
     expect(pushes.push(modelChanged("claude-sonnet-5"))).toBe(true);
   });
 
   it("always delivers an event arm, even an identical one", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(compacting());
 
     expect(pushes.push(compacting())).toBe(true);
   });
 
   it("reaches every attached consumer", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const one = pushes.subscribe();
     const two = pushes.subscribe();
     pushes.push(modelChanged("claude-opus-5"));
@@ -207,7 +241,7 @@ describe("pushing", () => {
   });
 
   it("opens a degraded window when a consumer's queue overflows", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.subscribe();
     for (let index = 0; index < SUBSCRIBER_QUEUE_LIMIT + 2; index++) pushes.push(compacting());
 
@@ -219,7 +253,7 @@ describe("pushing", () => {
 
 describe("faults", () => {
   it("restate the diagnostics to every consumer", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const read = reader(pushes.subscribe());
     await read.next();
 
@@ -229,7 +263,7 @@ describe("faults", () => {
   });
 
   it("accumulate distinct components since start", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.fault(
       create(conversationv1.SessionFaultSchema, {
         component: "converter",
@@ -246,7 +280,7 @@ describe("faults", () => {
   });
 
   it("a repeat of the same component and kind REPLACES the standing fault rather than stacking", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.fault(fault("one"));
     pushes.fault(fault("two"));
 
@@ -260,7 +294,7 @@ describe("faults", () => {
   });
 
   it("a different kind on the same component is a SECOND fault", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.fault(fault("the store went away"));
     pushes.fault(
       create(conversationv1.SessionFaultSchema, {
@@ -277,7 +311,7 @@ describe("faults", () => {
   });
 
   it("logs the first occurrence of a fault at error", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const before = mockedWriteSync.mock.calls.length;
 
     pushes.fault(fault("the store went away"));
@@ -290,7 +324,7 @@ describe("faults", () => {
   });
 
   it("logs a repeat at debug, carrying the repeat count", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.fault(fault("one"));
     const before = mockedWriteSync.mock.calls.length;
 
@@ -306,7 +340,7 @@ describe("faults", () => {
 
 describe("standing down", () => {
   it("ENDS every consumer's stream", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const read = reader(pushes.subscribe());
     await read.next();
 
@@ -316,7 +350,7 @@ describe("standing down", () => {
   });
 
   it("closes a stream opened after the stand-down rather than hanging it", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.standDown();
 
     const taken = await reader(pushes.subscribe()).rest();
@@ -326,7 +360,7 @@ describe("standing down", () => {
 
 describe("a component recovering", () => {
   it("clears that component's standing faults", () => {
-    const pushes = new SessionPushes(() => 7);
+    const pushes = new SessionPushes(() => 7, "test-build-sha");
     pushes.fault(
       create(conversationv1.SessionFaultSchema, {
         component: "converter",
@@ -344,7 +378,7 @@ describe("a component recovering", () => {
   });
 
   it("leaves another component's fault standing", () => {
-    const pushes = new SessionPushes(() => 7);
+    const pushes = new SessionPushes(() => 7, "test-build-sha");
     pushes.fault(fault("the store is gone"));
 
     pushes.resolveComponent("converter", 0);
@@ -353,7 +387,7 @@ describe("a component recovering", () => {
   });
 
   it("closes that component's open window with the dropped count", async () => {
-    const pushes = new SessionPushes(() => 7);
+    const pushes = new SessionPushes(() => 7, "test-build-sha");
     pushes.openDegradedWindow("converter", "the fold refused a message");
 
     pushes.resolveComponent("converter", 3);
@@ -364,7 +398,7 @@ describe("a component recovering", () => {
   });
 
   it("stamps the close with the clock's instant", () => {
-    const pushes = new SessionPushes(() => 7);
+    const pushes = new SessionPushes(() => 7, "test-build-sha");
     pushes.openDegradedWindow("converter", "the fold refused a message");
 
     pushes.resolveComponent("converter", 0);
@@ -375,13 +409,13 @@ describe("a component recovering", () => {
   });
 
   it("answers false when nothing was standing for that component", () => {
-    const pushes = new SessionPushes(() => 7);
+    const pushes = new SessionPushes(() => 7, "test-build-sha");
 
     expect(pushes.resolveComponent("converter", 0)).toBe(false);
   });
 
   it("pushes the healthy diagnostics to a subscriber", async () => {
-    const pushes = new SessionPushes(() => 7);
+    const pushes = new SessionPushes(() => 7, "test-build-sha");
     pushes.fault(
       create(conversationv1.SessionFaultSchema, {
         component: "converter",
@@ -417,7 +451,7 @@ describe("fast mode", () => {
   }
 
   it("is replayed to a consumer that joins after the vendor stated it", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(fastMode(true));
 
     const opening = await take(pushes.subscribe(), 2);
@@ -426,14 +460,14 @@ describe("fast mode", () => {
   });
 
   it("is dropped when the state did not change", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(fastMode(true));
 
     expect(pushes.push(fastMode(true))).toBe(false);
   });
 
   it("goes out when the state changed", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(fastMode(true));
 
     expect(pushes.push(fastMode(false))).toBe(true);
@@ -451,7 +485,7 @@ describe("the vendor's title for the conversation", () => {
     // THE DAEMON IS ALWAYS THAT CONSUMER: the title is read during
     // StartSession and the daemon's standing WatchSession opens after
     // StartSession has answered, so without the replay it would never see it.
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(title("Add SPC j keybinding support"));
 
     const opening = await take(pushes.subscribe(), 2);
@@ -460,14 +494,14 @@ describe("the vendor's title for the conversation", () => {
   });
 
   it("is dropped when the vendor restated the same title", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(title("the one title"));
 
     expect(pushes.push(title("the one title"))).toBe(false);
   });
 
   it("goes out when the vendor changed its mind", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(title("first guess"));
 
     expect(pushes.push(title("what it turned out to be"))).toBe(true);
@@ -502,7 +536,7 @@ describe("account usage", () => {
   // reached nobody, so the footer drew no allowance figure until a turn
   // closed and reprobed — the whole of a fresh session's usage line, missing.
   it("is replayed to a consumer that joins after the session probed it", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(accountUsage(1n, 41));
 
     const opening = await take(pushes.subscribe(), 2);
@@ -511,7 +545,7 @@ describe("account usage", () => {
   });
 
   it("goes out again for a later sample, which never repeats an instant", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.push(accountUsage(1n, 41));
 
     expect(pushes.push(accountUsage(2n, 41))).toBe(true);
@@ -520,7 +554,7 @@ describe("account usage", () => {
 
 describe("a consumer that goes away", () => {
   it("ends the stream when the iterator's own return() is called directly", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const iterator = pushes.subscribe()[Symbol.asyncIterator]();
     await iterator.next();
 
@@ -536,7 +570,7 @@ describe("a consumer that goes away", () => {
   // every later fact into a queue nobody drains.
   it("drops the subscriber from the fan-out when it leaves with nothing pending", async () => {
     // Arrange.
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const iterator = pushes.subscribe()[Symbol.asyncIterator]();
     await iterator.next();
     const pending = iterator.next();
@@ -550,7 +584,7 @@ describe("a consumer that goes away", () => {
   });
 
   it("also ends via a for-await break, which the runtime maps to return()", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
 
     for await (const _ of pushes.subscribe()) {
       break;
@@ -564,7 +598,7 @@ describe("a consumer that goes away", () => {
 
 describe("the default clock", () => {
   it("stamps a degraded window with a real wall-clock time when none is injected", () => {
-    const pushes = new SessionPushes();
+    const pushes = new SessionPushes(undefined, "test-build-sha");
     const before = Date.now();
 
     const window = pushes.openDegradedWindow("test", "no clock injected");
@@ -578,7 +612,7 @@ describe("pushing after the stand-down", () => {
     // A stream opened after the stand-down is closed on arrival but still
     // attached, so the next fact cannot reach it — and a consumer's view having
     // a hole is exactly what a degraded window states.
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.standDown();
     pushes.subscribe();
 
@@ -593,7 +627,7 @@ describe("pushing after the stand-down", () => {
 
 describe("a session fact carrying no arm", () => {
   it("still reaches an attached consumer rather than being swallowed as unchanged", async () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     const stream = pushes.subscribe()[Symbol.asyncIterator]();
     await stream.next();
 
@@ -605,7 +639,7 @@ describe("a session fact carrying no arm", () => {
 
 describe("a fault that names no kind", () => {
   it("is still recorded, and still makes the session unhealthy", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
 
     pushes.fault(create(conversationv1.SessionFaultSchema, { component: "test", detail: "why" }));
 
@@ -618,7 +652,7 @@ describe("a fault that names no kind", () => {
 
 describe("recovering a component whose window is already closed", () => {
   it("answers false, so the caller does not restate an unchanged verdict", () => {
-    const pushes = new SessionPushes(() => 1);
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
     pushes.recordDegradedWindow(
       create(conversationv1.SessionDegradedWindowSchema, {
         component: "store-writer",
