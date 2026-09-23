@@ -47,6 +47,17 @@ type agentWatch struct {
 	// frame. It is BOUNDED: a shim that refuses forever is reported as a
 	// fault rather than retried forever.
 	refusals int
+	// paged records that this watch has been served an opening page — its
+	// own, or the one StartTurn's answer carried for the main watch. From then
+	// on, everything a later opening page carries was written after it.
+	paged bool
+	// catchUp records that the open in force asked for a CATCH-UP page: one
+	// carrying only entries this watch has not been served, because the open
+	// named a known_through pointer or the watch had already been paged. Its
+	// entries were written while no stream stood, so a cut among them is an
+	// edge the views missed and is routed (routePageCutLocked). A watch's
+	// FIRST page is a repaint instead: history, whose cuts are never edges.
+	catchUp bool
 }
 
 // shellWatch is one open WatchBash stream for one detached shell.
@@ -143,17 +154,19 @@ type watcher struct {
 	closedTurns     map[ids.TurnID]TurnClose
 	closedTurnOrder []ids.TurnID
 
-	// seenTerminals is every terminal row this watcher has been served, keyed
-	// by the watch that carried it and the row's pointer (terminalKey). A
-	// terminal is a row of its own in the book — one per turn, one per agent
-	// run — so its pointer IS its identity, and a second sighting of it is a
-	// REPLAY: the shim re-serving rows it already served after the store ended
-	// a standing watch. A replay is dropped whole; it never reaches a view and
-	// is never charged to the turn now open. See routeAgentFrameLocked.
+	// seenClosings is every row that CLOSES AN ACT — an agent's terminal, or
+	// a context cut — this watcher has been served, keyed by the watch that
+	// carried it and the row's pointer (closingKey). Each is a row of its own
+	// in the book, so its pointer IS its identity, and a second sighting of it
+	// is a REPLAY: the shim re-serving rows it already served after the store
+	// ended a standing watch. A replay is dropped whole; it never reaches a
+	// view, is never charged to the turn now open, and never ends a
+	// compaction that began after it. See routeAgentFrameLocked and
+	// routePageClosingsLocked.
 	//
-	// UNBOUNDED BY DESIGN: it grows by one per terminal row, and a bounded
+	// UNBOUNDED BY DESIGN: it grows by one per closing row, and a bounded
 	// memory would re-open exactly the hole it closes for the oldest rows.
-	seenTerminals map[string]struct{}
+	seenClosings map[string]struct{}
 
 	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
 	// started records that the session facts have been taken up, from
@@ -284,8 +297,8 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		closedTurns: map[ids.TurnID]TurnClose{},
 		facts:       map[string]*activityFact{},
 
-		seenTerminals: map[string]struct{}{},
-		unseenAsks:    map[string]struct{}{},
+		seenClosings: map[string]struct{}{},
+		unseenAsks:   map[string]struct{}{},
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	if session.MainKnownThrough != nil {
@@ -545,7 +558,7 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 		"entries":  len(page.GetEntries()),
 	})
 	if page != nil {
-		w.routeOpeningPageLocked(w.main, page)
+		w.routeOpeningPageLocked(w.main, page, pageTurnAccepted)
 	}
 	// THE HAND-OVER IS COMPLETE, so a terminal held for this turn's naming is
 	// released HERE and not a line earlier: the views have just been given the
@@ -978,8 +991,9 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 	}
 	a.refusals = 0
 	a.stream = stream
+	a.catchUp = req.KnownThrough != nil || a.paged
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
-		"agent_id": a.id.GetValue(), "catch_up": req.KnownThrough != nil,
+		"agent_id": a.id.GetValue(), "catch_up": a.catchUp,
 	})
 	go w.runAgent(gen, a, stream)
 }

@@ -179,7 +179,7 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 // page, or one entry as written.
 func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgentResponse) {
 	if page := resp.GetPage(); page != nil {
-		w.routeOpeningPageLocked(a, page)
+		w.routeOpeningPageLocked(a, page, pageWatchOpened)
 		return
 	}
 	if at := resp.GetEntry(); at != nil {
@@ -191,21 +191,43 @@ func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgen
 	})
 }
 
+// pageOrigin says which answer carried an opening page, because the two are
+// not the same promise about the rows that follow.
+type pageOrigin int
+
+const (
+	// pageWatchOpened is a watch's own first frame. The stream serves every
+	// later row live and none of the page's rows again, so the page is the
+	// ONLY sighting its rows get on this stream.
+	pageWatchOpened pageOrigin = iota
+	// pageTurnAccepted is the page StartTurn's answer carried. The main
+	// watch is standing beside it and serves the same rows live, so nothing
+	// on it is this watcher's to route or to count as served.
+	pageTurnAccepted
+)
+
+// String names the origin for a log record.
+func (o pageOrigin) String() string {
+	if o == pageTurnAccepted {
+		return "turn_accepted"
+	}
+	return "watch_opened"
+}
+
 // routeOpeningPageLocked hands an OPENING PAGE to the feed whole — a watch's
 // own first frame, or the page StartTurnSuccess carried.
 //
 // THE PAGE IS NOT REPLAYED AS LIVE FRAMES. Its entries are NEWEST FIRST, so
 // walking them would see a turn's terminal before its prompt and leave a
-// finished turn recorded as in flight. The only thing read out of a page is
-// the MAIN agent's identity, which an adopted session has no other source for
-// until its next StartTurn.
-func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage) {
+// finished turn recorded as in flight. What is read out of a page is the MAIN
+// agent's identity, which an adopted session has no other source for until
+// its next StartTurn, and the rows that CLOSE AN ACT (routePageClosingsLocked).
+func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage, origin pageOrigin) {
 	if entries := page.GetEntries(); len(entries) > 0 {
 		if ptr := entries[0].GetAt(); ptr != nil {
 			w.known[watchKey(a.id)] = ptr
 		}
 	}
-	w.noteServedTerminalsLocked(a, page)
 	if a.id == nil {
 		for _, entry := range page.GetEntries() {
 			if prompt := entry.GetEntry().GetUserPrompt(); prompt != nil {
@@ -220,6 +242,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	}
 	w.log.Debug("daemon.sessionwatcher.history_page", "opening page routed to the feed", dlog.Context{
 		"agent_id": a.id.GetValue(), "entries": len(page.GetEntries()),
+		"origin": origin.String(), "catch_up": a.catchUp,
 	})
 	agent := w.watchAgentLocked(a)
 	w.sinks.Feed.OnHistoryPage(w.ws, agent, page, w.addr)
@@ -234,6 +257,69 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	// ever restate, so without the page the strip reports a rehydrated
 	// conversation as one that has never run.
 	w.sinks.Footer.OnHistoryPage(w.ws, agent, page)
+	// AFTER the page is handed over whole, the rows on it that close an act
+	// reach the views that act was standing in.
+	w.routePageClosingsLocked(a, page, origin)
+	a.paged = true
+}
+
+// routePageClosingsLocked walks an opening page's rows that CLOSE AN ACT,
+// OLDEST FIRST — the order they were written in — and gives each the one
+// treatment its kind and the page's origin call for.
+//
+// A TERMINAL on any page is history: it is recorded as served, so a later
+// re-serving of it on the live stream is a replay, and it is never routed.
+//
+// A CUT is routed by routePageCutLocked, because a cut the views never took
+// leaves them standing in the act it ended: a watch re-opened after the
+// vendor's `compacting` was seen live, whose catch-up page carried the cut,
+// left the footer's compaction line and `compacting` state up until the
+// turn's terminal took them down (daemon.footer.compaction_line_outlived_turn).
+func (w *watcher) routePageClosingsLocked(a *agentWatch, page *conversationv1.HistoryPage, origin pageOrigin) {
+	entries := page.GetEntries()
+	for i := len(entries) - 1; i >= 0; i-- {
+		at := entries[i]
+		frame := at.GetEntry().GetAgentFrame()
+		switch {
+		case frame == nil:
+			continue
+		case isTerminalFrame(frame):
+			w.closingReplayedLocked(a, frame, at.GetAt())
+		case frame.GetUpdate().GetContextCut() != nil:
+			w.routePageCutLocked(a, frame, at.GetAt(), origin)
+		}
+	}
+}
+
+// routePageCutLocked decides what one cut on an opening page is, and routes
+// it when it is an edge the views have not taken.
+//
+//   - On StartTurn's page it is left alone: the main watch standing beside
+//     that page serves the same row live, and counting it served here would
+//     make the live row read as a replay and never reach the views.
+//   - A cut this watch was already served is a REPLAY, dropped whole.
+//   - On a watch's FIRST page — a repaint — it is history, recorded as served
+//     and never routed: it ended an act this daemon never saw begin, and
+//     routing it would drop the context figure the topbar holds now and end
+//     whatever turn the footer is drawing.
+//   - On a CATCH-UP page it was written while no stream stood, so it is an
+//     edge the views missed, and it is routed exactly as a live cut is — bar
+//     the feed, which draws its divider from the page it was just handed.
+func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer, origin pageOrigin) {
+	agent := frame.GetAgentId()
+	ctx := dlog.Context{"agent_id": agent.GetValue(), "pointer": at.GetValue(), "origin": origin.String()}
+	if origin == pageTurnAccepted {
+		w.log.Debug("daemon.sessionwatcher.context_cut_on_turn_page", "a cut on StartTurn's page is left to the main watch, which serves the same row live", ctx)
+		return
+	}
+	if w.closingReplayedLocked(a, frame, at) {
+		return
+	}
+	if !a.catchUp {
+		w.log.Debug("daemon.sessionwatcher.context_cut_history", "a cut on a watch's first page is history: recorded as served, never routed", ctx)
+		return
+	}
+	w.routeContextCutLocked(agent, frame.GetUpdate().GetContextCut(), at, cutCaughtUp)
 }
 
 // routeEntryLocked routes one live history entry.
@@ -304,16 +390,7 @@ func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.Pee
 func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) {
 	agent := frame.GetAgentId()
 
-	if isTerminalFrame(frame) && w.terminalReplayedLocked(a, at) {
-		// A TERMINAL IS ROUTED ONCE. This row was already served on this
-		// watch — live, or on an opening page — so it is the shim re-serving
-		// its book after the store ended a standing watch, not an agent
-		// ending. The frame names no turn, so routing it would charge it to
-		// whichever turn is open NOW: that is how a store restart once ended
-		// a live turn with the previous turn's terminal (2026-09-23 12:38:36).
-		w.log.Info("daemon.sessionwatcher.terminal_replayed", "a terminal row already served was served again; it is dropped", dlog.Context{
-			"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": turnValue(w.turn),
-		})
+	if isClosingFrame(frame) && w.closingReplayedLocked(a, frame, at) {
 		return
 	}
 
@@ -343,35 +420,65 @@ func isTerminalFrame(frame *conversationv1.AgentFrame) bool {
 	return frame.GetSuccess() != nil || frame.GetFailure() != nil
 }
 
-// terminalKey is a terminal row's identity on one watch.
-func terminalKey(a *agentWatch, at *conversationv1.HistoryPointer) string {
+// isClosingFrame reports whether a frame CLOSES AN ACT: an agent's terminal
+// ends its run, and a context cut ends the clear or compaction that produced
+// it. These are the rows routed once per pointer (closingReplayedLocked).
+func isClosingFrame(frame *conversationv1.AgentFrame) bool {
+	return isTerminalFrame(frame) || frame.GetUpdate().GetContextCut() != nil
+}
+
+// closingKey is a closing row's identity on one watch.
+func closingKey(a *agentWatch, at *conversationv1.HistoryPointer) string {
 	return watchKey(a.id) + "\x00" + at.GetValue()
 }
 
-// terminalReplayedLocked records a terminal row as served and reports whether
-// it had been served before. A row with no pointer has no identity to compare,
-// so it is never taken for a replay.
-func (w *watcher) terminalReplayedLocked(a *agentWatch, at *conversationv1.HistoryPointer) bool {
+// closingReplayedLocked records a closing row as served and reports whether
+// it had been served before — the ONE identity check every closing row passes
+// through, live or on a page, so a row is routed at most once per pointer.
+//
+// A row with no pointer has no identity to compare, so it is never taken for
+// a replay: it is routed rather than lost. The contract gives every entry a
+// pointer, so its absence is recorded as the producer defect it is.
+func (w *watcher) closingReplayedLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) bool {
+	agent := frame.GetAgentId()
 	if at.GetValue() == "" {
+		w.log.Error("daemon.sessionwatcher.closing_unaddressed", "a row closing an act carried no pointer, so a replay of it cannot be recognized", dlog.Context{
+			"agent_id": agent.GetValue(), "closing": closingKind(frame),
+		})
 		return false
 	}
-	key := terminalKey(a, at)
-	if _, seen := w.seenTerminals[key]; seen {
+	key := closingKey(a, at)
+	if _, seen := w.seenClosings[key]; !seen {
+		w.seenClosings[key] = struct{}{}
+		return false
+	}
+	if isTerminalFrame(frame) {
+		// A TERMINAL IS ROUTED ONCE. This row was already served on this
+		// watch — live, or on an opening page — so it is the shim re-serving
+		// its book after the store ended a standing watch, not an agent
+		// ending. The frame names no turn, so routing it would charge it to
+		// whichever turn is open NOW: that is how a store restart once ended
+		// a live turn with the previous turn's terminal (2026-09-23 12:38:36).
+		w.log.Info("daemon.sessionwatcher.terminal_replayed", "a terminal row already served was served again; it is dropped", dlog.Context{
+			"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": turnValue(w.turn),
+		})
 		return true
 	}
-	w.seenTerminals[key] = struct{}{}
-	return false
+	// A CUT IS ROUTED ONCE, for the same reason: re-served, it would end
+	// whatever compaction or turn the views are drawing NOW, and drop a
+	// context figure read after it.
+	w.log.Info("daemon.sessionwatcher.context_cut_replayed", "a cut row already served was served again; it is dropped", dlog.Context{
+		"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": turnValue(w.turn),
+	})
+	return true
 }
 
-// noteServedTerminalsLocked records every terminal row an opening page
-// carries. The page's terminals are history and are never routed as edges; a
-// later re-serving of one of them on the live stream is a replay.
-func (w *watcher) noteServedTerminalsLocked(a *agentWatch, page *conversationv1.HistoryPage) {
-	for _, at := range page.GetEntries() {
-		if frame := at.GetEntry().GetAgentFrame(); frame != nil && isTerminalFrame(frame) {
-			w.terminalReplayedLocked(a, at.GetAt())
-		}
+// closingKind names a closing row's kind for a log record.
+func closingKind(frame *conversationv1.AgentFrame) string {
+	if isTerminalFrame(frame) {
+		return "terminal"
 	}
+	return "context_cut"
 }
 
 // routeUpdateLocked routes one AgentUpdate arm.
@@ -401,19 +508,8 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.notifyPermissionLocked(permission)
 
 	case update.GetContextCut() != nil:
-		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", dlog.Context{
-			"agent_id": agent.GetValue(),
-		})
-		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), at, w.addr)
-		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
-		w.sinks.Topbar.OnContextCut(w.ws, agent, update.GetContextCut())
-		// A CLEAR OR A COMPLETED COMPACTION moves the digest boundary, so the
-		// synthesizer resets its hash and re-synthesizes on the next trigger. A
-		// FAILED compaction cut nothing, so the digest is unchanged and the
-		// synthesizer is left alone.
-		if cut := update.GetContextCut(); w.sinks.Title != nil && (cut.GetCleared() != nil || cut.GetCompacted() != nil) {
-			w.sinks.Title.OnContextReset(w.ws)
-		}
+		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetContextCut() != nil"})
+		w.routeContextCutLocked(agent, update.GetContextCut(), at, cutLive)
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
@@ -437,6 +533,51 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Warn("daemon.sessionwatcher.update_unrouted", "an AgentUpdate arm has no route", dlog.Context{
 			"agent_id": agent.GetValue(),
 		})
+	}
+}
+
+// cutSource says how a routed cut reached the watcher.
+type cutSource int
+
+const (
+	// cutLive is a cut served as a live entry.
+	cutLive cutSource = iota
+	// cutCaughtUp is a cut on a catch-up page: written while no stream stood.
+	cutCaughtUp
+)
+
+// String names the source for a log record.
+func (s cutSource) String() string {
+	if s == cutCaughtUp {
+		return "caught_up"
+	}
+	return "live"
+}
+
+// routeContextCutLocked routes one context cut to every view that resolves
+// from it. It is the ONE path a cut takes, whether it arrived live or on a
+// catch-up page, so no view can be handed one and not the other.
+//
+// THE FEED IS THE ONE DIFFERENCE: a caught-up cut is on the page the feed was
+// just handed whole, and it draws the divider from there.
+func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, source cutSource) {
+	ctx := dlog.Context{"agent_id": agent.GetValue(), "pointer": at.GetValue(), "source": source.String()}
+	if source == cutCaughtUp {
+		// INFO, NOT DEBUG: an act closed while no stream stood, and this is
+		// the only record that its end reached the views at all.
+		w.log.Info("daemon.sessionwatcher.context_cut", "a cut written while no stream stood was caught up; the footer and the topbar take it", ctx)
+	} else {
+		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", ctx)
+		w.sinks.Feed.OnContextCut(w.ws, agent, cut, at, w.addr)
+	}
+	w.sinks.Footer.OnContextCut(w.ws, agent, cut)
+	w.sinks.Topbar.OnContextCut(w.ws, agent, cut)
+	// A CLEAR OR A COMPLETED COMPACTION moves the digest boundary, so the
+	// synthesizer resets its hash and re-synthesizes on the next trigger. A
+	// FAILED compaction cut nothing, so the digest is unchanged and the
+	// synthesizer is left alone.
+	if w.sinks.Title != nil && (cut.GetCleared() != nil || cut.GetCompacted() != nil) {
+		w.sinks.Title.OnContextReset(w.ws)
 	}
 }
 
