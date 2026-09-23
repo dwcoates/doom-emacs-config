@@ -612,3 +612,58 @@ func TestAResponseWithNoUsageOfItsOwnStillWarnsAfterALaterOneReportsIts(t *testi
 			detail.GetLines()[0].GetText())
 	}
 }
+
+func TestADaemonRaisedWarningIsDrawnAsItsLineAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		raises    [][2]string
+		wantLines []string
+	}{
+		{
+			name:      "one raised condition draws one line with no overlay",
+			raises:    [][2]string{{"detached:w1", "detached shell w1 could not be placed"}},
+			wantLines: []string{"detached shell w1 could not be placed"},
+		},
+		{
+			name: "raising the same key again restates the line rather than adding one",
+			raises: [][2]string{
+				{"detached:w1", "first sentence"},
+				{"detached:w1", "second sentence"},
+			},
+			wantLines: []string{"second sentence"},
+		},
+		{
+			name: "two keys draw two lines, newest first",
+			raises: [][2]string{
+				{"detached:w1", "older"},
+				{"detached:w2", "newer"},
+			},
+			wantLines: []string{"newer", "older"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			for _, raise := range tc.raises {
+				h.r.RaiseWarning(testWS, raise[0], raise[1])
+			}
+
+			// Assert
+			got := warnings(t, h)
+			if len(got) != len(tc.wantLines) {
+				t.Fatalf("warnings = %+v, want %d", got, len(tc.wantLines))
+			}
+			for i, want := range tc.wantLines {
+				if line := got[i].GetLine().GetText(); line != want {
+					t.Errorf("warning %d line = %q, want %q", i, line, want)
+				}
+				if got[i].GetDetail() != nil {
+					t.Errorf("warning %d carries an overlay %T, want the line alone", i, got[i].GetDetail())
+				}
+			}
+		})
+	}
+}
