@@ -539,14 +539,18 @@ func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workI
 	cardID := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID})
 	retired := r.retire(s, at.feed, cardID.GetValue())
 	u.moved = true
+	u.movedTo = workID
 	sh := s.shell(workID)
 	sh.command = u.input
 	sh.startedAtMs = u.startedAtMs
 	sh.feed = at
-	r.publishShell(s, workID, sh, nil)
+	// THE CALL MAY HAVE ENDED ALREADY. Its result and its move are separate
+	// records, and a result drawn first is still the work's ending: the head
+	// is drawn settled from it rather than live.
+	r.publishShell(s, workID, sh, shellEnding(r.logger(s.id), workID, u.ending))
 	r.logger(s.id).Debug("daemon.feed.detached_shell",
 		"a foreground shell's running card was retired and redrawn as its detached shell bubble",
-		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired})
+		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired, "ended": u.ending != nil})
 	return true
 }
 
@@ -694,12 +698,9 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	case *conversationv1.AgentBash_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Success"})
 		sh.stateCommand(frame.Success.GetCommand().GetLine())
-		settled = shellSettled(log, workID, frame.Success)
+		settled = shellEnding(log, workID, bash)
 	case *conversationv1.AgentBash_Failure:
-		settled = &frontendv1.FeedShellSettled{
-			EndedAtMs: failureSettledMs(frame.Failure.GetError()),
-			Outcome:   &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}},
-		}
+		settled = shellEnding(log, workID, bash)
 	}
 
 	r.publishShell(s, workID, sh, settled)
@@ -861,6 +862,23 @@ func capSpool(spool string) (string, uint64) {
 		}
 	}
 	return tail, countLines(dropped)
+}
+
+// shellEnding renders how a shell ended from its terminal frame, and nil for
+// a frame that is not one (or for no frame at all). ONE rendering for every
+// source of a shell's ending -- its own run stream, or the call's own result
+// when the call's work had moved -- so the two can never draw it differently.
+func shellEnding(log dlog.Logger, workID string, bash *conversationv1.AgentBash) *frontendv1.FeedShellSettled {
+	switch frame := bash.GetResult().(type) {
+	case *conversationv1.AgentBash_Success:
+		return shellSettled(log, workID, frame.Success)
+	case *conversationv1.AgentBash_Failure:
+		return &frontendv1.FeedShellSettled{
+			EndedAtMs: failureSettledMs(frame.Failure.GetError()),
+			Outcome:   &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}},
+		}
+	}
+	return nil
 }
 
 // shellSettled renders a settled shell. A non-zero exit still COMPLETED —

@@ -2257,3 +2257,79 @@ func TestALiveSpawnWithNoStartInstantCountsFromFirstObserved(t *testing.T) {
 		t.Fatalf("started_at_ms = %d, want the first-observed instant %d (never zero)", got, h.nowMs)
 	}
 }
+
+// A MOVE THAT LANDS AFTER THE CALL ENDED. The call's result and its move are
+// separate records and can arrive in either order; a result drawn first is
+// still the work's ending, so the head is drawn settled from it, never live.
+
+func TestAMoveAnnouncedAfterTheCallSucceededDrawsTheHeadSettled(t *testing.T) {
+	// Arrange: the call ran and returned where it ran.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
+
+	// Act: the move is announced late.
+	h.detachWork("work-1", "unit-1")
+
+	// Assert.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCompleted() == nil || settled.GetExit().GetCode() != 0 || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want completed exit 0 at 9000", settled)
+	}
+}
+
+func TestAMoveAnnouncedAfterTheCallFailedDrawsTheHeadCancelled(t *testing.T) {
+	// Arrange: the call's input line comes from its start; its failure states none.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.send(activityOf("unit-1", failedCall(9_000)))
+
+	// Act.
+	h.detachWork("work-1", "unit-1")
+
+	// Assert.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCancelled() == nil || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want cancelled at 9000", settled)
+	}
+}
+
+func TestAMoveOfAStillRunningCallDrawsTheHeadLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+
+	// Act.
+	h.detachWork("work-1", "unit-1")
+
+	// Assert.
+	if h.shellHead().GetLive() == nil {
+		t.Fatalf("state = %T, want the head live", h.shellHead().GetState())
+	}
+}
+
+func TestShellEndingRendersNothingForAFrameThatIsNotATerminal(t *testing.T) {
+	tests := []struct {
+		name string
+		bash *conversationv1.AgentBash
+	}{
+		{name: "no frame at all", bash: nil},
+		{name: "a start", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{}}}},
+		{name: "an update", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{}}}},
+		{name: "a beat", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Progress{Progress: &conversationv1.AgentToolCallProgress{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+
+			// Act.
+			settled := shellEnding(log, "work-1", tt.bash)
+
+			// Assert.
+			if settled != nil {
+				t.Fatalf("settled = %+v, want nil", settled)
+			}
+		})
+	}
+}

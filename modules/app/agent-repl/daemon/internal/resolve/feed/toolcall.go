@@ -670,8 +670,20 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	// launch receipt, the other plane's replay, the next turn's live-work
 	// reconciliation — restates the CALL and never the move, so drawing one here
 	// would put a second, stale card beside the bubble.
+	//
+	// A TERMINAL IS THE ONE FRAME THAT STILL COUNTS. A call whose work really
+	// moved returns the backgrounding receipt, which settles nothing; a
+	// terminal on this unit is therefore its work's own ending, and it settles
+	// the head the card became. Dropping it left the head running forever when
+	// no other source ended the run -- the store holding no rows for it.
 	if u.moved {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.moved"})
+		if bash.GetSuccess() != nil || bash.GetFailure() != nil {
+			r.drawDetachedShell(s, &conversationv1.DetachedWorkId{Value: u.movedTo}, bash)
+			r.logger(s.id).Debug("daemon.feed.detached_shell_settled_by_call",
+				"a moved call's own terminal settled the detached shell head it became",
+				dlog.Context{"unit": unitID, "work": u.movedTo, "failed": bash.GetFailure() != nil})
+		}
 		return nil, errNotARow
 	}
 
@@ -699,6 +711,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Success"})
 		u.input = state.Success.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
+		u.ending = bash
 		ok, form := r.bashOutcomeForm(s, u.input, state.Success)
 		// THE EXIT CODE IS THE COMMAND'S OWN VERDICT ON ITSELF, and the
 		// foreground card states it exactly as the detached shell's settled
@@ -710,6 +723,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 				bashExit(state.Success))), nil
 	case *conversationv1.AgentBash_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
+		u.ending = bash
 		return r.toolRow(s, at, unitID, "Bash",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
