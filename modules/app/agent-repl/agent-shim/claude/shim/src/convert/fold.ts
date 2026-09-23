@@ -444,7 +444,7 @@ function settleCompaction(
  * absent one stays absent rather than becoming a zero wait.
  */
 function rememberVendorApiError(
-  message: { readonly error?: unknown; readonly retry_delay_ms?: unknown },
+  message: { readonly error?: unknown; readonly retry_delay_ms?: unknown; readonly message?: unknown },
   state: FoldState,
 ): void {
   const errorClass = typeof message.error === "string" ? message.error : undefined;
@@ -453,12 +453,18 @@ function rememberVendorApiError(
       ? Math.round(message.retry_delay_ms)
       : undefined;
   if (errorClass === undefined && retryAfterMs === undefined) return;
+  // THE SENTENCE RIDES THE SAME MESSAGE AS THE CLASS: an assistant message that
+  // states an `error` is the CLI's notice for it, and its prose is the vendor's
+  // own account of the failure. Only a message that states a class carries one.
+  const sentence = errorClass === undefined ? undefined : noticeText(message.message);
   const previous = state.vendorApiError;
-  const merged: { errorClass?: string; retryAfterMs?: number } = {};
+  const merged: { errorClass?: string; retryAfterMs?: number; sentence?: string } = {};
   const heldClass = errorClass ?? previous?.errorClass;
   if (heldClass !== undefined) merged.errorClass = heldClass;
   const heldWait = retryAfterMs ?? previous?.retryAfterMs;
   if (heldWait !== undefined) merged.retryAfterMs = heldWait;
+  const heldSentence = sentence ?? previous?.sentence;
+  if (heldSentence !== undefined) merged.sentence = heldSentence;
   state.vendorApiError = merged;
   // EARLY VISIBILITY FOR THE TWO CLASSES THAT MATTER. The full diagnostic record
   // is the terminal's (it alone reaches the status, the human sentence, the
@@ -479,6 +485,28 @@ function rememberVendorApiError(
     { vendor_error: merged.errorClass, retry_after_ms: merged.retryAfterMs },
     "the vendor stated an API failure class; held for the turn's terminal",
   );
+}
+
+/**
+ * The prose of a CLI error notice, or `undefined` when it has none.
+ *
+ * Read loosely: the notice's `message` is an ordinary assistant message whose
+ * content is a string or a list of blocks, and only its text is the sentence.
+ */
+function noticeText(message: unknown): string | undefined {
+  const content = (message as { content?: unknown } | undefined)?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((block) => (block as { type?: unknown }).type === "text")
+            .map((block) => (block as { text?: unknown }).text)
+            .filter((part): part is string => typeof part === "string")
+            .join("")
+        : "";
+  const trimmed = text.trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 
 /**
