@@ -143,6 +143,21 @@ describe("a DENIED call retires its unit", () => {
     const failure = read.result.value as conversationv1.AgentReadFailure;
     expect(failure.error?.content).toBeUndefined();
   });
+
+  it("restates the call's path, since the start it upserts over is gone once it lands", () => {
+    const registry = createCallRegistry();
+    registry.remember(call("Read", { file_path: "/tmp/a" }));
+    const entries = convert(
+      resultRecord([
+        { type: "tool_result", tool_use_id: "toolu_1", content: "Error: denied", is_error: true },
+      ]),
+      registry,
+      { deniedCall: () => true },
+    );
+
+    const read = activityOf(entries[0])?.item.value as conversationv1.AgentRead;
+    expect((read.result.value as conversationv1.AgentReadFailure).path?.path).toBe("/tmp/a");
+  });
 });
 
 // A SETTLED SEND STANDS ALONE on every path a tool result reaches the fold by:
