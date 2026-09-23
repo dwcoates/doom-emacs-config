@@ -28,7 +28,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import type { TrayContext } from "./context.js";
 import { drawHeldOffer } from "./held-offer.js";
-import { drawHeldPrompt } from "./held-prompt.js";
+import { drawHeldPrompt, openHeldTurns, reopenHeldFolds } from "./held-prompt.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -72,7 +72,11 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
       // a region: `#hold-tray:empty` is what collapses the space, and it only
       // matches a host with no children at all.
       const drawn = drawDaemonHoldTray(tray, tc);
+      // The reader's open folds are view state the push knows nothing of, so
+      // they are carried from the drawing being replaced onto its successor.
+      const open = openHeldTurns(host);
       host.replaceChildren(...(drawn === null ? [] : [drawn]));
+      reopenHeldFolds(host, open);
     },
   });
 
