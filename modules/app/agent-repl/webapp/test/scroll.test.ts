@@ -976,7 +976,7 @@ describe("observeScrollBox", () => {
   /**
    * A real element that answers scroll geometry, since jsdom lays nothing out.
    * `scrollTop` clamps into the scrollable range on write, as a browser's does
-   * — which is what turns `parkAtTail`'s "assign scrollHeight" into the bottom.
+   * — which is what turns the tail owner's "assign scrollHeight" into the bottom.
    */
   function scrollBox(init: { scrollHeight: number; clientHeight: number; scrollTop: number }) {
     const element = document.createElement("div");

@@ -244,6 +244,12 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   only from a parking cause and ends when the reader scrolls away; returning
   to the tail does not restart it. The reader's own wheel redirect and
   collapse click are input, not causes, and are the only other writes.
+  NOTHING MOVES A SCROLL BOX INDIRECTLY EITHER: a redraw never re-attaches an
+  element already in place (`placeChildren`, src/dom.ts), a response re-push
+  updates its bubble in place, a card holding a box the reader scrolled is
+  morphed rather than replaced (src/feed/keep-scroll.ts), an unchanged re-push
+  draws nothing, and anything repainted on a tick or toggled by a measurer
+  holds a fixed footprint (the cost corner, the shell clocks, `has-more`).
 - **A REDRAW NEVER UN-TOGGLES, WHATEVER ITS SHAPE** (owner ruling, 2026-09-18).
   The wire's fold is the INITIAL fold: an upsert carries the reader's open folds
   off the element it replaces (`carryExpanded`), and a full page replace —
