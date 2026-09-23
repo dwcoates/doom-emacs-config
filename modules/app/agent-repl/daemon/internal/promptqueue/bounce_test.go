@@ -166,18 +166,11 @@ func TestRequestBounceDecidesByWhatIsInFlight(t *testing.T) {
 			} else if g.runs.Load() != 0 {
 				t.Fatalf("a registered bounce ran %d times before its work ended", g.runs.Load())
 			}
-			if !recordWith(h.log.Records(), levelFor(tc.wantForced), opBounce, tc.wantMessage) {
+			if !recordWith(h.log.Records(), "info", opBounce, tc.wantMessage) {
 				t.Fatalf("records = %+v, want %q", h.log.Records(), tc.wantMessage)
 			}
 		})
 	}
-}
-
-func levelFor(forced bool) string {
-	if forced {
-		return "warn"
-	}
-	return "info"
 }
 
 func TestARegisteredBounceIsTakenWhenItsWorkEndsInEitherOrder(t *testing.T) {
