@@ -21,7 +21,7 @@ import {
   FooterTokensCellVerdictSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { panelStorageKey } from "../../src/footer/footer";
 import {
   assertVocabCoversArms,
@@ -54,6 +54,8 @@ import {
 import { ROOT_FEED } from "./fake-daemon";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

@@ -33,7 +33,7 @@ import {
   FeedDiffLineSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-import { HARNESS_EPOCH_MS, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { drawnPaintClass, expectedPaintClass } from "./vocab";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
@@ -106,6 +106,8 @@ import {
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
