@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/dlog"
@@ -86,6 +87,16 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 	if errors.As(err, &shimRefusal) {
 		return s.fill(refusal{Arm: shimRefusal.Arm, Reason: shimRefusal.Detail}), true
 	}
+	// THE STANDING EDIT'S OWN TURN rides the being_edited arm, so the refusal
+	// names the prompt that is being edited rather than only saying one is.
+	var beingEdited *promptqueue.BeingEditedError
+	if errors.As(err, &beingEdited) {
+		return s.fill(refusal{
+			Arm:    "being_edited",
+			Reason: err.Error(),
+			Fields: map[string]any{"editing_turn": &conversationv1.TurnId{Value: string(beingEdited.Turn)}},
+		}), true
+	}
 	// THE COLD GATE'S OWN SENTENCE, not this package's error string: the arm's
 	// `detail` is what a client shows the user, and it must read the way the
 	// gate card and the footer's cold-gate line read.
@@ -114,6 +125,12 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "accept_not_applicable", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrReleaseRefused):
 		return s.fill(refusal{Arm: "release_refused", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrNotHeld):
+		return s.fill(refusal{Arm: "not_held", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrNotEditing):
+		return s.fill(refusal{Arm: "not_editing", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrNoEditor):
+		return s.fill(refusal{Arm: "no_editor", Reason: err.Error()}), true
 
 	// The feed resolver's page-walk refusals.
 	case errors.Is(err, feed.ErrNoWalk):

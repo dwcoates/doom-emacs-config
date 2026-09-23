@@ -563,6 +563,14 @@ func (s *server) MutationProgress(progress *agentreplv1.WorkspaceMutationProgres
 	})
 }
 
+// hostStreamHeld reports whether a WatchHostWorkspace stream stands for the
+// workspace right now: the held-prompt edit's editor probe.
+func (s *server) hostStreamHeld(ws ids.WorkspaceID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hostHeld[ws] > 0
+}
+
 // holdParticipant records that one of a workspace's two per-workspace streams
 // is held, which is the fact rollout's adoption rendezvous terminates on AND
 // two of the three hops of connectivity truth (daemon.md invariant 11). Every
@@ -577,6 +585,14 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	}
 	hostLive, webLive := s.hostHeld[ws] > 0, s.webHeld[ws] > 0
 	s.mu.Unlock()
+
+	// THE EDITOR'S HOST STREAM IS THE HELD-PROMPT EDIT'S SCOPE. The last one
+	// closing retires the edit as a cancel would; the queue decides that
+	// under its delivery lock, so a begin that raced this close either saw no
+	// stream or is retired here.
+	if host && delta < 0 && !hostLive {
+		s.deps.Queue.EditorGone(ws)
+	}
 
 	s.log.Debug("daemon.server.participants", "a per-workspace stream edge moved the participant set",
 		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive})

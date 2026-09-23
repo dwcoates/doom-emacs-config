@@ -360,6 +360,56 @@ func TestAHostStreamCloseStatesTheHopDown(t *testing.T) {
 	}
 }
 
+// TestTheLastHostStreamClosingReleasesTheEdit pins the held-prompt edit's
+// scope: the editor's host stream going away tells the queue its editor is gone.
+func TestTheLastHostStreamClosingReleasesTheEdit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+	h.Footer.AwaitEdge(t) // the open edge
+
+	// Act.
+	cancel()
+	h.Footer.AwaitEdge(t) // the close edge, stated after the release
+
+	// Assert.
+	if gone := h.Queue.editorsGone(); len(gone) != 1 || gone[0] != testWorkspaceID {
+		t.Fatalf("editors gone = %v, want the test workspace once", gone)
+	}
+}
+
+// TestAHostStreamOpeningReleasesNoEdit pins that only a close is a departure.
+func TestAHostStreamOpeningReleasesNoEdit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+	h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if gone := h.Queue.editorsGone(); len(gone) != 0 {
+		t.Fatalf("editors gone = %v, want none on an open", gone)
+	}
+}
+
 // TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent pins the
 // state/event topic separation: after a drain schedule is armed and a
 // mutation-progress event is pushed, a LATE subscriber must still replay the
