@@ -73,6 +73,7 @@ import type {
   AssistantOptions,
   FakeBlock,
   LiveTask,
+  StartedTask,
   ResultSpec,
   ScenarioContext,
   ToolCall,
@@ -1152,8 +1153,9 @@ export function createFakeQuery(
   /** Scenarios parked on `awaitBackgrounded`, keyed by the call they own. */
   const backgroundWaiters = new Map<string, (ack: () => void) => void>();
 
-  const startTask = (task: Omit<LiveTask, "backgrounded">): LiveTask => {
-    const live: LiveTask = { ...task, backgrounded: false };
+  const startTask = (task: StartedTask): LiveTask => {
+    const { foreground, ...facts } = task;
+    const live: LiveTask = { ...facts, backgrounded: foreground !== true };
     liveTasks.set(task.taskId, live);
     // THE SPOOL EXISTS FROM THE MOMENT THE TASK DOES. A detached run that ends
     // by TIMING OUT or by being CANCELLED never gets a scenario line that opens
@@ -1163,13 +1165,16 @@ export function createFakeQuery(
     // ONLY FOR THE KINDS THAT OWN A SPOOL. A shell run's spool is its output and
     // an agent's is its own transcript; a monitor has neither, and inventing an
     // empty file for one puts bytes on disk the vendor never writes.
-    const spooled = task.kind === "local_bash" || task.kind === "local_agent";
-    const outputFile = spooled ? files.spool(task.taskId).path : undefined;
+    const flagged = task.kind === "local_bash" || task.kind === "local_agent";
+    const outputFile = flagged ? files.spool(task.taskId).path : undefined;
     systemMessage("task_started", {
       task_id: task.taskId,
       tool_use_id: task.toolUseId,
       description: task.description,
       task_type: task.kind,
+      // THE 0.3.280 SHAPE: every flagged kind states which side of the line it
+      // began on, and a foreground start says `false`.
+      ...(flagged ? { is_backgrounded: live.backgrounded } : {}),
       ...(outputFile === undefined ? {} : { output_file: outputFile }),
     });
     return live;
@@ -1178,8 +1183,10 @@ export function createFakeQuery(
   const announceLiveTasks = (): void =>
     // REPLACE semantics: the payload is the whole live set after the change,
     // which is why every mutation re-announces instead of sending a delta.
+    // ONLY BACKGROUND WORK IS ON THE LEVEL: the vendor's set is "every live
+    // background task", and foreground work is not one.
     systemMessage("background_tasks_changed", {
-      tasks: [...liveTasks.values()].map((t) => ({
+      tasks: [...liveTasks.values()].filter((t) => t.backgrounded).map((t) => ({
         task_id: t.taskId,
         task_type: t.kind,
         description: t.description,
@@ -1238,6 +1245,12 @@ export function createFakeQuery(
     mintAgentTaskId,
     mintMessageId,
     startTask,
+    markBackgrounded: (taskId: string) => {
+      const task = liveTasks.get(taskId);
+      if (task === undefined) throw new Error(`fake: markBackgrounded names no tracked task ${taskId}`);
+      task.backgrounded = true;
+      announceLiveTasks();
+    },
     announceLiveTasks,
     endTask: (taskId: string) => {
       liveTasks.delete(taskId);
