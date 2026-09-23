@@ -51,6 +51,7 @@ import { buildInterruptDetachedRequest } from "../requests.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { stopTicking, tick } from "../ticking.js";
+import { foldTitle } from "../title-fold.js";
 
 const PATH = "FeedSubagent";
 
@@ -151,8 +152,9 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
   label.textContent = requireMessage(msg.label, `${PATH}.label`).text;
   el.append(label);
 
+  let description: HTMLElement | null = null;
   if (msg.description !== undefined) {
-    const description = document.createElement("span");
+    description = document.createElement("span");
     description.className = "subagent-description";
     description.textContent = msg.description.text;
     el.append(description);
@@ -178,7 +180,7 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
         el.append(drawFeedSubagentLastProgress(state.value.lastProgress, rc));
       }
       if (isDetachedRow(rc)) el.append(drawStopControl(rc));
-      return el;
+      break;
     }
     case "settled": {
       const outcome = requireCase(state.value.outcome, `${PATH}.settled.outcome`);
@@ -196,11 +198,16 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       // frozen at the span the MESSAGE reports, and this element carries no
       // live subscription onward from a terminal draw.
       stopTicking(el);
-      return el;
+      break;
     }
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
   }
+  // THE DESCRIPTION IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the one
+  // two-line title fold, owned by the bubble's fold (bubble.ts). Folded AFTER a
+  // settled draw's stop, which would otherwise tear down the fold's measurer.
+  if (description !== null) foldTitle(description, "card");
+  return el;
 }
 
 /** Whether the row placing this head is the DETACHED wrapper. */

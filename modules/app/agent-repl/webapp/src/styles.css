@@ -4629,10 +4629,10 @@ response-body.bubble-body { display: block; }
    adopt it. Yellow for now (var(--token-yellow)). */
 .token-count { color: var(--token-yellow); }
 .subagent-tokens { font-size: 0.7rem; }
+/* The description is the bubble's TITLE: the shared two-line title fold
+   (`.title-fold`, title-fold.ts) caps it, in place of the one-line ellipsis it
+   wore before (owner ruling, 2026-09-23). The width cap stays. */
 .subagent-description {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 24rem;
 }
 /* LOST IS NOT FAILURE: we stopped being able to see it, which the muted dot

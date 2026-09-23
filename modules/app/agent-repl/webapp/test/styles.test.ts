@@ -1523,6 +1523,14 @@ describe("the title fold", () => {
     );
   });
 
+  it("lets a subagent's description wrap to its two rows, not a one-line ellipsis", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".subagent-description");
+
+    // Assert
+    expect(rule).not.toMatch(/white-space:\s*nowrap/);
+  });
+
   it("sets the fade's background to the tool card's own fill", () => {
     // Arrange / Act
     const card = rulesOf(stylesheet).find(
