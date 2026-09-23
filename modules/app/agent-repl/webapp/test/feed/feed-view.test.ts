@@ -26,6 +26,7 @@ import {
 import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js";
 import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
+import { onDiscard } from "../../src/feed/ticking.js";
 import {
   agentPromptRow,
   countingTicker,
@@ -1804,6 +1805,30 @@ describe("createFeedController: a card's clocks stop when its unit settles", () 
     controller.upsert(turnEndedRow("e", "turn-1"));
     // Assert: turn-2's call is still counting.
     expect(ticker.live()).toBe(1);
+  });
+
+  it("leaves a row's discard hooks in place when its turn ends, since the row stays on screen", () => {
+    // Arrange: a running call whose card also holds a non-clock teardown (a
+    // measurer's observer, say), in a turn that is about to end.
+    let disposed = 0;
+    const ticker = countingTicker();
+    const { controller } = fixture(harness({ ticker }), {}, {
+      renderers: {
+        simpleToolCall: (u, rc) => {
+          const el = drawFeedSimpleToolCall(u, rc);
+          onDiscard(el, () => (disposed += 1));
+          return el;
+        },
+      },
+    });
+    controller.applyPage(page([toolCallRow("t", "running", { turn: "turn-1" })]), "replace");
+
+    // Act
+    controller.upsert(turnEndedRow("e", "turn-1"));
+
+    // Assert: the clock stopped, and the hook did not run.
+    expect(ticker.live()).toBe(0);
+    expect(disposed).toBe(0);
   });
 
   it("leaves a turnless row's clocks running, since no turn ended under it", () => {

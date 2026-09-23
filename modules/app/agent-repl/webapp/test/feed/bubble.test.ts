@@ -5,6 +5,8 @@ import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
 import { mountBubble } from "../../src/feed/bubble.js";
+import { foldTitle } from "../../src/feed/title-fold.js";
+import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { installStylesheet } from "../stylesheet.js";
@@ -48,6 +50,8 @@ function mount(
     states?: (string | null)[];
     /** The caret's view rule, for the suites that assert where it leaves the reader. */
     scroll?: FeedReveal;
+    /** A head of the suite's own, in place of the marked stub. */
+    head?: () => HTMLElement;
   } = {},
 ) {
   const heads: number[] = [];
@@ -56,6 +60,7 @@ function mount(
     row,
     rc: rowContext(h.ctx, row),
     head: () => {
+      if (opts.head !== undefined) return opts.head();
       const el = document.createElement("span");
       el.className = "stub-head";
       const state = opts.states?.[heads.length];
@@ -1233,5 +1238,53 @@ describe("mountBubble: the head carries the subagent's token count", () => {
     bubble.update(subagentRow("b1", { tokens: "9.9k tok" }));
     // Assert: the head shows the new figure, not the stale one.
     expect(bubble.element.querySelector(".subagent-tokens")?.textContent).toBe("9.9k tok");
+  });
+});
+
+describe("mountBubble: the head's title fold follows the bubble's fold", () => {
+  /** A head holding one overflowing, card-owned title fold. */
+  function titledHead(): { head: () => HTMLElement; title: HTMLElement } {
+    const title = document.createElement("span");
+    title.className = "shell-command";
+    Object.defineProperty(title, "clientHeight", { configurable: true, value: 40 });
+    Object.defineProperty(title, "scrollHeight", { configurable: true, value: 120 });
+    return {
+      title,
+      head: () => {
+        const el = document.createElement("div");
+        el.append(foldTitle(title, "card"));
+        return el;
+      },
+    };
+  }
+
+  it("drops the title's has-more when the head click expands the bubble", async () => {
+    // Arrange
+    const { head, title } = titledHead();
+    const { bubble } = mount(subagentRow("b1"), harness(), { head });
+    title.classList.add(HAS_MORE_CLASS);
+
+    // Act
+    bubble.element.querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("restores the title's has-more when the head click collapses the bubble", async () => {
+    // Arrange — an expanded bubble whose title is lifted.
+    const { head, title } = titledHead();
+    const { bubble } = mount(subagentRow("b1"), harness(), { head });
+    const headLine = bubble.element.querySelector<HTMLElement>(".bubble-head");
+    headLine?.click();
+    await settle();
+
+    // Act
+    headLine?.click();
+    await settle();
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 });

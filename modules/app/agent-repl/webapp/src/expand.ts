@@ -48,6 +48,11 @@ export const CAPPED_CLASSES = [
   "shell-tail",
   // A hook card's reason/output box — its own per-section fold, unchanged.
   "hook-output",
+  // A card TITLE that is its own fold (owner ruling, 2026-09-23): the two-line
+  // title of a card with no card-level fold to defer to — a hook card, a skill
+  // card that is not loaded (title-fold.ts). A title INSIDE a `.tool-fold` or a
+  // `.bubble-fold` never wears it, so a click there still opens the whole card.
+  "title-fold-standalone",
   // The response/prompt/peer bubble's own scroll box (bubble-scroll.ts). Owner
   // ruling, 2026-09-15: a collapsed bubble no longer scrolls; clicking it
   // expands it to at most 50vh, and only then is its scroll revealed. Last in

@@ -27,8 +27,24 @@ import type { Ticker } from "../clock.js";
 /** The attribute marking an element that holds clock subscriptions. */
 export const TICKING_ATTRIBUTE = "data-ticking";
 
+/**
+ * The attribute marking an element that holds DISCARD hooks (`onDiscard`) —
+ * teardown that is not a clock, such as a `ResizeObserver` measuring a box.
+ *
+ * Its own marker, apart from `data-ticking`, because a hook must outlive a
+ * CLOCK stop: a card that settles stops its clocks, and a finished turn's
+ * backstop stops whatever clocks its rows still hold (`stopClocks`), yet the
+ * row stays on screen and its measurers must keep measuring. Only a DISCARD
+ * (`stopTicking`) ends them. It also keeps a measured element out of every
+ * `[data-ticking]` query, which asks about clocks.
+ */
+export const DISCARD_ATTRIBUTE = "data-discard";
+
 /** Every live unsubscribe, per element that owns one. */
 const subscriptions = new WeakMap<Element, Set<() => void>>();
+
+/** Every discard hook, per element that registered one. */
+const discards = new WeakMap<Element, Set<() => void>>();
 
 /**
  * Subscribe FN to the shared clock for as long as EL is on screen, and run it
@@ -48,25 +64,25 @@ export function tick(el: Element, ticker: Ticker, fn: (nowMs: number) => void): 
 }
 
 /**
- * Register DISPOSE to run when EL is discarded, through the SAME machinery a
- * clock subscription uses, so `stopTicking` (called by whoever throws the DOM
- * away) tears it down with no disposer for the renderer to hold. It is for the
+ * Register DISPOSE to run when EL is discarded, so `stopTicking` (called by
+ * whoever throws the DOM away) tears it down with no disposer for the renderer
+ * to hold. A CLOCK stop (`stopClocks`) leaves it in place. It is for the
  * non-clock teardown a drawn element still needs — a `ResizeObserver` watching a
  * bubble's width, say — which would otherwise outlive the element it observes.
  */
 export function onDiscard(el: Element, dispose: () => void): void {
-  const existing = subscriptions.get(el);
+  const existing = discards.get(el);
   if (existing === undefined) {
-    subscriptions.set(el, new Set([dispose]));
+    discards.set(el, new Set([dispose]));
   } else {
     existing.add(dispose);
   }
-  el.setAttribute(TICKING_ATTRIBUTE, "1");
+  el.setAttribute(DISCARD_ATTRIBUTE, "1");
 }
 
 /**
- * Drop every clock subscription EL and its descendants hold, and say HOW MANY
- * elements actually held one.
+ * DISCARD EL: drop every clock subscription EL and its descendants hold, run
+ * every discard hook they registered, and say HOW MANY elements held a clock.
  *
  * Called by whoever is discarding the DOM — the row controller replacing a
  * row's body, a bubble tearing down its sub-feed — so a renderer never has to
@@ -74,6 +90,22 @@ export function onDiscard(el: Element, dispose: () => void): void {
  * whether it stopped anything, rather than logging on every sweep.
  */
 export function stopTicking(el: Element): number {
+  const stopped = stopClocks(el);
+  releaseDiscards(el);
+  for (const descendant of el.querySelectorAll(`[${DISCARD_ATTRIBUTE}]`)) {
+    releaseDiscards(descendant);
+  }
+  return stopped;
+}
+
+/**
+ * Drop every CLOCK subscription EL and its descendants hold, leaving their
+ * discard hooks in place, and say how many elements held a clock.
+ *
+ * For an element that stays on screen while its clocks end — a finished turn's
+ * rows, swept by feed-view's backstop — so a measurer drawn on it keeps working.
+ */
+export function stopClocks(el: Element): number {
   let stopped = release(el);
   for (const descendant of el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)) {
     stopped += release(descendant);
@@ -103,6 +135,15 @@ export function replaceTicking(host: Element, next: readonly Node[] = []): numbe
   }
   host.replaceChildren(...next);
   return stopped;
+}
+
+/** One element's discard hooks, run and forgotten. */
+function releaseDiscards(el: Element): void {
+  const held = discards.get(el);
+  if (held === undefined) return;
+  for (const dispose of held) dispose();
+  discards.delete(el);
+  el.removeAttribute(DISCARD_ATTRIBUTE);
 }
 
 /** One element's subscriptions, dropped and forgotten. 1 if it held any. */

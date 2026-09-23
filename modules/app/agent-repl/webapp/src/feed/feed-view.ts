@@ -66,7 +66,7 @@ import type {
   RowRenderers,
   SubfeedView,
 } from "./renderers.js";
-import { replaceTicking, stopTicking } from "./ticking.js";
+import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
 import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
@@ -306,7 +306,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       if (state.row.row.case === "turnEnded") continue;
       const turn = state.row.turn;
       if (turn === undefined || !ended.has(turn.value)) continue;
-      if (stopTicking(state.element) === 0) continue;
+      // CLOCKS ONLY: the row stays on screen, so its measurers (a bubble's or a
+      // title's "more below", bubble-more.ts) keep measuring.
+      if (stopClocks(state.element) === 0) continue;
       stopped.push(requireMessage(state.row.id, "FeedRow.id").value);
     }
     if (stopped.length === 0) return;

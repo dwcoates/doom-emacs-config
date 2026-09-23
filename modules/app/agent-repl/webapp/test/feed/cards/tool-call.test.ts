@@ -34,6 +34,9 @@ import {
 } from "../../../src/feed/cards/tool-call.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { HAS_MORE_CLASS, TITLE_FOLD_CLASS } from "../../../src/feed/bubble-more.js";
+import { fireResize } from "../../resize-observer.js";
+import { measureTitle } from "../title-measure.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -1163,7 +1166,7 @@ describe("the card-level fold", () => {
     }
   });
 
-  it("never caps the TITLE, which the two-row header cap excludes", () => {
+  it("never caps the tool name in the head, which is not the card's title", () => {
     // Arrange
     const remove = installStylesheet();
     try {
@@ -1223,5 +1226,95 @@ describe("the card-level fold", () => {
     } finally {
       remove();
     }
+  });
+});
+
+/**
+ * THE INPUT LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+ * two-line title fold (title-fold.ts), owned by the card's own `.tool-fold`.
+ */
+describe("the title fold on the input line", () => {
+  /** A connected Bash card of OUTCOME, and its input line. */
+  function drawn(outcome: MessageInitShape<typeof FeedSimpleToolCallSchema>["outcome"]) {
+    const el = drawFeedSimpleToolCall(
+      card({ input: { text: "cd /some/path && cat some_file.txt", form: { case: "command", value: {} } }, outcome }),
+      rowContext(),
+    );
+    document.body.replaceChildren(el);
+    return { el, title: el.querySelector(".bash-input") as HTMLElement };
+  }
+
+  const RETURNED = {
+    case: "returned",
+    value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text: "ok" } } },
+  } as const;
+
+  it("marks the input line with the one title-fold class", () => {
+    // Arrange / Act
+    const { title } = drawn({ case: "running", value: {} });
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_CLASS)).toBe(true);
+  });
+
+  it("wears has-more when the input line overflows its two rows", () => {
+    // Arrange
+    const { title } = drawn({ case: "running", value: {} });
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("keeps has-more off an input line that fits its two rows", () => {
+    // Arrange
+    const { title } = drawn({ case: "running", value: {} });
+    measureTitle(title, false);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("drops has-more once the card is expanded", () => {
+    // Arrange
+    const { el, title } = drawn({ case: "running", value: {} });
+    measureTitle(title, true);
+    fireResize(title);
+    el.classList.add(EXPANDED_CLASS);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("keeps measuring a returned card's title after the card's terminal stop", () => {
+    // Arrange
+    const { title } = drawn(RETURNED);
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("stops measuring once the card is discarded", () => {
+    // Arrange
+    const { el, title } = drawn(RETURNED);
+
+    // Act
+    stopTicking(el);
+
+    // Assert — nothing observes the title any more, so a fire has no target.
+    expect(() => fireResize(title)).toThrow();
   });
 });
