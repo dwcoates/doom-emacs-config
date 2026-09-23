@@ -637,9 +637,8 @@ function rememberAnswer(
   for (const entry of entries) {
     if (entry.item.kind !== "frame") continue;
     const result = entry.item.frame.result;
-    if (result.case !== "update") continue;
-    const update = result.value.update;
-    if (update.case !== "activity") continue;
+    const update = result.case === "update" ? result.value.update : undefined;
+    if (update?.case !== "activity") continue;
     if (update.value.item.case !== "response") continue;
     if (update.value.item.value.result.case !== "success") continue;
     state.lastAnswer = update.value.activityId;
