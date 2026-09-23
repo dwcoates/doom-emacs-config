@@ -387,8 +387,12 @@ heuristic; the explicit-interrupt fast path ("stop", "abort", "cancel",
 "halt", "wait") bypasses the model. Interject re-spec: the interrupting
 prompt moves to the semantic head before teardown; the footer's
 waiting·interrupting fires the moment the interrupt registers; delivery
-waits for the real turn end; a failed interrupt strips the jump and stamps
-classification_error.
+waits for the real turn end; a refused interrupt strips the jump and returns
+the prompt to hold_for_turn_end. No failure on the classifier path is ever
+stamped classification_error (the tray's "unclassified"): a running turn the
+store cannot show as open, a failed classifier call, and a refused interrupt
+each resolve to hold_for_turn_end and are logged; every verdict is recorded at
+INFO.
 
 ### merge (`internal/merge`)
 
