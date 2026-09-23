@@ -8,6 +8,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
 )
 
 // fakeSenderClient answers each shim verb with whatever a test arranged.
@@ -63,6 +64,54 @@ func TestSenderStartTurnCarriesTheDaemonsMintedTurn(t *testing.T) {
 	// Assert
 	if got := client.startTurnReq.GetTurn().GetValue(); got != "turn-1" {
 		t.Fatalf("StartTurn turn = %q, want the daemon's minted turn-1", got)
+	}
+}
+
+// TestSenderStartTurnNeverAsksForHistory covers the owner's rule on the turn
+// path: an accepted turn's opening page carries the turn's own prompt row and
+// nothing older. The page budget is that one row, and the main watch's newest
+// pointer bounds it whenever the daemon holds one.
+func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
+	tests := []struct {
+		name      string
+		known     func() *conversationv1.HistoryPointer
+		wantKnown string
+	}{
+		{
+			name:      "the main watch's pointer bounds the page",
+			known:     func() *conversationv1.HistoryPointer { return &conversationv1.HistoryPointer{Value: "ptr-41"} },
+			wantKnown: "ptr-41",
+		},
+		{
+			name:  "a main watch served nothing states no pointer",
+			known: func() *conversationv1.HistoryPointer { return nil },
+		},
+		{
+			name: "a sender with no watcher states no pointer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
+			}}
+			s := &sender{client: client, known: tt.known}
+
+			// Act.
+			if _, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+				t.Fatalf("StartTurn: %v", err)
+			}
+
+			// Assert.
+			if got := client.startTurnReq.GetPageSize(); got != 1 {
+				t.Fatalf("page_size = %d, want 1: the turn's own prompt row", got)
+			}
+			if got := client.startTurnReq.GetKnownThrough().GetValue(); got != tt.wantKnown {
+				t.Fatalf("known_through = %q, want %q", got, tt.wantKnown)
+			}
+		})
 	}
 }
 
@@ -312,5 +361,33 @@ func TestSenderSetModelCarriesTheColdRefusal(t *testing.T) {
 	refusal, ok := AsShimRefusal(err)
 	if !ok || refusal.Arm != ArmShimCold {
 		t.Fatalf("SetModel = %v, want the cold refusal", err)
+	}
+}
+
+// senderPointer is the main-watch pointer the live watcher states.
+var senderPointer = &conversationv1.HistoryPointer{Value: "ptr-main-12"}
+
+// TestFleetSenderStatesTheMainWatchsNewestPointer covers the pointer a turn is
+// bounded by: it is read from the LIVE watcher at the call, not when the
+// sender was handed out.
+func TestFleetSenderStatesTheMainWatchsNewestPointer(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	got, ok := f.fleet.Sender(ws.ID)
+	if !ok {
+		t.Fatal("Sender: no sender for a live workspace")
+	}
+	f.watcher.pointers = sessionwatcher.Pointers{Main: senderPointer}
+
+	// Act.
+	known := got.(*sender).knownThrough()
+
+	// Assert.
+	if known.GetValue() != senderPointer.GetValue() {
+		t.Fatalf("known_through = %q, want the main watch's newest %q", known.GetValue(), senderPointer.GetValue())
 	}
 }

@@ -131,9 +131,9 @@ describe("the prompt bubble's thinking wave, across a turn", () => {
       (match) => match[1].trim(),
     );
 
-    // Assert — there is exactly one, and it demands the mark.
+    // Assert — there is exactly one, and it demands the mark on a prompt.
     expect(selectors).toEqual([
-      `.bubble.user[${PROMPT_WAVE_ATTRIBUTE}="${PROMPT_WAVE_WORKING}"]`,
+      `.bubble[data-role="prompt"][${PROMPT_WAVE_ATTRIBUTE}="${PROMPT_WAVE_WORKING}"]`,
     ]);
   });
 });

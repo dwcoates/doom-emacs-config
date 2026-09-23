@@ -13,9 +13,8 @@
  * oneof, so an unset one is a malformed view here rather than a bubble drawn
  * with no body.
  */
-import { armPromptWave } from "../../breathing.js";
 import { log } from "../../log.js";
-import { bubbleScroll } from "../bubble-scroll.js";
+import { drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedUserPrompt,
@@ -31,20 +30,17 @@ const PATH = "FeedUserPrompt";
  * The prompt bubble.
  *
  * IT WAVES EXACTLY WHILE ITS ROW SAYS ITS TURN IS WORKING (`msg.working`, the
- * daemon's fact). `armPromptWave` stamps both halves of the signal: the mark
+ * daemon's fact). The one bubble stamps both halves of the signal: the mark
  * the `bubble-wave` rule keys on, drawn from that flag verbatim, and the
  * wave's PHASE as a negative inline `animation-delay` — the feed rebuilds a
  * row's body wholesale and a fresh node restarts a CSS animation at 0%, so
  * without the delay every redraw would jump the band back to the left edge.
  */
-export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
+export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement): HTMLElement {
   log.info("drawing a user prompt row", {
     operation: "feed.draw-user-prompt",
     context: { arm: msg.result.case ?? "unset" },
   });
-  const bubble = document.createElement("div");
-  bubble.className = "bubble user";
-  armPromptWave(bubble, msg.working);
   // The author is still a required field on the wire (a message with none is
   // malformed, not merely unattributed) — validated but no longer drawn: the
   // bubble carries no "You" label or other attribution (owner ruling,
@@ -54,34 +50,32 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   const result = requireCase(msg.result, `${PATH}.result`);
   switch (result.case) {
     case "success":
-      bubble.append(
-        bubbleScroll(
-          drawFeedUserPromptBody(
+      // PREVIOUS, the row's last draw, is updated in place (drawBubble), so a
+      // re-push never replaces the box a reader is scrolled inside.
+      return drawBubble(
+        {
+          role: "prompt",
+          variant: "user",
+          hooks: ["user"],
+          working: msg.working,
+          content: drawFeedUserPromptBody(
             requireMessage(result.value.body, `${PATH}.success.body`),
             `${PATH}.success.body`,
           ),
-        ),
-      );
-      return bubble;
+          capLines: "feed",
+        },
+        previous,
+      ).bubble;
     default:
       return unreachableArm(`${PATH}.result`, result.case);
   }
 }
 
-/**
- * The blocks the person composed, in order.
- *
- * `.bubble-body` is what the stylesheet caps at the shared 25-line budget and
- * scrolls past it, so the cap comes from reusing the existing class rather than
- * from anything measured here.
- */
-export function drawFeedUserPromptBody(body: FeedUserPromptBody, path: string): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "bubble-body";
-  body.blocks.forEach((block, index) => {
-    el.append(drawFeedUserPromptBlock(block, `${path}.blocks[${index}]`));
-  });
-  return el;
+/** The blocks the person composed, in order: the bubble's content. */
+export function drawFeedUserPromptBody(body: FeedUserPromptBody, path: string): HTMLElement[] {
+  return body.blocks.map((block, index) =>
+    drawFeedUserPromptBlock(block, `${path}.blocks[${index}]`),
+  );
 }
 
 /** One block of a user prompt — the shared drawn block vocabulary. */

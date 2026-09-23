@@ -62,6 +62,10 @@
      since a faint wash all but vanishes on a dark ground. */
   --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
   --user: #e0ecff;
+  /* A HELD prompt's fill (owner ruling, 2026-09-23): "much more grey than
+     blue" -- a neutral grey carrying only a subtle blue hue, so a prompt the
+     daemon is holding reads as the blue bubble it will become, not yet sent. */
+  --held-prompt-bg: #e8ebf0;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
@@ -146,11 +150,6 @@
      the softer sibling of the --clear-divider red, because a compaction
      summarizes the context above rather than dropping it the way a clear does. */
   --compact-rule: #ea580c;
-  /* The wash behind a compaction's summary bubble: purple, a hue no other
-     bubble in the feed wears, so the ONE surviving account of everything the
-     compaction discarded cannot be mistaken for ordinary commentary. It pairs
-     with the --final-response green border the bubble also wears. */
-  --compact-summary-bg: #f3e8ff;
   /* The border around a turn's final response: green, the palette's success
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
@@ -333,6 +332,7 @@
        bottom edge stays the subtler shade. */
     --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
     --user: #1e2a44;
+    --held-prompt-bg: #25282e;
     --assistant: #292040;
     --thinking: #fb923c;
     --retry: #a78bfa;
@@ -356,7 +356,6 @@
     --interrupted: #facc15;
     --clear-divider: #ef4444;
     --compact-rule: #f97316;
-    --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
     /* Lighter yellow for the dark theme, as the other state borders lift, so
        the thinking hairline still reads against the dark purple fill. */
@@ -458,6 +457,12 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
+  /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
+     bubble -- response, prompt, peer, held prompt, compaction summary,
+     agentic card -- fits its text up to this cap, and a metaprompt tree in
+     any of them wraps at it (src/bubble/body.ts measures it). 77% is the
+     response's and the prompt's former cap. */
+  --bubble-max-width: 77%;
 }
 
 /* ---- The workspaces rail (sidebar.ts) ----------------------------------
@@ -1378,6 +1383,17 @@ pre {
   flex-direction: column;
   align-items: stretch;
   gap: 0.15rem;
+  /* ONE LEADING AND ONE SIZE FOR EVERY BUBBLE (owner ruling, 2026-09-23): the
+     response's. The collapsed cap is counted in these lines, so a 25-line
+     cap is the same height on a prompt as on an answer. */
+  --md-line-h: 1.5;
+  font-size: calc(0.9rem * var(--feed-text-scale));
+  line-height: var(--md-line-h);
+  /* Every bubble fits its text, up to the one cap; its role says which rail
+     it hangs on and its fill (`--bubble-bg`), and nothing else. */
+  width: fit-content;
+  max-width: var(--bubble-max-width);
+  background: var(--bubble-bg);
 }
 /* A HIDDEN BUBBLE MUST ACTUALLY BE HIDDEN. The rule above sets `display`, and a
    class selector outranks the user-agent stylesheet's own `[hidden]` rule — so
@@ -1416,37 +1432,32 @@ pre {
    box's border and its padding, so this padding is the distance from the TEXT
    to the bar, never from the bar to the bubble. */
 .bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); overflow-wrap: anywhere; }
-/* THE METADATA STRIP: full width, above the scroll box, outside it. It keeps
-   the right inset the bubble's padding used to give it, so the stamp sits
+/* THE HEADER STRIP: full width, above the scroll box, outside it (every
+   element a kind puts there wears `.bubble-strip`, src/bubble/draw.ts). It
+   keeps the right inset the bubble's padding used to give it, so a label sits
    where it always sat while the bar below it runs to the edge. */
-.bubble > .turn-meta,
-.bubble > .prompt-author,
-.bubble > .response-notice-heading {
+.bubble > .bubble-strip {
   padding-right: calc(0.9rem - var(--bubble-scroll-gap));
 }
-.bubble.user {
-  background: var(--user);
-  width: fit-content;
-  /* The blue prompt bubble caps at 77% (owner ruling,
-     2026-09-15): 77%. ONLY the max width changes — the margin
-     below keeps its bias off the unscaled --agent-bubble-cap. */
-  max-width: 77%;
+/* THE ROLE: the side and the background, and nothing else (owner ruling,
+   2026-09-23). A prompt hugs the RIGHT rail in blue: its right margin is half
+   the column's leftover, so its right edge lands flush with the centered tool
+   cards'. A response hugs the LEFT rail in purple, the mirror image. */
+.bubble[data-role="prompt"] {
+  --bubble-bg: var(--user);
   margin-left: auto;
   margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
-  /* The prompt's verbatim <pre> carried no leading of its own, so it fell to
-     the UA's font-dependent `normal` — a line box no rule could count. The
-     prompt's 25-line height cap is measured in these lines (see
-     --cap-line-h), so the leading is stated here, as a token, at the same
-     1.4 every other monospace box in the feed sets (the Read, Bash, diff and
-     skill previews). Declaring it is what makes the cap exactly 25 lines
-     rather than 25 guesses, and the token is what keeps the two from ever
-     drifting apart. */
-  --prompt-line-h: 1.4;
-  line-height: var(--prompt-line-h);
-  /* RETIRED: the one-grid-cell overlay of body and hover stamp. Every bubble
-     kind now stacks its metadata strip over its scroll box (owner ruling,
-     2026-09-14), and an overlaid stamp is by construction BESIDE the bar
-     rather than above it. The prompt keeps `.bubble`'s own flex column. */
+}
+.bubble[data-role="response"] {
+  --bubble-bg: var(--assistant);
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: auto;
+}
+/* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
+   in the tray is "much more grey than blue", with only a subtle blue hue, so it
+   reads as the prompt it will become that has not been sent yet. */
+.bubble[data-variant="held"] {
+  --bubble-bg: var(--held-prompt-bg);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
@@ -1491,7 +1502,7 @@ pre {
    a second `bubble-wave` on `.bubble-body` would pan a second band across the
    text's own box at its own phase. One animated element means there is nothing
    for a second phase to drift against. */
-.bubble.user[data-wave="working"] {
+.bubble[data-role="prompt"][data-wave="working"] {
   background-image: linear-gradient(90deg, transparent 0%, var(--bubble-wave) 50%, transparent 100%);
   background-size: 200% 100%;
   background-repeat: no-repeat;
@@ -1506,7 +1517,7 @@ pre {
    feed. Static, not animated: the attribute's presence is itself the signal,
    so it survives `prefers-reduced-motion` (which only stops the wave's
    animation above) unchanged. */
-.bubble.user[data-wave="working"] {
+.bubble[data-role="prompt"][data-wave="working"] {
   border-color: var(--prompt-live-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
@@ -1521,7 +1532,7 @@ pre {
    inline style. It is a WATCH FLAG, not a lock: on return to visible the driver
    clears the flag and the compositor takes the pass back, re-seeked to the same
    phase. The fill stays, so the band the driver paints has something to move. */
-html[data-page-hidden] .bubble.user[data-wave="working"] {
+html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   animation: none;
 }
 /* Left to right, entering fully off the left edge and leaving fully off the
@@ -1533,69 +1544,18 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   from { background-position-x: 200%; }
   to { background-position-x: -100%; }
 }
-/* A markdown fenced code block the user typed into their prompt renders as
-   the same card the agent's markdown fences get (.md pre.md-code), but the
-   prompt bubble is not .md, so it carries its own rule. The .hljs token
-   colors above are unscoped, so they already reach in. The first/last
-   child margin resets keep a leading or trailing code card flush with the
-   bubble edge, matching the .md bubble-body rules. */
-.bubble.user pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; }
-.bubble.user pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
-.bubble.user .bubble-body > :first-child { margin-top: 0; }
-.bubble.user .bubble-body > :last-child { margin-bottom: 0; }
-
-/* THE PEER BUBBLE — a message another Claude session sent in (an inter-session
-   peer message or a subagent hand-back). Right-aligned like a prompt (the same
-   side of the feed), but PURPLE, not the blue --user fill: a low-priority,
-   non-intrusive aside, drawn with the --assistant purple so it reads as
-   "another agent" rather than "you". It is deliberately NOT `.bubble.user`, so
-   none of the blue fill, the working wave or the prompt cap reaches it. */
-.bubble.peer {
-  background: var(--assistant);
-  width: fit-content;
-  max-width: 77%;
-  margin-left: auto;
-  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
-}
-/* The always-visible head: the sender label and the chevron, the whole of a
-   COLLAPSED peer bubble. A borderless button that fills the bubble's width so a
-   click anywhere on the collapsed bubble expands it. */
-.bubble.peer > .peer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  background: none;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.bubble.peer .peer-label {
+/* THE PEER MESSAGE'S HEADER STRIP: the sender label, the whole of its
+   collapsed face (its cap is zero lines, src/feed/rows/peer-message.ts). One
+   line, ellipsized, clear of the has-more chevron that sits at its right. */
+.peer-label {
   font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.85;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 1.5em;
 }
-/* The chevron names the next move: pointing right (collapsed) it says "opens",
-   rotated down (expanded) it says "closes". Pure CSS content, so no glyph asset. */
-.bubble.peer .peer-chevron::before { content: "\203A"; display: inline-block; transition: transform 0.12s ease; }
-.bubble.peer.peer-expanded .peer-chevron::before { transform: rotate(90deg); }
-/* COLLAPSED = NO BODY (owner spec): the body's scroll box is hidden entirely
-   while collapsed — the peer bubble shows only its head. Expanding it adds
-   `.expanded` to the scroll box, which the shared `.bubble > .bubble-scroll.expanded`
-   rule then caps at 50vh and turns scrollable. */
-.bubble.peer > .bubble-scroll:not(.expanded) { display: none; }
-.bubble.peer > .bubble-scroll { margin-top: 0.4rem; }
-.bubble.peer pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; }
-.bubble.peer .bubble-body > :first-child { margin-top: 0; }
-.bubble.peer .bubble-body > :last-child { margin-bottom: 0; }
 /* The bubble's top-right corner: a flex column stacking a final response's
    stats (duration, input tokens) above its timestamp. Smaller and quieter
    than the body text, lifted clear of its first line. Negative top/right
@@ -1663,19 +1623,6 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   color: color-mix(in srgb, var(--muted), var(--fg) 25%);
 }
 .turn-meta:hover .turn-ts { display: block; }
-/* RETIRED with the prompt bubble's grid (see `.bubble.user`): the two
-   `grid-area: 1 / 1` placements that overlaid the stamp on the body. The
-   prompt's stamp is a metadata strip above the scroll box like every other
-   bubble's, placed by the shared rules on `.bubble`.
-   The hover stamp keeps its own zero margin, since the shared `.turn-meta`
-   negative top margin would lift it off a strip that is already the first
-   thing in the bubble. */
-.bubble.user > .turn-meta { margin: 0; }
-.bubble.user .turn-ts {
-  background: var(--user);
-  padding: 0 0.2rem;
-  border-radius: 4px;
-}
 /* THE feed-card rule: one maximum width for every full-width card the feed
    draws, and it is the SAME `--agent-bubble-cap` the assistant's response
    bubble is capped at. A permission request, the resolved card that replaces
@@ -1702,66 +1649,33 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   margin-left: auto;
   margin-right: auto;
 }
-/* The assistant's response bubble shrinks to fit its own text and hugs the
-   LEFT rail, the mirror of the prompt's right-flush (see `.bubble.user` and
-   the column comment above `.bubble`). Its left margin is exactly half the
-   agent column's leftover, so a short response sits with its left edge flush
-   against the centered tool cards' left edge, and an auto right margin lets a
-   long one grow rightward only to the agent cap. */
-.bubble.assistant {
-  background: var(--assistant);
-  width: fit-content;
-  /* The purple response bubble caps 15% below the shared bubble cap (owner
-     ruling, 2026-09-14): 82.5% * 0.85. ONLY the max width changes — the
-     margin below keeps its bias off the unscaled --agent-bubble-cap. */
-  max-width: 77%;
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
-  margin-right: auto;
-}
 /* SHRINK-TO-FIT, CAPPED AT THE MAX (owner ruling, 2026-09-15, reversing the
-   fill-cap pin of the same date). Every response/prompt bubble sizes to its
-   widest RENDERED line plus its padding via `width: fit-content`
-   (`.bubble.assistant`/`.bubble.user` above), capped at the `max-width: 77%`
-   ceiling — for ALL bubbles, INCLUDING those whose body drew a metaprompt tree.
-   The tree is pre-wrapped to the cap's own column budget
-   (`measureTreeCols`), so its longest physical line never exceeds the cap and
-   the bubble shrinks to that line rather than sitting pinned at the full cap.
-   Wrapping stays STABLE while the bubble shrinks because the tree's column
-   budget derives from the CAP (the bubble's resolved max-width against its
-   containing block, `resolveCapPx`), never from the bubble's shrunk
-   current width — so a shrink cannot feed back into a re-wrap. The old
-   `.bubble.bubble-fill-cap { width: 77% }` pin and its `markFillCap` stamping
-   are gone. */
-/* The answer the turn landed on, as against the commentary above it. Only
-   the border color changes, so the 0.3px the base reserved stays laid out.
-   `:not(.thinking-bubble)` keeps the GREEN reserved for a concluded answer:
-   a thinking bubble reuses `.bubble.assistant` for its purple fill but is
-   intermediate reasoning, never the answer, so the green border can NEVER
-   land on it — the structural half is that the daemon never names a thinking
-   row as the answer, and this selector is the second guard. */
-.bubble.assistant.final-response:not(.thinking-bubble) { border-color: var(--final-response); }
-/* THE THINKING BUBBLE: the agent's intermediate reasoning, one bubble per
-   reasoning block. Purple fill (the same --assistant wash the response bubble
-   wears) and always a LIGHT ORANGE border (owner ruling 2026-09-15) at the
-   SAME 0.3px thickness the base bubble reserves — only the border COLOR lands
-   here, so there is no reflow. The green final-answer border is excluded above
-   (`:not(.thinking-bubble)`), so an intermediate reasoning bubble can NEVER
-   wear the green answer border; and a partial-final response (an in-construction
-   answer that is NOT a thinking bubble) never matches this rule, so it stays
-   borderless until it becomes the green final answer. */
-.bubble.assistant.thinking-bubble { border-color: var(--thinking-border); }
+   fill-cap pin of the same date). Every bubble sizes to its widest RENDERED
+   line plus its padding via `width: fit-content`, capped at
+   `--bubble-max-width` -- INCLUDING those whose body drew a metaprompt tree.
+   The tree is pre-wrapped to the cap's own column budget (`measureTreeCols`),
+   so its longest physical line never exceeds the cap and the bubble shrinks to
+   that line rather than sitting pinned at the full cap. */
+/* THE BORDER LADDER. The state or variant sets the BORDER and nothing else,
+   and only its color where the 0.3px the base reserves is enough, so a state
+   change recolors a laid-out hairline and never reflows the feed.
+   THE THINKING BUBBLE: the agent's intermediate reasoning, yellow (owner
+   ruling 2026-09-15). It can never take the green answer border below. */
+.bubble[data-variant="thinking"] { border-color: var(--thinking-border); }
 /* A settled response that is neither the turn's answer nor thinking: the pear
    step of the ladder. Keyed on the daemon's settled state, so a response still
    streaming keeps the base border until it settles. */
-.bubble.assistant[data-state="success"]:not(.final-response):not(.thinking-bubble) {
+.bubble[data-variant="response"][data-state="success"]:not(.final-response) {
   border-color: var(--interim-response-border);
 }
+/* The answer the turn landed on, as against the commentary above it: green.
+   `:not([data-variant="thinking"])` keeps it off reasoning — the structural
+   half is that the daemon never names a thinking row as the answer. */
+.bubble.final-response:not([data-variant="thinking"]) { border-color: var(--final-response); }
 /* The SELECTED final response (reply-to-a-past-response mode): blue in place of
-   the green. Declared after the green rule and at higher specificity (it adds
-   `.response-selected`), so the selected bubble reads blue while selected and
-   falls back to green the moment the selection clears — only the border color
-   changes, so the reserved 0.3px stays laid out and there is no reflow. */
-.bubble.assistant.final-response.response-selected {
+   the green. Declared after the green rule at the same specificity, so the
+   selected bubble reads blue while selected and green the moment it clears. */
+.bubble.final-response.response-selected {
   border-color: var(--selected-response);
 }
 /* The working-frontier BREATH is gone with the pulse machinery that drove it,
@@ -1770,14 +1684,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    announces itself now, so neither a bubble's background nor its text tail
    carries a liveness signal any more. */
 
-/* Markdown-rendered assistant text. The leading is a token because the
-   response bubble's 25-line height cap is measured in these lines (see
-   --cap-line-h), so the two must never drift apart. */
-.md { font-size: calc(0.9rem * var(--feed-text-scale)); --md-line-h: 1.5; line-height: var(--md-line-h); }
-/* The markdown lives one level in, inside the bubble's body column, so the
-   flush-with-the-bubble-edge rules reach through it. */
-.md .bubble-body > :first-child { margin-top: 0; }
-.md .bubble-body > :last-child { margin-bottom: 0; }
+/* Markdown in every bubble (every bubble wears `.md`; its size and leading
+   are the `.bubble` rule's). A bubble's first and last content are flush with
+   its edges, reached through a markdown slot (`[data-markdown]`, see
+   src/bubble/body.ts) to the prose it holds. */
+.bubble-body > :first-child,
+.bubble-body > [data-markdown]:first-child > :first-child { margin-top: 0; }
+.bubble-body > :last-child,
+.bubble-body > [data-markdown]:last-child > :last-child { margin-bottom: 0; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 0.6em 0 0.3em; line-height: 1.25; }
 .md h1 { font-size: calc(1.3rem * var(--feed-text-scale)); } .md h2 { font-size: calc(1.15rem * var(--feed-text-scale)); } .md h3 { font-size: calc(1.05rem * var(--feed-text-scale)); }
 .md p { margin: 0.4em 0; }
@@ -2180,11 +2094,10 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    inherited. Everything past the cap stays reachable by scrolling.
 
    --cap-line-h exists because the budget is a count of TEXT LINES, and the
-   monospace previews, the prompt bubble, and the response bubble do not set
-   their text at the same leading. The default is the previews' own 1.4,
-   which the rule below sets on them; each bubble overrides it with the
-   leading its own text actually renders at, so 25 lines means 25 of ITS
-   lines. */
+   monospace previews and the bubbles do not set their text at the same
+   leading. The default is the previews' own 1.4, which the rule below sets on
+   them; every bubble counts its cap in the one bubble leading instead
+   (`--bubble-cap-lines` x `--md-line-h`, see the collapsed line limit below). */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content,
 .fold-fixed > .agent-panel {
   max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
@@ -2199,7 +2112,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    50vh) — it can never SHRINK the bubble. Before this, on a short window 50vh was
    below the 27.5-line height, so clicking to expand shrank the bubble. */
 .bubble > .bubble-scroll {
-  max-height: min(calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px)), 50vh);
+  max-height: min(calc(var(--bubble-cap-lines) * var(--md-line-h) * 1em), 50vh);
 }
 /* COLLAPSED = NO SCROLL (owner ruling, 2026-09-15: "remove the scroll from the
    collapsed bubble views ... only when expanded ... is the scroll bar/
@@ -2223,31 +2136,20 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   overflow-y: auto;
 }
 /* The monospace previews' own leading, which --cap-line-h defaults to. The
-   bubbles are deliberately absent: each carries its own leading token. */
+   bubbles are deliberately absent: they carry the one bubble leading. */
 .tool-read-output, .bash-input, .bash-output, .diff-output, .skill-input, .skill-content {
   line-height: 1.4;
 }
-/* Neither speaker's bubble may push the whole rest of the feed off screen, so
-   a prompt and an answer alike stop at 25 of their OWN text lines and scroll
-   past that — one budget stated once, for both.
-
-   The cap rides the SCROLL BOX rather than the bubble, so the corner stamp —
-   which is the bubble's own child, above the box — is never scrolled away from
-   the text it labels. The line box each bubble counts in is
-   read from that bubble's own leading token rather than restated here, so a
-   change to `.md`'s or the prompt's leading moves the cap with it instead of
-   silently mis-measuring it. */
-.bubble > .bubble-scroll { --cap-lines: var(--feed-cap-lines); }
-.bubble.assistant > .bubble-scroll { --cap-line-h: calc(var(--md-line-h) * 1em); }
-.bubble.user > .bubble-scroll { --cap-line-h: calc(var(--prompt-line-h) * 1em); }
-/* THE THINKING BUBBLE SHOWS TWO LINES (owner ruling, 2026-09-23). A thinking
-   bubble IS a response bubble (same `.bubble.assistant` scroll box, same
-   `.md` leading), so it keeps every piece of the response's collapse model —
-   the min(cap, 50vh) clip, the `has-more` fade and chevron, click-to-expand to
-   50vh and back — and only its line BUDGET changes. Only `--cap-lines` is set
-   here: the (0,4,0) selector outranks the shared (0,2,0) budget above, and the
-   `.bubble > .bubble-scroll.expanded` rule still lifts the cap on a click. */
-.bubble.assistant.thinking-bubble > .bubble-scroll { --cap-lines: 2; }
+/* THE COLLAPSED LINE LIMIT (owner ruling, 2026-09-23), one entry per
+   `BubbleCapLines` value (src/bubble/draw.ts; styles.test.ts holds the two
+   together): the shared feed cap for most bubbles, two lines for a thinking
+   bubble and a held prompt, and NONE past the header strip for a peer message,
+   whose label is the whole of its collapsed face. The cap rides the SCROLL
+   BOX, so the strip above it never scrolls away from the text it labels, and
+   it is counted in the one bubble leading. */
+.bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
+.bubble[data-cap-lines="2"] { --bubble-cap-lines: 2; }
+.bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
 .bash-input { --cap-lines: 5; }
 .bash-output { --cap-lines: 5; --cap-extra: calc(0.35rem + 1px); }
@@ -2380,24 +2282,27 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 /* FIX2 "MORE BELOW" (owner ruling, 2026-09-15: "a signal that there's more to
    reveal"). A COLLAPSED response or prompt bubble whose content overruns its cap
    wears `has-more` (bubble-more.ts measures the overflow and toggles the class);
-   this draws the signal from that class and nothing else. The affordance is
-   SCOPED to `.bubble.assistant` and `.bubble.user` scroll boxes ONLY — never a
-   tool-call section — and each fades into its OWN bubble background (assistant
-   purple / user blue) so the last line dissolves rather than being hard-clipped.
+   this draws the signal from that class and nothing else. EVERY bubble's
+   scroll box wears it (one measurer, one rule) — never a tool-call section —
+   and each fades into its OWN bubble background (`--bubble-bg`) so the last
+   line dissolves rather than being hard-clipped.
    Both pseudo-elements are absolutely positioned against the box, which the cap
    holds still while collapsed (overflow-y: hidden), so bottom:0 is the visible
    fold. `pointer-events: none` keeps a click on either one falling through to
    click-to-expand. A tool card's TITLE fold (above) wears the same fade and
    chevron from the same rules, fading into its card's `--title-fold-bg`; an
-   output section still never does. */
-.bubble.assistant > .bubble-scroll.has-more,
-.bubble.user > .bubble-scroll.has-more,
-.title-fold.has-more {
+   output section still never does.
+   THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
+   scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
+   (`position: relative` on the box itself, not on `.has-more`), and the fade
+   and chevron are out of flow, so the measurer toggling the class moves
+   nothing inside or around the box. */
+.bubble > .bubble-scroll,
+.title-fold {
   position: relative;
 }
 /* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
-.bubble.assistant > .bubble-scroll.has-more::after,
-.bubble.user > .bubble-scroll.has-more::after,
+.bubble > .bubble-scroll.has-more::after,
 .title-fold.has-more::after {
   content: "";
   position: absolute;
@@ -2407,19 +2312,15 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   height: 1.5em;
   pointer-events: none;
 }
-.bubble.assistant > .bubble-scroll.has-more::after {
-  background: linear-gradient(to bottom, transparent, var(--assistant));
-}
-.bubble.user > .bubble-scroll.has-more::after {
-  background: linear-gradient(to bottom, transparent, var(--user));
+.bubble > .bubble-scroll.has-more::after {
+  background: linear-gradient(to bottom, transparent, var(--bubble-bg));
 }
 .title-fold.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
 }
 /* The chevron, centered on the bottom edge over the fade. Generated content is
    not selectable, so it needs no user-select carve-out. */
-.bubble.assistant > .bubble-scroll.has-more::before,
-.bubble.user > .bubble-scroll.has-more::before,
+.bubble > .bubble-scroll.has-more::before,
 .title-fold.has-more::before {
   content: "\2304";
   position: absolute;
@@ -2431,6 +2332,17 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   font-size: 1.05em;
   line-height: 1;
   color: var(--muted);
+}
+/* A ZERO-LINE CAP shows its header strip and nothing below it, so there is no
+   last line to fade: the chevron alone says there is more, at the strip's
+   right end where the box (zero tall) meets it. */
+.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::after {
+  background: none;
+}
+.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::before {
+  left: auto;
+  right: calc(0.9rem - var(--bubble-scroll-gap));
+  transform: none;
 }
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
@@ -2594,18 +2506,13 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .compact-divider {
   text-align: center;
 }
-/* The compaction summary bubble: the --final-response GREEN border every
-   landed answer wears, on the purple --compact-summary-bg wash no other
-   bubble uses. The pairing is deliberate — it reads as an answer (it IS the
-   conversation above, restated) that is nonetheless not part of the ordinary
-   exchange. Nothing here varies with the compaction's trigger.
-
-   The `compaction_summary` payload arm draws the SAME block through the same
-   selector, which is the point: the purple wash is one visual with one rule,
-   so a summary that arrives on its own arm cannot drift into a second look. */
-.bubble.assistant.compact-summary {
-  border-color: var(--final-response);
-  background: var(--compact-summary-bg);
+/* The compaction summary bubble (owner ruling, 2026-09-23): a response bubble
+   like any other — the response fill, the response rail, the one cap and
+   expand — whose BORDER is the compaction divider bar's own color. The token
+   is the bar's (`.sep-accent-compacted`), never a copy of its value, so the
+   summary and the divider it hangs under cannot drift apart. */
+.bubble[data-variant="compaction"] {
+  border-color: var(--compact-rule);
 }
 /* The summary block's own footnote — when the compaction completed and, when
    the daemon resolved one, what producing the summary cost. Muted and small:
@@ -2663,26 +2570,19 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 }
 
 /* --- §2.13 in-flight message queue ----------------------------------------
-   A queued message is PARKED, not active. It must read as subdued and
-   plainly distinct from a live .bubble.user, so the user sees the message
-   is waiting for later and is explicitly NOT interrupting the running turn
-   unless escalated. Three cues carry that: the DASHED border (a solid one
-   is the live bubble's), the reduced OPACITY, and the muted card grey — the
-   opposite of the user bubble's saturated fill. The dash is drawn in the
-   very --user blue the live bubble fills with, so even parked the card reads
-   as the user's own prompt held back rather than a foreign chrome. It fits
-   its own text; WHICH RAIL it hangs on is `.held-right`'s to say, in the hold
-   tray's own section below, because that is a statement about whose words
-   these are and not about how a parked card is framed. */
-.queued-card {
-  width: fit-content;
+   A queued message is PARKED, not active. It must read as plainly distinct
+   from a live prompt bubble, so the user sees the message is waiting for later
+   and is explicitly NOT interrupting the running turn unless escalated: its
+   grey-blue held fill and its DASHED frame (a solid one is the live bubble's)
+   carry that, and everything else is the one bubble's. */
+/* THE HELD PROMPT'S FRAME (owner rulings, 2026-09-23): a held prompt is a
+   prompt-role bubble (src/tray/held-prompt.ts) on the grey-blue held fill
+   (`--held-prompt-bg`), and its variant sets its BORDER: DASHED in the very
+   --user blue the live bubble fills with, so parked it still reads as the
+   user's own prompt held back. A hold that is not the turn's names its own
+   frame below. */
+.bubble[data-variant="held"] {
   border: 1px dashed var(--user);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-  font-size: calc(0.85rem * var(--feed-text-scale));
-  opacity: 0.8;
 }
 .queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
 /* The status pill: "queued — classifying…" → "queued — waiting" or
@@ -2706,9 +2606,6 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   border-color: var(--muted);
   font-weight: 700;
 }
-/* The user's own words stay upright and legible at full color — the subdued
-   chrome is around them, not on them. */
-.queued-content { color: var(--fg); }
 /* The classifier's one-line reason reads as an aside: muted and italic. */
 .queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
@@ -2724,15 +2621,13 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
    shares the queued card's geometry (same column, same fit-content width) so
    it sits in the feed as one more parked prompt, and departs from it in
-   every cue that carries meaning: the border goes SOLID in the merge/bounce
-   amber rather than dashed user-blue, and the card carries the bounce wash.
+   the cue that carries meaning: the border goes SOLID in the merge/bounce
+   amber rather than dashed user-blue.
    The dashed blue card means "waiting on the turn above you"; this one means
    "waiting on the whole daemon", and the reader must not have to read the
    badge to tell them apart. */
-.queued-card.lease-card {
+.bubble[data-variant="held"].lease-card {
   border: 1px solid var(--merge-border);
-  background: var(--merge-card);
-  opacity: 1;
 }
 /* The badge says WHY, and takes the same amber so the pill and the frame
    agree — it is never the classifier's grey, because no classification
@@ -2755,10 +2650,8 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    textbook teal case — nothing is wired to this prompt yet, and nothing is
    wrong. The amber is spent on coordinated daemon work (merges, bounces),
    which this is not. */
-.queued-card.keep-alive-card {
+.bubble[data-variant="held"].keep-alive-card {
   border: 1px solid var(--hibernated);
-  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
-  opacity: 1;
 }
 /* The badge takes the same teal so pill and frame agree. Never the
    classifier's grey: no classification happened, and none will. */
@@ -2768,16 +2661,6 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   font-weight: 700;
 }
 
-/* --- The revival hold bubble (render.ts `RevivalHeldCard`) ---------------
-   A prompt parked behind a compact-first revival whose compaction has not
-   landed. Same shape and same hibernation teal as the keep-alive card above:
-   both are "held by the hibernation machinery, never classified, cannot be
-   forced", and a revival is that vocabulary's own event. */
-.queued-card.revival-card {
-  border: 1px solid var(--hibernated);
-  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
-  opacity: 1;
-}
 .queued-badge.revival {
   color: var(--hibernated);
   border-color: var(--hibernated);
@@ -3186,7 +3069,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
      delay seeking to the wrong phase here. The gradient goes with it: a
      stopped wave would otherwise park a static shadow band across the fill.
      The body needs no entry — it never had an animation of its own. */
-  .bubble.user[data-wave="working"] {
+  .bubble[data-role="prompt"][data-wave="working"] {
     animation: none;
     background-image: none;
   }
@@ -4371,30 +4254,30 @@ body.draining #composer-input::placeholder {
    corner stamp and the two state marks. */
 
 /* The response body is a custom element (it knows when it joins the document,
-   see `createResponseBody`), and a custom element is inline until told. */
-response-body.bubble-body { display: block; }
+   see `createBubbleBody`), and a custom element is inline until told. */
+bubble-body.bubble-body { display: block; }
 
 /* THE COST CORNER: the token figure, and — once the response has settled —
    the relative duration it reveals on hover. Collapsed, only the token shows,
    at a fixed inset from the bubble's top and right edges whatever its digit
-   count. Revealed, the token slides left by exactly the duration's width (plus
-   its gap), so a shorter duration means a shorter slide.
+   count. Revealed, the token slides left by the duration's fixed-width slot
+   (plus its gap), and the duration reads beside it.
 
-   THE SLIDE EQUALS THE DURATION'S WIDTH BY CONSTRUCTION, never by measuring
-   or by a guessed length. The corner holds two in-flow pieces:
-     1. `::before`, an invisible copy of the token text (`data-tokens`), which
-        reserves the token's width;
-     2. `.usage-slider`, whose ONLY in-flow content is `.usage-ago` (the gap is
-        that element's `margin-left`), so the slider's own width is exactly
-        gap + duration.
+   THE SLIDE IS THE DURATION SLOT'S WIDTH, and every width here is FIXED
+   (owner rule, 2026-09-23: the user owns the scroll), so no figure, tick or
+   settle moves the float. The corner holds two in-flow pieces:
+     1. `::before`, an invisible copy of the token text (`data-tokens`) in a
+        fixed-width slot;
+     2. `.usage-slider`, the fixed-width duration slot, whose ONLY in-flow
+        content is `.usage-ago` (the gap is that element's `margin-left`).
    The visible `.usage-stamp` is taken out of flow and pinned to the slider's
    left edge (`right: 100%`). Collapsed, the slider is `translateX(100%)` — a
    percentage of its OWN width — so the duration sits just past the corner's
    right edge (clipped by `overflow: hidden`) and the token's right edge lands
    exactly on that edge. Revealed, the slider is `translateX(0)`: the duration
    fills its slot and the token sits exactly over the spacer. A corner with no
-   duration yet (still arriving) has a zero-width slider, so the token sits at
-   the right edge and nothing moves on hover.
+   duration yet (still arriving, `data-arriving`) keeps its slot reserved and
+   collapsed, so the token sits at the right edge and nothing moves on hover.
 
    FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling,
    2026-09-15). The corner floats top-right INSIDE the scroll box, before the
@@ -4435,22 +4318,33 @@ response-body.bubble-body { display: block; }
   --usage-ago-font-size: 0.85em;
 }
 /* The token's width reservation: the token text again, invisible, in the
-   token's own size and figures so its width is the visible token's width. */
+   token's own size and figures. ITS WIDTH IS FIXED (owner rule, 2026-09-23:
+   the user owns the scroll): an arriving response restates its figure as it
+   grows, and a spacer as wide as the text reflowed the first prose line --
+   and every line under it -- whenever the figure gained a character. 6ch
+   holds the widest figure the one token formatter writes ("999.9k"). */
 .usage-corner::before {
   content: attr(data-tokens);
   visibility: hidden;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-size: var(--usage-ago-font-size);
+  width: 6ch;
 }
-/* The element the reveal moves. Its width is its in-flow content — the
-   duration and its gap, nothing else — so `translateX(100%)` is exactly the
-   duration's width. It is the token's containing block (`position: relative`)
-   and stretches to the row's height so the token's `top: 0` lines it up with
-   the spacer. */
+/* The element the reveal moves: the duration's fixed-width slot, so
+   `translateX(100%)` is exactly the slot's width. It is the token's containing
+   block (`position: relative`) and stretches to the row's height so the
+   token's `top: 0` lines it up with the spacer. */
 .usage-slider {
   position: relative;
   align-self: stretch;
+  /* THE DURATION SLOT IS A FIXED WIDTH, arriving or settled (owner rule,
+     2026-09-23: the user owns the scroll). The live clock repaints the
+     duration every second, and a slot as wide as its text moved the float --
+     and reflowed the first prose line under a reader -- on every tick that
+     changed a digit's width or the label's length. The gap plus 11ch of the
+     duration's own 0.85em font holds its longest label ("364d 23h ago"). */
+  width: calc(0.35rem + 11ch * 0.85);
   transform: translateX(100%);
   transition: transform 0.5s ease;
 }
@@ -4474,6 +4368,7 @@ response-body.bubble-body { display: block; }
 .usage-ago {
   color: var(--muted);
   font-size: var(--usage-ago-font-size);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   margin-left: 0.35rem;
   opacity: 0;
@@ -4499,6 +4394,12 @@ response-body.bubble-body { display: block; }
 .usage-corner.usage-corner--revealed .usage-ago {
   opacity: 1;
 }
+/* AN ARRIVING CORNER NEVER SLIDES: its duration slot is reserved but empty
+   until the response settles, so revealing it would move the token over
+   nothing. (0,5,0) outranks every reveal trigger above. */
+.bubble.assistant .usage-corner[data-arriving] .usage-slider {
+  transform: translateX(100%);
+}
 /* Reduced motion: the duration appears and the token moves with no slide or
    fade. */
 @media (prefers-reduced-motion: reduce) {
@@ -4510,7 +4411,7 @@ response-body.bubble-body { display: block; }
 /* A bubble the turn's death cut short: the border says it and the marker names
    it. WHY it died is the turn's terminal row, never this bubble's, so the
    marker carries no reason text. */
-.bubble.assistant.response-cut-short {
+.bubble.response-cut-short {
   border-color: var(--err);
 }
 .response-cut-short-marker {
@@ -4716,7 +4617,7 @@ response-body.bubble-body { display: block; }
   color: var(--muted);
 }
 /* An AGENT-addressed prompt wears the orange border the schema names for it. */
-.bubble.user.prompt-agent { border: 1px solid var(--thinking); }
+.bubble[data-role="prompt"][data-variant="agent"] { border: 1px solid var(--thinking); }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
 /* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
    it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
@@ -4733,20 +4634,6 @@ response-body.bubble-body { display: block; }
 }
 
 /* ---- hold tray (src/tray) ---------------------------------------------- */
-
-/* THE HELD PROMPT HANGS ON THE PROMPT RAIL (owner ruling 1, 2026-09-13). A
-   held prompt is the user's own words on their way to becoming a
-   `.bubble.user`, so it sits on the side that bubble sits on and obeys that
-   bubble's width rule — the same 60% cap and the same half-leftover right
-   margin, so a released prompt does not jump rails as it is released. It used
-   to hug the agent's LEFT rail, which said the wrong thing about whose words
-   these are. Only the rail changes: the parked frame, fill, opacity and
-   type are `.queued-card`'s and are untouched. */
-.queued-card.held-right {
-  max-width: 60%;
-  margin-left: auto;
-  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
-}
 
 /* The items list. Delimited by the one shared `.list-rows` rule, so a held
    prompt is separated from the next exactly as a footer panel's rows are. */
@@ -4791,28 +4678,6 @@ response-body.bubble-body { display: block; }
   content: "✓";
   margin-right: 0.2rem;
 }
-/* The prompt's own words, at full color inside the subdued chrome. */
-.queued-text > *:first-child { margin-top: 0; }
-.queued-text > *:last-child { margin-bottom: 0; }
-/* THE FIRST LINE ONLY, until the reader opens the prompt (owner ruling,
-   2026-09-23). Collapsed, the fold shows `.held-line` — the first line alone —
-   clamped to ONE ROW by the tool card's input-line clamp, and the whole prompt
-   (`.queued-content`) is not drawn; expanded, the reverse. The toggle is the
-   feed's own `.expanded` class and its zoom cursors, worn only by a fold with
-   something past its first line (`held-foldable`), so a prompt that fits
-   offers nothing to open. */
-.held-fold:not(.expanded) > .queued-content { display: none; }
-.held-fold.expanded > .held-line { display: none; }
-.held-line {
-  color: var(--fg);
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.held-line > * { margin-top: 0; margin-bottom: 0; }
-.held-fold.held-foldable { cursor: zoom-in; }
-.held-fold.held-foldable.expanded { cursor: zoom-out; }
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */
@@ -5478,7 +5343,7 @@ response-body.bubble-body { display: block; }
    --tool-title purple the tool cards title themselves with, which is the
    register this page already spends on "the agent did something", so the three
    cards read as siblings of the tool cards rather than as a fourth palette. */
-.bubble.assistant.agentic {
+.bubble[data-variant="agentic"] {
   border-left: 2px solid var(--tool-title);
 }
 /* The heading line: the daemon's composed text, drawn verbatim (an artifact's
@@ -5660,9 +5525,18 @@ response-body.bubble-body { display: block; }
   font-family: ui-monospace, monospace;
   overflow-wrap: anywhere;
 }
+/* THE SHELL HEAD'S TWO CLOCKS HOLD A FIXED FOOTPRINT (owner rule, 2026-09-23:
+   the user owns the scroll). The head wraps (`flex-wrap`), and a clock label
+   repainted every second that grew by a unit ("59s" -> "1m 0s") could push
+   its neighbor onto a new line and move everything under the reader. Each is
+   one unbreakable, tabular run with room reserved for its longest usual
+   label ("59m 59s"; "quiet for 59m 59s"). */
 .shell-clock {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
+  display: inline-block;
+  white-space: nowrap;
+  min-width: 7ch;
 }
 /* "quiet for 12s": the client's clock over the daemon's last observed append.
    Muted and italic like every other aside, NOT an alarm hue — quietness is a
@@ -5670,6 +5544,10 @@ response-body.bubble-body { display: block; }
 .shell-quiet {
   color: var(--muted);
   font-style: italic;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  white-space: nowrap;
+  min-width: 17ch;
 }
 .shell-spool {
   margin-top: 0.3rem;
@@ -5968,15 +5846,8 @@ response-body.bubble-body { display: block; }
    feed's rhythm is untouched, and gains a muted left accent plus the daemon's
    heading in the same small muted type `.system-note` has always used for a
    system remark. No new colour is introduced — a notice is not a warning. */
-.bubble.assistant.response-notice {
+.bubble.response-notice {
   border-left: 2px solid var(--muted);
-  padding-left: calc(0.9rem - 2px);
-  /* `.bubble` lays its children out as a flex ROW (body beside the cost
-     corner), so the heading is given the whole first line and the row wraps
-     beneath it — the alternative, nesting the heading inside `.bubble-body`,
-     cannot work: the prose painters rewrite that element whole on every frame
-     of the type-out. */
-  flex-wrap: wrap;
 }
 .response-notice-heading {
   width: 100%;
@@ -6630,9 +6501,10 @@ response-body.bubble-body { display: block; }
 #ws-sidebar .sb-refusal-paths > li { overflow-wrap: anywhere; }
 
 /* ---- agent prompt delivery (src/feed/rows/agent-prompt.ts) ---- */
+/* The delivery line is the second line of the agent prompt's header strip,
+   under its address (owner ruling, 2026-09-23). */
 .prompt-delivery {
   display: block;
-  margin-top: 4px;
   font-size: 0.85em;
   opacity: 0.7;
 }

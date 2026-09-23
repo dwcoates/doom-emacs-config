@@ -54,9 +54,9 @@ let onComposerPanel: ((panel: SubmitPromptCommandPanel) => void) | null = null;
 /** The topbar's `openLogin`, and the login handle's `open` it must reach. */
 let openLogin: ((control: HTMLElement) => void) | null = null;
 const loginOpen = vi.fn();
-/** The footer's `revealRow`, and the feed handle's `revealRow` it must reach. */
-let footerRevealRow: ((id: unknown) => void) | null = null;
-const feedRevealRow = vi.fn();
+/** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
+let footerSelectDetachedWork: ((id: unknown) => void) | null = null;
+const feedSelectDetachedWork = vi.fn();
 /** The last `mountFeed` deps, for the composer-factory contract. */
 let feedDeps: { composerFactory?: unknown } | null = null;
 /** The context the boot built, so its stream's fate can be read off it. */
@@ -191,7 +191,7 @@ async function bootMain(): Promise<void> {
     mountFeed: mounts.feed.mockImplementation((_host: HTMLElement, _ctx, deps: typeof feedDeps) => {
       order.push("feed");
       feedDeps = deps;
-      return { dispose: vi.fn(), revealRow: feedRevealRow };
+      return { dispose: vi.fn(), selectDetachedWork: feedSelectDetachedWork };
     }),
   }));
   vi.doMock("../src/feed/renderers.js", () => ({
@@ -205,9 +205,9 @@ async function bootMain(): Promise<void> {
   }));
   vi.doMock("../src/footer/footer.js", () => ({
     mountFooter: mounts.footer.mockImplementation(
-      (_host: HTMLElement, _ctx, deps: { revealRow: (id: unknown) => void }) => {
+      (_host: HTMLElement, _ctx, deps: { selectDetachedWork: (id: unknown) => void }) => {
         order.push("footer");
-        footerRevealRow = deps.revealRow;
+        footerSelectDetachedWork = deps.selectDetachedWork;
         return {
           dispose: vi.fn(),
           onStatus: (fn: (statusCase: string) => void) => {
@@ -259,9 +259,9 @@ beforeEach(() => {
   adopt = async () => {};
   onFooterStatus = null;
   openLogin = null;
-  footerRevealRow = null;
+  footerSelectDetachedWork = null;
   loginOpen.mockClear();
-  feedRevealRow.mockClear();
+  feedSelectDetachedWork.mockClear();
   onComposerPanel = null;
   feedDeps = null;
   drawnPanel = null;
@@ -396,9 +396,9 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
   test("routes the footer's jump row to the feed it mounted", async () => {
     await bootMain();
 
-    footerRevealRow?.({ value: "row-1" });
+    footerSelectDetachedWork?.({ value: "row-1" });
 
-    expect(feedRevealRow).toHaveBeenCalledWith({ value: "row-1" });
+    expect(feedSelectDetachedWork).toHaveBeenCalledWith({ value: "row-1" });
   });
 
   test("mints a page identity without crypto.randomUUID", async () => {
