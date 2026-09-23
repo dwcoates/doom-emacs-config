@@ -701,6 +701,9 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		sh.stateCommand(frame.Success.GetCommand().GetLine())
 		settled = shellEnding(log, workID, bash)
 	case *conversationv1.AgentBash_Failure:
+		// The failure restates the command, as the success does, so a head
+		// drawn from its ending alone still names what ran.
+		sh.stateCommand(frame.Failure.GetCommand().GetLine())
 		settled = shellEnding(log, workID, bash)
 	}
 
