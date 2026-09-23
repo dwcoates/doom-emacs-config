@@ -162,6 +162,13 @@ const TRAY_REGION_CLASS = "hold-tray";
 const TRAY_LIST_CLASS = "hold-tray-items";
 
 /**
+ * Every held entry the tray draws, in the daemon's order: the list's own cards.
+ * The tray sits after the feed in the scroll zone, so its last card, when there
+ * is one, is the feed column's latest entry (`latestEntry`, feed.ts).
+ */
+export const HELD_ENTRY_SELECTOR = `.${TRAY_LIST_CLASS} > *`;
+
+/**
  * One held thing. THE ARM IS THE KIND.
  *
  * A prompt is released or dropped and an offer is answered, so the routing is
