@@ -21,6 +21,7 @@ import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedPlan, EDIT_PLAN_TEXT, PLAN_STATE_ARMS } from "../../../src/feed/cards/plan.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
+import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
 
 /**
  * The oneof as an INIT shape rather than a built message: the fixtures below
@@ -223,5 +224,34 @@ describe("drawFeedPlan malformed input", () => {
       value: {},
     };
     expect(() => drawFeedPlan(u, harness().rc)).toThrow(MalformedView);
+  });
+});
+
+describe("a tree in the plan", () => {
+  const staged = useTreeLayout();
+
+  /** A planned bubble of MARKDOWN, attached under its own column. */
+  function mounted(markdown: string): HTMLElement {
+    const el = drawFeedPlan(plan(planned(markdown)), harness().rc);
+    const column = document.createElement("div");
+    column.append(el);
+    document.body.append(column);
+    return el;
+  }
+
+  it("wraps at the agentic bubble's own cap", () => {
+    // Arrange / Act
+    const el = mounted(WIDE_TREE);
+    // Assert
+    const widths = treeLineWidths(el);
+    expect(widths.length).toBeGreaterThan(3);
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("never wraps below its max width", () => {
+    // Arrange / Act
+    const el = mounted(FITTING_TREE);
+    // Assert
+    expect(treeLineWidths(el)).toHaveLength(3);
   });
 });
