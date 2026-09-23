@@ -10,8 +10,12 @@
  * unit than the start, and usage — which rides block 0 alone — attached to
  * nothing at all.
  */
-import { describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { createFold } from "../../src/convert/fold.js";
+import { StreamBlocks } from "../../src/convert/stream-events.js";
+import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { activityOf, foldContext } from "./fold-harness.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
@@ -532,5 +536,587 @@ function noticeSubjectOf(record: Record<string, unknown>): string | undefined {
 describe("prose the vendor synthesized for a rate limit", () => {
   it("classifies the notice as a USAGE LIMIT, not as an unclassified failure", () => {
     expect(noticeSubjectOf({ error: "rate_limit" })).toBe("usageLimit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Interleaved streams: one block state PER STREAM.
+// ---------------------------------------------------------------------------
+
+const MAIN_ID = "msg_main";
+const SUB_ID = "msg_sub";
+const SPAWN = "toolu_spawn";
+
+/** A stream event on the stream `parent` names (`null` is the main agent's). */
+function eventOn(parent: string | null, event: Record<string, unknown>, uuid: string): SdkMessage {
+  return {
+    type: "stream_event",
+    uuid,
+    session_id: "session-1",
+    parent_tool_use_id: parent,
+    event,
+  } as unknown as SdkMessage;
+}
+
+/** The assistant line restating one block of `messageId`, on the stream `parent` names. */
+function lineOn(
+  parent: string | null,
+  messageId: string,
+  block: Record<string, unknown>,
+  uuid: string,
+): SdkMessage {
+  return {
+    type: "assistant",
+    uuid,
+    session_id: "session-1",
+    parent_tool_use_id: parent,
+    message: {
+      id: messageId,
+      type: "message",
+      role: "assistant",
+      model: "claude-opus-5",
+      content: [block],
+      stop_reason: null,
+      usage: USAGE,
+    },
+  } as unknown as SdkMessage;
+}
+
+const start = (id: string): Record<string, unknown> => ({ type: "message_start", message: { id, usage: USAGE } });
+const blockStart = (index: number, type: string): Record<string, unknown> => ({
+  type: "content_block_start",
+  index,
+  content_block: { type },
+});
+const textDelta = (index: number, text: string): Record<string, unknown> => ({
+  type: "content_block_delta",
+  index,
+  delta: { type: "text_delta", text },
+});
+const thinkingDelta = (index: number, thinking: string): Record<string, unknown> => ({
+  type: "content_block_delta",
+  index,
+  delta: { type: "thinking_delta", thinking },
+});
+const blockStop = (index: number): Record<string, unknown> => ({ type: "content_block_stop", index });
+const STOP: Record<string, unknown> = { type: "message_stop" };
+
+/** Fold the messages, in order, over ONE fold. */
+function foldAll(messages: readonly SdkMessage[]): PersistEntry[] {
+  const fold = createFold();
+  const context = foldContext();
+  return messages.flatMap((message) => [...fold.onSdkMessage(message, context).entries]);
+}
+
+/** The distinct upsert keys of the rows in the main agent's book. */
+function mainBookKeys(entries: readonly PersistEntry[]): string[] {
+  return [...new Set(entries.filter((e) => e.agentId.value === "main-agent").map((e) => e.upsertKey))];
+}
+
+/** The distinct upsert keys of the rows in any subagent's book. */
+function subagentBookKeys(entries: readonly PersistEntry[]): string[] {
+  return [...new Set(entries.filter((e) => e.agentId.value !== "main-agent").map((e) => e.upsertKey))];
+}
+
+/** The settled prose of the main book's response unit. */
+function settledMainProse(entries: readonly PersistEntry[]): string | undefined {
+  for (const entry of entries) {
+    if (entry.agentId.value !== "main-agent") continue;
+    const item = activityOf(entry)?.item;
+    if (item?.case === "response" && item.value.result.case === "success") {
+      return item.value.result.value.prose?.markdown;
+    }
+  }
+  return undefined;
+}
+
+/** The settled reasoning text of the main book's thinking unit. */
+function settledMainThinking(entries: readonly PersistEntry[]): string | undefined {
+  for (const entry of entries) {
+    if (entry.agentId.value !== "main-agent") continue;
+    const item = activityOf(entry)?.item;
+    if (item?.case !== "thinking" || item.value.result.case !== "success") continue;
+    const reasoning = item.value.result.value.reasoning;
+    return reasoning.case === "text" ? reasoning.value.text : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A subagent's `message_start` lands BEFORE the main agent opens its thinking
+ * block: the main stream's block must still be keyed to the MAIN message.
+ */
+function foldSubagentStartBeforeMainThinking(): PersistEntry[] {
+  return foldAll([
+    eventOn(null, start(MAIN_ID), "u-m-start"),
+    eventOn(SPAWN, start(SUB_ID), "u-s-start"),
+    eventOn(null, blockStart(0, "thinking"), "u-m-b0"),
+    eventOn(null, thinkingDelta(0, "pondering"), "u-m-d0"),
+    eventOn(SPAWN, blockStart(0, "text"), "u-s-b0"),
+    eventOn(SPAWN, textDelta(0, "sub prose"), "u-s-d0"),
+    lineOn(null, MAIN_ID, { type: "thinking", thinking: "pondering" }, "u-m-a0"),
+    eventOn(null, blockStop(0), "u-m-s0"),
+    lineOn(SPAWN, SUB_ID, { type: "text", text: "sub prose" }, "u-s-a0"),
+    eventOn(SPAWN, blockStop(0), "u-s-s0"),
+    eventOn(SPAWN, STOP, "u-s-stop"),
+    eventOn(null, STOP, "u-m-stop"),
+  ]);
+}
+
+describe("a subagent's message_start before the main agent's thinking block", () => {
+  it("keeps exactly ONE main unit, keyed to the main message", () => {
+    // Arrange, Act.
+    const entries = foldSubagentStartBeforeMainThinking();
+
+    // Assert.
+    expect(mainBookKeys(entries)).toEqual([`activity:${MAIN_ID}:0`]);
+  });
+
+  it("keeps exactly ONE subagent unit, keyed to the subagent's message", () => {
+    // Arrange, Act.
+    const entries = foldSubagentStartBeforeMainThinking();
+
+    // Assert.
+    expect(subagentBookKeys(entries)).toEqual([`activity:${SUB_ID}:0`]);
+  });
+});
+
+/** A subagent's whole response lands BETWEEN two deltas of the main agent's open block. */
+function foldSubagentMidMainBlock(kind: "text" | "thinking"): PersistEntry[] {
+  const delta = kind === "text" ? textDelta : thinkingDelta;
+  const settled =
+    kind === "text" ? { type: "text", text: "Hello world" } : { type: "thinking", thinking: "Hello world" };
+  return foldAll([
+    eventOn(null, start(MAIN_ID), "u-m-start"),
+    eventOn(null, blockStart(0, kind), "u-m-b0"),
+    eventOn(null, delta(0, "Hello "), "u-m-d0"),
+    eventOn(SPAWN, start(SUB_ID), "u-s-start"),
+    eventOn(SPAWN, blockStart(0, "text"), "u-s-b0"),
+    eventOn(SPAWN, textDelta(0, "sub prose"), "u-s-d0"),
+    eventOn(null, delta(0, "world"), "u-m-d1"),
+    lineOn(SPAWN, SUB_ID, { type: "text", text: "sub prose" }, "u-s-a0"),
+    lineOn(null, MAIN_ID, settled, "u-m-a0"),
+    eventOn(null, blockStop(0), "u-m-s0"),
+    eventOn(SPAWN, blockStop(0), "u-s-s0"),
+    eventOn(null, STOP, "u-m-stop"),
+    eventOn(SPAWN, STOP, "u-s-stop"),
+  ]);
+}
+
+describe("a subagent's message_start in the middle of the main agent's text block", () => {
+  it("keeps exactly ONE main unit", () => {
+    // Arrange, Act.
+    const entries = foldSubagentMidMainBlock("text");
+
+    // Assert.
+    expect(mainBookKeys(entries)).toEqual([`activity:${MAIN_ID}:0`]);
+  });
+
+  it("settles that unit with the WHOLE text", () => {
+    // Arrange, Act.
+    const entries = foldSubagentMidMainBlock("text");
+
+    // Assert.
+    expect(settledMainProse(entries)).toBe("Hello world");
+  });
+});
+
+describe("a subagent's message_start in the middle of the main agent's thinking block", () => {
+  it("keeps exactly ONE main unit", () => {
+    // Arrange, Act.
+    const entries = foldSubagentMidMainBlock("thinking");
+
+    // Assert.
+    expect(mainBookKeys(entries)).toEqual([`activity:${MAIN_ID}:0`]);
+  });
+
+  it("settles that unit with the WHOLE reasoning", () => {
+    // Arrange, Act.
+    const entries = foldSubagentMidMainBlock("thinking");
+
+    // Assert.
+    expect(settledMainThinking(entries)).toBe("Hello world");
+  });
+});
+
+describe("a thinking-token estimate while a subagent streams its own reasoning", () => {
+  it("reaches the MAIN agent's open reasoning unit", () => {
+    // Arrange, Act.
+    const entries = foldAll([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "thinking"), "u-m-b0"),
+      eventOn(SPAWN, start(SUB_ID), "u-s-start"),
+      eventOn(SPAWN, blockStart(0, "thinking"), "u-s-b0"),
+      {
+        type: "system",
+        subtype: "thinking_tokens",
+        estimated_tokens: 40,
+        estimated_tokens_delta: 10,
+        uuid: "u-tokens",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(keysFor(entries, "activity.thinking.update.withheld")).toEqual([`activity:${MAIN_ID}:0`]);
+  });
+});
+
+/** One `system:thinking_tokens` estimate. */
+const THINKING_TOKENS = {
+  type: "system",
+  subtype: "thinking_tokens",
+  estimated_tokens: 40,
+  estimated_tokens_delta: 10,
+  uuid: "u-tokens",
+  session_id: "session-1",
+} as unknown as SdkMessage;
+
+describe("a thinking-token estimate after a subagent's un-streamed line", () => {
+  it("still reaches the MAIN agent's open reasoning unit", () => {
+    // Arrange, Act.
+    const entries = foldAll([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "thinking"), "u-m-b0"),
+      lineOn(SPAWN, SUB_ID, { type: "thinking", thinking: "sub reasoning" }, "u-s-a0"),
+      THINKING_TOKENS,
+    ]);
+
+    // Assert.
+    expect(keysFor(entries, "activity.thinking.update.withheld")).toEqual([`activity:${MAIN_ID}:0`]);
+  });
+});
+
+describe("a thinking-token estimate with no response open on the main stream", () => {
+  it("produces nothing, even while a subagent's reasoning is open", () => {
+    // Arrange, Act.
+    const entries = foldAll([
+      eventOn(SPAWN, start(SUB_ID), "u-s-start"),
+      eventOn(SPAWN, blockStart(0, "thinking"), "u-s-b0"),
+      THINKING_TOKENS,
+    ]);
+
+    // Assert.
+    expect(keysFor(entries, "activity.thinking.update.withheld")).toEqual([]);
+  });
+});
+
+describe("usage over interleaved streams", () => {
+  it("attaches once PER STREAM, to each stream's own first block", () => {
+    // Arrange, Act: the main response's second line arrives after a subagent's line.
+    const entries = foldAll([
+      lineOn(null, MAIN_ID, { type: "text", text: "main first" }, "u-m-a0"),
+      lineOn(SPAWN, SUB_ID, { type: "text", text: "sub first" }, "u-s-a0"),
+      lineOn(null, MAIN_ID, { type: "text", text: "main second" }, "u-m-a1"),
+    ]);
+
+    // Assert.
+    const carrying = entries.filter((e) => activityOf(e)?.usage !== undefined).map((e) => e.upsertKey);
+    expect(carrying).toEqual([`activity:${MAIN_ID}:0`, `activity:${SUB_ID}:0`]);
+  });
+});
+
+describe("a subagent block opened with no message_start on ITS stream", () => {
+  it("is skipped rather than borrowing the main stream's open response", () => {
+    // Arrange, Act.
+    const entries = foldAll([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(SPAWN, blockStart(0, "text"), "u-s-b0"),
+    ]);
+
+    // Assert.
+    expect(entries).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A stream's block state is dropped at the stream's end.
+// ---------------------------------------------------------------------------
+
+describe("a stream's block state", () => {
+  it("is created on the stream's first message_start", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+
+    // Act.
+    streams.beginResponse(SPAWN, SUB_ID);
+
+    // Assert.
+    expect(streams.openResponse(SPAWN)?.messageId).toBe(SUB_ID);
+  });
+
+  it("is created on the first line of an un-streamed response", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+
+    // Act.
+    streams.responseFor(SPAWN, SUB_ID);
+
+    // Assert.
+    expect(streams.openStreams).toBe(1);
+  });
+
+  it("is dropped at the stream's message_stop", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    streams.beginResponse(SPAWN, SUB_ID);
+
+    // Act.
+    streams.endResponse(SPAWN);
+
+    // Assert.
+    expect(streams.openStreams).toBe(0);
+  });
+
+  it("is NOT dropped by ANOTHER stream's message_stop", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    streams.beginResponse(null, MAIN_ID);
+    streams.beginResponse(SPAWN, SUB_ID);
+
+    // Act.
+    streams.endResponse(SPAWN);
+
+    // Assert.
+    expect(streams.openResponse(null)?.messageId).toBe(MAIN_ID);
+  });
+
+  it("is dropped for the main stream at the turn's end", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    streams.beginResponse(null, MAIN_ID);
+
+    // Act.
+    streams.endTurn();
+
+    // Assert.
+    expect(streams.openStreams).toBe(0);
+  });
+
+  it("outlives the turn's end for a subagent's stream", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    streams.beginResponse(SPAWN, SUB_ID);
+
+    // Act.
+    streams.endTurn();
+
+    // Assert.
+    expect(streams.openResponse(SPAWN)?.messageId).toBe(SUB_ID);
+  });
+
+  it("is dropped for a subagent's stream at its agent's end", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    streams.beginResponse(SPAWN, SUB_ID);
+
+    // Act.
+    streams.endAgent(SPAWN);
+
+    // Assert.
+    expect(streams.openStreams).toBe(0);
+  });
+
+  it("is never dropped for the main stream by an agent's end", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    streams.beginResponse(null, MAIN_ID);
+
+    // Act.
+    streams.endAgent("");
+
+    // Assert.
+    expect(streams.openResponse(null)?.messageId).toBe(MAIN_ID);
+  });
+
+  it("keeps a unit AT or ABOVE an assistant line's block pending", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+    const state = streams.beginResponse(null, MAIN_ID);
+    state.unsettled.set(1, create(conversationv1.AgentActivityIdSchema, { value: `${MAIN_ID}:1` }));
+
+    // Act.
+    streams.settledBelow(null, 1);
+
+    // Assert.
+    expect([...state.unsettled.keys()]).toEqual([1]);
+  });
+
+  it("drops through the fold at message_stop, so a later delta is keyed to nothing", () => {
+    // Arrange, Act.
+    const entries = foldAll([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, STOP, "u-m-stop"),
+      eventOn(null, textDelta(0, "late"), "u-m-late"),
+    ]);
+
+    // Assert.
+    expect(entries).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The log records these invariants are reported through.
+// ---------------------------------------------------------------------------
+
+const mockedWriteSync = vi.mocked(writeSync);
+
+/** A persisted log record, as the canonical logger writes one. */
+interface LogRecord {
+  readonly level: string;
+  readonly message: string;
+  readonly context: Record<string, unknown>;
+}
+
+/** The records the canonical logger persisted while `act` ran. */
+function recordsDuring(act: () => void): LogRecord[] {
+  const before = mockedWriteSync.mock.calls.length;
+  act();
+  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as LogRecord,
+  );
+}
+
+const UNSETTLED = "invariant violated: a streamed unit was started and never settled; its row stays unsettled";
+
+/** The unsettled-unit error records folding `messages` wrote. */
+function unsettledReports(messages: readonly SdkMessage[]): LogRecord[] {
+  return recordsDuring(() => foldAll(messages)).filter((record) => record.message === UNSETTLED);
+}
+
+describe("a streamed unit its stream started and never settled", () => {
+  it("is logged at ERROR level at the stream's message_stop", () => {
+    // Arrange, Act.
+    const reports = unsettledReports([
+      eventOn(SPAWN, start(SUB_ID), "u-s-start"),
+      eventOn(SPAWN, blockStart(0, "text"), "u-s-b0"),
+      eventOn(SPAWN, STOP, "u-s-stop"),
+    ]);
+
+    // Assert.
+    expect(reports.map((r) => r.level)).toEqual(["error"]);
+  });
+
+  it("names the stream, the message id and the unit id", () => {
+    // Arrange, Act.
+    const reports = unsettledReports([
+      eventOn(SPAWN, start(SUB_ID), "u-s-start"),
+      eventOn(SPAWN, blockStart(0, "text"), "u-s-b0"),
+      eventOn(SPAWN, STOP, "u-s-stop"),
+    ]);
+
+    // Assert.
+    expect(reports[0]?.context).toMatchObject({
+      stream: SPAWN,
+      message_id: SUB_ID,
+      activity_id: `${SUB_ID}:0`,
+      detected_at: "message_stop",
+    });
+  });
+
+  it("names the main stream as `main`", () => {
+    // Arrange, Act.
+    const reports = unsettledReports([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "thinking"), "u-m-b0"),
+      eventOn(null, STOP, "u-m-stop"),
+    ]);
+
+    // Assert.
+    expect(reports[0]?.context.stream).toBe("main");
+  });
+
+  it("is caught at the assistant line for a LATER block of the same response", () => {
+    // Arrange, Act: block 0 closes without its line, and the line for block 1 arrives.
+    const reports = unsettledReports([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "text"), "u-m-b0"),
+      eventOn(null, blockStop(0), "u-m-s0"),
+      lineOn(null, MAIN_ID, { type: "text", text: "second" }, "u-m-a1"),
+    ]);
+
+    // Assert.
+    expect(reports.map((r) => r.context.detected_at)).toEqual(["assistant"]);
+  });
+
+  it("is caught at the assistant line of a DIFFERENT response on the same stream", () => {
+    // Arrange, Act.
+    const reports = unsettledReports([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "text"), "u-m-b0"),
+      lineOn(null, "msg_next", { type: "text", text: "next" }, "u-n-a0"),
+    ]);
+
+    // Assert.
+    expect(reports.map((r) => r.context.message_id)).toEqual([MAIN_ID]);
+  });
+
+  it("is caught at the next message_start on the same stream", () => {
+    // Arrange, Act.
+    const reports = unsettledReports([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "text"), "u-m-b0"),
+      eventOn(null, start("msg_next"), "u-n-start"),
+    ]);
+
+    // Assert.
+    expect(reports.map((r) => r.context.detected_at)).toEqual(["message_start"]);
+  });
+
+  it("is reported exactly once however many ends follow", () => {
+    // Arrange, Act.
+    const reports = unsettledReports([
+      eventOn(null, start(MAIN_ID), "u-m-start"),
+      eventOn(null, blockStart(0, "text"), "u-m-b0"),
+      eventOn(null, blockStop(0), "u-m-s0"),
+      lineOn(null, MAIN_ID, { type: "text", text: "second" }, "u-m-a1"),
+      eventOn(null, STOP, "u-m-stop"),
+    ]);
+
+    // Assert.
+    expect(reports).toHaveLength(1);
+  });
+
+  it("is NOT reported for a subagent message_start interleaved into an open main block", () => {
+    // Arrange, Act.
+    const reports = recordsDuring(() => foldSubagentMidMainBlock("text")).filter((r) => r.level === "error");
+
+    // Assert.
+    expect(reports).toEqual([]);
+  });
+
+  it("is NOT reported for a response whose every unit settled", () => {
+    // Arrange, Act.
+    const reports = recordsDuring(() => foldStreamedResponse()).filter((r) => r.message === UNSETTLED);
+
+    // Assert.
+    expect(reports).toEqual([]);
+  });
+});
+
+describe("the warnings a stream with no identity still raises", () => {
+  it("warns when a message_start names no message id", () => {
+    // Arrange, Act.
+    const records = recordsDuring(() => foldAll([eventOn(null, { type: "message_start", message: {} }, "u-noid")]));
+
+    // Assert.
+    expect(
+      records
+        .filter((r) => r.message === "a message_start named no message id; no block can be identified")
+        .map((r) => ({ level: r.level, stream: r.context.stream })),
+    ).toEqual([{ level: "warn", stream: "main" }]);
+  });
+
+  it("warns when a content block opens with no message_start on its stream", () => {
+    // Arrange, Act.
+    const records = recordsDuring(() => foldAll([eventOn(SPAWN, blockStart(0, "text"), "u-orphan")]));
+
+    // Assert.
+    expect(
+      records
+        .filter((r) => r.message === "a content block opened with no message_start seen on its stream; skipped")
+        .map((r) => ({ level: r.level, stream: r.context.stream })),
+    ).toEqual([{ level: "warn", stream: SPAWN }]);
   });
 });
