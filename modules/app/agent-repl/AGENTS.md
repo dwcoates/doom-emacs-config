@@ -377,61 +377,68 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
-## A landed change is DEPLOYED immediately, and nobody is asked first
+## ONE deploy per complete change landing on master, and the daemon runs it
 
-Owner ruling, standing (2026-09-21). The moment a change lands on master it is
-deployed with `bin/deploy-all.sh` — in the same breath, as part of landing it,
-never as a separate errand and never behind a question. "Landed" means merged
-or committed on master; a change that sits built-but-undeployed is a change the
-owner's editor is not running, and the running system is the one that matters.
+Owner design, standing (2026-09-23; supersedes the 2026-09-21 "deploy
+immediately with bin/deploy-all.sh" ruling). THERE IS NO DEPLOY SCRIPT. The
+daemon owns deploys (`daemon/internal/deploy`, `Deploy{force}` in
+`proto/src/agentrepl/v1/endpoint_deploy.proto`): it builds, decides what is
+out of date, and restarts what is, WHEN it may.
 
-THE DEPLOY IS PART OF THE LANDING, not a follow-up to it. A merge that is not
-followed by a deploy is an unfinished merge: the owner then reads a defect out
-of a binary that predates the fix, and the diagnosis that follows is wasted on
-a system nobody is running. That has happened, which is why this is a rule and
-not a habit.
+- A COMPLETE CHANGE landing on master — a merge commit — gets exactly ONE
+  deploy, never one per commit.
+  - A landing through the daemon's own merge (the workspace-merge flow) runs it
+    automatically: the merge tells the deploy once, with every commit it
+    landed, and never waits on the build.
+  - A change merged onto master by hand is followed by ONE deploy, in the same
+    breath and never behind a question:
+    `modules/app/agent-repl/daemon/bin/claude-repld deploy` (or
+    `M-x agent-repl-deploy` in Emacs).
+- A change whose tests are red is not landed, so it is not deployed.
+- The deploy's answer is its DECISIONS, one per component; what follows
+  arrives on the surfaces that already carry it. A build failure deploys
+  NOTHING and is the answer, loudly (`build_failed` naming the step, the tail
+  of its output and the archived log under `<state>/deploy/logs/`).
 
-Nothing about it is conditional. It is not asked about, not deferred to a
-quieter moment, not batched behind another change, and not skipped because the
-change "is only elisp" or "only the webapp" — `deploy-all.sh` knows which
-runtimes a change touches, and the lead does not second-guess it.
+## A deploy never ends a turn unless it is FORCED
 
-The one thing that stops a deploy is a suite that did not pass. A change whose
-tests are red is not landed in the first place.
+How the daemon puts each component into service:
 
-## A deploy ROLLS OUT; it never restarts, and it never ends a turn
+1. It BUILDS every component into a staging directory
+   (`bin/build-frontend.sh --out <staging> <target>` per target, after
+   `make -C proto all`). A failure installs nothing and restarts nothing.
+2. It judges STALENESS BY CONTENT HASH: each running process's reported build
+   against the fresh one. Every process reports its build when it connects, as
+   a REQUIRED field — Emacs on `WatchDaemon` (`elisp_build`), a webview on
+   `WatchWebWorkspace` (`webapp_build`), a shim on every `SessionDiagnostics`
+   frame (`shim_build`), and the store and sidecar in their build report
+   (`agent-shim/logging/go/buildreport`).
+3. It INSTALLS the staged artifacts atomically, then:
+   - the STORE and SIDECAR restart at once when stale, in the recorded safe
+     order: bootout the sidecar, kickstart the store, await `store.sock`,
+     bootstrap the sidecar;
+   - a stale DAEMON is replaced by the blue-green handover, and its successor
+     bounces the stale shims it adopts through its own bounce registry;
+   - each stale SHIM goes to the prompt queue's BOUNCE REGISTRY: bounced now
+     when it has no turn and no detached work, otherwise registered and
+     bounced on its freeness edge (a turn or the last detached item ending).
+     Queued prompts never block a bounce; the workspace drains and they are
+     delivered to the new shim. Monitors, background shells and background
+     subagents DO block it, because they die with the shim's vendor child;
+   - a stale Emacs is pushed `reload_elisp` (the whole module set in
+     `config.el` load order, then the heartbeat and timer re-arm check), and a
+     stale webview `reload_webapp`.
 
-Owner ruling, standing (2026-09-21). `bin/deploy-all.sh` builds, then asks the
-DAEMON to put the build into service (`RollOutBuild`,
-`proto/src/agentrepl/v1/endpoint_roll_out_build.proto`). The daemon does what
-`docs/overhaul/daemon.md` item 10 specifies: a blue-green HANDOVER for a daemon
-change, a per-workspace shim RELAUNCH for a shim change, a `reload_webapp` push
-for a webapp change — every one of them at the workspace's FREENESS (no turn in
-flight, no live detached work), waited on for as long as it takes. A workspace
-mid-turn keeps being served by the outgoing daemon until its turn ends.
+`force` does not wait: every stale shim is bounced at once and a stale daemon
+hands every workspace over at once, ENDING RUNNING TURNS. Emacs asks before a
+forced deploy; the CLI's `-force` says so in its help.
+`UpdateShutdownSchedule{now}` is still the operator's emergency stop, and no
+deploy calls it.
 
-THERE IS ONE ROLLOUT ENGINE AND TWO TRIGGERS. A self-merge reaches it through
-`rollout.Trigger` (classify the landed range, run the deploy chain, act); a
-deploy reaches it through `rollout.RollOut` (the chain states what it rebuilt,
-act). Both take the same per-subsystem action by the same precedence, so a
-deploy and a self-merge cannot roll out differently. Do not add a third path.
-
-`UpdateShutdownSchedule{now}` FORCES EVERY SESSION DOWN and is an operator's
-emergency stop. NO SCRIPT CALLS IT BY DEFAULT. `deploy-all.sh --restart` is the
-one way to reach it, it says in so many words that it ends every running turn,
-and it exists for two cases only: moving the runtime to another checkout's
-artifacts, and a daemon too old to answer `RollOutBuild`.
-
-A ROLLOUT IN FLIGHT IS NEVER STARTED AGAIN. A handover waiting on a busy
-workspace refuses a second one (`already_rolling_out`, naming the holdouts), and
-the deploy fails loudly rather than standing a second successor beside the
-first. Whether the daemon is owed a handover is a STAMP written when a rollout
-was accepted (`daemon/bin/.rolled-out-fingerprint`), never "did this build
-change the file": a `--no-bounce` run changes the file and rolls nothing out.
-
-Store and sidecar are launchd services the chain restarts itself, in the
-recorded safe order. A running shim rides a store restart out on its bounded
-retry buffer; the sidecar re-reads its files from its cursor.
+A DEPLOY IN FLIGHT IS NEVER STARTED AGAIN (`already_deploying`), a handover
+in flight refuses a second (`already_rolling_out`, naming the holdouts), and
+a successor still joining refuses (`joining`). Every deploy decision is
+recorded through the daemon's logger under `daemon.deploy.*`.
 
 ## Every landed remediation gets a changelog line
 
@@ -761,15 +768,15 @@ server socket under `$TMPDIR/emacs501/`:
   --eval '(with-current-buffer "*Messages*" (buffer-substring-no-properties (point-min) (point-max)))'
 ```
 
-Deploy stamps are evidence, not logs. `~/.cache/agent-repl/bin/` contains the
+Build stamps are evidence, not logs. `~/.cache/agent-repl/bin/` contains the
 installed `shim-store`, `shim-claude-sidecar`, and `shim-lock` binaries plus
-their `.<name>.built-sha`, `.<name>.source-tree`, and `.<name>.deployed`
-one-line stamps. `bin/build-frontend.sh` writes build/source stamps;
-`bin/deploy-all.sh` writes deployed fingerprints after the corresponding
-service is installed or bounced. They have no timestamps, rotations,
-workspace attribution, severity, or `AGENT_REPL_LOG_LEVEL` behavior; use
-`bin/readiness-report.sh` to compare them with the source tree and running
-artifacts.
+their `.<name>.built-sha` and `.<name>.source-tree` one-line stamps, written by
+`bin/build-frontend.sh` and installed beside each artifact by the daemon's
+deploy. The store's and the sidecar's own build reports (pid plus content
+hash, under `~/.cache/agent-repl/run/`) are what a deploy judges them by. None
+of these have timestamps, rotations, workspace attribution, severity, or
+`AGENT_REPL_LOG_LEVEL` behavior; use `bin/readiness-report.sh` to compare them
+with the source tree and running artifacts.
 
 ### Resetting the record store
 
@@ -786,7 +793,7 @@ AGENT_REPL_STORE_RESET=1 modules/app/agent-repl/bin/store-reset.sh
 It refuses unless `AGENT_REPL_STORE_RESET` is exactly `1`. `--keep-down`
 removes the files and leaves both services stopped. The sidecar stops first and
 starts last (its cursors live in the file being removed), and the store's socket
-is waited on in between — the same recorded safe order `bin/deploy-all.sh` uses.
+is waited on in between — the same recorded safe order the daemon's deploy uses.
 The rest of the rules live in `agent-shim/shim-store/AGENTS.md`.
 
 AFTER A RESET THE SIDECAR RE-READS THE WHOLE CORPUS from offset zero, which is
@@ -1456,60 +1463,37 @@ nested container in one indexed pass instead of a scan:
 and a subagent inside IT share one value. That change ships with no migration and
 no backfill.
 
-## Committing to master means bouncing what you changed
+## Committing to master means deploying what you changed
 
 Every component here is a built artifact, and every running process keeps
-serving the binary it started with — so a commit deploys nothing on its own. A
+serving the build it started with — so a commit deploys nothing on its own. A
 change is finished when the process serving the user is running it, and your
-report says what you rebuilt and what you restarted.
+report says what the deploy decided.
 
 A merged-but-undeployed fix looks exactly like a fix that does not work, except
 the correct code sitting in `git log` makes it harder to diagnose.
 
-The two deploy paths have OPPOSITE bounce policies. Follow each as written
-rather than re-deciding per change.
-
-**1. `bin/build-frontend.sh` — shim, webapp bundle, daemon. ALWAYS bounce the
-daemon afterwards.** Build-if-stale, so it is cheap to run unconditionally:
-
-```sh
-modules/app/agent-repl/bin/build-frontend.sh
-```
-
-Then bounce claude-repld — every time, without asking and without weighing
-whether this particular change merits it. Rebuilding the binary is not deploying
-it, and the bounce is also what remounts webviews, which is how a webapp rebuild
-reaches the user. The top-level "Daemon bounce policy (claude-repld)" section
-governs HOW (never mid-turn; prefer the Emacs restart path) — never whether.
-
-**2. Hand-deployed launchd services — shim-store, shim-claude-sidecar. Leave
-these IN FLIGHT; bounce only when the user asks.** They carry the file plane for
-every live session, so restarting them is disruptive in a way a daemon bounce is
-not. After landing an important change to either, ASK the user whether to bounce
-— an unbounced service means they never see the change, so silence is not the
-safe option either.
-
-`build-frontend.sh` does NOT touch them. They run out of
-`~/.cache/agent-repl/bin/` under `com.agentrepl.shim-store` and
-`com.agentrepl.shim-claude-sidecar` (plists in `launchd/`), so changes under
-`agent-shim/shim-store/` or `agent-shim/claude/shim-sidecar/` deploy nothing
-until:
+THE DEPLOY IS THE DAEMON'S, for every component alike — shim, webapp, daemon,
+store, sidecar and elisp (see "A deploy never ends a turn unless it is
+FORCED" above). Nobody hand-builds into `~/.cache/agent-repl/bin`, hand-
+kickstarts a service or hand-loads elisp to deploy a change: those paths skip
+the staleness judgement and the recorded safe order, and they are how a
+service ends up running a binary no build report accounts for.
 
 ```sh
-cd modules/app/agent-repl/agent-shim/shim-store
-go build -o ~/.cache/agent-repl/bin/shim-store .
-cd ../claude/shim-sidecar
-go build -o ~/.cache/agent-repl/bin/shim-claude-sidecar .
-
-launchctl kickstart -k gui/$(id -u)/com.agentrepl.shim-store
-# WAIT for ~/.cache/agent-repl/sock/store.sock before the next line
-launchctl kickstart -k gui/$(id -u)/com.agentrepl.shim-claude-sidecar
+modules/app/agent-repl/daemon/bin/claude-repld deploy          # decisions, one line per component
+modules/app/agent-repl/daemon/bin/claude-repld deploy -force   # ENDS RUNNING TURNS
 ```
 
-**That ordering is mandatory.** Restarting both at once makes the sidecar's
-cursor recovery fail against a socket not yet listening; it then starts cold and
-silently re-reads every watched transcript from offset zero (observed
-2026-07-25, thousands of files re-ingested).
+`bin/build-frontend.sh` (no `--out`) is still how Emacs's cold start builds a
+daemon before any daemon exists, and how a developer builds in place; it
+deploys nothing.
+
+**The store-then-sidecar ordering is mandatory, and the daemon holds it.**
+Restarting both at once makes the sidecar's cursor recovery fail against a
+socket not yet listening; it then starts cold and silently re-reads every
+watched transcript from offset zero (observed 2026-07-25, thousands of files
+re-ingested).
 
 ## Verify the deploy rather than assuming it
 
