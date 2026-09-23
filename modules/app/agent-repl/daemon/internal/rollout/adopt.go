@@ -786,10 +786,56 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	was := c.joiningMode
 	c.joiningMode = false
 	c.mu.Unlock()
-	if was {
-		c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
-			merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+	if !was {
+		return
 	}
+	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
+		merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+	c.bounceStaleFleet(fields)
+}
+
+// bounceStaleFleet relaunches every adopted shim that runs an older build than
+// the one deployed, EACH AT ITS OWN FREENESS.
+//
+// THE HANDOVER'S OTHER HALF. A deploy that rebuilt the daemon and the shim
+// rolls out as a handover alone, and the successor ADOPTS the running shims —
+// which are still the old build. The staleness check that bounces them used to
+// run only when a workspace was OPENED, so an adopted shim stayed on the old
+// build until someone happened to reopen its workspace: a vendor-SDK upgrade
+// did not reach a single running session. The successor is the one that knows
+// the handover is over, so it runs the check here, once, for every live shim.
+//
+// ONE GOROUTINE PER WORKSPACE, because each relaunch waits for its own
+// workspace's freeness for as long as that takes: a busy workspace must never
+// hold up the others. Each bounce fires at most once per reported build stamp
+// (`claimStaleBounce`), and a shim already on the deployed build is left alone.
+func (c *controller) bounceStaleFleet(fields dlog.Context) {
+	lifetime := c.deps.Lifetime
+	if lifetime == nil {
+		lifetime = context.Background()
+	}
+	workspaces, err := c.deps.DB.ListWorkspaces(lifetime)
+	if err != nil {
+		c.log.Error(opStaleness, "could not list the workspaces to check for stale shims", withCause(fields, err))
+		return
+	}
+	checked := 0
+	for _, ws := range workspaces {
+		if _, live := c.deps.Shims.Client(ws.ID); !live {
+			continue
+		}
+		checked++
+		c.staleBounces.Add(1)
+		go func(ws ids.WorkspaceID) {
+			defer c.staleBounces.Done()
+			if err := c.RelaunchShim(lifetime, ws, ReasonBuildStale); err != nil {
+				c.log.Error(opStaleness, "a stale shim could not be relaunched onto the deployed build",
+					withCause(merge(fields, dlog.Context{"workspace": string(ws)}), err))
+			}
+		}(ws.ID)
+	}
+	c.log.Info(opStaleness, "checking every adopted shim against the deployed build",
+		merge(fields, dlog.Context{"live_shims": checked}))
 }
 
 // retryAdvertise is advertise's retry loop, on the injected clock.
