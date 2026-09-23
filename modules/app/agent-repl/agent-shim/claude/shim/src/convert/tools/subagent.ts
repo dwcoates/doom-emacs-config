@@ -44,6 +44,15 @@ const LOGGER = bindLog({ component: "shim-convert-subagent", operation: "shim.co
 /** The vendor statuses that are NOT this unit's conclusion. */
 const BACKGROUNDED_STATUSES: ReadonlySet<string> = new Set(["async_launched", "remote_launched"]);
 
+/**
+ * Whether a spawn's structured result is a LAUNCH RECEIPT rather than the run's
+ * conclusion: the run moved to the background and is still going.
+ */
+export function isLaunchReceipt(structured: unknown): boolean {
+  const status = str(asRecord(structured), "status");
+  return status !== undefined && BACKGROUNDED_STATUSES.has(status);
+}
+
 // ---------------------------------------------------------------------------
 // The prompt, restated on every frame
 // ---------------------------------------------------------------------------
@@ -306,10 +315,9 @@ export const subagentConverter: ToolConverter = {
       );
       return undefined;
     }
-    const status = str(structured, "status");
-    if (status !== undefined && BACKGROUNDED_STATUSES.has(status)) {
+    if (isLaunchReceipt(structured)) {
       LOGGER.info(
-        { tool_use_id: call.toolUseId, status, is_async: bool(structured, "isAsync") },
+        { tool_use_id: call.toolUseId, status: str(structured, "status"), is_async: bool(structured, "isAsync") },
         "a subagent spawn moved to the background; this result is a launch receipt, not the run's conclusion",
       );
       return undefined;
