@@ -2060,6 +2060,46 @@ describe("the one bubble rule set", () => {
   });
 
 
+  it("places and fills a bubble only through its role, and the held variant's named fill", () => {
+    // Arrange / Act — every rule on a bubble that sets a side margin or its fill.
+    const placing = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some(onBubble) &&
+        /(?:^|;)\s*(?:margin-left|margin-right|--bubble-bg|background(?:-color)?)\s*:/.test(rule.declarations),
+    );
+    // Assert — the base rule paints the role's token; the roles and held choose it.
+    expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
+      [".bubble", '.bubble[data-role="prompt"]', '.bubble[data-role="response"]', '.bubble[data-variant="held"]'].sort(),
+    );
+  });
+
+  it("lets a variant or state rule set the border and nothing else", () => {
+    // Arrange / Act — every rule keyed on a variant, a state or a hook class.
+    const keyed = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some(
+        (sel) => onBubble(sel) && sel !== ".bubble" && !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) && !sel.includes("[hidden]"),
+      ),
+    );
+    const beyondBorder = keyed.filter((rule) =>
+      rule.declarations
+        .split(";")
+        .map((decl) => decl.split(":")[0]?.trim() ?? "")
+        .some((prop) => prop !== "" && !prop.startsWith("border") && prop !== "--bubble-bg"),
+    );
+    // Assert — the working wave's own animation is the one other thing a
+    // prompt state draws (ruling f), and it lives on its own rule.
+    expect(beyondBorder.flatMap((rule) => rule.selectors).filter((sel) => !sel.includes("[data-wave="))).toEqual([]);
+  });
+
+  it("draws a fenced code block through the one markdown rule, with no per-kind copy", () => {
+    // Arrange / Act
+    const copies = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /pre\.md-code$/.test(sel)),
+    );
+    // Assert
+    expect(copies.flatMap((rule) => rule.selectors)).toEqual([".md pre.md-code"]);
+  });
+
   it.each(BUBBLE_CAP_LINES.map((cap) => [String(cap)]))("maps the %s cap to a line count", (cap) => {
     // Arrange / Act
     const rule = declarationsOf(`.bubble[data-cap-lines="${cap}"]`) ?? "";
@@ -2117,5 +2157,23 @@ describe("the held prompt's fill: much more grey than blue", () => {
     const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
     // Assert
     expect(rule).toMatch(/--bubble-bg:\s*var\(--held-prompt-bg\)/);
+  });
+});
+
+describe("the compaction summary's border is the compaction divider bar's", () => {
+  it("borders the summary with the divider bar's own token", () => {
+    // Arrange / Act
+    const summary = declarationsOf('.bubble[data-variant="compaction"]') ?? "";
+    const bar = declarationsOf(".sep-accent-compacted") ?? "";
+    // Assert — one token, read by both; no copied value.
+    expect([/border-color:\s*var\(--compact-rule\)/.test(summary), /background:\s*var\(--compact-rule\)/.test(bar)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("gives the summary no fill of its own: it is a response bubble", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/--compact-summary-bg/);
   });
 });

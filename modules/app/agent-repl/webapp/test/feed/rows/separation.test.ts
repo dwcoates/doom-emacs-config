@@ -14,6 +14,13 @@ import {
 } from "../../../src/feed/rows/separation.js";
 import { harness, rowContext, separationRow, userPromptRow } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import {
+  BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_ROLE_ATTRIBUTE,
+  BUBBLE_VARIANT_ATTRIBUTE,
+} from "../../../src/bubble/draw.js";
+import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
+import { fireResize } from "../../resize-observer.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -376,5 +383,83 @@ describe("separationBoundsFeed", () => {
 
   it("a row that is not a separation bounds nothing", () => {
     expect(separationBoundsFeed(userPromptRow("p1", "hello"))).toBe(false);
+  });
+});
+
+describe("drawFeedSessionSeparation: the summary is a response bubble", () => {
+  /** A compacted divider of SUMMARY, FOLDED or open. */
+  function compacted(summary: string, folded: boolean): HTMLElement {
+    return drawFeedSessionSeparation(
+      separation({ case: "compacted", value: { summary: { markdown: summary }, fold: { folded } } }),
+      ctxFor(),
+    );
+  }
+
+  it("is a response-role bubble", () => {
+    expect(compacted("s", false).querySelector(".sep-summary")?.getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("response");
+  });
+
+  it("is the compaction variant, whose border is the divider bar's", () => {
+    expect(compacted("s", false).querySelector(".sep-summary")?.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe(
+      "compaction",
+    );
+  });
+
+  it("collapses at the shared feed cap, in the one scroll box", () => {
+    const summary = compacted("s", false).querySelector(".sep-summary");
+    expect([summary?.getAttribute(BUBBLE_CAP_ATTRIBUTE), summary?.querySelector(":scope > .bubble-scroll") !== null]).toEqual([
+      "feed",
+      true,
+    ]);
+  });
+});
+
+describe("drawFeedSessionSeparation: a tree in the summary", () => {
+  const staged = useTreeLayout();
+
+  /** A compacted divider of SUMMARY, FOLDED or open, attached. */
+  function mounted(summary: string, folded: boolean): HTMLElement {
+    const el = drawFeedSessionSeparation(
+      separation({ case: "compacted", value: { summary: { markdown: summary }, fold: { folded } } }),
+      ctxFor(),
+    );
+    document.body.append(el);
+    return el;
+  }
+
+  it("wraps at the summary bubble's own cap", () => {
+    // Arrange / Act
+    const el = mounted(WIDE_TREE, false);
+    // Assert
+    const widths = treeLineWidths(el);
+    expect(widths.length).toBeGreaterThan(3);
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("never wraps below its max width", () => {
+    // Arrange / Act
+    const el = mounted(FITTING_TREE, false);
+    // Assert
+    expect(treeLineWidths(el)).toHaveLength(3);
+  });
+
+  it("waits while the summary is folded, measuring nothing hidden", () => {
+    // Arrange / Act
+    const el = mounted(WIDE_TREE, true);
+    // Assert
+    expect(treeLineWidths(el)).toHaveLength(0);
+  });
+
+  it("wraps it once the reader unfolds the summary", () => {
+    // Arrange
+    const el = mounted(WIDE_TREE, true);
+    // Act — the fold opens, and the summary's column grows to hold it.
+    el.querySelector<HTMLElement>(".sep-fold-toggle")?.click();
+    fireResize(el.querySelector(".sep-compacted") as HTMLElement);
+    vi.runOnlyPendingTimers();
+    // Assert
+    const widths = treeLineWidths(el);
+    expect(widths.length).toBeGreaterThan(3);
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
   });
 });
