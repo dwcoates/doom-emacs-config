@@ -60,8 +60,6 @@ export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
     context: { state: state.case },
   });
 
-  const { bubble, body } = agenticBubble({ state: state.case });
-
   // THE ARM IS CHECKED BEFORE ANYTHING IS DRAWN FROM IT, so an arm a newer
   // daemon set reaches the refusal that quotes its name rather than a table
   // lookup that has no entry for it.
@@ -70,16 +68,17 @@ export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
       // The planning treatment: the badge, and the same animated ellipsis every
       // other live face on this page wears. A breathing wash of its own would
       // be a second visual language for "still working".
-      body.append(badge(state.case), planningIndicator());
-      return bubble;
+      return agenticBubble({ state: state.case, content: [badge(state.case), planningIndicator()] });
     case "planned":
-      body.append(badge(state.case));
-      body.append(drawFeedPlanPlanned(state.value, rc.ctx, `${PATH}.planned`));
-      return bubble;
+      return agenticBubble({
+        state: state.case,
+        content: [badge(state.case), drawFeedPlanPlanned(state.value, rc.ctx, `${PATH}.planned`)],
+      });
     case "failed":
-      body.append(badge(state.case));
-      body.append(drawFeedPlanFailed(state.value, `${PATH}.failed`));
-      return bubble;
+      return agenticBubble({
+        state: state.case,
+        content: [badge(state.case), drawFeedPlanFailed(state.value, `${PATH}.failed`)],
+      });
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
   }

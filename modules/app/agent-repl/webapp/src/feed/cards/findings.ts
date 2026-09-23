@@ -84,16 +84,10 @@ export function drawFeedFindings(u: FeedFindings, rc: RowContext): HTMLElement {
     requireMessage(u.heading, `${PATH}.heading`),
     `${PATH}.heading`,
   );
-  const { bubble, body } = agenticBubble({
-    // The list's own shape is the only "state" this message has, and a reader
-    // scanning for the empty case should not have to count rows to find it.
-    state: u.rows.length === 0 ? "empty" : "findings",
-    heading,
-  });
-
+  // The list's own shape is the only "state" this message has, and a reader
+  // scanning for the empty case should not have to count rows to find it.
   if (u.rows.length === 0) {
-    body.append(nothingFound());
-    return bubble;
+    return agenticBubble({ state: "empty", heading, content: [nothingFound()] });
   }
 
   const list = document.createElement("div");
@@ -101,8 +95,7 @@ export function drawFeedFindings(u: FeedFindings, rc: RowContext): HTMLElement {
   u.rows.forEach((row, index) => {
     list.append(drawFeedFindingsRow(row, rc, index, `${PATH}.rows[${index}]`));
   });
-  body.append(list);
-  return bubble;
+  return agenticBubble({ state: "findings", heading, content: [list] });
 }
 
 /** The composed heading line, drawn verbatim. */

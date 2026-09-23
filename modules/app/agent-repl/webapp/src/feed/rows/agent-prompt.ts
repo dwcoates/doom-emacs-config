@@ -12,9 +12,8 @@
  * mapping is one base function per message; sharing the BODY vocabulary is what
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
-import { armPromptWave } from "../../breathing.js";
 import { log } from "../../log.js";
-import { bubbleScroll } from "../bubble-scroll.js";
+import { drawBubble } from "../../bubble/draw.js";
 import { armName } from "../renderers.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -54,23 +53,21 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
     operation: "feed.draw-agent-prompt",
     context: {},
   });
-  const bubble = document.createElement("div");
-  bubble.className = "bubble user prompt-agent";
-  armPromptWave(bubble, msg.working);
-  bubble.append(drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`)));
-  // The address line is the metadata strip and the body hangs in the shared
-  // scroll box beneath it, exactly as a person's own prompt does.
-  bubble.append(
-    bubbleScroll(
-      drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
-    ),
-  );
   // AN UNSET DELIVERY DRAWS NOTHING. The oneof is absent on every recipient
   // copy, which is not a missing fact but the absence of one.
-  if (msg.delivery.case !== undefined) {
-    bubble.append(drawFeedAgentPromptDelivery(msg.delivery));
-  }
-  return bubble;
+  const footer = msg.delivery.case === undefined ? [] : [drawFeedAgentPromptDelivery(msg.delivery)];
+  // The address line is the metadata strip and the body hangs in the shared
+  // scroll box beneath it, exactly as a person's own prompt does.
+  return drawBubble({
+    role: "prompt",
+    variant: "agent",
+    hooks: ["user", "prompt-agent"],
+    working: msg.working,
+    strip: [drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`))],
+    content: drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
+    footer,
+    capLines: "feed",
+  }).bubble;
 }
 
 /**
@@ -84,14 +81,11 @@ export function drawFeedAgentPromptAddress(address: FeedAgentPromptAddress): HTM
   return el;
 }
 
-/** The prompt's blocks, in composed order, capped like any long prompt. */
-export function drawFeedAgentPromptBody(body: FeedAgentPromptBody, path: string): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "bubble-body";
-  body.blocks.forEach((block, index) => {
-    el.append(drawFeedAgentPromptBlock(block, `${path}.blocks[${index}]`));
-  });
-  return el;
+/** The prompt's blocks, in composed order: the bubble's content. */
+export function drawFeedAgentPromptBody(body: FeedAgentPromptBody, path: string): HTMLElement[] {
+  return body.blocks.map((block, index) =>
+    drawFeedAgentPromptBlock(block, `${path}.blocks[${index}]`),
+  );
 }
 
 /** One block of an agent prompt — the shared drawn block vocabulary. */
