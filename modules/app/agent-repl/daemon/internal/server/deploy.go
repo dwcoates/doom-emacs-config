@@ -184,6 +184,11 @@ func (s *server) EmacsBuilds() []deploy.EmacsClient {
 // EVENT addressed to those streams alone — a webview's WatchDaemon never
 // carries it — and it answers how many it reached. A stream whose queue is
 // full is reported loudly rather than blocked on.
+//
+// A STREAM THE RELOAD REACHED STANDS AT THE PUSHED BUILD from then on: Emacs
+// owns the load and reports its own failures, and a stream left at the build
+// it connected with would be pushed the same reload again by every later
+// deploy, each one re-running the module set for nothing.
 func (s *server) PushReloadElisp(streams []string, moduleRoot, build string) int {
 	want := make(map[string]bool, len(streams))
 	for _, id := range streams {
@@ -204,7 +209,9 @@ func (s *server) PushReloadElisp(streams []string, moduleRoot, build string) int
 			reached++
 			s.log.Info("daemon.server.reload_elisp", "pushed the elisp reload to an Emacs", dlog.Context{
 				"stream": w.id, "build": build, "module_root": moduleRoot,
+				"state": "elisp_build", "before": w.elispBuild, "after": build,
 			})
+			w.elispBuild = build
 		default:
 			s.log.Error("daemon.server.reload_elisp", "an Emacs stream's push queue is full; the elisp reload did not reach it", dlog.Context{
 				"stream": w.id, "build": build,
