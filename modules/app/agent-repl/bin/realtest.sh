@@ -303,7 +303,17 @@ fi
 # second spelling of "which rows are a run's" in bash is how the two would come
 # to disagree about the owner's registry.
 
-readonly REALTEST_ROOT="$HOME/.claude-emacs/realtest"
+# THE OWNER'S STATE ROOT, spelled once. A realtest drives the owner's real
+# Emacs.app, launched through LaunchServices with launchd's environment rather
+# than this shell's, so its state lives at ~/.claude-emacs — the same root the
+# Go harness measures (e2e/realtest, RealEnv). It deliberately does NOT honor
+# $AGENT_REPL_STATE_DIR: in the caller's shell that variable describes the
+# daemon that spawned the CALLER (an agent session inherits it), not the editor
+# this run launches, and honoring it once pointed the unguarded-shim scan at a
+# different directory than every other check here looked at.
+readonly OWNER_STATE_DIR="$HOME/.claude-emacs"
+
+readonly REALTEST_ROOT="$OWNER_STATE_DIR/realtest"
 
 # run_harness_check NAME ENV... — one non-realtest check in the realtest
 # package.
@@ -451,7 +461,7 @@ note "no workspace row from a previous sweep is standing under $REALTEST_ROOT"
 # Record the stamps this run exercised. They are what a report says the run was
 # MEASURING; without them a finding cannot be tied to a build.
 RUN_STAMP="$(realtest_backup_stamp)"
-RUN_DIR="${AGENT_REPL_REALTEST_OUT:-$HOME/.claude-emacs/realtest/realtest-$RUN_STAMP}"
+RUN_DIR="${AGENT_REPL_REALTEST_OUT:-$REALTEST_ROOT/realtest-$RUN_STAMP}"
 mkdir -p "$RUN_DIR"
 printf '%s\n' "$READINESS" > "$RUN_DIR/readiness.json"
 note "run directory: $RUN_DIR"
@@ -789,8 +799,7 @@ fi
 # spawns to hold its lock, which inherits the shim's environment and therefore
 # tells the same story about it.
 
-STATE_DIR="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
-SOCK_DIR="${STATE_DIR%/}/sock"
+SOCK_DIR="$OWNER_STATE_DIR/sock"
 
 # scan_unguarded_shims — fill UNGUARDED (the lines a refusal prints),
 # UNGUARDED_SHIM_PIDS and UNGUARDED_SHIM_SOCKETS from the process table. A
@@ -937,7 +946,7 @@ note "every listening shim carries $VENDOR_GUARD_ENV"
 # live database is written and starts costing real blocks. The workspace state
 # has no such property: wsm.db is the owner's workspaces, branches, selections
 # and held prompts, and nothing re-derives it.
-WSM_DB="$HOME/.claude-emacs/wsm.db"
+WSM_DB="$OWNER_STATE_DIR/wsm.db"
 
 # A clone still needs a floor of real free space for its own metadata and for
 # the -wal/-shm plain-copy fallback; this is a cheap sanity floor, not the
