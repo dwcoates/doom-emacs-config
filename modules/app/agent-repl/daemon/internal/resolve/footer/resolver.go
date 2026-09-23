@@ -214,6 +214,8 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		view         *frontendv1.FooterView
 		log          dlog.Logger
 		arm          string
+		armChanged   bool
+		previousArm  string
 		line         activityLine
 		lineChanged  bool
 		previousLine activityLine
@@ -227,9 +229,13 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		}
 		apply(s)
 		view := r.render(ws, s)
-		arm, _, _ := s.observeArm(view)
+		arm, armChanged, previousArm := s.observeArm(view)
 		line, lineChanged, previousLine := s.observeLine(view)
-		out = append(out, publication{r.topicLocked(ws), view, r.logOf(ws, s), arm, line, lineChanged, previousLine})
+		out = append(out, publication{
+			topic: r.topicLocked(ws), view: view, log: r.logOf(ws, s),
+			arm: arm, armChanged: armChanged, previousArm: previousArm,
+			line: line, lineChanged: lineChanged, previousLine: previousLine,
+		})
 	}
 	r.mu.Unlock()
 
@@ -239,6 +245,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 	r.log.Global().Debug(operation, message, ctx)
 	for _, p := range out {
 		p.log.Debug(operation, message, ctx)
+		logArmChange(p.log, operation, p.arm, p.armChanged, p.previousArm)
 		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
 		p.topic.Publish(p.view)
 	}

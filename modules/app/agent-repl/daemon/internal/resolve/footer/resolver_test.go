@@ -396,6 +396,23 @@ func TestAContextCutRecordsTheArmItMoves(t *testing.T) {
 	}
 }
 
+// TestADaemonScopedFaultRecordsTheArmItMoves — a daemon-scoped fault moves
+// every strip's arm through the resolver-wide path, and that move is recorded
+// like one made through a workspace's own.
+func TestADaemonScopedFaultRecordsTheArmItMoves(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OpenFault("", faultOf(t, "fault-1", health.KindPromptsDirMissing, true))
+
+	// Assert
+	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "blocked"}) {
+		t.Fatalf("recorded arms = %v, want idle, blocked", got)
+	}
+}
+
 // TestAnUnchangedStatusArmIsNotRecordedAgain keeps the record a record of
 // CHANGES: a push that leaves the arm where it stands writes nothing.
 func TestAnUnchangedStatusArmIsNotRecordedAgain(t *testing.T) {
