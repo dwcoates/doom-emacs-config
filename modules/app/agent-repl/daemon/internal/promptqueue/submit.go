@@ -473,6 +473,22 @@ func (q *queue) noteBringUp(ws ids.WorkspaceID, delta int, log dlog.Logger) {
 	})
 }
 
+// Reviving is Queue.Reviving.
+//
+// A REVIVAL IS ENGAGEMENT UNTIL ITS PROMPT IS DELIVERED. The bring-up makes the
+// fleet serve the session (and retires its terminal record) BEFORE it records
+// the session's facts, and the revived prompt is delivered only after that, so
+// for the whole window the durable session reads live, free and idle since the
+// engagement before the hibernation. The sweep hibernated it there: the
+// revived hold then met a dead query (`query_dead`) or no session at all
+// (TestRevivalAfterHibernate, TestRevivalRunsInTheSessionsModeNotTheSummarizers).
+// `reviving` is raised before the bring-up starts and lowered only after the
+// released hold has been delivered, when the turn it started is in flight, so
+// between the two the session is never both free and unclaimed.
+func (q *queue) Reviving(ws ids.WorkspaceID) bool {
+	return q.isReviving(ws)
+}
+
 // isReviving reports whether a bring-up for a workspace is running or about to
 // run: either a background revival goroutine is in flight, or a revival call
 // itself is. Both mean the session is still coming up.

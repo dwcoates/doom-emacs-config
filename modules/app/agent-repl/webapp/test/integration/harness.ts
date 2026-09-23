@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
 import { Agent } from "undici";
-import { vi } from "vitest";
+import { beforeAll, vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { shellElements, type ShellElements } from "../../src/shell";
@@ -55,6 +55,7 @@ import type { TerminalFactory } from "../../src/login/terminal";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
+import { resetPageState } from "../page-state";
 import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 
@@ -399,6 +400,48 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
   };
   return harness;
+}
+
+/**
+ * THE BOUND ON ONE FILE'S COLD BOOT, which `bootColdOnce` pays in a
+ * `beforeAll`. MEASURED across the full suite: the slowest cold boot at a
+ * load average of ~60 was 602ms, and 1800 is ~3x that. Even at loads of
+ * 100-300 the slowest seen was 971ms, so a boot that crosses this is hung,
+ * not slow.
+ */
+const COLD_BOOT_TIMEOUT_MS = 1_800;
+
+/**
+ * PAY THE FILE'S COLD BOOT BEFORE ITS FIRST TEST, NOT INSIDE IT.
+ *
+ * The integration run is isolated, so every file evaluates the app's modules
+ * afresh, and the FIRST `startHarness` in a file is the first time any of
+ * that code runs: the shell's parse, the transport and the codecs on the
+ * first round trip, every mount's first draw. V8 compiles all of it lazily,
+ * on that call. MEASURED with a per-phase probe in `startHarness` (every
+ * phase is slower, the first settle most): the first boot in a file took
+ * ~90-100ms against ~25ms for every later one on an idle machine, and
+ * ~410-600ms against ~110-270ms at a load average of ~60. At the loads the
+ * suite failed under, the first boot alone (945ms) crossed the 900ms
+ * `testTimeout` before the test had asserted anything. That is why a loaded
+ * run failed EXACTLY the first harness-booting test of each file, and why
+ * each of those files passed alone.
+ *
+ * So every file that boots the app calls this once at its top level: it
+ * boots and stops one throwaway app (composer on, so the composer's mounts
+ * are compiled too) in a `beforeAll` with its OWN bound, and no test body
+ * carries the cold start. The 900ms test bound then means what it says: one
+ * warm test. harness.self.test.ts checks that every file that calls
+ * `startHarness` calls this.
+ */
+export function bootColdOnce(): void {
+  beforeAll(async () => {
+    // setup.ts installs this per TEST, and a `beforeAll` runs before any of
+    // those: without it the first mount's first log line has no logger.
+    resetPageState();
+    const cold = await startHarness({ composer: true });
+    await cold.stop();
+  }, COLD_BOOT_TIMEOUT_MS);
 }
 
 // pageSerial names each mounted app's page. A page id addresses ONE stream on

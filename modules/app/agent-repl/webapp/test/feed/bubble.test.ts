@@ -26,6 +26,8 @@ import {
   type Harness,
 } from "./harness.js";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
+import { TailFollow } from "../../src/scroll.js";
+import { captureLogRecords } from "../log-capture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -49,6 +51,8 @@ function mount(
     states?: (string | null)[];
     /** A head of the suite's own, in place of the marked stub. */
     head?: () => HTMLElement;
+    /** The page's scroll box and tail owner. */
+    scroll?: { box: Element; tail: TailFollow };
   } = {},
 ) {
   const heads: number[] = [];
@@ -76,6 +80,7 @@ function mount(
         ? undefined
         : (host) => opts.composerFactory!(host),
     initialFolded: opts.folded ?? true,
+    scroll: opts.scroll,
   });
   document.body.replaceChildren(bubble.element);
   return { bubble, h, heads };
@@ -255,15 +260,106 @@ describe("mountBubble: collapse", () => {
     expect(bubble.element.querySelector('[data-feed-row="after"]')).toBeNull();
   });
 
-  it("keeps the last DOM, so a re-expand is cheap to look at", async () => {
+  // OWNER RULING 2026-09-23 replaces "keeps the last DOM": a collapse WIPES the
+  // sub-feed, and the next expansion starts from a fresh OpenFeed page.
+  it("disposes the child and leaves no sub-feed row in the DOM", async () => {
+    // Arrange
     const h = harness({
       openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
     });
     const { bubble } = mount(subagentRow("b1"), h);
     await bubble.expand();
     await settle();
+    // Act
     bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
-    expect(bubble.element.querySelector('[data-feed-row="r1"]')).not.toBeNull();
+    // Assert
+    expect({
+      rows: bubble.element.querySelectorAll("[data-feed-row]").length,
+      child: bubble.child(),
+    }).toEqual({ rows: 0, child: null });
+  });
+
+  it("disposes the bubble's composer with the sub-feed", async () => {
+    // Arrange
+    const disposed: string[] = [];
+    const { bubble } = mount(subagentRow("b1"), harness(), {
+      composerFactory: () => ({ dispose: () => disposed.push("composer") }),
+    });
+    await bubble.expand();
+    await settle();
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    // Assert
+    expect(disposed).toEqual(["composer"]);
+  });
+
+  it("re-expands from a fresh OpenFeed page alone, never the accumulated history", async () => {
+    // Arrange: the first expansion's page and a streamed row, then a collapse.
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:b1", channel);
+    let opens = 0;
+    const h = harness({
+      channels,
+      openFeed: (req) => {
+        opens += 1;
+        return openSuccess(page(opens === 1 ? [responseRow("old")] : [responseRow("newest")]), tokenFor(req));
+      },
+    });
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    channel.push(push(responseRow("streamed")));
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    // Act
+    await bubble.expand();
+    await settle();
+    // Assert: only the second OpenFeed's page is drawn.
+    expect([...bubble.element.querySelectorAll("[data-feed-row]")].map((el) => el.getAttribute("data-feed-row"))).toEqual([
+      "newest",
+    ]);
+  });
+
+  it("streams new rows in while the bubble stays open", async () => {
+    // Arrange
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:b1", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
+    });
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect([...bubble.element.querySelectorAll("[data-feed-row]")].map((el) => el.getAttribute("data-feed-row"))).toEqual([
+      "r1",
+      "r2",
+    ]);
+  });
+
+  it("leaves no watch drawing after the collapse", async () => {
+    // Arrange
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:b1", channel);
+    const { bubble } = mount(subagentRow("b1"), harness({ channels }));
+    await bubble.expand();
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    // Act: the daemon keeps publishing.
+    channel.push(push(responseRow("late")));
+    await settle();
+    // Assert: nothing drew it, and no controller exists to draw it.
+    expect({
+      rows: bubble.element.querySelectorAll("[data-feed-row]").length,
+      child: bubble.child(),
+    }).toEqual({ rows: 0, child: null });
   });
 
   it("re-opens on the next expansion, state being 'now'", async () => {
@@ -1269,5 +1365,65 @@ describe("mountBubble: the head's title fold follows the bubble's fold", () => {
 
     // Assert
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+});
+
+describe("mountBubble: a collapse moves nothing the reader is looking at", () => {
+  /** A rect, scripted since jsdom lays nothing out. */
+  const rect = (top: number, height: number) => (): DOMRect =>
+    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+
+  /** Expand a bubble on a scroll box scrolled to 1000, its sub-feed at SUBTOP. */
+  async function expandedAt(subTop: number, subHeight: number) {
+    const box = document.createElement("div");
+    const metrics = { scrollTop: 1000, scrollHeight: 4000, clientHeight: 300 };
+    Object.defineProperties(box, {
+      scrollTop: { get: () => metrics.scrollTop, set: (next: number) => { metrics.scrollTop = next; } },
+      scrollHeight: { get: () => metrics.scrollHeight },
+      clientHeight: { get: () => metrics.clientHeight },
+    });
+    box.getBoundingClientRect = rect(0, 300);
+    const tail = new TailFollow(box);
+    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: { box, tail } });
+    await bubble.expand();
+    await settle();
+    const sub = bubble.element.querySelector<HTMLElement>(".bubble-subfeed");
+    if (sub === null) throw new Error("no sub-feed panel");
+    sub.getBoundingClientRect = rect(subTop, subHeight);
+    return { bubble, metrics };
+  }
+
+  it("compensates a sub-feed wholly above the viewport through the content-preserving cause", async () => {
+    // Arrange: a 400px sub-feed ending 10px above the viewport's top.
+    const capture = captureLogRecords("debug");
+    const { bubble, metrics } = await expandedAt(-410, 400);
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    // Assert: the view moved back by exactly the 400px that left above it.
+    capture.logger.flush();
+    await Promise.resolve();
+    const moved = capture.sent.filter((record) => record.operation === "scroll.feed-moved");
+    expect({ scrollTop: metrics.scrollTop, cause: moved.map((record) => record.context?.cause) }).toEqual({
+      scrollTop: 600,
+      cause: ["prependCompensation"],
+    });
+  });
+
+  it("writes no scroll for a sub-feed the reader can see", async () => {
+    // Arrange: the sub-feed runs from 50px into the viewport.
+    const { bubble, metrics } = await expandedAt(50, 400);
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    // Assert
+    expect(metrics.scrollTop).toBe(1000);
+  });
+
+  it("writes no scroll for a sub-feed straddling the viewport's top", async () => {
+    // Arrange: the reader is looking into the sub-feed's lower part.
+    const { bubble, metrics } = await expandedAt(-200, 400);
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    // Assert
+    expect(metrics.scrollTop).toBe(1000);
   });
 });
