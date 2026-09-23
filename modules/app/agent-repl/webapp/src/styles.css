@@ -6717,3 +6717,14 @@ bubble-body.bubble-body { display: block; }
   margin-left: 0;
   margin-right: 0;
 }
+
+/* ---- the detached-work id (src/feed/work-id.ts) ---- */
+/* The id an async bubble's head names its work by (owner ruling, 2026-09-23):
+   the head's quiet figures' size and muted ink, in the monospace ids read in,
+   and selectable so a reader can copy it to refer to the work. */
+.async-work-id {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  user-select: text;
+}

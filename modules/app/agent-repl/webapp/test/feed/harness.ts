@@ -475,10 +475,12 @@ export function subagentRow(
     };
     description?: string;
     tokens?: string;
+    workId?: string;
   } = {},
 ): FeedRow {
   const subagent = create(FeedSubagentSchema, {
     label: { text: "Explore" },
+    workId: opts.workId === undefined ? undefined : { text: opts.workId },
     description: opts.description === undefined ? undefined : { text: opts.description },
     tokens: opts.tokens === undefined ? undefined : { text: opts.tokens },
     runtime: { startedAtMs: opts.startedAtMs ?? 0n },
