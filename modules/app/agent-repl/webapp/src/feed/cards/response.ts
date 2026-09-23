@@ -66,15 +66,14 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { bubbleScroll } from "../bubble-scroll.js";
+import { drawBubble } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import {
-  createResponseBody,
   createTreeWrap,
   paintWhole,
   proseHtml,
   reconcileChildren,
-  type ResponseBody,
+  type BubbleBody,
 } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
@@ -109,70 +108,75 @@ export const THINKING_BUBBLE_CLASS = "thinking-bubble";
  */
 const RESPONSE_PROSE_BLOCKS = 1;
 
-/** The prose bubble. */
+/** The prose bubble: its spec, drawn through the one bubble (src/bubble/draw.ts). */
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const path = "FeedResponse";
   const result = requireCase(u.result, `${path}.result`);
 
-  const bubble = document.createElement("div");
-  bubble.className = "bubble assistant md";
-  bubble.setAttribute("data-state", result.case);
-
   // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
   // the prose is intermediate reasoning is orthogonal to whether it is still
-  // arriving. The class draws the bubble purple and non-bordered and keeps the
-  // green final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
-  if (u.thinking) {
-    bubble.classList.add(THINKING_BUBBLE_CLASS);
-    bubble.setAttribute("data-thinking", "");
-  }
+  // arriving. The class draws the bubble's thinking border and keeps the green
+  // final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
+  const hooks = ["assistant", "md"];
+  if (u.thinking) hooks.push(THINKING_BUBBLE_CLASS);
 
   // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When
   // the daemon has stamped this response as the turn's concluded answer, the
   // flag rides the row data — so the green is (re)applied here on every push,
   // redraw, tool-group re-arrange, and history replay, and no rebuild of this
-  // bubble can lose it. This replaces the former one-shot mark the turn-ended
-  // row applied in reaction to a live event, which the daemon no longer needs
-  // to deliver for the border to appear (turn-ended.ts). A THINKING BUBBLE IS
-  // EXCLUDED: it is never the answer, so it never greens — the guard here
-  // matches the stylesheet's own `.final-response:not(.thinking-bubble)` rule.
-  // The BLUE selected-response border still wins over the green: the controller
-  // toggles `.response-selected` on this same bubble and the stylesheet's
-  // `.final-response.response-selected` rule paints blue over the green.
-  if (u.finalAnswer && !u.thinking) {
-    bubble.classList.add(FINAL_RESPONSE_CLASS);
-  }
+  // bubble can lose it. A THINKING BUBBLE IS EXCLUDED: it is never the answer,
+  // so it never greens — the guard here matches the stylesheet's own
+  // `.final-response:not(.thinking-bubble)` rule. The BLUE selected-response
+  // border still wins over the green: the controller toggles
+  // `.response-selected` on this same bubble.
+  if (u.finalAnswer && !u.thinking) hooks.push(FINAL_RESPONSE_CLASS);
 
-  // BEFORE the body, and outside it: the body is rewritten whole by the prose
-  // painters (and by every frame of the type-out), so a heading placed inside it
-  // would be wiped by the first repaint of an arriving response.
+  // The heading is the header strip, outside the body: the body is rewritten
+  // by the prose painters (and by every frame of the type-out), so a heading
+  // placed inside it would be wiped by the first repaint of an arriving response.
+  const strip: HTMLElement[] = [];
   if (u.notice !== undefined) {
-    bubble.classList.add("response-notice");
-    bubble.setAttribute("data-notice", "");
-    bubble.appendChild(drawFeedResponseNotice(u.notice, `${path}.notice`));
+    hooks.push("response-notice");
+    strip.push(drawFeedResponseNotice(u.notice, `${path}.notice`));
   }
-
-  // The body is the CONTENT WRAPPER; the element appended to the bubble is the
-  // scroll box that holds it (see bubble-scroll.ts).
-  const body = createResponseBody();
-  const scroll = bubbleScroll(body);
+  if (result.case === "error") hooks.push("response-cut-short");
 
   // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
-  // The cost corner is inserted INTO the scroll box, BEFORE the body, and floats
-  // top-right (`float: right`, styles.css). The body is a plain block sibling in
-  // the same block-formatting context (the scroll box, which clips its overflow),
-  // so the prose's FIRST line flows to the corner's LEFT and wraps around it;
-  // once the text drops past the corner's height — one line, since the corner is
-  // a single row of token + duration — every SUBSEQUENT line runs the full width.
-  // The corner keeps a CONSTANT reserved width across the hover reveal (the
-  // duration slot is reserved even while collapsed — see `.usage-ago`), so
-  // exposing the duration animates opacity/translate only and never reflows the
-  // first line. It lives here rather than above the box so the wrap can reach it:
-  // a strip above the body could not shorten a line inside the body.
-  if (u.usage !== undefined) {
-    scroll.insertBefore(drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`), body);
+  // The cost corner rides INSIDE the scroll box, before the body, floated
+  // top-right, so the prose's FIRST line wraps around it and every later line
+  // runs the full width (see `.usage-corner`).
+  const corner =
+    u.usage === undefined ? undefined : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`);
+
+  // The arm is read BEFORE anything is drawn, so an arm a newer daemon set
+  // reaches the refusal that names it rather than half a bubble.
+  switch (result.case) {
+    case "update":
+    case "success":
+    case "error":
+      break;
+    default: {
+      // The narrowed value is `never` here, which is the compile-time half of
+      // the guarantee; the run-time half still needs the arm's NAME, and an arm
+      // a NEWER daemon set is exactly the case that reaches this line.
+      const other: { case: string } = result;
+      return unreachableArm(`${path}.result`, other.case);
+    }
   }
-  bubble.appendChild(scroll);
+
+  const { bubble, body } = drawBubble({
+    role: "response",
+    variant: u.thinking ? "thinking" : "response",
+    state: result.case,
+    hooks,
+    strip,
+    ...(corner === undefined ? {} : { corner }),
+    content: [],
+    footer: result.case === "error" ? [cutShortMarker()] : [],
+    capLines: u.thinking ? 2 : "feed",
+  });
+  if (u.thinking) bubble.setAttribute("data-thinking", "");
+  if (u.notice !== undefined) bubble.setAttribute("data-notice", "");
 
   let characters: number;
   switch (result.case) {
@@ -188,19 +192,10 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     }
     case "error": {
       const markdown = drawFeedResponseError(result.value, `${path}.error`);
-      bubble.classList.add("response-cut-short");
       paintWhole(body, markdown);
       markRevealed(bubble, markdown.length);
-      bubble.appendChild(cutShortMarker());
       characters = markdown.length;
       break;
-    }
-    default: {
-      // The narrowed value is `never` here, which is the compile-time half of
-      // the guarantee; the run-time half still needs the arm's NAME, and an arm
-      // a NEWER daemon set is exactly the case that reaches this line.
-      const other: { case: string } = result;
-      return unreachableArm(`${path}.result`, other.case);
     }
   }
   recordDraw(u, rc, result.case, characters);
@@ -275,7 +270,7 @@ export function drawFeedResponseUpdate(
   rc: RowContext,
   path: string,
   bubble: HTMLElement,
-  body: ResponseBody,
+  body: BubbleBody,
 ): number {
   const markdown = drawFeedResponseProse(requireMessage(u.prose, `${path}.prose`), `${path}.prose`);
   const resumed = revealedSoFar(rc.previous, markdown.length);
@@ -457,7 +452,7 @@ function cutShortMarker(): HTMLElement {
  */
 function animate(
   bubble: HTMLElement,
-  body: ResponseBody,
+  body: BubbleBody,
   markdown: string,
   resumed: number,
   rc: RowContext,
