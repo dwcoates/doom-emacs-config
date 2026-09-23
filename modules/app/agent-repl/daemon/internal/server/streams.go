@@ -392,7 +392,7 @@ func (s *server) watchWebWorkspace(
 	out streamSink[agentreplv1.WatchWebWorkspaceResponse],
 ) error {
 	const rpc = "WatchWebWorkspace"
-	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
+	if err := validateWatchWebWorkspaceRequest(msg); err != nil {
 		return err
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
@@ -404,6 +404,10 @@ func (s *server) watchWebWorkspace(
 	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
+	// THE PAGE'S BUILD STANDS FOR AS LONG AS ITS STREAM DOES: a deploy tells
+	// exactly the webviews on an older webapp to reload.
+	defer s.holdWebBuild(subject.Record.ID, msg.GetWebappBuild())()
+	subject.Log.Debug(rpc, "the webview reported its webapp build", dlog.Context{"webapp_build": msg.GetWebappBuild()})
 
 	// COMPOSE BEFORE SUBSCRIBING, as the host stream does. The state topic
 	// replays its latest value to a new subscriber, so publishing here is what
@@ -493,23 +497,31 @@ func (s *server) WatchDaemon(
 // hangs off the STATE topic's shutdown push alone; an event never satisfies it.
 func (s *server) watchDaemon(
 	ctx context.Context,
-	_ *agentreplv1.WatchDaemonRequest,
+	msg *agentreplv1.WatchDaemonRequest,
 	out streamSink[agentreplv1.WatchDaemonResponse],
 ) error {
+	if err := validateWatchDaemonRequest(msg); err != nil {
+		return err
+	}
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
 	states := s.daemonTopic.Subscribe(streamCtx)
 	events := s.daemonEventTopic.Subscribe(streamCtx)
 
-	w := &daemonWatcher{sent: make(chan struct{})}
+	w := &daemonWatcher{sent: make(chan struct{}), elisp: make(chan *agentreplv1.WatchDaemonResponse, 4)}
+	if emacs := msg.GetEmacs(); emacs != nil {
+		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
+	}
 	s.addDaemonWatcher(w)
 	// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits for delivery
 	// or for the stream to be gone, never for a client that has stopped
 	// listening.
 	defer s.removeDaemonWatcher(w)
 	s.acceptStream(ctx, "WatchDaemon")
-	s.log.Debug("WatchDaemon", "accepted a standing stream", nil)
+	s.log.Debug("WatchDaemon", "accepted a standing stream", dlog.Context{
+		"stream": w.id, "emacs": w.emacs, "elisp_build": w.elispBuild,
+	})
 
 	for {
 		var push *agentreplv1.WatchDaemonResponse
@@ -538,6 +550,8 @@ func (s *server) watchDaemon(
 				continue
 			}
 			push, fromState = event, false
+		case addressed := <-w.elisp:
+			push, fromState = addressed, false
 		}
 		if err := out.Send(push); err != nil {
 			s.log.Debug("WatchDaemon", "the standing stream's client went away",

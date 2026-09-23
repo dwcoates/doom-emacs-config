@@ -22,6 +22,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/internal/deploy"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/feedid"
@@ -444,20 +445,26 @@ func (f *fakeDrain) ShutdownNow(_ context.Context, reason *agentreplv1.DrainReas
 	return nil
 }
 
-// fakeRollout answers the two adoption calls and the deploy's rollout.
+// fakeRollout answers the two adoption calls.
 type fakeRollout struct {
 	rollout.Controller
 	adoptHostErr error
 	adoptWebErr  error
-	// rolledOut is what the last RollOut was asked to roll out.
-	rolledOut  rollout.Rebuilt
-	accepted   rollout.Acceptance
-	rollOutErr error
 }
 
-func (f *fakeRollout) RollOut(_ context.Context, rebuilt rollout.Rebuilt) (rollout.Acceptance, error) {
-	f.rolledOut = rebuilt
-	return f.accepted, f.rollOutErr
+// fakeDeployer answers the Deploy rpc with a scripted result.
+type fakeDeployer struct {
+	mu     sync.Mutex
+	forced []bool
+	result deploy.Result
+	err    error
+}
+
+func (f *fakeDeployer) Deploy(_ context.Context, force bool) (deploy.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forced = append(f.forced, force)
+	return f.result, f.err
 }
 
 func (f *fakeRollout) AdoptHost(context.Context, ids.WorkspaceID) error { return f.adoptHostErr }
@@ -721,6 +728,7 @@ type harness struct {
 	Merge      *fakeMerge
 	Drain      *fakeDrain
 	Rollout    *fakeRollout
+	Deployer   *fakeDeployer
 	Health     *fakeHealth
 	Facts      *fakeSessionFacts
 	Login      *fakeLogin
@@ -760,6 +768,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Merge:      &fakeMerge{},
 		Drain:      &fakeDrain{},
 		Rollout:    &fakeRollout{},
+		Deployer:   &fakeDeployer{},
 		Health:     &fakeHealth{},
 		Facts:      &fakeSessionFacts{facts: map[ids.WorkspaceID]HostFacts{}},
 		Login:      &fakeLogin{},
@@ -780,6 +789,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Merge:            h.Merge,
 		Drain:            h.Drain,
 		Rollout:          h.Rollout,
+		Deploy:           h.Deployer,
 		Health:           h.Health,
 		SessionFacts:     h.Facts,
 		Login:            h.Login,
