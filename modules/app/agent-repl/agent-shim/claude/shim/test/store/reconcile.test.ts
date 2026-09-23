@@ -595,7 +595,7 @@ describe("announceLiveWork", () => {
   const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
 
   it("uses the CREATED arm: a restarted daemon has no element to continue", () => {
-    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE]);
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
 
     // `detached` means "continue what you are drawing"; telling a fresh
     // consumer that leaves the work undrawn and unreachable.
@@ -603,14 +603,14 @@ describe("announceLiveWork", () => {
   });
 
   it("describes the work FROM THE STORE, by the unit the handle names", () => {
-    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE]);
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
 
     const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
     expect(created.workCreated?.work.case).toBe("bash");
   });
 
   it("carries the recorded start, so the description cannot disagree with the record", () => {
-    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE]);
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK);
 
     const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
     const bash = created.workCreated?.work.value as conversationv1.AgentBash;
@@ -618,8 +618,19 @@ describe("announceLiveWork", () => {
     expect(start.command?.line).toBe("sleep 100");
   });
 
+  it("names the book's agent as the work's OWNER, so it is drawn in that agent's feed", () => {
+    // Arrange: the start was found in BOOK's own record.
+    const records = [recordedRun("run-1")];
+
+    // Act.
+    const announced = announceLiveWork(records, [HANDLE], BOOK);
+
+    // Assert.
+    expect(announced[0]?.owner?.value).toBe(BOOK.value);
+  });
+
   it("omits work the record cannot describe rather than announcing a bare handle", () => {
-    expect(announceLiveWork([], [HANDLE])).toEqual([]);
+    expect(announceLiveWork([], [HANDLE], BOOK)).toEqual([]);
   });
 
   // WHO OWNS THE RECORD is whoever can tell the two cases apart, and this
@@ -630,7 +641,7 @@ describe("announceLiveWork", () => {
     const undescribed: conversationv1.DetachedWorkId[] = [];
 
     // Act.
-    const announced = announceLiveWork([], [HANDLE], (handle) => {
+    const announced = announceLiveWork([], [HANDLE], BOOK, (handle) => {
       undescribed.push(handle);
     });
 
@@ -644,7 +655,7 @@ describe("announceLiveWork", () => {
     const undescribed: conversationv1.DetachedWorkId[] = [];
 
     // Act.
-    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], (handle) => {
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE], BOOK, (handle) => {
       undescribed.push(handle);
     });
 
@@ -682,7 +693,7 @@ describe("announceLiveWork", () => {
     });
 
     // A kind absent from DetachableWork cannot claim to be detached.
-    expect(announceLiveWork([read], [HANDLE])).toEqual([]);
+    expect(announceLiveWork([read], [HANDLE], BOOK)).toEqual([]);
   });
 });
 
@@ -858,7 +869,7 @@ describe("announceLiveWork for the non-shell kinds", () => {
     });
 
     // Act.
-    const announced = announceLiveWork([entry], [HANDLE]);
+    const announced = announceLiveWork([entry], [HANDLE], BOOK);
 
     // Assert.
     const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
@@ -878,7 +889,7 @@ describe("announceLiveWork for the non-shell kinds", () => {
     });
 
     // Act.
-    const announced = announceLiveWork([entry], [HANDLE]);
+    const announced = announceLiveWork([entry], [HANDLE], BOOK);
 
     // Assert.
     const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
@@ -894,7 +905,7 @@ describe("announceLiveWork for the non-shell kinds", () => {
     });
 
     // Act, Assert.
-    expect(announceLiveWork([entry], [HANDLE])).toEqual([]);
+    expect(announceLiveWork([entry], [HANDLE], BOOK)).toEqual([]);
   });
 });
 
