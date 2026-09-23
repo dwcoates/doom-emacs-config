@@ -119,3 +119,28 @@ func TestInstallingATreeSwapsItWhole(t *testing.T) {
 		})
 	}
 }
+
+func TestLiveNamesWhereTheDaemonRunsFrom(t *testing.T) {
+	tests := []struct {
+		name       string
+		live       Live
+		wantShim   string
+		wantWebapp string
+	}{
+		{name: "the checkout's own artifacts", live: Live{ModuleRoot: "/m"},
+			wantShim: "/m/agent-shim/claude/shim/dist/main.js", wantWebapp: "/m/webapp/dist"},
+		{name: "the daemon pointed elsewhere", live: Live{ModuleRoot: "/m", Shim: "/s/main.js", Webapp: "/w/dist"},
+			wantShim: "/s/main.js", wantWebapp: "/w/dist"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			shim, webapp := tc.live.ShimMain(), tc.live.WebappDist()
+
+			// Assert
+			if shim != tc.wantShim || webapp != tc.wantWebapp {
+				t.Fatalf("live = (%q, %q), want (%q, %q)", shim, webapp, tc.wantShim, tc.wantWebapp)
+			}
+		})
+	}
+}

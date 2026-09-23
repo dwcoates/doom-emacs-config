@@ -40,6 +40,9 @@ type deployerParams struct {
 	Surfaces dlog.Surfaces
 	// Checkout is the agent-repl module root the daemon was deployed from.
 	Checkout string
+	// ShimMain and WebappDist are where the daemon runs the shim bundle and
+	// serves the webapp from.
+	ShimMain, WebappDist string
 	// StateDir is the state root; staging and build logs live under it.
 	StateDir string
 	// SelfExe is this daemon's binary, whose content hash is its build.
@@ -116,7 +119,10 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, err
 		Log:         log,
 	}
 	deployer, err := deploy.New(deploy.Deps{
-		Live:        deploy.Live{ModuleRoot: p.Checkout, CacheBin: where.cacheBin},
+		Live: deploy.Live{
+			ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
+			Shim: p.ShimMain, Webapp: p.WebappDist,
+		},
 		StagingRoot: filepath.Join(deployDir, "staging"),
 		Builder:     builder,
 		Bundle:      p.Bundle,

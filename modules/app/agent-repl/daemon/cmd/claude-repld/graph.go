@@ -569,17 +569,19 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	clients := &deployClientsForwarder{}
 	deployer, err := buildDeployer(ctx, deployerParams{
-		Surfaces:  p.Surfaces,
-		Checkout:  paths.Checkout,
-		StateDir:  p.Layout.Dir(),
-		SelfExe:   selfExe,
-		Bundle:    shimBundle,
-		Rollout:   rolloutController,
-		Clients:   clients,
-		Runner:    scripts,
-		Store:     p.Opts.storeSocket,
-		Workspace: fleet.Workspaces,
-		Getenv:    os.Getenv,
+		Surfaces:   p.Surfaces,
+		Checkout:   paths.Checkout,
+		ShimMain:   paths.ShimMain,
+		WebappDist: paths.WebappDist,
+		StateDir:   p.Layout.Dir(),
+		SelfExe:    selfExe,
+		Bundle:     shimBundle,
+		Rollout:    rolloutController,
+		Clients:    clients,
+		Runner:     scripts,
+		Store:      p.Opts.storeSocket,
+		Workspace:  fleet.Workspaces,
+		Getenv:     os.Getenv,
 	})
 	if err != nil {
 		return nil, err

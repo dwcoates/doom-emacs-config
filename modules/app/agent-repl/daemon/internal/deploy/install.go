@@ -22,15 +22,28 @@ type Live struct {
 	// CacheBin is ~/.cache/agent-repl/bin, where launchd runs the services
 	// from.
 	CacheBin string
+	// Shim and Webapp, when set, are the bundle every spawn runs and the dist
+	// the daemon serves, when the daemon was pointed elsewhere than the
+	// checkout (--shim-main, --webapp-dist). A deploy installs where the
+	// daemon RUNS from, or its staleness judgement would never converge.
+	Shim, Webapp string
 }
 
 // ShimMain is the installed shim bundle.
 func (l Live) ShimMain() string {
+	if l.Shim != "" {
+		return l.Shim
+	}
 	return filepath.Join(l.ModuleRoot, "agent-shim", "claude", "shim", "dist", "main.js")
 }
 
 // WebappDist is the installed webapp dist the daemon serves.
-func (l Live) WebappDist() string { return filepath.Join(l.ModuleRoot, "webapp", "dist") }
+func (l Live) WebappDist() string {
+	if l.Webapp != "" {
+		return l.Webapp
+	}
+	return filepath.Join(l.ModuleRoot, "webapp", "dist")
+}
 
 // DaemonBin is the installed daemon binary a successor is spawned from.
 func (l Live) DaemonBin() string { return filepath.Join(l.ModuleRoot, "daemon", "bin", "claude-repld") }
