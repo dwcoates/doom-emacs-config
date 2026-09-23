@@ -235,17 +235,21 @@ func dlSamePath(a, b string) bool {
 func dlAwaitLostShell(
 	t *testing.T,
 	ctx context.Context,
+	w *World,
+	ws *workspacev1.WorkspaceRef,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
 	commandSubstring string,
 	wantHow string,
-) *frontendv1.FeedShell {
+) (shell *frontendv1.FeedShell, spool string) {
 	t.Helper()
-	shell, _ := dbAwaitDetachedShell(t, ctx, initial, stream, commandSubstring,
-		func(s *frontendv1.FeedShellSettled) bool { return s.GetOutcome() != nil })
-	if shell == nil {
-		t.Fatalf("e2e: the detached shell %q never settled within %s", commandSubstring, dlLostBound)
-	}
+	// EVERY LOST RUN HERE WROTE ONE LINE before it was lost, and a LOST
+	// conclusion never drops what was observed: the body is awaited carrying
+	// it, which is also what makes the answered spool the one the settled
+	// bubble draws.
+	shell, spool = dbAwaitSettledShell(t, ctx, w, ws, initial, stream, commandSubstring,
+		func(s *frontendv1.FeedShellSettled) bool { return s.GetOutcome() != nil },
+		"partial output with no terminator")
 	lost := shell.GetSettled().GetLost()
 	if lost == nil {
 		t.Fatalf("settled outcome = %v, want the LOST arm (feed.proto, FeedShellSettled.outcome.lost): "+
@@ -257,7 +261,7 @@ func dlAwaitLostShell(
 			"the daemon relays the sidecar's DetachedLost arm by name, so a different word here "+
 			"means the arm was dropped or renamed on the way to the frontend", got, wantHow)
 	}
-	return shell
+	return shell, spool
 }
 
 // dlShellLostHow names the feed's own lost arm, in the DetachedLost
@@ -325,8 +329,8 @@ func TestDetachedLostWentSilent(t *testing.T) {
 
 	// Assert: the feed draws it LOST, and the spool it managed to write is
 	// still carried — a LOST conclusion never drops what was observed.
-	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "went_silent")
-	if got := shell.GetSpool().GetText(); !strings.Contains(got, "partial output with no terminator") {
+	shell, got := dlAwaitLostShell(t, ctx, w, ws, initial, stream, "sleep 100000", "went_silent")
+	if !strings.Contains(got, "partial output with no terminator") {
 		t.Errorf("the LOST shell's spool = %q, want the one line the run managed to write before it went silent", got)
 	}
 	if shell.GetSettled().GetExit() != nil {
@@ -364,7 +368,7 @@ func TestDetachedLostFileVanished(t *testing.T) {
 	// racing the tail rather than exercising the policy: the feed's own live
 	// spool text is the evidence the sidecar read the file, and it is a
 	// bounded wait on a real signal.
-	live := dbAwaitLiveDetachedShell(t, ctx, initial, stream, "sleep 100000", "partial output with no terminator")
+	live := dbAwaitLiveDetachedShell(t, ctx, w, ws, initial, stream, "sleep 100000", "partial output with no terminator")
 	if live.GetLive() == nil {
 		t.Fatalf("detached shell state = %v, want live before the spool is removed", live.GetState())
 	}
@@ -376,8 +380,8 @@ func TestDetachedLostFileVanished(t *testing.T) {
 
 	// Assert: the arm, then the feed's LOST draw.
 	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "file_vanished")
-	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "file_vanished")
-	if got := shell.GetSpool().GetText(); !strings.Contains(got, "partial output with no terminator") {
+	_, got := dlAwaitLostShell(t, ctx, w, ws, initial, stream, "sleep 100000", "file_vanished")
+	if !strings.Contains(got, "partial output with no terminator") {
 		t.Errorf("the LOST shell's spool = %q, want the bytes read before the file vanished — "+
 			"the file going away is not a licence to drop what was already observed", got)
 	}
@@ -429,7 +433,7 @@ func TestDetachedLostSweptUp(t *testing.T) {
 	spool := dlAwaitOneSpool(t, ctx, w)
 	// The bytes must be ingested by the FIRST sidecar, so the restart is
 	// resuming a run rather than discovering it for the first time.
-	live := dbAwaitLiveDetachedShell(t, ctx, initial, stream, "sleep 100000", "partial output with no terminator")
+	live := dbAwaitLiveDetachedShell(t, ctx, w, ws, initial, stream, "sleep 100000", "partial output with no terminator")
 	if live.GetLive() == nil {
 		t.Fatalf("detached shell state = %v, want live before the sidecar is restarted", live.GetState())
 	}
@@ -445,5 +449,5 @@ func TestDetachedLostSweptUp(t *testing.T) {
 
 	// Assert: the arm, then the feed's LOST draw.
 	dlAwaitLostReason(t, ctx, w, ws.GetDir(), spool, "swept_up")
-	dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "swept_up")
+	dlAwaitLostShell(t, ctx, w, ws, initial, stream, "sleep 100000", "swept_up")
 }
