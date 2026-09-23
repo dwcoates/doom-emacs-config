@@ -32,7 +32,29 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			s.tok.observeUsage(unit, agent.GetValue(), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
 			r.applyActivity(ws, s, unit, act)
+			// THE CALL'S CARRIER OWNS ITS WORK: a shell that later detaches
+			// from this unit is drawn on this agent's feed.
+			if row, ok := s.bashUnits[unit]; ok && row.owner == "" {
+				row.owner = agent.GetValue()
+			}
 		})
+}
+
+// OnMainAgent records the session's main agent, whose detached work is on the
+// root feed.
+//
+// IT PUBLISHES NOTHING. The naming is not a fact the strip draws — it only
+// decides where a later shell row's jump lands — and the watcher states it
+// before the frames that need it, so the next publication carries it. A
+// footer is not published at all until its first fact, and this is not one.
+func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId) {
+	r.mu.Lock()
+	s := r.stateLocked(ws)
+	s.mainAgent = agent.GetValue()
+	log := r.logOf(ws, s)
+	r.mu.Unlock()
+	log.Debug("daemon.footer.on_main_agent", "the footer took the session's main agent",
+		dlog.Context{"agent": agent.GetValue()})
 }
 
 // activityArm names the activity's kind for the record.
@@ -578,8 +600,12 @@ func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.Age
 	case *conversationv1.AgentDetachedWork_Detached:
 		unit := origin.Detached.GetDetachedFromId().GetValue()
 		if row, ok := s.bashUnits[unit]; ok {
+			// An owner the two sources disagree on stays unknown: the feed
+			// draws no head for it (and reports why), so there is no row to
+			// point a jump at.
+			owner, _ := feedid.DetachedOwner(work.GetOwner().GetValue(), row.owner)
 			s.shells[id] = &shellRow{
-				work: id, command: row.command, startedAt: row.startedAt, order: s.nextOrder()}
+				work: id, command: row.command, startedAt: row.startedAt, order: s.nextOrder(), owner: owner}
 			return
 		}
 		if row, ok := s.agents[unit]; ok {
@@ -590,13 +616,13 @@ func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.Age
 			return
 		}
 	case *conversationv1.AgentDetachedWork_Created:
-		r.applyCreatedWork(s, id, origin.Created.GetWorkCreated())
+		r.applyCreatedWork(s, id, work.GetOwner().GetValue(), origin.Created.GetWorkCreated())
 	}
 }
 
 // applyCreatedWork describes work that is detached from the moment the footer
 // hears of it, so nothing has described it yet.
-func (r *resolver) applyCreatedWork(s *wsState, id string, created *conversationv1.DetachableWork) {
+func (r *resolver) applyCreatedWork(s *wsState, id, owner string, created *conversationv1.DetachableWork) {
 	switch item := created.GetWork().(type) {
 	case *conversationv1.DetachableWork_Bash:
 		if start, ok := item.Bash.GetResult().(*conversationv1.AgentBash_Start); ok {
@@ -605,6 +631,7 @@ func (r *resolver) applyCreatedWork(s *wsState, id string, created *conversation
 				command:   truncate(start.Start.GetCommand().GetLine(), DefaultWarningRowWidth),
 				startedAt: time.UnixMilli(start.Start.GetStartedAt().GetAtMs()),
 				order:     s.nextOrder(),
+				owner:     owner,
 			}
 		}
 	case *conversationv1.DetachableWork_Subagent:
@@ -848,10 +875,30 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedShells{}
 	for _, row := range rows {
+		// THE JUMP ADDRESSES THE HEAD ON THE FEED THE FEED DREW IT ON — its
+		// owner's, by the one rule the feed places by — which for a subagent's
+		// shell is that subagent's sub-feed. It used to be the root for every
+		// shell, so a subagent's shell jumped to a row the root never held.
+		owner := row.owner
+		if owner == "" {
+			if unit, ok := s.bashUnits[row.work]; ok {
+				owner = unit.owner
+			}
+		}
+		feed, err := feedid.AgentFeed(owner, s.mainAgent)
+		if err != nil {
+			// NO ADDRESS IS INVENTED. A shell whose owner is not known yet has
+			// no head on any feed (the feed holds it, or has reported it
+			// unplaceable), so a target would point at nothing.
+			r.logOf(ws, s).Debug("daemon.footer.shell_row_unaddressed",
+				"a live shell's head has no known feed; the panel leaves its row out rather than address a row that does not exist",
+				dlog.Context{"work_id": row.work, "owner": owner, "main_agent": s.mainAgent, "cause": err.Error()})
+			continue
+		}
 		out.Rows = append(out.Rows, &frontendv1.FooterShellRow{
 			Target: r.opts.encodeFeedID(feedid.Ref{
 				WS:   ws,
-				Feed: feedid.Feed{Root: true},
+				Feed: feed,
 				// The jump lands on the shell bubble's HEAD (KindShellHead), the
 				// row a reader expands — not the spool BODY on the sub-feed.
 				Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: row.work},

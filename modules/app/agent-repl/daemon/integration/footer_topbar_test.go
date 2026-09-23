@@ -329,7 +329,7 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 
 	// Act: one live subagent, one live shell.
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-agent", "sub-1", "explore the tree")))
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-shell", "sleep 5")))
+	pushDetachedShell(f.shim, "work-shell", "sleep 5")
 	// Two tracker tasks, one done.
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "write the tests", true)))
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-2", "t-2", "land the change", false)))

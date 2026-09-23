@@ -32,7 +32,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 	if !isSub || s.address != nil {
 		// The main agent's prompt, or any prompt while a lease holder's output
 		// address is in force: one user-prompt row, placed by the address.
-		at := r.place(s, recipient)
+		// AN UNPLACEABLE PROMPT STILL OPENS ITS TURN: only its row is not drawn
+		// (place has reported why).
+		at, placed := r.place(s, recipient)
 		// THE TURN THE SESSION IS RUNNING, learned from the prompt that opened
 		// it: every later row this turn produces is stamped with it, and its
 		// terminal row is what clears it. This is set even for a directive turn,
@@ -71,6 +73,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			log.Debug("daemon.feed.directive_prompt_suppressed",
 				"a context-cut directive's prompt frame drew no user-prompt bubble",
 				dlog.Context{"turn": turn.GetValue(), "origin": prompt.GetOrigin().String()})
+			return
+		}
+		if !placed {
 			return
 		}
 		row := r.userPromptRow(s, at, turn, prompt.GetOrigin(), blocks)
@@ -210,7 +215,7 @@ func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
 	if prompt.Turn != "" {
 		s.endedTurns[ids.TurnID(prompt.Turn)] = true
 	}
-	at := r.place(s, nil)
+	at := r.outputPlacement(s)
 	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())
 	row := r.userPromptRow(s, at, turn, prompt.Origin, blocks)
 	r.logger(s.id).Debug("daemon.feed.ported_prompt",

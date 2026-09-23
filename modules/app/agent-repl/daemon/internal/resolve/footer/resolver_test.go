@@ -133,6 +133,9 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 	if err := r.SetWorkspaceDir(testWS, t.TempDir()); err != nil {
 		t.Fatalf("SetWorkspaceDir: %v", err)
 	}
+	// THE WATCHER NAMES THE MAIN AGENT before it routes a frame; the harness
+	// stands in for it.
+	r.OnMainAgent(testWS, mainAgent)
 	return &harness{r: r, clock: clock, log: log}
 }
 
@@ -530,6 +533,9 @@ func wakeupScheduled(at time.Time) *conversationv1.AgentActivity {
 func createdShell(work, command string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: work},
+		// The producer names the owner of work it re-announces: the book the
+		// work's start was found in, here the main agent's.
+		Owner: mainAgent,
 		Origin: &conversationv1.AgentDetachedWork_Created{
 			Created: &conversationv1.DetachedWorkCreated{
 				WorkCreated: &conversationv1.DetachableWork{
