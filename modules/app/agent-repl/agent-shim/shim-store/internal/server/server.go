@@ -250,8 +250,8 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	}
 
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"batch durable written=%d absorbed=%d skipped=%d page_lines=%d bash_rows=%d shapes=%d",
-		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), len(result.BashRows), result.Shapes)
+		"batch durable written=%d absorbed=%d settled=%d skipped=%d page_lines=%d bash_rows=%d shapes=%d",
+		result.Written, result.Absorbed, result.Settled, len(result.Skipped), len(result.Lines), len(result.BashRows), result.Shapes)
 	s.publish(log, msg.GetProducer(), result.Lines)
 	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 	return connect.NewResponse(&storev1.WriteBatchResponse{

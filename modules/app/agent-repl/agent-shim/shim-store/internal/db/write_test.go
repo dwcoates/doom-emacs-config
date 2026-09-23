@@ -1105,3 +1105,60 @@ func TestEveryStatementOfAWriteBatchSeeksRatherThanScans(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteBatchKeepsAConcludedUnitWhenAStartArrivesAfterIt(t *testing.T) {
+	// Arrange: the stream plane concluded the unit; the file plane then reads
+	// the same unit's opening line.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A")))))
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT write_id FROM entry WHERE upsert_key = 'activity:act-1'`); got != "w1" {
+		t.Fatalf("write_id = %q, want the concluding write w1 to still own the row", got)
+	}
+}
+
+func TestWriteBatchDeliversNoLineForAStartAfterAConclusion(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A")))))
+
+	// Act
+	result := writeOK(t, d, pageEntry("w2", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert: nothing is re-delivered to a watcher, and the entry is counted.
+	if len(result.Lines) != 0 || result.Settled != 1 || result.Written != 0 {
+		t.Fatalf("result = %+v, want the start left unapplied and counted as settled", result)
+	}
+}
+
+func TestWriteBatchLetsALaterConclusionSupersedeAnEarlierOne(t *testing.T) {
+	// Arrange: a conclusion may be restated more fully by the other plane.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A")))))
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A, fully")))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT write_id FROM entry WHERE upsert_key = 'activity:act-1'`); got != "w2" {
+		t.Fatalf("write_id = %q, want the later conclusion w2 applied", got)
+	}
+}
+
+func TestWriteBatchAppliesAConclusionOverAStart(t *testing.T) {
+	// Arrange: the ordinary order.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "activity:act-1", "agent-1", frameItem(activityFrame("agent-1", "act-1", proseSaying("A")))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT write_id FROM entry WHERE upsert_key = 'activity:act-1'`); got != "w2" {
+		t.Fatalf("write_id = %q, want the conclusion w2 applied", got)
+	}
+}

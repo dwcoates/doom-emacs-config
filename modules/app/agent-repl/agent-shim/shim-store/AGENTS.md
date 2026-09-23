@@ -552,6 +552,14 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   answer and written at ERROR (`store.db.live-work.unscoped`) naming each row,
   on every read that finds it. A live agent with NEITHER spawn column is
   indistinguishable from another session's main agent and is not reportable.
+- **A UNIT'S ROW NEVER WALKS BACK FROM ITS CONCLUSION.** Both planes write a
+  unit under one `activity:<id>` key and neither waits for the other, so the
+  sidecar can read a call's START after the shim wrote its success. An entry
+  restating a non-concluding state over a row that already concludes the unit
+  is not applied (`WriteResult.Settled`, a verbose trace), so no watcher is
+  re-delivered the regression; a conclusion over a conclusion still applies.
+  Before this a loaded skill card was redrawn running and never settled again
+  (2026-09-23).
 - **A DETACHED ROW'S SPECIFIC KIND IS FINAL.** `detached_work.kind` changes
   only out of the unspecific `detached` marker. A later write naming a
   different specific kind (a shell terminal on a subagent's handle) still
