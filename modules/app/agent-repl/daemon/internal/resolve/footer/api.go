@@ -20,7 +20,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
@@ -269,6 +268,11 @@ type Resolver interface {
 	Prime(ws ids.WorkspaceID)
 	// Topic is the workspace's footer publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FooterView]
+	// OnEntryPlaced records where the feed drew one detached-work-capable
+	// entry (a subagent bubble by its spawn unit, a shell head by its work
+	// id). It is the feed resolver's Deps.EntryPlaced, and it is what a jump
+	// row names: FooterJump.entry, never an address the footer guessed.
+	OnEntryPlaced(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
 }
 
 // Option adjusts the resolver's injectable knobs. The defaults are the
@@ -281,7 +285,6 @@ type options struct {
 	dwell         time.Duration
 	alarmTokens   uint64
 	rateNewsworth float64
-	encodeFeedID  func(feedid.Ref) *frontendv1.FeedId
 }
 
 // WithClock injects the clock the dwell and every `at` stamp are taken from.
@@ -299,12 +302,6 @@ func WithTokenAlarmThreshold(n uint64) Option { return func(o *options) { o.alar
 // must reach before it is reported as newsworthy.
 func WithRateLimitNewsworthyThreshold(f float64) Option {
 	return func(o *options) { o.rateNewsworth = f }
-}
-
-// WithFeedIDEncoder injects the FeedId encoder the chips' jump targets are
-// minted with. Production uses feedid.Encode.
-func WithFeedIDEncoder(f func(feedid.Ref) *frontendv1.FeedId) Option {
-	return func(o *options) { o.encodeFeedID = f }
 }
 
 // Defaults for the injectable knobs.
