@@ -28,15 +28,26 @@ func (c *Converter) skillSettled(call openCall, markdown string, ts int64) *conv
 
 // skillFailed settles an invocation the producer answered with an error: no
 // document will ever land for a skill that did not resolve, so the error result
-// IS this unit's terminal.
-func (c *Converter) skillFailed(failure *conversationv1.AgentToolFailure) *conversationv1.AgentActivity {
+// IS this unit's terminal. It restates the skill, as the success does, so the
+// settled frame stands alone once it has upserted over the start.
+func (c *Converter) skillFailed(call openCall, failure *conversationv1.AgentToolFailure) *conversationv1.AgentActivity {
 	return item(&conversationv1.AgentActivity_SkillUse{SkillUse: &conversationv1.AgentSkillUse{
-		Result: &conversationv1.AgentSkillUse_Failure{Failure: &conversationv1.AgentSkillUseFailure{Error: failure}},
+		Result: &conversationv1.AgentSkillUse_Failure{Failure: &conversationv1.AgentSkillUseFailure{
+			Error: failure,
+			Skill: &conversationv1.AgentSkillName{Name: skillName(call)},
+		}},
 	}})
 }
 
 func skillName(call openCall) string {
-	return str(pick(call.input, "skill", "name", "command"))
+	return requestedSkill(call.input)
+}
+
+// requestedSkill is the skill an invocation named, read by the start and by
+// every settled arm alike so the settled frame restates exactly what the start
+// announced.
+func requestedSkill(input map[string]any) string {
+	return str(pick(input, "skill", "name", "command"))
 }
 
 // skillAllowedTools states what invoking the skill PERMITS — a fact about

@@ -26,6 +26,12 @@ type unitState struct {
 	input string
 	// inputForm is how that line is drawn.
 	inputForm inputForm
+	// startHeld records that this process drew the unit's START frame, so a
+	// settled frame that fails to restate what its call named can still be
+	// drawn from what the start said. A replay that serves the unit's latest
+	// frame alone never sets it: the store keeps one row per unit, so once the
+	// call settles its start is gone. See restatedOrHeld.
+	startHeld bool
 	// denied records that the permission gate refused this call, so a late
 	// frame never redraws it as running.
 	denied bool
