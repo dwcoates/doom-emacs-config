@@ -662,6 +662,10 @@ type Store struct {
 	Socket  string
 	DBPath  string
 	LogPath string
+	// lockDir is AGENT_REPL_LOCK_DIR for this store, kept so StartSameDB
+	// restarts the same process onto the same private dir rather than
+	// re-deriving one.
+	lockDir string
 	Client  storev1connect.ShimStoreClient
 
 	cmd     *exec.Cmd
@@ -678,10 +682,15 @@ func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		t.Fatalf("e2e: mkdir %s: %v", filepath.Dir(dbPath), err)
 	}
+	lockDir := filepath.Join(filepath.Dir(dbPath), "lock")
 	cmd := exec.Command(bin, "--socket", socket, "--db", dbPath, "--log", logPath)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
 	cmd.Stdout = os.Stderr
@@ -702,6 +711,7 @@ func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
 		Socket:  socket,
 		DBPath:  dbPath,
 		LogPath: logPath,
+		lockDir: lockDir,
 		Client:  storeClient(socket),
 		cmd:     cmd,
 		exit:    watchProcess(cmd),
@@ -780,6 +790,7 @@ func (s *Store) StartSameDB(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+s.Socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		"AGENT_REPL_LOCK_DIR="+s.lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
 	cmd.Stdout = os.Stderr
@@ -829,7 +840,10 @@ type Sidecar struct {
 	SpoolRoot string
 	// bin and args are exactly what this sidecar was launched with, kept so a
 	// Restart relaunches the same process rather than a re-derived one.
-	bin     string
+	bin string
+	// lockDir is AGENT_REPL_LOCK_DIR, kept so a Restart reuses the same
+	// private dir rather than re-deriving one.
+	lockDir string
 	args    []string
 	cmd     *exec.Cmd
 	exit    *processExit
@@ -926,10 +940,15 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 			args = append(args, w.flag, w.value.String())
 		}
 	}
+	lockDir := filepath.Join(opts.StateDir, "lock")
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
 	cmd.Stdout = os.Stderr
@@ -940,7 +959,7 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	// Same reasoning as startStore's: --log puts the state root in this
 	// process's argv, and the sidecar is the test's own, never a daemon stray.
 	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
-	s := &Sidecar{t: t, bin: bin, args: args, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
+	s := &Sidecar{t: t, bin: bin, args: args, lockDir: lockDir, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
 	t.Cleanup(s.Stop)
 	return s
 }
@@ -963,6 +982,7 @@ func (s *Sidecar) Restart(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+storeSocketOf(s.args),
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		"AGENT_REPL_LOCK_DIR="+s.lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
 	cmd.Stdout = os.Stderr
