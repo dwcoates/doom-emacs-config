@@ -76,6 +76,16 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	if running := watcher.TurnInFlight(); running != nil {
 		return q.hold(ctx, sub, *running, nil, log)
 	}
+	// A SUBMISSION GOING STRAIGHT TO THE SHIM IS A DELIVERY DECISION, so it is
+	// taken under the delivery lock, where a standing edit is read: a prompt
+	// submitted while an edit stands is queued after the edited one and is
+	// withheld with it.
+	drain := &q.state(sub.WS).drain
+	drain.Lock()
+	defer drain.Unlock()
+	if claim, editing := q.Editing(sub.WS); editing {
+		return q.holdBehindEdit(ctx, sub, claim, log)
+	}
 	return q.deliver(ctx, sub, sender, watcher, log)
 }
 
@@ -370,6 +380,7 @@ func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dl
 		}
 		log.Warn(opSubmit, "dropped a revival-pending hold whose bring-up failed",
 			dlog.Context{"turn": string(h.Turn), "cause": cause})
+		q.retireEditIf(ctx, ws, h.Turn, tombstoneDropped, log)
 		dropped++
 	}
 	if dropped == 0 {
