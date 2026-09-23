@@ -92,8 +92,8 @@
 (declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-interrupt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-interrupt-response "wire-verbs" (alist))
-(declare-function agent-repl-wire-encode-roll-out-build-request "wire-verbs" (request))
-(declare-function agent-repl-wire-decode-roll-out-build-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-deploy-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-deploy-response "wire-verbs" (alist))
 (declare-function agent-repl-elisp-build "elisp-build" ())
 (declare-function agent-repl-wire-encode-update-shutdown-schedule-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-shutdown-schedule-response "wire-verbs" (alist))
@@ -400,14 +400,15 @@ with `confirm_agents' set.")
   "Schedule, cancel or immediately trigger the daemon's shutdown.
 This is how Emacs stops a daemon; Emacs never kills a daemon that answers.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-roll-out-build
-  "RollOutBuild"
-  agent-repl-wire-encode-roll-out-build-request
-  agent-repl-wire-decode-roll-out-build-response
-  "Put a build the deploy chain already produced into service.
-The daemon rolls it out at each workspace's freeness and ENDS NO TURN,
-which is why a deploy calls this and never `UpdateShutdownSchedule{now}'.
-The answer is the rollout's ACCEPTANCE, not its completion.")
+(agent-repl-rpc--defverb agent-repl-rpc-deploy
+  "Deploy"
+  agent-repl-wire-encode-deploy-request
+  agent-repl-wire-decode-deploy-response
+  "Ask the daemon to put the checkout's current source into service.
+The daemon builds every component, decides what is out of date by content
+hash and restarts or reloads exactly that.  An unforced deploy ENDS NO
+TURN; `:force' does not wait for in-flight work.  The answer is the
+deploy's DECISIONS, one outcome per component, not its completion.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-update-merge-queue
   "UpdateMergeQueue"

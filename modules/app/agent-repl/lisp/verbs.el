@@ -97,6 +97,7 @@
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-daemon-health "agent-repl-rpc" (conn request &rest keys))
@@ -1098,6 +1099,134 @@ is the daemon-wide switch and is omitted from the encoding."
    (lambda (_) (message "agent-repl: merge queue %s" (plist-get action :arm)))
    :on-error
    (lambda (value) (agent-repl-verbs--merge-queue-on-error action value))))
+
+;;;; ---- Deploy -----------------------------------------------------------
+;;
+;; THE DAEMON OWNS DEPLOYS.  Emacs only ASKS: the daemon builds every
+;; component, decides what is out of date by content hash and restarts or
+;; reloads exactly that.  The answer is the deploy's DECISIONS, one outcome
+;; per component; what follows arrives on the surfaces that already carry it
+;; (a handover's announcement, a shim bounce, this Emacs's own
+;; `reload_elisp').
+
+(defcustom agent-repl-deploy-timeout-seconds 900
+  "Seconds `agent-repl-deploy' waits for the daemon's answer.
+The answer comes after the daemon has BUILT every component, which is the
+whole stack's build, so it is far longer than an ordinary verb's deadline."
+  :type 'number
+  :group 'agent-repl)
+
+(defun agent-repl-verbs--deploy-component-name (component)
+  "Return the DeployComponent keyword COMPONENT as its bare name."
+  (substring (symbol-name component) 1))
+
+(defun agent-repl-verbs--deploy-outcome-phrase (outcome)
+  "Return the decision OUTCOME, a (:arm ARM :value V), as a short phrase."
+  (let ((value (plist-get outcome :value)))
+    (pcase (plist-get outcome :arm)
+      (:up-to-date "up to date")
+      (:restarted "restarted")
+      (:handing-over
+       (format "handing over %d workspace%s (%d busy%s)"
+               (plist-get value :workspaces)
+               (if (= (plist-get value :workspaces) 1) "" "s")
+               (plist-get value :busy)
+               (if (plist-get value :forced) ", forced" "")))
+      (:shims
+       (let ((bounces (plist-get value :bounces)))
+         (format "%d bounced now, %d registered"
+                 (cl-count :bounced-now bounces
+                           :key (lambda (b) (plist-get (plist-get b :when) :arm)))
+                 (cl-count :registered bounces
+                           :key (lambda (b) (plist-get (plist-get b :when) :arm))))))
+      (:reload-pushed
+       (format "reload pushed to %d" (plist-get value :recipients)))
+      (:deferred-to-successor "deferred to the successor")
+      (arm (format "%S" arm)))))
+
+(defun agent-repl-verbs--deploy-on-success (force value)
+  "Report the DeploySuccess VALUE of a deploy sent with FORCE.
+One log record per component outcome, then one echo-area line naming every
+component's decision."
+  (let ((components (plist-get value :components)))
+    (dolist (outcome components)
+      (agent-repl--info nil "elisp.verbs.deploy-component component=%s build=%s decision=%S detail=%S"
+                        (agent-repl-verbs--deploy-component-name (plist-get outcome :component))
+                        (plist-get outcome :build)
+                        (plist-get (plist-get outcome :outcome) :arm)
+                        (plist-get (plist-get outcome :outcome) :value)))
+    (message "agent-repl: deploy%s: %s"
+             (if force " (forced)" "")
+             (if components
+                 (mapconcat
+                  (lambda (outcome)
+                    (format "%s %s"
+                            (agent-repl-verbs--deploy-component-name (plist-get outcome :component))
+                            (agent-repl-verbs--deploy-outcome-phrase (plist-get outcome :outcome))))
+                  components "; ")
+               "no component was listed"))))
+
+(defun agent-repl-verbs--deploy-refusal-sentence (cause)
+  "Return the DeployError CAUSE, a (:arm ARM :value V), as the sentence it is reported by."
+  (let ((value (plist-get cause :value)))
+    (pcase (plist-get cause :arm)
+      (:build-failed
+       (format "the %s build failed, so nothing was deployed: %s%s"
+               (plist-get value :step) (plist-get value :detail)
+               (if (string-empty-p (or (plist-get value :log) ""))
+                   ""
+                 (format " (log: %s)" (plist-get value :log)))))
+      (:already-deploying "a deploy is already running; ask again when it ends")
+      (:already-rolling-out
+       (format "a handover is already in flight, waiting on %s"
+               (or (and (plist-get value :waiting-on)
+                        (mapconcat #'identity (plist-get value :waiting-on) ", "))
+                   "no workspace")))
+      (:joining "this daemon is a successor still joining a handover")
+      (:service-restart-failed
+       (format "%s did not come back onto the fresh build: %s"
+               (agent-repl-verbs--deploy-component-name (plist-get value :component))
+               (plist-get value :detail)))
+      (:install-failed
+       (format "the %s artifact could not be installed, so nothing was restarted: %s"
+               (agent-repl-verbs--deploy-component-name (plist-get value :component))
+               (plist-get value :detail)))
+      (arm (format "the daemon refused with %S" arm)))))
+
+(defun agent-repl-verbs--deploy-on-error (value)
+  "Report the DeployError VALUE loudly, and claim it.
+Every arm is an ERROR record carrying its fields and an echo-area line
+carrying its detail."
+  (let ((cause (plist-get value :cause)))
+    (agent-repl--error nil "elisp.verbs.deploy-refused arm=%S fields=%S"
+                       (plist-get cause :arm) (plist-get cause :value))
+    (message "agent-repl: deploy refused: %s"
+             (agent-repl-verbs--deploy-refusal-sentence cause))
+    t))
+
+(defun agent-repl-deploy (&optional force)
+  "Ask the daemon to deploy the checkout's current source.
+The daemon builds every component and restarts or reloads exactly what is
+out of date; an unforced deploy ENDS NO TURN.  With a prefix argument the
+deploy is FORCED: every out-of-date shim is bounced at once and an
+out-of-date daemon hands over at once, ending running turns, so it asks
+first.  The answer is reported in one echo-area line plus a log record per
+component; every refusal is reported loudly with its detail."
+  (interactive "P")
+  (let ((force (and force t)))
+    (when (and force
+               (not (yes-or-no-p
+                     "A forced deploy ends every running turn in an out-of-date workspace.  Deploy anyway? ")))
+      (agent-repl--info nil "elisp.verbs.deploy-force-declined")
+      (user-error "agent-repl: forced deploy cancelled"))
+    (agent-repl--info nil "elisp.verbs.deploy-requested force=%s" force)
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-deploy (agent-repl-verbs--conn)
+     (list :force force)
+     :op "deploy"
+     :timeout agent-repl-deploy-timeout-seconds
+     :on-success (lambda (value) (agent-repl-verbs--deploy-on-success force value))
+     :on-error #'agent-repl-verbs--deploy-on-error)))
 
 ;;;; ---- Health -----------------------------------------------------------
 

@@ -470,7 +470,11 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "merge-queue refused: the daemon's registry does not hold repository %S"
      "reports why the user's merge-queue command was refused")
     ("verbs.el" agent-repl-verb-merge-queue "agent-repl: merge queue %s"
-     "confirms the user's merge-queue command"))
+     "confirms the user's merge-queue command")
+    ("verbs.el" agent-repl-verbs--deploy-on-success "agent-repl: deploy%s: %s"
+     "reports every component's decision for the user's deploy command")
+    ("verbs.el" agent-repl-verbs--deploy-on-error "agent-repl: deploy refused: %s"
+     "reports why the user's deploy command was refused, with its detail"))
   "Every permitted production `message' call and its user-facing reason.")
 
 (ert-deftest agent-repl-test-message-sites-are-explicitly-user-facing ()
