@@ -511,12 +511,11 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 	if out.failed != "" || out.landed == "" || !r.selfCheckout || len(out.commits) == 0 {
 		return
 	}
-	r.o.log(ctx, r.ws).Debug(op, "triggering the self-reload for a merge into this daemon's own checkout",
+	// ONE MERGE IS ONE LANDING, AND ONE DEPLOY: the deploy is told once with
+	// every commit the merge landed, never once per commit.
+	r.o.log(ctx, r.ws).Info(op, "a merge landed in this daemon's own checkout; the deploy is told once",
 		dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": len(out.commits)})
-	if err := r.o.deps.Rollout.Trigger(ctx, out.commits); err != nil {
-		r.o.log(ctx, r.ws).Error(op, "the self-reload trigger failed",
-			dlog.Context{"workspace": string(r.ws), "error": err.Error()})
-	}
+	r.o.deps.Rollout.Landed(ctx, out.commits)
 }
 
 // publishAbandoned draws the ABANDONED terminal: a merge taken off the queue
