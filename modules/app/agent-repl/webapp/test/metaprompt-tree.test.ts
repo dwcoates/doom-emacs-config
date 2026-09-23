@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  WIDE_CHAR_CLASS,
+  boxWideChars,
   findTreeRegion,
   formatTree,
   isMetapromptTree,
@@ -448,6 +450,42 @@ describe("renderTreeHtml", () => {
     // Assert — the tag is escaped inside the code block, not rendered.
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
+  });
+});
+
+describe("boxWideChars", () => {
+  const box = (cluster: string): string => `<span class="${WIDE_CHAR_CLASS}">${cluster}</span>`;
+
+  it.each([
+    { name: "an astral emoji", html: "a 🔧 b", want: `a ${box("🔧")} b` },
+    { name: "an emoji with its variation selector", html: "✏️x", want: `${box("✏️")}x` },
+    { name: "a BMP emoji", html: "✅", want: box("✅") },
+    { name: "a CJK ideograph", html: "中", want: box("中") },
+    { name: "a zero-width-joined pair, joiner outside", html: "👨\u200d👩", want: `${box("👨")}\u200d${box("👩")}` },
+    { name: "narrow text and box-drawing rails", html: "│   ├── 1.1 abc", want: "│   ├── 1.1 abc" },
+    { name: "an emoji inside a tag's text, the tag untouched", html: "<code>🔧</code>", want: `<code>${box("🔧")}</code>` },
+    { name: "an emoji-looking attribute, never split", html: '<a title="🔧">x</a>', want: '<a title="🔧">x</a>' },
+  ])("boxes $name", ({ html, want }) => {
+    // Act + Assert
+    expect(boxWideChars(html)).toBe(want);
+  });
+
+  it("boxes exactly the characters the width model counts as two columns", () => {
+    // Arrange
+    const text = "1 🔧 ✏️ ✅ 中 a";
+    // Act — the box count, times two, plus the narrow characters left outside.
+    const boxed = boxWideChars(text);
+    const boxes = boxed.split(`class="${WIDE_CHAR_CLASS}"`).length - 1;
+    const outside = boxed.replace(new RegExp(`<span class="${WIDE_CHAR_CLASS}">[^<]*</span>`, "g"), "");
+    // Assert
+    expect(boxes * 2 + visibleWidth(outside)).toBe(visibleWidth(text));
+  });
+
+  it("draws a root line's emoji inside a two-column box", () => {
+    // Act
+    const html = renderTreeHtml("1 🔧 Fixed it", identity, 100);
+    // Assert
+    expect(html).toContain(`<span class="mp-content">${box("🔧")} Fixed it</span>`);
   });
 });
 
