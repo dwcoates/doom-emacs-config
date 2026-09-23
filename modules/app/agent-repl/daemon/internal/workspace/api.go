@@ -246,8 +246,10 @@ type Verbs interface {
 	// attention marker. Idempotent.
 	Select(ctx context.Context, ws ids.WorkspaceID) error
 	// MarkViewed records that the user has SEEN this workspace: its roster row
-	// goes PARTIAL until its status changes. Idempotent, and it touches no
-	// durable record — the mode is a view fact, not a workspace fact.
+	// goes PARTIAL until its status changes, if and only if the row is DONE
+	// (the roster drops the report on any other status). Idempotent, and it
+	// touches no durable record — the mode is a view fact, not a workspace
+	// fact.
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
