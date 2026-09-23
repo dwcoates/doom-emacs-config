@@ -429,6 +429,92 @@ describe("the compaction boundary", () => {
   it("produces nothing when there is nowhere to hold the boundary until its summary lands", () => {
     expect(convert({ type: "system", subtype: "compact_boundary" })).toEqual([]);
   });
+
+  it("names the summary record by the preserved messages' anchor", () => {
+    // Arrange: both captures give the summary record this anchor's uuid.
+    const held: PendingCompaction[] = [];
+
+    // Act.
+    convert(
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          trigger: "manual",
+          preserved_segment: { anchor_uuid: "uuid-segment-anchor" },
+          preserved_messages: { anchor_uuid: "uuid-summary", uuids: [] },
+        },
+      },
+      (pending) => held.push(pending),
+    );
+
+    // Assert: `preserved_messages` supersedes `preserved_segment`.
+    expect(held[0]?.summaryUuid).toBe("uuid-summary");
+  });
+
+  it("falls back to the preserved segment's anchor when no preserved messages are stated", () => {
+    // Arrange.
+    const held: PendingCompaction[] = [];
+
+    // Act.
+    convert(
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "manual", preserved_segment: { anchor_uuid: "uuid-segment-anchor" } },
+      },
+      (pending) => held.push(pending),
+    );
+
+    // Assert.
+    expect(held[0]?.summaryUuid).toBe("uuid-segment-anchor");
+  });
+
+  it("names no summary record when the anchor is the boundary itself", () => {
+    // Arrange: a prefix-preserving partial compaction anchors on the boundary.
+    const held: PendingCompaction[] = [];
+
+    // Act.
+    convert(
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "manual", preserved_messages: { anchor_uuid: "uuid-1", uuids: [] } },
+      },
+      (pending) => held.push(pending),
+    );
+
+    // Assert.
+    expect(held[0]?.summaryUuid).toBeUndefined();
+  });
+
+  it("names no summary record when the boundary states no anchor", () => {
+    // Arrange.
+    const held: PendingCompaction[] = [];
+
+    // Act.
+    convert({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto" } }, (pending) =>
+      held.push(pending),
+    );
+
+    // Assert.
+    expect(held[0]?.summaryUuid).toBeUndefined();
+  });
+
+  it("stamps when the boundary was held, so a late release can state its age", () => {
+    // Arrange.
+    const held: PendingCompaction[] = [];
+
+    // Act.
+    convertSessionMessage(
+      message({ type: "system", subtype: "compact_boundary" }),
+      foldContext({ nowMs: 4_242 }),
+      (pending) => held.push(pending),
+    );
+
+    // Assert.
+    expect(held[0]?.heldAtMs).toBe(4_242);
+  });
 });
 
 describe("compactionEntry", () => {
@@ -440,6 +526,7 @@ describe("compactionEntry", () => {
       tokensAfter: 20n,
       automatic,
       durationMs: 7n,
+      heldAtMs: 1_000,
     };
   }
 
@@ -455,6 +542,10 @@ describe("compactionEntry", () => {
     expect(cutOf(compactionEntry(foldContext(), pending(true), "we did things")).summary?.markdown).toBe(
       "we did things",
     );
+  });
+
+  it("leaves the summary absent when the vendor stated none, rather than filling it", () => {
+    expect(cutOf(compactionEntry(foldContext(), pending(true), undefined)).summary).toBeUndefined();
   });
 
   it("draws an automatic compaction as the automatic trigger", () => {
