@@ -192,7 +192,7 @@ func TestASuccessorTakesTheNextRollOut(t *testing.T) {
 	// Act: the next deploy asks the successor to roll out in turn.
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	announcements, err := successor.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	announcements, err := successor.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}}}))
 	if err != nil {
 		t.Fatalf("WatchDaemon on the successor: %v", err)
 	}
