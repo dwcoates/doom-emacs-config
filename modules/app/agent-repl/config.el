@@ -270,6 +270,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; dispatch hands workspace-mutation progress to, and the create verb registers
 ;; its callbacks with; it needs only core.el, so it loads beside daemon-link.
 (agent-repl--load-module "mutation-progress")
+;; WHY: elisp-build.el answers the elisp build every WatchDaemon reports and
+;; carries out a deploy's pushed `reload_elisp'.  daemon-link.el dispatches
+;; that push to it and rpc.el asks it for the build, both at call time; its
+;; own needs are core.el's logging ladder and heartbeat assertion.
+(agent-repl--load-module "elisp-build")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
