@@ -23,6 +23,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/commandfile"
+	"claude-repld/internal/deploy"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/feedid"
@@ -138,6 +139,9 @@ type Server interface {
 	// Announcer publishes the daemon-scoped pushes onto every WatchDaemon
 	// stream. It also satisfies rollout.Announcer, whose one method it shares.
 	drain.Announcer
+	// Clients are the connected clients' reported builds and the reload pushes
+	// a deploy addresses to the stale ones (deploy.go).
+	deploy.Clients
 
 	// Relay is the host-push relay the workspace verbs use. It is a SEPARATE
 	// value rather than an embedded interface because workspace.HostRelay's
