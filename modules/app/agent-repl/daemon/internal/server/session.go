@@ -134,6 +134,51 @@ func (s *server) UpdateHeldPrompt(
 	return connect.NewResponse(resp), nil
 }
 
+// EditHeldPrompt runs one step of a held-prompt edit: begin, commit or
+// cancel. All three are the queue's own verbs; the begin's editor probe is
+// this server's own knowledge of whether a host stream stands for the
+// workspace, which is what the claim is scoped to.
+func (s *server) EditHeldPrompt(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.EditHeldPromptRequest],
+) (*connect.Response[agentreplv1.EditHeldPromptResponse], error) {
+	const rpc = "EditHeldPrompt"
+	if err := validateEditHeldPromptRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.EditHeldPromptResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	ws := subject.Record.ID
+	turn := ids.TurnID(req.Msg.GetTurn().GetValue())
+	var (
+		err  error
+		step string
+	)
+	switch {
+	case req.Msg.GetBegin() != nil:
+		step = "begin"
+		err = s.deps.Queue.BeginEdit(ctx, ws, turn, func() bool { return s.hostStreamHeld(ws) })
+	case req.Msg.GetCommit() != nil:
+		step = "commit"
+		err = s.deps.Queue.CommitEdit(ctx, ws, turn, req.Msg.GetCommit().GetSaid())
+	default:
+		step = "cancel"
+		err = s.deps.Queue.CancelEdit(ctx, ws, turn)
+	}
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	subject.Log.Debug("daemon.server.edit_held_prompt", "ran a held-prompt edit step",
+		dlog.Context{"turn": string(turn), "step": step})
+	resp.Result = &agentreplv1.EditHeldPromptResponse_Success{
+		Success: &agentreplv1.EditHeldPromptSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // AnswerHeldOffer answers a question the daemon parked in the tray. The one
 // offer that exists is the merge dequeue: keep the queued merge, or release it.
 func (s *server) AnswerHeldOffer(
