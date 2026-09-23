@@ -23,6 +23,7 @@ import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
+  HELD_FOLDABLE_CLASS,
   drawHeldPrompt,
   drawUnsupportedBlock,
   sessionCommandLiteral,
@@ -671,6 +672,162 @@ describe("the said body", () => {
     const { tc } = trayContext();
     const prompt = heldPrompt({ said: { content: { blocks: [{}] } } });
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+});
+
+/** A held prompt whose words are TEXT. */
+const saying = (text: string): HeldPrompt =>
+  heldPrompt({ said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } } });
+
+/** The card's fold: the one element that shows the first line or the whole. */
+const foldOf = (card: HTMLElement): HTMLElement => {
+  const fold = card.querySelector<HTMLElement>(":scope > .held-fold");
+  if (fold === null) throw new Error("the card drew no fold");
+  return fold;
+};
+
+describe("the held prompt's one-line fold", () => {
+  it("shows only the first line of a multi-line prompt while collapsed", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
+    // Assert
+    expect([fold.querySelector(".held-line")?.textContent?.trim(), fold.classList.contains("expanded")])
+      .toEqual(["first line", false]);
+  });
+
+  it("offers the expand affordance on a multi-line prompt", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
+    // Assert
+    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
+  });
+
+  it("expands to the whole prompt on a click", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
+    // Act
+    fold.click();
+    // Assert
+    expect([fold.classList.contains("expanded"), fold.querySelector(".queued-text")?.textContent])
+      .toEqual([true, expect.stringContaining("second line")]);
+  });
+
+  it("collapses back to the first line on a second click", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
+    fold.click();
+    // Act
+    fold.click();
+    // Assert
+    expect(fold.classList.contains("expanded")).toBe(false);
+  });
+
+  it("offers no expand affordance on a one-line prompt", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const fold = foldOf(drawHeldPrompt(saying("fix the test"), tc));
+    // Assert
+    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(false);
+  });
+
+  it("does not expand a one-line prompt on a click", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const fold = foldOf(drawHeldPrompt(saying("fix the test"), tc));
+    // Act
+    fold.click();
+    // Assert
+    expect(fold.classList.contains("expanded")).toBe(false);
+  });
+
+  it("offers the affordance on a one-line prompt whose line overruns its row", () => {
+    // Arrange — a layout engine, faked: the line measures taller than its row.
+    const { tc } = trayContext();
+    const fold = foldOf(drawHeldPrompt(saying("a single line far too long for its row"), tc));
+    const line = fold.querySelector(".held-line");
+    if (line === null) throw new Error("the fold drew no first line");
+    Object.defineProperty(line, "scrollHeight", { value: 40 });
+    Object.defineProperty(line, "clientHeight", { value: 20 });
+    // Act
+    fold.dispatchEvent(new Event("pointerenter"));
+    // Assert
+    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
+  });
+
+  it("keeps an open fold closable when its hidden line measures nothing", () => {
+    // Arrange — an overrunning line opened, then hidden and measuring 0/0.
+    const { tc } = trayContext();
+    const fold = foldOf(drawHeldPrompt(saying("a single line far too long for its row"), tc));
+    const line = fold.querySelector(".held-line");
+    if (line === null) throw new Error("the fold drew no first line");
+    Object.defineProperty(line, "scrollHeight", { value: 40, configurable: true });
+    Object.defineProperty(line, "clientHeight", { value: 20, configurable: true });
+    fold.dispatchEvent(new Event("pointerenter"));
+    fold.click();
+    Object.defineProperty(line, "scrollHeight", { value: 0 });
+    Object.defineProperty(line, "clientHeight", { value: 0 });
+    // Act
+    fold.dispatchEvent(new Event("pointerenter"));
+    // Assert
+    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
+  });
+
+  it("offers the affordance on a one-line prompt carrying an attachment", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const fold = foldOf(
+      drawHeldPrompt(
+        heldPrompt({
+          said: {
+            content: {
+              blocks: [
+                { block: { case: "text", value: { text: "see this" } } },
+                {
+                  block: {
+                    case: "image",
+                    value: { location: { case: "path", value: { path: "/tmp/a.png" } }, mediaType: "image/png" },
+                  },
+                },
+              ],
+            },
+          },
+        }),
+        tc,
+      ),
+    );
+    // Assert
+    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
+  });
+
+  it("skips leading blank lines to find the first line", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const fold = foldOf(drawHeldPrompt(saying("\n\nfirst line\nsecond line"), tc));
+    // Assert
+    expect(fold.querySelector(".held-line")?.textContent?.trim()).toBe("first line");
+  });
+
+  it("leaves a link click in the first line to the link", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const fold = foldOf(
+      drawHeldPrompt(saying("see [the docs](https://example.test/docs)\nmore"), tc),
+    );
+    const link = fold.querySelector<HTMLAnchorElement>(".held-line a");
+    link?.addEventListener("click", (event) => event.preventDefault());
+    // Act
+    link?.click();
+    // Assert
+    expect(fold.classList.contains("expanded")).toBe(false);
   });
 });
 

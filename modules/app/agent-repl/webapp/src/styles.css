@@ -4963,6 +4963,25 @@ body.draining #composer-input::placeholder {
 /* The prompt's own words, at full color inside the subdued chrome. */
 .queued-text > *:first-child { margin-top: 0; }
 .queued-text > *:last-child { margin-bottom: 0; }
+/* THE FIRST LINE ONLY, until the reader opens the prompt (owner ruling,
+   2026-09-23). Collapsed, the fold shows `.held-line` — the first line alone —
+   clamped to ONE ROW by the tool card's input-line clamp, and the whole prompt
+   (`.queued-content`) is not drawn; expanded, the reverse. The toggle is the
+   feed's own `.expanded` class and its zoom cursors, worn only by a fold with
+   something past its first line (`held-foldable`), so a prompt that fits
+   offers nothing to open. */
+.held-fold:not(.expanded) > .queued-content { display: none; }
+.held-fold.expanded > .held-line { display: none; }
+.held-line {
+  color: var(--fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.held-line > * { margin-top: 0; margin-bottom: 0; }
+.held-fold.held-foldable { cursor: zoom-in; }
+.held-fold.held-foldable.expanded { cursor: zoom-out; }
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */
