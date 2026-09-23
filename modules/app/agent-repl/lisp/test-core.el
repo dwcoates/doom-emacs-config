@@ -398,6 +398,21 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("magit.el" +dwc/magit-copy-commit-link
      "GitHub commit link copied to clipboard: %s"
      "confirms an interactive clipboard write")
+    ("elisp-build.el" agent-repl-elisp-reload-handle
+     "agent-repl: elisp reload REFUSED -- the deploy is for %s, this Emacs runs %s"
+     "tells the user a deploy's reload was refused because it names another checkout")
+    ("elisp-build.el" agent-repl--elisp-reload-report-heartbeat
+     "agent-repl: elisp reload left required timers unarmed: %s"
+     "tells the user the reload left the editor's heartbeat broken")
+    ("elisp-build.el" agent-repl--elisp-reload-run
+     "agent-repl: elisp reload FAILED -- %s names no module"
+     "tells the user the reload loaded nothing and why")
+    ("elisp-build.el" agent-repl--elisp-reload-run
+     "agent-repl: elisp reload FAILED -- %s could not be read: %s"
+     "tells the user the reload loaded nothing and why")
+    ("elisp-build.el" agent-repl--elisp-reload-run
+     "agent-repl: elisp reload: %d module(s) failed to load: %s"
+     "tells the user which modules the reload could not load")
     ("magit.el" +dwc/open-workspace-pr-in-browser "Opened PR: %s"
      "confirms the interactive browser action")
     ("panels.el" agent-repl-workspace-push-to-back
