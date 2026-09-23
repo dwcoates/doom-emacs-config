@@ -89,6 +89,17 @@ export interface AssistantOptions {
    * context above that floor; the mock's ordinary usage is far below it.
    */
   readonly contextTokens?: number;
+  /**
+   * Another agent's emission that lands IN THE MIDDLE of one of this
+   * response's blocks, keyed by block index.
+   *
+   * THE MAIN AGENT AND ITS BACKGROUND SUBAGENTS SHARE ONE SDK ITERATOR, so a
+   * subagent's whole response — its `message_start` included — can arrive
+   * between two deltas of the main agent's open block. The emission runs after
+   * the block's FIRST delta and before the rest; this response's own stream
+   * attribution is restored afterwards.
+   */
+  readonly interleave?: ReadonlyMap<number, () => void>;
 }
 
 /** Who a sidechain message belongs to. */

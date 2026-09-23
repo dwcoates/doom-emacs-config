@@ -645,17 +645,32 @@ export function createFakeQuery(
     }
   };
 
-  const emitBlockStream = (block: FakeBlock, index: number): void => {
+  /**
+   * Run another agent's emission in the middle of an open block, then restore
+   * THIS response's stream attribution: the nested emission set its own and
+   * cleared it at its `message_stop`.
+   */
+  const interleaved = (midBlock: (() => void) | undefined): void => {
+    if (midBlock === undefined) return;
+    const own = streamParentToolUseId;
+    midBlock();
+    streamParentToolUseId = own;
+  };
+
+  const emitBlockStream = (block: FakeBlock, index: number, midBlock?: () => void): void => {
     switch (block.type) {
       case "text": {
         emitStream({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
         // Two deltas, never one: a consumer that concatenated wrongly would
         // still pass against a single-delta block.
         const mid = Math.ceil(block.text.length / 2);
-        for (const chunk of [block.text.slice(0, mid), block.text.slice(mid)]) {
-          if (chunk !== "") {
-            emitStream({ type: "content_block_delta", index, delta: { type: "text_delta", text: chunk } });
-          }
+        const [head, tail] = [block.text.slice(0, mid), block.text.slice(mid)];
+        if (head !== "") {
+          emitStream({ type: "content_block_delta", index, delta: { type: "text_delta", text: head } });
+        }
+        interleaved(midBlock);
+        if (tail !== "") {
+          emitStream({ type: "content_block_delta", index, delta: { type: "text_delta", text: tail } });
         }
         break;
       }
@@ -665,11 +680,22 @@ export function createFakeQuery(
           index,
           content_block: { type: "thinking", thinking: "", signature: "" },
         });
-        if (block.thinking !== "") {
+        // Two deltas, never one, for the reason prose has two.
+        const mid = Math.ceil(block.thinking.length / 2);
+        const [head, tail] = [block.thinking.slice(0, mid), block.thinking.slice(mid)];
+        if (head !== "") {
           emitStream({
             type: "content_block_delta",
             index,
-            delta: { type: "thinking_delta", thinking: block.thinking, estimated_tokens: null },
+            delta: { type: "thinking_delta", thinking: head, estimated_tokens: null },
+          });
+        }
+        interleaved(midBlock);
+        if (tail !== "") {
+          emitStream({
+            type: "content_block_delta",
+            index,
+            delta: { type: "thinking_delta", thinking: tail, estimated_tokens: null },
           });
         }
         // The signature delta arrives even when the reasoning itself is
@@ -689,6 +715,7 @@ export function createFakeQuery(
           index,
           content_block: { type: "tool_use", id: block.id, name: block.name, input: {} },
         });
+        interleaved(midBlock);
         emitStream({
           type: "content_block_delta",
           index,
@@ -702,6 +729,7 @@ export function createFakeQuery(
           index,
           content_block: { type: "fallback", from: block.from, to: block.to },
         });
+        interleaved(midBlock);
         break;
       }
     }
@@ -761,7 +789,7 @@ export function createFakeQuery(
       },
     });
     blocks.forEach((block, index) => {
-      emitBlockStream(block, index);
+      emitBlockStream(block, index, options.interleave?.get(index));
       const uuid = opts.newUuid();
       uuids.push(uuid);
       // A SCENARIO MAY LIE ABOUT WHEN, and about nothing else: see
