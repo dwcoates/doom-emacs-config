@@ -1626,8 +1626,8 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 
 // TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation is the other side
 // of the challenge's contract: `live_agent_count` counts AGENTS, and a
-// detached shell is not one. It dies with the query like anything else, but
-// the user is not challenged over it.
+// detached shell is not one. The unconfirmed interrupt's kill is unforced, so
+// the shell runs on, and the user is not challenged over it.
 func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 	t.Parallel()
 	// Arrange
