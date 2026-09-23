@@ -19,12 +19,11 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | `a3cde9e9c734a7c27` | 18:20 |
 | `fix/integration-cold-first-test` | `~/.config/doom-worktrees/integration-cold-first-test` | Root-cause the flaky integration tests (the first test in 6 files fails under load; 900ms bound). Measured cause, one shared cold-start helper, and green 5× under load. | `a77100b53ad11dbed` | 18:25 |
+| `fix/selection-click-and-stable-gutter` | `~/.config/doom-worktrees/selection-click-and-stable-gutter` | A click on the feed outside any bubble clears the reply selection (via the daemon), then snaps to the bottom and follows. `scrollbar-gutter: stable` on bubble scroll boxes. | `af0ad8918210bd694` | 18:30 |
+| `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
 
 ## Still waiting on the owner
 
-- Confirm that the latest-visible follow rule stays off while a reply selection is active.
-- A proto decision: restate `summary` and `addressed_to` on `AgentSendMessageSuccess`/`Failure`, so an agent-message bubble keeps its body after replay.
-- A visual decision: `scrollbar-gutter: stable` on bubbles, so prose doesn't shift by the scrollbar's width when an expanded bubble starts scrolling.
 - The new name for "Release" (suggested: "Send now").
 - A retry of `SPC TAB f`, which now logs.
 
