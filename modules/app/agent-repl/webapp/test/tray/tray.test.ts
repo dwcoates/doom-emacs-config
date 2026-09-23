@@ -19,6 +19,7 @@ import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import {
+  HELD_ENTRY_SELECTOR,
   drawDaemonHoldItem,
   drawDaemonHoldTray,
   mountHoldTray,
@@ -159,6 +160,15 @@ describe("drawDaemonHoldTray", () => {
   it("delimits its rows with the one shared list rule", () => {
     const drawn = drawDaemonHoldTray(tray([promptItem("t1")]), trayContext());
     expect(drawn?.querySelector(".hold-tray-items")?.classList.contains("list-rows")).toBe(true);
+  });
+
+  it("names every held card, in order, by its held-entry selector", () => {
+    // Arrange
+    const drawn = drawDaemonHoldTray(tray([promptItem("t1"), offerItem(), promptItem("t2")]), trayContext());
+    // Act
+    const entries = [...(drawn?.querySelectorAll(HELD_ENTRY_SELECTOR) ?? [])];
+    // Assert
+    expect(entries.map((node) => node.getAttribute("data-held-turn"))).toEqual(["t1", null, "t2"]);
   });
 
 });
