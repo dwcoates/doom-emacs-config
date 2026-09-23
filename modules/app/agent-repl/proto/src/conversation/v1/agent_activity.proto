@@ -1236,6 +1236,12 @@ message AgentReadCutAtTokenCap {}
 message AgentReadFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // What was to be read, restated from the start so the settled frame stands
+  // alone: a call's start and its settle upsert ONE unit, so once the call
+  // settles its start is gone from any store that keeps the latest frame, and
+  // a replay drawing this frame alone must still name the file.
+  ReadPath path = 2;
 }
 
 // A path a file tool acted on.
@@ -1361,6 +1367,12 @@ message AgentWriteUpdated {}
 message AgentWriteFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // What was to be written, restated from the start so the settled frame
+  // stands alone: a call's start and its settle upsert ONE unit, so once the
+  // call settles its start is gone from any store that keeps the latest frame,
+  // and a replay drawing this frame alone must still name the file.
+  ReadPath path = 2;
 }
 
 // The agent edited a file: replaced a matched string, which must have been
@@ -1425,6 +1437,12 @@ message AgentEditSuccess {
 message AgentEditFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // What was to be edited, restated from the start so the settled frame stands
+  // alone: a call's start and its settle upsert ONE unit, so once the call
+  // settles its start is gone from any store that keeps the latest frame, and
+  // a replay drawing this frame alone must still name the file.
+  ReadPath path = 2;
 }
 
 // ==========================================================================
@@ -1593,6 +1611,12 @@ message AgentGrepCount {
 message AgentGrepFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // What was searched for, restated from the start so the settled frame stands
+  // alone: a call's start and its settle upsert ONE unit, so once the call
+  // settles its start is gone from any store that keeps the latest frame, and
+  // a replay drawing this frame alone must still state the query.
+  AgentGrepQuery query = 2;
 }
 
 // The agent matched file PATHS against a pattern.
@@ -1695,6 +1719,12 @@ message AgentGlobOmittedAtLeast {
 message AgentGlobFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // What was matched against, restated from the start so the settled frame
+  // stands alone: a call's start and its settle upsert ONE unit, so once the
+  // call settles its start is gone from any store that keeps the latest frame,
+  // and a replay drawing this frame alone must still state the pattern.
+  AgentGlobQuery query = 2;
 }
 
 // ---- The shell: a command, what it said, and where it went ----
@@ -1993,6 +2023,13 @@ message AgentBashOutputImage {
 message AgentBashFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // What was run, restated from the start so the settled frame stands alone,
+  // exactly as the success arm restates it: a call's start and its settle
+  // upsert ONE unit, so once the call settles its start is gone from any store
+  // that keeps the latest frame, and a replay drawing this frame alone must
+  // still state the command.
+  AgentBashCommand command = 2;
 }
 
 // ---- The subagent: a spawn, its progress, and its report ----
@@ -2545,6 +2582,13 @@ message AgentSkillAllowedTools {
 message AgentSkillUseFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // Which skill was invoked, restated so the settled frame stands alone,
+  // exactly as the success arm restates it: a call's start and its settle
+  // upsert ONE unit, so once the call settles its start is gone from any store
+  // that keeps the latest frame, and a replay drawing this frame alone must
+  // still name the skill.
+  AgentSkillName skill = 2;
 }
 
 // ---- The message to another agent ----
@@ -2637,6 +2681,19 @@ message AgentSendMessageSuccess {
 
   // When the send settled. UNSET when the producer observed no instant.
   optional AgentActivitySettledAt settled_at = 4;
+
+  // WHO THE CALLER ADDRESSED, restated from the start so the settled frame
+  // stands alone. A send's start and its settle upsert ONE unit, so once the
+  // send settles the start is gone from any store that keeps the latest frame,
+  // and a replay drawing this frame alone must still name the recipient as the
+  // caller wrote it. Same value, same meaning, as AgentSendMessageStart's.
+  string addressed_to = 5;
+
+  // The one-line preview, restated from the start so the settled frame stands
+  // alone, for the same reason as the address above. UNSET exactly when the
+  // start's was: the caller supplied none, and a surface draws the recipient
+  // alone — never the body.
+  optional AgentSendMessageSummary summary = 6;
 }
 
 // The recipient was already running and the message is queued for it.
@@ -2656,6 +2713,17 @@ message AgentSendMessageResumedRecipient {}
 message AgentSendMessageFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // WHO THE CALLER ADDRESSED, restated from the start so the settled frame
+  // stands alone: a refused send is still drawn, and once it settles its start
+  // is gone from any store that keeps the latest frame of the unit. Same
+  // value, same meaning, as AgentSendMessageStart's.
+  string addressed_to = 2;
+
+  // The one-line preview, restated from the start so the settled frame stands
+  // alone. UNSET exactly when the start's was: the caller supplied none, and a
+  // surface draws the recipient alone — never the body.
+  optional AgentSendMessageSummary summary = 3;
 }
 
 // ---- The web fetch: one URL's content, read by the agent ----

@@ -357,6 +357,26 @@ describe("bashConverter.settle", () => {
     expect((item?.value as conversationv1.AgentBash).result.case).toBe("failure");
   });
 
+  it("restates the command on the failure arm, so the settled frame stands alone", () => {
+    // Arrange.
+    const pending = call({ command: "nope", description: "try it" });
+
+    // Act.
+    const item = bashConverter.settle(pending, outcome({ stdout: "", stderr: "" }, true));
+
+    // Assert.
+    const failure = (item?.value as conversationv1.AgentBash).result.value as conversationv1.AgentBashFailure;
+    expect({ line: failure.command?.line, description: failure.command?.description }).toEqual({
+      line: "nope",
+      description: "try it",
+    });
+  });
+
+  it("produces NO failure frame for a call that named no command, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(bashConverter.settle(call({}), outcome({ stdout: "", stderr: "" }, true))).toBeUndefined();
+  });
+
   it("produces NO frame for IMAGE output whose result carries no image block", () => {
     // Arrange: `isImage` alone states no media type and no bytes, and naming
     // either would be inventing a fact the vendor never stated.
