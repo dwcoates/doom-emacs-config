@@ -531,8 +531,9 @@ audit's charge can be reconciled against the files.
   one outside get two. `CloseLogin` with nothing open succeeds, and a vendor
   binary that cannot be spawned answers `spawn_failed`.
 - THE VENDOR GUARD'S TWO REFUSAL SITES are exercised under `Opts.NoFake`: a
-  prompt needing classification is HELD with `classification_error` and an
-  ERROR naming "classifier"; `OpenLogin` is refused naming "login".
+  prompt needing classification is HELD with `hold_for_turn_end` (never the
+  producer-less `classification_error`) and an ERROR under
+  `daemon.promptqueue.classify`; `OpenLogin` is refused naming "login".
 - SELF-RELOAD NEEDS BOTH HALVES: a sibling worktree of the self repository runs
   the Emacs method but triggers no deploy, and a one-shot's merge on any
   other repository triggers none either.

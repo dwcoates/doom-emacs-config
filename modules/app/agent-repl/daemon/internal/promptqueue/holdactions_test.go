@@ -180,11 +180,12 @@ func TestAcceptFlipsAHoldForTurnEndVerdict(t *testing.T) {
 }
 
 func TestAcceptRefusesAnyOtherVerdict(t *testing.T) {
-	// Arrange: a classification_error verdict is not a hold_for_turn_end.
+	// Arrange: an interject verdict is not a hold_for_turn_end. (This once
+	// used a failed classifier, which no longer yields a verdict other than
+	// hold_for_turn_end.)
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.err = errors.New("the vendor run failed")
-	heldPrompt(t, h, "t1", classifier.Verdict{})
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: true, Reason: "it countermands the work"})
 	// Act
 	err := h.q.Accept(context.Background(), theWorkspace, "t1")
 	// Assert

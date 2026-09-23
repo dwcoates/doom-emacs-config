@@ -101,6 +101,16 @@ func (r *ShimRefusal) KeepaliveTurnAlreadyOpen() bool {
 	return r.Verb == "StartTurn" && r.Arm == "turn_already_open" && r.TransientKeepalive
 }
 
+// KillRefusedLive reports that this refusal is a KillTurn the shim declined
+// because the turn is still LIVE — it spawned detached work the shim will not
+// tear down under an ordinary interrupt. It is an expected domain outcome, not
+// a fault: the prompt queue matches it structurally (via a package-local
+// interface, as it does KeepaliveTurnAlreadyOpen) so a refused interjection
+// is narrated at the level its nature earns.
+func (r *ShimRefusal) KillRefusedLive() bool {
+	return r.Verb == "KillTurn" && r.Arm == ArmShimTurnLive
+}
+
 // Error renders the verb, the arm and the shim's own words, because the
 // evidence is the point.
 func (r *ShimRefusal) Error() string {
