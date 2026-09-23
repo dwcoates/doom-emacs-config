@@ -268,10 +268,16 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   bubble) has NO implicit writer: it moves only on the reader's input. The
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
-  `replaceRestore`, `prependCompensation` — each a named `TailFollow` method,
-  each recorded at DEBUG as `scroll.feed-moved` with its cause. A follow starts
-  only from a parking cause and ends when the reader scrolls away; returning
-  to the tail does not restart it. The reader's own wheel redirect and
+  `replaceRestore`, `prependCompensation`, `latestVisible` — each a named
+  `TailFollow` cause, each move recorded at DEBUG as `scroll.feed-moved` with
+  its cause. A follow starts from a parking cause, or (`latestVisible`, owner
+  rule 2026-09-23) whenever the reader can SEE the feed column's latest entry
+  (the last root row, or the hold tray's last card; `latestEntry` in
+  src/feed/feed.ts, "can see" defined once by `latestEntryVisible`), evaluated
+  on every scroll event, resize and row upsert. That latch moves nothing; later
+  content then keeps the tail in view. An active reply selection holds it off
+  until the selection clears. A follow ends when the reader scrolls the latest
+  entry away. The reader's own wheel redirect and
   collapse click are input, not causes, and are the only other writes.
   NOTHING MOVES A SCROLL BOX INDIRECTLY EITHER: a redraw never re-attaches an
   element already in place (`placeChildren`, src/dom.ts), a response re-push
