@@ -1064,6 +1064,113 @@ describe("the tail against a malformed or ending watch", () => {
     expect(reopened[1]?.value).toBe("7");
   });
 
+  it("never re-serves a line the re-open carries that was already served unchanged", async () => {
+    // THE RE-OPEN'S LOWER BOUND WALKS BACKWARD: it is the LAST pointer served,
+    // and an upsert of an old row is served at that row's original pointer.
+    // After a store restart the catch-up page then carried rows the consumer
+    // already held -- the previous turn's terminal among them -- and the
+    // daemon ended the turn now running with it (2026-09-23).
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH)
+          : opened(floorPage([storedLine("3", "unit-c"), storedLine("2", "unit-b")]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? {
+              async *[Symbol.asyncIterator]() {
+                // The upsert of the oldest row walks the bound back to "1".
+                yield create(storev1.WatchAgentSessionResponseSchema, {
+                  line: storedLine("1", "unit-a-updated"),
+                });
+              },
+            }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    await iterator.next();
+
+    // Act. The watch ends; the re-open carries "2" again, unchanged, then "3".
+    const next = await iterator.next();
+    session.close();
+
+    // Assert.
+    expect(unitOf(next.value as conversationv1.HistoryEntryAt)).toBe("unit-c");
+  });
+
+  it("still serves a line the re-open carries at a served pointer when its content changed", async () => {
+    // The bound is kept precisely so an update to an old row is not lost: the
+    // same pointer with new content is new information.
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH)
+          : opened(floorPage([storedLine("2", "unit-b-updated")]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? {
+              async *[Symbol.asyncIterator]() {
+                yield create(storev1.WatchAgentSessionResponseSchema, {
+                  line: storedLine("1", "unit-a-updated"),
+                });
+              },
+            }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    await iterator.next();
+
+    // Act.
+    const next = await iterator.next();
+    session.close();
+
+    // Assert.
+    expect(unitOf(next.value as conversationv1.HistoryEntryAt)).toBe("unit-b-updated");
+  });
+
+  it("records the lines a re-open withheld as already served", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("1", "unit-a")]), WATCH)
+          : opened(floorPage([storedLine("3", "unit-c"), storedLine("1", "unit-a")]), WATCH_2);
+      },
+      watchAgentSession: (request) =>
+        request.watch?.value === "watch-1"
+          ? { async *[Symbol.asyncIterator]() {} }
+          : standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10);
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await session.tail[Symbol.asyncIterator]().next();
+    session.close();
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message:
+          "the re-opened book carried lines already served unchanged; they were not served again",
+        context: containing({ replayed: 1 }),
+      }),
+    );
+  });
+
   it("records an unasked ending inside the budget as the recovery it is", async () => {
     // THE SILENCE WAS THE DEFECT, and so was the WARN that replaced it: an
     // ORDERED store restart ends every standing watch once and this side
@@ -1598,7 +1705,13 @@ describe("the re-open's catch-up page", () => {
             },
           };
         }
-        return { async *[Symbol.asyncIterator]() {} };
+        // The re-opened watch carries the next line. (It used to END at once,
+        // which drove a further re-open whose page re-served "2" -- a line the
+        // store never returns above a `known_through` of "2", and one the
+        // reader now withholds as already served.)
+        return standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("3", "unit-c") }),
+        ]);
       },
     });
     const session = await reader.openAgentPage(BOOK, 10);
