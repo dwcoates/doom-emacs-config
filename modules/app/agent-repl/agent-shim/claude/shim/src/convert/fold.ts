@@ -65,7 +65,7 @@ import type { PersistEntry } from "../store/persistence.js";
 import { convertAttachment, type AttachmentRecord } from "./attachments.js";
 import { convertDetached, createTaskKindRegistry, type TaskKindRegistry } from "./detached.js";
 import { attachmentActivityId } from "./ids.js";
-import type { FoldContext } from "./fold-context.js";
+import { spawningCallOf, type FoldContext } from "./fold-context.js";
 import {
   convertHookResponse,
   convertHookStarted,
@@ -522,7 +522,7 @@ function rememberAnswer(
   entries: readonly PersistEntry[],
   state: FoldState,
 ): void {
-  if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== "") return;
+  if (spawningCallOf(message.parent_tool_use_id) !== undefined) return;
   for (const entry of entries) {
     if (entry.item.kind !== "frame") continue;
     const result = entry.item.frame.result;

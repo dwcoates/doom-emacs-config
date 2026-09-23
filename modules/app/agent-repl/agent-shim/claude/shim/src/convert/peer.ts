@@ -21,7 +21,7 @@ import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { peerUpsertKey } from "../store/keys.js";
 import type { FoldContext } from "./fold-context.js";
-import { subagentBook } from "./fold-context.js";
+import { bookFor } from "./fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-convert-peer", operation: "shim.convert.peer" });
 
@@ -103,8 +103,7 @@ export function convertPeerMessage(
     return undefined;
   }
 
-  const parent = (record.parent_tool_use_id ?? null) as string | null;
-  const book = parent === null || parent === "" ? context.mainAgentId : subagentBook(context, parent);
+  const book = bookFor(context, record.parent_tool_use_id);
   const peer = create(conversationv1.PeerMessageSchema, {
     agent: book,
     sender: facts.sender,
