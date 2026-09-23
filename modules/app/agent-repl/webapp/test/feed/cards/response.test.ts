@@ -30,7 +30,7 @@ import {
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
-import { installTreeLayout, stagedCols, type TreeLayout } from "../../tree-layout.js";
+import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
@@ -75,6 +75,23 @@ function mount(el: HTMLElement): HTMLElement {
   column.append(el);
   document.body.append(column);
   return column;
+}
+
+/**
+ * A body inside a scroll box inside a bubble (of BUBBLECLASS), attached under
+ * its own column unless DETACHED.
+ */
+function stageBody(opts: { detached?: boolean; bubbleClass?: string } = {}): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = opts.bubbleClass ?? "bubble assistant md";
+  const scroll = document.createElement("div");
+  scroll.className = "bubble-scroll";
+  const body = document.createElement("div");
+  body.className = "bubble-body";
+  scroll.append(body);
+  bubble.append(scroll);
+  if (opts.detached !== true) mount(bubble);
+  return body;
 }
 
 /** The tree the metaprompt renderer recognizes, with its header. */
@@ -850,14 +867,7 @@ const SHOWCASE_TREE = [
 ].join("\n");
 
 describe("the wrapped tree a settled response carries", () => {
-  let layout: TreeLayout;
-  let uninstallLayout: () => void = () => {};
-  beforeEach(() => {
-    ({ layout, uninstall: uninstallLayout } = installTreeLayout());
-  });
-  afterEach(() => {
-    uninstallLayout();
-  });
+  const staged = useTreeLayout();
 
   it("wraps a too-wide branch onto continuation lines with real ancestor rails", () => {
     // Arrange
@@ -1051,7 +1061,7 @@ describe("the wrapped tree a settled response carries", () => {
     if (body === null) throw new Error("no bubble body");
     const tree = el.querySelector(".mp-tree");
     // Act — the column narrows, but the resize is delivered for the body alone.
-    layout.containingPx = 500;
+    staged.layout.containingPx = 500;
     fireResize(body);
     vi.runOnlyPendingTimers();
     // Assert — no re-wrap: the very same tree node.
@@ -1079,28 +1089,8 @@ describe("the wrapped tree a settled response carries", () => {
  * DETACHED element reads as no box and no style, exactly as in the webview.
  */
 describe("the columns a tree wraps to are measured against the bubble cap", () => {
-  let layout: TreeLayout;
-  let uninstallLayout: () => void = () => {};
-  beforeEach(() => {
-    ({ layout, uninstall: uninstallLayout } = installTreeLayout());
-  });
-  afterEach(() => {
-    uninstallLayout();
-  });
+  const staged = useTreeLayout();
 
-  /** A body inside a bubble inside a column, attached unless DETACHED. */
-  function stageBody(opts: { detached?: boolean } = {}): HTMLElement {
-    const bubble = document.createElement("div");
-    bubble.className = "bubble assistant md";
-    const scroll = document.createElement("div");
-    scroll.className = "bubble-scroll";
-    const body = document.createElement("div");
-    body.className = "bubble-body";
-    scroll.append(body);
-    bubble.append(scroll);
-    if (opts.detached !== true) mount(bubble);
-    return body;
-  }
 
   it("measures the cap less the chrome, in columns of the tree font", () => {
     // Arrange — 77% of 1000px = 770px, less 2 x 10px body padding = 750px.
@@ -1116,7 +1106,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     const body = stageBody();
     const narrow = measureTreeCols(body);
     // Act
-    layout.containingPx = 1400;
+    staged.layout.containingPx = 1400;
     const wide = measureTreeCols(body);
     // Assert
     expect(wide).toBeGreaterThan(narrow);
@@ -1124,7 +1114,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
 
   it("honors a px max-width cap directly", () => {
     // Arrange — an engine that resolves the cap to px hands it back as px.
-    layout.maxWidth = "560px";
+    staged.layout.maxWidth = "560px";
     const body = stageBody();
     // Act + Assert — 560 - 20 = 540px, floor(540 / 8).
     expect(measureTreeCols(body)).toBe(67);
@@ -1132,7 +1122,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
 
   it("resolves a single-percentage calc() cap as that percentage", () => {
     // Arrange
-    layout.maxWidth = "calc(77%)";
+    staged.layout.maxWidth = "calc(77%)";
     const body = stageBody();
     // Act + Assert
     expect(measureTreeCols(body)).toBe(93);
@@ -1165,25 +1155,8 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
 });
 
 describe("an unmeasurable tree width is an invariant violation", () => {
-  let layout: TreeLayout;
-  let uninstallLayout: () => void = () => {};
-  beforeEach(() => {
-    ({ layout, uninstall: uninstallLayout } = installTreeLayout());
-  });
-  afterEach(() => {
-    uninstallLayout();
-  });
+  const staged = useTreeLayout();
 
-  /** A body inside a bubble, attached under a column unless told otherwise. */
-  function stageBody(opts: { detached?: boolean; bubbleClass?: string } = {}): HTMLElement {
-    const bubble = document.createElement("div");
-    bubble.className = opts.bubbleClass ?? "bubble assistant md";
-    const body = document.createElement("div");
-    body.className = "bubble-body";
-    bubble.append(body);
-    if (opts.detached !== true) mount(bubble);
-    return body;
-  }
 
   /** Measure BODY, and answer the reason the violation was recorded with. */
   async function violation(body: HTMLElement): Promise<string> {
@@ -1226,7 +1199,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 
   it("refuses a tree font whose column measures no width", async () => {
     // Arrange — a laid-out page that gave the probe no box.
-    layout.charPx = 0;
+    staged.layout.charPx = 0;
     const body = stageBody();
     // Act + Assert
     expect(await violation(body)).toBe("the tree font's column measured no width");
@@ -1234,7 +1207,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 
   it("refuses a containing block with no width", async () => {
     // Arrange
-    layout.containingPx = 0;
+    staged.layout.containingPx = 0;
     const body = stageBody();
     // Act + Assert
     expect(await violation(body)).toBe("the bubble's containing block has no width");
@@ -1242,7 +1215,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 
   it("refuses a max-width that does not resolve", async () => {
     // Arrange
-    layout.maxWidth = "none";
+    staged.layout.maxWidth = "none";
     const body = stageBody();
     // Act + Assert
     expect(await violation(body)).toBe("the bubble's max-width does not resolve");
@@ -1250,8 +1223,6 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 
   it("refuses a computed length that is not in px", async () => {
     // Arrange — jsdom's own unit-less answer, which no laid-out engine gives.
-    uninstallLayout();
-    ({ layout, uninstall: uninstallLayout } = installTreeLayout());
     const body = stageBody();
     vi.spyOn(window, "getComputedStyle").mockImplementation(
       () => ({ maxWidth: "77%", paddingLeft: "0", paddingRight: "0" }) as unknown as CSSStyleDeclaration,
@@ -1263,7 +1234,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 
   it("refuses a cap whose content width holds no column", async () => {
     // Arrange — a body padding wider than the whole cap.
-    layout.bodyPaddingPx = 400;
+    staged.layout.bodyPaddingPx = 400;
     const body = stageBody();
     // Act + Assert
     expect(await violation(body)).toBe("the bubble's content width at its cap holds no column");
@@ -1300,14 +1271,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 });
 
 describe("a tree's first paint waits for the body to join the document", () => {
-  let layout: TreeLayout;
-  let uninstallLayout: () => void = () => {};
-  beforeEach(() => {
-    ({ layout, uninstall: uninstallLayout } = installTreeLayout());
-  });
-  afterEach(() => {
-    uninstallLayout();
-  });
+  const staged = useTreeLayout();
 
   /** Every rendered tree line's column width. */
   function lineWidths(el: HTMLElement): number[] {
@@ -1337,7 +1301,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     // Assert — it wrapped, and no line is wider than the budget.
     const widths = lineWidths(el);
     expect(widths.length).toBeGreaterThan(4);
-    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(layout));
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
   });
 
   it("never wraps a tree whose lines fit under the cap's budget", () => {
@@ -1369,7 +1333,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     // Act
     mount(el);
     // Assert
-    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(layout));
+    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout));
   });
 
   it("draws plain prose at once, detached, since it needs no width", () => {
@@ -1391,12 +1355,12 @@ describe("a tree's first paint waits for the body to join the document", () => {
     const column = mount(el);
     const before = lineWidths(el).length;
     // Act — the column narrows.
-    layout.containingPx = 500;
+    staged.layout.containingPx = 500;
     fireResize(column);
     vi.runOnlyPendingTimers();
     // Assert — more lines, none past the narrower budget.
     expect(lineWidths(el).length).toBeGreaterThan(before);
-    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(layout));
+    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout));
   });
 
   it("does not repaint when the column resizes without moving the budget", () => {
@@ -1423,7 +1387,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     mount(el);
     const before = lineWidths(el).length;
     // Act — moved into a narrower column.
-    layout.containingPx = 500;
+    staged.layout.containingPx = 500;
     mount(el);
     // Assert
     expect(lineWidths(el).length).toBeGreaterThan(before);
@@ -1612,14 +1576,7 @@ describe("the record of the drawn response", () => {
  * did not change keep their identity so the reader sees no teardown.
  */
 describe("the incremental reveal reconciles the prose without rebuilding it", () => {
-  let layout: TreeLayout;
-  let uninstallLayout: () => void = () => {};
-  beforeEach(() => {
-    ({ layout, uninstall: uninstallLayout } = installTreeLayout());
-  });
-  afterEach(() => {
-    uninstallLayout();
-  });
+  const staged = useTreeLayout();
 
   /** The body's prose HTML, compared against the whole-render oracle. The
    * streaming reveal carries no trailing indicator node, so it is exactly the
@@ -1694,15 +1651,15 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Drive the type-out to completion so no reveal frame is left pending; the
     // resize is then the only work the timers run.
     vi.advanceTimersByTime(5000);
-    const before = stagedCols(layout);
+    const before = stagedCols(staged.layout);
     // Act — the column narrows: the observer re-measures and repaints.
-    layout.containingPx = 600;
+    staged.layout.containingPx = 600;
     fireResize(column);
     vi.runOnlyPendingTimers();
     // Assert — the re-wrapped prose equals the whole render at the NEW width,
     // and is no longer the render at the width it first drew at.
     const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
-    const after = stagedCols(layout);
+    const after = stagedCols(staged.layout);
     expect(prose(body)).toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => after));
     expect(prose(body)).not.toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => before));
   });
