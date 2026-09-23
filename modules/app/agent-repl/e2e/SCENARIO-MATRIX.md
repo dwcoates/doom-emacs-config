@@ -189,11 +189,11 @@ Two further limits, stated rather than hidden:
 | `!slash-shape-a-unnamed` | ungrounded | slashcommands_e2e_test.go | — | — | Go: TestSlashShapeAUnnamed asserts exact transcript content string, absence of command-name, exact conclusion text. | covered |
 | `!subagent` | grounded | refusals_e2e_test.go, subagents_e2e_test.go | feed-families.layer.test.ts, subfeeds.layer.test.ts | — | Go: TestSubagentSyncNestedActivity/TestBubbleRefusedNotDeliverable assert exact Label/Description text, sub-feed confinement. Web: subfeeds.layer asserts exact SYNC_COMMISSION string, feedContainer structure. | covered |
 | `!subagent-detached` | grounded | subagents_e2e_test.go | feed-families.layer.test.ts, subfeeds.layer.test.ts | — | Go: TestSubagentDetached asserts root row is the detached wrapper, exact completion text confined to sub-feed. Web: subfeeds.layer asserts exact DETACHED_COMMISSION string. | covered |
-| `!subagent-detached-hold` | TODO | — | — | — | No counted e2e layer drives this scenario. | uncovered |
+| `!subagent-detached-hold` | ungrounded | subagents_e2e_test.go | — | — | Go: TestSubagentDetachedSurvivesAnInterjection interjects the held turn with an explicit `stop` and asserts turn_ended.interrupted, then proves the agent is still LIVE by an answer (Interrupt(detached) on its bubble succeeds with interrupted_detached, which a stopped agent refuses) and that the bubble then settles cancelled. | covered |
 | `!subagent-detached-live` | ungrounded | refusals_e2e_test.go | — | — | Go: TestBubbleRefusedAgentBusy asserts AgentBusy()!=nil; TestUnknownAgentOnUpdateAgent asserts exact Connect code + message substring. | covered |
 | `!subagent-detached-utterance` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentDetachedUtteranceStaysOffTopLevel asserts bubble stays Live, exact utterance text confined to sub-feed (positive+negative on exact string). | covered |
 | `!subagent-failed` | ungrounded | subagents_e2e_test.go | — | — | Go: TestSubagentFailed asserts the DETACHED wrapper placement, the head still naming the commission, and FeedSubagentSettled.outcome == failed with all three neighbouring arms (succeeded, cancelled, lost) checked ABSENT — the discrimination a resolver that collapsed the four would fail. | covered |
-| `!subagent-interleaved` | TODO | — | — | — | No counted e2e layer drives this scenario. | uncovered |
+| `!subagent-interleaved` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentInterleavedResponsesStayOnTheirOwnFeeds asserts the main turn draws exactly ONE thinking unit and ONE final_answer response, each with its whole exact text, the subagent's two exact responses on its sub-feed and absent from the root feed, and the bubble settled succeeded. | covered |
 | `!task-change` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts a checklist row with Status.GetRunning()!=nil. | covered |
 | `!task-create` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts turn concluded and footer LiveWork.Tasks.Total==2. | covered |
 | `!task-reject` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts checklist rows persist and LiveWork.Tasks chip still non-nil after rejection. | covered |
@@ -226,13 +226,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **150**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **152**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
-- Uncovered (no counted layer drives the scenario at all): **2**
+- Uncovered (no counted layer drives the scenario at all): **0**
 - Total canonical scenarios: 152
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 149 scenarios referenced across 25 files
+- Go e2e (non-emacs): 151 scenarios referenced across 25 files
 - Webapp layer: 35 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -249,8 +249,7 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
-- `!subagent-detached-hold`
-- `!subagent-interleaved`
+_None._
 
 <!-- END DERIVED: uncovered -->
 
