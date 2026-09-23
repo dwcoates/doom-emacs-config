@@ -1034,12 +1034,86 @@ describe("createFeedController: following the tail", () => {
     expect(record.context).toMatchObject({ feed: "root", rows: 1 });
   });
 
+  it("parks at the tail when a new prompt is drawn while the reader was scrolled up", () => {
+    // Arrange
+    const { controller, acts } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    acts.length = 0;
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    // Assert
+    expect(acts).toEqual(["park"]);
+  });
 
+  it("paints the new prompt before it parks", () => {
+    // Arrange
+    const { controller, parkedOver } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    parkedOver.length = 0;
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    // Assert
+    expect(parkedOver).toEqual([["a", "p"]]);
+  });
 
+  it("records the park a new prompt makes", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.sent-prompt-parked");
+    expect(record.context).toMatchObject({ feed: "root", row: "p" });
+  });
 
+  it("does not re-park on a redraw of a prompt already drawn", () => {
+    // Arrange
+    const { controller, acts } = scrolled(false);
+    controller.applyPage(page([userPromptRow("p", "hi", "t1", true)]), "replace");
+    acts.length = 0;
+    // Act
+    controller.upsert(userPromptRow("p", "hi, edited", "t1", true));
+    // Assert
+    expect(acts).not.toContain("park");
+  });
 
+  it("does not re-park when a replace redraws a prompt it already drew", async () => {
+    // Arrange — the replace's own park stands; the prompt adds none.
+    const capture = captureLogRecords("debug");
+    const { controller } = scrolled(false);
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    capture.logger.flush();
+    await Promise.resolve();
+    capture.sent.length = 0;
+    // Act
+    controller.applyPage(page([userPromptRow("p", "hi", "t1", true)]), "replace");
+    // Assert
+    await expect(forwardedRecord(capture, "feed.sent-prompt-parked")).rejects.toThrow();
+  });
 
+  it("does not park when a prepend draws a prompt from history", () => {
+    // Arrange
+    const { controller, acts } = scrolled(false);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    acts.length = 0;
+    // Act
+    controller.applyPage(page([userPromptRow("old", "hi", "t0", true)]), "prepend");
+    // Assert
+    expect(acts).not.toContain("park");
+  });
 
+  it("does not park on a turn's terminal re-push of a prompt this feed never drew", () => {
+    // Arrange — the prompt scrolled out of the newest page; its turn ends.
+    const { controller, acts } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    acts.length = 0;
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", false));
+    // Assert
+    expect(acts).not.toContain("park");
+  });
 
   it("keeps the reader's content in place when older rows land above it", () => {
     // Arrange — `a` sits 100px down; the older row lands above it.

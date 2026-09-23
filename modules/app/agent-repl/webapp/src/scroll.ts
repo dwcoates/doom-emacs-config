@@ -186,8 +186,9 @@ export class TailFollow {
   /**
    * Park the box at its tail and follow from here on. Every "show me the
    * newest" act routes through this: the host's workspace-switch snap, the
-   * restored-session render, a replaced page (feed-view.ts's
-   * `parkAfterReplace`), and a render that is following.
+   * restored-session render, a freshly sent prompt (feed-view.ts's
+   * `parkOnSentPrompt`), a replaced page (feed-view.ts's `parkAfterReplace`), and
+   * a render that is following.
    *
    * It LATCHES the follow rather than only moving the pixels, which is what
    * makes a workspace switch land at the bottom reliably: content that arrives
