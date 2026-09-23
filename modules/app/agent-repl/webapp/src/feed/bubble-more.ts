@@ -11,6 +11,12 @@
  * scroll boxes only (the response and prompt bubbles) — never a tool-call
  * section or any other capped box — which is what MORE_BUBBLE_SELECTOR encodes.
  *
+ * TITLE FOLDS (owner ruling, 2026-09-23): a tool card's TITLE — the command a
+ * shell bubble runs, a tool call's input line, and the other title lines
+ * title-fold.ts marks — is capped at two lines while its fold is collapsed and
+ * wears the SAME fade and chevron when it overflows them. It is the one other
+ * kind in MORE_KINDS; an output section still never wears the affordance.
+ *
  * Nothing here draws the fade or the chevron: those are pure CSS keyed on
  * `has-more` (styles.css). This module only MEASURES the overflow and toggles
  * the class, at the three moments it can change: on draw and on width re-wrap
@@ -39,6 +45,41 @@ export const HAS_MORE_CLASS = "has-more";
  */
 export const MORE_BUBBLE_SELECTOR =
   ".bubble.assistant > .bubble-scroll, .bubble.user > .bubble-scroll";
+
+/**
+ * The class every TITLE fold wears (title-fold.ts): a tool card's title line —
+ * the command a shell runs, a tool call's input line, a skill's invocation, a
+ * hook's headline, a subagent's description — capped at two lines while its
+ * fold is collapsed. Declared HERE rather than in title-fold.ts because the
+ * measurer must know every kind it serves, and title-fold.ts imports the
+ * measurer; the reverse import would be a module cycle.
+ */
+export const TITLE_FOLD_CLASS = "title-fold";
+
+/**
+ * A title fold that is its OWN fold, for a card with no card-level fold to
+ * defer to (a hook card, a skill card that is not loaded). It is a
+ * CAPPED_CLASSES entry in expand.ts, so the feed-wide click toggles `.expanded`
+ * on the title itself; title-fold.test.ts holds the two literals together.
+ */
+export const TITLE_FOLD_STANDALONE_CLASS = "title-fold-standalone";
+
+/**
+ * When a title fold's FOLD is open — whichever fold owns it: the title itself
+ * (a standalone title), the tool-call/skill card it sits in (`.tool-fold`,
+ * toggled by expand.ts), or the bubble whose head it heads (`.bubble-fold`,
+ * toggled by bubble.ts). The stylesheet lifts the two-line cap on exactly this
+ * selector list, and styles.test.ts holds the two to each other.
+ *
+ * Child combinators on the bubble arm keep an OPEN bubble from lifting the cap
+ * on the titles of the cards inside its sub-feed; a `.tool-fold` card holds no
+ * other card, so its descendant combinator reaches only its own titles.
+ */
+export const TITLE_FOLD_OPEN_SELECTOR = [
+  `.${TITLE_FOLD_CLASS}.${EXPANDED_CLASS}`,
+  `.tool-fold.${EXPANDED_CLASS} .${TITLE_FOLD_CLASS}`,
+  `.bubble-fold[data-expanded="true"] > .bubble-head .${TITLE_FOLD_CLASS}`,
+].join(", ");
 
 /** The box as the measurement sees it: its overflow, its state, its identity. */
 export interface MoreBox {
@@ -76,6 +117,10 @@ const MORE_KINDS: readonly MoreKind[] = [
     selector: MORE_BUBBLE_SELECTOR,
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
   },
+  {
+    selector: `.${TITLE_FOLD_CLASS}`,
+    isOpen: (box) => box.matches(TITLE_FOLD_OPEN_SELECTOR),
+  },
 ];
 
 /**
@@ -103,12 +148,17 @@ export function refreshHasMore(box: MoreBox): void {
  * down with the bubble through `onDiscard`/`stopTicking` (ticking.ts), so it
  * never outlives the box it watches. A host with no `ResizeObserver` (a test
  * with none installed) simply never auto-refreshes; the expand toggle's
- * synchronous refresh still keeps it correct across a click.
+ * synchronous refresh still keeps it correct across a click. REFRESH is what a
+ * resize runs, `refreshHasMore` unless the caller wraps it (title-fold.ts adds
+ * its orphan check).
  */
-export function installHasMore(scroll: HTMLElement): void {
+export function installHasMore(
+  scroll: HTMLElement,
+  refresh: (box: HTMLElement) => void = refreshHasMore,
+): void {
   const view = scroll.ownerDocument?.defaultView;
   if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
-  const observer = new view.ResizeObserver(() => refreshHasMore(scroll));
+  const observer = new view.ResizeObserver(() => refresh(scroll));
   observer.observe(scroll);
   const body = scroll.firstElementChild;
   if (body !== null) observer.observe(body);

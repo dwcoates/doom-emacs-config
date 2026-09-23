@@ -33,6 +33,8 @@ import {
 import { fireResize } from "../resize-observer.js";
 import { fireIntersection, intersectionObservers } from "../intersection-observer.js";
 import { OVERSCAN_CLASS } from "../../src/feed/overscan.js";
+import { foldTitle } from "../../src/feed/title-fold.js";
+import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -864,5 +866,50 @@ describe("mountFeed: the overscan buffer", () => {
     await settle();
     feed.dispose();
     expect(intersectionObservers().some((r) => r.root === scroll)).toBe(false);
+  });
+});
+
+describe("mountFeed: a card toggle re-measures the titles it owns", () => {
+  /** A `.tool-fold` card in the mounted feed, holding one overflowing title. */
+  function cardWithTitle(host: HTMLElement): { card: HTMLElement; title: HTMLElement } {
+    const card = document.createElement("div");
+    card.className = "tool-card tool-fold";
+    const title = document.createElement("pre");
+    title.className = "cmd bash-input";
+    card.append(foldTitle(title, "card"));
+    host.append(card);
+    Object.defineProperty(title, "clientHeight", { configurable: true, value: 40 });
+    Object.defineProperty(title, "scrollHeight", { configurable: true, value: 120 });
+    return { card, title };
+  }
+
+  it("drops the title's has-more when a click expands its card", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    const { card, title } = cardWithTitle(host);
+    title.classList.add(HAS_MORE_CLASS);
+
+    // Act
+    card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+    feed.dispose();
+  });
+
+  it("restores the title's has-more when a click collapses its card", async () => {
+    // Arrange — an expanded card whose title is lifted.
+    const { feed, host } = mount();
+    await settle();
+    const { card, title } = cardWithTitle(host);
+    card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Act
+    card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+    feed.dispose();
   });
 });

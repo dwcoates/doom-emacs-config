@@ -52,6 +52,7 @@ import type {
   RowRenderers,
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
+import { refreshTitleFolds } from "./title-fold.js";
 import type { FeedReveal } from "../scroll.js";
 import type { Overscan } from "./overscan.js";
 
@@ -217,6 +218,9 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     // `aria-expanded` rides the head now that the head is the toggle.
     headLine.setAttribute("aria-expanded", next ? "true" : "false");
     panel.hidden = !next;
+    // The head's title fold follows this fold (title-fold.ts): re-measure it on
+    // the toggle, which lifts or restores its two-line cap.
+    refreshTitleFolds(headLine);
   }
 
   /**
