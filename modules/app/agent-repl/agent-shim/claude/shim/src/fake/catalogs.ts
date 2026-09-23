@@ -187,10 +187,10 @@ export function fakeContextUsage(
   const messageTokens = totalTokens - 9_400;
   return {
     categories: [
-      { name: "System prompt", tokens: 3_200, color: "blue" },
-      { name: "Messages", tokens: messageTokens, color: "green" },
-      { name: "Memory files", tokens: 1_200, color: "yellow" },
-      { name: "MCP tools", tokens: 5_000, color: "magenta", isDeferred: true },
+      { name: "System prompt", tokens: 3_200, color: "blue", kind: "used" },
+      { name: "Messages", tokens: messageTokens, color: "green", kind: "used" },
+      { name: "Memory files", tokens: 1_200, color: "yellow", kind: "used" },
+      { name: "MCP tools", tokens: 5_000, color: "magenta", isDeferred: true, kind: "deferred" },
     ],
     totalTokens,
     maxTokens,

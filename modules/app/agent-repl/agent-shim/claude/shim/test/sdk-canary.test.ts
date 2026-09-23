@@ -92,7 +92,7 @@ const LOCKFILE = JSON.parse(
  * this suite reports. It is spelled out rather than read from the lockfile so
  * that a lockfile bump alone cannot slip through green.
  */
-const PINNED_SDK_VERSION = "0.3.220";
+const PINNED_SDK_VERSION = "0.3.280";
 
 /** The lockfile key the SDK is pinned under. */
 const LOCK_KEY = "node_modules/@anthropic-ai/claude-agent-sdk";
@@ -144,7 +144,21 @@ function methodSignature(body: string, name: string): string | null {
   const at = new RegExp(`^[ \\t]+${name}\\s*\\(`, "m").exec(body);
   if (at === null) return null;
   const rest = body.slice(at.index);
-  const semicolon = rest.indexOf(";");
+  // THE PARAMETER LIST IS SKIPPED BY DEPTH, not by the first `;`: a method
+  // whose parameter is an inline options object (`getContextUsage(opts?: {
+  // detail?: ...; })`) carries semicolons INSIDE its parentheses, and cutting
+  // there would lose the return type the signature is read for.
+  let depth = 0;
+  let close = -1;
+  for (let i = rest.indexOf("("); i < rest.length; i++) {
+    if (rest[i] === "(") depth++;
+    else if (rest[i] === ")" && --depth === 0) {
+      close = i;
+      break;
+    }
+  }
+  if (close === -1) return rest;
+  const semicolon = rest.indexOf(";", close);
   return semicolon === -1 ? rest : rest.slice(0, semicolon + 1);
 }
 
@@ -571,7 +585,6 @@ const TOOL_TYPES: ReadonlyArray<{
   { kind: "TaskGet", input: "TaskGetInput", output: "TaskGetOutput" },
   { kind: "TaskList", input: "TaskListInput", output: "TaskListOutput" },
   { kind: "TaskStop", input: "TaskStopInput", output: "TaskStopOutput" },
-  { kind: "TaskOutput", input: "TaskOutputInput", output: null },
   { kind: "WebFetch", input: "WebFetchInput", output: "WebFetchOutput" },
   { kind: "WebSearch", input: "WebSearchInput", output: "WebSearchOutput" },
   { kind: "Monitor", input: "MonitorInput", output: "MonitorOutput" },
@@ -696,8 +709,8 @@ const UNDECLARED_AT_PIN = [
     known_from: "testdata/corpus/tool-results/tool_search.jsonl",
   },
   {
-    kind: "TaskOutput's OUTPUT half (its input IS declared; an exempt kind)",
-    names: ["TaskOutputOutput"],
+    kind: "TaskOutput (removed from the CLI at 0.3.280; an exempt kind, still read from older transcripts)",
+    names: ["TaskOutputInput", "TaskOutputOutput"],
     known_from: "testdata/corpus/tool-results/task_output.jsonl",
   },
 ] as const;
