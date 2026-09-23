@@ -2038,11 +2038,37 @@ describe("the warning chip as the one error surface", () => {
  * mid-turn response is pear, and the turn's answer stays green.
  */
 describe("the response border ladder", () => {
-  it("paints thinking bubbles yellow", () => {
+  it("paints thinking bubbles a red-leaning yellow", () => {
     // Arrange / Act
     const root = declarationsOf(":root") ?? "";
     // Assert
-    expect(root).toMatch(/--thinking-border:\s*#eab308/);
+    expect(root).toMatch(/--thinking-border:\s*#e3a008/);
+  });
+
+  /** The hue, in degrees, of every `NAME: #rrggbb` declaration, in sheet order (light, then dark). */
+  function huesOf(name: string): number[] {
+    const re = new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`, "g");
+    return [...stylesheet.matchAll(re)].map((m) => {
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    });
+  }
+
+  it("runs monotonically toward green in both themes: thinking, then interim, then the answer", () => {
+    // Arrange / Act
+    const thinking = huesOf("thinking-border");
+    const interim = huesOf("interim-response-border");
+    const answer = huesOf("final-response");
+    // Assert — one light and one dark value each, and the hue climbs from
+    // red-leaning yellow through yellow-leaning pear to green in each theme.
+    expect([thinking.length, interim.length, answer.length]).toEqual([2, 2, 2]);
+    for (const theme of [0, 1]) {
+      expect(thinking[theme]).toBeLessThan(interim[theme]);
+      expect(interim[theme]).toBeLessThan(answer[theme]);
+    }
   });
 
   it("paints a settled mid-turn response pear", () => {

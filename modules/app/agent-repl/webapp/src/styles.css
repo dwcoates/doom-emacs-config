@@ -161,13 +161,13 @@
      the deep-orange --compact-rule and amber --async, so an in-progress
      reasoning card reads as its own state. Same 0.3px thickness the base bubble
      reserves; only the color lands here. */
-  --thinking-border: #eab308;
+  --thinking-border: #e3a008;
   /* The border around a FINISHED response the agent wrote MID-TURN (prose
      between tool calls: settled, but not the turn's answer): pear, the step
      between thinking's yellow and an answer's green (owner ruling,
      2026-09-23), so the border ladder runs monotonic toward done: yellow
      (reasoning) -> pear (said, not concluded) -> green (the answer). */
-  --interim-response-border: #a3b10b;
+  --interim-response-border: #b0b00c;
   /* The border around the response the reader has SELECTED to reply to
      (reply-to-a-past-response mode): blue, distinct from the green a final
      answer wears at rest, so the one bubble the next prompt will quote is
@@ -363,8 +363,8 @@
     --final-response: #4ade80;
     /* Lighter yellow for the dark theme, as the other state borders lift, so
        the thinking hairline still reads against the dark purple fill. */
-    --thinking-border: #facc15;
-    --interim-response-border: #c7d32a;
+    --thinking-border: #f9c21b;
+    --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
