@@ -53,21 +53,21 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
     operation: "feed.draw-agent-prompt",
     context: {},
   });
-  // AN UNSET DELIVERY DRAWS NOTHING. The oneof is absent on every recipient
-  // copy, which is not a missing fact but the absence of one.
-  const footer = msg.delivery.case === undefined ? [] : [drawFeedAgentPromptDelivery(msg.delivery)];
-  // The address line is the metadata strip and the body hangs in the shared
-  // scroll box beneath it, exactly as a person's own prompt does.
-  // PREVIOUS, the row's last draw, is updated in place (drawBubble).
+  // THE HEADER STRIP IS THE ADDRESS AND THE DELIVERY LINE (owner ruling,
+  // 2026-09-23), and the body hangs in the one scroll box beneath it, exactly
+  // as a person's own prompt does. AN UNSET DELIVERY DRAWS NOTHING: the oneof
+  // is absent on every recipient copy, which is not a missing fact but the
+  // absence of one. PREVIOUS, the row's last draw, is updated in place.
+  const strip = [drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`))];
+  if (msg.delivery.case !== undefined) strip.push(drawFeedAgentPromptDelivery(msg.delivery));
   return drawBubble(
     {
       role: "prompt",
       variant: "agent",
       hooks: ["user", "prompt-agent"],
       working: msg.working,
-      strip: [drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`))],
+      strip,
       content: drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
-      footer,
       capLines: "feed",
     },
     previous,

@@ -6501,9 +6501,10 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .sb-refusal-paths > li { overflow-wrap: anywhere; }
 
 /* ---- agent prompt delivery (src/feed/rows/agent-prompt.ts) ---- */
+/* The delivery line is the second line of the agent prompt's header strip,
+   under its address (owner ruling, 2026-09-23). */
 .prompt-delivery {
   display: block;
-  margin-top: 4px;
   font-size: 0.85em;
   opacity: 0.7;
 }

@@ -194,3 +194,22 @@ describe("drawFeedAgentPrompt: a re-push", () => {
     expect(again).toBe(first);
   });
 });
+
+describe("drawFeedAgentPrompt: the delivery line", () => {
+  it("rides the header strip, under the address", () => {
+    // Arrange / Act
+    const el = drawFeedAgentPrompt(
+      create(FeedAgentPromptSchema, {
+        address: { text: "→ Explore" },
+        body: { blocks: [] },
+        delivery: { case: "queuedToLive", value: create(FeedAgentPromptQueuedToLiveSchema, {}) },
+      }),
+    );
+    // Assert
+    expect([...el.children].map((c) => c.classList[0])).toEqual([
+      "prompt-author",
+      "prompt-delivery",
+      "bubble-scroll",
+    ]);
+  });
+});
