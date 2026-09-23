@@ -13,7 +13,7 @@ import {
   onClientVerdict,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { REVEAL_CLASS, mountFeed } from "../../src/feed/feed.js";
+import { REVEAL_CLASS, latestEntry, mountFeed } from "../../src/feed/feed.js";
 import {
   Channel,
   feedId,
@@ -957,5 +957,163 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
     // Assert
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
     feed.dispose();
+  });
+});
+
+describe("latestEntry", () => {
+  /** Build a scroll zone from MARKUP, the way index.html lays out the feed and the tray. */
+  function zone(markup: string): HTMLElement {
+    const box = document.createElement("div");
+    box.innerHTML = markup;
+    return box;
+  }
+
+  it("answers nothing for a zone with nothing drawn", () => {
+    // Arrange
+    const box = zone('<main id="feed"></main><section id="hold-tray"></section>');
+    // Act + Assert
+    expect(latestEntry(box)).toBeNull();
+  });
+
+  it("answers the last root row when nothing is held", () => {
+    // Arrange
+    const box = zone(
+      '<main id="feed"><article data-feed-row="r1"></article><article data-feed-row="r2"></article></main>' +
+        '<section id="hold-tray"></section>',
+    );
+    // Act + Assert
+    expect(latestEntry(box)?.getAttribute("data-feed-row")).toBe("r2");
+  });
+
+  it("answers the bubble row, not the last row of its nested sub-feed", () => {
+    // Arrange
+    const box = zone(
+      '<main id="feed"><article data-feed-row="r1"></article>' +
+        '<article data-feed-row="bubble"><div><article data-feed-row="inner"></article></div></article></main>',
+    );
+    // Act + Assert
+    expect(latestEntry(box)?.getAttribute("data-feed-row")).toBe("bubble");
+  });
+
+  it("answers a tool group's bubble for a last row drawn as one of its tabs", () => {
+    // Arrange
+    const box = zone(
+      '<main id="feed"><div class="feed-group" id="group">' +
+        '<article data-feed-row="t1"></article><article data-feed-row="t2" hidden></article></div></main>',
+    );
+    // Act + Assert
+    expect(latestEntry(box)?.id).toBe("group");
+  });
+
+  it("answers the last held entry when the tray holds something", () => {
+    // Arrange
+    const box = zone(
+      '<main id="feed"><article data-feed-row="r1"></article></main>' +
+        '<section id="hold-tray"><div class="hold-tray"><div class="hold-tray-items">' +
+        '<article data-held-turn="t1"></article><article data-held-turn="t2"></article></div></div></section>',
+    );
+    // Act + Assert
+    expect(latestEntry(box)?.getAttribute("data-held-turn")).toBe("t2");
+  });
+});
+
+describe("mountFeed: the latest-visible latch", () => {
+  const rect = (top: number, height: number) => (): DOMRect =>
+    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+
+  /**
+   * A mounted root feed in a 300px viewport over 2000px of content, with the
+   * hold tray after the feed holding HELD cards (none when 0). The first paint
+   * parks at the tail; the reader then wheels up to 100, which ends that
+   * follow, with nothing yet laid out where they land.
+   */
+  async function mounted(held: number) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    const tray = document.createElement("section");
+    const cards = Array.from({ length: held }, (_, i) => `<article data-held-turn="t${i}"></article>`);
+    tray.innerHTML =
+      held === 0 ? "" : `<div class="hold-tray"><div class="hold-tray-items">${cards.join("")}</div></div>`;
+    scroll.append(host, tray);
+    document.body.replaceChildren(scroll);
+    let top = 100;
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => 2000 },
+      clientHeight: { get: () => 300 },
+      scrollTop: { get: () => top, set: (next: number) => { top = next; } },
+    });
+    scroll.getBoundingClientRect = rect(0, 300);
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    scroll.dispatchEvent(new Event("wheel"));
+    top = 100;
+    scroll.dispatchEvent(new Event("scroll"));
+    const place = (el: Element | null, at: number): void => {
+      if (!(el instanceof HTMLElement)) throw new Error("the entry is not drawn");
+      el.getBoundingClientRect = rect(at, 100);
+    };
+    return { feed, host, tray, scroll, channel, place };
+  }
+
+  it("keeps the tail after a scroll brings the last row into view", async () => {
+    // Arrange
+    const m = await mounted(0);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), 250);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(2000);
+    m.feed.dispose();
+  });
+
+  it("leaves the reader where they are while the last row is out of view", async () => {
+    // Arrange
+    const m = await mounted(0);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), 300);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(100);
+    m.feed.dispose();
+  });
+
+  it("latches on a held prompt in view even with the last row scrolled above it", async () => {
+    // Arrange
+    const m = await mounted(1);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), -200);
+    m.place(m.tray.querySelector('[data-held-turn="t0"]'), 150);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(2000);
+    m.feed.dispose();
+  });
+
+  it("does not latch on a visible last row while the last held prompt is below the fold", async () => {
+    // Arrange
+    const m = await mounted(2);
+    m.place(m.host.querySelector('[data-feed-row="r1"]'), 50);
+    m.place(m.tray.querySelector('[data-held-turn="t0"]'), 200);
+    m.place(m.tray.querySelector('[data-held-turn="t1"]'), 300);
+    m.scroll.dispatchEvent(new Event("scroll"));
+    // Act
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(100);
+    m.feed.dispose();
   });
 });
