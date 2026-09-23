@@ -67,6 +67,7 @@ ALL_SUITES=(
     build-frontend-harness
     deploy-harness
     suite-slot-harness
+    background-harness
     store-reset-harness
     readiness-harness
     logs-harness
@@ -371,6 +372,7 @@ require_executable "$THIS_DIR/test-report-logging-density.sh"
 require_executable "$THIS_DIR/test-build-frontend.sh"
 require_executable "$THIS_DIR/test-deploy-all.sh"
 require_executable "$THIS_DIR/test-suite-slot.sh"
+require_executable "$THIS_DIR/test-background.sh"
 require_executable "$THIS_DIR/test-store-reset.sh"
 require_executable "$THIS_DIR/test-readiness-report.sh"
 require_executable "$THIS_DIR/test-e2e.sh"
@@ -398,6 +400,7 @@ run_timed logging-density-harness "$THIS_DIR/test-report-logging-density.sh"
 run_timed build-frontend-harness "$THIS_DIR/test-build-frontend.sh"
 run_timed deploy-harness "$THIS_DIR/test-deploy-all.sh"
 run_timed suite-slot-harness "$THIS_DIR/test-suite-slot.sh"
+run_timed background-harness "$THIS_DIR/test-background.sh"
 run_timed store-reset-harness "$THIS_DIR/test-store-reset.sh"
 run_timed readiness-harness "$THIS_DIR/test-readiness-report.sh"
 run_timed logs-harness "$THIS_DIR/test-logs.sh"
