@@ -103,8 +103,11 @@ type ShimStoreClient interface {
 	// The sidecar's persisted file cursors, for resuming every tailed file
 	// exactly where the last committed batch left it.
 	GetSidecarCursors(context.Context, *connect.Request[v1.GetSidecarCursorsRequest]) (*connect.Response[v1.GetSidecarCursorsResponse], error)
-	// The open obligations: everything started and never concluded, per the
-	// record. The shim resolves each at session start — re-adopt or close.
+	// ONE SESSION'S open obligations: everything started and never concluded,
+	// per the record, within the lineage of the caller's main agent. The store
+	// is shared by every session on the host, so the answer is scoped and an
+	// unscoped request is refused. The shim resolves each at session start —
+	// re-adopt or close.
 	GetLiveWork(context.Context, *connect.Request[v1.GetLiveWorkRequest]) (*connect.Response[v1.GetLiveWorkResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
@@ -258,8 +261,11 @@ type ShimStoreHandler interface {
 	// The sidecar's persisted file cursors, for resuming every tailed file
 	// exactly where the last committed batch left it.
 	GetSidecarCursors(context.Context, *connect.Request[v1.GetSidecarCursorsRequest]) (*connect.Response[v1.GetSidecarCursorsResponse], error)
-	// The open obligations: everything started and never concluded, per the
-	// record. The shim resolves each at session start — re-adopt or close.
+	// ONE SESSION'S open obligations: everything started and never concluded,
+	// per the record, within the lineage of the caller's main agent. The store
+	// is shared by every session on the host, so the answer is scoped and an
+	// unscoped request is refused. The shim resolves each at session start —
+	// re-adopt or close.
 	GetLiveWork(context.Context, *connect.Request[v1.GetLiveWorkRequest]) (*connect.Response[v1.GetLiveWorkResponse], error)
 	// One batch, durable or nothing, cursor advance in the same transaction.
 	WriteBatch(context.Context, *connect.Request[v1.WriteBatchRequest]) (*connect.Response[v1.WriteBatchResponse], error)
