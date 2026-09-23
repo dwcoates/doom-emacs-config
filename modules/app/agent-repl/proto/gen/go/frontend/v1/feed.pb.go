@@ -3234,7 +3234,24 @@ type FeedResponse struct {
 	// lose it. UNSET = an ordinary response bubble (a partial, an interim, or an
 	// interrupted/cut-short row that never became the answer): no green. Never
 	// set on a thinking bubble (`thinking` above is the structural exclusion).
-	FinalAnswer   bool `protobuf:"varint,7,opt,name=final_answer,json=finalAnswer,proto3" json:"final_answer,omitempty"`
+	FinalAnswer bool `protobuf:"varint,7,opt,name=final_answer,json=finalAnswer,proto3" json:"final_answer,omitempty"`
+	// SET on a THINKING bubble (`thinking` above) once a LATER agent response
+	// row exists in the SAME feed: another thinking bubble, mid-turn prose, or a
+	// final answer, i.e. any `FeedResponse` row ordered after it. Tool calls,
+	// prompts and every other row kind never supersede it. UNSET while the
+	// thinking bubble is the feed's latest agent response.
+	//
+	// Owner rule, 2026-09-23: a thinking bubble is shown IN FULL (the ordinary
+	// response bubble's collapsed limit) while it is the latest agent response,
+	// and collapses to its two-line form once the next response lands. That is
+	// the DAEMON'S fact, never a client inference: the resolver computes it per
+	// feed from the feed's own row order (a sub-feed follows the same rule
+	// within itself and never across feeds), stamps it on every draw of the row
+	// and on every page, and RE-PUSHES the earlier thinking row with the flag
+	// set when the later response is first placed. The client draws the
+	// collapsed limit from THIS flag alone; a bubble the reader expanded stays
+	// expanded. Never set on a non-thinking row.
+	Superseded    bool `protobuf:"varint,8,opt,name=superseded,proto3" json:"superseded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3327,6 +3344,13 @@ func (x *FeedResponse) GetThinking() bool {
 func (x *FeedResponse) GetFinalAnswer() bool {
 	if x != nil {
 		return x.FinalAnswer
+	}
+	return false
+}
+
+func (x *FeedResponse) GetSuperseded() bool {
+	if x != nil {
+		return x.Superseded
 	}
 	return false
 }
@@ -16473,7 +16497,7 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0fFeedArtifactUrl\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\"(\n" +
 	"\x12FeedArtifactFailed\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x9b\x03\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xbb\x03\n" +
 	"\fFeedResponse\x12>\n" +
 	"\x05usage\x18\x01 \x01(\v2#.frontend.v1.FeedResponseUsageStampH\x01R\x05usage\x88\x01\x01\x129\n" +
 	"\x06update\x18\x02 \x01(\v2\x1f.frontend.v1.FeedResponseUpdateH\x00R\x06update\x12<\n" +
@@ -16481,7 +16505,10 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\v2\x1e.frontend.v1.FeedResponseErrorH\x00R\x05error\x12<\n" +
 	"\x06notice\x18\x05 \x01(\v2\x1f.frontend.v1.FeedResponseNoticeH\x02R\x06notice\x88\x01\x01\x12\x1a\n" +
 	"\bthinking\x18\x06 \x01(\bR\bthinking\x12!\n" +
-	"\ffinal_answer\x18\a \x01(\bR\vfinalAnswerB\b\n" +
+	"\ffinal_answer\x18\a \x01(\bR\vfinalAnswer\x12\x1e\n" +
+	"\n" +
+	"superseded\x18\b \x01(\bR\n" +
+	"supersededB\b\n" +
 	"\x06resultB\b\n" +
 	"\x06_usageB\t\n" +
 	"\a_notice\".\n" +
