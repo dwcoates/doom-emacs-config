@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -169,4 +170,92 @@ func TestRequestedModelIsNullWhenNoModelWasAskedFor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---- lineage from a SETTLED spawn ----
+//
+// A file-plane delivery of a synchronous spawn is only ever its conclusion, so
+// the success is the one frame that names the spawner.
+
+// subagentSuccess is the settled spawn unit naming the agent it created.
+func subagentSuccess(createdAgentID string) *conversationv1.AgentSubagent {
+	success := &conversationv1.AgentSubagentSuccess{}
+	if createdAgentID != "" {
+		success.CreatedAgentId = &conversationv1.AgentId{Value: createdAgentID}
+	}
+	return &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Success{Success: success}}
+}
+
+func TestASettledSpawnRecordsTheSpawnerOfAnAgentItCreated(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub")))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT spawned_by_agent FROM agent WHERE agent_id = 'toolu_sub'`); got != "agent-main" {
+		t.Fatalf("spawned_by_agent = %q, want the agent whose book holds the spawn", got)
+	}
+}
+
+func TestASettledSpawnCompletesTheLineageOfAnAgentFirstSeenWithoutOne(t *testing.T) {
+	// Arrange: the subagent's own transcript was copied before its spawner's
+	// result, so its row exists with no spawner.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "u1", "toolu_sub", frameItem(activityFrame("toolu_sub", "act-1", prose()))))
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "u2", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub")))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT spawned_by_agent FROM agent WHERE agent_id = 'toolu_sub'`); got != "agent-main" {
+		t.Fatalf("spawned_by_agent = %q, want the spawner the settled spawn named", got)
+	}
+}
+
+func TestASettledSpawnKeepsTheMetadataItsStartRecorded(t *testing.T) {
+	// Arrange: the stream plane's start recorded the prompt's isolation.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentStart("toolu_sub")))))
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "u1", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub")))))
+
+	// Assert: lineage and nothing else — the conclusion erases no start column.
+	if got := scalar[string](t, d, `SELECT isolation FROM agent WHERE agent_id = 'toolu_sub'`); got != "worktree" {
+		t.Fatalf("isolation = %q, want the start's worktree kept", got)
+	}
+}
+
+func TestASettledSpawnNamingNoCreatedAgentRecordsNoLineage(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("")))))
+
+	// Assert
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM agent WHERE spawned_by_agent IS NOT NULL`); got != 0 {
+		t.Fatalf("agents with a spawner = %d, want 0 — an unnamed created agent is never invented", got)
+	}
+}
+
+func TestASettledSpawnWhoseLineageCannotBeWrittenFailsTheBatchLoudly(t *testing.T) {
+	// Arrange: the agent table refuses the lineage write.
+	d, s := newStore(t)
+	if _, err := d.sql.ExecContext(ctx(), `CREATE TRIGGER refuse_lineage BEFORE INSERT ON agent
+	  WHEN NEW.spawned_by_agent IS NOT NULL BEGIN SELECT RAISE(ABORT, 'lineage refused'); END`); err != nil {
+		t.Fatalf("seed trigger: %v", err)
+	}
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-producer",
+		batch(pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "toolu_sub", subagentSuccess("toolu_sub"))))), nil)
+
+	// Assert
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("error = %v, want ErrStorage", err)
+	}
+	s.assertLogged(t, "error", "recording the spawner of settled spawn")
 }
