@@ -53,7 +53,7 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 	}
 	switch {
 	case decision.Now && decision.Forced:
-		c.log.Warn(opBounce, "bouncing the shim now over its work in flight (forced)", merge(fields, dlog.Context{
+		c.log.Info(opBounce, "bouncing the shim now over its work in flight (forced)", merge(fields, dlog.Context{
 			"turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 		}))
 	case decision.Now:

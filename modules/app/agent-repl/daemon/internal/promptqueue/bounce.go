@@ -108,7 +108,9 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 	decision.Now = true
 	decision.Forced = !free
 	if decision.Forced {
-		log.Warn(opBounce, "a FORCED bounce: bouncing now over the work in flight, which ends with it", dlog.Context{
+		// A FORCED BOUNCE IS THE CALLER'S ORDER, not a fault: it is recorded
+		// at INFO, naming the work it ends.
+		log.Info(opBounce, "a FORCED bounce: bouncing now over the work in flight, which ends with it", dlog.Context{
 			"turn_in_flight": turn, "detached_work": detached,
 		})
 	} else {
