@@ -27,7 +27,7 @@
  * The N-line cap and the scrollbar styling ride this class in `styles.css`; the
  * only thing built here is the nesting the two rules assume.
  */
-import { installHasMore } from "./bubble-more.js";
+import { bubbleBodyOf, installHasMore, refreshHasMore } from "./bubble-more.js";
 
 /** The class the stylesheet caps, scrolls and paints a scrollbar on. */
 export const BUBBLE_SCROLL_CLASS = "bubble-scroll";
@@ -41,6 +41,6 @@ export function bubbleScroll(body: HTMLElement): HTMLElement {
   // step with the box's overflow for its whole life. The gate to response/prompt
   // bubbles ONLY lives in refreshHasMore (bubble-more.ts) — this factory is
   // shared, so the observer is armed on every bubble and self-restricts.
-  installHasMore(scroll);
+  installHasMore(scroll, refreshHasMore, bubbleBodyOf);
   return scroll;
 }
