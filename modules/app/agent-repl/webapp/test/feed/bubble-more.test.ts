@@ -54,11 +54,9 @@ describe("MORE_BUBBLE_SELECTOR: held to the scroll-box class", () => {
     expect(MORE_BUBBLE_SELECTOR).toContain(`.${BUBBLE_SCROLL_CLASS}`);
   });
 
-  it("scopes to the assistant and user bubbles only", () => {
+  it("serves every bubble's scroll box, and only a bubble's", () => {
     // Arrange / Act / Assert
-    expect(MORE_BUBBLE_SELECTOR).toBe(
-      `.bubble.assistant > .${BUBBLE_SCROLL_CLASS}, .bubble.user > .${BUBBLE_SCROLL_CLASS}`,
-    );
+    expect(MORE_BUBBLE_SELECTOR).toBe(`.bubble > .${BUBBLE_SCROLL_CLASS}`);
   });
 });
 

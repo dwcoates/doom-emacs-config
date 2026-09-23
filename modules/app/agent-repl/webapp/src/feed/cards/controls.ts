@@ -164,7 +164,7 @@ export function agenticBubble(opts: {
       role: "response",
       variant: "agentic",
       state: opts.state,
-      hooks: ["assistant", "md", AGENTIC_CLASS],
+      hooks: ["assistant", AGENTIC_CLASS],
       content,
       capLines: "feed",
     },

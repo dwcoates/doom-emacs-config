@@ -113,7 +113,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // the prose is intermediate reasoning is orthogonal to whether it is still
   // arriving. The class draws the bubble's thinking border and keeps the green
   // final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
-  const hooks = ["assistant", "md"];
+  const hooks = ["assistant"];
   if (u.thinking) hooks.push(THINKING_BUBBLE_CLASS);
 
   // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When

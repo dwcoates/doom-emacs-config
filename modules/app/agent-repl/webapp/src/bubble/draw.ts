@@ -149,7 +149,7 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   const body = reused?.body ?? createBubbleBody();
   const scroll = reused?.scroll ?? bubbleScroll(body);
 
-  const hooks = [BUBBLE_CLASS, ...(spec.hooks ?? [])];
+  const hooks = [BUBBLE_CLASS, "md", ...(spec.hooks ?? [])];
   for (const old of drawnHooks.get(bubble) ?? []) {
     if (!hooks.includes(old)) bubble.classList.remove(old);
   }

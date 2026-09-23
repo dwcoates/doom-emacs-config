@@ -44,7 +44,7 @@ export function drawFeedTextBlock(block: FeedTextBlock): HTMLElement {
     operation: "feed.draw-text-block",
     context: { characters: block.text.length },
   });
-  return markdownSlot("prompt-block prompt-block-text md", block.text);
+  return markdownSlot("prompt-block prompt-block-text", block.text);
 }
 
 /**
