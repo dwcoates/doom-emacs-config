@@ -21,8 +21,9 @@
 //   StatusActivity the finest, DYNAMIC line: typed KINDS whose payload is
 //                  mostly text the daemon composed.
 //   Clock          how long the current turn has been running.
-//   Tokens cell    the turn's uncached-input figure with two glyphs; a click
-//                  target opening the token panel.
+//   Tokens cell    how much the in-flight turn has added to the MAIN agent's
+//                  context window (`--` with no turn in flight), with two
+//                  glyphs; a click target opening the token panel.
 //   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells —
 //                  each a click target opening its panel.
 //
@@ -89,9 +90,9 @@ message FooterStrip {
   // legal, so an illegal pairing is unrepresentable.
   // The turn clock. The client ticks from the carried instant.
   FooterClock clock = 4;
-  // The tokens CELL: the turn's uncached-input figure plus two glyphs, and
-  // the click target that opens FooterExpandedTokens. The full breakdown
-  // lives in that panel, never here.
+  // The tokens CELL: the in-flight turn's growth of the MAIN agent's context
+  // window plus two glyphs, and the click target that opens
+  // FooterExpandedTokens. The full breakdown lives in that panel, never here.
   FooterTokensCell tokens = 5;
   // The live-work chips, right-aligned. Each chip is a click target opening
   // its panel.
@@ -1040,21 +1041,40 @@ message FooterClock {
 
 // ---- 5. Tokens cell -------------------------------------------------------
 
-// The strip's tokens cell. Deliberately ONE figure: the turn's uncached
-// input tokens — the number that costs money at full price — with the alarm
-// and accounting verdict reduced to glyphs. Everything else (thinking,
-// cache figures, first-token latency, alarm detail, verdict evidence) is
-// FooterExpandedTokens' content, reached by clicking this cell. Figures
-// accumulate while the turn runs; a new turn resets the cell.
+// The strip's tokens cell. Deliberately ONE figure: how many tokens the
+// in-flight turn has ADDED TO THE MAIN AGENT'S CONTEXT WINDOW — with the alarm
+// and accounting verdict reduced to glyphs. Everything else (the per-agent
+// spend, subagents and detached agents included, the cache figures,
+// first-token latency, alarm detail, verdict evidence) is
+// FooterExpandedTokens' content, reached by clicking this cell. The figure
+// moves while the turn runs; a new turn re-takes its baseline.
+//
+// THE FIGURE IS THE TOPBAR'S CONTEXT CHIP'S GROWTH. It is
+// `SessionContextUsage.total_tokens` — the ONE fact the topbar's context chip
+// resolves from — now, minus the same fact as it stood when the turn opened,
+// so the chip and this cell can never disagree about the context window.
+// Subagent and detached-agent spend is NOT in it: their tokens never enter
+// the main agent's window.
+//
+// A CONTEXT CUT RE-TAKES THE BASELINE. The context held only shrinks by a cut
+// (a compaction, a clear), so a reading below the baseline IS one, and the
+// baseline becomes that post-cut reading: the figure is the growth since the
+// cut, and the panel's context-growth line says so.
+//
+// WITH NO TURN IN FLIGHT the figure is `--`, stated by the daemon, and the
+// cell stays a click target: the panel still opens, on the most recent
+// turn's breakdown. The glyphs keep their own lifetimes (below).
 message FooterTokensCell {
-  // The turn's uncached input figure, daemon-formatted ("18.2k in") from the
-  // canonical TokenUsage input_misses total (written + unwritten; cache
-  // READS excluded, which is the whole point). The client draws it verbatim
-  // — no arithmetic, no unit rounding.
+  // The figure, daemon-formatted ("18.2k in") from the growth described
+  // above, or "--" with no turn in flight. The client draws it verbatim — no
+  // arithmetic, no unit rounding, no idle inference of its own.
   FooterTokensCellInput input = 1;
   // The expensive-turn alarm glyph (⚠). PRESENT iff the alarm tripped this
   // turn; presence IS the glyph, and the composed sentence is the panel's
-  // alarm line. Kept until the next turn starts.
+  // alarm line. Kept until the next turn starts. The alarm keys on the
+  // WHOLE turn's spend — the uncached input summed across every agent in the
+  // panel's accounting — never on the context growth, because a cold cache
+  // re-bills the whole prefix without growing the context at all.
   optional FooterTokensCellAlarm alarm = 2;
   // The accounting verdict badge. UNSET while the turn runs (no verdict
   // yet); set once the settled turn is reconciled.
@@ -1064,7 +1084,8 @@ message FooterTokensCell {
 // The cell's figure. Wrapped so the cell's one number is its own element and
 // a later prop (a tone, a tooltip) lands here without touching the cell.
 message FooterTokensCellInput {
-  // The formatted figure, exactly as drawn ("18.2k in").
+  // The formatted figure, exactly as drawn ("18.2k in", or "--" with no turn
+  // in flight).
   string text = 1;
 }
 
@@ -1308,10 +1329,21 @@ message FooterMonitorRowPersistent {}
 // yet known carries no value and draws its name with an empty slot. Values
 // are daemon-formatted strings — the client does no arithmetic and no unit
 // rounding.
+//
+// THREE FACTS, ONE PANEL:
+// - context_growth — the strip cell's figure, the main agent's context
+//   growth this turn;
+// - agents — the per-agent spend, the main agent and every subagent or
+//   detached agent that reported usage, each with its own lines;
+// - input … thinking — the SUM of that spend across every agent.
+// WITH NO TURN IN FLIGHT the panel still arrives, holding the most recent
+// turn's breakdown plus the live usage of every detached agent still
+// running, so background spend stays visible here while the cell reads `--`.
+// A detached agent still running when a turn opens is carried into the new
+// turn's accounting; one that has ended leaves it.
 message FooterExpandedTokens {
-  // "input (uncached)" — the same figure the strip's cell shows, repeated
-  // here as a line (the cell and the line are two drawn elements of one
-  // resolved value).
+  // "input (uncached)" — input_misses (written + unwritten) summed across
+  // every agent in `agents`.
   FooterTokensLineInput input = 1;
   // "input (cache read)" — input tokens served from cache.
   FooterTokensLineCacheRead cache_read = 2;
@@ -1331,6 +1363,45 @@ message FooterExpandedTokens {
   // The verdict's detail line. UNSET while the turn runs (mirrors the
   // cell's badge); set once reconciled.
   optional FooterTokensLineVerdict verdict = 8;
+  // "context growth" — the main agent's context growth: the SAME resolved
+  // value the strip's cell shows while a turn runs, and the most recent
+  // turn's growth once it has ended.
+  FooterTokensLineContextGrowth context_growth = 9;
+  // One entry per agent that reported usage in this accounting, the MAIN
+  // agent first and then every subagent or detached agent in the order its
+  // usage first arrived. A TRUE LIST: every entry is the same kind of thing.
+  // Empty until any usage is known. The sum across it is lines 1–5.
+  repeated FooterTokensAgent agents = 10;
+}
+
+// The context-growth line.
+message FooterTokensLineContextGrowth {
+  // The formatted growth ("18.2k"). UNSET = no context reading has arrived
+  // since a turn opened; the line still draws, with an empty slot.
+  optional string value = 1;
+  // PRESENT iff a context cut re-took the baseline during the turn, so the
+  // figure is the growth SINCE THE CUT rather than since the turn opened.
+  // Empty: presence is the whole fact.
+  optional FooterTokensLineContextGrowthSinceCut since_cut = 2;
+}
+// The since-a-cut marker. Empty: presence is the whole fact.
+message FooterTokensLineContextGrowthSinceCut {}
+
+// One agent's share of the accounting: its daemon-composed name, then the
+// same four figure lines the panel's sum carries, for this agent alone.
+// Every line is SET: an agent is listed only once it has reported usage.
+message FooterTokensAgent {
+  // The agent's name, daemon-composed and drawn verbatim: "main" for the
+  // main agent, the subagent type (and its description) for any other.
+  string label = 1;
+  // input_misses (written + unwritten) — this agent's uncached input.
+  FooterTokensLineInput input = 2;
+  // input_hits.read — what the prompt cache served this agent.
+  FooterTokensLineCacheRead cache_read = 3;
+  // input_misses.written — what this agent wrote into the cache.
+  FooterTokensLineCacheWrite cache_write = 4;
+  // Every output token this agent generated, thinking included.
+  FooterTokensLineOutput output = 5;
 }
 
 // The uncached-input line.
