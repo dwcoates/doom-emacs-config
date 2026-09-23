@@ -12,30 +12,18 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/e2e-all-green` | `~/.config/doom-worktrees/e2e-all-green` | Drive e2e to green: 15 failing tests, the handover-ordering race, subagent rows mislabelled `kind=bash`, 2 uncovered fake scenarios. | `a8e05498e73a172bd` | 16:55 |
-| `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | The daemon owns builds and deploys, with a shim bounce registry, a forced RPC and one deploy per complete change. `deploy-all.sh` is removed. | `a148f02f6f00b1311` | 16:05 |
-| `fix/webapp-bundle-chunks` | `~/.config/doom-worktrees/webapp-bundle-chunks` | The `vite build` chunk-size warning, fixed by splitting or trimming the bundle (not by raising the limit). | `a0d3f5e7dcd7eff3a` | 17:10 |
+| `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a9939024139796b9d` | 17:50 |
+| `fix/e2e-all-green` | `~/.config/doom-worktrees/e2e-all-green` | REVIVED (4 commits plus uncommitted work): e2e to green. | `a915f8a8d5e7424ee` | 17:50 |
+| `fix/webapp-bundle-chunks` | `~/.config/doom-worktrees/webapp-bundle-chunks` | REVIVED (uncommitted work): the `vite build` chunk-size warning fixed by splitting. | `ac473efebb8713465` | 17:50 |
+| `fix/bubble-borders-fade-wrap` | `~/.config/doom-worktrees/bubble-borders-fade-wrap` | Fade only, never a chevron. has-more only when content is really hidden. User prompts always bordered purple, agent-to-agent prompts (and peer messages) amber, held prompts unbordered. Wrap as if expanded. Empty agent-prompt body. | `a9cf9a1637a84bcb4` | 17:50 |
+| `fix/usage-corner-gap-animation` | `~/.config/doom-worktrees/usage-corner-gap-animation` | Right gap equals the top gap, a two-phase hover slide, the same font size and alignment, and no hover reflow. | `aba2fd3eb1ac85a69` | 17:50 |
+| `fix/shim-hides-keepalive` | `~/.config/doom-worktrees/shim-hides-keepalive` | The shim never serves a keep-alive turn's prompt, reply, usage or terminal. | `a5f0d85cf57c43d07` | 17:50 |
+| `fix/footer-rows-and-work-ids` | `~/.config/doom-worktrees/footer-rows-and-work-ids` | The detached-work id in every async bubble header. A footer row click either selects its entry or shows and logs "not on screen", never neither. The 0-token rows. The footer capped at 4 rows. | `a0ac08889b72fae26` | 17:50 |
 
-## Pending after the full bounce (owner asked ~17:20; nothing below dispatched yet)
+## Still waiting on the owner
 
-The bounce ends this Claude session's turn and kills every background agent. So
-after it:
-
-1. Check the three `running` rows above (e2e-all-green, daemon-owned-deploys,
-   webapp-bundle-chunks). Look at each worktree's partial work, redispatch fresh
-   agents to finish, and record each one here.
-2. Find the three subagents the footer shows stuck at 387.9k / 350.6k / 334.5k
-   tokens (all named "subagent"), and check whether their work landed.
-3. The async-work bubble header shows the detached-work id for ALL async work,
-   so every item can be referred to by a stable id.
-4. Structural invariant for clicking a footer detached-work row: if the feed
-   entry is known it is selected, and if not, "not on screen" is shown and
-   logged for remediation. Never neither (one subagent's click did nothing).
-5. Two footer subagents show 0 tokens and "not on screen": find out what they
-   are, and make the "not on screen" path log enough to investigate.
-6. The expanded footer shows at most 4 rows, and scrolls beyond that.
-7. Reassess every unaddressed request since the last two compactions (except
-   wiping the logs and circling back), and dispatch each at once.
+- The new name for "Release" (suggested: "Send now").
+- A retry of `SPC TAB f`, which now logs.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
@@ -57,6 +45,8 @@ after it:
 - One `drawBubble` for every blue and purple bubble, with grey held prompts capped at 2 lines and the compaction summary bordered like its divider (`refactor/one-bubble`, 5292 tests pass).
 
 ## Lost and recovered
+
+- ~17:25: the owner's full bounce killed the three running agents (deploys, e2e, bundle chunks). The footer showed them stalled at 387.9k / 350.6k / 334.5k tokens. None had landed, and all three were revived from their worktrees at 17:50.
 
 - 13:23:48: two agents (foreground Bash, turn-end truth) were stopped by a classifier interrupt. Both were redispatched or finished, and both landed.
 - 14:37:37 and 14:49:23: four agents were stopped by interrupts. All were redispatched and landed.
