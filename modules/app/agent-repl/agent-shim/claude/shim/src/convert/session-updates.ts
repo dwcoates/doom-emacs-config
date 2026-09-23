@@ -129,11 +129,19 @@ export function clearedCutEntry(
 /**
  * A compaction whose SUMMARY has not arrived yet.
  *
- * `ContextCompacted.summary` is not optional — the feed shows the summary in
- * the cut's place so the cut is not a hole — and the vendor states the boundary
- * FIRST and the summary as the assistant message that follows. So exactly one
- * boundary is remembered until that message lands, and the row is emitted then.
- * Bounded to one value, cleared on use.
+ * WHERE THE SUMMARY COMES FROM. The vendor states the boundary and then, as the
+ * very next stream record, the summary itself: a MAIN-stream `user` record
+ * marked `isSynthetic`, whose uuid is the one the transcript gives its
+ * `isCompactSummary` line and the one `compact_metadata`'s `anchor_uuid` names
+ * (`testdata/captures/compaction-directed` and `auto-compaction`, both). It is
+ * NOT the assistant prose that follows: a `/compact` turn has none at all —
+ * `compaction-directed` goes boundary, summary, the command's stdout replay,
+ * `result` — so a cut keyed to prose was held into the NEXT turn and paired
+ * with whatever the model said there.
+ *
+ * So exactly one boundary is remembered until that record lands, bounded by the
+ * vendor's own sequence, and the turn's terminal releases it regardless (the
+ * fold owns that backstop). Bounded to one value, cleared on use.
  */
 export interface PendingCompaction {
   readonly vendorUuid: string;
@@ -141,17 +149,41 @@ export interface PendingCompaction {
   readonly tokensAfter: bigint;
   readonly automatic: boolean;
   readonly durationMs: bigint;
+  /**
+   * The uuid the summary record carries, when the boundary names it: the
+   * `anchor_uuid` of its preserved segment. UNSET when the boundary names no
+   * anchor (the vendor summarized everything) or names ITSELF as the anchor (a
+   * prefix-preserving partial compaction), and then the summary is the first
+   * main-stream synthetic user record that follows.
+   */
+  readonly summaryUuid?: string;
+  /** When the boundary was held, for the age a late release reports. */
+  readonly heldAtMs: number;
 }
 
-/** The compaction row, once its summary has arrived. */
+/**
+ * The compaction row.
+ *
+ * `summary` is UNSET when the vendor never stated one for this boundary — the
+ * fold releases such a cut at the turn's terminal, or when a second boundary
+ * supersedes it, with the facts the boundary itself carried. Nothing stands in
+ * for the missing summary: the field is left absent rather than filled.
+ */
 export function compactionEntry(
   context: FoldContext,
   pending: PendingCompaction,
-  summary: string,
+  summary: string | undefined,
 ): PersistEntry {
   LOGGER.info(
-    { tokens_before: pending.tokensBefore.toString(), tokens_after: pending.tokensAfter.toString() },
-    "the conversation was compacted; recording the cut with its summary",
+    {
+      uuid: pending.vendorUuid,
+      tokens_before: pending.tokensBefore.toString(),
+      tokens_after: pending.tokensAfter.toString(),
+      summarized: summary !== undefined,
+    },
+    summary === undefined
+      ? "the conversation was compacted; recording the cut without a summary, since the vendor stated none"
+      : "the conversation was compacted; recording the cut with its summary",
   );
   return pageLineEntry(
     context,
@@ -168,7 +200,7 @@ export function compactionEntry(
           cut: {
             case: "compacted",
             value: create(conversationv1.ContextCompactedSchema, {
-              summary: prose(summary),
+              ...(summary === undefined ? {} : { summary: prose(summary) }),
               tokens: create(conversationv1.ContextTokenDeltaSchema, {
                 tokensBefore: pending.tokensBefore,
                 tokensAfter: pending.tokensAfter,
@@ -395,8 +427,8 @@ function rateLimitStatusUpdate(
  * Every session-scoped message the vendor sends.
  *
  * `compactionSink` receives a boundary whose summary has not arrived yet; the
- * caller (the fold) holds the one pending value and emits the row when the next
- * assistant message supplies the summary.
+ * caller (the fold) holds the one pending value and emits the row when the
+ * vendor's summary record lands, or at the turn's terminal at the latest.
  *
  * `clearSink` receives a reset whose ROTATED-TO session id has not been stated
  * yet, on the same terms: the fold holds it and emits the row when the init
@@ -526,12 +558,15 @@ export function convertSessionMessage(
       const before = metadata?.pre_tokens;
       const after = metadata?.post_tokens;
       const duration = metadata?.duration_ms;
+      const summaryUuid = summaryAnchor(metadata, uuid);
       const pending: PendingCompaction = {
         vendorUuid: uuid,
         tokensBefore: typeof before === "number" ? BigInt(Math.trunc(before)) : 0n,
         tokensAfter: typeof after === "number" ? BigInt(Math.trunc(after)) : 0n,
         automatic: metadata?.trigger === "auto",
         durationMs: typeof duration === "number" ? BigInt(Math.trunc(duration)) : 0n,
+        ...(summaryUuid === undefined ? {} : { summaryUuid }),
+        heldAtMs: context.nowMs(),
       };
       if (compactionSink === undefined) {
         // warn: a defect because a compaction without a fold cannot retain its pending summary cut.
@@ -541,7 +576,10 @@ export function convertSessionMessage(
         );
         return [];
       }
-      LOGGER.debug({ uuid }, "a compaction boundary arrived; holding it until its summary lands");
+      LOGGER.debug(
+        { uuid, summary_uuid: summaryUuid },
+        "a compaction boundary arrived; holding it until its summary record lands",
+      );
       compactionSink(pending);
       return [];
     }
@@ -597,4 +635,21 @@ export function convertSessionMessage(
         ),
       ];
   }
+}
+
+/**
+ * The uuid a boundary's summary record will carry, when the boundary names it.
+ *
+ * `preserved_messages` supersedes `preserved_segment` (sdk.d.ts), so its anchor
+ * is read first. An anchor equal to the boundary's own uuid is a
+ * prefix-preserving partial compaction, where the anchor is the boundary and
+ * not the summary, so it names nothing here.
+ */
+function summaryAnchor(metadata: Record<string, unknown> | undefined, boundaryUuid: string): string | undefined {
+  const anchorOf = (segment: unknown): string | undefined => {
+    const anchor = (segment as { anchor_uuid?: unknown } | undefined)?.anchor_uuid;
+    return typeof anchor === "string" && anchor !== "" ? anchor : undefined;
+  };
+  const anchor = anchorOf(metadata?.preserved_messages) ?? anchorOf(metadata?.preserved_segment);
+  return anchor === boundaryUuid ? undefined : anchor;
 }

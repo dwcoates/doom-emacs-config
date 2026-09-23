@@ -974,6 +974,32 @@ export function createFakeQuery(
     });
   };
 
+  const compactSummary = (boundaryUuid: string, summaryUuid: string, summary: string): void => {
+    // BOTH PLANES, ONE UUID, and the uuid is the boundary's ANCHOR. GROUNDED
+    // twice (`compaction-directed`, `auto-compaction`): the stream states the
+    // summary as the record right after the boundary — a main-stream `user`
+    // record marked `isSynthetic` — and the transcript writes the same uuid as
+    // the `isCompactSummary` line parented on the boundary.
+    emitWithUuid(summaryUuid, {
+      type: "user",
+      message: { role: "user", content: summary },
+      parent_tool_use_id: null,
+      timestamp: nowIso(),
+      isReplay: false,
+      isSynthetic: true,
+    });
+    files.transcript.append({
+      parentUuid: boundaryUuid,
+      isSidechain: false,
+      type: "user",
+      message: { role: "user", content: summary },
+      isVisibleInTranscriptOnly: true,
+      isCompactSummary: true,
+      uuid: summaryUuid,
+      timestamp: nowIso(),
+    });
+  };
+
   const systemMessage = (subtype: string, fields: Record<string, unknown>): void =>
     emit({ type: "system", subtype, ...fields });
 
@@ -1269,6 +1295,7 @@ export function createFakeQuery(
     toolUse,
     toolResult,
     attachment,
+    compactSummary,
     systemRecord,
     systemMessage,
     result,
