@@ -594,6 +594,24 @@ message FeedResponse {
   // interrupted/cut-short row that never became the answer): no green. Never
   // set on a thinking bubble (`thinking` above is the structural exclusion).
   bool final_answer = 7;
+
+  // SET on a THINKING bubble (`thinking` above) once a LATER agent response
+  // row exists in the SAME feed: another thinking bubble, mid-turn prose, or a
+  // final answer, i.e. any `FeedResponse` row ordered after it. Tool calls,
+  // prompts and every other row kind never supersede it. UNSET while the
+  // thinking bubble is the feed's latest agent response.
+  //
+  // Owner rule, 2026-09-23: a thinking bubble is shown IN FULL (the ordinary
+  // response bubble's collapsed limit) while it is the latest agent response,
+  // and collapses to its two-line form once the next response lands. That is
+  // the DAEMON'S fact, never a client inference: the resolver computes it per
+  // feed from the feed's own row order (a sub-feed follows the same rule
+  // within itself and never across feeds), stamps it on every draw of the row
+  // and on every page, and RE-PUSHES the earlier thinking row with the flag
+  // set when the later response is first placed. The client draws the
+  // collapsed limit from THIS flag alone; a bubble the reader expanded stays
+  // expanded. Never set on a non-thinking row.
+  bool superseded = 8;
 }
 
 // The notice register's heading, daemon-composed.
