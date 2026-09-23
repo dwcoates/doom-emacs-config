@@ -224,3 +224,25 @@ func TestAHandoverThatNeverSpawnedDoesNotRefuseTheNextOne(t *testing.T) {
 		t.Fatalf("second HandOver: %v, want it accepted", err)
 	}
 }
+
+func TestRollingOutNamesWhatTheHandoverInFlightWaitsOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	_, before := h.c.RollingOut()
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+
+	// Act
+	waiting, rolling := h.c.RollingOut()
+
+	// Assert
+	if before {
+		t.Fatalf("RollingOut reported a handover before one began")
+	}
+	if !rolling || len(waiting) != 1 || waiting[0] != ws {
+		t.Fatalf("RollingOut = %v, %v; want the busy workspace waited on", waiting, rolling)
+	}
+}
