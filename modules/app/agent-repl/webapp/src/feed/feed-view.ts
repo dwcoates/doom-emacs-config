@@ -171,8 +171,8 @@ export interface FeedController extends Handle {
 
 /**
  * THE MARK A SELECTED FINAL-RESPONSE ROW WEARS, on its chrome — the dual of
- * FINAL_ANSWER_ATTRIBUTE. The reply-to-a-past-response selection is the
- * daemon's per-workspace state, and this is the feed's own record of which row
+ * the final-answer marker (`data-final-answer`, turn-ended.ts). The
+ * reply-to-a-past-response selection is the daemon's per-workspace state, and this is the feed's own record of which row
  * carries it, spelled once so a re-push naming a different row can strip it
  * from every other row by this same name.
  */

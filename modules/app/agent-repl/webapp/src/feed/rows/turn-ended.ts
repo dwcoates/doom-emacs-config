@@ -63,7 +63,7 @@ export const FINAL_RESPONSE_CLASS = "final-response";
  * prompt row's own daemon-stated `working` flag, which the client draws
  * verbatim.
  */
-export const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
+const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
 
 /**
  * The error arms that CARRY A WAIT, which is the only per-arm knowledge left in
