@@ -15,10 +15,11 @@ import {
   PROMPT_WAVE_WORKING,
 } from "../../../src/breathing.js";
 
-function agentPrompt(address = "→ Explore", blocks: unknown[] = []) {
+function agentPrompt(address = "→ Explore", blocks: unknown[] = [], working = false) {
   return create(FeedAgentPromptSchema, {
     address: { text: address },
     body: { blocks: blocks as never },
+    working,
   });
 }
 
@@ -31,10 +32,16 @@ describe("drawFeedAgentPrompt", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).classList.contains("prompt-agent")).toBe(true);
   });
 
-  it("waves from the moment it is drawn, like the user kind it is a sibling of", () => {
-    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(
-      PROMPT_WAVE_WORKING,
-    );
+  it("waves when its row says the turn is working, like the user kind", () => {
+    expect(
+      drawFeedAgentPrompt(agentPrompt("→ Explore", [], true)).getAttribute(PROMPT_WAVE_ATTRIBUTE),
+    ).toBe(PROMPT_WAVE_WORKING);
+  });
+
+  it("does not wave when its row says the turn is not working", () => {
+    expect(
+      drawFeedAgentPrompt(agentPrompt("→ Explore", [], false)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
+    ).toBe(false);
   });
 
   it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
