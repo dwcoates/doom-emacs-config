@@ -114,9 +114,9 @@ would abort the very branch a test is asserting."
     ("AdjustFeedTextScale" agent-repl-rpc-adjust-feed-text-scale
      agent-repl-wire-encode-adjust-feed-text-scale-request
      agent-repl-wire-decode-adjust-feed-text-scale-response)
-    ("RollOutBuild" agent-repl-rpc-roll-out-build
-     agent-repl-wire-encode-roll-out-build-request
-     agent-repl-wire-decode-roll-out-build-response)
+    ("Deploy" agent-repl-rpc-deploy
+     agent-repl-wire-encode-deploy-request
+     agent-repl-wire-decode-deploy-response)
     ("UpdateShutdownSchedule" agent-repl-rpc-update-shutdown-schedule
      agent-repl-wire-encode-update-shutdown-schedule-request
      agent-repl-wire-decode-update-shutdown-schedule-response)
