@@ -35,6 +35,17 @@ func (r *resolver) toolRow(s *wsState, at placement, unitID, name string, outcom
 		Input: input,
 	}
 	outcome(card)
+	// A START AFTER THE RETURN DOES NOT REOPEN THE CARD. The two planes write
+	// one unit under one key and neither waits for the other, so the file
+	// plane's start can arrive after the stream plane's return. Its facts (the
+	// input line, the start instant) are taken above; its running arm is not,
+	// because nothing will ever return the call a second time.
+	if returned := u.row.GetActivity().GetSimpleToolCall().GetReturned(); returned != nil && card.GetRunning() != nil {
+		r.logger(s.id).Debug("daemon.feed.start_after_settle",
+			"a tool call's start arrived after its return; the returned card stands",
+			dlog.Context{"unit": unitID})
+		card.Outcome = &frontendv1.FeedSimpleToolCall_Returned{Returned: returned}
+	}
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID}),
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{

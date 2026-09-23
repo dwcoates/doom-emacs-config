@@ -1326,3 +1326,58 @@ func TestAMovedCallsNonTerminalFrameLeavesTheHeadLive(t *testing.T) {
 		t.Fatalf("state = %T, want the head still live", h.shellHead().GetState())
 	}
 }
+
+// ---- CROSS-PLANE ORDER ----
+
+func TestAStartAfterTheReturnKeepsTheCardReturned(t *testing.T) {
+	// Arrange: the stream plane's return lands before the file plane's start
+	// for the same unit.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Success{Success: &conversationv1.AgentGrepSuccess{
+			Query: &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+			Matches: &conversationv1.AgentGrepSuccess_Files{Files: &conversationv1.AgentGrepFiles{
+				Extent: &conversationv1.AgentGrepFiles_All{All: &conversationv1.AgentGrepFilesAll{}},
+			}},
+		}},
+	}))
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Start{Start: &conversationv1.AgentGrepStart{
+			Query:     &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert.
+	if h.card().GetReturned() == nil {
+		t.Fatalf("outcome = %T, want the returned card to stand", h.card().GetOutcome())
+	}
+}
+
+func TestAStartAfterTheReturnStillStatesItsInput(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Success{Success: &conversationv1.AgentGrepSuccess{
+			Query: &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+			Matches: &conversationv1.AgentGrepSuccess_Files{Files: &conversationv1.AgentGrepFiles{
+				Extent: &conversationv1.AgentGrepFiles_All{All: &conversationv1.AgentGrepFilesAll{}},
+			}},
+		}},
+	}))
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Start{Start: &conversationv1.AgentGrepStart{
+			Query:     &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetInput().GetText(); got != "FeedRow" {
+		t.Fatalf("input = %q, want the start's query", got)
+	}
+}
