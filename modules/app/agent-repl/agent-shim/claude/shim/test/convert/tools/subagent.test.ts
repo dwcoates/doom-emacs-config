@@ -8,7 +8,12 @@
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../../src/proto.js";
-import { subagentConverter, subagentPrompt, subagentStartFrom } from "../../../src/convert/tools/subagent.js";
+import {
+  isLaunchReceipt,
+  subagentConverter,
+  subagentPrompt,
+  subagentStartFrom,
+} from "../../../src/convert/tools/subagent.js";
 import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
 import { toolInput, toolUseResult } from "./corpus.js";
 
@@ -565,4 +570,38 @@ describe("subagentConverter.settle for facts the vendor left unstated", () => {
       expect(read(success.totals!.toolStats!)).toBe(0);
     });
   }
+});
+
+describe("whether a spawn's result is a launch receipt", () => {
+  it.each(["async_launched", "remote_launched"])("is a receipt when the status is %s", (status) => {
+    // Arrange / Act
+    const receipt = isLaunchReceipt({ status, isAsync: true });
+
+    // Assert
+    expect(receipt).toBe(true);
+  });
+
+  it("is NOT a receipt when the run completed", () => {
+    // Arrange / Act
+    const receipt = isLaunchReceipt({ status: "completed" });
+
+    // Assert
+    expect(receipt).toBe(false);
+  });
+
+  it("is NOT a receipt when the result states no status", () => {
+    // Arrange / Act
+    const receipt = isLaunchReceipt({ content: [] });
+
+    // Assert
+    expect(receipt).toBe(false);
+  });
+
+  it("is NOT a receipt when there is no structured result at all", () => {
+    // Arrange / Act
+    const receipt = isLaunchReceipt(undefined);
+
+    // Assert
+    expect(receipt).toBe(false);
+  });
 });
