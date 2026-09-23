@@ -1763,3 +1763,60 @@ func TestASeveringNamesADeadShim(t *testing.T) {
 		t.Fatalf("shim_exit_code = %v, want 9", got["shim_exit_code"])
 	}
 }
+
+// TestAReOpenedWatchCatchesUpOnlyAfterItWasServed covers which re-open is a
+// CATCH-UP: one that names a pointer, or one on a watch already paged (its
+// book was empty then, so everything on the new page was written since). A
+// watch never served anything re-opens as a repaint, whose cuts are history.
+func TestAReOpenedWatchCatchesUpOnlyAfterItWasServed(t *testing.T) {
+	tests := []struct {
+		name string
+		// served is what the main watch was served before the link broke.
+		served func(w *watcher)
+		// wantPointer is the known_through the re-open asks with.
+		wantPointer string
+		want        []string
+	}{
+		{
+			name: "served a row, so re-opened from its pointer",
+			served: func(w *watcher) {
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-1"))
+			},
+			wantPointer: "ptr-1",
+			want:        []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"},
+		},
+		{
+			name: "served an empty page, so re-opened with no pointer",
+			served: func(w *watcher) {
+				w.routeAgentResponseLocked(w.main, pageFrame())
+			},
+			wantPointer: "",
+			want:        []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"},
+		},
+		{
+			name:        "served nothing, so re-opened as a repaint",
+			served:      func(*watcher) {},
+			wantPointer: "",
+			want:        []string{"feed.OnHistoryPage", "footer.OnHistoryPage"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.drainNow()
+			h.routeNow(tt.served)
+			req := h.relink(t)
+			h.drainNow()
+
+			// Act.
+			got := h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
+
+			// Assert.
+			if req.GetKnownThrough().GetValue() != tt.wantPointer {
+				t.Fatalf("re-opened with known_through %q, want %q", req.GetKnownThrough().GetValue(), tt.wantPointer)
+			}
+			assertNames(t, got, tt.want)
+		})
+	}
+}
