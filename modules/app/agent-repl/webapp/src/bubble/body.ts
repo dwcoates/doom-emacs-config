@@ -181,10 +181,10 @@ function resolveCapPx(maxWidth: string, containingPx: number): number | null {
 }
 
 /** The tag of a response's body: a custom element, so it knows when it joins the document. */
-export const RESPONSE_BODY_TAG = "response-body";
+export const BUBBLE_BODY_TAG = "bubble-body";
 
 /** A response's body, which runs its hooks every time it joins the document. */
-export interface ResponseBody extends HTMLElement {
+export interface BubbleBody extends HTMLElement {
   onConnect(hook: () => void): void;
 }
 
@@ -194,8 +194,8 @@ export interface ResponseBody extends HTMLElement {
  * and whether or not the webview is visible — which is what lets a tree's first
  * paint wait for a containing block without ever showing a wrong-width frame.
  */
-function responseBodyClass(): CustomElementConstructor {
-  return class extends HTMLElement implements ResponseBody {
+function bubbleBodyClass(): CustomElementConstructor {
+  return class extends HTMLElement implements BubbleBody {
     private readonly hooks: Array<() => void> = [];
 
     onConnect(hook: () => void): void {
@@ -209,11 +209,11 @@ function responseBodyClass(): CustomElementConstructor {
 }
 
 /** A fresh response body, the custom element defined on first use. */
-export function createResponseBody(): ResponseBody {
-  if (customElements.get(RESPONSE_BODY_TAG) === undefined) {
-    customElements.define(RESPONSE_BODY_TAG, responseBodyClass());
+export function createBubbleBody(): BubbleBody {
+  if (customElements.get(BUBBLE_BODY_TAG) === undefined) {
+    customElements.define(BUBBLE_BODY_TAG, bubbleBodyClass());
   }
-  const body = document.createElement(RESPONSE_BODY_TAG) as ResponseBody;
+  const body = document.createElement(BUBBLE_BODY_TAG) as BubbleBody;
   body.className = "bubble-body";
   return body;
 }
@@ -241,7 +241,7 @@ export interface TreeWrap {
  * below its cap — re-wraps when the column's width moves the budget. The
  * observer is torn down with the body through `stopTicking` (see ticking.ts).
  */
-export function createTreeWrap(body: ResponseBody): TreeWrap {
+export function createTreeWrap(body: BubbleBody): TreeWrap {
   let cols: number | null = null;
   let latest: (() => void) | null = null;
   let deferred = false;
@@ -327,7 +327,7 @@ function requireBubble(body: HTMLElement): HTMLElement {
  * `createTreeWrap`). Plain prose reflows on its own (CSS), so it takes no
  * observer and no measurement.
  */
-export function paintWhole(body: ResponseBody, markdown: string): void {
+export function paintWhole(body: BubbleBody, markdown: string): void {
   const wrap = createTreeWrap(body);
   wrap.paint(markdown, () => {
     body.innerHTML = proseHtml(markdown, wrap.cols);

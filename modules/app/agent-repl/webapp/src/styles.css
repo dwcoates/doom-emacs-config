@@ -4371,8 +4371,8 @@ body.draining #composer-input::placeholder {
    corner stamp and the two state marks. */
 
 /* The response body is a custom element (it knows when it joins the document,
-   see `createResponseBody`), and a custom element is inline until told. */
-response-body.bubble-body { display: block; }
+   see `createBubbleBody`), and a custom element is inline until told. */
+bubble-body.bubble-body { display: block; }
 
 /* THE COST CORNER: the token figure, and — once the response has settled —
    the relative duration it reveals on hover. Collapsed, only the token shows,
