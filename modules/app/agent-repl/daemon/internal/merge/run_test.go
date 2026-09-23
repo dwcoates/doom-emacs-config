@@ -2,8 +2,11 @@ package merge
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -295,4 +298,95 @@ func recordAt(h *harness, level, operation string) (dlog.Record, bool) {
 		}
 	}
 	return dlog.Record{}, false
+}
+
+// --- an admitted merge waits for the workspace to fall free --------------
+
+// TestAnAdmittedMergeWaitsForTheWorkspaceToFallFree covers the merge's half of
+// "an interrupt ends only the turn": the displaced turn was ended unforced, so
+// its detached work runs on, and the merge WAITS for it on the fleet's
+// freeness before it drives the session. It never stops that work, and a wait
+// that ends without the workspace falling free aborts the merge loudly.
+func TestAnAdmittedMergeWaitsForTheWorkspaceToFallFree(t *testing.T) {
+	tests := []struct {
+		name       string
+		busy       bool
+		awaitErr   error
+		wantAwaits int
+		wantLanded bool
+		wantLevel  string
+		wantOp     string
+		wantText   string
+	}{
+		{
+			name: "a free workspace is not waited on", wantLanded: true,
+			wantLevel: "debug", wantOp: "daemon.merge.await_free", wantText: "the workspace is free; the merge proceeds",
+		},
+		{
+			name: "a busy workspace holds the merge until it falls free", busy: true,
+			wantAwaits: 1, wantLanded: true,
+			wantLevel: "info", wantOp: "daemon.merge.await_free", wantText: "the workspace fell free; the merge proceeds",
+		},
+		{
+			name: "a wait that fails aborts the merge", busy: true, awaitErr: errors.New("the watcher closed"),
+			wantAwaits: 1,
+			wantLevel:  "error", wantOp: "daemon.merge.abort", wantText: "the watcher closed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.emacsRepo()
+			h.displaceTurn("carry on with the refactor")
+			h.landsCleanly("abc123def4567")
+			h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+			h.gatePasses("daemon")
+			h.freeness.busy = tt.busy
+			h.freeness.awaitErr = tt.awaitErr
+			if tt.busy {
+				h.freeness.waiting = make(chan struct{})
+				h.freeness.release = make(chan struct{})
+			}
+			enqueue(t, h)
+
+			// Act
+			done := admitAsync(h, context.Background())
+			if tt.busy {
+				select {
+				case <-h.freeness.waiting:
+				case <-done:
+					t.Fatal("the merge ran to its end without waiting for the busy workspace to fall free")
+				}
+				if h.git.seen("merge_no_ff") {
+					t.Fatal("the merge ran its git while the workspace was still busy")
+				}
+				h.mu.Lock()
+				stopped := len(h.stoppedSessions)
+				h.mu.Unlock()
+				if stopped != 0 {
+					t.Fatal("the merge stopped the session while waiting, want its detached work left running")
+				}
+				close(h.freeness.release)
+			}
+			// The pump's own policy decides whether one run's error rides up
+			// out of it; what the run RECORDED is asserted below.
+			<-done
+
+			// Assert
+			if got := h.freeness.awaits(); got != tt.wantAwaits {
+				t.Fatalf("freeness waits = %d, want %d", got, tt.wantAwaits)
+			}
+			if got := h.git.seen("merge_no_ff"); got != tt.wantLanded {
+				t.Fatalf("the merge ran merge_no_ff = %v, want %v", got, tt.wantLanded)
+			}
+			for _, record := range h.logs.Records() {
+				if record.Level == tt.wantLevel && record.Operation == tt.wantOp &&
+					(record.Message == tt.wantText || strings.Contains(fmt.Sprint(record.Context["summary"]), tt.wantText)) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %s %s %q", h.logs.Records(), tt.wantLevel, tt.wantOp, tt.wantText)
+		})
+	}
 }

@@ -636,6 +636,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			d, ok, err := fleet.CaptureDisplaced(ctx, ws)
 			return merge.Displaced{Turn: d.Turn, Text: d.Text}, ok, err
 		},
+		Freeness:          fleet,
 		PauseAfterCapture: capturePause(p.Surfaces.Global()),
 		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),
 		ParkedRoute:       guidanceRoute(fleet, mergeRef),
