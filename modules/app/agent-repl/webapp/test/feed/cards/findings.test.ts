@@ -120,7 +120,7 @@ afterEach(() => {
 describe("drawFeedFindings", () => {
   it("is the purple response-styled bubble", () => {
     expect(drawFeedFindings(findings([finding()]), harness().rc).className).toBe(
-      "bubble assistant md agentic",
+      "bubble md assistant agentic",
     );
   });
 

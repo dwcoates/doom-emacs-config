@@ -60,8 +60,6 @@ export function drawFeedArtifact(u: FeedArtifact, rc: RowContext): HTMLElement {
     requireMessage(u.heading, `${PATH}.heading`),
     `${PATH}.heading`,
   );
-  const { bubble, body } = agenticBubble({ state: state.case, heading });
-
   // THE ARM IS CHECKED BEFORE ANYTHING IS DRAWN FROM IT. Badging first would
   // read the arm's own name out of a table an unknown arm is not in, and the
   // refusal that owes the reader the arm's NAME would become a TypeError.
@@ -69,16 +67,21 @@ export function drawFeedArtifact(u: FeedArtifact, rc: RowContext): HTMLElement {
     case "publishing":
       // The badge IS the state; there is no URL to draw yet, and an empty line
       // where one will appear would read as a page published to nowhere.
-      body.append(badge(state.case));
-      return bubble;
+      return agenticBubble({ previous: rc.previous, state: state.case, heading, content: [badge(state.case)] });
     case "published":
-      body.append(badge(state.case));
-      body.append(drawFeedArtifactPublished(state.value, rc.ctx, `${PATH}.published`));
-      return bubble;
+      return agenticBubble({
+        previous: rc.previous,
+        state: state.case,
+        heading,
+        content: [badge(state.case), drawFeedArtifactPublished(state.value, rc.ctx, `${PATH}.published`)],
+      });
     case "failed":
-      body.append(badge(state.case));
-      body.append(drawFeedArtifactFailed(state.value, `${PATH}.failed`));
-      return bubble;
+      return agenticBubble({
+        previous: rc.previous,
+        state: state.case,
+        heading,
+        content: [badge(state.case), drawFeedArtifactFailed(state.value, `${PATH}.failed`)],
+      });
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
   }

@@ -19,7 +19,7 @@
  * outlive the row it described.
  */
 import { log } from "../../log.js";
-import { bubbleScroll } from "../bubble-scroll.js";
+import { drawBubble } from "../../bubble/draw.js";
 import type { RowContext } from "../renderers.js";
 
 /** The attribute a fold's toggle carries its state on. */
@@ -146,23 +146,28 @@ export function agenticBubble(opts: {
   state: string;
   /** The heading line, verbatim. Omitted where the message has none. */
   heading?: string;
-}): { bubble: HTMLElement; body: HTMLElement } {
-  const bubble = document.createElement("div");
-  bubble.className = `bubble assistant md ${AGENTIC_CLASS}`;
-  bubble.setAttribute("data-state", opts.state);
-
-  // The body is the content wrapper; the bubble's own child is the scroll box
-  // that holds it, so the purple bubbles scroll exactly where the response
-  // bubble does (see bubble-scroll.ts).
-  const body = document.createElement("div");
-  body.className = "bubble-body";
-  bubble.append(bubbleScroll(body));
-
+  /** What the state draws under the heading. */
+  content: readonly ChildNode[];
+  /** The row's previous draw, updated in place (drawBubble). */
+  previous?: HTMLElement;
+}): HTMLElement {
+  const content: ChildNode[] = [];
   if (opts.heading !== undefined) {
     const heading = document.createElement("div");
     heading.className = "agentic-heading";
     heading.textContent = opts.heading;
-    body.append(heading);
+    content.push(heading);
   }
-  return { bubble, body };
+  content.push(...opts.content);
+  return drawBubble(
+    {
+      role: "response",
+      variant: "agentic",
+      state: opts.state,
+      hooks: ["assistant", AGENTIC_CLASS],
+      content,
+      capLines: "feed",
+    },
+    opts.previous,
+  ).bubble;
 }

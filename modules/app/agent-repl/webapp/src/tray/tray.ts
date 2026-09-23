@@ -6,11 +6,19 @@
  * last row rather than as chrome docked beneath it. Nothing here is a feed row
  * — a held prompt is daemon-owned pending intent the vendor never saw.
  *
- * WHOLE-LIST-REPLACED. Every push carries the tray entire, so a redraw throws
- * the previous DOM away instead of reconciling it, and an item that left is
- * simply absent from the next push — deletion is row omission, never an event.
- * The one thing that must survive that is the ticker subscriptions the cards
- * open for their queued-at ages, which is what `TrayContext.onDispose` is for.
+ * WHOLE-LIST PUSHED, DRAWN IN PLACE. Every push carries the tray entire, and
+ * an item that left is simply absent from the next push — deletion is row
+ * omission, never an event. But a held prompt is a bubble a reader may have
+ * opened and scrolled (owner rule, 2026-09-23: the user owns the scroll), so a
+ * redraw updates each held prompt's card IN PLACE, matched by its echoed turn
+ * (`drawBubble` over the previous card), and moves nothing already in its
+ * place (`placeChildren`); only what left is dropped, its clocks stopped. The
+ * cards' queued-at ages subscribe through `TrayContext.onDispose`, cleared and
+ * re-taken on every push.
+ *
+ * THE ONE TOGGLE. The tray sits outside `#feed`, so the feed's click handler
+ * never reaches it: the tray arms the same one (`installClickExpand`) on its
+ * own host, with the same has-more refresh after each toggle.
  *
  * THERE IS NO HEADING (owner rulings 2 and 5, 2026-09-13). The cards say what
  * is held, so a "held (2)" counter over two visible cards is a second answer to
@@ -28,7 +36,11 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import type { TrayContext } from "./context.js";
 import { drawHeldOffer } from "./held-offer.js";
-import { drawHeldPrompt, openHeldTurns, reopenHeldFolds } from "./held-prompt.js";
+import { drawHeldPrompt } from "./held-prompt.js";
+import { placeChildren } from "../dom.js";
+import { installClickExpand } from "../expand.js";
+import { refreshHasMore } from "../feed/bubble-more.js";
+import { stopTicking } from "../feed/ticking.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -44,6 +56,9 @@ export interface Handle {
  */
 export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
   log.debug("mounting the hold tray", { operation: "tray.mount" });
+  // The one click-to-expand every bubble opens by, and the has-more refresh a
+  // toggle that moved no height needs (bubble-more.ts).
+  installClickExpand(host, undefined, (section) => refreshHasMore(section));
 
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
@@ -71,12 +86,10 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
       // An EMPTY tray draws NOTHING, so the host is emptied rather than given
       // a region: `#hold-tray:empty` is what collapses the space, and it only
       // matches a host with no children at all.
-      const drawn = drawDaemonHoldTray(tray, tc);
-      // The reader's open folds are view state the push knows nothing of, so
-      // they are carried from the drawing being replaced onto its successor.
-      const open = openHeldTurns(host);
-      host.replaceChildren(...(drawn === null ? [] : [drawn]));
-      reopenHeldFolds(host, open);
+      const current = host.firstElementChild instanceof HTMLElement ? host.firstElementChild : null;
+      const drawn = drawDaemonHoldTray(tray, tc, current);
+      if (current !== null && current !== drawn) stopTicking(current);
+      placeChildren(host, drawn === null ? [] : [drawn]);
     },
   });
 
@@ -85,6 +98,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
       log.debug("disposing the hold tray", { operation: "tray.dispose" });
       stream.cancel();
       clear();
+      for (const child of host.children) stopTicking(child);
       host.replaceChildren();
     },
   };
@@ -101,28 +115,51 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
  * `#hold-tray:empty` collapses the region only while the host has NO children,
  * so an empty wrapper would still pay layout.
  */
-export function drawDaemonHoldTray(u: DaemonHoldTray, tc: TrayContext): HTMLElement | null {
+export function drawDaemonHoldTray(
+  u: DaemonHoldTray,
+  tc: TrayContext,
+  previous: HTMLElement | null = null,
+): HTMLElement | null {
   const path = "DaemonHoldTray";
   log.debug("drawing the hold tray", {
     operation: "tray.draw",
-    context: { items: u.items.length },
+    context: { items: u.items.length, in_place: previous !== null },
   });
 
   if (u.items.length === 0) return null;
 
-  const region = document.createElement("div");
-  region.className = "hold-tray";
-
-  const list = document.createElement("div");
+  // THE PREVIOUS DRAWING IS REUSED, region and list alike, so a held prompt's
+  // card updated in place never leaves the document (see the file header).
+  const reused = previous?.classList.contains(TRAY_REGION_CLASS) === true ? previous : null;
+  const region = reused ?? document.createElement("div");
+  region.className = TRAY_REGION_CLASS;
+  let list = region.querySelector<HTMLElement>(`:scope > .${TRAY_LIST_CLASS}`);
+  if (list === null) {
+    list = document.createElement("div");
+    region.appendChild(list);
+  }
   // The shared delimiter class: the tray's rows are delimited exactly as a
   // topbar dropdown's and an expanded footer panel's are.
-  list.className = "hold-tray-items list-rows";
-  for (const [index, item] of u.items.entries()) {
-    list.appendChild(drawDaemonHoldItem(item, tc, `${path}.items[${index}]`));
+  list.className = `${TRAY_LIST_CLASS} list-rows`;
+
+  const cards = new Map<string, HTMLElement>();
+  for (const card of list.querySelectorAll<HTMLElement>(":scope > [data-held-turn]")) {
+    cards.set(card.getAttribute("data-held-turn") ?? "", card);
   }
-  region.appendChild(list);
+  const items = u.items.map((item, index) =>
+    drawDaemonHoldItem(item, tc, `${path}.items[${index}]`, cards),
+  );
+  const kept = new Set<Element>(items);
+  for (const child of list.children) {
+    if (!kept.has(child)) stopTicking(child);
+  }
+  placeChildren(list, items);
   return region;
 }
+
+/** The tray region's class, and its list's. */
+const TRAY_REGION_CLASS = "hold-tray";
+const TRAY_LIST_CLASS = "hold-tray-items";
 
 /**
  * One held thing. THE ARM IS THE KIND.
@@ -134,6 +171,7 @@ export function drawDaemonHoldItem(
   u: DaemonHoldItem,
   tc: TrayContext,
   path: string,
+  cards: ReadonlyMap<string, HTMLElement> = new Map(),
 ): HTMLElement {
   const item = requireCase(u.item, `${path}.item`);
   log.debug("drawing a held item", {
@@ -142,7 +180,8 @@ export function drawDaemonHoldItem(
   });
   switch (item.case) {
     case "prompt":
-      return drawHeldPrompt(item.value, tc);
+      // This turn's card from the last drawing, updated in place.
+      return drawHeldPrompt(item.value, tc, cards.get(item.value.turn?.value ?? ""));
     case "offer":
       return drawHeldOffer(item.value, tc);
     default: {
