@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -117,5 +118,55 @@ func TestAssetPathEscapeIsRefused(t *testing.T) {
 	// Assert.
 	if resp.StatusCode == http.StatusOK {
 		t.Fatal("a traversal path was served; it must be refused")
+	}
+}
+
+// TestChunkIsServedUnderEveryPageHost pins that a code-split chunk the entry
+// document names by an origin-absolute `/assets/<name>` url resolves whatever
+// Host the page was loaded under: the webview loads the page from its
+// workspace's own `ws-<id>.localhost:<port>`, and the asset origin serves
+// dist/ by path alone.
+func TestChunkIsServedUnderEveryPageHost(t *testing.T) {
+	const chunk = "assets/proto-Ab12_-.js"
+	const body = "export const x = 1;"
+	cases := []struct {
+		name string
+		host func(port string) string
+	}{
+		{name: "a per-workspace host", host: func(port string) string { return "ws-abc123.localhost:" + port }},
+		{name: "the loopback address", host: func(port string) string { return "127.0.0.1:" + port }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if err := os.MkdirAll(filepath.Join(h.WebappDist, "assets"), 0o755); err != nil {
+				t.Fatalf("make the assets directory: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(h.WebappDist, filepath.FromSlash(chunk)), []byte(body), 0o644); err != nil {
+				t.Fatalf("write the chunk: %v", err)
+			}
+			req, err := http.NewRequest(http.MethodGet, h.HTTP.URL+"/"+chunk, nil)
+			if err != nil {
+				t.Fatalf("build the request: %v", err)
+			}
+			req.Host = tc.host(req.URL.Port())
+
+			// Act.
+			resp, err := h.HTTP.Client().Do(req)
+			if err != nil {
+				t.Fatalf("get the chunk: %v", err)
+			}
+			defer resp.Body.Close()
+			got, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read the chunk: %v", err)
+			}
+
+			// Assert.
+			if resp.StatusCode != http.StatusOK || string(got) != body {
+				t.Fatalf("status = %d body = %q, want %d %q", resp.StatusCode, got, http.StatusOK, body)
+			}
+		})
 	}
 }
