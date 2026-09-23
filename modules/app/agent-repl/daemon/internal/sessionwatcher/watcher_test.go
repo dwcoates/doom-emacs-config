@@ -465,6 +465,26 @@ func TestBothViewSinksHearOneLiveWorkSet(t *testing.T) {
 	assertLiveWork(t, *roster.live, *footer.live)
 }
 
+// TestTheFeedHearsTheLiveWorkSetTheFooterHears covers the feed's half of the
+// fan-out: a detached shell's bubble settles when its run leaves the set, so
+// the feed must be handed the same value the footer is.
+func TestTheFeedHearsTheLiveWorkSetTheFooterHears(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: one detached item is announced.
+	got := h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", monitorWork()))))
+
+	// Assert.
+	footer := requireEvent(t, got, "footer.OnLiveWorkChanged")
+	feed := requireEvent(t, got, "feed.OnLiveWorkChanged")
+	if footer.live == nil || feed.live == nil {
+		t.Fatalf("a sink was handed no set: footer %+v, feed %+v", footer.live, feed.live)
+	}
+	assertLiveWork(t, *footer.live, *feed.live)
+}
+
 // TestATerminalForUnannouncedWorkChangesNothing covers the levels rule: the
 // live set is the announcements and the terminals of what was announced, and
 // an unpaired terminal edge must not invent or retire membership.
@@ -539,7 +559,7 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	assertNames(t, got, []string{
 		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
 		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {
 		t.Fatal("a started session is not connected")

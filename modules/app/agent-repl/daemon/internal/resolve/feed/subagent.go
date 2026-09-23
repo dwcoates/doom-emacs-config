@@ -7,6 +7,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/figures"
+	"claude-repld/internal/sessionwatcher"
 )
 
 // THE SUBAGENT BUBBLE — sync or detached, ONE component. The bubble IS a feed:
@@ -539,14 +540,18 @@ func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workI
 	cardID := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID})
 	retired := r.retire(s, at.feed, cardID.GetValue())
 	u.moved = true
+	u.movedTo = workID
 	sh := s.shell(workID)
 	sh.command = u.input
 	sh.startedAtMs = u.startedAtMs
 	sh.feed = at
-	r.publishShell(s, workID, sh, nil)
+	// THE CALL MAY HAVE ENDED ALREADY. Its result and its move are separate
+	// records, and a result drawn first is still the work's ending: the head
+	// is drawn settled from it rather than live.
+	r.publishShell(s, workID, sh, shellEnding(r.logger(s.id), workID, u.ending))
 	r.logger(s.id).Debug("daemon.feed.detached_shell",
 		"a foreground shell's running card was retired and redrawn as its detached shell bubble",
-		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired})
+		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired, "ended": u.ending != nil})
 	return true
 }
 
@@ -694,15 +699,61 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	case *conversationv1.AgentBash_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Success"})
 		sh.stateCommand(frame.Success.GetCommand().GetLine())
-		settled = shellSettled(log, workID, frame.Success)
+		settled = shellEnding(log, workID, bash)
 	case *conversationv1.AgentBash_Failure:
-		settled = &frontendv1.FeedShellSettled{
-			EndedAtMs: failureSettledMs(frame.Failure.GetError()),
-			Outcome:   &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}},
-		}
+		settled = shellEnding(log, workID, bash)
 	}
 
 	r.publishShell(s, workID, sh, settled)
+}
+
+// settleShellsLeftLive settles, as LOST, every drawn detached shell that the
+// live set held at its previous publication and no longer holds, unless the
+// shell has already settled.
+//
+// A RUN THAT LEFT THE LIVE SET HAS ENDED FOR EVERY READER. The live set is the
+// open watch set: a shell leaves it at its own terminal (which settled the
+// head before the set was republished, so nothing is left to do here), or
+// because nothing will report it again -- its stream could not be re-opened,
+// the link was severed, the session's query died. In those cases no terminal
+// is coming, and a head left running drew an orange dot and a stop button
+// forever over work nobody could see any more. "We stopped being able to see
+// it" is exactly FeedShellLost; no staleness ruling stated WHY, so the arm
+// carries no cause.
+//
+// ONLY A SHELL THE SET HELD. A shell the feed drew but the watcher never held
+// (its first watch open was refused while the store had no rows for it yet)
+// has not left anything: a repeated announcement is its re-open.
+func (r *resolver) settleShellsLeftLive(s *wsState, live sessionwatcher.LiveWorkSet) {
+	now := make(map[string]struct{}, len(live.Shells))
+	for _, work := range live.Shells {
+		now[work.GetValue()] = struct{}{}
+	}
+	for workID := range s.liveShells {
+		if _, still := now[workID]; still {
+			continue
+		}
+		delete(s.liveShells, workID)
+		sh, drawn := s.shells[workID]
+		if !drawn || sh.row == nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleShellsLeftLive", "condition": "!drawn || sh.row == nil"})
+			continue
+		}
+		if sh.settled != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleShellsLeftLive", "condition": "sh.settled != nil"})
+			continue
+		}
+		r.publishShell(s, workID, sh, &frontendv1.FeedShellSettled{
+			EndedAtMs: r.deps.Now().UnixMilli(),
+			Outcome:   &frontendv1.FeedShellSettled_Lost{Lost: &frontendv1.FeedShellLost{}},
+		})
+		r.logger(s.id).Info("daemon.feed.detached_shell_left_live",
+			"a detached shell left the live set with no terminal; its head is settled lost",
+			dlog.Context{"work": workID})
+	}
+	for workID := range now {
+		s.liveShells[workID] = struct{}{}
+	}
 }
 
 // shellStart answers the instant a run's clock counts from. The authoritative
@@ -861,6 +912,23 @@ func capSpool(spool string) (string, uint64) {
 		}
 	}
 	return tail, countLines(dropped)
+}
+
+// shellEnding renders how a shell ended from its terminal frame, and nil for
+// a frame that is not one (or for no frame at all). ONE rendering for every
+// source of a shell's ending -- its own run stream, or the call's own result
+// when the call's work had moved -- so the two can never draw it differently.
+func shellEnding(log dlog.Logger, workID string, bash *conversationv1.AgentBash) *frontendv1.FeedShellSettled {
+	switch frame := bash.GetResult().(type) {
+	case *conversationv1.AgentBash_Success:
+		return shellSettled(log, workID, frame.Success)
+	case *conversationv1.AgentBash_Failure:
+		return &frontendv1.FeedShellSettled{
+			EndedAtMs: failureSettledMs(frame.Failure.GetError()),
+			Outcome:   &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}},
+		}
+	}
+	return nil
 }
 
 // shellSettled renders a settled shell. A non-zero exit still COMPLETED —

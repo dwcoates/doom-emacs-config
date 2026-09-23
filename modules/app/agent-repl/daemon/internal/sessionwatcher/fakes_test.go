@@ -499,6 +499,11 @@ func (s *feedSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWorkId
 	s.rec.emit(event{sink: "feed", method: "OnBash", detail: work.GetValue()})
 }
 
+func (s *feedSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
+	held := live
+	s.rec.emit(event{sink: "feed", method: "OnLiveWorkChanged", live: &held})
+}
+
 func (s *feedSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.SessionUpdate) {
 	s.rec.emit(event{sink: "feed", method: "OnSessionUpdate", detail: sessionArm(update)})
 }

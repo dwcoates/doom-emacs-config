@@ -45,6 +45,55 @@ const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.co
 /** Why a unit left the turn. */
 export type DetachCause = "requested" | "by_user" | "timed_out";
 
+// ---------------------------------------------------------------------------
+// FOREGROUND WORK IS NEVER DETACHED WORK — the one rule, shared.
+// ---------------------------------------------------------------------------
+//
+// The vendor tracks FOREGROUND work as a task too: from SDK 0.3.280 every
+// `Bash` call and every synchronous `Agent` spawn emits `task_started`, and
+// `is_backgrounded` is what says which side of the line the work began on
+// ("registered in the background (true) or in the foreground with the spawning
+// tool call blocking on it (false)"; set for `local_agent` and `local_bash`).
+// A task is detached work when ANY of three statements says so:
+//
+//   - it STARTED backgrounded — `task_started.is_backgrounded` is not `false`
+//     (a kind the vendor does not flag, a monitor or a workflow, has no
+//     foreground phase at all);
+//   - a later PATCH moved it — `task_updated.patch.is_backgrounded: true`, a
+//     hand-backgrounded shell or agent;
+//   - its own TOOL RESULT says it moved — a `Bash` result naming a
+//     `backgroundTaskId` (a timeout, a Ctrl-B, a `run_in_background` launch).
+//
+// The converter decides what to ANNOUNCE by these three and the engine decides
+// what is LIVE by the same three, which is why they are written once, here. A
+// foreground task left out of this rule was announced and recorded as detached
+// work, and every ordinary shell call drew as a detached shell that never
+// settled.
+
+/** Whether a started task began in the FOREGROUND, its spawning call blocking on it. */
+export function startedInForeground(started: { readonly is_backgrounded?: boolean }): boolean {
+  return started.is_backgrounded === false;
+}
+
+/** Whether a task patch moves the task to the background. */
+export function patchBackgrounds(
+  patch: { readonly is_backgrounded?: boolean } | undefined,
+): boolean {
+  return patch?.is_backgrounded === true;
+}
+
+/**
+ * The vendor task a tool result says MOVED to the background, when it says one did.
+ *
+ * `toolUseResult.backgroundTaskId` is the vendor's own statement that the call's
+ * work left rather than ended; a result without it ended its work.
+ */
+export function resultBackgroundTaskId(structured: unknown): string | undefined {
+  if (typeof structured !== "object" || structured === null) return undefined;
+  const taskId = (structured as { backgroundTaskId?: unknown }).backgroundTaskId;
+  return typeof taskId === "string" && taskId !== "" ? taskId : undefined;
+}
+
 /** The cause arm, with the timeout figure the timed-out arm carries. */
 function detachCause(
   cause: DetachCause,
@@ -170,8 +219,8 @@ export function bashDetachmentEntry(
   // THE VENDOR'S TASK ID IS ONLY EVIDENCE THAT IT BACKGROUNDED, not the handle:
   // the wire handle is the spawning call's own id (ruling, landing 3), and the
   // task id stays shim-side for `stopTask` and the live level.
-  const vendorTaskId = output?.backgroundTaskId;
-  if (typeof vendorTaskId !== "string" || vendorTaskId === "") return undefined;
+  const vendorTaskId = resultBackgroundTaskId(structured);
+  if (vendorTaskId === undefined) return undefined;
   const timedOut = output?.timedOutAfterMs;
   const cause: DetachCause =
     typeof timedOut === "number"
@@ -250,6 +299,7 @@ interface RawTask {
   readonly task_type?: string;
   readonly tool_use_id?: string;
   readonly skip_transcript?: boolean;
+  readonly is_backgrounded?: boolean;
   readonly output_file?: string;
   readonly status?: string;
   readonly summary?: string;
@@ -326,10 +376,27 @@ export interface TaskKindRegistry {
    * what keeps the table self-emptying.
    */
   settlesAsSubagent(taskId: string): boolean;
+  /**
+   * Remember that a task STARTED in the foreground ({@link startedInForeground}).
+   *
+   * Its later detachment is stated by a cause — a patch or its own tool result
+   * — so a foreground task with no remembered cause never left the turn.
+   */
+  rememberForeground(taskId: string): void;
+  /**
+   * Whether a settling task is FOREGROUND WORK that never left the turn: it
+   * started in the foreground and no patch or tool result ever gave it a
+   * cause. Such a task's own tool result settles its unit, so its notification
+   * writes nothing. Answering `true` also FORGETS the task.
+   */
+  concludesInForeground(taskId: string): boolean;
 }
 
 export function createTaskKindRegistry(): TaskKindRegistry {
-  const facts = new Map<string, { kind?: string; cause?: DetachCause; toolUseId?: string }>();
+  const facts = new Map<
+    string,
+    { kind?: string; cause?: DetachCause; toolUseId?: string; foreground?: boolean }
+  >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
   const reserve = (): void => {
     if (facts.size < TASK_KIND_CAPACITY) return;
@@ -365,6 +432,16 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       const kind = facts.get(taskId)?.kind;
       facts.delete(taskId);
       return kind === undefined || kind === "local_agent";
+    },
+    rememberForeground(taskId) {
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), foreground: true });
+    },
+    concludesInForeground(taskId) {
+      const fact = facts.get(taskId);
+      if (fact?.foreground !== true || fact.cause !== undefined) return false;
+      facts.delete(taskId);
+      return true;
     },
   };
 }
@@ -436,6 +513,20 @@ export function convertDetached(
       if (raw.task_type !== undefined && raw.task_type !== "") {
         taskKinds.remember(taskId, raw.task_type);
       }
+      // FOREGROUND WORK IS NEVER DETACHED WORK. The vendor tracks a blocking
+      // `Bash` call or a synchronous spawn as a task from its first moment, and
+      // `is_backgrounded: false` says the spawning call is still waiting on it.
+      // Announcing it here put every ordinary shell call on the stream as a
+      // detached shell. If it moves later, the patch or its own tool result
+      // says so, and that is where the announcement is made.
+      if (startedInForeground(raw)) {
+        taskKinds.rememberForeground(taskId);
+        LOGGER.debug(
+          { uuid, task_id: taskId, tool_use_id: toolUseId, task_type: raw.task_type ?? "" },
+          "a task started in the foreground; it is not detached work and nothing is announced",
+        );
+        return [];
+      }
       // A SHELL TASK IS NOT A DETACHMENT YET. The vendor tracks a FOREGROUND
       // shell as a task the moment it starts — that is what makes Ctrl-B
       // addressable at all — so `task_started` says nothing about whether the
@@ -469,7 +560,7 @@ export function convertDetached(
     }
 
     case "task_updated": {
-      if (raw.patch?.is_backgrounded !== true) {
+      if (!patchBackgrounds(raw.patch)) {
         LOGGER.logVerbose(
           { uuid, task_id: taskId, status: raw.patch?.status },
           "a task patch with no detachment fact; the unit's own frames carry the rest",
@@ -521,6 +612,17 @@ export function convertDetached(
     }
 
     case "task_notification": {
+      if (taskKinds.concludesInForeground(taskId)) {
+        // FOREGROUND WORK THAT NEVER LEFT THE TURN ends on its own tool result,
+        // which settles its unit. A detachment upsert here would announce, at
+        // its very end, work that was never detached, and a subagent terminal
+        // would settle a synchronous spawn a second time.
+        LOGGER.debug(
+          { uuid, task_id: taskId, tool_use_id: toolUseId ?? "" },
+          "foreground work concluded without ever leaving the turn; its own tool result settles it",
+        );
+        return [];
+      }
       const entries: PersistEntry[] = [];
       if (toolUseId !== undefined && toolUseId !== "" && raw.output_file !== undefined) {
         entries.push(

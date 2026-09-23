@@ -8,7 +8,8 @@
  * arm a reader is told, which is the whole point of `lost` — and the ruling
  * itself belongs to whoever holds the live set.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
@@ -22,6 +23,9 @@ import {
   lostBashEntry,
   lostSubagentEntry,
   outputPathFromProse,
+  patchBackgrounds,
+  resultBackgroundTaskId,
+  startedInForeground,
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
@@ -806,5 +810,147 @@ describe("convertDetached: a task subtype no converter owns", () => {
     const entries = convert({ subtype: "task_teleported", task_id: "t1" });
 
     expect(entries[0]?.source.discriminator).toBe("unknown.task_teleported");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Foreground work is never detached work
+// ---------------------------------------------------------------------------
+
+describe("the shared rule: when a task is detached work", () => {
+  it.each([
+    { name: "a foreground start", started: { is_backgrounded: false }, want: true },
+    { name: "a background start", started: { is_backgrounded: true }, want: false },
+    { name: "a start of a kind the vendor does not flag", started: {}, want: false },
+  ])("reads $name as foreground=$want", ({ started, want }) => {
+    expect(startedInForeground(started)).toBe(want);
+  });
+
+  it.each([
+    { name: "a patch that backgrounds", patch: { is_backgrounded: true }, want: true },
+    { name: "a patch that says foreground", patch: { is_backgrounded: false }, want: false },
+    { name: "a patch that states no side", patch: {}, want: false },
+    { name: "no patch at all", patch: undefined, want: false },
+  ])("reads $name as a move=$want", ({ patch, want }) => {
+    expect(patchBackgrounds(patch)).toBe(want);
+  });
+
+  it.each([
+    { name: "a result naming its background task", structured: { backgroundTaskId: "b1" }, want: "b1" },
+    { name: "a result that ended its work", structured: { stdout: "done" }, want: undefined },
+    { name: "an EMPTY background task id", structured: { backgroundTaskId: "" }, want: undefined },
+    { name: "a non-string background task id", structured: { backgroundTaskId: 7 }, want: undefined },
+    { name: "no structured result", structured: undefined, want: undefined },
+  ])("reads $name as moved task $want", ({ structured, want }) => {
+    expect(resultBackgroundTaskId(structured)).toBe(want);
+  });
+});
+
+describe("convertDetached: foreground work", () => {
+  // THE 0.3.280 VENDOR starts a task for every `Bash` call and every
+  // synchronous spawn; `is_backgrounded: false` says the call blocks on it.
+  const KINDS = [{ kind: "local_bash" }, { kind: "local_agent" }];
+
+  const foregroundStart = (kind: string) => ({
+    subtype: "task_started",
+    task_id: "t1",
+    tool_use_id: "toolu_1",
+    task_type: kind,
+    is_backgrounded: false,
+  });
+
+  const notification = {
+    subtype: "task_notification",
+    task_id: "t1",
+    tool_use_id: "toolu_1",
+    output_file: "/tmp/t1.output",
+    status: "completed",
+  };
+
+  it("announces no detachment when a SYNCHRONOUS spawn starts", () => {
+    expect(convert(foregroundStart("local_agent"))).toEqual([]);
+  });
+
+  it("announces no detachment when a foreground Bash starts", () => {
+    expect(convert(foregroundStart("local_bash"))).toEqual([]);
+  });
+
+  it("records a foreground start at debug, naming the task", () => {
+    // Arrange.
+    const written = vi.mocked(writeSync);
+    const before = written.mock.calls.length;
+
+    // Act.
+    convert(foregroundStart("local_bash"));
+
+    // Assert.
+    const records = (written.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>)
+      .map(([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+      )
+      .filter((record) => record.message === "a task started in the foreground; it is not detached work and nothing is announced")
+      .map((record) => ({ level: record.level, task: (record.context as Record<string, unknown>).task_id }));
+    expect(records).toEqual([{ level: "debug", task: "t1" }]);
+  });
+
+  it.each(KINDS)("writes nothing when a foreground $kind concludes without ever moving", ({ kind }) => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    convert(foregroundStart(kind), {}, registry);
+
+    // Act.
+    const entries = convert(notification, {}, registry);
+
+    // Assert.
+    expect(entries).toEqual([]);
+  });
+
+  it("announces `by_user` when a patch moves a foreground spawn", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    convert(foregroundStart("local_agent"), {}, registry);
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
+
+    // Assert.
+    expect(detachedOrigin(entries[0]).cause.case).toBe("byUser");
+  });
+
+  it("settles a foreground spawn that a patch moved, at its notification", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    convert(foregroundStart("local_agent"), {}, registry);
+    convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
+
+    // Act.
+    const entries = convert(notification, {}, registry);
+
+    // Assert.
+    expect(entries.map((entry) => entry.source.discriminator)).toEqual([
+      "agent_frame.detached_work.detached.by_user",
+      "activity.subagent.success",
+    ]);
+  });
+
+  it("upserts the moved shell's announcement at its notification once its result stated the move", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    convert(foregroundStart("local_bash"), {}, registry);
+    drain([bashDetachment({ backgroundTaskId: "t1", timedOutAfterMs: 120_000 }, undefined, registry)]);
+
+    // Act.
+    const entries = convert(notification, {}, registry);
+
+    // Assert.
+    expect(detachedOrigin(entries[0]).cause.case).toBe("timedOut");
   });
 });

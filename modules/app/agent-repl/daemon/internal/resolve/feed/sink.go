@@ -310,6 +310,15 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	r.drawDetachedWork(s, agent, work)
 }
 
+// OnLiveWorkChanged settles every detached shell that left the live set
+// without its own terminal having settled it.
+func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live sessionwatcher.LiveWorkSet) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.settleShellsLeftLive(s, live)
+}
+
 // OnBash draws one detached shell's progress.
 func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()

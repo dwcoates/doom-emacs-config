@@ -1212,3 +1212,117 @@ func TestAReplayedUnitFrameAfterTheMoveDrawsNoCard(t *testing.T) {
 		t.Fatalf("a replayed unit frame redrew a tool card, want none after the move")
 	}
 }
+
+// A MOVED CALL'S OWN TERMINAL IS ITS WORK'S ENDING. The backgrounding receipt
+// settles nothing (the shim answers no terminal for it), so a terminal on a
+// moved unit is the work itself ending, and the head the card became settles on
+// it rather than drawing running forever.
+
+// exitedSuccess is a foreground call's own completed result, exit code given.
+func exitedSuccess(line string, code int32, atMs int64) *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: line},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: &conversationv1.AgentBashOutput{},
+				Termination: &conversationv1.AgentBashTermination{
+					How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: code}},
+				},
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: atMs},
+		}},
+	}
+}
+
+// failedCall is a foreground call's own failure result.
+func failedCall(atMs int64) *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{
+			Error: &conversationv1.AgentToolFailure{
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: atMs},
+			},
+		}},
+	}
+}
+
+func TestAMovedCallsOwnSuccessSettlesTheHeadItBecame(t *testing.T) {
+	// Arrange: the call's work moved and the head stands in the card's place.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.detachWork("work-1", "unit-1")
+
+	// Act: the call's own result arrives on the unit.
+	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 3, 9_000)))
+
+	// Assert: the head is settled, completed, with the call's exit code.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCompleted() == nil || settled.GetExit().GetCode() != 3 || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want completed exit 3 at 9000", settled)
+	}
+}
+
+func TestAMovedCallsOwnFailureSettlesTheHeadAsCancelled(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.detachWork("work-1", "unit-1")
+
+	// Act.
+	h.send(activityOf("unit-1", failedCall(9_000)))
+
+	// Assert: the same rendering a detached run's own failure gets.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCancelled() == nil || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want cancelled at 9000", settled)
+	}
+}
+
+func TestAMovedCallsOwnTerminalDrawsNoCardBesideTheHead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.detachWork("work-1", "unit-1")
+
+	// Act.
+	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
+
+	// Assert.
+	if h.hasActivityRow("unit-1") {
+		t.Fatalf("the call's terminal redrew a tool card, want only the settled head")
+	}
+}
+
+func TestAMovedCallsOwnTerminalIsRecordedAsSettlingTheHead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.detachWork("work-1", "unit-1")
+
+	// Act.
+	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
+
+	// Assert.
+	if !h.hasRecord("debug", "daemon.feed.detached_shell_settled_by_call") {
+		t.Fatalf("records = %+v, want the settle recorded", h.records())
+	}
+}
+
+func TestAMovedCallsNonTerminalFrameLeavesTheHeadLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.detachWork("work-1", "unit-1")
+
+	// Act: a restated start is not an ending.
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "go test ./..."},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert.
+	if h.shellHead().GetLive() == nil {
+		t.Fatalf("state = %T, want the head still live", h.shellHead().GetState())
+	}
+}

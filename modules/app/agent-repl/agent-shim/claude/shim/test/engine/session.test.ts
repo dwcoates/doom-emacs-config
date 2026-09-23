@@ -8388,3 +8388,73 @@ describe("reconciling when the store holds no rows for this agent yet", () => {
     expect(logLevelFor(before, "the book could not be read for reconciliation")).toBe("warn");
   });
 });
+
+describe("foreground work on the 0.3.280 vendor, which starts a task for every call", () => {
+  /** A FOREGROUND shell task, its spawning call still blocking on it. */
+  const foregroundShell = async (h: Harness): Promise<void> => {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "toolu_fg",
+      task_type: "local_bash",
+      is_backgrounded: false,
+      description: "ls",
+      uuid: "00000000-0000-4000-8000-0000000000e1",
+      session_id: "s",
+    } as never);
+  };
+
+  it("answers KillSession idle while only foreground work has a task", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await foregroundShell(h);
+
+    // Act.
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("refuses StopBash on a foreground shell, which is no detached run", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await foregroundShell(h);
+
+    // Act.
+    const response = await h.engine.stopBash(
+      create(shimv1.StopBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_fg" }),
+      }),
+    );
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.kind.case : undefined).toBe("unknownWork");
+  });
+
+  it("admits a foreground shell to the live set once its own tool result says it moved", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await foregroundShell(h);
+
+    // Act.
+    await h.engine.onSdkMessage({
+      type: "user",
+      message: { role: "user", content: [] },
+      parent_tool_use_id: null,
+      tool_use_result: { stdout: "", backgroundTaskId: "b01", timedOutAfterMs: 120_000 },
+      uuid: "00000000-0000-4000-8000-0000000000e2",
+      session_id: "s",
+    } as never);
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});

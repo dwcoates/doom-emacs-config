@@ -23,13 +23,33 @@ const result = async (prompt: string): Promise<Record<string, unknown>> => {
 };
 
 describe("foreground shells", () => {
-  it("emits NOTHING between the call and the result, because output is unobservable while running", async () => {
-    // Arrange + Act
+  it("emits NO output between the call and the result, because output is unobservable while running", async () => {
+    // Arrange + Act. The 0.3.280 vendor DOES start a task for a foreground
+    // call (the next test), but a task start carries no output; progress does.
     const driven = await driveScenario(["!bash echo hi"]);
-    const between = ofType(driven, "tool_progress").length + ofType(driven, "system", "task_started").length;
 
     // Assert
-    expect(between).toBe(0);
+    expect(ofType(driven, "tool_progress")).toHaveLength(0);
+  });
+
+  it("starts the call's task in the FOREGROUND, the 0.3.280 vendor's shape", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash echo hi"]);
+    const started = ofType(driven, "system", "task_started");
+
+    // Assert
+    expect(started.map((m) => ({ task_type: m.task_type, is_backgrounded: m.is_backgrounded }))).toEqual([
+      { task_type: "local_bash", is_backgrounded: false },
+    ]);
+  });
+
+  it("keeps a foreground call's task off the background level", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash echo hi"]);
+    const levels = ofType(driven, "system", "background_tasks_changed");
+
+    // Assert
+    expect(levels.flatMap((m) => m.tasks as unknown[])).toEqual([]);
   });
 
   it("passes the prompt's argument through as the command", async () => {

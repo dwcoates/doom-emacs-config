@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/figures"
+	"claude-repld/internal/sessionwatcher"
 )
 
 // THE BUBBLE IS A FEED, and sync-vs-detached is PLACEMENT rather than a second
@@ -2255,5 +2256,217 @@ func TestALiveSpawnWithNoStartInstantCountsFromFirstObserved(t *testing.T) {
 	got := bubbleOf(h.bubbleRow("spawn-1", created)).GetRuntime().GetStartedAtMs()
 	if got != h.nowMs {
 		t.Fatalf("started_at_ms = %d, want the first-observed instant %d (never zero)", got, h.nowMs)
+	}
+}
+
+// A MOVE THAT LANDS AFTER THE CALL ENDED. The call's result and its move are
+// separate records and can arrive in either order; a result drawn first is
+// still the work's ending, so the head is drawn settled from it, never live.
+
+func TestAMoveAnnouncedAfterTheCallSucceededDrawsTheHeadSettled(t *testing.T) {
+	// Arrange: the call ran and returned where it ran.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.send(activityOf("unit-1", exitedSuccess("go test ./...", 0, 9_000)))
+
+	// Act: the move is announced late.
+	h.detachWork("work-1", "unit-1")
+
+	// Assert.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCompleted() == nil || settled.GetExit().GetCode() != 0 || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want completed exit 0 at 9000", settled)
+	}
+}
+
+func TestAMoveAnnouncedAfterTheCallFailedDrawsTheHeadCancelled(t *testing.T) {
+	// Arrange: the call's input line comes from its start; its failure states none.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+	h.send(activityOf("unit-1", failedCall(9_000)))
+
+	// Act.
+	h.detachWork("work-1", "unit-1")
+
+	// Assert.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCancelled() == nil || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want cancelled at 9000", settled)
+	}
+}
+
+func TestAMoveOfAStillRunningCallDrawsTheHeadLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+
+	// Act.
+	h.detachWork("work-1", "unit-1")
+
+	// Assert.
+	if h.shellHead().GetLive() == nil {
+		t.Fatalf("state = %T, want the head live", h.shellHead().GetState())
+	}
+}
+
+func TestShellEndingRendersNothingForAFrameThatIsNotATerminal(t *testing.T) {
+	tests := []struct {
+		name string
+		bash *conversationv1.AgentBash
+	}{
+		{name: "no frame at all", bash: nil},
+		{name: "a start", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{}}}},
+		{name: "an update", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{}}}},
+		{name: "a beat", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Progress{Progress: &conversationv1.AgentToolCallProgress{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+
+			// Act.
+			settled := shellEnding(log, "work-1", tt.bash)
+
+			// Assert.
+			if settled != nil {
+				t.Fatalf("settled = %+v, want nil", settled)
+			}
+		})
+	}
+}
+
+// A RUN THAT LEFT THE LIVE SET HAS ENDED FOR EVERY READER. The live set is the
+// watcher's open watch set; a shell that leaves it with no terminal of its own
+// will never report again, so its head settles lost rather than drawing an
+// orange dot forever.
+
+// liveShells is the watcher's live-work publication naming these shells.
+func liveShells(works ...string) sessionwatcher.LiveWorkSet {
+	var live sessionwatcher.LiveWorkSet
+	for _, work := range works {
+		live.Shells = append(live.Shells, &conversationv1.DetachedWorkId{Value: work})
+	}
+	return live
+}
+
+// runningShell draws a detached shell that has started and not ended.
+func runningShell(h *harness, work string) {
+	h.t.Helper()
+	h.bash(work, &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+}
+
+func TestAShellThatLeftTheLiveSetUnsettledIsSettledLost(t *testing.T) {
+	// Arrange: the run is drawn and the live set holds it.
+	h := newHarness(t)
+	runningShell(h, "work-1")
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1"))
+
+	// Act: the set is republished without it, and no terminal came.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells())
+
+	// Assert: lost, with no cause claimed, ended now.
+	settled := h.shellHead().GetSettled()
+	if settled.GetLost() == nil || settled.GetLost().GetHow() != nil {
+		t.Fatalf("settled = %+v, want lost with no cause", settled)
+	}
+	if settled.GetEndedAtMs() != h.nowMs {
+		t.Fatalf("ended = %d, want the daemon's clock %d", settled.GetEndedAtMs(), h.nowMs)
+	}
+}
+
+func TestAShellThatLeftTheLiveSetUnsettledIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	runningShell(h, "work-1")
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1"))
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells())
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.feed.detached_shell_left_live") {
+		t.Fatalf("records = %+v, want the settle recorded at info", h.records())
+	}
+}
+
+func TestAShellItsOwnTerminalSettledKeepsThatEndingWhenItLeavesTheLiveSet(t *testing.T) {
+	// Arrange: the store's conclusion arrives first, as it does at a terminal.
+	h := newHarness(t)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1"))
+	settledShell(h, "work-1")
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells())
+
+	// Assert: completed exit 0, as the run itself said.
+	settled := h.shellHead().GetSettled()
+	if settled.GetCompleted() == nil || settled.GetExit().GetCode() != 0 || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want the run's own completed ending", settled)
+	}
+	if h.hasRecord("info", "daemon.feed.detached_shell_left_live") {
+		t.Fatalf("records = %+v, want no lost settle for a run that ended itself", h.records())
+	}
+}
+
+func TestAShellTheLiveSetNeverHeldIsNotSettledByASetWithoutIt(t *testing.T) {
+	// Arrange: drawn, but the watcher never held it (its first open refused).
+	h := newHarness(t)
+	runningShell(h, "work-1")
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells())
+
+	// Assert.
+	if h.shellHead().GetLive() == nil {
+		t.Fatalf("state = %T, want the head still live", h.shellHead().GetState())
+	}
+}
+
+func TestAShellStillInTheLiveSetStaysLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	runningShell(h, "work-1")
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1"))
+
+	// Act: another change that still lists it.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1", "work-2"))
+
+	// Assert.
+	if h.shellHead().GetLive() == nil {
+		t.Fatalf("state = %T, want the head still live", h.shellHead().GetState())
+	}
+}
+
+func TestAShellHeldBeforeItWasDrawnIsNotDrawnWhenItLeaves(t *testing.T) {
+	// Arrange: the set held a run the feed has drawn nothing for.
+	h := newHarness(t)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1"))
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells())
+
+	// Assert: nothing is invented for a run no bubble shows.
+	for _, row := range h.everyRow() {
+		if row.GetShellHead() != nil {
+			t.Fatalf("a shell head was drawn for a run the feed never drew")
+		}
+	}
+}
+
+func TestAShellHeldBeforeItWasDrawnIsSettledLostWhenItLeavesAfterDrawing(t *testing.T) {
+	// Arrange: the set held it first, then its bubble was drawn.
+	h := newHarness(t)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells("work-1"))
+	runningShell(h, "work-1")
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveShells())
+
+	// Assert.
+	if h.shellHead().GetSettled().GetLost() == nil {
+		t.Fatalf("state = %T, want the head settled lost", h.shellHead().GetState())
 	}
 }
