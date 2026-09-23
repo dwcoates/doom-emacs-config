@@ -620,12 +620,13 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// Act: a second real claude-repld boots on the SAME state root, store
 	// socket and lock dir.
 	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		SelfRepo:    repo.Dir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
+		StateDir:        w.StateDir,
+		SelfRepo:        repo.Dir,
+		ShimNode:        requireNode(t),
+		ShimMain:        requireShimBundle(t),
+		StoreSocket:     w.Store.Socket,
+		ServiceBinaries: w.ServiceBinaries(),
+		ExtraEnv:        []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir},
 	})
 	d2.ExpectWarnings(mqExpectedBounceWarnings...)
 	// Re-point World at the new process: every w.Client()/w.WatchFeed/... call
@@ -676,12 +677,13 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// the turn back is durable, so the boot after it finds nothing owed.
 	w.Kill()
 	d3 := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		SelfRepo:    repo.Dir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
+		StateDir:        w.StateDir,
+		SelfRepo:        repo.Dir,
+		ShimNode:        requireNode(t),
+		ShimMain:        requireShimBundle(t),
+		StoreSocket:     w.Store.Socket,
+		ServiceBinaries: w.ServiceBinaries(),
+		ExtraEnv:        []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir},
 	})
 	d3.ExpectWarnings(mqExpectedBounceWarnings...)
 	w.Daemon = d3
