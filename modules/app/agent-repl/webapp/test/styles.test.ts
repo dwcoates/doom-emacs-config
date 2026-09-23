@@ -547,6 +547,40 @@ describe("the 'more below' affordance", () => {
     expect(chevron).toMatch(/pointer-events:\s*none/);
   });
 
+  it("draws the affordance only out of flow, so toggling has-more changes no layout", () => {
+    // Arrange / Act — every rule keyed on has-more. THE USER OWNS THE SCROLL
+    // (owner rule, 2026-09-23): the measurer toggles the class under a reader,
+    // so it may add nothing but out-of-flow pseudo-elements and a cursor.
+    const withHasMore = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes(".has-more")),
+    );
+    const inFlow = withHasMore.filter((rule) => {
+      const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
+      if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
+      const positioned = /position:\s*absolute/.test(rule.declarations);
+      const decorative = /^\s*background:[^;]*;?\s*$/.test(rule.declarations);
+      return !positioned && !decorative;
+    });
+
+    // Assert
+    expect(inFlow.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("makes the box the affordance's containing block whether or not it wears has-more", () => {
+    // Arrange
+    const boxes = [".bubble.assistant > .bubble-scroll", ".bubble.user > .bubble-scroll", ".title-fold"];
+
+    // Act — whether any rule on the bare box (no has-more) makes it relative.
+    const relative = boxes.map((box) =>
+      rulesOf(stylesheet).some(
+        (rule) => rule.selectors.includes(box) && /position:\s*relative/.test(rule.declarations),
+      ),
+    );
+
+    // Assert
+    expect(relative).toEqual([true, true, true]);
+  });
+
   it("never puts the affordance on a tool-call section", () => {
     // Arrange / Act — every rule that keys on has-more.
     const withHasMore = rulesOf(stylesheet).filter((rule) =>
