@@ -617,11 +617,89 @@ composer and vendor_info arms together."
 
 ;;;; ---- WatchDaemon ----
 
-(ert-deftest agent-repl-test-wire-host-watch-daemon-request-is-empty ()
-  "The stream is daemon-scoped, so there is nothing to address."
+(defun agent-repl-test-wire-host--encode-breach (encoder value)
+  "Return the `agent-repl-wire-error' data encoding VALUE with ENCODER raises."
+  (agent-repl-test-wire-host--quiet
+    (condition-case err
+        (progn (funcall encoder value) nil)
+      (agent-repl-wire-error (cdr err)))))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-names-emacs-and-its-build ()
+  "Emacs connects as the `emacs' client, stating the elisp build it loaded."
   (should (equal (agent-repl-test-wire-host--quiet
-                   (json-serialize (agent-repl-wire-encode-watch-daemon-request nil)))
-                 "{}")))
+                   (json-serialize (agent-repl-wire-encode-watch-daemon-request
+                                    '(:client (:arm :emacs :value (:elisp-build "abc123"))))))
+                 "{\"emacs\":{\"elispBuild\":\"abc123\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-without-a-client-is-refused ()
+  "The client arm is REQUIRED: a request naming none never leaves Emacs."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-watch-daemon-request nil)
+                 '("WatchDaemonRequest" client "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-refuses-the-webview-arm ()
+  "Emacs never connects as a webview, so the codec has no spelling for it."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-watch-daemon-request
+                  '(:client (:arm :webview :value nil)))
+                 '("WatchDaemonRequest" client "unknown oneof arm"))))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-empty-build-is-refused ()
+  "An EMPTY elisp build is refused before anything is sent."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-watch-daemon-emacs '(:elisp-build ""))
+                 '("WatchDaemonEmacs" elispBuild "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-unset-build-is-refused ()
+  "An UNSET elisp build is refused before anything is sent."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-watch-daemon-emacs nil)
+                 '("WatchDaemonEmacs" elispBuild "required field is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-watch-daemon-request-arms-pinned ()
+  "The request's client arms are the frozen schema's; Emacs spells `emacs' alone."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonRequest")
+                       #'string<)
+                 '("emacs" "webview"))))
+
+(ert-deftest agent-repl-test-wire-host-daemon-push-arms-pinned ()
+  "The daemon stream's push arms are exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
+                       #'string<)
+                 (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
+                             "mutationProgress" "reloadElisp")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-reload-elisp-decodes-its-root-and-build ()
+  "A deploy's reload push carries the root to load from and the build it is."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"reloadElisp\":{\"moduleRoot\":\"/r/agent-repl/\",\"build\":\"b1\"}}")
+                 '(:arm :reload-elisp
+                   :value (:module-root "/r/agent-repl/" :build "b1")))))
+
+(ert-deftest agent-repl-test-wire-host-reload-elisp-without-a-root-is-a-breach ()
+  "The root is REQUIRED: without it Emacs cannot check the reload is its own."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"reloadElisp\":{\"build\":\"b1\"}}")
+                 '("DaemonReloadElisp" moduleRoot "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-reload-elisp-without-a-build-is-a-breach ()
+  "The build is REQUIRED: it is what Emacs reports from then on."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"reloadElisp\":{\"moduleRoot\":\"/r/\"}}")
+                 '("DaemonReloadElisp" build "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-reload-elisp-unknown-field-is-refused ()
+  "A field the reload does not declare is refused, never guessed at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"reloadElisp\":{\"moduleRoot\":\"/r/\",\"build\":\"b\",\"partial\":true}}")
+                 '("DaemonReloadElisp" partial "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-shutdown-announced-carries-the-successor ()
   "A handover announcement carries the address Emacs dual-attaches to."

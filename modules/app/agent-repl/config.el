@@ -70,8 +70,58 @@ genuine fatal condition the user must see immediately."
 ;; status.
 (setq agent-repl--load-errors nil)
 
+;; ---- The elisp build this Emacs loaded ----
+;;
+;; Every process reports its build when it connects, and Emacs's is the
+;; content hash of the elisp it LOADED (WatchDaemonEmacs.elisp_build).  The
+;; loader records, in load order, each module's name and the SHA-256 of the
+;; `lisp/<module>.el' bytes it loaded; `lisp/elisp-build.el' turns that list
+;; into the build by the proto's algorithm.  The list is RESET on every load
+;; of this file, exactly like `agent-repl--load-errors', so a reload reports
+;; what the reload loaded rather than an accumulation of every load since
+;; startup.
+
+(defvar agent-repl--elisp-module-builds nil
+  "The elisp this Emacs loaded, as ((MODULE . SHA256) ...) in load order.
+MODULE is the name `agent-repl--load-module' was given (\"core\"), and
+SHA256 the lowercase hex SHA-256 of the bytes of `lisp/MODULE.el' as they
+were when it was loaded.  A module whose file is absent records nothing.")
+
+(setq agent-repl--elisp-module-builds nil)
+
+(defun agent-repl--elisp-module-file (root module)
+  "Return the absolute path of MODULE's source, `lisp/MODULE.el' under ROOT.
+Always the `.el' source, even where a `.elc' exists: the build is the
+content hash of the source, which is what the daemon hashes too."
+  (expand-file-name (concat "lisp/" module ".el") root))
+
+(defun agent-repl--elisp-file-sha256 (file)
+  "Return the lowercase hex SHA-256 of FILE's bytes, or nil when FILE is absent.
+The file is read LITERALLY into a unibyte buffer, so the digest is of the
+bytes on disk — no decoding, no end-of-line conversion — which is what the
+daemon's Go side hashes from the checkout."
+  (when (file-exists-p file)
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert-file-contents-literally file)
+      (secure-hash 'sha256 (current-buffer)))))
+
+(defun agent-repl--elisp-record-module-build (root module)
+  "Record MODULE's source under ROOT in `agent-repl--elisp-module-builds'.
+Appends (MODULE . SHA256) so the list stays in load order.  An absent file
+records nothing: it contributes no line to the build, and its load fails
+and is reported on the loader's own path."
+  (let ((sha (agent-repl--elisp-file-sha256 (agent-repl--elisp-module-file root module))))
+    (if sha
+        (setq agent-repl--elisp-module-builds
+              (append agent-repl--elisp-module-builds (list (cons module sha))))
+      (agent-repl--boot-info "elisp-build: %s.el is absent under %s; it records nothing"
+                             module root))))
+
 (defmacro agent-repl--load-module (file)
   "Load FILE via `load!', recording any error for collective reporting.
+Before loading, FILE's source bytes are recorded in
+`agent-repl--elisp-module-builds' (the build this Emacs reports).
 FILE names a module source WITHOUT its `lisp/' prefix and `.el' suffix:
 every source lives in `lisp/' beside this file, while config.el itself
 stays at the module root because that is the path Doom's module loader
@@ -83,6 +133,8 @@ core.el ladder directly because the very first expansion of this macro is
 what loads core.el."
   `(condition-case err
        (progn
+         (agent-repl--elisp-record-module-build
+          (file-name-directory (or load-file-name buffer-file-name)) ,file)
          (load! (concat "lisp/" ,file))
          (agent-repl--boot-info "%s.el loaded." ,file))
      (error
@@ -218,6 +270,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; dispatch hands workspace-mutation progress to, and the create verb registers
 ;; its callbacks with; it needs only core.el, so it loads beside daemon-link.
 (agent-repl--load-module "mutation-progress")
+;; WHY: elisp-build.el answers the elisp build every WatchDaemon reports and
+;; carries out a deploy's pushed `reload_elisp'.  daemon-link.el dispatches
+;; that push to it and rpc.el asks it for the build, both at call time; its
+;; own needs are core.el's logging ladder and heartbeat assertion.
+(agent-repl--load-module "elisp-build")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
