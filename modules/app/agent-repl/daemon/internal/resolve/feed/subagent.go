@@ -36,10 +36,18 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// announced before this unit drew is exactly the case the flag cannot
 	// carry, and leaving the mark standing would report the unit as one
 	// nothing ever drew.
-	_, announcedDetached := s.claimDetached(unitID)
+	announcedWork, announcedDetached := s.claimDetached(unitID)
 	if detached || announcedDetached {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "detached || announcedDetached"})
 		state.detached = true
+	}
+	switch {
+	case announcedDetached:
+		state.work = announcedWork
+	case detached:
+		// BORN DETACHED: the announcement's own handle is this unit's id (the
+		// created arm is drawn under an activity keyed by the work).
+		state.work = unitID
 	}
 	if state.bubble == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.bubble == nil"})
@@ -217,9 +225,11 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 		bubble.Label = &frontendv1.FeedSubagentLabel{Text: "Agent"}
 	}
 
+	stampDetachedWork(state)
 	id := r.rowID(s.id, at.feed, feedid.RowKey{
 		Kind: feedid.KindActivity, ID: unitID, Sub: state.created.GetValue(),
 	})
+	r.announceEntry(s, unitID, state.row, id)
 	state.row = id
 	state.feed = at
 
@@ -227,7 +237,7 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 	// makes an expand's OpenFeed resolve and a page's crumbs draw.
 	if state.created.GetValue() != "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.created.GetValue() != \"\""})
-		r.mintSubFeed(s, id, feedid.Feed{Agent: state.created}, bubbleLabel(bubble))
+		r.mintSubFeed(s, id, at.feed, feedid.Feed{Agent: state.created}, bubbleLabel(bubble))
 		r.drawCommission(s, at, unitID, state, commission)
 	}
 
@@ -243,6 +253,34 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 		}}
 	}
 	return row
+}
+
+// stampDetachedWork puts the run's detached-work id on its head, and only on a
+// detached one: a synchronous spawn is the turn's own progress and names none.
+// A detached bubble whose handle the resolver never learned draws none rather
+// than a guessed one.
+func stampDetachedWork(state *subagentState) {
+	if !state.detached || state.work == "" {
+		state.bubble.WorkId = nil
+		return
+	}
+	state.bubble.WorkId = &frontendv1.FeedDetachedWorkId{Text: state.work}
+}
+
+// announceEntry tells Deps.EntryPlaced where UNIT's entry is drawn, when that
+// is news: the first draw, or a FeedId that changed. A redraw at the same
+// address announces nothing, so the receiver is not woken on every frame.
+func (r *resolver) announceEntry(s *wsState, unit string, previous, current *frontendv1.FeedId) {
+	if r.deps.EntryPlaced == nil || unit == "" {
+		return
+	}
+	if previous.GetValue() == current.GetValue() {
+		return
+	}
+	r.logger(s.id).Debug("daemon.feed.entry_placed",
+		"a detached-work-capable entry was placed; its address was handed to the footer",
+		dlog.Context{"unit": unit, "row": current.GetValue(), "previous": previous.GetValue()})
+	r.deps.EntryPlaced(s.id, unit, current)
 }
 
 // retireHeldSpawns draws every spawn whose frames are still waiting for one
@@ -455,6 +493,7 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 		unitID := origin.Detached.GetDetachedFromId().GetValue()
 		if state, ok := s.subagents[unitID]; ok {
 			state.detached = true
+			state.work = workID
 			r.republishSubagent(s, unitID, state)
 			log.Debug("daemon.feed.detached_subagent",
 				"a subagent bubble moved to its detached placement",
@@ -592,6 +631,7 @@ func (r *resolver) retireDetachment(s *wsState, unitID string) {
 
 // republishSubagent re-pushes a bubble whose placement wrapper changed.
 func (r *resolver) republishSubagent(s *wsState, unitID string, state *subagentState) {
+	stampDetachedWork(state)
 	row := &frontendv1.FeedRow{Id: state.row}
 	if state.detached {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "state.detached"})
@@ -834,6 +874,8 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 	head := &frontendv1.FeedShell{
 		Command: &frontendv1.FeedShellCommand{Text: sh.command},
 		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: r.shellStart(sh)},
+		// A shell bubble exists only for detached work, so every head names it.
+		WorkId: &frontendv1.FeedDetachedWorkId{Text: workID},
 	}
 	if sh.settled != nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.settled != nil"})
@@ -850,6 +892,7 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 	// THE HEAD, on the parent feed. NO SPOOL: the command, clock and stop live
 	// here; the spool is the body, on the sub-feed.
 	headID := r.rowID(s.id, sh.feed.feed, feedid.RowKey{Kind: feedid.KindShellHead, ID: workID})
+	r.announceEntry(s, workID, sh.row, headID)
 	sh.row = headID
 	headRow := &frontendv1.FeedRow{
 		Id:  headID,
@@ -862,7 +905,7 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 	// makes an expand's OpenFeed resolve and the body's crumbs draw. Minted
 	// after the head is upserted so the parent feed is known.
 	sub := shellSubFeed(workID)
-	r.mintSubFeed(s, headID, sub, sh.command)
+	r.mintSubFeed(s, headID, sh.feed.feed, sub, sh.command)
 
 	// THE BODY: the spool tail, on the shell's own sub-feed, present from the
 	// first output. Snapshot semantics — capped and replaced whole on every
