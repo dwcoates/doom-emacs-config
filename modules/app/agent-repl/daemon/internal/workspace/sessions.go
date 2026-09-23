@@ -235,6 +235,14 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+	// watched is the LAST watcher this process started per workspace, kept
+	// after it closes: its pointers are what its successor resumes from, so a
+	// restart, a revival or a relaunch never replays history. See opening.go.
+	watched map[ids.WorkspaceID]sessionwatcher.Watcher
+	// selected marks a workspace pointed at a different transcript since its
+	// last watcher: the next watcher replays the selected transcript's first
+	// page. See opening.go.
+	selected map[ids.WorkspaceID]bool
 
 	// detached counts the session starts running OFF a caller's goroutine, and
 	// detachedCtx is the context every one of them runs under. See
@@ -378,6 +386,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		generation:      map[ids.WorkspaceID]int{},
 		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
+		watched:         map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		selected:        map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -744,6 +754,12 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	if f.Live(ws) {
 		return nil
 	}
+	// A SELECTED TRANSCRIPT IS A DIFFERENT CONVERSATION: the watcher this
+	// start opens replays its first page, and the previous watcher's pointers,
+	// which name another book, are forgotten. See opening.go.
+	if rebind {
+		f.noteTranscriptSelected(ws)
+	}
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return fmt.Errorf("start session for %q: %w", ws, err)
@@ -770,6 +786,11 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// changed it. A fresh start carries no resume to mark, so the marker is
 	// simply never composed for one.
 	src.Rebind = rebind
+	// A FRESH START IS A NEW CONVERSATION: its book is new, and the previous
+	// watcher's pointers name lines of another one. See forgetPointers.
+	if src.Fresh {
+		f.forgetPointers(ws)
+	}
 	log.Debug(opBringUp, "decided how the session comes up", dlog.Context{
 		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID, "rebind": src.Rebind,
 	})
@@ -934,7 +955,7 @@ func (f *Fleet) sessionUp(
 	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
 		return err
 	}
-	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	watcher, err := f.startWatcher(ctx, log, ws, client, started)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)

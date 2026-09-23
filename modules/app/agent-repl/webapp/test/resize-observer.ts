@@ -1,6 +1,6 @@
 /**
- * A `ResizeObserver` FOR JSDOM — the same kind of environment substitution as
- * the harness's `scrollIntoView` stub, and for the same reason.
+ * A `ResizeObserver` FOR JSDOM — an environment substitution, because jsdom
+ * lacks the capability rather than because the app has a seam here.
  *
  * jsdom performs no layout, so it ships no `ResizeObserver`: an element's box
  * never changes size there, and nothing would ever be delivered even if the

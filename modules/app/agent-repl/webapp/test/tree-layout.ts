@@ -12,6 +12,10 @@
  * first paint that always fell back to 105 columns in the webview passed.
  *
  * What it stages, for CONNECTED elements only:
+ *   - `getClientRects()` answers one box for an element with no `[hidden]`
+ *     ancestor-or-self, and none for one inside a hidden subtree — the way an
+ *     engine answers a `display: none` element — which is what the body's
+ *     "laid out" test reads;
  *   - a `.mp-tree` element's rect is `CHARPX` per character of its text (the
  *     measure's probe is one);
  *   - an element holding a `.bubble` child reports `CONTAININGPX` as its
@@ -22,6 +26,7 @@
  * Every other read passes through to jsdom untouched.
  */
 import { afterEach, beforeEach } from "vitest";
+import { visibleWidth } from "../src/metaprompt-tree.js";
 
 /** The geometry a staged tree measurement reads. */
 export interface TreeLayout {
@@ -77,6 +82,14 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
     return originalRect.call(this);
   };
 
+  // Captured to be ASSIGNED back on teardown, never called off the reference.
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
+  const originalRects = Element.prototype.getClientRects;
+  Element.prototype.getClientRects = function staged(this: Element): DOMRectList {
+    const boxes = this.isConnected && this.closest("[hidden]") === null ? [rect(1)] : [];
+    return Object.assign(boxes, { item: (i: number) => boxes[i] ?? null });
+  };
+
   const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth");
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
     configurable: true,
@@ -111,6 +124,7 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
     layout,
     uninstall: () => {
       Element.prototype.getBoundingClientRect = originalRect;
+      Element.prototype.getClientRects = originalRects;
       delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
       window.getComputedStyle = originalStyle;
     },
@@ -148,4 +162,28 @@ export function useTreeLayout(): { readonly layout: TreeLayout } {
       return installed.layout;
     },
   };
+}
+
+/**
+ * A metaprompt tree with branches far wider than the default layout's
+ * 93-column budget, so a bubble at its cap must wrap them.
+ */
+export const WIDE_TREE = [
+  "1 🌳 A tree drawn in a bubble of any kind, wrapped at that bubble's own cap",
+  "├── 1.1 This branch is deliberately much longer than the default layout's ninety-three column budget, so it must wrap",
+  "└── 1.2 The last branch, also long enough to run well past the budget and wrap onto a continuation line of its own",
+].join("\n");
+
+/** A tree whose every branch fits comfortably under the default layout's budget. */
+export const FITTING_TREE = [
+  "1 🌳 A tree whose longest branch is comfortably under the cap.",
+  "├── 1.1 A branch of about seventy rendered columns, well inside the cap here.",
+  "└── 1.2 Another branch, also short enough to stand on one line.",
+].join("\n");
+
+/** Every drawn tree line's width in columns, under EL. */
+export function treeLineWidths(el: Element): number[] {
+  return [...el.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")].map((line) =>
+    visibleWidth(line.textContent ?? ""),
+  );
 }

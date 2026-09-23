@@ -32,6 +32,7 @@
  * feedids, selection and the reveal walk keep working.
  */
 import { log } from "../log.js";
+import { placeChildren } from "../dom.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 /** The class the group container (the tabbed bubble) wears. */
@@ -174,8 +175,8 @@ export interface ToolGroupStore {
    * Reuse or create the group for KEY, lay it out for MEMBERS, and return the
    * wrapper to place at the top level.
    */
-  place(key: string, kind: string, members: readonly GroupMember[]): HTMLElement;
-  /** Dispose every group not `place`d since the previous prune. */
+  arrange(key: string, kind: string, members: readonly GroupMember[]): HTMLElement;
+  /** Dispose every group not `arrange`d since the previous prune. */
   prune(): void;
 }
 
@@ -189,7 +190,7 @@ export function createToolGroupStore(): ToolGroupStore {
   const groups = new Map<string, ToolGroup>();
   let seen = new Set<string>();
   return {
-    place(key, kind, members) {
+    arrange(key, kind, members) {
       seen.add(key);
       let group = groups.get(key);
       if (group === undefined) {
@@ -252,12 +253,14 @@ function createToolGroup(kind: string): ToolGroup {
     const activeId = picked ?? ids[ids.length - 1];
 
     strip.replaceChildren(...members.map((member, index) => tab(member, index, activeId)));
-    for (const member of members) {
-      // Appending an element already in the DOM MOVES it; the member keeps its
-      // folds, clocks and streaming across the move.
-      panel.append(member.element);
-      member.element.hidden = member.id !== activeId;
-    }
+    // Only a member out of place is moved (`placeChildren`): re-appending one
+    // already in place would re-attach it, and a re-attached element loses the
+    // reader's scroll position inside it (owner rule, 2026-09-23).
+    placeChildren(
+      panel,
+      members.map((member) => member.element),
+    );
+    for (const member of members) member.element.hidden = member.id !== activeId;
     group.setAttribute("data-count", String(members.length));
     group.setAttribute("data-active", activeId ?? "");
     log.debug("laid out a tabbed tool group", {

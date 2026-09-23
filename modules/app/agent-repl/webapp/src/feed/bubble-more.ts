@@ -1,15 +1,15 @@
 /**
- * bubble-more — the "more below" affordance on a COLLAPSED response or
- * user-prompt bubble whose text overruns its height cap.
+ * bubble-more — THE ONE has-more measurer: the "more below" affordance on a
+ * COLLAPSED bubble (any kind) whose text overruns its height cap.
  *
  * FIX2 (owner ruling, 2026-09-15): the owner asked for "a signal that there's
  * more to reveal" on the response and prompt bubbles. When a bubble is collapsed
  * and its content actually overflows the cap (`scrollHeight > clientHeight` on
  * the `.bubble-scroll` box), the box wears `has-more`; the stylesheet draws a
  * bottom fade into the bubble's own background plus a small chevron from that
- * class. The affordance is RESTRICTED to `.bubble.assistant` and `.bubble.user`
- * scroll boxes only (the response and prompt bubbles) — never a tool-call
- * section or any other capped box — which is what MORE_BUBBLE_SELECTOR encodes.
+ * class. Every bubble's scroll box is served (owner ruling, 2026-09-23: one
+ * measurer for every blue and purple bubble) — never a tool-call section or
+ * any other capped box — which is what MORE_BUBBLE_SELECTOR encodes.
  *
  * TITLE FOLDS (owner ruling, 2026-09-23): a tool card's TITLE — the command a
  * shell bubble runs, a tool call's input line, and the other title lines
@@ -32,10 +32,11 @@ import { onDiscard } from "./ticking.js";
 export const HAS_MORE_CLASS = "has-more";
 
 /**
- * The only scroll boxes the "more below" affordance is allowed on: a response
- * bubble (`.bubble.assistant`) and a prompt bubble (`.bubble.user`, which also
- * covers an agent-addressed prompt — a user-kind bubble). One entry per bubble
- * kind, so a tool-call section's capped box can never match it.
+ * The bubble scroll boxes the "more below" affordance serves: EVERY bubble's
+ * (src/bubble/draw.ts builds them all, and only it builds a `.bubble`), so a
+ * response, a prompt, a peer message, a held prompt, a compaction summary and
+ * an agentic card all fade the same way. A tool-call section is not a
+ * `.bubble` and can never match it.
  *
  * The class name here is the LITERAL of `BUBBLE_SCROLL_CLASS` (bubble-scroll.ts)
  * rather than an import of it: bubble-scroll.ts imports `installHasMore` from
@@ -43,8 +44,7 @@ export const HAS_MORE_CLASS = "has-more";
  * reads the const in its temporal dead zone. bubble-more.test.ts holds this
  * literal to the exported constant so the two cannot drift.
  */
-export const MORE_BUBBLE_SELECTOR =
-  ".bubble.assistant > .bubble-scroll, .bubble.user > .bubble-scroll";
+export const MORE_BUBBLE_SELECTOR = ".bubble > .bubble-scroll";
 
 /**
  * The class every TITLE fold wears (title-fold.ts): a tool card's title line —
@@ -160,7 +160,24 @@ export function installHasMore(
   if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
   const observer = new view.ResizeObserver(() => refresh(scroll));
   observer.observe(scroll);
-  const body = scroll.firstElementChild;
+  // THE BODY IS FOLLOWED, NOT CAPTURED: a redraw that keeps the box a reader
+  // is scrolled inside hands it a new body (keep-scroll.ts), and the observer
+  // must measure the body the box now holds rather than the one it was built
+  // with.
+  let body = scroll.firstElementChild;
   if (body !== null) observer.observe(body);
-  onDiscard(scroll, () => observer.disconnect());
+  const retarget = (): void => {
+    const next = scroll.firstElementChild;
+    if (next === body) return;
+    if (body !== null) observer.unobserve(body);
+    body = next;
+    if (body !== null) observer.observe(body);
+    refresh(scroll);
+  };
+  const children = typeof view.MutationObserver === "function" ? new view.MutationObserver(retarget) : null;
+  children?.observe(scroll, { childList: true });
+  onDiscard(scroll, () => {
+    observer.disconnect();
+    children?.disconnect();
+  });
 }
