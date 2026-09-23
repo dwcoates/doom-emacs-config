@@ -33,7 +33,7 @@ var File_agentrepl_v1_service_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a+agentrepl/v1/endpoint_select_response.proto\x1a2agentrepl/v1/endpoint_adjust_feed_text_scale.proto\x1a%agentrepl/v1/endpoint_open_feed.proto\x1a&agentrepl/v1/endpoint_watch_feed.proto\x1a)agentrepl/v1/endpoint_get_feed_page.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a+agentrepl/v1/endpoint_answer_question.proto\x1a,agentrepl/v1/endpoint_answer_cold_gate.proto\x1a2agentrepl/v1/endpoint_watch_workspace_roster.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a/agentrepl/v1/endpoint_register_repository.proto\x1a2agentrepl/v1/endpoint_bind_workspace_session.proto\x1a6agentrepl/v1/endpoint_list_workspace_transcripts.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a*agentrepl/v1/endpoint_kill_workspace.proto\x1a,agentrepl/v1/endpoint_forget_workspace.proto\x1a*agentrepl/v1/endpoint_nuke_workspace.proto\x1a+agentrepl/v1/endpoint_merge_workspace.proto\x1a-agentrepl/v1/endpoint_restart_workspace.proto\x1a(agentrepl/v1/endpoint_watch_topbar.proto\x1a)agentrepl/v1/endpoint_open_external.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a,agentrepl/v1/endpoint_send_login_input.proto\x1a3agentrepl/v1/endpoint_request_command_support.proto\x1a'agentrepl/v1/endpoint_create_task.proto\x1a'agentrepl/v1/endpoint_update_task.proto\x1a1agentrepl/v1/endpoint_assign_workspace_task.proto\x1a&agentrepl/v1/endpoint_open_login.proto\x1a0agentrepl/v1/endpoint_watch_login_terminal.proto\x1a'agentrepl/v1/endpoint_close_login.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a/agentrepl/v1/endpoint_set_permission_mode.proto\x1a2agentrepl/v1/endpoint_set_workspace_priority.proto\x1a(agentrepl/v1/endpoint_watch_footer.proto\x1a.agentrepl/v1/endpoint_watch_daemon_holds.proto\x1a.agentrepl/v1/endpoint_update_held_prompt.proto\x1a-agentrepl/v1/endpoint_answer_held_offer.proto\x1a*agentrepl/v1/endpoint_roll_out_build.proto\x1a4agentrepl/v1/endpoint_update_shutdown_schedule.proto\x1a.agentrepl/v1/endpoint_update_merge_queue.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a.agentrepl/v1/endpoint_register_workspace.proto\x1a*agentrepl/v1/endpoint_select_account.proto\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a1agentrepl/v1/endpoint_mark_workspace_viewed.proto\x1a0agentrepl/v1/endpoint_watch_host_workspace.proto\x1a(agentrepl/v1/endpoint_watch_daemon.proto\x1a0agentrepl/v1/endpoint_adopt_host_workspace.proto\x1a/agentrepl/v1/endpoint_watch_web_workspace.proto\x1a/agentrepl/v1/endpoint_adopt_web_workspace.proto\x1a&agentrepl/v1/endpoint_watch_page.proto2\xf2*\n" +
+	"\x1aagentrepl/v1/service.proto\x12\fagentrepl.v1\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a+agentrepl/v1/endpoint_select_response.proto\x1a2agentrepl/v1/endpoint_adjust_feed_text_scale.proto\x1a%agentrepl/v1/endpoint_open_feed.proto\x1a&agentrepl/v1/endpoint_watch_feed.proto\x1a)agentrepl/v1/endpoint_get_feed_page.proto\x1a%agentrepl/v1/endpoint_interrupt.proto\x1a-agentrepl/v1/endpoint_answer_permission.proto\x1a+agentrepl/v1/endpoint_answer_question.proto\x1a,agentrepl/v1/endpoint_answer_cold_gate.proto\x1a2agentrepl/v1/endpoint_watch_workspace_roster.proto\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a/agentrepl/v1/endpoint_register_repository.proto\x1a2agentrepl/v1/endpoint_bind_workspace_session.proto\x1a6agentrepl/v1/endpoint_list_workspace_transcripts.proto\x1a*agentrepl/v1/endpoint_open_workspace.proto\x1a+agentrepl/v1/endpoint_close_workspace.proto\x1a*agentrepl/v1/endpoint_kill_workspace.proto\x1a,agentrepl/v1/endpoint_forget_workspace.proto\x1a*agentrepl/v1/endpoint_nuke_workspace.proto\x1a+agentrepl/v1/endpoint_merge_workspace.proto\x1a-agentrepl/v1/endpoint_restart_workspace.proto\x1a(agentrepl/v1/endpoint_watch_topbar.proto\x1a)agentrepl/v1/endpoint_open_external.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a,agentrepl/v1/endpoint_send_login_input.proto\x1a3agentrepl/v1/endpoint_request_command_support.proto\x1a'agentrepl/v1/endpoint_create_task.proto\x1a'agentrepl/v1/endpoint_update_task.proto\x1a1agentrepl/v1/endpoint_assign_workspace_task.proto\x1a&agentrepl/v1/endpoint_open_login.proto\x1a0agentrepl/v1/endpoint_watch_login_terminal.proto\x1a'agentrepl/v1/endpoint_close_login.proto\x1a%agentrepl/v1/endpoint_set_model.proto\x1a/agentrepl/v1/endpoint_set_permission_mode.proto\x1a2agentrepl/v1/endpoint_set_workspace_priority.proto\x1a(agentrepl/v1/endpoint_watch_footer.proto\x1a.agentrepl/v1/endpoint_watch_daemon_holds.proto\x1a.agentrepl/v1/endpoint_update_held_prompt.proto\x1a-agentrepl/v1/endpoint_answer_held_offer.proto\x1a\"agentrepl/v1/endpoint_deploy.proto\x1a4agentrepl/v1/endpoint_update_shutdown_schedule.proto\x1a.agentrepl/v1/endpoint_update_merge_queue.proto\x1a)agentrepl/v1/endpoint_daemon_health.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a&agentrepl/v1/endpoint_client_log.proto\x1a.agentrepl/v1/endpoint_register_workspace.proto\x1a*agentrepl/v1/endpoint_select_account.proto\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a1agentrepl/v1/endpoint_mark_workspace_viewed.proto\x1a0agentrepl/v1/endpoint_watch_host_workspace.proto\x1a(agentrepl/v1/endpoint_watch_daemon.proto\x1a0agentrepl/v1/endpoint_adopt_host_workspace.proto\x1a/agentrepl/v1/endpoint_watch_web_workspace.proto\x1a/agentrepl/v1/endpoint_adopt_web_workspace.proto\x1a&agentrepl/v1/endpoint_watch_page.proto2\xe0*\n" +
 	"\tAgentRepl\x12U\n" +
 	"\fSubmitPrompt\x12!.agentrepl.v1.SubmitPromptRequest\x1a\".agentrepl.v1.SubmitPromptResponse\x12[\n" +
 	"\x0eSelectResponse\x12#.agentrepl.v1.SelectResponseRequest\x1a$.agentrepl.v1.SelectResponseResponse\x12j\n" +
@@ -72,8 +72,8 @@ const file_agentrepl_v1_service_proto_rawDesc = "" +
 	"\x10WatchDaemonHolds\x12%.agentrepl.v1.WatchDaemonHoldsRequest\x1a&.agentrepl.v1.WatchDaemonHoldsResponse0\x01\x12a\n" +
 	"\x10UpdateHeldPrompt\x12%.agentrepl.v1.UpdateHeldPromptRequest\x1a&.agentrepl.v1.UpdateHeldPromptResponse\x12^\n" +
 	"\x0fAnswerHeldOffer\x12$.agentrepl.v1.AnswerHeldOfferRequest\x1a%.agentrepl.v1.AnswerHeldOfferResponse\x12s\n" +
-	"\x16UpdateShutdownSchedule\x12+.agentrepl.v1.UpdateShutdownScheduleRequest\x1a,.agentrepl.v1.UpdateShutdownScheduleResponse\x12U\n" +
-	"\fRollOutBuild\x12!.agentrepl.v1.RollOutBuildRequest\x1a\".agentrepl.v1.RollOutBuildResponse\x12a\n" +
+	"\x16UpdateShutdownSchedule\x12+.agentrepl.v1.UpdateShutdownScheduleRequest\x1a,.agentrepl.v1.UpdateShutdownScheduleResponse\x12C\n" +
+	"\x06Deploy\x12\x1b.agentrepl.v1.DeployRequest\x1a\x1c.agentrepl.v1.DeployResponse\x12a\n" +
 	"\x10UpdateMergeQueue\x12%.agentrepl.v1.UpdateMergeQueueRequest\x1a&.agentrepl.v1.UpdateMergeQueueResponse\x12U\n" +
 	"\fDaemonHealth\x12!.agentrepl.v1.DaemonHealthRequest\x1a\".agentrepl.v1.DaemonHealthResponse\x12X\n" +
 	"\rSessionHealth\x12\".agentrepl.v1.SessionHealthRequest\x1a#.agentrepl.v1.SessionHealthResponse\x12L\n" +
@@ -134,7 +134,7 @@ var file_agentrepl_v1_service_proto_goTypes = []any{
 	(*UpdateHeldPromptRequest)(nil),          // 33: agentrepl.v1.UpdateHeldPromptRequest
 	(*AnswerHeldOfferRequest)(nil),           // 34: agentrepl.v1.AnswerHeldOfferRequest
 	(*UpdateShutdownScheduleRequest)(nil),    // 35: agentrepl.v1.UpdateShutdownScheduleRequest
-	(*RollOutBuildRequest)(nil),              // 36: agentrepl.v1.RollOutBuildRequest
+	(*DeployRequest)(nil),                    // 36: agentrepl.v1.DeployRequest
 	(*UpdateMergeQueueRequest)(nil),          // 37: agentrepl.v1.UpdateMergeQueueRequest
 	(*DaemonHealthRequest)(nil),              // 38: agentrepl.v1.DaemonHealthRequest
 	(*SessionHealthRequest)(nil),             // 39: agentrepl.v1.SessionHealthRequest
@@ -192,7 +192,7 @@ var file_agentrepl_v1_service_proto_goTypes = []any{
 	(*UpdateHeldPromptResponse)(nil),         // 91: agentrepl.v1.UpdateHeldPromptResponse
 	(*AnswerHeldOfferResponse)(nil),          // 92: agentrepl.v1.AnswerHeldOfferResponse
 	(*UpdateShutdownScheduleResponse)(nil),   // 93: agentrepl.v1.UpdateShutdownScheduleResponse
-	(*RollOutBuildResponse)(nil),             // 94: agentrepl.v1.RollOutBuildResponse
+	(*DeployResponse)(nil),                   // 94: agentrepl.v1.DeployResponse
 	(*UpdateMergeQueueResponse)(nil),         // 95: agentrepl.v1.UpdateMergeQueueResponse
 	(*DaemonHealthResponse)(nil),             // 96: agentrepl.v1.DaemonHealthResponse
 	(*SessionHealthResponse)(nil),            // 97: agentrepl.v1.SessionHealthResponse
@@ -252,7 +252,7 @@ var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	33,  // 33: agentrepl.v1.AgentRepl.UpdateHeldPrompt:input_type -> agentrepl.v1.UpdateHeldPromptRequest
 	34,  // 34: agentrepl.v1.AgentRepl.AnswerHeldOffer:input_type -> agentrepl.v1.AnswerHeldOfferRequest
 	35,  // 35: agentrepl.v1.AgentRepl.UpdateShutdownSchedule:input_type -> agentrepl.v1.UpdateShutdownScheduleRequest
-	36,  // 36: agentrepl.v1.AgentRepl.RollOutBuild:input_type -> agentrepl.v1.RollOutBuildRequest
+	36,  // 36: agentrepl.v1.AgentRepl.Deploy:input_type -> agentrepl.v1.DeployRequest
 	37,  // 37: agentrepl.v1.AgentRepl.UpdateMergeQueue:input_type -> agentrepl.v1.UpdateMergeQueueRequest
 	38,  // 38: agentrepl.v1.AgentRepl.DaemonHealth:input_type -> agentrepl.v1.DaemonHealthRequest
 	39,  // 39: agentrepl.v1.AgentRepl.SessionHealth:input_type -> agentrepl.v1.SessionHealthRequest
@@ -310,7 +310,7 @@ var file_agentrepl_v1_service_proto_depIdxs = []int32{
 	91,  // 91: agentrepl.v1.AgentRepl.UpdateHeldPrompt:output_type -> agentrepl.v1.UpdateHeldPromptResponse
 	92,  // 92: agentrepl.v1.AgentRepl.AnswerHeldOffer:output_type -> agentrepl.v1.AnswerHeldOfferResponse
 	93,  // 93: agentrepl.v1.AgentRepl.UpdateShutdownSchedule:output_type -> agentrepl.v1.UpdateShutdownScheduleResponse
-	94,  // 94: agentrepl.v1.AgentRepl.RollOutBuild:output_type -> agentrepl.v1.RollOutBuildResponse
+	94,  // 94: agentrepl.v1.AgentRepl.Deploy:output_type -> agentrepl.v1.DeployResponse
 	95,  // 95: agentrepl.v1.AgentRepl.UpdateMergeQueue:output_type -> agentrepl.v1.UpdateMergeQueueResponse
 	96,  // 96: agentrepl.v1.AgentRepl.DaemonHealth:output_type -> agentrepl.v1.DaemonHealthResponse
 	97,  // 97: agentrepl.v1.AgentRepl.SessionHealth:output_type -> agentrepl.v1.SessionHealthResponse
@@ -384,7 +384,7 @@ func file_agentrepl_v1_service_proto_init() {
 	file_agentrepl_v1_endpoint_watch_daemon_holds_proto_init()
 	file_agentrepl_v1_endpoint_update_held_prompt_proto_init()
 	file_agentrepl_v1_endpoint_answer_held_offer_proto_init()
-	file_agentrepl_v1_endpoint_roll_out_build_proto_init()
+	file_agentrepl_v1_endpoint_deploy_proto_init()
 	file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_init()
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_init()
 	file_agentrepl_v1_endpoint_daemon_health_proto_init()

@@ -51,7 +51,7 @@ import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
-import "agentrepl/v1/endpoint_roll_out_build.proto";
+import "agentrepl/v1/endpoint_deploy.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_daemon_health.proto";
@@ -216,10 +216,10 @@ service AgentRepl {
   // endpoint_update_shutdown_schedule.proto.
   rpc UpdateShutdownSchedule(UpdateShutdownScheduleRequest) returns (UpdateShutdownScheduleResponse);
 
-  // Put a build the deploy chain already produced into service — a rollout
-  // that waits for freeness and never ends a turn. See
-  // endpoint_roll_out_build.proto.
-  rpc RollOutBuild(RollOutBuildRequest) returns (RollOutBuildResponse);
+  // Build the checkout and put what is out of date into service — the daemon
+  // owns deploys, and an unforced one never ends a turn. See
+  // endpoint_deploy.proto.
+  rpc Deploy(DeployRequest) returns (DeployResponse);
 
   // Operator control of the merge queue. See
   // endpoint_update_merge_queue.proto.
