@@ -762,22 +762,25 @@ describe("a peer message", () => {
     expect(row.querySelector(".bubble.user")).toBeNull();
   });
 
-  it("starts collapsed, so the body is not revealed", async () => {
+  it("starts collapsed to its header alone, so the body is not revealed", async () => {
     // Arrange / Act
     const row = await drawRow(peerMessageRow());
     // Assert
-    expect(row.querySelector(".peer-head")?.getAttribute("aria-expanded")).toBe("false");
+    expect([
+      row.querySelector(".bubble.peer")?.getAttribute("data-cap-lines"),
+      row.querySelector(".bubble.peer > .bubble-scroll")?.classList.contains("expanded"),
+    ]).toEqual(["0", false]);
   });
 
-  it("reveals the body when the head is clicked", async () => {
+  it("reveals the body when its label is clicked, through the one toggle", async () => {
     // Arrange
     await drawRow(peerMessageRow({ id: feedId("peer-1") }));
     // Act
-    await harness.click('[data-feed-row="peer-1"] .peer-head');
+    await harness.click('[data-feed-row="peer-1"] .peer-label');
     // Assert
     expect(
-      harness.$('[data-feed-row="peer-1"] .peer-head')?.getAttribute("aria-expanded"),
-    ).toBe("true");
+      harness.$('[data-feed-row="peer-1"] .bubble.peer > .bubble-scroll')?.classList.contains("expanded"),
+    ).toBe(true);
   });
 });
 

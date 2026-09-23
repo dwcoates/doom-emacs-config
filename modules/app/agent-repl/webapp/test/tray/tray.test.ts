@@ -246,6 +246,42 @@ describe("mountHoldTray", () => {
     expect(ticker.subscribers()).toBe(0);
   });
 
+  it("opens a held prompt through the one toggle, armed on the tray's host", async () => {
+    // Arrange
+    const host = document.createElement("section");
+    const ctx = streamingContext(async function* () {
+      yield tray([multiLineItem("t1")]);
+    });
+    const handle = mountHoldTray(host, ctx);
+    await settle();
+    // Act — a click on the header strip, as on any bubble.
+    host.querySelector<HTMLElement>(".queued-head")?.click();
+    // Assert
+    expect(host.querySelector('[data-held-turn="t1"] > .bubble-scroll')?.classList.contains("expanded")).toBe(true);
+    handle.dispose();
+  });
+
+  it("redraws a re-served held prompt in place, the same card", async () => {
+    // Arrange
+    const host = document.createElement("section");
+    let pushed!: () => void;
+    const next = new Promise<void>((resolve) => (pushed = resolve));
+    const ctx = streamingContext(async function* () {
+      yield tray([multiLineItem("t1")]);
+      await next;
+      yield tray([multiLineItem("t1")]);
+    });
+    const handle = mountHoldTray(host, ctx);
+    await settle();
+    const first = host.querySelector('[data-held-turn="t1"]');
+    // Act
+    pushed();
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-held-turn="t1"]')).toBe(first);
+    handle.dispose();
+  });
+
   it("keeps a held prompt's open fold open across a push that re-serves it", async () => {
     // Arrange — the second push waits until the reader has opened the fold.
     const host = document.createElement("section");
@@ -258,12 +294,12 @@ describe("mountHoldTray", () => {
     });
     const handle = mountHoldTray(host, ctx);
     await settle();
-    host.querySelector<HTMLElement>(".held-fold")?.click();
+    host.querySelector<HTMLElement>(".queued-text")?.click();
     // Act
     opened();
     await settle();
-    // Assert — a fresh card, still open.
-    expect(host.querySelector('[data-held-turn="t1"] > .held-fold')?.classList.contains("expanded"))
+    // Assert — the card, redrawn in place, still open.
+    expect(host.querySelector('[data-held-turn="t1"] > .bubble-scroll')?.classList.contains("expanded"))
       .toBe(true);
     handle.dispose();
   });
@@ -280,12 +316,12 @@ describe("mountHoldTray", () => {
     });
     const handle = mountHoldTray(host, ctx);
     await settle();
-    host.querySelector<HTMLElement>(".held-fold")?.click();
+    host.querySelector<HTMLElement>(".queued-text")?.click();
     // Act
     opened();
     await settle();
     // Assert
-    expect(host.querySelector('[data-held-turn="t2"] > .held-fold')?.classList.contains("expanded"))
+    expect(host.querySelector('[data-held-turn="t2"] > .bubble-scroll')?.classList.contains("expanded"))
       .toBe(false);
     handle.dispose();
   });
