@@ -30,6 +30,8 @@ import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
+import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -1646,6 +1648,189 @@ describe("the thinking bubble", () => {
     capture.logger.flush();
     await Promise.resolve();
     expect(capture.sent.some((rec) => rec.operation === "feed.draw-thinking")).toBe(false);
+  });
+});
+
+/**
+ * THE THINKING BUBBLE'S TWO-LINE CAP (owner ruling, 2026-09-23). A collapsed
+ * thinking bubble shows at most two lines, wearing the response bubble's own
+ * fade + chevron (`has-more`) when it runs past them, and a click expands and
+ * collapses it exactly as it does a response bubble.
+ *
+ * jsdom resolves the cascade but lays nothing out, so `layOut` stands in for
+ * the layout engine: the box's content is LINES tall, and while the cascade
+ * hands the box its collapsed cap it shows at most `--cap-lines` of them (the
+ * token resolved through `:root`, as the browser would); once the cascade hands
+ * it the expanded 50vh ceiling the window is taken to hold every line. Every
+ * figure it reads comes from the real stylesheet, so the cap under test is the
+ * one the file declares.
+ */
+describe("the thinking bubble's two-line cap", () => {
+  const LINE_PX = 20;
+
+  /** A `var(--token)` value resolved through `:root`, or the literal itself. */
+  function resolvedNumber(value: string): number {
+    const token = /^var\((--[\w-]+)\)$/.exec(value);
+    if (token === null) return Number(value);
+    return resolvedNumber(cascadedValue(document.documentElement, token[1] ?? ""));
+  }
+
+  /** Give SCROLL content LINES tall, clipped by whatever cap the cascade hands it. */
+  function layOut(scroll: HTMLElement, lines: number): void {
+    Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: lines * LINE_PX });
+    Object.defineProperty(scroll, "clientHeight", {
+      configurable: true,
+      get: () => {
+        if (cascadedValue(scroll, "max-height") === "50vh") return lines * LINE_PX;
+        return Math.min(lines, resolvedNumber(cascadedValue(scroll, "--cap-lines"))) * LINE_PX;
+      },
+    });
+  }
+
+  /** A drawn bubble in a feed host armed with click-to-expand, as feed.ts arms it. */
+  function mounted(u: FeedResponse, lines: number): HTMLElement {
+    const host = document.createElement("div");
+    installClickExpand(host, () => "", (section) => refreshHasMore(section));
+    host.append(drawFeedResponse(u, rowContext()));
+    document.body.append(host);
+    const scroll = host.querySelector(".bubble-scroll") as HTMLElement;
+    layOut(scroll, lines);
+    refreshHasMore(scroll);
+    return scroll;
+  }
+
+  function thinking(state: "update" | "success"): FeedResponse {
+    return response({ thinking: true, result: { case: state, value: { prose: { markdown: "weighing" } } } });
+  }
+
+  it("caps a thinking bubble's scroll box at two lines", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const scroll = mounted(thinking("success"), 5);
+      // Assert
+      expect(cascadedValue(scroll, "--cap-lines")).toBe("2");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("caps a still-streaming thinking bubble at two lines too", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const scroll = mounted(thinking("update"), 5);
+      // Assert
+      expect(cascadedValue(scroll, "--cap-lines")).toBe("2");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("wears the response bubble's fade and chevron when it runs past two lines", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      // Act — three lines: past the thinking cap, far inside the response cap.
+      const scroll = mounted(thinking("success"), 3);
+      // Assert
+      expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(true);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("expands a capped thinking bubble on a click, dropping the fade", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const scroll = mounted(thinking("success"), 3);
+      const collapsed = scroll.clientHeight;
+      // Act
+      scroll.click();
+      // Assert — grown from two lines to the full content, nothing left below
+      // the fold.
+      expect([
+        collapsed,
+        scroll.classList.contains(EXPANDED_CLASS),
+        scroll.clientHeight,
+        scroll.classList.contains(HAS_MORE_CLASS),
+      ]).toEqual([2 * LINE_PX, true, 3 * LINE_PX, false]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("collapses an expanded thinking bubble on a second click, restoring the fade", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const scroll = mounted(thinking("success"), 3);
+      scroll.click();
+      // Act
+      scroll.click();
+      // Assert — back to two lines under the fade.
+      expect([
+        scroll.classList.contains(EXPANDED_CLASS),
+        scroll.clientHeight,
+        scroll.classList.contains(HAS_MORE_CLASS),
+      ]).toEqual([false, 2 * LINE_PX, true]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("shows no fade or chevron on a thinking bubble that fits in two lines", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const scroll = mounted(thinking("success"), 2);
+      // Assert
+      expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(false);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("gives a fitting thinking bubble nothing to expand on a click", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const scroll = mounted(thinking("success"), 2);
+      const collapsed = scroll.clientHeight;
+      // Act
+      scroll.click();
+      // Assert — the same height and still no fade: the click reveals nothing,
+      // exactly as it does on a short response bubble.
+      expect([scroll.clientHeight, scroll.classList.contains(HAS_MORE_CLASS)]).toEqual([
+        collapsed,
+        false,
+      ]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("leaves a normal response bubble on the shared feed cap", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const scroll = mounted(
+        response({ result: { case: "success", value: { prose: { markdown: "an answer" } } } }),
+        3,
+      );
+      // Assert — the shared budget, so three lines fit with no fade.
+      expect([
+        cascadedValue(scroll, "--cap-lines"),
+        scroll.classList.contains(HAS_MORE_CLASS),
+      ]).toEqual(["var(--feed-cap-lines)", false]);
+    } finally {
+      teardown();
+    }
   });
 });
 
