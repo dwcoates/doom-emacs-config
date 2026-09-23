@@ -20,6 +20,15 @@ import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import { drawFeedHook } from "../../../src/feed/cards/hook.js";
+import {
+  HAS_MORE_CLASS,
+  TITLE_FOLD_CLASS,
+  TITLE_FOLD_STANDALONE_CLASS,
+} from "../../../src/feed/bubble-more.js";
+import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
+import { fireResize } from "../../resize-observer.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { measureTitle } from "../title-measure.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -237,5 +246,110 @@ describe("a malformed hook card", () => {
     const u = hook({ case: undefined });
     (u as { outcome: unknown }).outcome = { case: "teleported", value: {} };
     expect(() => drawFeedHook(u, harness().rc)).toThrow(MalformedView);
+  });
+});
+
+/**
+ * THE HEADLINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+ * two-line title fold (title-fold.ts). A hook card has no card-level fold, so
+ * the headline is its own click-to-expand fold.
+ */
+describe("the title fold on the headline", () => {
+  /** A connected card of OUTCOME, and its headline. */
+  function drawn(outcome: FeedHook["outcome"] = blocked("master is protected")) {
+    const el = drawFeedHook(hook(outcome), harness().rc);
+    document.body.replaceChildren(el);
+    return { el, title: el.querySelector(".tool-head > .tool-name") as HTMLElement };
+  }
+
+  it.each([
+    { arm: "blocked", outcome: blocked("master is protected") },
+    { arm: "failed", outcome: failed(2, "boom") },
+  ])("makes the $arm card's headline its own title fold", ({ outcome }) => {
+    // Arrange / Act
+    const { title } = drawn(outcome);
+
+    // Assert
+    expect([...title.classList]).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
+  });
+
+  it("wears has-more when the headline overflows its two lines", () => {
+    // Arrange
+    const { title } = drawn();
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("keeps has-more off a headline that fits its two lines", () => {
+    // Arrange
+    const { title } = drawn();
+    measureTitle(title, false);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("opens the headline with the feed-wide click, the one toggle", () => {
+    // Arrange
+    const { el, title } = drawn();
+    const feed = document.createElement("div");
+    feed.append(el);
+    document.body.replaceChildren(feed);
+    installClickExpand(feed, () => "");
+
+    // Act
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // Assert
+    expect(title.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("drops has-more once the headline is expanded", () => {
+    // Arrange
+    const { title } = drawn();
+    measureTitle(title, true);
+    fireResize(title);
+    title.classList.add(EXPANDED_CLASS);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("clamps a collapsed headline to two lines", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = drawn();
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+    } finally {
+      remove();
+    }
+  });
+
+  it("shows the whole headline once it is expanded", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = drawn();
+      title.classList.add(EXPANDED_CLASS);
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("none");
+    } finally {
+      remove();
+    }
   });
 });

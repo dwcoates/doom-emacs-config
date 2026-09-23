@@ -28,6 +28,7 @@ import type {
 import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { RowContext } from "./context.js";
+import { foldTitle } from "../title-fold.js";
 
 /**
  * The hook card.
@@ -51,8 +52,15 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
 
   const head = document.createElement("div");
   head.className = "tool-head";
+  // THE HEADLINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+  // two-line title fold. A hook card has no card-level fold, so the headline is
+  // its own (title-fold.ts). No draw here stops the card's ticking, so folding
+  // it at once keeps its measurer.
   head.appendChild(
-    drawFeedHookHeadline(requireMessage(u.headline, `${path}.headline`), `${path}.headline`),
+    foldTitle(
+      drawFeedHookHeadline(requireMessage(u.headline, `${path}.headline`), `${path}.headline`),
+      "standalone",
+    ),
   );
   card.appendChild(head);
 
