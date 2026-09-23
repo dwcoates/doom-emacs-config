@@ -12,6 +12,8 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
@@ -58,8 +60,28 @@ func newDiagnosticsSink(t *testing.T, reporter health.Reporter) *lifecycleSink {
 	t.Helper()
 	ref := &healthForwarder{}
 	ref.bind(reporter)
-	return &lifecycleSink{health: ref, log: dlog.NewTestLogger()}
+	builds := &rolloutForwarder{}
+	builds.bind(&fakeBuildJudge{})
+	return &lifecycleSink{health: ref, builds: builds, log: dlog.NewTestLogger()}
 }
+
+// fakeBuildJudge records the shim builds the lifecycle sink reports.
+type fakeBuildJudge struct {
+	rollout.Controller
+	reported []string
+}
+
+func (f *fakeBuildJudge) ShimReported(ws ids.WorkspaceID, build string) {
+	f.reported = append(f.reported, string(ws)+"="+build)
+}
+
+// fakeFreeQueue records the freeness edges the lifecycle sink hands on.
+type fakeFreeQueue struct {
+	promptqueue.Queue
+	frees []ids.WorkspaceID
+}
+
+func (f *fakeFreeQueue) OnFree(ws ids.WorkspaceID) { f.frees = append(f.frees, ws) }
 
 func unhealthyDiagnostics(faults ...*conversationv1.SessionFault) *conversationv1.SessionDiagnostics {
 	return &conversationv1.SessionDiagnostics{
@@ -139,7 +161,9 @@ func TestADiagnosticsPushLeavesAFaultOfAnotherKindStanding(t *testing.T) {
 
 func TestADiagnosticsPushWithNoBoundReporterIsRecordedNotDropped(t *testing.T) {
 	// Arrange
-	sink := &lifecycleSink{health: &healthForwarder{}, log: dlog.NewTestLogger()}
+	builds := &rolloutForwarder{}
+	builds.bind(&fakeBuildJudge{})
+	sink := &lifecycleSink{health: &healthForwarder{}, builds: builds, log: dlog.NewTestLogger()}
 
 	// Act / Assert: an unbound forwarder must not panic; the boot-order defect
 	// is surfaced through the error record instead.
@@ -194,5 +218,70 @@ func TestOnLinkFaultLevelsAForgottenWorkspaceAtDebug(t *testing.T) {
 				t.Fatalf("lifecycle record level = %q, want %q", level, tt.wantLevel)
 			}
 		})
+	}
+}
+
+func TestEveryDiagnosticsFrameReportsItsShimBuild(t *testing.T) {
+	tests := []struct {
+		name        string
+		diagnostics *conversationv1.SessionDiagnostics
+		want        string
+	}{
+		{name: "a healthy frame", diagnostics: &conversationv1.SessionDiagnostics{ShimBuild: "b1",
+			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}}}, want: "ws-1=b1"},
+		{name: "an unhealthy frame", diagnostics: func() *conversationv1.SessionDiagnostics {
+			d := unhealthyDiagnostics(&conversationv1.SessionFault{Component: "store", Detail: "down"})
+			d.ShimBuild = "b2"
+			return d
+		}(), want: "ws-1=b2"},
+		{name: "a frame naming no build", diagnostics: &conversationv1.SessionDiagnostics{}, want: "ws-1="},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			judge := &fakeBuildJudge{}
+			builds := &rolloutForwarder{}
+			builds.bind(judge)
+			sink := &lifecycleSink{health: &healthForwarder{}, builds: builds, log: dlog.NewTestLogger()}
+
+			// Act
+			sink.OnSessionDiagnostics("ws-1", tc.diagnostics)
+
+			// Assert
+			if len(judge.reported) != 1 || judge.reported[0] != tc.want {
+				t.Fatalf("reported = %v, want [%s]", judge.reported, tc.want)
+			}
+		})
+	}
+}
+
+func TestABuildReportedBeforeTheRolloutExistsIsRecordedNotDropped(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{health: &healthForwarder{}, builds: &rolloutForwarder{}, log: log}
+
+	// Act
+	sink.OnSessionDiagnostics("ws-1", &conversationv1.SessionDiagnostics{ShimBuild: "b1"})
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Message == "a shim reported its build before the rollout controller existed" && r.Context["build"] == "b1" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the unbound report at ERROR naming the build", log.Records())
+}
+
+func TestTheFreenessEdgeReachesTheQueue(t *testing.T) {
+	// Arrange
+	queue := &fakeFreeQueue{}
+	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.OnFree("ws-1")
+
+	// Assert
+	if len(queue.frees) != 1 || queue.frees[0] != "ws-1" {
+		t.Fatalf("frees = %v, want [ws-1]", queue.frees)
 	}
 }
