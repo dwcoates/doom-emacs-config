@@ -58,17 +58,35 @@ export function overflowsCap(box: { scrollHeight: number; clientHeight: number }
 }
 
 /**
- * True when the box should wear `has-more`: it is a response/prompt bubble's
- * scroll box, it is COLLAPSED (not expanded), and its content overflows the cap.
- * Expanded boxes never show it (the whole answer is reachable by scrolling), and
- * a box that fits its cap has nothing below the fold to point at.
+ * One kind of box the affordance serves: the selector a box is recognized by,
+ * and when that box's FOLD is open. The affordance only ever points at content
+ * a collapsed fold is hiding, so each kind states whose fold it reads.
+ */
+interface MoreKind {
+  readonly selector: string;
+  isOpen(box: MoreBox): boolean;
+}
+
+/**
+ * Every kind of box that may wear `has-more`, and nothing else. A response or
+ * prompt bubble's scroll box is its own fold: it is open when it is `.expanded`.
+ */
+const MORE_KINDS: readonly MoreKind[] = [
+  {
+    selector: MORE_BUBBLE_SELECTOR,
+    isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
+  },
+];
+
+/**
+ * True when the box should wear `has-more`: it is one of the kinds the
+ * affordance serves, its fold is COLLAPSED, and its content overflows the cap.
+ * An open fold never shows it (the whole content is reachable), and a box that
+ * fits its cap has nothing below the fold to point at.
  */
 export function shouldShowMore(box: MoreBox): boolean {
-  return (
-    box.matches(MORE_BUBBLE_SELECTOR) &&
-    !box.classList.contains(EXPANDED_CLASS) &&
-    overflowsCap(box)
-  );
+  const kind = MORE_KINDS.find((k) => box.matches(k.selector));
+  return kind !== undefined && !kind.isOpen(box) && overflowsCap(box);
 }
 
 /** Add or drop `has-more` on BOX to match its current overflow and state. */
