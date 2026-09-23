@@ -47,6 +47,14 @@ type unitState struct {
 	// drawn from the frame alone a second, stale card drew beside the bubble.
 	// A moved unit draws nothing.
 	moved bool
+	// movedTo is the detached work a moved unit's head became, so the unit's
+	// OWN ending can settle that head (see ending).
+	movedTo string
+	// ending is the call's own terminal frame (success or failure), kept
+	// because a shell's ending and its move can arrive in EITHER order. A
+	// call's work ends once: when the move lands after the result, the head it
+	// is redrawn as must be drawn settled from this, not live.
+	ending *conversationv1.AgentBash
 	// diagnostics are the IDE findings raised against this change, composed.
 	diagnostics []string
 	// row is the last row this unit drew, so a post-terminal frame (an
