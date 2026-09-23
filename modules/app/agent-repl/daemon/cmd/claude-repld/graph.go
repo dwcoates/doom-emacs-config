@@ -570,6 +570,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// one exists.
 		Spawns:       supervisor,
 		Freeness:     fleet.Freeness(),
+		Reviving:     queue.Reviving,
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,
 		PublishHost:  relay.PublishHostWorkspace,

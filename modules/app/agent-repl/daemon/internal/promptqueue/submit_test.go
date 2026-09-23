@@ -364,6 +364,75 @@ func TestSubmitRevivesAParkedWorkspaceRatherThanRefusingIt(t *testing.T) {
 	}
 }
 
+// TestRevivingReportsTheRevivalAcrossItsBringUp pins that the idle sweep's
+// revival answer is raised while the revival's bring-up runs.
+func TestRevivingReportsTheRevivalAcrossItsBringUp(t *testing.T) {
+	// Arrange: a bring-up the test holds open.
+	h := newHarness(t)
+	h.noSession = true
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	h.reviveHook = func() { close(entered); <-release }
+	t.Cleanup(func() { close(release); h.waitRevivals() })
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-entered
+
+	// Act
+	got := h.q.Reviving(theWorkspace)
+
+	// Assert
+	if !got {
+		t.Fatal("Reviving = false during the bring-up, want true")
+	}
+}
+
+// TestRevivingReportsTheRevivalUntilItsPromptIsDelivered pins that the answer
+// stays raised while the revived prompt is being handed to the new shim: the
+// session's record still reads idle there, and only the turn the delivery
+// starts claims it.
+func TestRevivingReportsTheRevivalUntilItsPromptIsDelivered(t *testing.T) {
+	// Arrange: the revival makes a session, and the delivery observes the flag.
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.noSession = false }
+	var duringDelivery bool
+	h.sender.startHook = func() { duringDelivery = h.q.Reviving(theWorkspace) }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if !duringDelivery {
+		t.Fatal("Reviving = false while the revived prompt was delivered, want true")
+	}
+}
+
+// TestRevivingIsLoweredOnceTheRevivalHasDelivered pins that a finished revival
+// no longer defers the sweep.
+func TestRevivingIsLoweredOnceTheRevivalHasDelivered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.noSession = false }
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.waitRevivals()
+
+	// Act
+	got := h.q.Reviving(theWorkspace)
+
+	// Assert
+	if got {
+		t.Fatal("Reviving = true after the revival delivered, want false")
+	}
+}
+
 // TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp is the rpc-shape
 // half: the minted turn comes back before the revival has run at all.
 func TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp(t *testing.T) {
