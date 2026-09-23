@@ -464,7 +464,7 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 		return nil
 	}
 
-	watcher, err := f.watch(context.WithoutCancel(ctx), ws, c, sessionwatcher.Session{}, f.deps.Sinks, log)
+	watcher, err := f.startWatcher(ctx, log, ws, c, nil)
 	if err != nil {
 		log.Error(opFleetRollout, "could not open the adopted session's watches", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("workspace: install a shim for %q: start the watcher: %w", ws, err)
@@ -559,7 +559,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	// (realtest sweep 2026-09-12T15:23:03.338). Both other sites that open a
 	// fleet already detach the context for exactly this reason; this one did
 	// not.
-	watcher, err := f.watch(context.WithoutCancel(ctx), ws, c, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	watcher, err := f.startWatcher(ctx, log, ws, c, started)
 	if err != nil {
 		log.Error(opFleetRollout, "could not re-open the session's watches after a resume", dlog.Context{
 			"cause": err.Error(),

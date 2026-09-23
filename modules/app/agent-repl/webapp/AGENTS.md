@@ -24,6 +24,7 @@ src/clock.ts src/duration.ts   the shared ticker and its formatters
 src/vocab.ts              typed accessors over proto/vocab/*.json
 src/log.ts                the canonical logging API
 src/link.ts               renderExternalLink / renderEditorLink
+src/bubble/               THE ONE BUBBLE: draw (drawBubble, the spec) and body (the pipeline)
 src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
   renderers.ts              THE SEAM, plus createRowRenderers: the registry
   cards/ asks/ merge/       the fifteen row renderers
@@ -95,6 +96,8 @@ and are contract on the same terms:
 | `data-status-wave` | the `.footer-status` cell whose arm means PROGRESS | `progress` (absent on every other status, and on the client's own composed disconnected strip); the word is then per-letter `.pfooter-wave-letter` spans inside one `.pfooter-status-word` | webapp/footer-status-wave |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
+| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `2` \| `0` | one-bubble, 2026-09-23 |
+| `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 
 ## Commands
@@ -182,6 +185,24 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   fire-and-forget click handler goes through it, so a `MalformedView` is logged
   once and filed as `frame_undecodable` instead of escaping as an unhandled
   rejection.
+- **ONE BUBBLE** (owner rulings, 2026-09-23). Every blue (prompt) and purple
+  (response) bubble — a response, thinking, an agentic card, a compaction
+  summary, a user or agent prompt, a peer message, a held prompt — is built by
+  `drawBubble(spec, previous)` (src/bubble/draw.ts), and a kind's module only
+  builds its spec: role, variant and state, the header strip (plus the
+  response's usage corner), the content, the collapsed line count and, on a
+  prompt, the working flag. Content goes through ONE body pipeline
+  (src/bubble/body.ts): prose is a `markdownSlot`, painted by the body, so a
+  metaprompt tree in any bubble wraps at that bubble's cap (`--bubble-max-width`)
+  and a bubble below its cap never wraps; a paint that needs a width waits for
+  the bubble to be laid out, and an unmeasurable width still fails loudly. A
+  redraw given the row's previous draw updates it IN PLACE. The stylesheet has
+  ONE rule set on `.bubble`: one size and leading, `[data-role]` sets only the
+  side and `--bubble-bg`, a variant or state only the border, `[data-cap-lines]`
+  the collapsed limit; one scroll box, one has-more measurer (bubble-more.ts)
+  and one toggle (expand.ts, which also opens a bubble from its header strip).
+  `test/bubble/consolidation.test.ts` fails any bubble, box, body, wrap, paint,
+  has-more or toggle logic built anywhere else.
 - **ONE VIEWPORT CLAMP.** `clampReveal` (src/topbar/clamp.ts). Any panel that
   must hang under an anchor and stay inside the window places itself through
   it — the topbar reveals and the sidebar row's detail panel both do — rather
@@ -231,6 +252,25 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   the page loaded. Every expanded subagent bubble opens another feed tail, so no
   fixed budget could have contained the count — which is why the guarantee is
   "one stream exists" rather than "few enough streams exist".
+- **THE USER OWNS THE SCROLL** (owner rule, 2026-09-23). `src/scroll.ts` is
+  the ONE module that writes a scroll position; `test/scroll.test.ts` scans
+  every other `src` module and fails on a `scrollTop`/`scrollLeft` assignment,
+  a `scrollIntoView`/`scrollTo`/`scrollBy` call, or a park/place/shift call.
+  A bubble's own scroll box (an expanded response, thinking, tool or async
+  bubble) has NO implicit writer: it moves only on the reader's input. The
+  feed moves implicitly only for the closed set `SCROLL_CAUSES` —
+  `promptSent`, `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
+  `replaceRestore`, `prependCompensation` — each a named `TailFollow` method,
+  each recorded at DEBUG as `scroll.feed-moved` with its cause. A follow starts
+  only from a parking cause and ends when the reader scrolls away; returning
+  to the tail does not restart it. The reader's own wheel redirect and
+  collapse click are input, not causes, and are the only other writes.
+  NOTHING MOVES A SCROLL BOX INDIRECTLY EITHER: a redraw never re-attaches an
+  element already in place (`placeChildren`, src/dom.ts), a response re-push
+  updates its bubble in place, a card holding a box the reader scrolled is
+  morphed rather than replaced (src/feed/keep-scroll.ts), an unchanged re-push
+  draws nothing, and anything repainted on a tick or toggled by a measurer
+  holds a fixed footprint (the cost corner, the shell clocks, `has-more`).
 - **A REDRAW NEVER UN-TOGGLES, WHATEVER ITS SHAPE** (owner ruling, 2026-09-18).
   The wire's fold is the INITIAL fold: an upsert carries the reader's open folds
   off the element it replaces (`carryExpanded`), and a full page replace —

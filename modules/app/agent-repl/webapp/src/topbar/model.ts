@@ -47,7 +47,6 @@ import {
   drawUnreadableRefusal,
   type SentenceTable,
 } from "../rpc/refuse.js";
-import { revealNode } from "../scroll.js";
 import { drawNoSessionCell } from "./no-session.js";
 import { asAnchor } from "./strip.js";
 
@@ -148,17 +147,17 @@ export const SET_MODEL_CAUSES = {
  * Send the reader to the cold gate.
  *
  * THE GATE ROW IS THE REMEDIATION, so the first choice is always the card
- * itself: it is brought into view through the ONE reveal primitive the feed's
- * other jumps use, and marked so the eye lands on it. A page whose feed has
- * not drawn the gate (a history page scrolled elsewhere, a gate the daemon has
- * not pushed yet) gets a footer notice NAMING the gate instead, which is a
+ * itself: it is marked so the eye lands on it. It is NOT scrolled to (owner
+ * rule, 2026-09-23: the user owns the scroll, and a model pick is not one of
+ * the feed's three implicit scroll causes). A page whose feed has not drawn
+ * the gate (a history page scrolled elsewhere, a gate the daemon has not
+ * pushed yet) gets a footer notice NAMING the gate instead, which is a
  * different fact and says so, rather than a silent no-op.
  */
 export function routeToColdGate(doc: Document): "gate" | "notice" {
   const gate = doc.querySelector<HTMLElement>(`[data-unit="${COLD_ATTENTION_VALUE}"]`);
   if (gate !== null) {
     gate.setAttribute(COLD_ATTENTION_ATTRIBUTE, COLD_ATTENTION_VALUE);
-    revealNode(gate, "start");
     log.info("routed the reader to the cold gate row", {
       operation: "topbar.model-cold-gate",
       context: { routed_to: "gate" },

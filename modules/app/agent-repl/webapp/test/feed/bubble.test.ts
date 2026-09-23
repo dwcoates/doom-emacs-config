@@ -11,7 +11,6 @@ import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { installStylesheet } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
-import { TailFollow, feedReveal, type FeedReveal } from "../../src/scroll.js";
 import {
   Channel,
   harness,
@@ -48,8 +47,6 @@ function mount(
     composerFactory?: (host: HTMLElement) => Handle;
     /** What the head states about itself, per draw. */
     states?: (string | null)[];
-    /** The caret's view rule, for the suites that assert where it leaves the reader. */
-    scroll?: FeedReveal;
     /** A head of the suite's own, in place of the marked stub. */
     head?: () => HTMLElement;
   } = {},
@@ -79,7 +76,6 @@ function mount(
         ? undefined
         : (host) => opts.composerFactory!(host),
     initialFolded: opts.folded ?? true,
-    scroll: opts.scroll,
   });
   document.body.replaceChildren(bubble.element);
   return { bubble, h, heads };
@@ -1074,7 +1070,7 @@ describe("mountBubble: the caret's own view rule", () => {
   /** The feed's height with the bubble SHUT: 1000 - 300 leaves a tail at 700. */
   const CONTENT_HEIGHT = 1000;
 
-  /** A scripted scroll box, with the caret's view rule bound to it. */
+  /** A scripted scroll box the bubble hangs in. */
   function scrolling(opts: { scrollTop: number; panelTop: number }) {
     const box = document.createElement("div");
     let panel: HTMLElement | null = null;
@@ -1092,10 +1088,8 @@ describe("mountBubble: the caret's own view rule", () => {
     });
     box.getBoundingClientRect = () => rect(0, BOX_HEIGHT);
     document.body.replaceChildren(box);
-    const tail = new TailFollow(box);
     return {
       box,
-      reveal: feedReveal(box, tail),
       top: () => scrollTop,
       /** Adopt a mounted bubble into the box, and script its panel's box. */
       adopt(element: HTMLElement): void {
@@ -1121,52 +1115,41 @@ describe("mountBubble: the caret's own view rule", () => {
     await settle();
   }
 
-  it("scrolls the revealed sub-feed into view when the reader was not at the tail", async () => {
+  it("does not scroll the opened sub-feed into view (removed trigger)", async () => {
     // Arrange -- the reader holds a place 40px down; the panel will hang from
-    // 250, so 150 of its 200px falls below the box's 300px fold.
+    // 250, so 150 of its 200px falls below the box's 300px fold. The caret used
+    // to scroll the feed by that overhang; the user owns the scroll.
     const view = scrolling({ scrollTop: 40, panelTop: 250 });
-    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
+    const { bubble } = mount(subagentRow("b1"));
     view.adopt(bubble.element);
     // Act
     await click(bubble);
-    // Assert -- moved by exactly the overhang, so the head stays on screen.
-    expect(view.top()).toBe(190);
-  });
-
-  it("re-lands the tail when the reader was following it before the click", async () => {
-    // Arrange -- parked at the tail: 1000 - 300 = 700.
-    const view = scrolling({ scrollTop: 700, panelTop: 250 });
-    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
-    view.adopt(bubble.element);
-    // Act -- the expansion grows the feed by the panel's 200px.
-    await click(bubble);
-    // Assert -- the tail of the GROWN feed, not the position it was at.
-    expect(view.top()).toBe(900);
-  });
-
-  it("does not move the view when the panel it opened is already wholly on screen", async () => {
-    // Arrange -- the panel will hang from 100 and end at 300, the fold itself.
-    const view = scrolling({ scrollTop: 40, panelTop: 100 });
-    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
-    view.adopt(bubble.element);
-    // Act
-    await click(bubble);
-    // Assert -- a reader who can already see what they opened is left alone.
+    // Assert
     expect(view.top()).toBe(40);
   });
 
+  it("does not park the feed at its tail on an expand (removed trigger)", async () => {
+    // Arrange -- parked at the tail: 1000 - 300 = 700.
+    const view = scrolling({ scrollTop: 700, panelTop: 250 });
+    const { bubble } = mount(subagentRow("b1"));
+    view.adopt(bubble.element);
+    // Act -- the expansion grows the feed by the panel's 200px.
+    await click(bubble);
+    // Assert -- the caret itself writes nothing; a standing follow, if any, is
+    // TailFollow's to keep (scroll.ts).
+    expect(view.top()).toBe(700);
+  });
+
   it("does not move the view when the caret COLLAPSES a bubble", async () => {
-    // Arrange -- opened, and the view settled wherever the open left it.
+    // Arrange
     const view = scrolling({ scrollTop: 40, panelTop: 250 });
-    const { bubble } = mount(subagentRow("b1"), harness(), { scroll: view.reveal });
+    const { bubble } = mount(subagentRow("b1"));
     view.adopt(bubble.element);
     await click(bubble);
-    const settled = view.top();
     // Act -- the second click, which shuts it.
     await click(bubble);
-    // Assert -- a collapse takes content from BELOW the reader and moves them
-    // nowhere.
-    expect(view.top()).toBe(settled);
+    // Assert
+    expect(view.top()).toBe(40);
   });
 });
 

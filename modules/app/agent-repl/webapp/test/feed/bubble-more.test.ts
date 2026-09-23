@@ -54,11 +54,9 @@ describe("MORE_BUBBLE_SELECTOR: held to the scroll-box class", () => {
     expect(MORE_BUBBLE_SELECTOR).toContain(`.${BUBBLE_SCROLL_CLASS}`);
   });
 
-  it("scopes to the assistant and user bubbles only", () => {
+  it("serves every bubble's scroll box, and only a bubble's", () => {
     // Arrange / Act / Assert
-    expect(MORE_BUBBLE_SELECTOR).toBe(
-      `.bubble.assistant > .${BUBBLE_SCROLL_CLASS}, .bubble.user > .${BUBBLE_SCROLL_CLASS}`,
-    );
+    expect(MORE_BUBBLE_SELECTOR).toBe(`.bubble > .${BUBBLE_SCROLL_CLASS}`);
   });
 });
 
@@ -254,6 +252,41 @@ describe("shouldShowMore: a card title is the other kind it serves", () => {
       `.${TITLE_FOLD_CLASS}.${EXPANDED_CLASS}, .tool-fold.${EXPANDED_CLASS} .${TITLE_FOLD_CLASS}, ` +
         `.bubble-fold[data-expanded="true"] > .bubble-head .${TITLE_FOLD_CLASS}`,
     );
+  });
+});
+
+describe("installHasMore: the body is followed, not captured", () => {
+  /** Let the MutationObserver watching the box's children deliver. */
+  async function flushMutations(): Promise<void> {
+    await Promise.resolve();
+  }
+
+  it("measures a body a redraw handed the kept box", async () => {
+    // Arrange -- keep-scroll.ts keeps a scrolled box and swaps its body.
+    const box = document.createElement("div");
+    box.append(document.createElement("div"));
+    const seen: HTMLElement[] = [];
+    installHasMore(box, (b) => seen.push(b));
+    const next = document.createElement("div");
+    box.replaceChildren(next);
+    await flushMutations();
+    seen.length = 0;
+    // Act
+    fireResize(next);
+    // Assert
+    expect(seen).toEqual([box]);
+  });
+
+  it("stops measuring the body the box no longer holds", async () => {
+    // Arrange
+    const box = document.createElement("div");
+    const old = document.createElement("div");
+    box.append(old);
+    installHasMore(box, () => undefined);
+    box.replaceChildren(document.createElement("div"));
+    await flushMutations();
+    // Act + Assert
+    expect(() => fireResize(old)).toThrow(/no ResizeObserver/);
   });
 });
 

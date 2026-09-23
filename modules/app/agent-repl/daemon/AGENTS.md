@@ -368,6 +368,47 @@ ids the watcher ADOPTED (an `OnDetachedWork` with no announcer, the one shape
 adoption takes) and ids already retired (a replay). A re-take of the same set
 mints nothing, and crons, tasks and workflows are never in the set.
 
+## History is replayed ONLY on a workspace open or a transcript select
+
+Owner rule, 2026-09-23: history is replayed only when a workspace is OPENED or
+a transcript is SELECTED (`SPC j c`, BindWorkspaceSession), and only the FIRST
+PAGE. A watch or StartTurn opened without `known_through` is answered with the
+agent's first page, and serving it onto a feed that already holds those rows
+re-fires the history effects (`clear_confirmed`, `delivery_bound_moved`,
+`subagent_without_start`, `detached_unknown_unit`) and redraws the webapp.
+The rule is structural:
+
+- `sessionwatcher.Session.Opening` is REQUIRED and `Start` refuses the zero
+  value at ERROR (`daemon.sessionwatcher.start_refused`).
+  `sessionwatcher.WorkspaceOpened` and `sessionwatcher.TranscriptSelected`
+  are the only two replays, and each has ONE production caller,
+  `workspace.(*Fleet).openingFor`. Every other watcher is
+  `sessionwatcher.ResumeFrom` the retired watcher's `Pointers()`.
+- The fleet decides the opening in `openingFor`, and every watcher it starts
+  goes through `startWatcher`: a transcript selected since the last watcher
+  replays; a workspace this process never watched, or whose session comes up
+  FRESH (a new book), replays; a restart, a revival, a rollout relaunch and a
+  cold-gate re-open resume. This is correct because the feed keeps a
+  workspace's rows across every bring-up but a bind (`ResetWorkspace`). The
+  `daemon.workspace.bring_up` INFO record states `opening` and
+  `replays_history` for every watcher.
+- A turn opening never replays: `StartTurn` asks for ONE entry (R15 makes it
+  the turn's own prompt row), bounded by the live main watch's
+  `MainKnownThrough`. The main watch serves everything the turn writes live.
+- Inside one watcher, `known` is never forgotten, so a re-opened watch (a
+  relink, a repeated announcement) always states its pointer, and a detached
+  handle retired at its terminal is never re-admitted by a re-served
+  announcement.
+- `workspace/opening_test.go`'s `TestFirstPageRequestsHaveNamedSitesOnly`
+  fails the moment another production site builds a replay opening, a
+  `WatchAgentRequest`, a `StartTurnRequest` or a `ReadHistory` first-page
+  request.
+
+A successor daemon's adoption (handover, crash boot) is that process's first
+open of the workspace: its feed holds nothing, so it still replays the first
+page. Whether it should instead carry the incumbent's feed is an owner
+question, recorded in `docs/REMEDIATION-CHANGELOG.md` (`replay-first-page-only`).
+
 ## Deploy chain
 
 `bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →

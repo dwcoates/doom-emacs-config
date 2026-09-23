@@ -94,7 +94,7 @@ afterEach(() => {
 describe("drawFeedArtifact", () => {
   it("is the purple response-styled bubble", () => {
     const el = drawFeedArtifact(artifact({ case: "publishing", value: {} }), harness().rc);
-    expect(el.className).toBe("bubble assistant md agentic");
+    expect(el.className).toBe("bubble md assistant agentic");
   });
 
   it("draws the heading verbatim, the daemon's favicon emoji included", () => {

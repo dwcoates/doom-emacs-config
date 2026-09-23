@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { ancestorMatching } from "../src/dom.js";
+import { ancestorMatching, placeChildren } from "../src/dom.js";
 
 /** Fake ancestor-chain node: the shape ancestorMatching walks. */
 interface FakeNode {
@@ -71,5 +72,92 @@ describe("ancestorMatching", () => {
     const start = node("start", { parentElement: stop });
     // Act + Assert
     expect(ancestorMatching(start, stop, matches)).toBeNull();
+  });
+});
+
+describe("placeChildren", () => {
+  /** A parent holding elements named by ID, in order. */
+  function parentOf(...ids: string[]): { parent: HTMLElement; el: Record<string, HTMLElement> } {
+    const parent = document.createElement("div");
+    const el: Record<string, HTMLElement> = {};
+    for (const id of ids) {
+      el[id] = document.createElement("article");
+      el[id].id = id;
+      parent.append(el[id]);
+    }
+    return { parent, el };
+  }
+
+  /** The ids of the nodes a mutation batch REMOVED from PARENT. */
+  function removedIds(observer: MutationObserver): string[] {
+    return observer
+      .takeRecords()
+      .flatMap((record) => [...record.removedNodes])
+      .map((node) => (node as HTMLElement).id);
+  }
+
+  /** Watch PARENT's child list, synchronously readable through takeRecords. */
+  function watch(parent: HTMLElement): MutationObserver {
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(parent, { childList: true });
+    return observer;
+  }
+
+  it("removes nothing when the order is unchanged", () => {
+    // Arrange -- the redraw a row repaint inside its chrome triggers.
+    const { parent, el } = parentOf("a", "b", "c");
+    const observer = watch(parent);
+    // Act
+    placeChildren(parent, [el.a, el.b, el.c]);
+    // Assert -- no element left the document, so no scroll box inside reset.
+    expect(removedIds(observer)).toEqual([]);
+  });
+
+  it("inserts an appended element without removing any other", () => {
+    // Arrange -- the redraw a live append triggers.
+    const { parent, el } = parentOf("a", "b");
+    const fresh = document.createElement("article");
+    fresh.id = "c";
+    const observer = watch(parent);
+    // Act
+    placeChildren(parent, [el.a, el.b, fresh]);
+    // Assert
+    expect(removedIds(observer)).toEqual([]);
+  });
+
+  it("lands the children in the desired order", () => {
+    // Arrange
+    const { parent, el } = parentOf("a", "b", "c");
+    // Act
+    placeChildren(parent, [el.c, el.a, el.b]);
+    // Assert
+    expect([...parent.children].map((child) => child.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("drops a child the desired list no longer holds", () => {
+    // Arrange
+    const { parent, el } = parentOf("a", "b", "c");
+    // Act
+    placeChildren(parent, [el.a, el.c]);
+    // Assert
+    expect([...parent.children].map((child) => child.id)).toEqual(["a", "c"]);
+  });
+
+  it("drops a stray non-element node", () => {
+    // Arrange
+    const { parent, el } = parentOf("a");
+    parent.append(document.createTextNode("stray"));
+    // Act
+    placeChildren(parent, [el.a]);
+    // Assert
+    expect(parent.childNodes.length).toBe(1);
+  });
+
+  it("answers how many elements it inserted or moved", () => {
+    // Arrange -- one new element in the middle.
+    const { parent, el } = parentOf("a", "b");
+    const fresh = document.createElement("article");
+    // Act + Assert
+    expect(placeChildren(parent, [el.a, fresh, el.b])).toBe(1);
   });
 });

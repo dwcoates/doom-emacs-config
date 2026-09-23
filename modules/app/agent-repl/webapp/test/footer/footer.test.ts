@@ -64,7 +64,7 @@ async function settle(): Promise<void> {
 function mount(h: Harness = harness()) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  const footer = mountFooter(host, h.ctx, { revealRow: async () => true });
+  const footer = mountFooter(host, h.ctx, { selectDetachedWork: async () => true });
   mounted.push(footer);
   return { host, h, footer };
 }

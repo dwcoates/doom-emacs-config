@@ -17,6 +17,7 @@
  * makes lives in the pure helpers above it.
  */
 import { ancestorMatching } from "./dom.js";
+import { collapseClicked } from "./scroll.js";
 
 /**
  * Classes that mark a click-to-expand section — the thing the feed-wide click
@@ -102,6 +103,32 @@ export function cappedSectionAt<
   T extends { parentElement: T | null; classList: ClassTest },
 >(start: T | null, feed: T): T | null {
   return ancestorMatching(start, feed, (node) => isCappedSection(node.classList));
+}
+
+/**
+ * The class every element of a bubble's HEADER STRIP wears (src/bubble/draw.ts
+ * stamps it). The strip is the bubble's collapsed face as much as its capped
+ * box is — a peer message's collapsed face is nothing BUT its strip — so a
+ * click on it toggles the bubble's one scroll box. Declared here, where the
+ * click is resolved, and imported by the bubble.
+ */
+export const BUBBLE_STRIP_CLASS = "bubble-strip";
+
+/**
+ * The section a click at START toggles, stopping below FEED: the innermost
+ * capped section at or above it, or — when a bubble's header strip is met
+ * first — that bubble's own scroll box. ONE toggle for every bubble kind: a
+ * peer message's label, a prompt's address line and a held prompt's badges all
+ * open the same box a click on the text itself does.
+ */
+export function sectionAt(start: HTMLElement | null, feed: HTMLElement): HTMLElement | null {
+  const hit = ancestorMatching(
+    start,
+    feed,
+    (node) => isCappedSection(node.classList) || node.classList.contains(BUBBLE_STRIP_CLASS),
+  );
+  if (hit === null || !hit.classList.contains(BUBBLE_STRIP_CLASS)) return hit;
+  return hit.parentElement?.querySelector<HTMLElement>(":scope > .bubble-scroll") ?? null;
 }
 
 /**
@@ -245,19 +272,16 @@ export function installClickExpand(
   feed.addEventListener("click", (e: MouseEvent) => {
     const target = e.target instanceof HTMLElement ? e.target : null;
     const section = expandAction({
-      section: cappedSectionAt(target, feed),
+      section: sectionAt(target, feed),
       interactive: target !== null && target.closest(CLICK_THROUGH_SELECTOR) !== null,
       selectedText: selection(),
     });
     if (section === null) return;
     const expanded = toggleExpanded(section);
-    // FIX3 (owner ruling, 2026-09-15: "unselecting the expanded bubble should
-    // return it to the original state — scrolled to the top, not where you left
-    // it"). Collapsing clips the box (overflow-y: hidden), which keeps whatever
-    // scrollTop the expanded view was left at and shows the box from there. Reset
-    // it so the next collapsed view — and a subsequent re-expand — starts at the
-    // top.
-    if (!expanded) section.scrollTop = 0;
+    // FIX3 (owner ruling, 2026-09-15): a collapse shows the preview from the
+    // top. The reader's own click is what moves the box, so the write lives in
+    // scroll.ts with every other scroll write (`collapseClicked`).
+    if (!expanded) collapseClicked(section);
     afterToggle?.(section, expanded);
   });
 }

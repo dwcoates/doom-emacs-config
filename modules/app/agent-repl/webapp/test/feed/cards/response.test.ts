@@ -18,17 +18,13 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
+  RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
-  RESPONSE_BODY_TAG,
-  TREE_WIDTH_UNMEASURABLE,
-  createResponseBody,
   drawFeedResponse,
-  measureTreeCols,
-  proseHtml,
-  proseNeedsWidth,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
+import { proseHtml } from "../../../src/bubble/body.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
@@ -75,23 +71,6 @@ function mount(el: HTMLElement): HTMLElement {
   column.append(el);
   document.body.append(column);
   return column;
-}
-
-/**
- * A body inside a scroll box inside a bubble (of BUBBLECLASS), attached under
- * its own column unless DETACHED.
- */
-function stageBody(opts: { detached?: boolean; bubbleClass?: string } = {}): HTMLElement {
-  const bubble = document.createElement("div");
-  bubble.className = opts.bubbleClass ?? "bubble assistant md";
-  const scroll = document.createElement("div");
-  scroll.className = "bubble-scroll";
-  const body = document.createElement("div");
-  body.className = "bubble-body";
-  scroll.append(body);
-  bubble.append(scroll);
-  if (opts.detached !== true) mount(bubble);
-  return body;
 }
 
 /** The tree the metaprompt renderer recognizes, with its header. */
@@ -456,6 +435,38 @@ describe("the usage corner's slider markup", () => {
     // token stays at the right edge.
     const corner = el.querySelector(".usage-corner") as HTMLElement;
     expect(shape(corner)).toEqual([{ className: "usage-slider", children: ["usage-stamp"] }]);
+  });
+
+  it("marks an arriving corner, so its empty slot never slides out", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(0n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(true);
+  });
+
+  it("does not mark a settled corner as arriving", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(false);
+  });
+
+  it("reserves the same slot width arriving and settled, so the settle moves nothing", () => {
+    // Arrange -- the real stylesheet.
+    const teardown = installStylesheet();
+    const arrivingEl = drawFeedResponse(withUsage(0n), rowContext());
+    const settledEl = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.append(arrivingEl, settledEl);
+    try {
+      // Act
+      const widths = [arrivingEl, settledEl].map((el) =>
+        cascadedValue(el.querySelector(".usage-slider") as HTMLElement, "width"),
+      );
+      // Assert
+      expect([widths[0] === widths[1], widths[0] !== "" && widths[0] !== "auto"]).toEqual([true, true]);
+    } finally {
+      teardown();
+    }
   });
 
   it("keeps the spacer's text and the visible token identical", () => {
@@ -1029,7 +1040,8 @@ describe("the wrapped tree a settled response carries", () => {
       // Assert — fit-content up to the 77% cap, never pinned at the cap width.
       expect(width).toBe("fit-content");
       expect(width).not.toBe("77%");
-      expect(maxWidth).toBe("77%");
+      expect(maxWidth).toBe("var(--bubble-max-width)");
+      expect(stylesheet).toMatch(/--bubble-max-width:\s*77%;/);
       el.remove();
     } finally {
       teardown();
@@ -1082,193 +1094,6 @@ describe("the wrapped tree a settled response carries", () => {
   });
 });
 
-/**
- * `measureTreeCols` reports the columns a tree wraps to: the body's content
- * width at the bubble's CAP, in columns of the tree font — and nothing else.
- * `installTreeLayout` stages the reads the way a real engine answers them, so a
- * DETACHED element reads as no box and no style, exactly as in the webview.
- */
-describe("the columns a tree wraps to are measured against the bubble cap", () => {
-  const staged = useTreeLayout();
-
-
-  it("measures the cap less the chrome, in columns of the tree font", () => {
-    // Arrange — 77% of 1000px = 770px, less 2 x 10px body padding = 750px.
-    const body = stageBody();
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — floor(750 / 8).
-    expect(cols).toBe(93);
-  });
-
-  it("resolves the percentage cap against the containing block, so a wider column yields more columns", () => {
-    // Arrange
-    const body = stageBody();
-    const narrow = measureTreeCols(body);
-    // Act
-    staged.layout.containingPx = 1400;
-    const wide = measureTreeCols(body);
-    // Assert
-    expect(wide).toBeGreaterThan(narrow);
-  });
-
-  it("honors a px max-width cap directly", () => {
-    // Arrange — an engine that resolves the cap to px hands it back as px.
-    staged.layout.maxWidth = "560px";
-    const body = stageBody();
-    // Act + Assert — 560 - 20 = 540px, floor(540 / 8).
-    expect(measureTreeCols(body)).toBe(67);
-  });
-
-  it("resolves a single-percentage calc() cap as that percentage", () => {
-    // Arrange
-    staged.layout.maxWidth = "calc(77%)";
-    const body = stageBody();
-    // Act + Assert
-    expect(measureTreeCols(body)).toBe(93);
-  });
-
-  it("never reads the bubble's own fit-content width", () => {
-    // Arrange — the bubble renders far narrower than its cap.
-    const body = stageBody();
-    const bubble = body.closest<HTMLElement>(".bubble");
-    if (bubble === null) throw new Error("no bubble");
-    const atCap = measureTreeCols(body);
-    // Act — shrink the bubble's box and the body's own width.
-    bubble.style.width = "120px";
-    bubble.getBoundingClientRect = () => ({ width: 120 }) as DOMRect;
-    Object.defineProperty(body, "clientWidth", { value: 100, configurable: true });
-    // Assert — the budget is the cap's, unmoved.
-    expect(measureTreeCols(body)).toBe(atCap);
-  });
-
-  it("records the measured budget at debug", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    const body = stageBody();
-    // Act
-    measureTreeCols(body);
-    // Assert
-    const record = await forwardedRecord(capture, "feed.cards.response.tree-cols");
-    expect(record.context).toMatchObject({ cols: 93, char_px: 8 });
-  });
-});
-
-describe("an unmeasurable tree width is an invariant violation", () => {
-  const staged = useTreeLayout();
-
-
-  /** Measure BODY, and answer the reason the violation was recorded with. */
-  async function violation(body: HTMLElement): Promise<string> {
-    const capture = captureLogRecords();
-    expect(() => measureTreeCols(body)).toThrow(/metaprompt tree width unmeasurable/);
-    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
-    expect(record.level.case).toBe("error");
-    const reason = record.context?.reason;
-    return typeof reason === "string" ? reason : "";
-  }
-
-  it("refuses a body that is not in the document", async () => {
-    // Arrange
-    const body = stageBody({ detached: true });
-    // Act + Assert
-    expect(await violation(body)).toBe("the bubble body is not in the document");
-  });
-
-  it("refuses a body with no bubble around it", async () => {
-    // Arrange
-    const body = stageBody({ bubbleClass: "not-a-bubble" });
-    // Act + Assert
-    expect(await violation(body)).toBe("the body has no bubble around it");
-  });
-
-  it("refuses a bubble with no containing block", async () => {
-    // Arrange — the document element is the one connected element with no parent.
-    const root = document.documentElement;
-    root.classList.add("bubble");
-    const body = document.createElement("div");
-    body.className = "bubble-body";
-    document.body.append(body);
-    try {
-      // Act + Assert
-      expect(await violation(body)).toBe("the bubble has no containing block");
-    } finally {
-      root.classList.remove("bubble");
-    }
-  });
-
-  it("refuses a tree font whose column measures no width", async () => {
-    // Arrange — a laid-out page that gave the probe no box.
-    staged.layout.charPx = 0;
-    const body = stageBody();
-    // Act + Assert
-    expect(await violation(body)).toBe("the tree font's column measured no width");
-  });
-
-  it("refuses a containing block with no width", async () => {
-    // Arrange
-    staged.layout.containingPx = 0;
-    const body = stageBody();
-    // Act + Assert
-    expect(await violation(body)).toBe("the bubble's containing block has no width");
-  });
-
-  it("refuses a max-width that does not resolve", async () => {
-    // Arrange
-    staged.layout.maxWidth = "none";
-    const body = stageBody();
-    // Act + Assert
-    expect(await violation(body)).toBe("the bubble's max-width does not resolve");
-  });
-
-  it("refuses a computed length that is not in px", async () => {
-    // Arrange — jsdom's own unit-less answer, which no laid-out engine gives.
-    const body = stageBody();
-    vi.spyOn(window, "getComputedStyle").mockImplementation(
-      () => ({ maxWidth: "77%", paddingLeft: "0", paddingRight: "0" }) as unknown as CSSStyleDeclaration,
-    );
-    // Act + Assert
-    expect(await violation(body)).toBe("a computed length is not in px");
-    vi.restoreAllMocks();
-  });
-
-  it("refuses a cap whose content width holds no column", async () => {
-    // Arrange — a body padding wider than the whole cap.
-    staged.layout.bodyPaddingPx = 400;
-    const body = stageBody();
-    // Act + Assert
-    expect(await violation(body)).toBe("the bubble's content width at its cap holds no column");
-  });
-
-  it("refuses to follow the column on a page with no ResizeObserver", async () => {
-    // Arrange
-    vi.stubGlobal("ResizeObserver", undefined);
-    const capture = captureLogRecords();
-    const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
-      rowContext(),
-    );
-    // Act — the attach is where the tree first paints and the observer is armed;
-    // jsdom reports a custom element reaction's throw rather than rethrowing it.
-    const reported: unknown[] = [];
-    const onError = (event: ErrorEvent): void => {
-      event.preventDefault();
-      reported.push(event.error);
-    };
-    window.addEventListener("error", onError);
-    try {
-      mount(el);
-    } finally {
-      window.removeEventListener("error", onError);
-    }
-    // Assert
-    expect(reported).toHaveLength(1);
-    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
-    expect(record.context).toMatchObject({
-      reason: "the page has no ResizeObserver to follow the column's width",
-    });
-  });
-});
 
 describe("a tree's first paint waits for the body to join the document", () => {
   const staged = useTreeLayout();
@@ -1408,37 +1233,6 @@ describe("a tree's first paint waits for the body to join the document", () => {
   });
 });
 
-describe("proseNeedsWidth", () => {
-  it.each([
-    { name: "a bare tree", markdown: TREE, want: true },
-    { name: "a fenced tree", markdown: ["```", TREE, "```"].join("\n"), want: true },
-    { name: "plain prose", markdown: "**done**, nothing tree-shaped", want: false },
-  ])("says whether $name needs a measured width", ({ markdown, want }) => {
-    // Act + Assert
-    expect(proseNeedsWidth(markdown)).toBe(want);
-  });
-});
-
-describe("the response body", () => {
-  it("is the custom element that knows when it joins the document", () => {
-    // Arrange / Act
-    const body = createResponseBody();
-    // Assert
-    expect([body.localName, body.className]).toEqual([RESPONSE_BODY_TAG, "bubble-body"]);
-  });
-
-  it("runs its hooks every time it joins the document", () => {
-    // Arrange
-    const body = createResponseBody();
-    let runs = 0;
-    body.onConnect(() => runs++);
-    // Act
-    document.body.append(body);
-    document.body.prepend(body);
-    // Assert — an attach and a move.
-    expect(runs).toBe(2);
-  });
-});
 
 describe("the record of the drawn response", () => {
   it("records a row's FIRST draw at info, the bubble appearing being the action", async () => {
@@ -1582,7 +1376,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
    * streaming reveal carries no trailing indicator node, so it is exactly the
    * oracle's markup. */
   function prose(body: HTMLElement): string {
-    return body.innerHTML;
+    return body.querySelector(`.${RESPONSE_PROSE_CLASS}`)?.innerHTML ?? "";
   }
 
   it("ends the reveal byte-identical to the whole-render oracle", () => {
@@ -1596,7 +1390,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     if (streamingBody === null) throw new Error("no bubble body");
     // Act — drive the type-out to completion.
     vi.advanceTimersByTime(5000);
-    // The settled draw of the same text is the oracle: one-shot `paintWhole`.
+    // The settled draw of the same text is the oracle: one settled paint.
     const settled = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
       rowContext(),
@@ -1605,7 +1399,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     const settledBody = settled.querySelector<HTMLElement>(".bubble-body");
     if (settledBody === null) throw new Error("no settled body");
     // Assert — the reconciled reveal lands exactly where the one-shot render does.
-    expect(prose(streamingBody)).toBe(settledBody.innerHTML);
+    expect(prose(streamingBody)).toBe(prose(settledBody));
   });
 
   it("keeps a stable leading tree line's node identity while the tail grows", () => {
@@ -1859,7 +1653,7 @@ describe("the thinking bubble's two-line cap", () => {
       configurable: true,
       get: () => {
         if (cascadedValue(scroll, "max-height") === "50vh") return lines * LINE_PX;
-        return Math.min(lines, resolvedNumber(cascadedValue(scroll, "--cap-lines"))) * LINE_PX;
+        return Math.min(lines, resolvedNumber(cascadedValue(scroll, "--bubble-cap-lines"))) * LINE_PX;
       },
     });
   }
@@ -1887,7 +1681,7 @@ describe("the thinking bubble's two-line cap", () => {
       // Act
       const scroll = mounted(thinking("success"), 5);
       // Assert
-      expect(cascadedValue(scroll, "--cap-lines")).toBe("2");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("2");
     } finally {
       teardown();
     }
@@ -1900,7 +1694,7 @@ describe("the thinking bubble's two-line cap", () => {
       // Act
       const scroll = mounted(thinking("update"), 5);
       // Assert
-      expect(cascadedValue(scroll, "--cap-lines")).toBe("2");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("2");
     } finally {
       teardown();
     }
@@ -2002,7 +1796,7 @@ describe("the thinking bubble's two-line cap", () => {
       );
       // Assert — the shared budget, so three lines fit with no fade.
       expect([
-        cascadedValue(scroll, "--cap-lines"),
+        cascadedValue(scroll, "--bubble-cap-lines"),
         scroll.classList.contains(HAS_MORE_CLASS),
       ]).toEqual(["var(--feed-cap-lines)", false]);
     } finally {
@@ -2082,11 +1876,187 @@ describe("the data-driven final-answer green", () => {
     // falls back to green the moment the selection clears. (var()-resolved
     // colours are not observable under jsdom; selector + order is the
     // deterministic proof, mirrored from styles.test.ts.)
-    expect(el.matches(".bubble.assistant.final-response:not(.thinking-bubble)")).toBe(true);
-    expect(el.matches(".bubble.assistant.final-response.response-selected")).toBe(true);
-    const green = stylesheet.indexOf(".bubble.assistant.final-response:not(.thinking-bubble)");
-    const blue = stylesheet.indexOf(".bubble.assistant.final-response.response-selected");
+    expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
+    expect(el.matches(".bubble.final-response.response-selected")).toBe(true);
+    const green = stylesheet.indexOf('.bubble.final-response:not([data-variant="thinking"])');
+    const blue = stylesheet.indexOf(".bubble.final-response.response-selected");
     expect(green).toBeGreaterThanOrEqual(0);
     expect(blue).toBeGreaterThan(green);
+  });
+});
+
+/**
+ * A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user owns
+ * the scroll). A fresh bubble per push replaced the scroll box, throwing a
+ * reader scrolled inside an expanded response back to its top on every
+ * fragment. jsdom lays nothing out, so the invariants are asserted on the DOM:
+ * the scroll box is the same element, its `scrollTop` (a plain number under
+ * jsdom) is untouched, and unchanged prose nodes keep their identity.
+ */
+describe("a re-push updates the bubble in place", () => {
+  /** What a re-push may carry besides its prose. */
+  interface Extra {
+    usage?: { text: string; atMs?: bigint };
+    notice?: { heading: string };
+  }
+
+  /** An arriving response carrying MARKDOWN. */
+  function arriving(markdown: string, extra: Extra = {}) {
+    return response({ ...extra, result: { case: "update", value: { prose: { markdown } } } });
+  }
+
+  /** A settled response carrying MARKDOWN. */
+  function settledAs(markdown: string, extra: Extra = {}) {
+    return response({ ...extra, result: { case: "success", value: { prose: { markdown } } } });
+  }
+
+  /** Draw FIRST, mount it, then draw NEXT over it as feed-view would. */
+  function redraw(first: FeedResponse, next: FeedResponse): { before: HTMLElement; after: HTMLElement } {
+    const before = drawFeedResponse(first, rowContext());
+    mount(before);
+    vi.advanceTimersByTime(2000);
+    const after = drawFeedResponse(next, rowContext(before));
+    return { before, after };
+  }
+
+  it("returns the previous bubble itself", () => {
+    // Arrange + Act
+    const { before, after } = redraw(arriving("hello"), arriving("hello world"));
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps the scroll box, so its position survives a streaming push", () => {
+    // Arrange -- the reader scrolled 120px inside the expanded bubble.
+    const before = drawFeedResponse(arriving("hello"), rowContext());
+    mount(before);
+    vi.advanceTimersByTime(2000);
+    const box = before.querySelector<HTMLElement>(".bubble-scroll");
+    if (box === null) throw new Error("the bubble drew no scroll box");
+    box.scrollTop = 120;
+    // Act
+    const after = drawFeedResponse(arriving("hello world"), rowContext(before));
+    // Assert
+    expect([after.querySelector(".bubble-scroll") === box, box.scrollTop]).toEqual([true, 120]);
+  });
+
+  it("keeps the scroll box when the response settles", () => {
+    // Arrange + Act
+    const { before, after } = redraw(arriving("hello"), settledAs("hello"));
+    // Assert
+    expect(after.querySelector(".bubble-scroll")).toBe(before.querySelector(".bubble-scroll"));
+  });
+
+  it("keeps an unchanged paragraph's node when the prose grows", () => {
+    // Arrange
+    const before = drawFeedResponse(settledAs("first paragraph"), rowContext());
+    mount(before);
+    const paragraph = before.querySelector(".bubble-body p");
+    // Act
+    drawFeedResponse(settledAs("first paragraph\n\nsecond paragraph"), rowContext(before));
+    // Assert
+    expect(before.querySelector(".bubble-body p")).toBe(paragraph);
+  });
+
+  it("stops the previous push's type-out painting over the update", () => {
+    // Arrange -- a long arrival still typing when the row settles to less.
+    const before = drawFeedResponse(arriving("x".repeat(5000)), rowContext());
+    mount(before);
+    vi.advanceTimersByTime(50);
+    // Act
+    drawFeedResponse(settledAs("done"), rowContext(before));
+    vi.advanceTimersByTime(5000);
+    // Assert
+    expect(before.querySelector(".bubble-body")?.textContent?.trim()).toBe("done");
+  });
+
+  it("keeps the controller's blue selection mark", () => {
+    // Arrange
+    const before = drawFeedResponse(arriving("hello"), rowContext());
+    mount(before);
+    before.classList.add("response-selected");
+    // Act
+    drawFeedResponse(arriving("hello world"), rowContext(before));
+    // Assert
+    expect(before.classList.contains("response-selected")).toBe(true);
+  });
+
+  it("keeps the usage corner when its figure did not change", () => {
+    // Arrange
+    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k" } }), rowContext());
+    mount(before);
+    const corner = before.querySelector(".usage-corner");
+    // Act
+    drawFeedResponse(arriving("hello world", { usage: { text: "1k" } }), rowContext(before));
+    // Assert
+    expect(before.querySelector(".usage-corner")).toBe(corner);
+  });
+
+  it("replaces the usage corner when its figure changed", () => {
+    // Arrange
+    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k" } }), rowContext());
+    mount(before);
+    // Act
+    drawFeedResponse(arriving("hello world", { usage: { text: "2k" } }), rowContext(before));
+    // Assert
+    expect(before.querySelectorAll(".usage-stamp")[0]?.textContent).toBe("2k");
+  });
+
+  it("stops the clock of a corner it replaced", () => {
+    // Arrange -- a settled corner ticks its "ago".
+    const before = drawFeedResponse(settledAs("done", { usage: { text: "1k", atMs: 1_000n } }), rowContext());
+    mount(before);
+    const corner = before.querySelector(".usage-corner");
+    // Act
+    drawFeedResponse(settledAs("done", { usage: { text: "2k", atMs: 1_000n } }), rowContext(before));
+    // Assert
+    expect(corner?.querySelector(`[${TICKING_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it("draws one cut-short marker however often the broken state is pushed", () => {
+    // Arrange
+    const broken = response({ result: { case: "error", value: { prose: { markdown: "half" } } } });
+    // Act
+    const { after } = redraw(broken, broken);
+    // Assert
+    expect(after.querySelectorAll(".response-cut-short-marker")).toHaveLength(1);
+  });
+
+  it("drops the notice heading when a re-push carries none", () => {
+    // Arrange + Act
+    const { after } = redraw(settledAs("hi", { notice: { heading: "interrupted" } }), settledAs("hi"));
+    // Assert
+    expect([after.querySelector(".response-notice-heading"), after.hasAttribute("data-notice")]).toEqual([
+      null,
+      false,
+    ]);
+  });
+
+  it("leaves the bubble untouched when a re-push is malformed", () => {
+    // Arrange
+    const before = drawFeedResponse(settledAs("hello"), rowContext());
+    mount(before);
+    const malformed = response({ result: { case: "success", value: {} } });
+    // Act
+    let refused: unknown = null;
+    try {
+      drawFeedResponse(malformed, rowContext(before));
+    } catch (err) {
+      refused = err;
+    }
+    // Assert -- refused, and the bubble on screen is the one drawn before.
+    expect([refused instanceof MalformedView, before.querySelector(".bubble-body")?.textContent?.trim()]).toEqual([
+      true,
+      "hello",
+    ]);
+  });
+
+  it("draws a fresh bubble when the previous body is not a response bubble", () => {
+    // Arrange -- a row whose arm changed hands over some other card's element.
+    const previous = document.createElement("div");
+    // Act
+    const after = drawFeedResponse(settledAs("hi"), rowContext(previous));
+    // Assert
+    expect(after).not.toBe(previous);
   });
 });

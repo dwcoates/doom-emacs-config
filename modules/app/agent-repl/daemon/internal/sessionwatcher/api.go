@@ -404,6 +404,14 @@ type Watcher interface {
 	Link() LinkState
 	// LiveWork is the current live-work set.
 	LiveWork() LiveWorkSet
+	// Pointers is the newest pointer this watcher was served on each watch. It
+	// is what a SUCCESSOR watcher of the same conversation resumes from
+	// (ResumeFrom), and it stays readable after Close for exactly that reason.
+	Pointers() Pointers
+	// MainKnownThrough is the newest pointer the MAIN agent's watch was served,
+	// nil when it was served none. StartTurn states it as known_through, so the
+	// accepted turn's opening page carries only what the turn itself wrote.
+	MainKnownThrough() *conversationv1.HistoryPointer
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
 	// Free reports freeness: no turn in flight AND an empty live-work set.
@@ -468,21 +476,17 @@ type Watcher interface {
 	Close() error
 }
 
-// Session is what the caller learned when it opened the session, plus the
-// history pointers it persisted. The watcher needs both: the SessionStarted
-// states the LEVEL it must open watches for (the turn in flight and every live
-// detached item), and the pointers are the known_through marks that make each
-// opening page a catch-up rather than a repaint.
+// Session is what the caller learned when it opened the session, and how the
+// watcher's watches begin. The watcher needs both: the SessionStarted states
+// the LEVEL it must open watches for (the turn in flight and every live
+// detached item), and the Opening decides whether each opening page is the
+// first page (a replay) or a catch-up from a predecessor's pointers. See
+// opening.go.
 type Session struct {
 	// Started is StartSession's success, whole.
 	Started *conversationv1.SessionStarted
-	// MainKnownThrough is the caller's persisted pointer for the MAIN agent,
-	// whose watch is addressed by an unset target and so has no key below.
-	// Nil asks for a full first page.
-	MainKnownThrough *conversationv1.HistoryPointer
-	// KnownThrough is the caller's persisted pointer per detached agent, keyed
-	// by AgentId.value. A missing key asks for a full first page.
-	KnownThrough map[string]*conversationv1.HistoryPointer
+	// Opening is REQUIRED: Start refuses the zero value.
+	Opening Opening
 }
 
 // Start builds and starts one workspace's watcher against its shim client.

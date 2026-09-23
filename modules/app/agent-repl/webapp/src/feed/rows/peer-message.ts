@@ -2,85 +2,49 @@
  * peer-message — A MESSAGE FROM ANOTHER CLAUDE: an inter-session peer message
  * or a subagent hand-back.
  *
- * IT IS NOT A PROMPT. It is drawn RIGHT-ALIGNED like a prompt (the same side of
- * the feed) but PURPLE, not the blue `.bubble.user` fill — a low-priority,
- * non-intrusive aside. It is ABBREVIATED: collapsed it shows only the sender
- * label and a chevron, NO body; clicking expands it to reveal the body via the
- * shared collapse/expand model (collapsed = no scroll; expand caps at 50vh and
- * only then reveals `overflow-y:auto` — bubble-scroll.ts + the `.expanded`
- * rules in styles.css).
- *
- * THE HEAD DRIVES THE TOGGLE. When collapsed the body's scroll box is hidden,
- * so there is nothing for the feed-wide click-to-expand (expand.ts) to land on;
- * the head's own click toggles the `.expanded` class on the scroll box, which
- * IS a capped section, so the feed's expandedKeys/applyExpanded reconcile keeps
- * the reader's open/closed choice across a re-push, and a click on the revealed
- * body collapses it again exactly as every other capped section does.
+ * ITS SPEC, AND NOTHING ELSE (owner rulings, 2026-09-23). It is a prompt-role
+ * bubble — the right rail and the prompt fill, like every prompt kind — whose
+ * header strip is the sender's label and whose collapsed line limit is ZERO:
+ * collapsed, it shows its label and nothing of its body, which is the
+ * abbreviated aside it has always been. It opens and closes through the one
+ * toggle every bubble has (expand.ts: a click on the strip or the body toggles
+ * the scroll box), wears the one has-more chevron, and its body is a markdown
+ * slot the one body pipeline paints, so a tree in it wraps at the bubble's cap.
  */
 import { log } from "../../log.js";
-import { bubbleScroll, BUBBLE_SCROLL_CLASS } from "../bubble-scroll.js";
-import { EXPANDED_CLASS } from "../../expand.js";
-import { renderMarkdown } from "../../markdown.js";
+import { markdownSlot } from "../../bubble/body.js";
+import { drawBubble } from "../../bubble/draw.js";
 import type { FeedPeerMessage } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
-/** The class the peer bubble wears — right-aligned like a prompt, but purple. */
+/** The class the peer bubble's hooks know it by. */
 export const PEER_BUBBLE_CLASS = "peer";
 
-/** The always-visible head: the sender label plus the expand chevron. */
-export const PEER_HEAD_CLASS = "peer-head";
+/** The header strip's one element: the sender label. */
+export const PEER_LABEL_CLASS = "peer-label";
 
-/**
- * The abbreviated peer bubble.
- *
- * COLLAPSED shows the head only. The body lives in a `.bubble-scroll` box the
- * stylesheet hides while the bubble is collapsed and reveals (capped at 50vh,
- * scrollable) once `.expanded`. The body reuses the feed's markdown machinery,
- * so a peer message renders like any other prose.
- */
-export function drawFeedPeerMessage(msg: FeedPeerMessage): HTMLElement {
+/** The class of the markdown slot the peer's body is painted into. */
+export const PEER_BODY_CLASS = "peer-body";
+
+/** The peer bubble: its spec, drawn (in place over PREVIOUS) by the one bubble. */
+export function drawFeedPeerMessage(msg: FeedPeerMessage, previous?: HTMLElement): HTMLElement {
   log.info("drawing a peer-message row", {
     operation: "feed.draw-peer-message",
     context: { sender: msg.sender },
   });
-  const bubble = document.createElement("div");
-  bubble.className = `bubble ${PEER_BUBBLE_CLASS} md`;
-
-  const head = document.createElement("button");
-  head.type = "button";
-  head.className = PEER_HEAD_CLASS;
-
-  const label = document.createElement("span");
-  label.className = "peer-label";
+  const label = document.createElement("div");
+  label.className = PEER_LABEL_CLASS;
   // The daemon composes the label ("agent <sender>"); drawn verbatim.
   label.textContent = msg.sender;
-  head.append(label);
-
-  const chevron = document.createElement("span");
-  chevron.className = "peer-chevron";
-  chevron.setAttribute("aria-hidden", "true");
-  head.append(chevron);
-  bubble.append(head);
-
-  const body = document.createElement("div");
-  body.className = "bubble-body";
-  body.innerHTML = renderMarkdown(msg.body);
-  const scroll = bubbleScroll(body);
-  bubble.append(scroll);
-
-  // The head toggles the body's scroll box, the tracked capped section. A click
-  // on the revealed body collapses it through the feed-wide handler, so this
-  // handler owns only the collapsed→expanded direction the hidden body cannot.
-  head.addEventListener("click", () => {
-    const expanded = scroll.classList.toggle(EXPANDED_CLASS);
-    bubble.classList.toggle("peer-expanded", expanded);
-    head.setAttribute("aria-expanded", String(expanded));
-  });
-  head.setAttribute("aria-expanded", "false");
-
-  // A defensive assertion that the box the head toggles is the one the
-  // stylesheet and the reconcile both key on.
-  if (!scroll.classList.contains(BUBBLE_SCROLL_CLASS)) {
-    throw new Error("peer-message: the body must ride the shared bubble-scroll box");
-  }
-  return bubble;
+  return drawBubble(
+    {
+      role: "prompt",
+      variant: "peer",
+      hooks: [PEER_BUBBLE_CLASS],
+      working: false,
+      strip: [label],
+      content: [markdownSlot(PEER_BODY_CLASS, msg.body)],
+      capLines: 0,
+    },
+    previous,
+  ).bubble;
 }
