@@ -228,7 +228,7 @@ func (o pageOrigin) String() string {
 func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage, origin pageOrigin) {
 	if entries := page.GetEntries(); len(entries) > 0 {
 		if ptr := entries[0].GetAt(); ptr != nil {
-			w.known[watchKey(a.id)] = ptr
+			w.adoptPagePointerLocked(a, ptr, origin)
 		}
 	}
 	if a.id == nil {
@@ -248,7 +248,7 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 		"origin": origin.String(), "catch_up": a.catchUp,
 	})
 	agent := w.watchAgentLocked(a)
-	w.sinks.Feed.OnHistoryPage(w.ws, agent, page, w.addr)
+	w.sinks.Feed.OnHistoryPage(w.ws, agent, feedPage(page, origin, a.catchUp), w.addr)
 	// A SPAWN ON THIS PAGE OWES ITS CHILD A WATCH. The page's own frames drew
 	// the commission, but the created agent's conversation lives only on the
 	// child's own book — so every spawn the page carries opens the same watch
@@ -264,6 +264,40 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	// reach the views that act was standing in.
 	w.routePageClosingsLocked(a, page, origin)
 	a.paged = true
+}
+
+// adoptPagePointerLocked records an opening page's newest pointer as the
+// watch's high-water mark.
+//
+// STARTTURN'S PAGE NEVER MOVES A MARK THE MAIN WATCH ALREADY HOLDS. The main
+// watch stands beside that page and serves the same rows live, and it may have
+// served rows NEWER than the page's one (the turn's first frames can beat the
+// answer back). Taking the page's pointer then would walk the mark backwards,
+// and the next re-open would re-serve what the views already drew. A main
+// watch that holds no mark yet — refused, or not yet paged — takes it, so its
+// re-open catches up from the turn's own row rather than from nothing.
+func (w *watcher) adoptPagePointerLocked(a *agentWatch, ptr *conversationv1.HistoryPointer, origin pageOrigin) {
+	key := watchKey(a.id)
+	if origin == pageTurnAccepted && w.known[key] != nil {
+		return
+	}
+	w.known[key] = ptr
+}
+
+// feedPage is the page the FEED is handed. A page's boundary says whether
+// older history remains BELOW it, and only a watch's first page is read from
+// the top of the book: a catch-up page is bounded by known_through and
+// StartTurn's page by its one-entry budget, so a `floor` on either means "the
+// mark was reached" and a `more` means "the budget ran out" — neither is a
+// statement about the conversation's oldest entry. Handed through, a catch-up
+// `floor` cleared the replay-truncated marker the first page had set, and a
+// turn page's `more` re-set it as a one-entry replay. So those two carry their
+// entries and no boundary.
+func feedPage(page *conversationv1.HistoryPage, origin pageOrigin, catchUp bool) *conversationv1.HistoryPage {
+	if origin != pageTurnAccepted && !catchUp {
+		return page
+	}
+	return &conversationv1.HistoryPage{Entries: page.GetEntries()}
 }
 
 // routePageClosingsLocked walks an opening page's rows that CLOSE AN ACT,
