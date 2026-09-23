@@ -1065,28 +1065,68 @@ func TestAWorkspaceNeverHandedOverIsOwnedOnceTheSuccessorAdvertises(t *testing.T
 	}
 }
 
-func TestTheSuccessorOwnsWhatItWasNotHandedOnceARetriedAdvertiseLands(t *testing.T) {
-	// Arrange: the claim is held once, then released.
+func TestTheSuccessorTakesOverOnceTheIncumbentLetsGoOfTheClaim(t *testing.T) {
+	// Arrange: the claim is held once, then released by the incumbent's exit.
+	var writes *scriptedAddrWrites
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
+	})
+	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{errHeldClaim, nil}}
+	_, second := joinedWithOneOfTwo(t, h)
+
+	// Act: Join's own watcher retries on its backoff.
+	h.clock.awaitArmed(t, incumbentExitPollInitial)
+	h.clock.Fire(incumbentExitPollInitial)
+	h.clock.awaitArmed(t, 2*incumbentExitPollInitial)
+	h.clock.Fire(2 * incumbentExitPollInitial)
+	<-h.c.tookOverSignal()
+
+	// Assert
+	if standing := h.c.Standing(second); standing != StandingOwned {
+		t.Fatalf("standing = %v, want owned once daemon.addr was written", standing)
+	}
+}
+
+func TestAWorkspaceWhoseHandoverNeverFinishedIsOwnedAfterTheTakeover(t *testing.T) {
+	// Arrange: FIRST was being handed over, and nobody ever adopted it — its
+	// participants never called (closed mid-handover).
 	var writes *scriptedAddrWrites
 	h := newHarness(t, func(d *Deps) {
 		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
 	})
 	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{nil}}
-	_, second := joinedWithOneOfTwo(t, h)
-	done := make(chan struct{})
+	first, _ := joinedWithOneOfTwo(t, h)
+
+	// Act: the incumbent is gone at the watcher's first look.
+	h.clock.awaitArmed(t, incumbentExitPollInitial)
+	h.clock.Fire(incumbentExitPollInitial)
+	<-h.c.tookOverSignal()
+	h.c.stragglerAdoptions.Wait()
+
+	// Assert: it is this daemon's, never not_yet_adopted again.
+	if standing := h.c.Standing(first); standing != StandingOwned {
+		t.Fatalf("standing = %v, want the unfinished workspace owned after the takeover", standing)
+	}
+}
+
+func TestTheTakeoverDoesNotWaitForEveryRendezvous(t *testing.T) {
+	// Arrange: the one handed-over workspace is never adopted.
+	var writes *scriptedAddrWrites
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
+	})
+	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{nil}}
+	joinedWithOneOfTwo(t, h)
 
 	// Act
-	go func() {
-		defer close(done)
-		h.c.retryAdvertise(context.Background(), nil)
-	}()
-	h.clock.awaitArmed(t, manifestPoll)
-	h.clock.Fire(manifestPoll)
-	<-done
+	h.clock.awaitArmed(t, incumbentExitPollInitial)
+	h.clock.Fire(incumbentExitPollInitial)
+	<-h.c.tookOverSignal()
+	h.c.stragglerAdoptions.Wait()
 
-	// Assert
-	if standing := h.c.Standing(second); standing != StandingOwned {
-		t.Fatalf("standing = %v, want owned once daemon.addr was written", standing)
+	// Assert: daemon.addr was written although no rendezvous completed.
+	if got := writes.count(); got != 1 {
+		t.Fatalf("daemon.addr writes = %d, want 1", got)
 	}
 }
 
@@ -1140,5 +1180,23 @@ func TestTheSuccessorChecksEveryLiveShimOnlyOnce(t *testing.T) {
 	}
 	if checks != 1 {
 		t.Fatalf("fleet checks = %d, want exactly 1", checks)
+	}
+}
+
+func TestIncumbentExitDelay(t *testing.T) {
+	cases := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{1, 150 * time.Millisecond},
+		{2, 300 * time.Millisecond},
+		{5, 2400 * time.Millisecond},
+		{9, 2400 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		// Act + Assert
+		if got := incumbentExitDelay(tc.attempt); got != tc.want {
+			t.Fatalf("incumbentExitDelay(%d) = %v, want %v", tc.attempt, got, tc.want)
+		}
 	}
 }
