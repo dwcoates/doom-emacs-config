@@ -145,6 +145,56 @@ describe("the turn loop", () => {
   });
 });
 
+/**
+ * THE SEND A TURN ANSWERS, echoed as the vendor does (sdk.d.ts
+ * `user_message_uuid`): the first top-level stream event, the first top-level
+ * assistant message and the result — and nothing else, and nothing at all for
+ * a send that carried no client uuid.
+ */
+describe("the echo of the send a turn answers", () => {
+  /** Every message of the drive that carries the echo. */
+  const echoed = (messages: readonly unknown[]): Record<string, unknown>[] =>
+    (messages as Record<string, unknown>[]).filter((message) => "user_message_uuid" in message);
+
+  it("stamps exactly the first stream event, the first assistant message and the result", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["client-send-1"] });
+
+    // Assert
+    expect(echoed(driven.messages).map((message) => message.type)).toEqual(["stream_event", "assistant", "result"]);
+  });
+
+  it("names the send's own uuid in both the field and the list", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["client-send-1"] });
+
+    // Assert
+    expect(theResult(driven)).toMatchObject({
+      user_message_uuid: "client-send-1",
+      user_message_uuids: ["client-send-1"],
+    });
+  });
+
+  it("stamps nothing for a send that carried no client uuid", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"]);
+
+    // Assert
+    expect(echoed(driven.messages)).toEqual([]);
+  });
+
+  it("stamps each turn with its OWN send", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["one", "two"], { clientUuids: ["client-send-1", "client-send-2"] });
+
+    // Assert
+    expect(ofType(driven, "result").map((line) => line.user_message_uuid)).toEqual([
+      "client-send-1",
+      "client-send-2",
+    ]);
+  });
+});
+
 describe("the block split", () => {
   it("emits one assistant message per block, all sharing the message id", async () => {
     // Arrange + Act
