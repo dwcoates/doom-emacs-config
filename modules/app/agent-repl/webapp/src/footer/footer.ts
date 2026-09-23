@@ -57,8 +57,8 @@ export function panelStorageKey(workspaceId: string): string {
 }
 
 export interface FooterDeps {
-  /** Bring a feed row into view; the panels' jump rows call it. */
-  readonly revealRow: (id: FeedId) => Promise<boolean>;
+  /** The reader picked a detached-work item: scroll to its card (feed.ts). */
+  readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
 }
 
 export interface FooterHandle extends Handle {
@@ -205,7 +205,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     const panel = drawFooterExpanded(expanded, selection, {
       ctx,
       stops,
-      revealRow: deps.revealRow,
+      selectDetachedWork: deps.selectDetachedWork,
       activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
     });
     const stripDeps = { ctx, selection, onSelect: select, stops };

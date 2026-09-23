@@ -147,9 +147,9 @@ export function agenticBubble(opts: {
   /** The heading line, verbatim. Omitted where the message has none. */
   heading?: string;
   /** What the state draws under the heading. */
-  content: readonly Node[];
+  content: readonly ChildNode[];
 }): HTMLElement {
-  const content: Node[] = [];
+  const content: ChildNode[] = [];
   if (opts.heading !== undefined) {
     const heading = document.createElement("div");
     heading.className = "agentic-heading";

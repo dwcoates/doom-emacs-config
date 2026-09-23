@@ -15,7 +15,7 @@ import { installIntersectionObserver } from "./intersection-observer.js";
  * mount subscribes one to its scroll box so a footer settling after a render
  * cannot leave the tail below the fold. Installed here, once per environment,
  * because it is a missing CAPABILITY of the environment rather than a seam in
- * the app -- the same standing the harness gives `Element.scrollIntoView`.
+ * the app.
  */
 installResizeObserver();
 

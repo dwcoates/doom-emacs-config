@@ -49,12 +49,12 @@
  * "we were not told what it cost" and "it cost nothing" are different claims.
  *
  * THE TYPE-OUT IS THE CLIENT'S PACING, and it RESUMES ACROSS PUSHES. The daemon
- * accumulates the fragments and re-pushes the whole prose; the feed core redraws
- * the row whole on each push. If the reveal restarted there, a steadily growing
+ * accumulates the fragments and re-pushes the whole prose, and each push is
+ * drawn IN PLACE over the bubble the previous draw returned (see
+ * `drawFeedResponse`). If the reveal restarted there, a steadily growing
  * response would re-type itself from the top several times a second. So the
- * shown length is carried on the element the previous draw returned
- * (`data-revealed`) and the new draw resumes from it — the one channel a
- * renderer has for state that must outlive a redraw.
+ * shown length is carried on that element (`data-revealed`) and the new draw
+ * resumes from it.
  */
 import type {
   FeedResponse,
@@ -67,7 +67,7 @@ import type {
 import { log } from "../../log.js";
 import { drawBubble } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
-import { markdownSlot, repaintSlot, type BubbleBody } from "../../bubble/body.js";
+import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
 import { tick } from "../ticking.js";
@@ -184,21 +184,37 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   }
   const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown.slice(0, shown));
 
-  const { bubble, body } = drawBubble({
-    role: "response",
-    variant: u.thinking ? "thinking" : "response",
-    state: result.case,
-    hooks,
-    strip,
-    ...(corner === undefined ? {} : { corner }),
-    content: [prose],
-    footer: result.case === "error" ? [cutShortMarker()] : [],
-    capLines: u.thinking ? 2 : "feed",
-  });
-  if (u.thinking) bubble.setAttribute("data-thinking", "");
-  if (u.notice !== undefined) bubble.setAttribute("data-notice", "");
+  // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
+  // owns the scroll). The daemon re-pushes the whole row on every fragment of an
+  // arriving response and again when it settles; the one bubble updates the
+  // previous draw's bubble instead of building a fresh one, so the scroll box
+  // keeps its identity (and a reader scrolled inside it keeps their place) and
+  // the prose is reconciled node by node. Everything the wire can refuse was
+  // read above, so a malformed push leaves the bubble exactly as it was.
+  const { bubble, body, content } = drawBubble(
+    {
+      role: "response",
+      variant: u.thinking ? "thinking" : "response",
+      state: result.case,
+      hooks,
+      strip,
+      ...(corner === undefined ? {} : { corner }),
+      content: [prose],
+      footer: result.case === "error" ? [cutShortMarker()] : [],
+      capLines: u.thinking ? 2 : "feed",
+    },
+    rc.previous,
+  );
+  bubble.toggleAttribute("data-thinking", u.thinking);
+  bubble.toggleAttribute("data-notice", u.notice !== undefined);
   markRevealed(bubble, shown);
-  if (result.case === "update") drawFeedResponseUpdate(markdown, shown, rc, bubble, body, prose);
+  if (result.case === "update") {
+    log.debug("drawing an arriving response", {
+      operation: "feed.cards.response.update",
+      context: { path: `${path}.update`, length: markdown.length, resumed: shown, in_place: bubble === rc.previous },
+    });
+    animate(bubble, body, content[0] as HTMLElement, markdown, shown, rc);
+  }
   const characters = markdown.length;
   recordDraw(u, rc, result.case, characters);
   return bubble;
@@ -257,28 +273,6 @@ function recordDraw(
   });
 }
 
-/**
- * The arriving state: the markdown so far, paced.
- *
- * The reveal resumes from the previous draw's shown length (RESUMED, already
- * painted into PROSE) and stops the moment it reaches the frontier; a redraw
- * whose prose did not grow therefore does no animation at all.
- */
-export function drawFeedResponseUpdate(
-  markdown: string,
-  resumed: number,
-  rc: RowContext,
-  bubble: HTMLElement,
-  body: BubbleBody,
-  prose: HTMLElement,
-): void {
-  log.debug("drawing an arriving response", {
-    operation: "feed.cards.response.update",
-    context: { length: markdown.length, resumed },
-  });
-  animate(bubble, body, prose, markdown, resumed, rc);
-}
-
 /** The settled state: the whole markdown. */
 export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): string {
   log.debug("drawing a settled response", {
@@ -331,34 +325,38 @@ export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
  * The cost corner: the token figure, drawn verbatim, and — once the response
  * has SETTLED — the relative timestamp it reveals when hovered or focused.
  *
- * THE MARKUP IS BUILT SO THE REVEAL'S SLIDE IS THE DURATION'S WIDTH BY
- * CONSTRUCTION (the stylesheet's `.usage-corner` comment has the mechanism):
+ * THE MARKUP (the stylesheet's `.usage-corner` comment has the mechanism):
  *
  *   span.usage-corner[data-tokens=<token text>]   ::before is a hidden copy of
- *     span.usage-slider                           the token, reserving its width
+ *     span.usage-slider                           the token, in a fixed-width slot
  *       span.usage-stamp  <token text>            out of flow, at the slider's left
  *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content
  *
- * The slider's own width is the duration (plus its gap), and it is translated
- * by a percentage of that width, so the collapsed token sits exactly at the
- * right edge and the revealed token slides left exactly as far as the duration
- * needs. The corner's floated width is spacer + slider in both states, so the
- * first prose line that wraps around it never reflows on the reveal. The
+ * The slider is the duration's fixed-width slot (plus its gap), translated by
+ * a percentage of that width, so the collapsed token sits exactly at the right
+ * edge and the revealed token slides left by the slot. The corner's floated
+ * width is spacer + slider in every state, so the first prose line that wraps
+ * around it never reflows on the reveal, the tick or the settle. The
  * stylesheet owns the 0.5s transition; `prefers-reduced-motion` drops it. A
  * state class is toggled here too, so a keyboard focus reveals the same
  * timestamp a hover does.
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.
- * As it grows the slider grows with it, and the collapsed token stays put.
+ * The slot does not grow with it, so nothing around the corner moves.
  * The subscription is taken through `tick`, which marks the element, so the
  * feed's teardown of the bubble — a re-push replacing the row, or the turn-end
  * backstop that stops every clock in a settled turn — unsubscribes it with no
  * disposer to remember here.
  *
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
- * a corner with no settled instant has an empty slider, so the token sits at
- * the right edge and nothing slides.
+ * a corner with no settled instant has an empty slider, marked
+ * `data-arriving`, so the token sits at the right edge and nothing slides.
+ *
+ * NOTHING HERE CHANGES THE CORNER'S WIDTH (owner rule, 2026-09-23: the user
+ * owns the scroll). The token spacer and the duration slot are fixed widths in
+ * the stylesheet, so a growing figure, the clock's tick and the settle itself
+ * leave the float -- and the first prose line wrapped around it -- in place.
  */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
@@ -374,6 +372,7 @@ export function drawFeedResponseUsageStamp(
   const corner = document.createElement("span");
   corner.className = "usage-corner";
   corner.dataset.tokens = u.text;
+  corner.setAttribute("data-says", `${u.text}|${String(atMs)}`);
 
   const slider = document.createElement("span");
   slider.className = "usage-slider";
@@ -384,6 +383,9 @@ export function drawFeedResponseUsageStamp(
   stamp.textContent = u.text;
   slider.appendChild(stamp);
 
+  // The duration slot is reserved at a fixed width either way (styles.css);
+  // an arriving corner marks itself so its empty slot never slides out.
+  corner.toggleAttribute("data-arriving", atMs === 0);
   if (atMs > 0) {
     const ago = document.createElement("span");
     ago.className = "usage-ago";
@@ -497,7 +499,11 @@ function animate(
   // draw into a detached fragment) keeps animating: absence of a document is
   // not the same fact as removal from one.
   let mounted = bubble.isConnected;
+  // A later paint of this same body (an in-place update) owns it from then on,
+  // so this loop never paints the previous push's prose over it.
+  const generation = paintGeneration(body);
   const step = (): void => {
+    if (paintGeneration(body) !== generation) return;
     if (bubble.isConnected) mounted = true;
     else if (mounted) return;
     const shown = reveal.reveal({
