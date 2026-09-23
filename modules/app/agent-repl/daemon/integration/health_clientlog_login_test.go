@@ -1039,7 +1039,7 @@ func TestOpenLoginUnderNoFakeIsRefusedNamingTheLoginSite(t *testing.T) {
 	}
 }
 
-func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldWithClassificationError(t *testing.T) {
+func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldForTurnEnd(t *testing.T) {
 	t.Parallel()
 	// Arrange: NoFake means the classifier reaches its real vendor-backed
 	// implementation (internal/classifier/vendor.go), guarded by
@@ -1072,16 +1072,14 @@ func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldWithClassification
 		t.Fatalf("the first tray push for the held prompt = %v, want the transient classifying arm", p)
 	}
 
-	// Assert: the verdict is classification_error -- the guard's refusal is
-	// NOT a verdict either way (classifier.Judge's doc comment) -- and its
-	// detail names the refused site "classifier" (envc.ForbiddenError.Error()).
-	verdict := harness.AwaitNext(t, f.d.Ctx(), holds, "the classification_error verdict")
+	// Assert: the guard's refusal is NOT a verdict (classifier.Judge's doc
+	// comment), but the prompt's true state is: it waits for the running
+	// turn to end. The failure is the daemon's, logged at ERROR under
+	// daemon.promptqueue.classify; the tray never shows "unclassified".
+	verdict := harness.AwaitNext(t, f.d.Ctx(), holds, "the hold_for_turn_end verdict")
 	p := promptHeldEntry(verdict, turn)
-	if p == nil || p.GetClassificationError() == nil {
-		t.Fatalf("the verdict for the held prompt under NoFake = %v, want classification_error", p)
-	}
-	if !strings.Contains(p.GetClassificationError().GetDetail(), "classifier") {
-		t.Fatalf("classification_error.detail = %q, want it to name the refused site \"classifier\"", p.GetClassificationError().GetDetail())
+	if p == nil || p.GetHoldForTurnEnd() == nil {
+		t.Fatalf("the verdict for the held prompt under NoFake = %v, want hold_for_turn_end", p)
 	}
 }
 

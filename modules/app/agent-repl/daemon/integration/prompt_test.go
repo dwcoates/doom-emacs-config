@@ -720,10 +720,10 @@ func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// A failed interject reverts to classification_error and FIFO order
+// A refused interject reverts to hold_for_turn_end and FIFO order
 // ---------------------------------------------------------------------------
 
-func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) {
+func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -731,8 +731,8 @@ func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) 
 	f.shim.ExpectStartTurn()
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
-	// internal/promptqueue/classify.go's stripJump logs the failed-interject
-	// ERROR under opInterject, and the refused shim call is recorded by the
+	// internal/promptqueue/classify.go's stripJump logs the refused interject
+	// at WARN under opInterject, and the refused shim call is recorded by the
 	// client that made it — the refusal IS the scenario.
 	f.d.ExpectWarnings("daemon.promptqueue.interject", "daemon.shimclient.kill_turn")
 
@@ -741,14 +741,15 @@ func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) 
 	resp2 := f.submit("stop and rebase instead", "k-stop-fail", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
 
-	// Assert: the entry reverts to classification_error and the footer's
-	// interrupting status clears.
-	tray := awaitView(t, f, holds, "the classification_error verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+	// Assert: the entry reverts to held for the turn's end — never the
+	// "unclassified" classification_error — and the footer's interrupting
+	// status clears.
+	tray := awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.DaemonHoldTray) bool {
 		p := promptHeldEntry(tray, turn2)
-		return p != nil && p.GetClassificationError() != nil
+		return p != nil && p.GetHoldForTurnEnd() != nil
 	})
-	if p := promptHeldEntry(tray, turn2); p == nil || p.GetClassificationError() == nil {
-		t.Fatalf("held entry for the failed interject = %v, want classification_error", p)
+	if p := promptHeldEntry(tray, turn2); p == nil || p.GetHoldForTurnEnd() == nil {
+		t.Fatalf("held entry for the failed interject = %v, want hold_for_turn_end", p)
 	}
 	awaitFooter(t, f, footer, "the footer clears waiting.interrupting after the failed interject", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetInterrupting() == nil
