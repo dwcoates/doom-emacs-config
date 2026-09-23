@@ -82,8 +82,8 @@ service Shim {
   // (a subagent, a workflow agent — never the session's own turn).
   rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
 
-  // END the turn: the agent and everything THIS turn spawned, transitively.
-  // Refuses while any of that is live unless forced, naming it.
+  // END the turn. Unforced, the synchronous turn only: detached work runs on.
+  // Forced, the agent and everything THIS turn spawned, transitively.
   rpc KillTurn(KillTurnRequest) returns (KillTurnResponse);
 
   // ---- Detached work: one stream per live item, and the writes each kind accepts ----

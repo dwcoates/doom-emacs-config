@@ -569,17 +569,60 @@ describe("KillTurn", () => {
     expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("noTurnOpen");
   });
 
-  it("refuses `live` when the turn has CLOSED but its work is still running", async () => {
-    // Detached work outlives the turn that spawned it by design, so answering
-    // "no turn is open" would leave the daemon with a running shell it has no
-    // verb to stop under the turn it belongs to.
+  // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN, and a closed turn has none.
+  // What it left running ends only through its own stop or a forced kill.
+  it("refuses noTurnOpen, unforced, for a CLOSED turn whose work is still running", async () => {
+    // Arrange
     const h = await harness();
     h.live.onTaskStarted(
       { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
 
-    expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("live");
+    // Act
+    const response = await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(failureKind(response)).toBe("noTurnOpen");
+  });
+
+  it("leaves a CLOSED turn's work running when the kill is not forced", async () => {
+    // Arrange
+    const h = await harness();
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
+      "turn-1",
+    );
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect({ stopped: h.query.stoppedTasks, live: h.live.all().map((e) => e.taskId) }).toEqual({
+      stopped: [],
+      live: ["b01"],
+    });
+  });
+
+  it("records the unforced kill of a CLOSED turn at debug, naming the work it spared", async () => {
+    // Arrange
+    const h = await harness();
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
+      "turn-1",
+    );
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        message: "refused KillTurn because no turn is open; any live work the turn left keeps running",
+      }),
+    );
   });
 
   it("forced, ends the work a CLOSED turn left running", async () => {
@@ -702,7 +745,11 @@ describe("KillTurn", () => {
     );
   });
 
-  it("REFUSES while the turn has live work and force was not set", async () => {
+  // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN. A non-forced kill used to
+  // refuse `live` here, so an interjection could never interrupt a turn that
+  // had spawned background work.
+  it("interrupts the turn as agent_only while its work is live and force was not set", async () => {
+    // Arrange
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
@@ -710,10 +757,17 @@ describe("KillTurn", () => {
       "turn-1",
     );
 
-    expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("live");
+    // Act
+    const response = await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(response.result.case === "success" ? response.result.value.killed?.how.case : undefined).toBe(
+      "agentOnly",
+    );
   });
 
-  it("NAMES the live work in the refusal, by its spawning call", async () => {
+  it("closes the turn it interrupted without force", async () => {
+    // Arrange
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
@@ -721,11 +775,55 @@ describe("KillTurn", () => {
       "turn-1",
     );
 
-    const response = await h.turns.killTurn(kill(false));
-    const failure = response.result.case === "failure" ? response.result.value : undefined;
-    expect(
-      failure?.cause.case === "live" ? failure.cause.value.liveWork.map((id) => id.value) : undefined,
-    ).toEqual(["t"]);
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect({ open: h.open, interrupted: h.query.calls.includes("interrupt") }).toEqual({
+      open: undefined,
+      interrupted: true,
+    });
+  });
+
+  it("stops none of the turn's live work when force was not set, and keeps it live", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
+      "turn-1",
+    );
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect({ stopped: h.query.stoppedTasks, live: h.live.all().map((e) => e.taskId) }).toEqual({
+      stopped: [],
+      live: ["b01"],
+    });
+  });
+
+  it("records the unforced interrupt at info, naming how much work it spared", async () => {
+    // Arrange
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
+      "turn-1",
+    );
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    await h.turns.killTurn(kill(false));
+
+    // Assert
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message: "interrupted a turn; the detached work it spawned keeps running",
+      }),
+    );
   });
 
   it("stops the whole transitive set when forced", async () => {
