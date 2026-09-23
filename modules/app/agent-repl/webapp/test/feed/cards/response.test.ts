@@ -18,6 +18,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
+  RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
@@ -1342,7 +1343,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
    * streaming reveal carries no trailing indicator node, so it is exactly the
    * oracle's markup. */
   function prose(body: HTMLElement): string {
-    return body.innerHTML;
+    return body.querySelector(`.${RESPONSE_PROSE_CLASS}`)?.innerHTML ?? "";
   }
 
   it("ends the reveal byte-identical to the whole-render oracle", () => {
@@ -1356,7 +1357,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     if (streamingBody === null) throw new Error("no bubble body");
     // Act — drive the type-out to completion.
     vi.advanceTimersByTime(5000);
-    // The settled draw of the same text is the oracle: one-shot `paintWhole`.
+    // The settled draw of the same text is the oracle: one settled paint.
     const settled = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
       rowContext(),
@@ -1365,7 +1366,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     const settledBody = settled.querySelector<HTMLElement>(".bubble-body");
     if (settledBody === null) throw new Error("no settled body");
     // Assert — the reconciled reveal lands exactly where the one-shot render does.
-    expect(prose(streamingBody)).toBe(settledBody.innerHTML);
+    expect(prose(streamingBody)).toBe(prose(settledBody));
   });
 
   it("keeps a stable leading tree line's node identity while the tail grows", () => {

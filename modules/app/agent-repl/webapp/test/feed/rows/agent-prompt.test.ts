@@ -14,6 +14,12 @@ import {
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
 } from "../../../src/breathing.js";
+import {
+  BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_ROLE_ATTRIBUTE,
+  BUBBLE_STRIP_CLASS,
+  BUBBLE_VARIANT_ATTRIBUTE,
+} from "../../../src/bubble/draw.js";
 
 function agentPrompt(address = "→ Explore", blocks: unknown[] = [], working = false) {
   return create(FeedAgentPromptSchema, {
@@ -156,5 +162,24 @@ describe("drawFeedAgentPrompt: the record of the row", () => {
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-agent-prompt");
     expect(record.level.case).toBe("info");
+  });
+});
+
+describe("drawFeedAgentPrompt: its spec", () => {
+  it("is a prompt-role bubble", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("prompt");
+  });
+
+  it("is the agent variant, whose border is its own", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("agent");
+  });
+
+  it("collapses at the shared feed cap", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("feed");
+  });
+
+  it("puts the address line in the header strip", () => {
+    const el = drawFeedAgentPrompt(agentPrompt());
+    expect(el.querySelector(".prompt-address")?.classList.contains(BUBBLE_STRIP_CLASS)).toBe(true);
   });
 });

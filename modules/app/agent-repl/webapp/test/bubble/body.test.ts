@@ -5,16 +5,22 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  BODY_INVARIANT,
   BUBBLE_BODY_TAG,
+  MARKDOWN_SLOT_ATTRIBUTE,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
+  markdownSlot,
   measureTreeCols,
-  paintWhole,
+  paintBody,
   proseNeedsWidth,
+  repaintSlot,
+  type BubbleBody,
 } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
 import { useTreeLayout } from "../tree-layout.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { fireResize } from "../resize-observer.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -118,7 +124,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     // Act
     measureTreeCols(body);
     // Assert
-    const record = await forwardedRecord(capture, "feed.cards.response.tree-cols");
+    const record = await forwardedRecord(capture, "bubble.body.tree-cols");
     expect(record.context).toMatchObject({ cols: 93, char_px: 8 });
   });
 });
@@ -213,13 +219,12 @@ describe("an unmeasurable tree width is an invariant violation", () => {
     // Arrange
     vi.stubGlobal("ResizeObserver", undefined);
     const capture = captureLogRecords();
-    const { bubble: el, body } = drawBubble({
+    const { bubble: el } = drawBubble({
       role: "response",
       variant: "response",
-      content: [],
+      content: [markdownSlot("prose", TREE)],
       capLines: "feed",
     });
-    paintWhole(body, TREE);
     // Act — the attach is where the tree first paints and the observer is armed;
     // jsdom reports a custom element reaction's throw rather than rethrowing it.
     const reported: unknown[] = [];
@@ -271,5 +276,200 @@ describe("the bubble body", () => {
     document.body.prepend(body);
     // Assert — an attach and a move.
     expect(runs).toBe(2);
+  });
+});
+
+/** A response bubble holding one markdown slot of MARKDOWN, and that slot. */
+function slotted(markdown: string): { bubble: HTMLElement; slot: HTMLElement } {
+  const slot = markdownSlot("prose", markdown);
+  const { bubble } = drawBubble({ role: "response", variant: "response", content: [slot], capLines: "feed" });
+  return { bubble, slot };
+}
+
+describe("markdown slots", () => {
+  it("wears the slot attribute the pipeline finds it by", () => {
+    // Arrange / Act
+    const slot = markdownSlot("prose", "**done**");
+    // Assert
+    expect(slot.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)).toBe(true);
+  });
+
+  it("draws nothing of its own until a body paints it", () => {
+    // Arrange / Act
+    const slot = markdownSlot("prose", "**done**");
+    // Assert
+    expect(slot.childNodes).toHaveLength(0);
+  });
+
+  it("is painted as markdown by paintBody", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", "**done**");
+    // Act
+    paintBody(body, [slot]);
+    // Assert
+    expect(slot.querySelector("strong")?.textContent).toBe("done");
+  });
+
+  it("paints every slot of the content, nested ones included", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const wrapper = document.createElement("div");
+    const nested = markdownSlot("nested", "*deep*");
+    wrapper.append(nested);
+    // Act
+    paintBody(body, [markdownSlot("top", "top"), wrapper]);
+    // Assert
+    expect(nested.querySelector("em")?.textContent).toBe("deep");
+  });
+
+  it("places the content's other nodes untouched, in order", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const badge = document.createElement("span");
+    badge.textContent = "plan";
+    // Act
+    paintBody(body, [badge, markdownSlot("prose", "text")]);
+    // Assert
+    expect(body.firstChild).toBe(badge);
+  });
+});
+
+describe("a slot holding a tree paints once the bubble is laid out", () => {
+  useTreeLayout();
+
+  it("paints plain prose at once, detached", () => {
+    // Arrange / Act
+    const { slot } = slotted("**done**");
+    // Assert
+    expect(slot.querySelector("strong")).not.toBeNull();
+  });
+
+  it("paints nothing of a tree while the bubble is detached", () => {
+    // Arrange / Act
+    const { slot } = slotted(TREE);
+    // Assert
+    expect(slot.childNodes).toHaveLength(0);
+  });
+
+  it("paints the tree the moment the bubble is attached", () => {
+    // Arrange
+    const { bubble, slot } = slotted(TREE);
+    // Act
+    mount(bubble);
+    // Assert
+    expect(slot.querySelector(".mp-tree")).not.toBeNull();
+  });
+
+  it("waits while the bubble is attached but hidden", () => {
+    // Arrange
+    const { bubble, slot } = slotted(TREE);
+    bubble.hidden = true;
+    // Act
+    mount(bubble);
+    // Assert
+    expect(slot.querySelector(".mp-tree")).toBeNull();
+  });
+
+  it("paints a hidden bubble's tree when the bubble is shown and its column resizes", () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    const { bubble, slot } = slotted(TREE);
+    bubble.hidden = true;
+    const column = mount(bubble);
+    // Act
+    bubble.hidden = false;
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    // Assert
+    expect(slot.querySelector(".mp-tree")).not.toBeNull();
+  });
+
+  it("records the deferral at debug", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    slotted(TREE);
+    // Assert
+    const record = await forwardedRecord(capture, "bubble.body.paint-deferred");
+    expect(record.context).toMatchObject({ connected: false });
+  });
+
+  it("does not measure a column that went hidden under a painted tree", () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    const { bubble } = slotted(TREE);
+    const column = mount(bubble);
+    // Act — the column is hidden: it has no box, and no width to wrap to.
+    column.hidden = true;
+    fireResize(column);
+    // Assert
+    expect(() => vi.runOnlyPendingTimers()).not.toThrow();
+    vi.useRealTimers();
+  });
+});
+
+describe("repaintSlot", () => {
+  it("repaints the slot with its new markdown", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", "one");
+    paintBody(body, [slot]);
+    // Act
+    repaintSlot(body, slot, "**two**");
+    // Assert
+    expect(slot.querySelector("strong")?.textContent).toBe("two");
+  });
+
+  it("keeps an unchanged leading paragraph's node while the tail grows", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", "first\n\nsec");
+    paintBody(body, [slot]);
+    const first = slot.firstElementChild;
+    // Act
+    repaintSlot(body, slot, "first\n\nsecond");
+    // Assert
+    expect(slot.firstElementChild).toBe(first);
+  });
+
+  it("refuses an element that is not a slot of this body, and records it", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const body = createBubbleBody();
+    const stranger = markdownSlot("prose", "elsewhere");
+    // Act + Assert
+    expect(() => repaintSlot(body, stranger, "x")).toThrow(/bubble body invariant/);
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect(record.context).toMatchObject({
+      reason: "a repaint named an element that is not a markdown slot of this body",
+    });
+  });
+
+  it("leaves the stranger's source untouched when it refuses", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const home = createBubbleBody();
+    const stranger = markdownSlot("prose", "kept");
+    paintBody(home, [stranger]);
+    // Act
+    expect(() => repaintSlot(body, stranger, "changed")).toThrow();
+    paintBody(home, [stranger]);
+    // Assert — a repaint from the held source still draws the old words.
+    expect(stranger.textContent?.trim()).toBe("kept");
+  });
+});
+
+describe("paintBody", () => {
+  it("refuses a body the pipeline did not make, and records it", async () => {
+    // Arrange — a bare element of the body's tag has no painter.
+    createBubbleBody();
+    const capture = captureLogRecords();
+    const bare = document.createElement(BUBBLE_BODY_TAG) as BubbleBody;
+    // Act + Assert
+    expect(() => paintBody(bare, [])).toThrow(/bubble body invariant/);
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect(record.context).toMatchObject({ reason: "a bubble body was painted that has no painter" });
   });
 });

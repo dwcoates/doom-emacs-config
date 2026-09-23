@@ -2,11 +2,15 @@
  * body — THE BUBBLE BODY: the element a bubble's content is painted into, and
  * the machinery that keeps a metaprompt tree in it wrapped to the bubble's cap.
  *
- * Extracted from the response card (response.ts), where it was the response
- * bubble's alone: the custom element that knows when it joins the document,
- * the cap measurement (`measureTreeCols`), the tree wrap that waits for a
- * containing block and follows the column's width, and the in-place reconcile
- * the type-out paints through.
+ * ONE BODY PIPELINE FOR EVERY BUBBLE. A prompt's blocks, a response's prose,
+ * an agentic card's badges and plan, a peer message, a compaction summary and a
+ * held prompt all go through `paintBody`: the content's nodes are placed, and
+ * every MARKDOWN SLOT among them (`markdownSlot`) is rendered through
+ * `proseHtml`, so a metaprompt tree in ANY bubble is wrapped by the metaprompt
+ * engine at that bubble's own cap — the budget `measureTreeCols` resolves from
+ * the bubble's CSS `max-width` (one token for every bubble) — and a bubble
+ * below its cap never wraps. It paints on attach when it needs a width, and
+ * re-wraps only when the containing block's width moves the budget.
  */
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
@@ -15,7 +19,7 @@ import { onDiscard } from "../feed/ticking.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
 const logTreeIssue: TreeIssue = (message, context) => {
-  log.debug(message, { operation: "feed.cards.response.tree", context });
+  log.debug(message, { operation: "bubble.body.tree", context });
 };
 
 /**
@@ -47,7 +51,7 @@ export function proseNeedsWidth(markdown: string): boolean {
 }
 
 /** The operation every unmeasurable-width violation is recorded under. */
-export const TREE_WIDTH_UNMEASURABLE = "feed.cards.response.tree-width-unmeasurable";
+export const TREE_WIDTH_UNMEASURABLE = "bubble.body.tree-width-unmeasurable";
 
 /**
  * A tree's column budget could not be measured: record it once, with what was
@@ -112,7 +116,7 @@ function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: b
  * wrapped at the fallback, whatever the bubble's room. jsdom styles detached
  * nodes and the unit suite stubbed geometry regardless of attachment, which is
  * why the tests never saw it. The first paint of a tree now waits for the body
- * to join the document (`createTreeWrap`). This is a watch flag, not a lock.
+ * to be laid out (`armPainter`). This is a watch flag, not a lock.
  */
 export function measureTreeCols(body: HTMLElement): number {
   if (!body.isConnected) unmeasurable("the bubble body is not in the document", {});
@@ -152,7 +156,7 @@ export function measureTreeCols(body: HTMLElement): number {
   const context = { cols, char_px: charPx, cap_px: capPx, chrome_px: chromePx, containing_px: containingPx };
   if (cols < 1) unmeasurable("the bubble's content width at its cap holds no column", context);
   log.debug("measured a metaprompt tree's column budget", {
-    operation: "feed.cards.response.tree-cols",
+    operation: "bubble.body.tree-cols",
     context,
   });
   return cols;
@@ -180,18 +184,24 @@ function resolveCapPx(maxWidth: string, containingPx: number): number | null {
   return null;
 }
 
-/** The tag of a response's body: a custom element, so it knows when it joins the document. */
+/** The tag of every bubble's body: a custom element, so it knows when it joins the document. */
 export const BUBBLE_BODY_TAG = "bubble-body";
 
-/** A response's body, which runs its hooks every time it joins the document. */
+/** The class the stylesheet's body rules key on. */
+export const BUBBLE_BODY_CLASS = "bubble-body";
+
+/** The attribute every markdown slot wears; its source is held beside it. */
+export const MARKDOWN_SLOT_ATTRIBUTE = "data-markdown";
+
+/** A bubble's body, which runs its hooks every time it joins the document. */
 export interface BubbleBody extends HTMLElement {
   onConnect(hook: () => void): void;
 }
 
 /**
- * The response body as a custom element. `connectedCallback` runs synchronously
- * inside the DOM operation that attaches the row — before any frame is painted,
- * and whether or not the webview is visible — which is what lets a tree's first
+ * The body as a custom element. `connectedCallback` runs synchronously inside
+ * the DOM operation that attaches the row — before any frame is painted, and
+ * whether or not the webview is visible — which is what lets a tree's first
  * paint wait for a containing block without ever showing a wrong-width frame.
  */
 function bubbleBodyClass(): CustomElementConstructor {
@@ -208,83 +218,178 @@ function bubbleBodyClass(): CustomElementConstructor {
   };
 }
 
-/** A fresh response body, the custom element defined on first use. */
+/** What paints one body: all of its slots, or one of them, at the cap's budget. */
+interface Painter {
+  paint(only?: HTMLElement): void;
+}
+
+/** Every body's painter, armed once when the body is created. */
+const painters = new WeakMap<Element, Painter>();
+
+/** Every markdown slot's source, held beside the element it paints. */
+const slotSources = new WeakMap<Element, string>();
+
+/** A fresh bubble body, the custom element defined on first use, its painter armed. */
 export function createBubbleBody(): BubbleBody {
   if (customElements.get(BUBBLE_BODY_TAG) === undefined) {
     customElements.define(BUBBLE_BODY_TAG, bubbleBodyClass());
   }
   const body = document.createElement(BUBBLE_BODY_TAG) as BubbleBody;
-  body.className = "bubble-body";
+  body.className = BUBBLE_BODY_CLASS;
+  painters.set(body, armPainter(body));
   return body;
 }
 
-/** What a body's painters draw through, so a tree is only ever drawn at a measured width. */
-export interface TreeWrap {
-  /** The body's measured column budget, measured on first ask after each attach. */
-  readonly cols: TreeCols;
-  /**
-   * Draw TEXT through DRAW: at once, unless TEXT holds a tree and the body is
-   * not in the document yet, in which case the draw runs the moment it joins.
-   * The latest draw is also what a width change re-runs.
-   */
-  paint(text: string, draw: () => void): void;
+/**
+ * A MARKDOWN SLOT: the one way a bubble's content says "this is prose". Every
+ * kind's markdown — a response's prose, a prompt's text block, a plan, a peer
+ * message, a compaction summary — is a slot, and only the body paints one, so
+ * every tree in every bubble is wrapped by the metaprompt engine at the
+ * bubble's own cap. A slot is an ordinary element (CLASSNAME is the kind's), so
+ * a kind can nest it in whatever structure it draws around its prose.
+ */
+export function markdownSlot(className: string, markdown: string): HTMLElement {
+  const slot = document.createElement("div");
+  slot.className = className;
+  slot.setAttribute(MARKDOWN_SLOT_ATTRIBUTE, "");
+  slotSources.set(slot, markdown);
+  return slot;
+}
+
+/** Paint BODY with CONTENT: its nodes, every markdown slot among them drawn. */
+export function paintBody(body: BubbleBody, content: readonly Node[]): void {
+  body.replaceChildren(...content);
+  painterOf(body).paint();
 }
 
 /**
- * Keep BODY's tree wrapped to the cap for its whole life.
- *
- * The FIRST paint of a tree waits for the body to join the document, since only
- * then is there a containing block to measure against. Every later attach (a
- * tool-group re-arrange moves the row) re-measures, and a `ResizeObserver` on
- * the CONTAINING BLOCK — the box the cap is a percentage of, not the
- * fit-content body, which keeps its width when the column grows around a bubble
- * below its cap — re-wraps when the column's width moves the budget. The
- * observer is torn down with the body through `stopTicking` (see ticking.ts).
+ * Point SLOT, already in BODY, at MARKDOWN and repaint it IN PLACE: the arriving
+ * response's type-out paints every frame through here, reconciled, so settled
+ * nodes keep their identity (see `reconcileChildren`).
  */
-export function createTreeWrap(body: BubbleBody): TreeWrap {
+export function repaintSlot(body: BubbleBody, slot: HTMLElement, markdown: string): void {
+  if (!slotSources.has(slot) || !body.contains(slot)) {
+    invariant("a repaint named an element that is not a markdown slot of this body", {
+      slot: slot.className,
+    });
+  }
+  slotSources.set(slot, markdown);
+  painterOf(body).paint(slot);
+}
+
+/** The source SLOT paints, which every slot has from its making. */
+function sourceOf(slot: Element): string {
+  const source = slotSources.get(slot);
+  if (source === undefined) {
+    invariant("a markdown slot carries no source", { slot: slot.className });
+  }
+  return source;
+}
+
+/** BODY's painter, which every body made by `createBubbleBody` has. */
+function painterOf(body: BubbleBody): Painter {
+  const painter = painters.get(body);
+  if (painter === undefined) invariant("a bubble body was painted that has no painter", {});
+  return painter;
+}
+
+/** The operation a body pipeline invariant violation is recorded under. */
+export const BODY_INVARIANT = "bubble.body.invariant";
+
+/** A body-pipeline invariant broke: record it once, and fail. */
+function invariant(reason: string, context: Record<string, unknown>): never {
+  log.error(`the bubble body pipeline broke an invariant: ${reason}`, {
+    operation: BODY_INVARIANT,
+    context: { reason, ...context },
+  });
+  throw new Error(`bubble body invariant: ${reason}`);
+}
+
+/**
+ * Keep BODY's slots painted, and every tree in them wrapped to the cap, for the
+ * body's whole life.
+ *
+ * A PAINT THAT NEEDS A WIDTH WAITS FOR A LAYOUT. Prose with no tree draws the
+ * same at every width, so it paints at once, detached or not. Prose holding a
+ * tree waits until the bubble is LAID OUT — in the document, and not inside
+ * anything `display: none` (a folded compaction summary, a collapsed sub-feed):
+ * `getClientRects()` is empty exactly when an element has no box — and then
+ * paints at the budget measured from the cap. Waiting is not a fallback: no
+ * width is guessed, and a laid-out bubble whose width cannot be read is still
+ * the `unmeasurable` violation.
+ *
+ * Every later attach (a tool-group re-arrange moves the row) re-measures, and a
+ * `ResizeObserver` on the CONTAINING BLOCK — the box the cap is a percentage
+ * of, not the fit-content body, which keeps its width when the column grows
+ * around a bubble below its cap — re-wraps only when the column's width moves
+ * the budget. The same observer is what sees a hidden bubble come back. It is
+ * torn down with the body through `stopTicking` (see ticking.ts).
+ */
+function armPainter(body: BubbleBody): Painter {
   let cols: number | null = null;
-  let latest: (() => void) | null = null;
   let deferred = false;
   let observer: ResizeObserver | null = null;
 
-  const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
-  const rewrap = (): void => {
-    const next = measureTreeCols(body);
-    if (next === cols) return;
-    cols = next;
-    latest?.();
+  const budget: TreeCols = () => {
+    cols ??= measureTreeCols(body);
+    return cols;
   };
+  const slots = (): HTMLElement[] => [
+    ...body.querySelectorAll<HTMLElement>(`[${MARKDOWN_SLOT_ATTRIBUTE}]`),
+  ];
+  const draw = (targets: readonly HTMLElement[]): void => {
+    for (const slot of targets) {
+      const target = document.createElement("div");
+      target.innerHTML = proseHtml(sourceOf(slot), budget);
+      reconcileChildren(slot, target, null);
+    }
+  };
+  const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
+  const needsWidth = (): boolean => slots().some((slot) => proseNeedsWidth(sourceOf(slot)));
+  const laidOut = (): boolean =>
+    body.isConnected && requireBubble(body).getClientRects().length > 0;
   const watch = (): void => {
     if (observer === null) onDiscard(body, () => observer?.disconnect());
     else observer.disconnect();
     observer = observeContainingBlock(body, rewrap);
   };
 
-  body.onConnect(() => {
-    if (deferred) {
-      deferred = false;
-      latest?.();
-    } else if (drawsTree()) {
-      rewrap();
+  function paint(only?: HTMLElement): void {
+    if (needsWidth() && !laidOut()) {
+      deferred = true;
+      log.debug("a bubble's tree waits for the bubble to be laid out", {
+        operation: "bubble.body.paint-deferred",
+        context: { connected: body.isConnected },
+      });
+      if (body.isConnected) watch();
+      return;
     }
-    if (drawsTree()) watch();
+    const whole = only === undefined || deferred;
+    deferred = false;
+    draw(whole ? slots() : [only]);
+    if (body.isConnected && observer === null && drawsTree()) watch();
+  }
+
+  function rewrap(): void {
+    // Not laid out (hidden, or detached): there is no width to wrap to, and
+    // the observer fires again when the bubble has a box once more.
+    if (!body.isConnected || (!deferred && !drawsTree()) || !laidOut()) return;
+    if (deferred) {
+      paint();
+      return;
+    }
+    const next = measureTreeCols(body);
+    if (next === cols) return;
+    cols = next;
+    draw(slots());
+  }
+
+  body.onConnect(() => {
+    rewrap();
+    if (deferred || drawsTree()) watch();
   });
 
-  return {
-    cols: () => {
-      cols ??= measureTreeCols(body);
-      return cols;
-    },
-    paint(text, draw) {
-      latest = draw;
-      if (!body.isConnected && proseNeedsWidth(text)) {
-        deferred = true;
-        return;
-      }
-      draw();
-      if (body.isConnected && observer === null && drawsTree()) watch();
-    },
-  };
+  return { paint };
 }
 
 /**
@@ -315,23 +420,11 @@ function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeOb
   return observer;
 }
 
-/** The bubble around BODY, which a drawn response body always has. */
+/** The bubble around BODY, which a drawn bubble body always has. */
 function requireBubble(body: HTMLElement): HTMLElement {
   const bubble = body.closest<HTMLElement>(".bubble");
   if (bubble === null) unmeasurable("the body has no bubble around it", {});
   return bubble;
-}
-
-/**
- * Write the whole settled prose into the body, wrapped to the cap (see
- * `createTreeWrap`). Plain prose reflows on its own (CSS), so it takes no
- * observer and no measurement.
- */
-export function paintWhole(body: BubbleBody, markdown: string): void {
-  const wrap = createTreeWrap(body);
-  wrap.paint(markdown, () => {
-    body.innerHTML = proseHtml(markdown, wrap.cols);
-  });
 }
 
 /**
@@ -356,7 +449,7 @@ export function paintWhole(body: BubbleBody, markdown: string): void {
  *
  * Because every position ends structurally equal to the target, the reconciled
  * result is byte-identical to a fresh `proseHtml(slice, cols)` — the same string
- * `paintWhole` writes in one shot.
+ * a settled paint writes.
  *
  * TAIL, when given, is a node kept as PARENT's last child: it is never matched
  * against the target and never removed, so the prose reconciles ahead of it and
