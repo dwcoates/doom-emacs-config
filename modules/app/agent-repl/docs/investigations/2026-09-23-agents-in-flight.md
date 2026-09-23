@@ -22,11 +22,13 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/selection-click-and-stable-gutter` | `~/.config/doom-worktrees/selection-click-and-stable-gutter` | A click on the feed outside any bubble clears the reply selection (via the daemon), then snaps to the bottom and follows. `scrollbar-gutter: stable` on bubble scroll boxes. | `af0ad8918210bd694` | 18:30 |
 | `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
 | `feat/held-prompt-compact-badges` | `~/.config/doom-worktrees/held-prompt-compact-badges` | Held prompts collapse to 2 lines, with details and buttons only when expanded, at half the normal max width. Statuses are colored badges (waiting red, interrupting green, the rest mapped). ADDED: a held prompt landing jumps the feed to the bottom and follows, like a sent prompt. | `afb5bccb8f702f5d3` | 18:55 |
+| `fix/sidecar-no-unrendered-spools` | `~/.config/doom-worktrees/sidecar-no-unrendered-spools` | The sidecar stops storing unclaimed task spools and duplicate transcript symlinks as residue. Rendered spools are bounded. | `a8d17efda472949bd` | 19:05 |
+| `fix/tests-background-priority` | `~/.config/doom-worktrees/tests-background-priority` | Every test entry point runs under `taskpolicy -b` through one helper, with a source-scan guard. The live runtime is untouched. | `a8e7822fe0f97a214` | 19:05 |
+| `fix/store-interactive-writes-first` | `~/.config/doom-worktrees/store-interactive-writes-first` | A two-tier store writer (interactive shim writes before bulk sidecar writes), bounded bulk batches, per-class metrics, and a look at the 163s write. | `a708d3073a6905327` | 19:05 |
+| `feat/edit-held-prompt` | `~/.config/doom-worktrees/edit-held-prompt` | An Edit button on the held card. The editing claim holds that prompt and everything after it. The content goes to the Emacs input (existing text saved to history), and a send replaces it and reclassifies. | `ac1c20bc246a27fba` | 19:05 |
 
 ## Still waiting on the owner
 
-- Load and latency fixes (test priority, a suite cap, the sidecar's raw copying of task outputs, store write priority, turn-end direct path): which to dispatch.
-- Edit held prompts: where editing happens, whether an edit holds the queue, whether an interject verdict fires at once, and the button.
 - The new name for "Release" (suggested: "Send now").
 - A retry of `SPC TAB f`, which now logs.
 
