@@ -399,7 +399,11 @@ function lifecycleClient(script: {
   daemon?: () => AsyncIterable<WatchDaemonResponse>;
   adopt?: () => AdoptWebWorkspaceResponse;
 }) {
-  const state = { adoptCalls: 0, webRequests: [] as Array<{ webappBuild: string }> };
+  const state = {
+    adoptCalls: 0,
+    webRequests: [] as Array<{ webappBuild: string }>,
+    daemonRequests: [] as Array<{ client: string | undefined }>,
+  };
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       watchWebWorkspace: async function* (request) {
@@ -409,7 +413,8 @@ function lifecycleClient(script: {
         }
         await new Promise<never>(() => undefined);
       },
-      watchDaemon: async function* () {
+      watchDaemon: async function* (request) {
+        state.daemonRequests.push({ client: request.client.case });
         for await (const push of script.daemon?.() ?? []) yield push;
         await new Promise<never>(() => undefined);
       },
@@ -583,6 +588,19 @@ describe("startLifecycle: the daemon stream", () => {
     // ASSERT (before dispose: disposing takes the banner down by design)
     expect(host.textContent).toContain("daemon restart scheduled · deploy");
     handle.dispose();
+  });
+
+  it("names the webview client on the WatchDaemon request", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client, state } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT: the daemon refuses a WatchDaemon naming no client (REQUIRED oneof).
+    expect(state.daemonRequests).toEqual([{ client: "webview" }]);
   });
 
   it("suppresses the unreachable card for exactly the announced window", async () => {
