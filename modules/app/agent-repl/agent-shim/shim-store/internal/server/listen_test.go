@@ -41,7 +41,7 @@ func TestListenBindsTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
-	defer ln.Close()
+	defer closeOrFail(t, ln)
 	if _, statErr := os.Stat(path); statErr != nil {
 		t.Fatalf("stat %q = %v, want the socket to exist", path, statErr)
 	}
@@ -56,7 +56,7 @@ func TestListenRestrictsTheSocketToItsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
-	defer ln.Close()
+	defer closeOrFail(t, ln)
 
 	// Assert.
 	info, err := os.Stat(path)
@@ -76,7 +76,7 @@ func TestListenReclaimsAStaleSocket(t *testing.T) {
 		t.Fatalf("stage stale socket: %v", err)
 	}
 	stale.(*net.UnixListener).SetUnlinkOnClose(false)
-	stale.Close()
+	closeOrFail(t, stale)
 
 	// Act.
 	ln, err := Listen(path, testLogger())
@@ -85,7 +85,7 @@ func TestListenReclaimsAStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen over a stale socket = %v, want nil", err)
 	}
-	ln.Close()
+	closeOrFail(t, ln)
 }
 
 func TestListenRefusesToReplaceANonSocket(t *testing.T) {
@@ -101,7 +101,7 @@ func TestListenRefusesToReplaceANonSocket(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		ln.Close()
+		closeOrFail(t, ln)
 		t.Fatal("Listen over a regular file = nil error, want a loud refusal")
 	}
 }
@@ -115,14 +115,14 @@ func TestListenRefusesASocketALiveStoreIsServing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer live.Close()
+	defer closeOrFail(t, live)
 
 	// Act.
 	ln, err := Listen(path, testLogger())
 
 	// Assert.
 	if err == nil {
-		ln.Close()
+		closeOrFail(t, ln)
 		t.Fatal("Listen over a live socket = nil error, want a refusal to steal it")
 	}
 }
@@ -134,7 +134,7 @@ func TestListenLeavesALiveSocketOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer live.Close()
+	defer closeOrFail(t, live)
 
 	// Act.
 	if _, err := Listen(path, testLogger()); err == nil {
@@ -154,7 +154,7 @@ func TestListenRecordsTheOccupiedSocketOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer live.Close()
+	defer closeOrFail(t, live)
 	sink := &syncBuffer{}
 	log := logging.New(sink, io.Discard, true)
 
