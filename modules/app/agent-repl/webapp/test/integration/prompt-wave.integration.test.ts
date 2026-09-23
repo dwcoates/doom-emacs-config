@@ -10,8 +10,9 @@
  * controller and consumed by a selector in the shipped stylesheet, and the two
  * are only one mechanism if the attribute the controller writes is the
  * attribute the sheet reads. This boots the whole app, drives a real turn
- * through the fake daemon's tail, and asserts BOTH ends: the attribute on the
- * bubble, and the `bubble-wave` rule keyed on exactly it.
+ * through the fake daemon's tail — the prompt row's daemon-stated `working`
+ * flag, set and then re-pushed unset — and asserts BOTH ends: the attribute on
+ * the bubble, and the `bubble-wave` rule keyed on exactly it.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -20,6 +21,7 @@ import { resolve } from "node:path";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing";
 import { startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
+import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   WORKSPACE_ID,
   feedId,
@@ -44,26 +46,27 @@ function bubble(id: string): HTMLElement {
   return el;
 }
 
+/** The user-prompt row for p1/t1, carrying the daemon's WORKING flag. */
+function prompt(working: boolean): FeedRow {
+  const row = userPromptRow("do the thing", { id: feedId("p1"), turn: turnId("t1") });
+  if (row.row.case !== "userPrompt") throw new Error("the fixture drew no user prompt");
+  row.row.value.working = working;
+  return row;
+}
+
 describe("the prompt bubble's thinking wave, across a turn", () => {
-  it("waves the prompt while its turn runs and stops when the turn concludes", async () => {
-    // Arrange — the app booted on a live tail, the prompt delivered.
+  it("waves the prompt while its row is working and stops when it is re-pushed settled", async () => {
+    // Arrange — the app booted on a live tail, the working prompt delivered.
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
-    harness.fake.pushRow(
-      WORKSPACE_ID,
-      ROOT_FEED,
-      userPromptRow("do the thing", { id: feedId("p1"), turn: turnId("t1") }),
-    );
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, prompt(true));
     await harness.settle();
     const working = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
     const drawn = bubble("p1");
 
-    // Act — the turn ends, on the same tail the prompt arrived on.
-    harness.fake.pushRow(
-      WORKSPACE_ID,
-      ROOT_FEED,
-      turnEndedConcludedRow(feedId("p1"), { id: feedId("e1"), turn: turnId("t1") }),
-    );
+    // Act — the daemon re-pushes the prompt settled, as it does at the turn's
+    // terminal, on the same tail the prompt arrived on.
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, prompt(false));
     await harness.settle();
 
     // Assert — the band ran, then stopped, and the bubble it stopped on is the
@@ -81,44 +84,28 @@ describe("the prompt bubble's thinking wave, across a turn", () => {
     });
   });
 
-  it("holds the wave through the turn's own final answer, releasing it only at turn_ended", async () => {
-    // THE BOUNDARY THE 'settled too early' REPORT NAMES: a turn's answering
-    // response landing must NOT settle the prompt — the feed marks the final
-    // answer only when the `turn_ended` row is drawn (turn-ended.ts), so a
-    // response arriving `success` while the turn is still open is the agent's
-    // answer taking shape, not the turn ending. The one prior case ends the
-    // turn on the push AFTER the prompt; this drives the realistic order —
-    // prompt, a streaming update, the settled answer, THEN the turn's end — and
-    // asserts the band survives every step until the last.
+  it("holds the wave through the answer and the turn_ended row while the row says working", async () => {
+    // THE BOUNDARY THE 'settled too early' REPORT NAMES: nothing but the
+    // prompt row's own flag moves the wave — not a streaming response, not the
+    // settled answer, not a turn_ended row naming it.
     //
-    // Arrange — the app booted on a live tail, the prompt delivered.
+    // Arrange — the app booted on a live tail, the working prompt delivered.
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
-    harness.fake.pushRow(
-      WORKSPACE_ID,
-      ROOT_FEED,
-      userPromptRow("do the thing", { id: feedId("p1"), turn: turnId("t1") }),
-    );
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, prompt(true));
     await harness.settle();
-    const afterPrompt = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
 
-    // Act 1 — the answer streams in, then settles, both on the prompt's turn.
+    // Act — the answer streams in and settles, and a terminal names it.
     harness.fake.pushRow(
       WORKSPACE_ID,
       ROOT_FEED,
       responseRow("update", "thinking", { id: feedId("r1"), turn: turnId("t1") }),
     );
-    await harness.settle();
-    const afterStreaming = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
     harness.fake.pushRow(
       WORKSPACE_ID,
       ROOT_FEED,
       responseRow("success", "the answer", { id: feedId("r1"), turn: turnId("t1") }),
     );
-    await harness.settle();
-    const afterFinalResponse = bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE);
-
-    // Act 2 — the turn ends, naming that settled response as its answer.
     harness.fake.pushRow(
       WORKSPACE_ID,
       ROOT_FEED,
@@ -126,19 +113,8 @@ describe("the prompt bubble's thinking wave, across a turn", () => {
     );
     await harness.settle();
 
-    // Assert — waving from draw, through the streamed and the settled answer,
-    // and only the turn's end takes it away.
-    expect({
-      afterPrompt,
-      afterStreaming,
-      afterFinalResponse,
-      afterTurnEnded: bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE),
-    }).toEqual({
-      afterPrompt: PROMPT_WAVE_WORKING,
-      afterStreaming: PROMPT_WAVE_WORKING,
-      afterFinalResponse: PROMPT_WAVE_WORKING,
-      afterTurnEnded: null,
-    });
+    // Assert — the prompt still waves: only its own re-push settles it.
+    expect(bubble("p1").getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
   });
 
   it("keys the shipped bubble-wave rule on the mark and on nothing wider", () => {

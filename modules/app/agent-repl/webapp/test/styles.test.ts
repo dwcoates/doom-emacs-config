@@ -1008,7 +1008,8 @@ describe("the cost corner's hover hit area", () => {
  * The border must appear exactly when the thinking glimmer starts and
  * disappear exactly when it ends, so it is keyed on the SAME
  * `data-wave="working"` attribute the glimmer itself reads (see
- * `startPromptWave` / `markPromptWave` in breathing.ts / feed-view.ts) —
+ * `armPromptWave` / `setPromptWave` in breathing.ts, drawn from the prompt
+ * row's daemon-stated `working` flag) —
  * never a separate class or a second JS toggle, since two independent
  * togglers is exactly what could drift apart.
  */
