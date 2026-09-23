@@ -36,7 +36,7 @@ import { mainAgentId } from "../../src/convert/ids.js";
 // from a second module graph would sail past every one of those arms. The
 // static binding is the file's one copy and cannot drift from the engine's.
 import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
-import type { SdkMessage } from "../../src/sdk/types.js";
+import type { SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -54,6 +54,11 @@ interface Harness {
   readonly released: string[];
   /** Every exit code the engine asked `main.ts` to end the process with. */
   readonly exits: number[];
+  /**
+   * Every client uuid the engine minted, in order: one per keep-alive send.
+   * A scripted reply stamps the latest to answer that send, as the vendor does.
+   */
+  readonly minted: string[];
   /**
    * The next hibernation compaction to SETTLE.
    *
@@ -193,6 +198,8 @@ function harness(
      * the push-to-pull bridge the engine submits every prompt through.
      */
     drainPrompts?: string[];
+    /** Like `drainPrompts`, but keeps every send WHOLE, client uuid and all. */
+    drainSends?: SdkUserMessage[];
     /** Reach each scripted query the moment it is created, before it is returned. */
     onQueryCreated?: (query: ScriptedQuery, spec: QuerySpec, index: number) => void;
     /**
@@ -225,6 +232,7 @@ function harness(
   const workspaceLocks: string[] = [];
   const exits: number[] = [];
   const settledCompactions: { ok: boolean; error?: string }[] = [];
+  const minted: string[] = [];
   const compactionWaiters: ((outcome: { ok: boolean; error?: string }) => void)[] = [];
   const engine = (options.engineFactory ?? createEngine)({
     onHibernationCompactionSettled: (outcome) => {
@@ -256,6 +264,12 @@ function harness(
       const index = queries.length;
       queries.push({ spec, query });
       options.onQueryCreated?.(query, spec, index);
+      const sends = options.drainSends;
+      if (sends !== undefined) {
+        void (async (): Promise<void> => {
+          for await (const message of spec.prompt) sends.push(message);
+        })();
+      }
       const drained = options.drainPrompts;
       if (drained !== undefined) {
         void (async (): Promise<void> => {
@@ -268,6 +282,11 @@ function harness(
       return Promise.resolve(query);
     },
     runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+    newUuid: () => {
+      const uuid = `00000000-0000-4000-8000-${String(minted.length + 1).padStart(12, "0")}`;
+      minted.push(uuid);
+      return uuid;
+    },
     env: { stateDir, configDir, cwd },
     nowMs: () => options.nowMs ?? 1_000_100,
     ...(options.withoutScheduler === true ? {} : { scheduler }),
@@ -322,6 +341,7 @@ function harness(
     workspaceLocks,
     released,
     exits,
+    minted,
     nextCompaction: () => {
       const ready = settledCompactions.shift();
       if (ready !== undefined) return Promise.resolve(ready);
@@ -1483,6 +1503,458 @@ describe("the keep-alive turn", () => {
  * blew the client-side length guard. The fix rewinds the outstanding keep-alive
  * before sending the next, so the transcript never holds more than one.
  */
+/**
+ * THE KEEP-ALIVE TURN SERVES NOTHING (the leak of 2026-09-23).
+ *
+ * WHAT THIS GUARDS: that every row and push a keep-alive turn gives rise to —
+ * its reply, its thinking, its usage, its terminal, its turn end — stays off
+ * every served plane, and that the tag comes from the send the vendor says a
+ * message answers. The failure mode being excluded is the owner's live one: a
+ * turn the vendor ran on its own closed the keep-alive, and the keep-alive's
+ * "." then arrived untagged and was drawn as a green final answer.
+ */
+describe("the keep-alive turn serves nothing", () => {
+  /** Beat the cadence once and let the send land. */
+  async function beat(h: Harness): Promise<void> {
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  /**
+   * A fold that behaves like the real converter in the one respect under test:
+   * every row it produces carries the context's tag, and an assistant message
+   * also produces a usage fact.
+   */
+  function taggingFold(h: Harness): void {
+    h.fold.entriesFor = (message) => {
+      const keepalive = h.fold.contexts.at(-1)?.keepalive ?? false;
+      const rows: PersistEntry[] = [
+        { ...activityEntry(`unit-${message.uuid}`, { case: undefined }, `frame-${message.uuid}`), keepalive },
+      ];
+      if (message.type === "assistant") {
+        rows.push({
+          ...foldEntry(
+            {
+              kind: "session_update",
+              update: create(conversationv1.SessionUpdateSchema, {
+                update: { case: "rateLimitStatus", value: create(conversationv1.SessionRateLimitStatusSchema, {}) },
+              }),
+            },
+            `usage-${message.uuid}`,
+          ),
+          keepalive,
+        });
+      }
+      return rows;
+    };
+  }
+
+  /** The persisted rows the fold produced for one vendor message. */
+  const rowsFor = (h: Harness, uuid: string): PersistEntry[] =>
+    h.persistence.buffered.filter((entry) => entry.source.vendorUuid.endsWith(uuid));
+
+  /** A vendor message answering nobody: the vendor's own task-notification turn. */
+  const vendorReply = (uuid: string): SdkMessage => assistantMessage(uuid);
+
+  /** A thinking-progress frame of the running turn. */
+  const thinking = (uuid: string): SdkMessage =>
+    ({
+      type: "system",
+      subtype: "thinking_tokens",
+      estimated_tokens: 10,
+      estimated_tokens_delta: 10,
+      uuid,
+      session_id: "s",
+    }) as never;
+
+  /** The StartTurn refusal's `turn_already_open.keepalive`, or absence. */
+  async function refusedBehindKeepalive(h: Harness, turnId: string): Promise<boolean | undefined> {
+    const response = await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    if (response.result.case !== "failure") return undefined;
+    const kind = response.result.value.kind;
+    return kind.case === "turnAlreadyOpen" ? kind.value.keepalive : undefined;
+  }
+
+  it("sends the keep-alive with a client uuid of its own", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    await beat(h);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(sends.at(-1)?.uuid).toBe(h.minted.at(-1));
+  });
+
+  it("sends a real prompt with no client uuid", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    await realPrompt(h, "turn-1");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(sends.at(-1)?.uuid).toBeUndefined();
+  });
+
+  it("keeps the keep-alive's reply off every page", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await beat(h);
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+
+    // Assert
+    expect(rowsFor(h, "ka-reply").map((row) => row.keepalive)).toEqual([true, true]);
+  });
+
+  it("keeps the keep-alive's terminal off every page", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await beat(h);
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect(rowsFor(h, "ka-result").map((row) => row.keepalive)).toEqual([true]);
+  });
+
+  it("keeps the keep-alive's thinking off every page", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await beat(h);
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, thinking("ka-thinking")));
+
+    // Assert
+    expect(rowsFor(h, "ka-thinking").map((row) => row.keepalive)).toEqual([true]);
+  });
+
+  it("pushes no usage fact the keep-alive's reply produced", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await beat(h);
+
+    // Act
+    const arms = await pushedUpdates(
+      h,
+      (update) => (update.case === "rateLimitStatus" ? update.case : undefined),
+      async () => {
+        await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+      },
+    );
+
+    // Assert
+    expect(arms).toEqual([]);
+  });
+
+  it("pushes no model the keep-alive was answered on", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+    const reply = {
+      ...assistantMessage("ka-reply"),
+      message: { id: "msg_ka", role: "assistant", content: [], model: "some-fallback-model" },
+    } as never;
+
+    // Act
+    const models = await pushedUpdates(
+      h,
+      // The session's own model is restated to a new subscriber; only the
+      // keep-alive's would be news.
+      (update) =>
+        update.case === "modelChanged" && update.value.effectiveModel?.name === "some-fallback-model"
+          ? update.value.effectiveModel.name
+          : undefined,
+      async () => {
+        await h.engine.onSdkMessage(answering(h, reply));
+      },
+    );
+
+    // Assert
+    expect(models).toEqual([]);
+  });
+
+  it("pushes no fast-mode state the keep-alive's result restates", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+    const result = { ...resultMessage("ka-result"), fast_mode_state: "on" } as never;
+
+    // Act
+    const states = await pushedUpdates(
+      h,
+      (update) => (update.case === "fastMode" ? update.case : undefined),
+      async () => {
+        await h.engine.onSdkMessage(answering(h, result));
+      },
+    );
+
+    // Assert
+    expect(states).toEqual([]);
+  });
+
+  it("samples no context usage at the keep-alive's end", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const probes = (): number => h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
+    await beat(h);
+    const before = probes();
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect(probes()).toBe(before);
+  });
+
+  it("re-probes no account usage at the keep-alive's end", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const probes = (): number => h.queries[0]?.query.calls.filter((call) => call === "usage").length ?? 0;
+    await beat(h);
+    const before = probes();
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect(probes()).toBe(before);
+  });
+
+  it("serves the rows of a turn the vendor ran while the keep-alive waited", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await beat(h);
+
+    // Act
+    await h.engine.onSdkMessage(vendorReply("vendor-reply"));
+
+    // Assert
+    expect(rowsFor(h, "vendor-reply").map((row) => row.keepalive)).toEqual([false, false]);
+  });
+
+  it("names no turn to the fold for a turn the vendor ran while the keep-alive waited", async () => {
+    // Arrange: the keep-alive's turn id must reach no served row.
+    const h = harness();
+    await started(h);
+    await beat(h);
+
+    // Act
+    await h.engine.onSdkMessage(vendorReply("vendor-reply"));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.turnId).toBeUndefined();
+  });
+
+  it("keeps the keep-alive open across the result of a turn the vendor ran first", async () => {
+    // Arrange: THE 2026-09-23 SEQUENCE.
+    const h = harness();
+    await started(h);
+    await beat(h);
+    await h.engine.onSdkMessage(vendorReply("vendor-reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Assert
+    expect(await refusedBehindKeepalive(h, "turn-1")).toBe(true);
+  });
+
+  it("keeps the keep-alive's answer off every page when it arrives after a vendor turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await beat(h);
+    await h.engine.onSdkMessage(vendorReply("vendor-reply"));
+    await h.engine.onSdkMessage(resultMessage("vendor-result"));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-dot")));
+
+    // Assert
+    expect(rowsFor(h, "ka-dot").map((row) => row.keepalive)).toEqual([true, true]);
+  });
+
+  it("closes the keep-alive on its own result", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert: the next real prompt is accepted, not refused behind the keep-alive.
+    expect(await refusedBehindKeepalive(h, "turn-1")).toBeUndefined();
+  });
+
+  it("leaves a real turn right after a keep-alive tagged as served", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    taggingFold(h);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("real-reply"));
+
+    // Assert
+    expect([h.fold.contexts.at(-1)?.turnId?.value, ...rowsFor(h, "real-reply").map((row) => row.keepalive)]).toEqual([
+      "turn-1",
+      false,
+      false,
+    ]);
+  });
+
+  it("still samples context usage at a real turn's end after a keep-alive", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+    const probes = (): number =>
+      h.queries.reduce((sum, entry) => sum + entry.query.calls.filter((call) => call === "getContextUsage").length, 0);
+    const before = probes();
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("real-result"));
+
+    // Assert
+    expect(probes()).toBeGreaterThan(before);
+  });
+
+  it("names no keep-alive as the turn in flight to a new watch", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await iterator.next();
+
+    // Act
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    // Assert
+    expect(second.frame.case === "sessionStarted" ? second.frame.value.turnInFlight : "not-started").toBeUndefined();
+  });
+
+  it("does not refuse KillSession over a keep-alive", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(response.result.case).not.toBe("failure");
+  });
+
+  it("does not refuse Hibernate over a keep-alive", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+
+    // Act
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    // Assert
+    expect(response.result.case).not.toBe("failure");
+  });
+
+  it("re-delivers a keep-alive under the SAME client uuid when its rewind is refused", async () => {
+    // Arrange: an anchor, one keep-alive of debt, and the next beat's rewind.
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    await beat(h);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Act
+    await h.engine.onSdkMessage(
+      errorResultMessage({ errors: ["No message found with message.uuid of: assistant-uuid"] }),
+    );
+    for (let attempt = 0; attempt < 50 && sends.filter((send) => send.uuid === h.minted.at(-1)).length < 2; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Assert
+    expect(sends.filter((send) => send.uuid === h.minted.at(-1)).length).toBe(2);
+  });
+
+  it("closes the keep-alive's scope, loudly, when it cannot be submitted", async () => {
+    // Arrange: both the rewind and its plain-resume recovery fail to open.
+    const h = harness({ createQueryFailsFrom: 1 });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    const before = logCursor();
+
+    // Act
+    await beat(h);
+    for (let attempt = 0; attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(logLevelFor(before, "a keep-alive's turn scope closed WITHOUT its answer")).toBe("info");
+  });
+
+  it("closes the keep-alive's scope when the vendor query dies under it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await beat(h);
+    const before = logCursor();
+
+    // Act
+    h.queries[0]?.query.end();
+    for (let attempt = 0; attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(logContextFor(before, "a keep-alive's turn scope closed WITHOUT its answer")?.reason).toMatch(
+      /^the vendor query died/,
+    );
+  });
+});
+
 describe("the keep-alive rewind between beats", () => {
   it("rewinds the prior keep-alive before the next, to the last REAL record", async () => {
     // Arrange. A real turn leaves the anchor, then one keep-alive rides it.
@@ -4540,8 +5012,19 @@ async function realTurn(
 async function keepaliveTurn(h: Harness, records: SdkMessage[]): Promise<void> {
   h.scheduler.fire(0);
   await new Promise((resolve) => setImmediate(resolve));
-  for (const record of records) await h.engine.onSdkMessage(record);
-  await h.engine.onSdkMessage(resultMessage("keepalive-result-uuid"));
+  for (const record of records) await h.engine.onSdkMessage(answering(h, record));
+  await h.engine.onSdkMessage(answering(h, resultMessage("keepalive-result-uuid")));
+}
+
+/**
+ * A reply frame as the vendor stamps it: naming the send it answers — the
+ * LATEST keep-alive send the engine minted a client uuid for (sdk.d.ts,
+ * `user_message_uuid` / `user_message_uuids`).
+ */
+function answering(h: Harness, message: SdkMessage): SdkMessage {
+  const send = h.minted.at(-1);
+  if (send === undefined) throw new Error("no keep-alive send was minted a client uuid");
+  return { ...message, user_message_uuid: send, user_message_uuids: [send] } as SdkMessage;
 }
 
 /** One activity frame row, as the fold produces them. */
@@ -6954,6 +7437,9 @@ describe("whose book a gated ask lands on", () => {
     await started(h);
     h.scheduler.fire(0);
     await new Promise((resolve) => setImmediate(resolve));
+    // THE ASK FOLLOWS THE ASSISTANT MESSAGE THAT CALLED THE TOOL, and that
+    // message is the keep-alive turn's first reply — stamped with its send.
+    await h.engine.onSdkMessage(answering(h, assistantMessage("keepalive-tool-call-uuid")));
     h.persistence.buffered.length = 0;
 
     await askUnder(h, "");

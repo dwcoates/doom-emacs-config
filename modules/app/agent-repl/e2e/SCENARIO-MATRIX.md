@@ -166,6 +166,7 @@ Two further limits, stated rather than hidden:
 | `!query-eof` | ungrounded | producerfaults_e2e_test.go | feed-families.layer.test.ts | — | Go: TestQueryEofEndsTheTurnAsQueryDied asserts the terminal is specifically FeedTurnEndedErrored.query_died with cause unexpected_eof (never concluded, never a generic vendor failure) plus a composed headline; TestQueryDiedBlocksTheFooter asserts the separate footer arm FooterSubStatusBlockedQueryDied and its FooterStatusActivityQueryDied line. | covered |
 | `!query-eof-mid-ask` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestQueryEofMidAskDeniesTheOpenAsk asserts the ask genuinely OPENED, then that the death settles it — FeedPermissionAnswered.denied_by_user, the gate's stand-down — and that the turn still ends on query_died. The fate of the in-flight ask, not only the notice. | covered |
 | `!query-fail` | ungrounded | producerfaults_e2e_test.go | query-death.layer.test.ts | — | Go: TestQueryFailEndsTheTurnAsQueryDied asserts FeedTurnEndedErrored.query_died with cause iterator_failure specifically, separating the rejecting iterable from the EOF half. | covered |
+| `!queue-vendor-turn` | ungrounded | hibernation_e2e_test.go | — | — | Go: TestKeepAliveAnswerAfterVendorTurnNeverServed asserts, after the shim's own keep-alive close and a later real turn's end, that NO feed row carries the keep-alive marker (the mock echoes it into the keep-alive's answer) AND that the vendor's own turn's prose (`A background task finished.`) IS drawn. | covered |
 | `!rate-limit` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitOverageWindowIsBelowTheNewsworthyGate asserts the exact conclusion prose and the specific negative that no rate-limit line was drawn for an overage figure below the newsworthy gate, with the harness warning sweep holding that the retired `daemon.footer.rate_limit_overage` warn stays gone. | covered |
 | `!rate-limit-five-hour` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitFiveHourWindowIsDrawn asserts the drawn `FooterAllowance(session)` — utilization pinned to the event's 0.82, `newsworthy` true, the named `allowed_warning` status arm, a non-zero `resets_at_s`, and the specific negative that no second status arm is carried. | covered |
 | `!rate-limit-seven-day` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: the seven-day sibling of the five-hour test asserts the drawn weekly `FooterAllowance` with the event's own utilization and reset instant, above the footer's newsworthiness gate. | covered |
@@ -226,13 +227,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **150**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **151**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
 - Uncovered (no counted layer drives the scenario at all): **2**
-- Total canonical scenarios: 152
+- Total canonical scenarios: 153
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 149 scenarios referenced across 25 files
+- Go e2e (non-emacs): 150 scenarios referenced across 26 files
 - Webapp layer: 35 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
