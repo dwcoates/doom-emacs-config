@@ -82,6 +82,11 @@ type fakeDB struct {
 	putJobErr   error
 	putSessions []wsm.Session
 	putTurns    []wsm.Turn
+	// putTurnErr fails every turn write, which the fake's own slice cannot.
+	putTurnErr error
+	// openTurns is what OpenTurns answers, and openTurnsErr fails the read.
+	openTurns    []wsm.Turn
+	openTurnsErr error
 	// hasTurnsErr makes the turns existence read fail, which the fake's own
 	// slice cannot.
 	hasTurnsErr error
@@ -372,8 +377,24 @@ func (d *fakeDB) ClearSessionTerminal(_ context.Context, id ids.WorkspaceID) err
 }
 
 func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
+	if d.putTurnErr != nil {
+		return d.putTurnErr
+	}
 	d.putTurns = append(d.putTurns, t)
 	return nil
+}
+
+func (d *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, error) {
+	if d.openTurnsErr != nil {
+		return nil, d.openTurnsErr
+	}
+	var out []wsm.Turn
+	for _, t := range d.openTurns {
+		if t.Workspace == id {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 // HasTurns answers off the same recorded turns PutTurn collects, so a test
