@@ -463,14 +463,28 @@ func TestRowDoesNotRecedeWhileTheWorkspaceIsOpen(t *testing.T) {
 
 // ---- The VIEWED marker: the row's display mode ----------------------------
 //
-// PRESENT is PARTIAL and ABSENT is FULL, and the only thing that lowers it is
-// the row's next STATUS CHANGE. These lock both halves, because a marker that
-// never clears and a marker that clears on every push are the two ways this
-// feature fails.
+// PRESENT is PARTIAL and ABSENT is FULL, the marker only ever stands on a DONE
+// row, and the only thing that lowers it there is the row's next STATUS
+// CHANGE. These lock all three halves, because a marker that never clears, a
+// marker that clears on every push and a marker drawn on live or exceptional
+// work are the three ways this feature fails.
+
+// finished brings the workspace to a DONE row: a live session whose turn
+// completed.
+func finished(t *testing.T, r sidebarResolver) sidebarResolver {
+	t.Helper()
+	live(t, r)
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	if got := statusName(onlyRow(t, r)); got != "done" {
+		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
+	}
+	return r
+}
 
 func TestRowCarriesNoViewedMarkerUntilTheEditorReportsOne(t *testing.T) {
 	// Arrange, Act.
-	r := arrange(t)
+	r := finished(t, arrange(t))
 
 	// Assert: ABSENT is FULL, which is what a row that has not been seen is.
 	if got := onlyRow(t, r).GetViewed(); got != nil {
@@ -478,22 +492,164 @@ func TestRowCarriesNoViewedMarkerUntilTheEditorReportsOne(t *testing.T) {
 	}
 }
 
-func TestViewedReportDrawsTheRowPartial(t *testing.T) {
+func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	// Arrange.
-	r := live(t, arrange(t))
+	r := finished(t, arrange(t))
 
 	// Act.
 	r.SetViewed(theWS)
 
 	// Assert: presence is the mode.
 	if got := onlyRow(t, r).GetViewed(); got == nil {
-		t.Fatal("viewed = unset, want the marker the editor's report raises")
+		t.Fatal("viewed = unset, want the marker the editor's report raises on a done row")
 	}
+}
+
+func TestViewedReportNeverDrawsANonDoneRowPartial(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, r sidebarResolver)
+		want    string
+	}{
+		{name: "none", arrange: func(*testing.T, sidebarResolver) {}, want: "none"},
+		{name: "init", arrange: func(_ *testing.T, r sidebarResolver) {
+			r.OnLink(theWS, shimclient.LinkDialing)
+		}, want: "init"},
+		{name: "ready", arrange: func(t *testing.T, r sidebarResolver) { live(t, r) }, want: "ready"},
+		{name: "submitting", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+		}, want: "submitting"},
+		{name: "thinking", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnActivity(theWS, agent("a1"), &conversationv1.AgentActivity{})
+		}, want: "thinking"},
+		{name: "clearing", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActClear})
+		}, want: "clearing"},
+		{name: "compacting", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActCompact})
+		}, want: "compacting"},
+		{name: "permission", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnPermission(theWS, agent("a1"), permissionAsk("p1"))
+		}, want: "permission"},
+		{name: "interrupted", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.SetTurnEnded(theWS, wsm.CloseKilled)
+		}, want: "interrupted"},
+		{name: "idle_async", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+			r.SetTurnEnded(theWS, wsm.CloseCompleted)
+		}, want: "idle_async"},
+		{name: "vendor_blocked", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnSessionUpdate(theWS, &conversationv1.SessionUpdate{
+				Update: &conversationv1.SessionUpdate_QueryDied{
+					QueryDied: &conversationv1.SessionQueryDied{}}})
+		}, want: "vendor_blocked"},
+		{name: "severed", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnLink(theWS, shimclient.LinkRedialing)
+		}, want: "severed"},
+		{name: "start_failed", arrange: func(_ *testing.T, r sidebarResolver) {
+			r.OnLink(theWS, shimclient.LinkDialing)
+			r.OnLink(theWS, shimclient.LinkDead)
+		}, want: "start_failed"},
+		{name: "degraded", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnSessionUpdate(theWS, degradedUpdate())
+		}, want: "degraded"},
+		{name: "dead", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.OnLink(theWS, shimclient.LinkDead)
+		}, want: "dead"},
+		{name: "merge_enqueuing", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "enqueuing"})
+		}, want: "merge_enqueuing"},
+		{name: "merging", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "merging"})
+		}, want: "merging"},
+		{name: "merge_queued", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "queued"})
+		}, want: "merge_queued"},
+		{name: "merge_conflict", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "conflict"})
+		}, want: "merge_conflict"},
+		{name: "merge_failed", arrange: func(t *testing.T, r sidebarResolver) {
+			live(t, r)
+			r.SetMerge(theWS, footer.MergeFacts{State: "failed"})
+		}, want: "merge_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+			tc.arrange(t, r)
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q — the arrangement missed the arm", got, tc.want)
+			}
+
+			// Act: the editor reports a dwell, however long it has been.
+			r.SetViewed(theWS)
+
+			// Assert: live work and exceptional states are never deprioritized.
+			if got := onlyRow(t, r).GetViewed(); got != nil {
+				t.Fatalf("viewed = %v on a %s row, want unset: only a done row goes PARTIAL", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAViewedReportOnANonDoneRowDoesNotSurviveIntoDone(t *testing.T) {
+	// Arrange: a report on a thinking row, which is refused.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.OnActivity(theWS, agent("a1"), &conversationv1.AgentActivity{})
+	r.SetViewed(theWS)
+
+	// Act: the turn finishes.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert: the finished response is new; the user has not seen it yet.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "done" {
+		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
+	}
+	if got := row.GetViewed(); got != nil {
+		t.Fatalf("viewed = %v, want unset: a report made while thinking is not a report on the done row", got)
+	}
+}
+
+func TestAViewedReportOnANonDoneRowIsRecordedAsRefused(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.SetViewed(theWS)
+
+	// Assert: the dropped report is visible in the log, not silent.
+	for _, rec := range r.surfaces.Records() {
+		if rec.Operation == "daemon.sidebar.row_viewed_refused" {
+			return
+		}
+	}
+	t.Fatal("no daemon.sidebar.row_viewed_refused record for a report on a ready row")
 }
 
 func TestViewedReportIsIdempotent(t *testing.T) {
 	// Arrange.
-	r := live(t, arrange(t))
+	r := finished(t, arrange(t))
 	r.SetViewed(theWS)
 
 	// Act: marking an already-viewed workspace changes nothing.
@@ -506,8 +662,8 @@ func TestViewedReportIsIdempotent(t *testing.T) {
 }
 
 func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
-	// Arrange: a viewed, ready row.
-	r := live(t, arrange(t))
+	// Arrange: a viewed, done row.
+	r := finished(t, arrange(t))
 	r.SetViewed(theWS)
 
 	// Act: new activity, from an origin the editor never told the roster about.
@@ -523,9 +679,28 @@ func TestAStatusChangeClearsTheViewedMarker(t *testing.T) {
 	}
 }
 
+func TestAViewedMarkerClearedByAStatusChangeStaysClearedBackOnDone(t *testing.T) {
+	// Arrange: a viewed, done row that took another turn.
+	r := finished(t, arrange(t))
+	r.SetViewed(theWS)
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Act: that turn finishes too.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert: the new response is unseen until the editor reports it again.
+	row := onlyRow(t, r)
+	if got := statusName(row); got != "done" {
+		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
+	}
+	if got := row.GetViewed(); got != nil {
+		t.Fatalf("viewed = %v, want unset until a fresh report on the new done", got)
+	}
+}
+
 func TestAPushThatRestatesTheSameStatusKeepsTheViewedMarker(t *testing.T) {
 	// Arrange.
-	r := live(t, arrange(t))
+	r := finished(t, arrange(t))
 	r.SetViewed(theWS)
 
 	// Act: a re-push that leaves the arm exactly where it was.
@@ -538,10 +713,12 @@ func TestAPushThatRestatesTheSameStatusKeepsTheViewedMarker(t *testing.T) {
 }
 
 func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
-	// Arrange: two workspaces, one of them viewed.
+	// Arrange: two workspaces, one of them done and viewed.
 	r := arrange(t, workspace(string(theWS), "one"), workspace("w2", "two"))
 	r.OnLink(theWS, shimclient.LinkConnected)
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
 	r.SetViewed(theWS)
 
 	// Act: the OTHER workspace takes a turn.
@@ -551,6 +728,9 @@ func TestAnotherWorkspacesStatusChangeLeavesThisMarkerStanding(t *testing.T) {
 	row := rowFor(repoRows(t, latest(t, r)), string(theWS))
 	if row == nil {
 		t.Fatal("the viewed workspace lost its row")
+	}
+	if got := statusName(row); got != "done" {
+		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
 	}
 	if got := row.GetViewed(); got == nil {
 		t.Fatal("viewed = unset, want a neighbour's activity to leave this row PARTIAL")
@@ -609,7 +789,7 @@ func TestRevivingMarkerLeavesTheStatusArmAlone(t *testing.T) {
 
 func TestRevivingMarkerLeavesTheViewedMarkerStanding(t *testing.T) {
 	// Arrange.
-	r := live(t, arrange(t))
+	r := finished(t, arrange(t))
 	r.SetViewed(theWS)
 
 	// Act.
