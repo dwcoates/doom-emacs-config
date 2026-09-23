@@ -140,7 +140,8 @@ const drawnHooks = new WeakMap<Element, readonly string[]>();
  * scrolled inside the box keeps their place), its classes and attributes are
  * brought to the spec (a class the bubble did not get from a spec — the
  * controller's `response-selected` — is left alone), a header, corner or footer
- * element that says the same thing is kept (a replaced one's clock stops), the
+ * element that states the same `data-says` is kept (a replaced one's clock
+ * stops), the
  * working wave keeps its phase, and the content is repainted in place
  * (`paintBody`). Nothing already in its place is moved (`placeChildren`).
  */
@@ -214,9 +215,11 @@ function liveChrome(bubble: HTMLElement, side: "strip" | "footer", scroll: HTMLE
 
 /**
  * The chrome to draw: each of NEXT, except that the live element in the same
- * position is KEPT when it says the same thing — a replaced corner would
- * restart its clock and drop a hover reveal for nothing. What says the same
- * thing: the same `data-says` when either states one, else an equal node. A
+ * position is KEPT when both state, in `data-says`, that they say the same
+ * thing — a replaced corner would restart its clock and drop a hover reveal for
+ * nothing. Keeping is OPT-IN: an element that states nothing is always the new
+ * draw's own, because chrome can carry listeners bound to the push that drew it
+ * (a held prompt's actions), and a stale one must never answer a click. A
  * discarded element's clock stops, whichever side it was on.
  */
 function keepSaid(live: readonly HTMLElement[], next: readonly HTMLElement[]): HTMLElement[] {
@@ -232,11 +235,8 @@ function keepSaid(live: readonly HTMLElement[], next: readonly HTMLElement[]): H
   return drawn;
 }
 
-/** Whether A and B state the same thing (see `keepSaid`). */
+/** Whether A and B both state, and state the same thing (see `keepSaid`). */
 function saysTheSame(a: HTMLElement, b: HTMLElement): boolean {
-  if (a.hasAttribute(SAYS_ATTRIBUTE) || b.hasAttribute(SAYS_ATTRIBUTE)) {
-    return a.getAttribute(SAYS_ATTRIBUTE) === b.getAttribute(SAYS_ATTRIBUTE);
-  }
-  b.classList.toggle(BUBBLE_STRIP_CLASS, a.classList.contains(BUBBLE_STRIP_CLASS));
-  return a.isEqualNode(b);
+  const said = a.getAttribute(SAYS_ATTRIBUTE);
+  return said !== null && said === b.getAttribute(SAYS_ATTRIBUTE);
 }

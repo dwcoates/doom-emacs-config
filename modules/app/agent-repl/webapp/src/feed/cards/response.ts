@@ -65,7 +65,7 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { drawBubble } from "../../bubble/draw.js";
+import { SAYS_ATTRIBUTE, drawBubble } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -315,6 +315,8 @@ export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTM
   const heading = document.createElement("div");
   heading.className = "response-notice-heading";
   heading.textContent = u.heading;
+  // What it says, so an in-place redraw keeps a heading that did not change.
+  heading.setAttribute(SAYS_ATTRIBUTE, u.heading);
   return heading;
 }
 
@@ -372,7 +374,7 @@ export function drawFeedResponseUsageStamp(
   const corner = document.createElement("span");
   corner.className = "usage-corner";
   corner.dataset.tokens = u.text;
-  corner.setAttribute("data-says", `${u.text}|${String(atMs)}`);
+  corner.setAttribute(SAYS_ATTRIBUTE, `${u.text}|${String(atMs)}`);
 
   const slider = document.createElement("span");
   slider.className = "usage-slider";
