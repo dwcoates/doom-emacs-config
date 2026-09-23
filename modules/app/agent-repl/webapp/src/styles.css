@@ -155,13 +155,20 @@
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
   --final-response: #16a34a;
-  /* The border around a THINKING response bubble: light orange, worn by the
+  /* The border around a THINKING response bubble: yellow (owner ruling,
+     2026-09-23; was light orange), worn by the
      agent's intermediate reasoning bubbles (never a final answer, partial or
      whole). Distinct from the green --final-response an answer wears and from
      the deep-orange --compact-rule and amber --async, so an in-progress
      reasoning card reads as its own state. Same 0.3px thickness the base bubble
      reserves; only the color lands here. */
-  --thinking-border: #fb923c;
+  --thinking-border: #eab308;
+  /* The border around a FINISHED response the agent wrote MID-TURN (prose
+     between tool calls: settled, but not the turn's answer): pear, the step
+     between thinking's yellow and an answer's green (owner ruling,
+     2026-09-23), so the border ladder runs monotonic toward done: yellow
+     (reasoning) -> pear (said, not concluded) -> green (the answer). */
+  --interim-response-border: #a3b10b;
   /* The border around the response the reader has SELECTED to reply to
      (reply-to-a-past-response mode): blue, distinct from the green a final
      answer wears at rest, so the one bubble the next prompt will quote is
@@ -350,9 +357,10 @@
     --compact-rule: #f97316;
     --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
-    /* Lighter orange for the dark theme, as the other state borders lift, so
+    /* Lighter yellow for the dark theme, as the other state borders lift, so
        the thinking hairline still reads against the dark purple fill. */
-    --thinking-border: #fdba74;
+    --thinking-border: #facc15;
+    --interim-response-border: #c7d32a;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
@@ -1743,6 +1751,12 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    answer that is NOT a thinking bubble) never matches this rule, so it stays
    borderless until it becomes the green final answer. */
 .bubble.assistant.thinking-bubble { border-color: var(--thinking-border); }
+/* A settled response that is neither the turn's answer nor thinking: the pear
+   step of the ladder. Keyed on the daemon's settled state, so a response still
+   streaming keeps the base border until it settles. */
+.bubble.assistant[data-state="success"]:not(.final-response):not(.thinking-bubble) {
+  border-color: var(--interim-response-border);
+}
 /* The SELECTED final response (reply-to-a-past-response mode): blue in place of
    the green. Declared after the green rule and at higher specificity (it adds
    `.response-selected`), so the selected bubble reads blue while selected and
