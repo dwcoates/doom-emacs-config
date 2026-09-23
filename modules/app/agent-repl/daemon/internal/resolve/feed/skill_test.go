@@ -246,3 +246,63 @@ func TestASkillTheGateRefusedSaysNothingWasLoaded(t *testing.T) {
 		t.Fatalf("outcome = %T, want denied", h.skillCard().GetOutcome())
 	}
 }
+
+func TestAStartAfterTheDocumentLandedKeepsTheCardLoaded(t *testing.T) {
+	// Arrange: the stream plane's success lands before the file plane's start
+	// for the same unit.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseSuccess{
+		Skill:    &conversationv1.AgentSkillName{Name: "graphify"},
+		Document: &conversationv1.AgentSkillDocument{Markdown: "# graphify\n"},
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetLoaded().GetDocument().GetMarkdown(); got != "# graphify\n" {
+		t.Fatalf("outcome = %T (document %q), want the loaded card to stand", h.skillCard().GetOutcome(), got)
+	}
+}
+
+func TestAStartAfterTheDocumentLandedStillStatesItsInvocation(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseSuccess{
+		Skill:    &conversationv1.AgentSkillName{Name: "graphify"},
+		Document: &conversationv1.AgentSkillDocument{Markdown: "# graphify\n"},
+	})
+	args := "--deep"
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		Args:      &args,
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetInvocation().GetText(); got != "/graphify --deep" {
+		t.Fatalf("invocation = %q, want the start's full line", got)
+	}
+}
+
+func TestAStartAfterAFailureKeepsTheCardFailed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if h.skillCard().GetFailed() == nil {
+		t.Fatalf("outcome = %T, want the failed card to stand", h.skillCard().GetOutcome())
+	}
+}
