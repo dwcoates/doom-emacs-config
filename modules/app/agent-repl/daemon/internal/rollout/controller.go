@@ -115,6 +115,14 @@ type controller struct {
 	// workspace's freeness; the group is what lets a caller (a test) know the
 	// checks have all run to their end rather than guessing with a delay.
 	staleBounces sync.WaitGroup
+	// stragglerAdoptions counts the adoptions becomeIncumbent started for
+	// workspaces whose handover never finished, for the same reason.
+	stragglerAdoptions sync.WaitGroup
+	// tookOver closes once this daemon stops JOINING and becomes the only
+	// daemon (becomeIncumbent). Made lazily under mu (tookOverSignal).
+	tookOver chan struct{}
+	// adopting marks the workspaces whose adoption is running right now.
+	adopting map[ids.WorkspaceID]bool
 	// bouncedStamp is the reported shim build each workspace was LAST bounced
 	// for. It is what makes the build-staleness bounce fire ONCE per observed
 	// stamp: a relaunched shim that comes back reporting the same sha as the
