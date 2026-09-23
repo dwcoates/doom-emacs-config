@@ -380,8 +380,14 @@ type wsState struct {
 	compacting bool
 	// compaction is the compaction's own progress line, from whichever
 	// producer is compacting — the vendor's auto-compaction or the cold gate's
-	// answered remediation. Nil when nothing is compacting.
+	// answered remediation. Nil when nothing is compacting. It is only ever
+	// stood and ended through compaction.go's standCompaction/endCompaction,
+	// which bind it to the act it narrates.
 	compaction *standing
+	// compactionEnd is the dwell that retires a CONCLUDED phase's line
+	// (`started`, `failed`), nil when the standing line narrates an act still
+	// in flight.
+	compactionEnd Timer
 
 	// interrupting is the registered-interrupt flag SetInterrupting installs.
 	interrupting bool

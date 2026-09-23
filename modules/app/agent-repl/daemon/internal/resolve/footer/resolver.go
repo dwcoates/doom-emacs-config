@@ -436,10 +436,10 @@ func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer)
 			// a stale progress sentence outliving its act is the same defect
 			// as no sentence at all.
 			if answer == nil {
-				s.compaction = nil
+				r.endCompaction(ws, s, "daemon.footer.set_cold_gate_answer")
 				return
 			}
-			s.compaction = &standing{text: answer.Text, at: r.opts.clock.Now()}
+			r.standCompaction(ws, s, answer.Text, "daemon.footer.set_cold_gate_answer")
 		})
 }
 
@@ -563,6 +563,9 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			s.queryDied = &standing{text: deadQueryLine, at: now}
 			s.blocked = &blockedState{kind: blockedQueryDied, at: now}
 			s.turn = nil
+			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
+			s.compacting = false
+			r.endCompaction(ws, s, "daemon.footer.on_session_update.query_died")
 			s.tok.settled = true
 		}
 	case *conversationv1.SessionUpdate_AccountUsage:
@@ -586,17 +589,22 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			// fact this arm carries — no phase, no figure — so the line says
 			// exactly that and nothing it does not know (owner ruling,
 			// 2026-09-14: both compactions read the same).
-			s.compaction = &standing{text: vendorCompactionLine, at: r.opts.clock.Now()}
+			r.standCompaction(ws, s, vendorCompactionLine, "daemon.footer.on_session_update.compacting")
 		}
 	case *conversationv1.SessionUpdate_CompactionProgress:
 		return "compaction_progress", func(s *wsState) {
 			r.logSessionArm(ws, s, "compaction_progress")
 			progress := u.CompactionProgress
-			s.compaction = &standing{text: CompactionLine(progress), at: r.opts.clock.Now()}
-			// A FAILED PHASE IS THE END OF THE COMPACTION, not a compaction
-			// still running; every other phase is one still in flight.
-			s.compacting = progress.GetPhase() !=
-				conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED
+			r.standCompaction(ws, s, CompactionLine(progress), "daemon.footer.on_session_update.compaction_progress")
+			// A CONCLUDED PHASE IS THE END OF THE COMPACTION, not a
+			// compaction still running: `failed` cut nothing and `started`
+			// is the resumed session up. Every other phase is one still in
+			// flight. The concluded line stands one dwell and is retired.
+			concluded := concludedPhase(progress.GetPhase())
+			s.compacting = !concluded
+			if concluded {
+				r.concludeCompaction(ws, s)
+			}
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {
@@ -913,7 +921,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 			// compaction's end signal, so its progress sentence stops standing
 			// here; a failed cut still says what went wrong, through the
 			// context-budget line below.
-			s.compaction = nil
+			r.endCompaction(ws, s, "daemon.footer.on_context_cut")
 			s.tok.settled = true
 			if failed == nil {
 				return
