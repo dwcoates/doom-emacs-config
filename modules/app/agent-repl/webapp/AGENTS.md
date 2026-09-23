@@ -202,7 +202,15 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   the collapsed limit; one scroll box, one has-more measurer (bubble-more.ts)
   and one toggle (expand.ts, which also opens a bubble from its header strip).
   `test/bubble/consolidation.test.ts` fails any bubble, box, body, wrap, paint,
-  has-more or toggle logic built anywhere else.
+  has-more or toggle logic built anywhere else. Three rulings of 2026-09-23 ride
+  it: "more below" is the FADE ONLY, never a chevron, and `has-more` means the
+  BODY's rendered lines run past the cap (never the box's `scrollHeight`, which
+  counts the usage corner's hit area); a prompt's border lands once it is
+  received and stays (the user's purple independent of the wave, one amber
+  `--agent-prompt-border` for agent-addressed prompts and peer messages, none
+  on a held prompt); and a tree's column budget always takes off the expanded
+  scrollbar's gutter (`--scrollbar-gutter-width`), so it never re-wraps on a
+  click.
 - **ONE VIEWPORT CLAMP.** `clampReveal` (src/topbar/clamp.ts). Any panel that
   must hang under an anchor and stay inside the window places itself through
   it — the topbar reveals and the sidebar row's detail panel both do — rather
