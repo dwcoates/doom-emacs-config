@@ -265,7 +265,9 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
         ...convertAssistantMessage(message, context, state.streams, state.calls, TOOL_CONVERTERS),
       ];
       rememberAnswer(message, entries, state);
-      rememberVendorApiError(message, state);
+      // THE TERMINAL IT FEEDS IS THE MAIN TURN'S: a subagent's failed request
+      // is that agent's own failure, never the class the turn ended on.
+      if (spawningCallOf(message.parent_tool_use_id) === undefined) rememberVendorApiError(message, state);
       return { entries };
     }
 
