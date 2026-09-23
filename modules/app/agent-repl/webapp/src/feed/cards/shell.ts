@@ -50,6 +50,7 @@ import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { stopTicking, tick } from "../ticking.js";
+import { foldTitle } from "../title-fold.js";
 import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import {
   clearRefusals,
@@ -136,9 +137,8 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   dot.textContent = "●";
   head.append(dot);
 
-  head.append(
-    drawFeedShellCommand(requireMessage(u.command, `${PATH}.command`), `${PATH}.command`),
-  );
+  const command = drawFeedShellCommand(requireMessage(u.command, `${PATH}.command`), `${PATH}.command`);
+  head.append(command);
 
   const runtime = requireMessage(u.runtime, `${PATH}.runtime`);
   switch (state.case) {
@@ -180,6 +180,10 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
       return unreachableArm(`${PATH}.state`, armName(state));
   }
 
+  // THE COMMAND IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the one
+  // two-line title fold, owned by the bubble's fold (bubble.ts). Folded AFTER a
+  // settled draw's stop, which would otherwise tear down the fold's measurer.
+  foldTitle(command, "card");
   return el;
 }
 
