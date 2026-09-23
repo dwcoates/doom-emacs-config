@@ -8,6 +8,8 @@
  * two error paths, and — reading the sources — that every title site comes
  * through `foldTitle` rather than rolling its own cap.
  */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CARD_FOLD_SELECTOR,
@@ -21,12 +23,7 @@ import { CAPPED_CLASSES, EXPANDED_CLASS } from "../../src/expand.js";
 import { stopTicking } from "../../src/feed/ticking.js";
 import { fireResize } from "../resize-observer.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-
-/** Give EL a measured box: a two-line client height, and its content's. */
-function measure(el: HTMLElement, overflow: boolean): void {
-  Object.defineProperty(el, "clientHeight", { configurable: true, value: 40 });
-  Object.defineProperty(el, "scrollHeight", { configurable: true, value: overflow ? 120 : 40 });
-}
+import { measureTitle } from "./title-measure.js";
 
 /** A connected `.tool-card.tool-fold` holding one card-owned title. */
 function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLElement } {
@@ -37,7 +34,7 @@ function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLEleme
   card.append(title);
   document.body.append(card);
   foldTitle(title, "card");
-  measure(title, overflow);
+  measureTitle(title, overflow);
   return { card, title };
 }
 
@@ -56,7 +53,7 @@ function bubbleFoldTitle(): { bubble: HTMLElement; title: HTMLElement; panel: HT
   bubble.append(head, panel);
   document.body.append(bubble);
   foldTitle(title, "card");
-  measure(title, true);
+  measureTitle(title, true);
   return { bubble, title, panel };
 }
 
@@ -181,7 +178,7 @@ describe("the measurement: has-more follows overflow and the owner's fold", () =
     const title = document.createElement("span");
     document.body.append(title);
     foldTitle(title, "standalone");
-    measure(title, true);
+    measureTitle(title, true);
     fireResize(title);
     title.classList.add(EXPANDED_CLASS);
 
@@ -223,7 +220,7 @@ describe("refreshTitleFolds: a toggle re-measures the titles it owns", () => {
     const title = document.createElement("span");
     document.body.append(title);
     foldTitle(title, "standalone");
-    measure(title, true);
+    measureTitle(title, true);
 
     // Act
     refreshTitleFolds(title);
@@ -278,7 +275,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const title = document.createElement("span");
     document.body.append(title);
     foldTitle(title, "card");
-    measure(title, true);
+    measureTitle(title, true);
 
     // Act
     fireResize(title);
@@ -294,7 +291,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const title = document.createElement("span");
     document.body.append(title);
     foldTitle(title, "card");
-    measure(title, false);
+    measureTitle(title, false);
 
     // Act
     fireResize(title);
@@ -311,7 +308,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const title = document.createElement("span");
     document.body.append(title);
     foldTitle(title, "standalone");
-    measure(title, true);
+    measureTitle(title, true);
 
     // Act
     fireResize(title);
@@ -337,5 +334,64 @@ describe("the error paths, logged through the canonical logger", () => {
   it("names both card folds a card-owned title may defer to", () => {
     // Arrange / Act / Assert
     expect(CARD_FOLD_SELECTOR).toBe(".tool-fold, .bubble-fold");
+  });
+});
+
+/** SOURCE with its block and whole-line comments dropped. */
+function codeOf(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+/** Every `.ts` file under DIR, recursively. */
+function sourcesUnder(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sourcesUnder(path);
+    return path.endsWith(".ts") ? [path] : [];
+  });
+}
+
+describe("every title site shares the one fold", () => {
+  const src = join(process.cwd(), "src");
+
+  /** The card modules that draw a title line, and the one call each makes. */
+  const TITLE_SITES = [
+    "feed/cards/shell.ts",
+    "feed/cards/tool-call.ts",
+    "feed/cards/skill.ts",
+    "feed/cards/hook.ts",
+    "feed/rows/subagent.ts",
+  ];
+
+  it.each(TITLE_SITES)("%s folds its title through foldTitle", (site) => {
+    // Arrange / Act
+    const text = readFileSync(join(src, site), "utf8");
+
+    // Assert
+    expect(text).toMatch(/\bfoldTitle\(/);
+  });
+
+  it("no source clamps lines by hand", () => {
+    // Arrange / Act — an inline clamp is a title cap rolled outside the fold.
+    const clamping = sourcesUnder(src)
+      .filter((path) => /line-?clamp|lineClamp/i.test(readFileSync(path, "utf8")))
+      .map((path) => relative(src, path));
+
+    // Assert
+    expect(clamping).toEqual([]);
+  });
+
+  it("no source but the fold's own writes the title-fold class", () => {
+    // Arrange / Act — the class literal in CODE anywhere but its declaration
+    // and the toggle's list means a site marking a title without the measurer.
+    // Comments are prose about the fold, so they are read past.
+    const owners = new Set(["feed/bubble-more.ts", "feed/title-fold.ts", "expand.ts"]);
+    const marking = sourcesUnder(src)
+      .map((path) => relative(src, path))
+      .filter((path) => !owners.has(path))
+      .filter((path) => /["'`.]title-fold/.test(codeOf(readFileSync(join(src, path), "utf8"))));
+
+    // Assert
+    expect(marking).toEqual([]);
   });
 });
