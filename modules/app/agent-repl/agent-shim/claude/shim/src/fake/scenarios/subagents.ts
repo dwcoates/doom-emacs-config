@@ -23,7 +23,7 @@
  * scenario writes it that way, which is what lets the sidecar ingest a
  * detached agent's work at all.
  */
-import { askPermission, conclude, scenario } from "./support.js";
+import { askPermission, conclude, scenario, visibleThinking } from "./support.js";
 import { FAKE_SIGNATURE } from "./support.js";
 
 /** The `AgentOutput` a completed synchronous subagent answers with. */
@@ -554,9 +554,97 @@ const USAGE_HISTORICAL = scenario({
   },
 });
 
+const SUBAGENT_INTERLEAVED = scenario({
+  name: "subagent-interleaved",
+  prompt: "!subagent-interleaved",
+  emits:
+    "a detached `Agent` whose own responses stream INTO the main agent's open blocks: one whole subagent " +
+    "response (its `message_start` included) between the two deltas of the main thinking block, another " +
+    "between the two deltas of the main text block, then the completed `task_notification`",
+  writes:
+    "the agent's `.meta.json` and `agent-<id>.jsonl`, its spool as agent JSONL, and the main transcript's lines",
+  arms:
+    "AgentThinking + AgentResponse.from_model on the main book, each ONE unit, beside the subagent's own " +
+    "AgentResponse units on its book",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "subagent-interleaved" }, "fake interleaved-subagent turn");
+    const description = ctx.args === "" ? "Background sweep" : ctx.args;
+    const agentPrompt = "Do the sweep and report.";
+    const call = ctx.toolUse("Agent", {
+      description,
+      prompt: agentPrompt,
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    });
+    const agentId = ctx.mintAgentTaskId();
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    const writer = ctx.files.subagent(agentId);
+    writer.writeMeta({
+      agentType: "general-purpose",
+      description,
+      toolUseId: call.toolUseId,
+      spawnDepth: 1,
+    });
+    writer.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: agentPrompt },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.toolResult(call, `Async agent launched successfully.\nagentId: ${agentId}`, {
+      isAsync: true,
+      status: "async_launched",
+      agentId,
+      description,
+      resolvedModel: "fake-sonnet-5",
+      prompt: agentPrompt,
+      outputFile: ctx.files.spoolPathFor(agentId),
+      canReadOutputFile: true,
+    });
+    const agent = {
+      agentId,
+      parentToolUseId: call.toolUseId,
+      subagentType: "general-purpose",
+      taskDescription: description,
+    };
+    const subagentSays = (text: string) => (): void => {
+      ctx.assistant([{ type: "text", text }], { agent, model: "fake-sonnet-5", stopReason: "end_turn" });
+    };
+    // THE MAIN AGENT ANSWERS WHILE ITS SUBAGENT STREAMS: each subagent response
+    // lands mid-block, so a fold that kept one block cursor for every agent
+    // would re-key the rest of the main block onto the subagent's message.
+    const conclusion = "The sweep is running in the background.";
+    ctx.assistant(
+      [visibleThinking("Answering while the sweep runs."), { type: "text", text: conclusion }],
+      {
+        stopReason: "end_turn",
+        interleave: new Map([
+          [0, subagentSays("Sweep started.")],
+          [1, subagentSays("Sweep finished.")],
+        ]),
+      },
+    );
+    ctx.result({ subtype: "success", result: conclusion });
+    ctx.files.spool(agentId).append(writer.read());
+    ctx.endTask(agentId);
+    ctx.systemMessage("task_notification", {
+      task_id: agentId,
+      tool_use_id: call.toolUseId,
+      status: "completed",
+      output_file: ctx.files.spoolPathFor(agentId),
+      summary: "Sweep finished.",
+      usage: { total_tokens: 6_200, tool_uses: 0, duration_ms: 900 },
+    });
+    ctx.announceLiveTasks();
+  },
+});
+
 export const SUBAGENT_SCENARIOS = [
   SUBAGENT_SYNC,
   SUBAGENT_DETACHED,
+  SUBAGENT_INTERLEAVED,
   SUBAGENT_DETACHED_LIVE,
   SUBAGENT_DETACHED_UTTERANCE,
   SUBAGENT_FAILED,

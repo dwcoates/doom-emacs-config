@@ -14,9 +14,12 @@
  * store already owns, and a bounce would lose it. The joins it is allowed are
  * each ONE remembered value or one bounded, self-emptying table:
  *
- *   - the per-message BLOCK COUNTER (so `<message.id>:<block_index>` is stable
- *     across the lines the vendor splits one message into), cleared at
- *     `message_stop`;
+ *   - the BLOCK STATE OF EACH STREAM with a response open (so
+ *     `<message.id>:<block_index>` is stable across the lines the vendor
+ *     splits one message into) — ONE PER STREAM, keyed by the main stream or
+ *     the spawning call a subagent's messages name, because the agents'
+ *     streams interleave; each dropped at its `message_stop`, at the turn's
+ *     end (main) or at its agent's end (a subagent);
  *   - the CALLS IN FLIGHT, so a tool result can restate its call's own facts —
  *     each entry dropped the moment its unit settles, and the table capped;
  *   - the HOOK FIRINGS in flight, for the same reason and on the same terms;
@@ -25,13 +28,16 @@
  *     a backgrounded shell command, and its `task_notification` must not settle
  *     a shell unit as a subagent;
  *   - ONE pending COMPACTION, because `ContextCompacted.summary` is not optional
- *     and the vendor states the boundary before the summary;
+ *     and the vendor states the boundary before the summary — released only by
+ *     the MAIN stream's prose, since the boundary is the session's and a
+ *     background subagent's line may arrive between the two;
  *   - ONE pending CLEAR, because a cut's upsert key must be the one spelling the
  *     FILE plane can also reach — the session the clear rotated to — and the
  *     `conversation_reset` does not name it; the init that follows does;
  *   - the LAST TOP-LEVEL RESPONSE unit, because `AgentCompleted.answer` names it
- *     and only the fold has seen which one it was;
- *   - the LAST VENDOR API ERROR of the turn, because the result record states
+ *     and only the fold has seen which one it was — the main stream's alone;
+ *   - the LAST VENDOR API ERROR of the turn — the main stream's alone, since
+ *     the terminal it feeds is the main turn's — because the result record states
  *     only the HTTP status and the vendor's own error CLASS and retry delay ride
  *     records that arrive before it (`api_retry`, and an assistant message's
  *     `error`) — cleared by the terminal that consumes it.
@@ -65,7 +71,7 @@ import type { PersistEntry } from "../store/persistence.js";
 import { convertAttachment, type AttachmentRecord } from "./attachments.js";
 import { convertDetached, createTaskKindRegistry, type TaskKindRegistry } from "./detached.js";
 import { attachmentActivityId } from "./ids.js";
-import type { FoldContext } from "./fold-context.js";
+import { spawningCallOf, type FoldContext } from "./fold-context.js";
 import {
   convertHookResponse,
   convertHookStarted,
@@ -82,12 +88,11 @@ import {
   type PendingCompaction,
 } from "./session-updates.js";
 import {
-  createBlockState,
   convertAssistantMessage,
   convertStreamEvent,
   convertModelRefusal,
   convertThinkingTokens,
-  type BlockState,
+  StreamBlocks,
 } from "./stream-events.js";
 import {
   classifyVendorApiFailure,
@@ -98,6 +103,7 @@ import {
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
 import { createCallRegistry, cutOpenCalls, type CallRegistry } from "./tool-calls.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
+import { isLaunchReceipt } from "./tools/subagent.js";
 
 const LOGGER = bindLog({ component: "shim-convert-fold", operation: "shim.convert.fold" });
 
@@ -150,7 +156,7 @@ interface Fold {
 
 /** Everything the fold remembers. Each field is named in this file's header. */
 interface FoldState {
-  readonly blocks: BlockState;
+  readonly streams: StreamBlocks;
   readonly calls: CallRegistry;
   readonly hooks: HookRegistry;
   readonly taskKinds: TaskKindRegistry;
@@ -168,7 +174,7 @@ interface FoldState {
  */
 export function createFold(): Fold {
   const state: FoldState = {
-    blocks: createBlockState(),
+    streams: new StreamBlocks(),
     calls: createCallRegistry(),
     hooks: createHookRegistry(),
     taskKinds: createTaskKindRegistry(),
@@ -251,28 +257,25 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
 
   switch (type) {
     case "stream_event":
-      return { entries: convertStreamEvent(message, context, state.blocks) };
+      return { entries: convertStreamEvent(message, context, state.streams) };
 
     case "assistant": {
       const entries = [
         ...settleCompaction(message, context, state),
-        ...convertAssistantMessage(message, context, state.blocks, state.calls, TOOL_CONVERTERS),
+        ...convertAssistantMessage(message, context, state.streams, state.calls, TOOL_CONVERTERS),
       ];
       rememberAnswer(message, entries, state);
-      rememberVendorApiError(message, state);
+      // THE TERMINAL IT FEEDS IS THE MAIN TURN'S: a subagent's failed request
+      // is that agent's own failure, never the class the turn ended on.
+      if (spawningCallOf(message.parent_tool_use_id) === undefined) rememberVendorApiError(message, state);
       return { entries };
     }
 
-    case "user":
-      return {
-        entries: convertUserRecord(
-          message,
-          context,
-          state.calls,
-          TOOL_CONVERTERS,
-          state.taskKinds,
-        ),
-      };
+    case "user": {
+      const entries = convertUserRecord(message, context, state.calls, TOOL_CONVERTERS, state.taskKinds);
+      endAgentsConcludedBy(message, state.streams);
+      return { entries };
+    }
 
     case "result": {
       // CONSUMED, NOT KEPT: the class belongs to the request that just failed,
@@ -280,6 +283,8 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // this turn's vendor never stated.
       const vendorApiError = state.vendorApiError ?? {};
       state.vendorApiError = undefined;
+      // THE MAIN STREAM ENDS WITH ITS TURN, `message_stop` or not.
+      state.streams.endTurn();
       const output = convertResult(message, context, state.lastAnswer, vendorApiError);
       if (!isUserStop(message)) return output;
       // A STOP CUTS WHAT WAS OPEN, and the calls it cut get no `tool_result` of
@@ -334,9 +339,12 @@ function convertSystemMessage(
   switch (message.subtype) {
     case "permission_denied":
       return convertPermissionDenied(message, context);
+    case "task_notification":
+      // A BACKGROUNDED AGENT'S END: its spawning call's stream is over.
+      if (typeof message.tool_use_id === "string") state.streams.endAgent(message.tool_use_id);
+      return convertDetached(message, context, state.taskKinds);
     case "task_started":
     case "task_updated":
-    case "task_notification":
     case "task_progress":
     case "background_tasks_changed":
       return convertDetached(message, context, state.taskKinds);
@@ -345,7 +353,7 @@ function convertSystemMessage(
     case "hook_response":
       return convertHookResponse(message, context, state.hooks);
     case "thinking_tokens":
-      return convertThinkingTokens(message, context, state.blocks);
+      return convertThinkingTokens(message, context, state.streams);
     case "model_refusal_no_fallback":
       return convertModelRefusal(message, context);
     case "api_retry":
@@ -361,6 +369,29 @@ function convertSystemMessage(
       return message.subtype === "init"
         ? [...entries, ...settleClear(message, context, state)]
         : entries;
+    }
+  }
+}
+
+/**
+ * End the stream of every subagent whose spawning call this user record
+ * CONCLUDES.
+ *
+ * A spawn's `tool_result` is the agent's end unless it is a LAUNCH RECEIPT
+ * ({@link isLaunchReceipt}): the agent moved to the background and its end is
+ * the `task_notification` that names the call. A call that spawned no agent
+ * holds no stream, so ending it is a no-op.
+ */
+function endAgentsConcludedBy(
+  message: Extract<SdkMessage, { type: "user" }>,
+  streams: StreamBlocks,
+): void {
+  if (isLaunchReceipt((message as { tool_use_result?: unknown }).tool_use_result)) return;
+  const content = (message.message as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return;
+  for (const block of content as { type?: unknown; tool_use_id?: unknown }[]) {
+    if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+      streams.endAgent(block.tool_use_id);
     }
   }
 }
@@ -403,8 +434,8 @@ function settleClear(
  *
  * `ContextCompacted.summary` is not optional — the feed shows the summary in the
  * cut's place, so the cut is not a hole — and the vendor states the boundary
- * FIRST. One boundary is held, and it is released by the very next assistant
- * prose, which is what that prose IS.
+ * FIRST. One boundary is held, and it is released by the very next MAIN-stream
+ * assistant prose, which is what that prose IS.
  */
 function settleCompaction(
   message: Extract<SdkMessage, { type: "assistant" }>,
@@ -413,6 +444,15 @@ function settleCompaction(
 ): readonly PersistEntry[] {
   const pending = state.pendingCompaction;
   if (pending === undefined) return [];
+  // THE BOUNDARY IS THE SESSION'S, so only the MAIN stream's prose is its
+  // summary: a background subagent's line can land between the two.
+  if (spawningCallOf(message.parent_tool_use_id) !== undefined) {
+    LOGGER.debug(
+      { parent_tool_use_id: message.parent_tool_use_id },
+      "a subagent's assistant message arrived while a compaction is held; it is not the summary",
+    );
+    return [];
+  }
   const content = (message.message as { content?: unknown } | undefined)?.content;
   const summary = Array.isArray(content)
     ? content
@@ -522,7 +562,7 @@ function rememberAnswer(
   entries: readonly PersistEntry[],
   state: FoldState,
 ): void {
-  if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== "") return;
+  if (spawningCallOf(message.parent_tool_use_id) !== undefined) return;
   for (const entry of entries) {
     if (entry.item.kind !== "frame") continue;
     const result = entry.item.frame.result;
