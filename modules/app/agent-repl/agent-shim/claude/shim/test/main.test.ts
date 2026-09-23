@@ -32,6 +32,7 @@ import {
   parseArgs,
   processIdentity,
   requireServingArgs,
+  SESSION_ID_ENV,
   workspaceIdFromListenSocket,
   resolveEnvironment,
   shutdownSignalHandlers,
@@ -1031,6 +1032,10 @@ describe("main", () => {
     });
 
     process.argv = ["node", "/shim/dist/main.js", ...argv];
+    // THE RUNNER'S OWN CORRELATION DOES NOT LEAK IN. A suite run from inside an
+    // agent-repl session inherits that session's id, and a scenario that means
+    // "the daemon exported none" would silently read the runner's instead.
+    delete process.env[SESSION_ID_ENV];
     Object.assign(process.env, spawnEnv(env));
 
     vi.resetModules();
