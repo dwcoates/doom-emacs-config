@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { computeTitleDigest, promptText, type TitleDigestRecord } from "../../src/convert/title-digest.js";
+import { keepalivePromptText } from "../../src/engine/keepalive.js";
 
 /** A person's prompt record. */
 function prompt(text: string): TitleDigestRecord {
@@ -131,6 +132,17 @@ describe("computeTitleDigest prompt filtering", () => {
 
     // Assert.
     expect(digest.prompts).toEqual(["main"]);
+  });
+
+  it("drops the shim's own keep-alive prompt", () => {
+    // Arrange: a keep-alive is never served, so it must never name a conversation.
+    const records = [prompt("real"), prompt(keepalivePromptText(3))];
+
+    // Act.
+    const digest = computeTitleDigest(records);
+
+    // Assert.
+    expect(digest.prompts).toEqual(["real"]);
   });
 });
 

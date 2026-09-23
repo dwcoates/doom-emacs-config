@@ -168,19 +168,29 @@ func TestBashInterruptedByTimeout(t *testing.T) {
 	// appended to the spool FILE and reaches the daemon on the sidecar's own
 	// pickup, after the turn is over. A page read on the line after the
 	// conclusion therefore races it, and found `spool text is empty` once in
-	// twenty-five in-container runs. The wait is on the row this test is about,
-	// on the feed's own tail; every assertion below then reads a page that has
-	// it.
-	rmAwaitFeedRow(t, w, ws, "the detached shell's row carrying its spool text",
-		func(row *frontendv1.FeedRow) bool {
-			return row.GetDetachedShell().GetShell().GetSpool().GetText() != ""
-		})
+	// twenty-five in-container runs. The wait is on the rows this test is
+	// about, on their feeds' own tails.
+	//
+	// TWO ROWS, TWO FEEDS (feed.proto, FeedRow.shell_head / detached_shell;
+	// ac808eb57): the bubble's HEAD — command, clock, state — rides the ROOT
+	// feed, and its spool BODY rides the bubble's own sub-feed, addressed by
+	// the head's FeedId.
+	initial, tail := dbOpenRootFeed(t, w, ws)
+	defer tail.Close()
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	head := dbAwaitShellHead(t, ctx, initial, tail, "sleep 600", "the auto-backgrounded Bash unit's shell head",
+		func(*frontendv1.FeedShell) bool { return true })
+	bodyInitial, body := dbOpenShellBody(t, w, ws, head)
+	defer body.Close()
+	if got := dbAwaitShellSpool(t, ctx, bodyInitial, body, "still going"); got == "" {
+		t.Fatalf("the detached shell's spool text is empty, want the scenario's own appended output")
+	}
 
 	// Assert: fetch the settled page and find both facts durably recorded —
 	// the turn's ORDINARY concluded terminal, and the Bash unit's own
-	// detached-shell placement, still live (no EXIT= line was ever written,
-	// per the scenario's own "writes" field), carrying the spool text the
-	// scenario appended.
+	// detached-shell head, still live (no EXIT= line was ever written, per
+	// the scenario's own "writes" field).
 	page, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenFeed: %v", err)
@@ -192,13 +202,16 @@ func TestBashInterruptedByTimeout(t *testing.T) {
 	rows := pageSuccess.GetPage().GetSuccess().GetRows()
 
 	var turnTerminal *frontendv1.FeedRow
-	var detachedShell *frontendv1.FeedRow
+	var shell *frontendv1.FeedShell
 	for _, row := range rows {
 		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
 			turnTerminal = row
 		}
 		if row.GetDetachedShell() != nil {
-			detachedShell = row
+			t.Errorf("the root feed carries a detached_shell BODY row %v: the spool body rides only the bubble's own sub-feed", row)
+		}
+		if h := dbShellHead(row, "sleep 600"); h != nil {
+			shell = h
 		}
 	}
 
@@ -212,17 +225,13 @@ func TestBashInterruptedByTimeout(t *testing.T) {
 		t.Fatalf("the bash-timeout turn's terminal carries turn_ended.interrupted, want none: this scenario is the Bash tool's OWN timeout, distinct from a turn-level interrupt (see #18)")
 	}
 
-	if detachedShell == nil {
-		t.Fatalf("no detached_shell row found in %d rows, want the auto-backgrounded Bash unit's own placement", len(rows))
+	if shell == nil {
+		t.Fatalf("no shell_head row found in %d rows, want the auto-backgrounded Bash unit's own bubble", len(rows))
 	}
-	shell := detachedShell.GetDetachedShell().GetShell()
 	if shell.GetSettled() != nil {
 		t.Fatalf("the detached shell's state = settled %v, want live: the scenario's spool carries no EXIT= line, so the shell never settles", shell.GetSettled())
 	}
 	if shell.GetLive() == nil {
 		t.Fatalf("the detached shell's state = %v, want live", shell.GetState())
-	}
-	if got := shell.GetSpool().GetText(); got == "" {
-		t.Fatalf("the detached shell's spool text is empty, want the scenario's own appended output")
 	}
 }

@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { writeSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { keepalivePromptText } from "../../src/engine/keepalive.js";
 import {
   CACHE_TTL_1H_MS,
   CACHE_TTL_5M_MS,
@@ -210,6 +211,17 @@ describe("reading the transcript's facts", () => {
     ]);
 
     expect(readTranscriptFacts(file)?.opening).toBe("x".repeat(TRANSCRIPT_OPENING_MAX_CHARS));
+  });
+
+  it("never opens a listing with the shim's own keep-alive prompt", () => {
+    // A keep-alive is never served; a conversation that began idle opens with
+    // the first thing a person said.
+    const file = transcript([
+      { type: "user", message: { role: "user", content: keepalivePromptText(1) } },
+      { type: "user", message: { role: "user", content: "explain hash tables" } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.opening).toBe("explain hash tables");
   });
 
   it("states no opening when the transcript holds no user prompt", () => {
