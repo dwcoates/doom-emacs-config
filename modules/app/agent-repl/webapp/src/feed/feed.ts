@@ -20,6 +20,7 @@ import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
 import { refreshHasMore } from "./bubble-more.js";
+import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
 import {
   TailFollow,
@@ -143,6 +144,9 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // without requiring the cursor to move first.
   installClickExpand(host, undefined, (section, expanded) => {
     refreshHasMore(section);
+    // A card's title fold follows the card's fold (title-fold.ts), so a toggle
+    // re-measures the titles it owns as well as the section itself.
+    refreshTitleFolds(section);
     if (expanded) intentScroll?.arm(section);
   });
 

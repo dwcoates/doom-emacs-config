@@ -2341,33 +2341,41 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   overflow-y: auto;
 }
 
-/* THE HEADER'S NON-TITLE CONTENT — the one input line (a command, a path, a
-   query, or plain input) — is capped at TWO ROWS while collapsed and clipped
-   beyond that. The TITLE lives in `.tool-head` and is never matched here, so it
-   is always shown in full and never counts toward the two rows. `line-clamp`
-   caps by text rows and `max-height: none` drops each line's own preview cap so
-   the two-row clamp is the only limit. */
-.tool-fold:not(.expanded) > .tool-input,
-.tool-fold:not(.expanded) > .bash-input,
-.tool-fold:not(.expanded) > .file-path,
-.tool-fold:not(.expanded) > .tool-query {
+/* ---- title fold (src/feed/title-fold.ts) ---- */
+/* THE TITLE FOLD (owner ruling, 2026-09-23): a tool card's TITLE — the command
+   a shell bubble runs, a tool call's input line (command, path, query or plain
+   input), a skill's invocation, a hook's headline, a subagent's description —
+   is capped at TWO LINES while the fold that owns it is collapsed, and wears the
+   response bubble's fade and chevron (the `has-more` rules below) when it
+   actually overflows them. `line-clamp` caps by text rows and `max-height: none`
+   drops each line's own preview cap (`.tool-input`, `.bash-input`), so the two
+   rows are the only limit. This is the ONE title cap: title-fold.ts marks every
+   title site, and no card caps its title any other way. */
+.title-fold {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   max-height: none;
 }
-/* EXPANDING LIFTS THE HEADER CAP TOO: the full input line shows alongside the
-   revealed section. */
-.tool-fold.expanded > .tool-input,
-.tool-fold.expanded > .bash-input,
-.tool-fold.expanded > .file-path,
-.tool-fold.expanded > .tool-query {
+/* EXPANDED LIFTS THE CAP: the whole title shows, alongside the card's output.
+   One selector per fold that can own a title — the title itself (standalone),
+   the `.tool-fold` card, the `.bubble-fold` head — which is exactly
+   TITLE_FOLD_OPEN_SELECTOR in bubble-more.ts (styles.test.ts holds the two
+   together). The standalone arm outranks the bare `.expanded` 50vh cap. */
+.title-fold.expanded,
+.tool-fold.expanded .title-fold,
+.bubble-fold[data-expanded="true"] > .bubble-head .title-fold {
   display: block;
   -webkit-line-clamp: none;
   overflow: visible;
   max-height: none;
 }
+/* A standalone title is its own click-to-expand fold (CAPPED_CLASSES); the
+   cursor offers the click only while there is more to reveal. */
+.title-fold-standalone.has-more { cursor: zoom-in; }
+/* Each title's fade blends into its own card's background. */
+.tool-card { --title-fold-bg: var(--card); }
 
 /* FIX2 "MORE BELOW" (owner ruling, 2026-09-15: "a signal that there's more to
    reveal"). A COLLAPSED response or prompt bubble whose content overruns its cap
@@ -2379,14 +2387,18 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    Both pseudo-elements are absolutely positioned against the box, which the cap
    holds still while collapsed (overflow-y: hidden), so bottom:0 is the visible
    fold. `pointer-events: none` keeps a click on either one falling through to
-   click-to-expand. */
+   click-to-expand. A tool card's TITLE fold (above) wears the same fade and
+   chevron from the same rules, fading into its card's `--title-fold-bg`; an
+   output section still never does. */
 .bubble.assistant > .bubble-scroll.has-more,
-.bubble.user > .bubble-scroll.has-more {
+.bubble.user > .bubble-scroll.has-more,
+.title-fold.has-more {
   position: relative;
 }
 /* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
 .bubble.assistant > .bubble-scroll.has-more::after,
-.bubble.user > .bubble-scroll.has-more::after {
+.bubble.user > .bubble-scroll.has-more::after,
+.title-fold.has-more::after {
   content: "";
   position: absolute;
   left: 0;
@@ -2401,10 +2413,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .bubble.user > .bubble-scroll.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--user));
 }
+.title-fold.has-more::after {
+  background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
+}
 /* The chevron, centered on the bottom edge over the fade. Generated content is
    not selectable, so it needs no user-select carve-out. */
 .bubble.assistant > .bubble-scroll.has-more::before,
-.bubble.user > .bubble-scroll.has-more::before {
+.bubble.user > .bubble-scroll.has-more::before,
+.title-fold.has-more::before {
   content: "\2304";
   position: absolute;
   left: 50%;
@@ -4613,10 +4629,10 @@ response-body.bubble-body { display: block; }
    adopt it. Yellow for now (var(--token-yellow)). */
 .token-count { color: var(--token-yellow); }
 .subagent-tokens { font-size: 0.7rem; }
+/* The description is the bubble's TITLE: the shared two-line title fold
+   (`.title-fold`, title-fold.ts) caps it, in place of the one-line ellipsis it
+   wore before (owner ruling, 2026-09-23). The width cap stays. */
 .subagent-description {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 24rem;
 }
 /* LOST IS NOT FAILURE: we stopped being able to see it, which the muted dot

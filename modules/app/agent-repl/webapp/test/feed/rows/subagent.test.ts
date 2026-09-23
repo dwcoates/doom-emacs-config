@@ -16,6 +16,14 @@ import {
 } from "../../../src/feed/rows/subagent.js";
 import { countingTicker, harness, rowContext, subagentRow, type Harness } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import {
+  HAS_MORE_CLASS,
+  TITLE_FOLD_CLASS,
+  TITLE_FOLD_STANDALONE_CLASS,
+} from "../../../src/feed/bubble-more.js";
+import { fireResize } from "../../resize-observer.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
+import { inBubbleFold, measureTitle } from "../title-measure.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -452,5 +460,139 @@ describe("drawFeedSubagent: a settled head's clocks", () => {
     vi.advanceTimersByTime(60_000);
     expect(el.querySelector(".subagent-clock")?.textContent).toBe("7s");
     el.remove();
+  });
+});
+
+/**
+ * THE DESCRIPTION IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the one
+ * two-line title fold (title-fold.ts), owned by the bubble's fold (bubble.ts).
+ */
+describe("drawFeedSubagent: the title fold", () => {
+  const DESCRIPTION = "sweep the repo for every caller of the old fold";
+
+  /** A head of ROW seated in a collapsed bubble, and its description. */
+  function seated(row = subagentRow("b1", { description: DESCRIPTION })) {
+    const { el } = drawRow(row);
+    const bubble = inBubbleFold(el);
+    return { bubble, title: el.querySelector(".subagent-description") as HTMLElement };
+  }
+
+  it("marks the description with the one title-fold class", () => {
+    // Arrange / Act
+    const { title } = seated();
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_CLASS)).toBe(true);
+  });
+
+  it("defers the description's fold to the bubble rather than making it its own", () => {
+    // Arrange / Act
+    const { title } = seated();
+
+    // Assert
+    expect(title.classList.contains(TITLE_FOLD_STANDALONE_CLASS)).toBe(false);
+  });
+
+  it("folds nothing when the spawn carried no description", () => {
+    // Arrange / Act
+    const { el } = drawRow(subagentRow("b1"));
+
+    // Assert
+    expect(el.querySelector(`.${TITLE_FOLD_CLASS}`)).toBeNull();
+  });
+
+  it("wears has-more when the description overflows its two lines", () => {
+    // Arrange
+    const { title } = seated();
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("keeps has-more off a description that fits its two lines", () => {
+    // Arrange
+    const { title } = seated();
+    measureTitle(title, false);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("drops has-more once the bubble is expanded", () => {
+    // Arrange
+    const { bubble, title } = seated();
+    measureTitle(title, true);
+    fireResize(title);
+    bubble.setAttribute("data-expanded", "true");
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("keeps measuring a settled head's description after the head's terminal stop", () => {
+    // Arrange
+    const { title } = seated(
+      subagentRow("b1", {
+        description: DESCRIPTION,
+        settled: { endedAtMs: 5000n, outcome: "succeeded" },
+      }),
+    );
+    measureTitle(title, true);
+
+    // Act
+    fireResize(title);
+
+    // Assert
+    expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
+  });
+
+  it("clamps the description to two lines while the bubble is collapsed", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = seated();
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+    } finally {
+      remove();
+    }
+  });
+
+  it("wraps the description onto its two lines rather than a one-line ellipsis", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { title } = seated();
+
+      // Act / Assert
+      expect(cascadedValue(title, "white-space")).not.toBe("nowrap");
+    } finally {
+      remove();
+    }
+  });
+
+  it("shows the whole description once the bubble is expanded", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble, title } = seated();
+      bubble.setAttribute("data-expanded", "true");
+
+      // Act / Assert
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("none");
+    } finally {
+      remove();
+    }
   });
 });
