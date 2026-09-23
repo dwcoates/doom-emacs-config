@@ -347,3 +347,45 @@ func TestLogProcessExitLogsThenRepanics(t *testing.T) {
 		t.Fatalf("record = %#v, want the panic narrated", record)
 	}
 }
+
+func TestJoinCloseLeavesACleanRunCleanWhenTheCloseSucceeds(t *testing.T) {
+	// Arrange.
+	var err error
+
+	// Act.
+	joinClose(&err, func() error { return nil })
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+}
+
+func TestJoinCloseFailsACleanRunWhoseCloseFailed(t *testing.T) {
+	// Arrange.
+	var err error
+	closeErr := errors.New("the close failed")
+
+	// Act.
+	joinClose(&err, func() error { return closeErr })
+
+	// Assert.
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("err = %v, want the close failure", err)
+	}
+}
+
+func TestJoinCloseKeepsTheRunsOwnFailureAlongsideAFailedClose(t *testing.T) {
+	// Arrange.
+	runErr := errors.New("the run failed")
+	err := runErr
+	closeErr := errors.New("the close failed")
+
+	// Act.
+	joinClose(&err, func() error { return closeErr })
+
+	// Assert.
+	if !errors.Is(err, runErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("err = %v, want both the run's failure and the close failure", err)
+	}
+}
