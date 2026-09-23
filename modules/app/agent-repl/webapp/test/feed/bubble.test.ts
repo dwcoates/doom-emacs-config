@@ -908,6 +908,67 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
       remove();
     }
   });
+
+  // THE EXPANDED CAP (owner ruling, 2026-09-23): an expanded bubble's sub-feed
+  // stops at three quarters of the feed's visible height (`75cqh` against the
+  // `#feed-scroll` size container) and scrolls inside past that.
+  it("caps an expanded sub-feed at three quarters of the feed's height", async () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      // Act
+      await bubble.expand();
+      await settle();
+      // Assert
+      expect(window.getComputedStyle(panelOf(bubble)).maxHeight).toBe("75cqh");
+    } finally {
+      remove();
+    }
+  });
+
+  it("leaves a collapsed sub-feed uncapped", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      // Act
+      const { bubble } = mount(subagentRow("b1"));
+      // Assert
+      expect(window.getComputedStyle(panelOf(bubble)).maxHeight).not.toBe("75cqh");
+    } finally {
+      remove();
+    }
+  });
+
+  it("scrolls an expanded sub-feed's overflow inside it rather than growing the feed", async () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      // Act
+      await bubble.expand();
+      await settle();
+      // Assert
+      expect(window.getComputedStyle(panelOf(bubble)).overflowY).toBe("auto");
+    } finally {
+      remove();
+    }
+  });
+
+  it("caps an expanded merge bubble through the same rule", async () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(mergeRow("m1"));
+      // Act
+      await bubble.expand();
+      await settle();
+      // Assert
+      expect(window.getComputedStyle(panelOf(bubble)).maxHeight).toBe("75cqh");
+    } finally {
+      remove();
+    }
+  });
 });
 
 // THE DETACHED/SUBAGENT BUBBLE IS FRAMED AS A NORMAL TOOL-CALL CARD (owner
