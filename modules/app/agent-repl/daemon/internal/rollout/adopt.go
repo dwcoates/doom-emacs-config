@@ -747,6 +747,7 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 	err := c.deps.WriteDaemonAddr(ctx)
 	if err == nil {
 		c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
+		c.becomeIncumbent(fields)
 		return
 	}
 	if !errors.Is(err, daemonaddr.ErrClaimed) {
@@ -765,6 +766,32 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 	go c.retryAdvertise(lifetime, fields)
 }
 
+// becomeIncumbent ends this daemon's JOINING standing: it is now the only
+// daemon there is.
+//
+// THE PROOF IS THE ADDRESS FILE. daemon.addr is written only once the outgoing
+// daemon has released its boot claim, and it releases the claim by exiting. So
+// from the moment the write succeeds no other daemon serves ANY workspace, and
+// a workspace this daemon was never handed — a closed one, a forgotten one,
+// one the outgoing daemon held but could not transfer — is simply this
+// daemon's. Left joining, the successor answered `not_yet_adopted` for every
+// such workspace FOREVER: a closed workspace could never be reopened after a
+// rollout, and the sidecar's forwarded diagnostics for it were refused in a
+// loop that never ended.
+//
+// A workspace still mid-rendezvous stays governed by its own `joining` entry:
+// its adoption is a separate, per-workspace fact this does not overrule.
+func (c *controller) becomeIncumbent(fields dlog.Context) {
+	c.mu.Lock()
+	was := c.joiningMode
+	c.joiningMode = false
+	c.mu.Unlock()
+	if was {
+		c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
+			merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+	}
+}
+
 // retryAdvertise is advertise's retry loop, on the injected clock.
 func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
 	started := c.deps.Clock.Now()
@@ -779,6 +806,7 @@ func (c *controller) retryAdvertise(ctx context.Context, fields dlog.Context) {
 		err := c.deps.WriteDaemonAddr(ctx)
 		if err == nil {
 			c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", merge(fields, dlog.Context{"attempts": attempt + 1}))
+			c.becomeIncumbent(fields)
 			return
 		}
 		if !errors.Is(err, daemonaddr.ErrClaimed) {
