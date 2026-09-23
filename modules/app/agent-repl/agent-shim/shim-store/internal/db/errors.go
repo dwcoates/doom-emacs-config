@@ -66,6 +66,10 @@ const (
 	// for. An agent the store HAS heard of but that has said nothing yet is not
 	// this: it is a legal, empty book.
 	SiteUnknownAgent = "unknown_agent"
+	// SiteSessionEmpty is a live-work read naming no session. The store is
+	// shared by every session on the host, so an unscoped answer would hand
+	// one session every other session's obligations; it is refused instead.
+	SiteSessionEmpty = "session_empty"
 )
 
 // refusal is one refusal's STRUCTURED detail: the site, the store's own name

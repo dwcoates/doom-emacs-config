@@ -11,6 +11,16 @@
  * "every started thing eventually gets a terminal row" hold across any gap in
  * observation.
  *
+ * # Always scoped to this session
+ *
+ * ONE STORE SERVES EVERY SESSION ON THE HOST. The read names this
+ * conversation's main agent and the store answers only that agent's lineage,
+ * because everything answered here that this vendor does not hold gets a
+ * closing terminal. Unscoped, a session start closed OTHER sessions' running
+ * work (2026-09-23: opening one workspace reaped five running subagents of
+ * another). The reconciler has no unscoped form, and an empty session is
+ * refused here before the store is asked.
+ *
  * # The honest closing arm: `lost.swept_up`
  *
  * A thing the record holds no terminal for after a restart is NOT known to have
@@ -54,8 +64,8 @@ export function reconciledCoordinate(subject: string): string {
 
 /** The reconciler, as the engine drives it. */
 interface Reconciler {
-  /** Everything the record holds a start for and no terminal. */
-  liveWork(): Promise<storev1.GetLiveWorkSuccess>;
+  /** Everything the record holds a start for and no terminal, in `session`'s lineage. */
+  liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess>;
   /** The row that closes an agent that did not survive the shim's restart. */
   closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry;
   /**
@@ -394,12 +404,12 @@ export function announceLiveWork(
     const described = describeDetachable(findUnit(entries, unit));
     if (described === undefined) {
       // WHO OWNS THE RECORD DEPENDS ON WHO CAN TELL THE TWO CASES APART, and
-      // this function cannot. `GetLiveWork` is the store's GLOBAL open-obligation
-      // set by contract, so a handle with no start in THIS book is either work
-      // whose own start the record lost -- a defect -- or another conversation's
-      // obligation, which is the ordinary state of a shared set. Only the
-      // caller can ask the vendor which, so a caller that passes this hands
-      // over the record and gets the handle instead.
+      // this function cannot. `GetLiveWork` is scoped to this session's
+      // lineage, so a handle with no start in THIS book is either work whose own
+      // start the record lost -- a defect -- or work a SUBAGENT of this session
+      // announced, whose start lives in that subagent's book. Only the caller
+      // can ask the vendor which, so a caller that passes this hands over the
+      // record and gets the handle instead.
       if (onUndescribed !== undefined) {
         onUndescribed(handle);
         continue;
@@ -428,28 +438,42 @@ export function announceLiveWork(
 }
 
 export function createReconciler(options: ReconcilerOptions): Reconciler {
-  /** The open obligations, as the store answered them once. */
-  const liveWorkOnce = async (): Promise<storev1.GetLiveWorkSuccess> => {
+  /** One session's open obligations, as the store answered them once. */
+  const liveWorkOnce = async (
+    session: conversationv1.AgentId,
+  ): Promise<storev1.GetLiveWorkSuccess> => {
     let response: storev1.GetLiveWorkResponse;
     try {
-      response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+      response = await options.client.getLiveWork(
+        create(storev1.GetLiveWorkRequestSchema, { session }),
+      );
     } catch (error) {
       LOGGER.error(
-        { detail: String(error) },
+        { agent: session.value, detail: String(error) },
         "the store could not be reached for the open obligations",
       );
       throw transportFailure(error);
     }
     const result = response.result;
     if (result.case === "failure") {
+      if (result.value.kind.case === "invalidRequest") {
+        // THE STORE REFUSED A REQUEST THIS PROCESS BUILT: a shim defect, and
+        // never an answer. It is not waited out (the same bytes are refused
+        // again) and it is never read as "no book yet", which would serve an
+        // empty obligation set and leave every open item unresolved in silence.
+        LOGGER.error(
+          { agent: session.value, field: result.value.kind.value.field, detail: result.value.detail },
+          "the store refused the open-obligation read as malformed",
+        );
+        throw new PersistenceError("invalid_request", result.value.detail);
+      }
       // warn: a defect because the store refused the obligation read needed for reconciliation.
       LOGGER.warn(
-        { detail: result.value.detail },
+        { agent: session.value, detail: result.value.detail },
         "the store refused to state the open obligations",
       );
-      // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
-      // handled by the same default, so a store that answers with no reason
-      // is unavailable rather than silently benign.
+      // `storage_failure` and an unset arm both land here, so a store that
+      // answers with no reason is unavailable rather than silently benign.
       throw readFailure(result.value);
     }
     if (result.case !== "success") {
@@ -460,6 +484,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     }
     LOGGER.debug(
       {
+        agent: session.value,
         live_agents: result.value.liveAgents.length,
         live_detached: result.value.liveDetached.length,
         live_workflows: result.value.liveWorkflows.length,
@@ -473,8 +498,17 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     // ON THE RETRY SCHEDULE. This read is what StartSession reconciles from and
     // what every joining WatchSession re-announces from, and it was the read a
     // single `SQLITE_BUSY` used to turn into a session fault that never lifted.
-    liveWork(): Promise<storev1.GetLiveWorkSuccess> {
-      return readWithRetry("GetLiveWork", liveWorkOnce, options);
+    //
+    // THE ONLY FORM IS SCOPED. An empty session is refused HERE, before the
+    // store is asked: the store would refuse it too, but a request this process
+    // could never have built correctly is this process's defect to name.
+    liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
+      if (session.value === "") {
+        const detail = "GetLiveWork names no session; the store is shared and is never read unscoped";
+        LOGGER.error({ detail }, "refusing an open-obligation read that names no session");
+        return Promise.reject(new PersistenceError("invalid_request", detail));
+      }
+      return readWithRetry("GetLiveWork", () => liveWorkOnce(session), options);
     },
     closingAgentTerminal,
     closingSubagentTerminal,

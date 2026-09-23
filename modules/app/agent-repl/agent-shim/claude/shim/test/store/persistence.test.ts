@@ -47,7 +47,7 @@ describe("unavailablePersistence", () => {
   });
 
   it("liveWork rejects with store_unavailable", async () => {
-    await expect(persistence.liveWork()).rejects.toMatchObject({
+    await expect(persistence.liveWork({} as never)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });

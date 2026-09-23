@@ -18,7 +18,14 @@ import {
 } from "../../src/store/persistence.js";
 import { createPersistence, toStoreEntry, toWriteBatchRequest } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
-import { agent, bashRunEntry, promptEntry, readEntry, socketPathForTest } from "./persistence-fixtures.js";
+import {
+  agent,
+  bashRunEntry,
+  promptEntry,
+  readEntry,
+  socketPathForTest,
+  spawnEntry,
+} from "./persistence-fixtures.js";
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
@@ -575,10 +582,10 @@ describe("producerHasWrittenRows", () => {
 describe("liveWork", () => {
   it("delegates to the reconciler's own answer", async () => {
     const { persistence: plane } = await persistence("writer-live-work");
-    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    plane.write([spawnEntry(agent("main-1"), "book-1"), readEntry(BOOK, "unit-1", "/tmp/a")]);
     await plane.flush();
 
-    const live = await plane.liveWork();
+    const live = await plane.liveWork(agent("main-1"));
 
     expect(live.liveAgents.map((id) => id.value)).toContain("book-1");
   });

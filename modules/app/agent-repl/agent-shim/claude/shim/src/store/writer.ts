@@ -702,8 +702,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       return reader.readAgentPage(agent, pageSize, after);
     },
 
-    liveWork(): Promise<storev1.GetLiveWorkSuccess> {
-      return reconciler.liveWork();
+    liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
+      return reconciler.liveWork(session);
     },
 
     openBashRun(

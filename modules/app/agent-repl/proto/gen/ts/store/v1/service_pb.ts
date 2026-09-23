@@ -122,8 +122,11 @@ export const ShimStore: GenService<{
     output: typeof GetSidecarCursorsResponseSchema;
   },
   /**
-   * The open obligations: everything started and never concluded, per the
-   * record. The shim resolves each at session start — re-adopt or close.
+   * ONE SESSION'S open obligations: everything started and never concluded,
+   * per the record, within the lineage of the caller's main agent. The store
+   * is shared by every session on the host, so the answer is scoped and an
+   * unscoped request is refused. The shim resolves each at session start —
+   * re-adopt or close.
    *
    * @generated from rpc store.v1.ShimStore.GetLiveWork
    */

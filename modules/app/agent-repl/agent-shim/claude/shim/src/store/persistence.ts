@@ -133,7 +133,11 @@ type PersistenceFailureKind =
   | "store_unavailable"
   | "unknown_agent"
   | "stale_pointer"
-  | "unknown_work";
+  | "unknown_work"
+  // A request THIS PROCESS malformed, refused before it could be answered — a
+  // shim defect, never waited out and never read as an empty answer. Today
+  // only a live-work read naming no session reaches it.
+  | "invalid_request";
 
 /** A refusal from the record plane, carrying the kind a caller switches on. */
 export class PersistenceError extends Error {
@@ -307,8 +311,17 @@ export interface Persistence {
     pageSize: number,
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
-  /** Everything the record holds a start for and no terminal. */
-  liveWork(): Promise<storev1.GetLiveWorkSuccess>;
+  /**
+   * Everything the record holds a start for and no terminal, WITHIN ONE
+   * SESSION: the lineage of `session`, this conversation's main agent.
+   *
+   * The store is shared by every session on the host, and whatever this
+   * answers the StartSession reconciliation closes when this vendor does not
+   * hold it — so the read is scoped by construction and there is no unscoped
+   * form. An empty `session` is refused as `invalid_request` before the store
+   * is asked.
+   */
+  liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess>;
   /**
    * One detached shell run's lifecycle frames: the announced start, then the tail.
    *

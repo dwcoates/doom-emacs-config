@@ -111,8 +111,9 @@ export interface FakeStore {
    * `unknown_agent` is NOT settable: the fake refuses it on its own for a book
    * it holds no rows for. Write a row to make an agent known.
    *
-   * `GetLiveWork` declares only `storage_failure`; any other arm is refused
-   * here rather than fabricating a response shape the proto forbids.
+   * `GetLiveWork` declares `invalid_request` and `storage_failure`; any other
+   * arm is refused here rather than fabricating a response shape the proto
+   * forbids.
    */
   failReads(verb: StoreReadVerb, arm: StoreReadFailureArm | null, detail?: string): void;
   /**
@@ -236,6 +237,15 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   /** Detached work ids that were announced, mapped to the run they detached from. */
   const detachedAnnounced = new Map<string, string | undefined>();
   /**
+   * The store's LINEAGE COLUMNS: which agent announced each detached work
+   * (`detached_work.owner_agent`) and which agent spawned each created agent
+   * (`agent.spawned_by_agent`), in first-sight order. `GetLiveWork` answers
+   * one session's lineage from these and from nothing else, exactly as
+   * `sessionLineageCTE` does in the real store.
+   */
+  const detachedOwner = new Map<string, string>();
+  const spawnedBy = new Map<string, string>();
+  /**
    * Every bash lifecycle row per run, in write order.
    *
    * A LIST, NOT THE NEWEST ROW: `WatchBashRun` replays the run's whole history
@@ -332,6 +342,24 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     const runId =
       detached.origin.case === "detached" ? detached.origin.value.detachedFromId?.value : undefined;
     detachedAnnounced.set(workId, runId);
+    const owner = frame.agentId?.value;
+    if (owner !== undefined && owner !== "") detachedOwner.set(workId, owner);
+  };
+
+  /** Every agent in `session`'s lineage: the main agent and all it spawned, transitively. */
+  const lineageOf = (session: string): Set<string> => {
+    const lineage = new Set<string>([session]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const [created, spawner] of spawnedBy) {
+        if (lineage.has(spawner) && !lineage.has(created)) {
+          lineage.add(created);
+          grew = true;
+        }
+      }
+    }
+    return lineage;
   };
 
   /**
@@ -366,7 +394,12 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     if (subagent.case !== "start") return;
     // `createSpawnedAgent`: the created agent's book is addressable from the
     // spawn frame on, before a single frame of its own has arrived.
-    rememberAgent(subagent.value.createdAgentId?.value);
+    const created = subagent.value.createdAgentId?.value;
+    rememberAgent(created);
+    const spawner = frame.agentId?.value;
+    if (created !== undefined && created !== "" && spawner !== undefined && spawner !== "") {
+      spawnedBy.set(created, spawner);
+    }
   };
 
   const landEntry = (entry: storev1.StoreEntry): void => {
@@ -688,39 +721,57 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
 
       async getLiveWork(request) {
         noteRead("GetLiveWork", request);
-        const refusal = refusalFor("GetLiveWork");
-        if (refusal !== undefined) {
-          return create(storev1.GetLiveWorkResponseSchema, {
+        const liveWorkFailure = (
+          detail: string,
+          kind: storev1.GetLiveWorkFailure["kind"],
+        ): storev1.GetLiveWorkResponse =>
+          create(storev1.GetLiveWorkResponseSchema, {
             result: {
               case: "failure",
-              value: create(storev1.GetLiveWorkFailureSchema, {
-                detail: refusal.detail,
-                kind: {
-                  case: "storageFailure",
-                  value: create(storev1.GetLiveWorkStorageFailureSchema, {}),
-                },
-              }),
+              value: create(storev1.GetLiveWorkFailureSchema, { detail, kind }),
             },
           });
+        // NEVER ANSWERED UNSCOPED, exactly as the real store refuses it: the
+        // store is shared by every session, and an unscoped answer is what let
+        // one session's start close another session's running work.
+        const session = request.session?.value ?? "";
+        if (session === "") {
+          return liveWorkFailure("session: GetLiveWork names no session", {
+            case: "invalidRequest",
+            value: create(storev1.GetLiveWorkInvalidRequestSchema, { field: "session" }),
+          });
         }
-        const liveAgents: conversationv1.AgentId[] = [];
-        for (const [bookId, rows] of books) {
-          if (bookId === "") continue;
-          let started = false;
-          let concluded = false;
-          for (const row of rows) {
+        const refusal = refusalFor("GetLiveWork");
+        if (refusal !== undefined) {
+          return liveWorkFailure(
+            refusal.detail,
+            refusal.arm === "invalid_request"
+              ? {
+                  case: "invalidRequest",
+                  value: create(storev1.GetLiveWorkInvalidRequestSchema, { field: "session" }),
+                }
+              : { case: "storageFailure", value: create(storev1.GetLiveWorkStorageFailureSchema, {}) },
+          );
+        }
+        const lineage = lineageOf(session);
+        const concluded = (agent: string): boolean =>
+          rowsOf(agent).some((row) => {
             const item = row.line.agentItem?.item;
-            if (item?.case !== "agentFrame") continue;
+            if (item?.case !== "agentFrame") return false;
             const arm = item.value.result.case;
-            if (arm === "update" || arm === "detachedWork") started = true;
-            if (arm === "success" || arm === "failure") concluded = true;
-          }
-          if (started && !concluded) {
-            liveAgents.push(create(conversationv1.AgentIdSchema, { value: bookId }));
-          }
+            return arm === "success" || arm === "failure";
+          });
+        // THE MAIN AGENT IS NEVER LISTED: it is the lineage's root, and its
+        // liveness is the session's own.
+        const liveAgents: conversationv1.AgentId[] = [];
+        for (const created of spawnedBy.keys()) {
+          if (created === session || !lineage.has(created) || concluded(created)) continue;
+          liveAgents.push(create(conversationv1.AgentIdSchema, { value: created }));
         }
         const liveDetached: conversationv1.DetachedWorkId[] = [];
         for (const [workId, runId] of detachedAnnounced) {
+          const owner = detachedOwner.get(workId);
+          if (owner === undefined || !lineage.has(owner)) continue;
           const rows = runId === undefined ? undefined : bashRowsByRun.get(runId);
           const newest = rows?.[rows.length - 1]?.frame;
           const ended = newest?.result.case === "success" || newest?.result.case === "failure";
@@ -804,12 +855,13 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         readFailures.delete(verb);
         return;
       }
-      if (verb === "GetLiveWork" && arm !== "storage_failure") {
-        // REFUSED RATHER THAN FABRICATED: GetLiveWorkFailure declares one arm,
-        // so serving another would put a shape on the wire the proto forbids
-        // and let a consumer be tested against a store that cannot exist.
+      if (verb === "GetLiveWork" && arm === "stale_pointer") {
+        // REFUSED RATHER THAN FABRICATED: GetLiveWorkFailure declares
+        // invalid_request and storage_failure, so serving another arm would put
+        // a shape on the wire the proto forbids and let a consumer be tested
+        // against a store that cannot exist.
         throw new Error(
-          `fake store: GetLiveWork declares only storage_failure, not ${arm}`,
+          `fake store: GetLiveWork declares invalid_request and storage_failure, not ${arm}`,
         );
       }
       readFailures.set(verb, { arm, detail: detail ?? `fake store refuses ${verb}` });

@@ -6,7 +6,13 @@
 // lists a main agent: a main agent has no spawner, and nothing is owed for it.
 package integration
 
-import "testing"
+import (
+	"testing"
+
+	"connectrpc.com/connect"
+
+	storev1 "agentrepl/proto/store/v1"
+)
 
 // TestLiveWorkListsASpawnedAgentUntilItsTerminal.
 func TestLiveWorkListsASpawnedAgentUntilItsTerminal(t *testing.T) {
@@ -24,7 +30,7 @@ func TestLiveWorkListsASpawnedAgentUntilItsTerminal(t *testing.T) {
 	)
 
 	// Assert.
-	if got := agentValues(liveWork(ctx, t, cli).GetLiveAgents()); !contains(got, "sub-1") {
+	if got := agentValues(liveWork(ctx, t, cli, "main").GetLiveAgents()); !contains(got, "sub-1") {
 		t.Errorf("a started agent is missing from live_agents: %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -46,7 +52,7 @@ func TestLiveWorkNeverListsAMainAgent(t *testing.T) {
 	)
 
 	// Assert.
-	if got := agentValues(liveWork(ctx, t, cli).GetLiveAgents()); contains(got, "main") {
+	if got := agentValues(liveWork(ctx, t, cli, "main").GetLiveAgents()); contains(got, "main") {
 		t.Errorf("GetLiveWork listed the main agent: %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -71,7 +77,7 @@ func TestLiveWorkScansDetachedWorkBesideAgents(t *testing.T) {
 	)
 
 	// Assert.
-	live := liveWork(ctx, t, cli)
+	live := liveWork(ctx, t, cli, "main")
 	if got := agentValues(live.GetLiveAgents()); !contains(got, "sub-live") {
 		t.Errorf("live_agents is missing the started subagent: %v", got)
 	}
@@ -98,7 +104,7 @@ func TestLiveWorkListsNoWorkflowsThisWave(t *testing.T) {
 	)
 
 	// Assert.
-	if got := workValues(liveWork(ctx, t, cli).GetLiveWorkflows()); len(got) != 0 {
+	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveWorkflows()); len(got) != 0 {
 		t.Errorf("live_workflows is %v, want empty for a wave where nothing routes into the workflow table", got)
 	}
 }
@@ -122,7 +128,7 @@ func TestLiveWorkSurvivesARestart(t *testing.T) {
 	// Assert.
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	if got := agentValues(liveWork(after, t, store.client()).GetLiveAgents()); !contains(got, "sub-restart") {
+	if got := agentValues(liveWork(after, t, store.client(), "main").GetLiveAgents()); !contains(got, "sub-restart") {
 		t.Errorf("an open obligation did not survive a restart: live_agents is %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -149,7 +155,7 @@ func TestLiveDetachedSurvivesARestart(t *testing.T) {
 	// Assert.
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	if got := workValues(liveWork(after, t, store.client()).GetLiveDetached()); !contains(got, "work-restart") {
+	if got := workValues(liveWork(after, t, store.client(), "main").GetLiveDetached()); !contains(got, "work-restart") {
 		t.Errorf("an announced run did not survive a restart: live_detached is %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -177,8 +183,77 @@ func TestARunConcludedBeforeARestartStaysClosedAcrossIt(t *testing.T) {
 	// Assert.
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	if got := workValues(liveWork(after, t, store.client()).GetLiveDetached()); contains(got, "work-closed") {
+	if got := workValues(liveWork(after, t, store.client(), "main").GetLiveDetached()); contains(got, "work-closed") {
 		t.Errorf("a restart resurrected a concluded run: live_detached is %v", got)
 	}
 	store.assertNoErrorRecords()
+}
+
+// TestLiveWorkAnswersEachSessionOnlyItsOwnObligations is the 2026-09-23
+// defect's store half: ONE store serves every session on the host, and a
+// session's read must never hand it another session's running work to close.
+func TestLiveWorkAnswersEachSessionOnlyItsOwnObligations(t *testing.T) {
+	tests := []struct {
+		name      string
+		session   string
+		wantAgent string
+		wantRun   string
+		notAgent  string
+		notRun    string
+	}{
+		{name: "session A", session: "main-a", wantAgent: "sub-a", wantRun: "run-a", notAgent: "sub-b", notRun: "run-b"},
+		{name: "session B", session: "main-b", wantAgent: "sub-b", wantRun: "run-b", notAgent: "sub-a", notRun: "run-a"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: two sessions' live subagents and shell runs, one store.
+			store := startStore(t, storeOptions{})
+			ctx, cancel := callContext(t)
+			defer cancel()
+			cli := store.client()
+			shim := streamProducer(cli)
+			shim.write(ctx, t,
+				shim.agentEntry("w-2s-a1", "u-2s-a1", frameLine(agentID("main-a"), subagentSpawnFrame("main-a", "act-a", "sub-a", "work", 1000))),
+				shim.agentEntry("w-2s-a2", "detached:run-a", frameLine(agentID("main-a"), detachedBashFrame("main-a", "run-a", "sleep 60", 1100))),
+				shim.agentEntry("w-2s-b1", "u-2s-b1", frameLine(agentID("main-b"), subagentSpawnFrame("main-b", "act-b", "sub-b", "work", 1200))),
+				shim.agentEntry("w-2s-b2", "detached:run-b", frameLine(agentID("main-b"), detachedBashFrame("main-b", "run-b", "sleep 60", 1300))),
+			)
+
+			// Act.
+			live := liveWork(ctx, t, cli, tc.session)
+
+			// Assert.
+			agents, runs := agentValues(live.GetLiveAgents()), workValues(live.GetLiveDetached())
+			if !contains(agents, tc.wantAgent) || contains(agents, tc.notAgent) {
+				t.Errorf("live_agents = %v, want %s and never %s", agents, tc.wantAgent, tc.notAgent)
+			}
+			if !contains(runs, tc.wantRun) || contains(runs, tc.notRun) {
+				t.Errorf("live_detached = %v, want %s and never %s", runs, tc.wantRun, tc.notRun)
+			}
+			store.assertNoErrorRecords()
+		})
+	}
+}
+
+// TestLiveWorkRefusesARequestNamingNoSession: there is no unscoped answer. The
+// refusal is the typed invalid_request arm naming `session`, recorded once.
+func TestLiveWorkRefusesARequestNamingNoSession(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	mark := store.logMark()
+
+	// Act.
+	resp, err := store.client().GetLiveWork(ctx, connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork answered a transport error where a typed failure was owed: %v", err)
+	}
+	if got := resp.Msg.GetFailure().GetInvalidRequest().GetField(); got != "session" {
+		t.Fatalf("result = %v, want invalid_request naming session", resp.Msg.GetResult())
+	}
+	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "an unscoped live-work read")
+	assertRefusalKeys(t, rec, "session_empty", "invalid_request")
 }

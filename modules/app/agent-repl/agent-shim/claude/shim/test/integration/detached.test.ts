@@ -19,7 +19,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
-import { conversationv1, shimv1 } from "../../src/proto.js";
+import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
 import {
   activityId,
@@ -54,6 +54,7 @@ import {
   createStoreClient,
   seedBashLifecycle,
   seedDetachedAnnouncement,
+  seedSubagentSpawn,
   sidecarProducer,
   writeEntries,
   writtenKeys,
@@ -1264,6 +1265,72 @@ describe("reconciliation at session start", () => {
     } else {
       throw new Error("the orphaned run was not closed with an interrupted terminal");
     }
+  });
+
+  test("a session start never closes ANOTHER session's live work (2026-09-23)", async () => {
+    // THE DEFECT: one store serves every session on the host. Opening a second
+    // workspace reconciled the WHOLE record against its own vendor and wrote
+    // lost.swept_up terminals for five subagents another session was still
+    // running. Session A's work here is five live subagents and a shell run;
+    // session B starts with an orphan of its own, whose closing terminal is the
+    // proof its reconciliation actually ran.
+    const first = await spawnShim();
+    const b = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    const store = createStoreClient(first.dirs.storeSocket);
+    const sessionA = "session-a-main";
+    const aSubagents = ["a-sub-1", "a-sub-2", "a-sub-3", "a-sub-4", "a-sub-5"];
+    for (const created of aSubagents) {
+      await seedSubagentSpawn(store, sidecarProducer(sessionA), { spawner: sessionA, created });
+    }
+    await seedDetachedAnnouncement(store, sidecarProducer(sessionA), {
+      work: "a-run",
+      agent: sessionA,
+      detachedFromId: "a-run",
+      outputPath: "/nonexistent/a-run.output",
+    });
+    await seedDetachedAnnouncement(store, sidecarProducer(b.vendorSessionId), {
+      work: "b-orphan",
+      agent: b.vendorSessionId,
+      detachedFromId: "b-orphan",
+      outputPath: "/nonexistent/b-orphan.output",
+    });
+
+    // Session B starts while A's work is live.
+    const second = await spawnShim({ reuse: first.dirs });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(b.vendorSessionId)));
+    // SYNCHRONIZATION: B's own orphan reaching its terminal proves B's
+    // reconciliation wrote its closings — they are one write.
+    const orphan = openStream((options) =>
+      second.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId("b-orphan") }),
+        options,
+      ),
+    );
+    await orphan.drain();
+    // An ORDERLY stand-down flushes every write the shim ever enqueued, so
+    // after it nothing B's reconciliation wrote can still be in flight.
+    await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await second.exited;
+
+    // Assert: nothing B's shim wrote names A's work...
+    const shimKeys = writtenKeys(
+      (first.store?.writeBatches() ?? [])
+        .filter((batch) => batch.accepted && !batch.request.producer.startsWith("claude-sidecar:"))
+        .map((batch) => batch.request),
+    );
+    expect(shimKeys.filter((key) => key.includes("a-sub-") || key.includes("a-run"))).toEqual([]);
+    // ...and A's work is still open in A's own lineage.
+    const live = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: sessionA }),
+      }),
+    );
+    const open = live.result.case === "success" ? live.result.value : undefined;
+    expect(open?.liveAgents.map((id) => id.value)).toEqual(aSubagents);
+    expect(open?.liveDetached.map((id) => id.value)).toEqual(["a-run"]);
   });
 
   test("GetLiveWork is called exactly ONCE, at session start", async () => {

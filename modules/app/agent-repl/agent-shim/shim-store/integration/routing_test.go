@@ -52,7 +52,7 @@ func TestContextCutArmPaginatesLikeAnyUpdate(t *testing.T) {
 	page := openSession(ctx, t, cli, "main", 10, nil)
 	assertTexts(t, "a book containing a context cut", pageTexts(page.GetPage()), []string{"after", "cut:main", "before"})
 
-	live := liveWork(ctx, t, cli)
+	live := liveWork(ctx, t, cli, "main")
 	if len(live.GetLiveAgents()) != 0 {
 		t.Errorf("a context cut put %v into live work; an update arm has no lifecycle", agentValues(live.GetLiveAgents()))
 	}
@@ -82,7 +82,7 @@ func TestApiErrorArmPaginatesAsEvidenceNotATerminal(t *testing.T) {
 	page := openSession(ctx, t, cli, "sub-a", 10, nil)
 	assertTexts(t, "a subagent's book carrying an api error", pageTexts(page.GetPage()), []string{"api_error:overloaded, retried"})
 
-	live := liveWork(ctx, t, cli)
+	live := liveWork(ctx, t, cli, "main")
 	if !contains(agentValues(live.GetLiveAgents()), "sub-a") {
 		t.Errorf("an api_error ended the agent's record: live agents are %v, want sub-a still open", agentValues(live.GetLiveAgents()))
 	}
@@ -135,7 +135,7 @@ func TestTerminalArmsWriteAPageLineAndCloseTheAgent(t *testing.T) {
 				shim.agentEntry("w-spawn-"+tc.name, "u-spawn-"+tc.name,
 					frameLine(agentID("main"), subagentSpawnFrame("main", "act-spawn-"+tc.name, tc.agent, "work", 2000))),
 			)
-			if !contains(agentValues(liveWork(ctx, t, cli).GetLiveAgents()), tc.agent) {
+			if !contains(agentValues(liveWork(ctx, t, cli, "main").GetLiveAgents()), tc.agent) {
 				t.Fatalf("the spawned agent %q was not live before its terminal", tc.agent)
 			}
 
@@ -146,7 +146,7 @@ func TestTerminalArmsWriteAPageLineAndCloseTheAgent(t *testing.T) {
 			page := openSession(ctx, t, cli, tc.agent, 10, nil)
 			assertTexts(t, "the terminal's own book", pageTexts(page.GetPage()), []string{tc.wantLine})
 
-			if got := agentValues(liveWork(ctx, t, cli).GetLiveAgents()); contains(got, tc.agent) {
+			if got := agentValues(liveWork(ctx, t, cli, "main").GetLiveAgents()); contains(got, tc.agent) {
 				t.Errorf("GetLiveWork still lists %q after its terminal; live agents are %v", tc.agent, got)
 			}
 			store.assertNoErrorRecords()
@@ -194,7 +194,7 @@ func TestDetachedWorkAnnouncementIsTheSourceOfLiveDetached(t *testing.T) {
 	)
 
 	// Assert.
-	live := liveWork(ctx, t, cli)
+	live := liveWork(ctx, t, cli, "main")
 	if !contains(workValues(live.GetLiveDetached()), "work-bash-live") {
 		t.Errorf("the announced run is missing from live_detached: %v", workValues(live.GetLiveDetached()))
 	}
@@ -224,7 +224,7 @@ func TestReAnnouncingDetachedWorkNeitherDuplicatesTheLineNorTheObligation(t *tes
 	// Assert.
 	page := openSession(ctx, t, cli, "main", 10, nil)
 	assertTexts(t, "the announcer's book after a re-announcement", pageTexts(page.GetPage()), []string{"detached:work-again"})
-	if got := workValues(liveWork(ctx, t, cli).GetLiveDetached()); len(got) != 1 {
+	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 1 {
 		t.Errorf("live_detached = %v, want exactly one entry per run", got)
 	}
 	store.assertNoErrorRecords()
@@ -251,7 +251,7 @@ func TestDetachedWorkLeavesLiveWorkAtItsTerminal(t *testing.T) {
 	)
 
 	// Assert.
-	live := liveWork(ctx, t, cli)
+	live := liveWork(ctx, t, cli, "main")
 	if contains(workValues(live.GetLiveDetached()), "work-bash-2") {
 		t.Errorf("a concluded run is still in live_detached: %v", workValues(live.GetLiveDetached()))
 	}

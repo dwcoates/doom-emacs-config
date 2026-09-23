@@ -737,7 +737,7 @@ func TestAReadCompletesWhileAWriteTransactionIsHeld(t *testing.T) {
 		{
 			name: "a live-work scan, which runs a pooled statement",
 			read: func(t *testing.T, d *DB) {
-				if _, err := d.LiveWork(ctx()); err != nil {
+				if _, err := d.LiveWork(ctx(), "agent-main"); err != nil {
 					t.Fatalf("LiveWork while a write was held: %v", err)
 				}
 			},

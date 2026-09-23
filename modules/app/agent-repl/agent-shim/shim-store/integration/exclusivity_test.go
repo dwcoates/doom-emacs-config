@@ -72,7 +72,7 @@ func TestTheIncumbentStoreKeepsServingAfterARivalIsRefused(t *testing.T) {
 	// Act
 	ctx, cancel := callContext(t)
 	defer cancel()
-	live := liveWork(ctx, t, incumbent.client())
+	live := liveWork(ctx, t, incumbent.client(), "main")
 
 	// Assert: the incumbent still owns its socket and answers on it.
 	if live == nil {

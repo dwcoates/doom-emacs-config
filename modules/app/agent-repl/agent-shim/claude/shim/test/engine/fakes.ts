@@ -437,7 +437,10 @@ export class RecordingPersistence implements Persistence {
     if (this.readError !== undefined) return Promise.reject(this.readError);
     return Promise.resolve(this.page);
   }
-  liveWork(): Promise<storev1.GetLiveWorkSuccess> {
+  /** The session every live-work read was scoped to, in order. */
+  readonly liveWorkSessions: string[] = [];
+  liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
+    this.liveWorkSessions.push(session.value);
     if (this.liveWorkError !== undefined) return Promise.reject(this.liveWorkError);
     return Promise.resolve(this.live);
   }
