@@ -4258,64 +4258,93 @@ body.draining #composer-input::placeholder {
 bubble-body.bubble-body { display: block; }
 
 /* THE COST CORNER: the token figure, and — once the response has settled —
-   the relative duration it reveals on hover. Collapsed, only the token shows,
-   at a fixed inset from the bubble's top and right edges whatever its digit
-   count. Revealed, the token slides left by the duration's fixed-width slot
-   (plus its gap), and the duration reads beside it.
+   the relative duration it reveals on hover (owner spec, 2026-09-23).
 
-   THE SLIDE IS THE DURATION SLOT'S WIDTH, and every width here is FIXED
-   (owner rule, 2026-09-23: the user owns the scroll), so no figure, tick or
-   settle moves the float. The corner holds two in-flow pieces:
-     1. `::before`, an invisible copy of the token text (`data-tokens`) in a
-        fixed-width slot;
-     2. `.usage-slider`, the fixed-width duration slot, whose ONLY in-flow
-        content is `.usage-ago` (the gap is that element's `margin-left`).
-   The visible `.usage-stamp` is taken out of flow and pinned to the slider's
-   left edge (`right: 100%`). Collapsed, the slider is `translateX(100%)` — a
-   percentage of its OWN width — so the duration sits just past the corner's
-   right edge (clipped by `overflow: hidden`) and the token's right edge lands
-   exactly on that edge. Revealed, the slider is `translateX(0)`: the duration
-   fills its slot and the token sits exactly over the spacer. A corner with no
-   duration yet (still arriving, `data-arriving`) keeps its slot reserved and
-   collapsed, so the token sits at the right edge and nothing moves on hover.
+   AT REST only the token shows, and its gap to the bubble's RIGHT edge equals
+   its gap to the bubble's TOP edge: both are `--usage-corner-gap`, the one
+   token the corner's top and right margins are derived from. The duration
+   waits one further `--usage-corner-gap` beyond its normal gap from the token,
+   which puts it past the bubble's inner edge, clipped, so it never peeks in.
+
+   ON HOVER the reveal runs in two phases, in sequence:
+     A. only the duration moves: `.usage-ago` slides left by that one extra
+        `--usage-corner-gap` until it sits at its normal gap
+        (`--usage-pair-gap`) from the token, fading in as it comes;
+     B. then the token and the duration slide left TOGETHER: `.usage-slider`
+        goes from `translateX(100%)` — a percentage of its OWN width, which is
+        the duration plus its gap — to `translateX(0)`, so the duration's
+        right edge lands `--usage-corner-gap` from the bubble's right edge.
+   Mouse-leave runs B back, then A back. The sequence is `transition-delay`:
+   the phase that runs second waits out the first (`--usage-phase`).
+
+   THE MARKUP (src/feed/cards/response.ts):
+     .usage-corner[data-tokens]      ::before reserves the token's slot
+       .usage-reserve                 reserves the gap plus the widest duration
+       .usage-slider                  absolute, its right edge the corner's
+         .usage-stamp                 absolute, its right edge the slider's left
+         .usage-ago                   the slider's only in-flow content
+
+   NO REFLOW, EVER (owner rule, 2026-09-23: the user owns the scroll). The
+   corner's in-flow content is the two reserves alone, both of fixed width, so
+   its float is the corner's full HOVERED footprint — both figures, their gap
+   and the right gap — from the first draw. The prose's first line wraps
+   around that footprint, and no hover, tick or settle moves it: the slider is
+   out of flow and every motion is a transform.
 
    FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling,
    2026-09-15). The corner floats top-right INSIDE the scroll box, before the
    `.bubble-body` block it shares that box's block-formatting context with, so
    the prose's FIRST line flows to its left and every later line runs the
-   bubble's full width. The float's width is spacer + slider at all times —
-   `transform` never changes layout — so the reveal never reflows that first
-   line. */
+   bubble's full width. */
 .usage-corner {
+  /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
+     inherited, so the token, the duration and both reserves cannot differ. */
+  font-size: 0.85em;
+  /* The half-leading of the corner's line: the space between its line box's
+     top and the figures' em box. It is part of the top gap as drawn, so the
+     right gap carries it too. */
+  --usage-half-leading: calc((var(--md-line-h) - 1) / 2 * 1em);
+  /* `.bubble`'s own top padding, which the corner sits under. styles.test.ts
+     fails if the two ever disagree. */
+  --usage-bubble-pad-top: 0.6rem;
+  /* THE ONE GAP TOKEN: the distance from the bubble's edge to the figure's em
+     box, top and right alike. It is the top gap the corner has always had,
+     and the right gap is derived from it below. */
+  --usage-corner-gap: calc(var(--usage-bubble-pad-top) + var(--usage-half-leading));
+  /* The normal gap between the token and the duration, unchanged. */
+  --usage-pair-gap: 0.35rem;
+  /* One phase of the reveal; the two phases together take 0.5s. */
+  --usage-phase: 0.25s;
+  /* The hover hit area's padding (owner ruling, 2026-09-14). */
+  --usage-hit-x: 1.25rem;
+  --usage-hit-y: 0.4rem;
   float: right;
-  display: inline-flex;
+  position: relative;
+  display: flex;
   flex-direction: row;
-  align-items: baseline;
-  justify-content: flex-end;
   max-width: 100%;
   overflow: hidden;
-  /* Enlarge the hover/hit region to roughly 4x its area — 2x wide and 2x tall
-     for a typical token figure — so the duration is easier to summon (owner
-     ruling, 2026-09-14). The padding grows the hoverable box; the equal and
-     opposite negative margin cancels it in layout on the top, bottom and left,
-     so no neighbor shifts. `overflow: hidden` clips to this padding box. */
-  padding: 0.4rem 1.25rem;
-  margin-top: -0.4rem;
-  margin-bottom: -0.4rem;
-  margin-left: -1.25rem;
-  /* CORNER-SCOPED RIGHT-EDGE GAP (owner ruling, 2026-09-15): the token's gap
-     from the bubble's right border, without touching the global
-     `--bubble-scroll-gap`. `.bubble`'s own right padding contributes one
-     `--bubble-scroll-gap`; the right margin departs from the fully-cancelling
-     `-1.25rem` by `--usage-corner-edge-gap - --bubble-scroll-gap`, so the total
-     gap is `--usage-corner-edge-gap`. It is static, never part of the reveal. */
-  --usage-corner-edge-gap: var(--bubble-scroll-gap);
-  margin-right: calc(
-    var(--usage-corner-edge-gap) - var(--bubble-scroll-gap) - 1.25rem
+  white-space: nowrap;
+  /* Enlarge the hover/hit region to roughly 4x its area, so the duration is
+     easier to summon (owner ruling, 2026-09-14). The padding grows the
+     hoverable box; `overflow: hidden` clips to it. */
+  padding: var(--usage-hit-y) var(--usage-hit-x);
+  margin-bottom: calc(0px - var(--usage-hit-y));
+  margin-left: calc(0px - var(--usage-hit-x));
+  /* THE TOP GAP: the bubble's top padding plus the line's half-leading, which
+     is `--usage-corner-gap` by definition; the margin cancels the hit padding
+     and adds exactly what the gap asks beyond that padding (nothing). */
+  margin-top: calc(
+    var(--usage-corner-gap) - var(--usage-half-leading) - var(--usage-bubble-pad-top)
+      - var(--usage-hit-y)
   );
-  /* The one size the token figure, its spacer and the revealed duration all
-     read (owner ruling, 2026-09-15: token and duration must match). */
-  --usage-ago-font-size: 0.85em;
+  /* THE RIGHT GAP: the corner's content edge sits `--usage-corner-gap` from
+     the bubble's right edge. `.bubble`'s own right padding contributes one
+     `--bubble-scroll-gap` and the hit padding is cancelled, so the margin
+     supplies the rest. */
+  margin-right: calc(
+    var(--usage-corner-gap) - var(--bubble-scroll-gap) - var(--usage-hit-x)
+  );
 }
 /* The token's width reservation: the token text again, invisible, in the
    token's own size and figures. ITS WIDTH IS FIXED (owner rule, 2026-09-23:
@@ -4328,30 +4357,40 @@ bubble-body.bubble-body { display: block; }
   visibility: hidden;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  font-size: var(--usage-ago-font-size);
   width: 6ch;
 }
-/* The element the reveal moves: the duration's fixed-width slot, so
-   `translateX(100%)` is exactly the slot's width. It is the token's containing
-   block (`position: relative`) and stretches to the row's height so the
-   token's `top: 0` lines it up with the spacer. */
+/* The duration's width reservation: the normal gap, then every widest label
+   the age formatter can write, stacked in ONE grid cell so the cell is as
+   wide as the widest of them. The live clock repaints the duration every
+   second, and its width never reaches past this. */
+.usage-reserve {
+  display: grid;
+  visibility: hidden;
+  margin-left: var(--usage-pair-gap);
+  font-variant-numeric: tabular-nums;
+}
+.usage-reserve > .usage-reserve-label {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+/* The pair's carrier, and the element PHASE B moves: out of flow, its right
+   edge on the corner's content edge, its top on the corner's content top, and
+   as wide as the duration plus its gap. At rest it is `translateX(100%)` of
+   that width, so the token hanging off its left edge sits on the corner's
+   content edge. It starts moving back first on mouse-leave, and waits out
+   phase A on hover. */
 .usage-slider {
-  position: relative;
-  align-self: stretch;
-  /* THE DURATION SLOT IS A FIXED WIDTH, arriving or settled (owner rule,
-     2026-09-23: the user owns the scroll). The live clock repaints the
-     duration every second, and a slot as wide as its text moved the float --
-     and reflowed the first prose line under a reader -- on every tick that
-     changed a digit's width or the label's length. The gap plus 11ch of the
-     duration's own 0.85em font holds its longest label ("364d 23h ago"). */
-  width: calc(0.35rem + 11ch * 0.85);
+  position: absolute;
+  top: var(--usage-hit-y);
+  right: var(--usage-hit-x);
   transform: translateX(100%);
-  transition: transform 0.5s ease;
+  transition: transform var(--usage-phase) ease 0s;
 }
 /* The cost corner's figure, drawn verbatim in the token amber the footer's
-   token cell wears, so the same idea reads the same color wherever it appears.
-   Anchored to the slider's left edge, it rides the slider's transform and has
-   no transform or transition of its own. */
+   token cell wears. Anchored to the slider's left edge at the slider's top —
+   the line the duration's text starts on, in the same inherited size and
+   leading, so the two share one baseline. It rides the slider's transform and
+   has no transform or transition of its own. */
 .usage-stamp {
   position: absolute;
   top: 0;
@@ -4359,33 +4398,37 @@ bubble-body.bubble-body { display: block; }
   white-space: nowrap;
   color: var(--info-tokens);
   font-variant-numeric: tabular-nums;
-  font-size: var(--usage-ago-font-size);
 }
 /* THE HOVER DURATION: the response's settled time, relative and live
-   ("5m 30s ago"), grey (the shared muted token) and the same size as the token
-   figure. Collapsed it is faded out as well as slid past the right edge; its
-   gap and width are the slider's width in both states, so nothing resizes. */
+   ("5m 30s ago"), grey (the shared muted token). The element PHASE A moves:
+   at rest it waits one `--usage-corner-gap` beyond its normal gap, faded out;
+   on hover it slides in and fades up first, and on mouse-leave it goes back
+   last, once phase B has returned. A block, so its transform applies. */
 .usage-ago {
+  display: block;
   color: var(--muted);
-  font-size: var(--usage-ago-font-size);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  margin-left: 0.35rem;
+  margin-left: var(--usage-pair-gap);
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transform: translateX(var(--usage-corner-gap));
+  transition:
+    transform var(--usage-phase) ease var(--usage-phase),
+    opacity var(--usage-phase) ease var(--usage-phase);
 }
 /* The reveal triggers off the WHOLE assistant bubble, not just the small
    corner: hovering the corner would put the cursor on top of the duration it
    had just revealed. The corner's own `:hover`/`:focus-within` and the
    `usage-corner--revealed` class (toggled on hover and keyboard focus) stay
    too (owner ruling, 2026-09-14). The slider and the duration share the one
-   trigger list. */
+   trigger list. On hover phase B waits for phase A. */
 .bubble.assistant:hover .usage-slider,
 .bubble.assistant:focus-within .usage-slider,
 .usage-corner:hover .usage-slider,
 .usage-corner:focus-within .usage-slider,
 .usage-corner.usage-corner--revealed .usage-slider {
   transform: translateX(0);
+  transition-delay: var(--usage-phase);
 }
 .bubble.assistant:hover .usage-ago,
 .bubble.assistant:focus-within .usage-ago,
@@ -4393,10 +4436,12 @@ bubble-body.bubble-body { display: block; }
 .usage-corner:focus-within .usage-ago,
 .usage-corner.usage-corner--revealed .usage-ago {
   opacity: 1;
+  transform: translateX(0);
+  transition-delay: 0s;
 }
-/* AN ARRIVING CORNER NEVER SLIDES: its duration slot is reserved but empty
-   until the response settles, so revealing it would move the token over
-   nothing. (0,5,0) outranks every reveal trigger above. */
+/* AN ARRIVING CORNER NEVER SLIDES: it has no duration yet, so revealing it
+   would move the token over nothing. (0,5,0) outranks every reveal trigger
+   above. */
 .bubble.assistant .usage-corner[data-arriving] .usage-slider {
   transform: translateX(100%);
 }
