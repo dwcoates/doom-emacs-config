@@ -174,8 +174,8 @@ export interface ToolGroupStore {
    * Reuse or create the group for KEY, lay it out for MEMBERS, and return the
    * wrapper to place at the top level.
    */
-  place(key: string, kind: string, members: readonly GroupMember[]): HTMLElement;
-  /** Dispose every group not `place`d since the previous prune. */
+  arrange(key: string, kind: string, members: readonly GroupMember[]): HTMLElement;
+  /** Dispose every group not `arrange`d since the previous prune. */
   prune(): void;
 }
 
@@ -189,7 +189,7 @@ export function createToolGroupStore(): ToolGroupStore {
   const groups = new Map<string, ToolGroup>();
   let seen = new Set<string>();
   return {
-    place(key, kind, members) {
+    arrange(key, kind, members) {
       seen.add(key);
       let group = groups.get(key);
       if (group === undefined) {

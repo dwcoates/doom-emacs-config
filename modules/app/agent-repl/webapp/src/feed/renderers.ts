@@ -352,7 +352,7 @@ export function arrangeSubfeedRows(
           members.push({ id, element: el });
         }
         // `groups` is defined here — `kind` is non-null only when it is.
-        top.push(groups!.place(groupKey(kind, members[0].id), kind, members));
+        top.push(groups!.arrange(groupKey(kind, members[0].id), kind, members));
         i = j;
         continue;
       }
