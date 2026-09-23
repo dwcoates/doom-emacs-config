@@ -762,6 +762,11 @@ func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harnes
 	if prep != nil {
 		prep(h.client)
 	}
+	// A test that states no opening is a workspace's first opening: the
+	// watcher every test before the replay rule was written against.
+	if session.Opening.validate() != nil {
+		session.Opening = WorkspaceOpened()
+	}
 
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{
 		Feed:      &feedSink{rec: h.rec},
