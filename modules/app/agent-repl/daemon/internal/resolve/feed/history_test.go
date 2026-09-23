@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
 )
 
 // HISTORY REPLAY goes through THE SAME per-family functions a live frame does,
@@ -179,6 +180,49 @@ func TestAReplayedTerminalDrawsTheTurnItStandsIn(t *testing.T) {
 	// Assert: history replays how the turn ended.
 	if h.terminalRow("turn-1").GetConcluded() == nil {
 		t.Fatalf("outcome = %T, want concluded", h.terminalRow("turn-1").GetOutcome())
+	}
+}
+
+// THE PAGE'S HEAD CAN OPEN MID-TURN. Every turn open repaints the opening page,
+// and that page's oldest terminal can end a turn whose prompt is older than the
+// page; it must never be charged to the turn the queue has just opened.
+func TestAReplayedTerminalBeforeEveryPromptDoesNotEndTheLiveTurn(t *testing.T) {
+	cases := []struct {
+		name string
+		page *conversationv1.HistoryPage
+	}{
+		{
+			name: "the live turn's prompt is on the page",
+			page: historyPage(&conversationv1.HistoryMore{},
+				promptEntry("turn-live", "now"),
+				frameEntry(mainAgent(), &conversationv1.AgentSuccess{
+					Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+				}),
+			),
+		},
+		{
+			name: "the live turn's prompt is not on the page yet",
+			page: historyPage(&conversationv1.HistoryMore{},
+				frameEntry(mainAgent(), &conversationv1.AgentSuccess{
+					Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+				}),
+			),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the queue opened the live turn.
+			h := newHarness(t)
+			h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-live"))
+
+			// Act: the opening page replays with an orphan terminal at its head.
+			h.replay(tc.page)
+
+			// Assert: the live turn has not ended.
+			if h.hasTerminalRow("turn-live") {
+				t.Fatal("the page's orphan terminal was drawn as the live turn's terminal")
+			}
+		})
 	}
 }
 
