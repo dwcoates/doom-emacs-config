@@ -225,6 +225,29 @@ describe("realQueryOptions on a resume", () => {
 });
 
 /**
+ * The per-task stop declaration. Without it the CLI fails closed and an
+ * interrupt kills every background agent, so it must ride EVERY way a session
+ * comes into being: a fresh start, a resume (a relaunch is a resume on a new
+ * shim), and a rewound resume.
+ */
+describe("realQueryOptions declares the per-task stop", () => {
+  it.each([
+    { name: "a fresh start", overrides: { binding: { kind: "fresh", sessionId: "vendor-1" } } },
+    { name: "a resume", overrides: { binding: { kind: "resume", resumeSessionId: "vendor-old" } } },
+    {
+      name: "a rewound resume",
+      overrides: { binding: { kind: "resume", resumeSessionId: "vendor-old" }, resumeSessionAt: "msg-uuid-7" },
+    },
+  ] satisfies { name: string; overrides: Partial<RealQuerySpec> }[])("on $name", ({ overrides }) => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(overrides));
+
+    // Assert.
+    expect(options.perTaskStopAffordance).toBe(true);
+  });
+});
+
+/**
  * The factory itself. It routes through the vendor guard, which is the ONE
  * place the SDK can enter this process; the suite mocks that chokepoint so the
  * vendor is never reached and the options the factory hands over are visible.
