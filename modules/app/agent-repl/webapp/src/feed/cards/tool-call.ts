@@ -61,6 +61,7 @@ import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { paintSpanClass } from "./paint.js";
 import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
+import { foldTitle } from "../title-fold.js";
 import type { RowContext } from "./context.js";
 
 /**
@@ -99,11 +100,12 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
 
   // CARD-LEVEL FOLD (owner ruling, 2026-09-15). The whole card is ONE
   // click-to-expand unit (`.tool-fold`, CAPPED_CLASSES in expand.ts): collapsed
-  // it shows only the head (the title, in full) and its input line (capped at
-  // two rows); its output section is HIDDEN — no preview — until the card is
-  // `.expanded`, at which point the section is revealed (scrolling at 50vh) and
-  // the input line's two-row cap is lifted. The stylesheet keys all of that off
-  // `.tool-fold`/`.tool-fold.expanded`; this end only marks the card.
+  // it shows only the head (the tool name, in full) and its input line (the
+  // title fold, capped at two rows — title-fold.ts); its output section is
+  // HIDDEN — no preview — until the card is `.expanded`, at which point the
+  // section is revealed (scrolling at 50vh) and the input line's cap is
+  // lifted. The stylesheet keys all of that off `.tool-fold`/`.tool-fold.expanded`
+  // and `.title-fold`; this end only marks the card and its title.
   const card = document.createElement("div");
   card.className = "tool-card tool-fold";
   card.setAttribute("data-state", outcome.case);
@@ -116,7 +118,8 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   const parts = drawOutcome(outcome, rc, path, card);
   head.appendChild(parts.badge);
 
-  card.appendChild(drawFeedToolCallInput(requireMessage(u.input, `${path}.input`), rc, `${path}.input`));
+  const input = drawFeedToolCallInput(requireMessage(u.input, `${path}.input`), rc, `${path}.input`);
+  card.appendChild(input);
   for (const element of parts.body) card.appendChild(element);
   // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. Every arm but `running`
   // is terminal — the call returned, was denied, or was handed off to a
@@ -124,6 +127,10 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   // element still holds (a live clock a previous draw left on a REUSED
   // element) is dropped here rather than left to a replace site upstream.
   if (outcome.case !== "running") stopTicking(card);
+  // THE INPUT LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+  // two-line title fold, owned by this card's fold. Folded AFTER the terminal
+  // stop above, which would otherwise tear down the fold's measurer.
+  foldTitle(input, "card");
   return card;
 }
 
