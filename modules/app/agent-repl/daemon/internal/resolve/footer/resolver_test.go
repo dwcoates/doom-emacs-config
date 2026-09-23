@@ -376,6 +376,25 @@ func TestTheStatusArmIsRecordedWhenItChanges(t *testing.T) {
 	}
 }
 
+// TestAContextCutRecordsTheArmItMoves — the cut ends the turn, so it moves the
+// published arm, and that move is recorded like every other one.
+func TestAContextCutRecordsTheArmItMoves(t *testing.T) {
+	// Arrange: a turn is in flight.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+
+	// Act
+	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
+	})
+
+	// Assert
+	if got := armChanges(h.log.Records()); !slices.Equal(got, []string{"idle", "thinking", "idle"}) {
+		t.Fatalf("recorded arms = %v, want idle, thinking, idle", got)
+	}
+}
+
 // TestAnUnchangedStatusArmIsNotRecordedAgain keeps the record a record of
 // CHANGES: a push that leaves the arm where it stands writes nothing.
 func TestAnUnchangedStatusArmIsNotRecordedAgain(t *testing.T) {

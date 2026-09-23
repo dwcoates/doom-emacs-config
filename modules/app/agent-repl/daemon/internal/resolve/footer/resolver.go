@@ -869,37 +869,32 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	arm := contextCutArm(cut)
 	failed, _ := cut.GetCut().(*conversationv1.ContextCut_CompactionFailed)
 
-	r.mu.Lock()
-	s := r.stateLocked(ws)
-	s.seen = true
-	s.turn = nil
-	s.turnEverRan = true
-	s.compacting = false
-	// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the compaction's end
-	// signal, so its progress sentence stops standing here; a failed cut still
-	// says what went wrong, through the context-budget line below.
-	s.compaction = nil
-	s.tok.settled = true
-	if failed != nil {
-		s.contextBudget = &standing{
-			text: "compaction failed — " + truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth),
-			at:   r.opts.clock.Now(),
-		}
-	}
-	view := r.render(ws, s)
-	topic := r.topicLocked(ws)
-	log := r.logOf(ws, s)
-	r.mu.Unlock()
-
-	if failed != nil {
-		log.Warn("daemon.footer.on_context_cut",
-			"a compaction failed, so nothing was cut and the context is still too large",
-			dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})
-	} else {
-		log.Debug("daemon.footer.on_context_cut", "the footer took a context cut",
-			dlog.Context{"arm": arm})
-	}
-	topic.Publish(view)
+	// THROUGH THE ONE PUBLICATION SITE, like every other fact: the cut moves
+	// the status arm (the turn ends) and the activity line (the compaction's
+	// line goes), and a change published past mutate is a change no record
+	// states.
+	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
+		dlog.Context{"arm": arm}, func(s *wsState) {
+			s.turn = nil
+			s.turnEverRan = true
+			s.compacting = false
+			// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the
+			// compaction's end signal, so its progress sentence stops standing
+			// here; a failed cut still says what went wrong, through the
+			// context-budget line below.
+			s.compaction = nil
+			s.tok.settled = true
+			if failed == nil {
+				return
+			}
+			s.contextBudget = &standing{
+				text: "compaction failed — " + truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth),
+				at:   r.opts.clock.Now(),
+			}
+			r.logOf(ws, s).Warn("daemon.footer.on_context_cut",
+				"a compaction failed, so nothing was cut and the context is still too large",
+				dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})
+		})
 }
 
 // contextCutArm names the cut's arm for the record.
