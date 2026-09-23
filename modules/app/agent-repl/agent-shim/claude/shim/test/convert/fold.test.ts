@@ -12,6 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import { EMPTY_FOLD_OUTPUT, createFold } from "../../src/convert/fold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
+import type { PersistEntry } from "../../src/store/persistence.js";
 import { activityOf, foldContext, residueOf, streamMessage } from "./fold-harness.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
@@ -731,40 +732,6 @@ describe("session facts", () => {
     );
 
     expect(output.entries).toHaveLength(0);
-  });
-
-  it("holds a compaction boundary until its summary arrives, then records the cut", () => {
-    const fold = createFold();
-    const held = fold.onSdkMessage(
-      {
-        type: "system",
-        subtype: "compact_boundary",
-        compact_metadata: {
-          trigger: "auto",
-          pre_tokens: 180_000,
-          post_tokens: 12_000,
-          duration_ms: 4_000,
-        },
-        uuid: "uuid-boundary",
-        session_id: "session-1",
-      } as unknown as SdkMessage,
-      foldContext(),
-    );
-
-    const output = fold.onSdkMessage(
-      assistant("msg-summary", [{ type: "text", text: "we discussed the fold" }]),
-      foldContext(),
-    );
-
-    expect(held.entries).toHaveLength(0);
-    const frame =
-      output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const cut = update.value as conversationv1.ContextCut;
-    const compacted = cut.cut.value as conversationv1.ContextCompacted;
-    expect(compacted.summary?.markdown).toBe("we discussed the fold");
-    expect(compacted.tokens?.tokensBefore).toBe(180_000n);
-    expect(compacted.trigger.case).toBe("automatic");
   });
 
   /** The `conversation_reset` a `/clear` puts on the stream. */
@@ -1585,74 +1552,6 @@ describe("an SDK message type no converter owns", () => {
   });
 });
 
-describe("a compaction summary the vendor stated as a bare string", () => {
-  it("records the cut with that string as the summary", () => {
-    // Arrange: the boundary is held until the prose that IS the summary arrives.
-    const fold = createFold();
-    fold.onSdkMessage(
-      {
-        type: "system",
-        subtype: "compact_boundary",
-        compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
-        uuid: "uuid-boundary-string",
-        session_id: "session-1",
-      } as unknown as SdkMessage,
-      foldContext(),
-    );
-
-    // Act
-    const output = fold.onSdkMessage(
-      assistant("msg-summary-string", [], { message: { content: "a bare string summary" } }),
-      foldContext(),
-    );
-
-    // Assert
-    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const cut = update.value as conversationv1.ContextCut;
-    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe(
-      "a bare string summary",
-    );
-  });
-});
-
-describe("a compaction boundary whose next assistant message carries no prose at all", () => {
-  it("HOLDS the cut, so the prose that follows still records it", () => {
-    // Arrange: the boundary is held, and the first assistant message after it
-    // states a content the vendor contract does not model as prose.
-    const fold = createFold();
-    fold.onSdkMessage(
-      {
-        type: "system",
-        subtype: "compact_boundary",
-        compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
-        uuid: "uuid-boundary-held",
-        session_id: "session-1",
-      } as unknown as SdkMessage,
-      foldContext(),
-    );
-    const barren = fold.onSdkMessage(
-      assistant("msg-no-prose", [], { message: { content: 42 } }),
-      foldContext(),
-    );
-    expect(barren.entries).toHaveLength(0);
-
-    // Act: the real summary arrives on the next assistant message.
-    const output = fold.onSdkMessage(
-      assistant("msg-prose", [], { message: { content: "the summary, at last" } }),
-      foldContext(),
-    );
-
-    // Assert
-    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const cut = update.value as conversationv1.ContextCut;
-    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe(
-      "the summary, at last",
-    );
-  });
-});
-
 /**
  * The class and the wait are remembered SEPARATELY: a retry that restates only
  * one of them must not erase the other, because the terminal reads both.
@@ -1889,53 +1788,340 @@ describe("where the fold ends a stream", () => {
   });
 });
 
-describe("a subagent's prose arriving while a compaction boundary is held", () => {
-  const boundary = {
+// ---------------------------------------------------------------------------
+// the compaction's held cut
+// ---------------------------------------------------------------------------
+
+/** A `compact_boundary` as the stream states it, naming its summary by anchor unless told otherwise. */
+function compactBoundary(uuid: string, anchor: string | null = `${uuid}-summary`): SdkMessage {
+  return {
     type: "system",
     subtype: "compact_boundary",
-    compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
-    uuid: "uuid-boundary-interleaved",
+    compact_metadata: {
+      trigger: "manual",
+      pre_tokens: 48_374,
+      post_tokens: 3_759,
+      duration_ms: 45_767,
+      ...(anchor === null ? {} : { preserved_messages: { anchor_uuid: anchor, uuids: [] } }),
+    },
+    uuid,
     session_id: "session-1",
   } as unknown as SdkMessage;
+}
 
-  it("is NOT taken as the summary", () => {
+/** The synthetic main-stream user record the vendor states a compaction's summary on. */
+function compactSummaryRecord(
+  uuid: string,
+  content: unknown,
+  extra: Record<string, unknown> = {},
+): SdkMessage {
+  return {
+    type: "user",
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+    session_id: "session-1",
+    uuid,
+    isSynthetic: true,
+    ...extra,
+  } as unknown as SdkMessage;
+}
+
+/** The compaction a row carries, or undefined for any other row. */
+function compactedOf(entry: PersistEntry | undefined): conversationv1.ContextCompacted | undefined {
+  if (entry?.item.kind !== "frame") return undefined;
+  const result = entry.item.frame.result;
+  const update = result.case === "update" ? result.value.update : undefined;
+  if (update?.case !== "contextCut") return undefined;
+  return update.value.cut.case === "compacted" ? update.value.cut.value : undefined;
+}
+
+describe("a compaction's summary record", () => {
+  it("releases the held cut carrying the summary the record states", () => {
     // Arrange.
     const fold = createFold();
-    fold.onSdkMessage(boundary, foldContext());
+    const held = fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
 
     // Act.
     const output = fold.onSdkMessage(
-      assistant("msg-subagent", [{ type: "text", text: "subagent prose" }], {
-        parent_tool_use_id: "toolu_spawn",
-      }),
+      compactSummaryRecord("uuid-boundary-summary", "This session is being continued. Summary: the fold"),
       foldContext(),
     );
 
     // Assert.
-    expect(output.entries.map((entry) => entry.upsertKey)).toEqual(["activity:msg-subagent:0"]);
+    expect({
+      held: held.entries.length,
+      key: output.entries[0]?.upsertKey,
+      summary: compactedOf(output.entries[0])?.summary?.markdown,
+      tokensBefore: compactedOf(output.entries[0])?.tokens?.tokensBefore,
+    }).toEqual({
+      held: 0,
+      key: "session:context_cut:uuid-boundary",
+      summary: "This session is being continued. Summary: the fold",
+      tokensBefore: 48_374n,
+    });
   });
 
-  it("leaves the cut held for the MAIN stream's summary", () => {
+  it("joins a summary's text blocks with newlines, the way the file plane reads the same summary", () => {
     // Arrange.
     const fold = createFold();
-    fold.onSdkMessage(boundary, foldContext());
-    fold.onSdkMessage(
-      assistant("msg-subagent", [{ type: "text", text: "subagent prose" }], {
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-boundary-summary", [
+        { type: "text", text: "first" },
+        { type: "image" },
+        { type: "text", text: "second" },
+      ]),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(compactedOf(output.entries[0])?.summary?.markdown).toBe("first\nsecond");
+  });
+
+  it("is not the assistant prose that follows the boundary", () => {
+    // Arrange: a /compact turn states no prose at all, and the next turn's
+    // reply is the model talking, not the summary.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      assistant("msg-after", [{ type: "text", text: "the next reply" }]),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(output.entries.map((entry) => entry.upsertKey)).toEqual(["activity:msg-after:0"]);
+  });
+
+  it("is not a synthetic record carrying a uuid other than the one the boundary's anchor names", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-stop-hook-feedback", "Stop hook feedback: keep going"),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(output.entries).toEqual([]);
+  });
+
+  it("is not a subagent's synthetic record", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-boundary-summary", "a subagent's own text", {
         parent_tool_use_id: "toolu_spawn",
       }),
       foldContext(),
     );
 
+    // Assert.
+    expect(output.entries).toEqual([]);
+  });
+
+  it("is not a user record the vendor did not synthesize", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
     // Act.
     const output = fold.onSdkMessage(
-      assistant("msg-summary", [], { message: { content: "the main summary" } }),
+      compactSummaryRecord("uuid-boundary-summary", "a prompt", { isSynthetic: false }),
       foldContext(),
     );
 
     // Assert.
-    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const cut = update.value as conversationv1.ContextCut;
-    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe("the main summary");
+    expect(output.entries).toEqual([]);
+  });
+
+  it("is the first main-stream synthetic record when the boundary names no anchor", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary", null), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(compactSummaryRecord("uuid-any", "the whole history, summarized"), foldContext());
+
+    // Assert.
+    expect(compactedOf(output.entries[0])?.summary?.markdown).toBe("the whole history, summarized");
+  });
+
+  it("releases the cut without a summary, and logs the gap at error, when it states no text", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext({ nowMs: 1_000 }));
+    mockedWriteSync.mockClear();
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-boundary-summary", []),
+      foldContext({ nowMs: 1_250 }),
+    );
+
+    // Assert.
+    const error = persistedRecords().find(
+      (record) => record.message === "the compaction's summary record carried no text; recording the cut without a summary",
+    );
+    expect({
+      summary: compactedOf(output.entries[0])?.summary,
+      key: output.entries[0]?.upsertKey,
+      level: (error as { level?: string } | undefined)?.level,
+      stream: error?.context.stream,
+      uuid: error?.context.uuid,
+      age: error?.context.age_ms,
+    }).toEqual({
+      summary: undefined,
+      key: "session:context_cut:uuid-boundary",
+      level: "error",
+      stream: "main",
+      uuid: "uuid-boundary",
+      age: 250,
+    });
+  });
+
+  it("releases nothing on a restarted shim's fold, which holds no boundary", () => {
+    // Arrange: the fold is per process, so a shim that restarted between the
+    // boundary and its summary holds nothing. The file plane records that cut
+    // from the transcript under the same key; this plane must not invent one.
+    const restarted = createFold();
+
+    // Act.
+    const output = restarted.onSdkMessage(
+      compactSummaryRecord("uuid-boundary-summary", "a summary for a boundary this process never saw"),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(output.entries).toEqual([]);
+  });
+});
+
+describe("a compaction cut still held when its turn ends", () => {
+  /** A turn after a boundary whose summary never came: only tool calls, then the result. */
+  function toolOnlyTurnAfterBoundary(): { fold: ReturnType<typeof createFold>; terminal: ReturnType<ReturnType<typeof createFold>["onSdkMessage"]> } {
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext({ nowMs: 10_000 }));
+    fold.onSdkMessage(
+      assistant("msg-tool", [{ type: "tool_use", id: "toolu_read", name: "Read", input: { file_path: "/a" } }]),
+      foldContext({ nowMs: 10_100 }),
+    );
+    fold.onSdkMessage(
+      toolResult("toolu_read", { type: "text", file: { filePath: "/a", content: "x" } }),
+      foldContext({ nowMs: 10_200 }),
+    );
+    mockedWriteSync.mockClear();
+    const terminal = fold.onSdkMessage(streamMessage("result_success"), foldContext({ nowMs: 13_000 }));
+    return { fold, terminal };
+  }
+
+  it("is released at the terminal, ahead of the terminal's own row", () => {
+    // Arrange, Act.
+    const { terminal } = toolOnlyTurnAfterBoundary();
+
+    // Assert.
+    expect({
+      first: terminal.entries[0]?.upsertKey,
+      summary: compactedOf(terminal.entries[0])?.summary,
+      tokensAfter: compactedOf(terminal.entries[0])?.tokens?.tokensAfter,
+      ended: terminal.turnEnded !== undefined,
+      lastIsTerminal: terminal.entries.at(-1)?.upsertKey !== "session:context_cut:uuid-boundary",
+    }).toEqual({
+      first: "session:context_cut:uuid-boundary",
+      summary: undefined,
+      tokensAfter: 3_759n,
+      ended: true,
+      lastIsTerminal: true,
+    });
+  });
+
+  it("records the missing summary at error, naming the stream, the boundary and its age", () => {
+    // Arrange, Act.
+    toolOnlyTurnAfterBoundary();
+
+    // Assert.
+    const error = persistedRecords().find(
+      (record) => record.message === "a compaction's summary never arrived; recording the held cut without a summary",
+    );
+    expect({
+      level: (error as { level?: string } | undefined)?.level,
+      stream: error?.context.stream,
+      uuid: error?.context.uuid,
+      age: error?.context.age_ms,
+    }).toEqual({ level: "error", stream: "main", uuid: "uuid-boundary", age: 3_000 });
+  });
+
+  it("is not released twice: the next turn's terminal records no second cut", () => {
+    // Arrange.
+    const { fold } = toolOnlyTurnAfterBoundary();
+
+    // Act.
+    const next = fold.onSdkMessage(streamMessage("result_success"), foldContext());
+
+    // Assert.
+    expect(next.entries.filter((entry) => entry.upsertKey.startsWith("session:context_cut:"))).toEqual([]);
+  });
+});
+
+describe("a second compaction boundary before the first one's summary", () => {
+  it("records both cuts, in the order the vendor stated them", () => {
+    // Arrange.
+    const fold = createFold();
+    const keys: string[] = [];
+    const collect = (output: { entries: readonly { upsertKey: string }[] }): void => {
+      keys.push(...output.entries.map((entry) => entry.upsertKey));
+    };
+
+    // Act.
+    collect(fold.onSdkMessage(compactBoundary("uuid-first"), foldContext()));
+    collect(fold.onSdkMessage(compactBoundary("uuid-second"), foldContext()));
+    collect(fold.onSdkMessage(compactSummaryRecord("uuid-second-summary", "the second summary"), foldContext()));
+
+    // Assert.
+    expect(keys).toEqual(["session:context_cut:uuid-first", "session:context_cut:uuid-second"]);
+  });
+
+  it("releases the first at the second boundary without a summary, at error", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-first"), foldContext({ nowMs: 1_000 }));
+    mockedWriteSync.mockClear();
+
+    // Act.
+    const output = fold.onSdkMessage(compactBoundary("uuid-second"), foldContext({ nowMs: 1_500 }));
+
+    // Assert.
+    const error = persistedRecords().find(
+      (record) => record.message === "a compaction's summary never arrived; recording the held cut without a summary",
+    );
+    expect({
+      summary: compactedOf(output.entries[0])?.summary,
+      uuid: error?.context.uuid,
+      age: error?.context.age_ms,
+    }).toEqual({ summary: undefined, uuid: "uuid-first", age: 500 });
+  });
+
+  it("gives the second cut the summary its own record states", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-first"), foldContext());
+    fold.onSdkMessage(compactBoundary("uuid-second"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      compactSummaryRecord("uuid-second-summary", "the second summary"),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(compactedOf(output.entries[0])?.summary?.markdown).toBe("the second summary");
   });
 });

@@ -27,10 +27,11 @@
  *     is the only message that says whether a detached task is an agent run or
  *     a backgrounded shell command, and its `task_notification` must not settle
  *     a shell unit as a subagent;
- *   - ONE pending COMPACTION, because `ContextCompacted.summary` is not optional
- *     and the vendor states the boundary before the summary — released only by
- *     the MAIN stream's prose, since the boundary is the session's and a
- *     background subagent's line may arrive between the two;
+ *   - ONE pending COMPACTION, because the vendor states the boundary one record
+ *     before its summary — released by the vendor's own summary record (the
+ *     main stream's synthetic `user` record the boundary's anchor names), and
+ *     at the latest by the turn's terminal or by a second boundary, each of
+ *     which records the cut without a summary and logs the gap at error;
  *   - ONE pending CLEAR, because a cut's upsert key must be the one spelling the
  *     FILE plane can also reach — the session the clear rotated to — and the
  *     `conversation_reset` does not name it; the init that follows does;
@@ -261,7 +262,6 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
 
     case "assistant": {
       const entries = [
-        ...settleCompaction(message, context, state),
         ...convertAssistantMessage(message, context, state.streams, state.calls, TOOL_CONVERTERS),
       ];
       rememberAnswer(message, entries, state);
@@ -272,7 +272,10 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
     }
 
     case "user": {
-      const entries = convertUserRecord(message, context, state.calls, TOOL_CONVERTERS, state.taskKinds);
+      const entries = [
+        ...settleCompaction(message, context, state),
+        ...convertUserRecord(message, context, state.calls, TOOL_CONVERTERS, state.taskKinds),
+      ];
       endAgentsConcludedBy(message, state.streams);
       return { entries };
     }
@@ -285,16 +288,21 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       state.vendorApiError = undefined;
       // THE MAIN STREAM ENDS WITH ITS TURN, `message_stop` or not.
       state.streams.endTurn();
+      // A CUT NEVER OUTLIVES ITS TURN. One still held here is a summary the
+      // vendor never stated, and holding it into the next turn is what left a
+      // compaction undrawn for minutes. It lands before the terminal, which
+      // stays the turn's last word.
+      const released = releaseCompaction(context, state, "the turn ended");
       const output = convertResult(message, context, state.lastAnswer, vendorApiError);
-      if (!isUserStop(message)) return output;
       // A STOP CUTS WHAT WAS OPEN, and the calls it cut get no `tool_result` of
       // their own — so their terminals are owed here or nowhere, and a unit left
       // on its running arm draws a live tool inside a turn that has ended. The
       // cut frames come FIRST so the terminal is still the turn's last word.
-      const cut = cutOpenCalls(TOOL_CONVERTERS, context, state.calls, {
-        vendorUuid: message.uuid,
-      });
-      return cut.length === 0 ? output : { ...output, entries: [...cut, ...output.entries] };
+      const cut = isUserStop(message)
+        ? cutOpenCalls(TOOL_CONVERTERS, context, state.calls, { vendorUuid: message.uuid })
+        : [];
+      const before = [...released, ...cut];
+      return before.length === 0 ? output : { ...output, entries: [...before, ...output.entries] };
     }
 
     case "tool_progress":
@@ -363,12 +371,15 @@ function convertSystemMessage(
       rememberVendorApiError(message, state);
       return convertSessionMessage(message, context);
     default: {
+      // A SECOND BOUNDARY NEVER DISCARDS THE FIRST: the first is released,
+      // in order, before the second is held.
+      const superseded: PersistEntry[] = [];
       const entries = convertSessionMessage(message, context, (pending) => {
+        superseded.push(...releaseCompaction(context, state, "a later compaction boundary arrived"));
         state.pendingCompaction = pending;
       });
-      return message.subtype === "init"
-        ? [...entries, ...settleClear(message, context, state)]
-        : entries;
+      const all = superseded.length === 0 ? entries : [...superseded, ...entries];
+      return message.subtype === "init" ? [...all, ...settleClear(message, context, state)] : all;
     }
   }
 }
@@ -430,49 +441,109 @@ function settleClear(
 }
 
 /**
- * The compaction row, once the assistant message carrying its summary arrives.
+ * The compaction row, once the vendor's summary record arrives.
  *
- * `ContextCompacted.summary` is not optional — the feed shows the summary in the
- * cut's place, so the cut is not a hole — and the vendor states the boundary
- * FIRST. One boundary is held, and it is released by the very next MAIN-stream
- * assistant prose, which is what that prose IS.
+ * THE SUMMARY IS A RECORD OF ITS OWN, not the prose that follows: the vendor
+ * states the boundary and then, as the very next stream record, a MAIN-stream
+ * `user` record marked `isSynthetic` whose text IS the summary and whose uuid
+ * is the one the boundary's `anchor_uuid` names (see `PendingCompaction`). A
+ * boundary that names an anchor is released only by the record carrying it; one
+ * that names none by the first main-stream synthetic user record, which in
+ * every captured compaction is the record right after the boundary.
+ *
+ * The text is read the way the file plane reads the transcript's
+ * `isCompactSummary` line — a string verbatim, text blocks joined by newlines —
+ * because both planes write this cut under one key and must agree on it.
  */
 function settleCompaction(
-  message: Extract<SdkMessage, { type: "assistant" }>,
+  message: Extract<SdkMessage, { type: "user" }>,
   context: FoldContext,
   state: FoldState,
 ): readonly PersistEntry[] {
   const pending = state.pendingCompaction;
   if (pending === undefined) return [];
-  // THE BOUNDARY IS THE SESSION'S, so only the MAIN stream's prose is its
-  // summary: a background subagent's line can land between the two.
-  if (spawningCallOf(message.parent_tool_use_id) !== undefined) {
+  // THE BOUNDARY IS THE SESSION'S, so only the MAIN stream carries its summary,
+  // and only as a record the vendor synthesized: a tool result or a prompt is
+  // never it.
+  if (
+    spawningCallOf(message.parent_tool_use_id) !== undefined ||
+    (message as { isSynthetic?: unknown }).isSynthetic !== true
+  ) {
+    LOGGER.logVerbose(
+      { uuid: message.uuid, boundary_uuid: pending.vendorUuid },
+      "a user record that cannot be a compaction summary arrived while a compaction is held",
+    );
+    return [];
+  }
+  if (pending.summaryUuid !== undefined && message.uuid !== pending.summaryUuid) {
     LOGGER.debug(
-      { parent_tool_use_id: message.parent_tool_use_id },
-      "a subagent's assistant message arrived while a compaction is held; it is not the summary",
+      { uuid: message.uuid, summary_uuid: pending.summaryUuid, boundary_uuid: pending.vendorUuid },
+      "a synthetic user record arrived while a compaction is held; it is not the summary the boundary names",
     );
     return [];
   }
   const content = (message.message as { content?: unknown } | undefined)?.content;
-  const summary = Array.isArray(content)
-    ? content
-        .filter((block) => (block as { type?: unknown }).type === "text")
-        .map((block) => (block as { text?: unknown }).text)
-        .filter((text): text is string => typeof text === "string")
-        .join("")
-    : typeof content === "string"
+  const summary =
+    typeof content === "string"
       ? content
-      : "";
-  if (summary === "") {
-    // warn: a defect because a compaction without summary prose leaves the cut pending.
-    LOGGER.warn(
-      {},
-      "the assistant message after a compaction boundary carried no prose; the cut is still held",
-    );
-    return [];
-  }
+      : Array.isArray(content)
+        ? content
+            .filter((block) => (block as { type?: unknown }).type === "text")
+            .map((block) => (block as { text?: unknown }).text)
+            .filter((text): text is string => typeof text === "string")
+            .join("\n")
+        : "";
   state.pendingCompaction = undefined;
+  if (summary === "") {
+    LOGGER.error(
+      {
+        stream: "main",
+        uuid: pending.vendorUuid,
+        summary_uuid: message.uuid,
+        age_ms: context.nowMs() - pending.heldAtMs,
+        detail: "the summary record named by the boundary stated no text",
+      },
+      "the compaction's summary record carried no text; recording the cut without a summary",
+    );
+    return [compactionEntry(context, pending, undefined)];
+  }
+  LOGGER.debug(
+    { uuid: pending.vendorUuid, summary_uuid: message.uuid },
+    "the compaction's summary record arrived; releasing the held cut with it",
+  );
   return [compactionEntry(context, pending, summary)];
+}
+
+/**
+ * Release a held compaction WITHOUT its summary, because the vendor's sequence
+ * moved past the point where the summary could still arrive.
+ *
+ * Two edges call it: the turn's terminal (a cut never outlives its turn) and a
+ * second boundary (which never discards the first). Either one means the
+ * summary never came, which is a defect in the vendor's sequence or in the
+ * reading of it, so it is recorded at error with the stream, the boundary's
+ * vendor uuid and how long the cut was held. The cut itself still lands, with
+ * every figure the boundary stated and no summary.
+ */
+function releaseCompaction(
+  context: FoldContext,
+  state: FoldState,
+  why: string,
+): readonly PersistEntry[] {
+  const pending = state.pendingCompaction;
+  if (pending === undefined) return [];
+  state.pendingCompaction = undefined;
+  LOGGER.error(
+    {
+      stream: "main",
+      uuid: pending.vendorUuid,
+      summary_uuid: pending.summaryUuid,
+      age_ms: context.nowMs() - pending.heldAtMs,
+      detail: `${why} before the vendor stated the compaction's summary record`,
+    },
+    "a compaction's summary never arrived; recording the held cut without a summary",
+  );
+  return [compactionEntry(context, pending, undefined)];
 }
 
 /**
