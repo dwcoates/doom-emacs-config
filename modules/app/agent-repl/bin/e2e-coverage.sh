@@ -25,6 +25,10 @@
 #   E2E_COVERAGE_PARALLEL        override `-parallel` (default 8)
 #   E2E_COVERAGE_TIMEOUT         override `-timeout` (default 45m)
 #   E2E_COVERAGE_RUN             pass a `-run` pattern through
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

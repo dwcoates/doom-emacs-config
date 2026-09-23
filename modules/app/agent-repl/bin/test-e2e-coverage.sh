@@ -2,6 +2,10 @@
 #
 # Hermetic tests for e2e-coverage.sh and e2e-shim-coverage-summary.mjs.
 # Every external tool (go, npx, node's c8 render) is stubbed; no suite runs.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
