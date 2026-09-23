@@ -30,7 +30,7 @@
  */
 import { log } from "../../log.js";
 import { requireMessage } from "../../rpc/strict.js";
-import type { Handle } from "../../failure/overlay.js";
+import type { Handle } from "../../failure/local.js";
 import type { FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,

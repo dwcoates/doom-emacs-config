@@ -26,6 +26,15 @@
  * tooltip, the tone name, the title, the figure and every warning sentence are
  * all composed daemon-side.
  *
+ * THE WARNING CHIP DOES NOT WAIT FOR A PUSH. It is where the page's own
+ * client-local failures are shown (`src/failure/local.ts`), and those are
+ * exactly the failures that can stop a push arriving — a boot that could not
+ * adopt, a link that dropped. So the strip is MOUNTED at boot, before
+ * adoption and before any stream, and redraws on every change to that set:
+ * over the last view drawn if there was one (stale while the link is down,
+ * which is the point), or as the chip alone if there never was. `watch` opens
+ * the stream once adoption has succeeded.
+ *
  * WHAT SURVIVES A PUSH IS THE REVEAL, and only by name. The strip itself is
  * replaced entirely — that is the whole-view-push contract — while the reveal
  * layer is a sibling that outlives it, and each control re-registers its reveal
@@ -34,13 +43,14 @@
  */
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import type { LocalFailureView } from "../failure/local.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireMessage } from "../rpc/strict.js";
-import { watchStream } from "../rpc/streams.js";
+import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawTopbarContextChip } from "./context-chip.js";
-import type { TopbarContext } from "./context.js";
+import type { TopbarContext, WarningChipContext } from "./context.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { drawTopbarFastMode } from "./fast-mode.js";
@@ -52,7 +62,7 @@ import {
   drawTopbarConnectivity,
   drawTopbarTitle,
 } from "./strip.js";
-import { drawTopbarWarningStrip } from "./warnings.js";
+import { drawLocalWarningStrip, drawTopbarWarningStrip } from "./warnings.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -60,19 +70,33 @@ export interface Handle {
 }
 
 export interface TopbarDeps {
-  /** Raise the login overlay — the logged-out account chip's click. */
-  readonly openLogin: (control: HTMLElement) => void;
+  /** The client-local failures the warning chip lists beside the pushed ones. */
+  readonly failures: LocalFailureView;
   /** Injected by tests, where jsdom reports every rect as zero. */
   geometry?: RevealGeometry;
 }
 
+export interface TopbarWatchDeps {
+  /** Raise the login overlay — the logged-out account chip's click. */
+  readonly openLogin: (control: HTMLElement) => void;
+}
+
+export interface TopbarHandle extends Handle {
+  /**
+   * Open the topbar's stream and draw its pushes. Called ONCE, after
+   * adoption: a joining daemon refuses every per-workspace rpc until then.
+   */
+  watch(ctx: AppContext, deps: TopbarWatchDeps): void;
+}
+
 /**
- * Mount the topbar on HOST and keep it drawn.
+ * Mount the topbar on HOST and keep its warning chip drawn from DEPS.failures
+ * until `watch` hands it a stream.
  *
  * The stream is STANDING: it never concludes on its own, so `dispose()` is the
  * only thing that closes it.
  */
-export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps): Handle {
+export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
   // AT INFO, LIKE feed.mount. A mount is a lifecycle edge a person asks
   // about — "did the topbar ever come up in this webview" is the first
   // question a blank strip raises, and it was only answerable at DEBUG.
@@ -86,34 +110,90 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
   // Mounted AFTER the strip so the layer is the later sibling and paints over
   // it; both live inside the host, which is the reveal's positioning context.
   const reveals = mountRevealLayer(host, deps.geometry);
-  const tc: TopbarContext = { ctx, reveals, openLogin: deps.openLogin };
+  const cc: WarningChipContext = { reveals, localFailures: () => deps.failures.standing() };
 
-  const stream = watchStream(ctx, {
-    name: "WatchTopbar",
-    schema: WatchTopbarResponseSchema,
-    open: (_client, signal) => ctx.streams.watch("topbar", { workspace: ctx.workspace }, signal),
-    onPush: (response) => {
-      const view = requireMessage(response.topbar, "WatchTopbarResponse.topbar");
-      // The old strip's clock subscriptions come down BEFORE the new one goes
-      // up, so nothing ticks against an element already detached.
-      stopTicking(strip);
-      const row = drawTopbarView(view, tc);
-      strip.replaceChildren(row);
-      // The controls re-registered their reveals as they were drawn; whatever
-      // the reader had open re-opens against the NEW anchors and content.
-      reveals.refresh();
-    },
-  });
+  /** The context `watch` built, and the last view drawn over it. */
+  let tc: TopbarContext | null = null;
+  let view: TopbarView | null = null;
+  let stream: StreamHandle | null = null;
+
+  /** Draw ROW (or nothing) as the whole strip, keeping the open reveal. */
+  const show = (row: HTMLElement | null): void => {
+    // The old strip's clock subscriptions come down BEFORE the new one goes
+    // up, so nothing ticks against an element already detached.
+    stopTicking(strip);
+    strip.replaceChildren(...(row === null ? [] : [row]));
+    // The controls re-registered their reveals as they were drawn; whatever
+    // the reader had open re-opens against the NEW anchors and content.
+    reveals.refresh();
+  };
+
+  // A CHANGE TO THE CLIENT-LOCAL FAILURES REDRAWS WITHOUT A PUSH: over the
+  // last view if there is one, which may be stale because the link is what
+  // failed, or as the chip alone if no view was ever drawn.
+  const redraw = (): void => {
+    log.debug("redrawing the topbar for a client-local failure change", {
+      operation: "topbar.local-failures-changed",
+      context: { has_view: view !== null, local_failures: cc.localFailures().length },
+    });
+    show(view !== null && tc !== null ? drawTopbarView(view, tc) : drawTopbarFailuresOnly(cc));
+  };
+  const unsubscribe = deps.failures.subscribe(redraw);
+  // Failures filed before this mount are drawn by it.
+  show(drawTopbarFailuresOnly(cc));
 
   return {
+    watch(ctx: AppContext, watchDeps: TopbarWatchDeps): void {
+      if (stream !== null) {
+        log.error("the topbar was asked to watch twice", { operation: "topbar.watch-twice" });
+        throw new Error("the topbar was asked to watch twice");
+      }
+      log.info("watching the topbar", { operation: "topbar.watch" });
+      const watching: TopbarContext = { ...cc, ctx, openLogin: watchDeps.openLogin };
+      tc = watching;
+      stream = watchStream(ctx, {
+        name: "WatchTopbar",
+        schema: WatchTopbarResponseSchema,
+        open: (_client, signal) =>
+          ctx.streams.watch("topbar", { workspace: ctx.workspace }, signal),
+        onPush: (response) => {
+          const next = requireMessage(response.topbar, "WatchTopbarResponse.topbar");
+          show(drawTopbarView(next, watching));
+          // Remembered only once it drew, so a malformed push never becomes
+          // the view a failure change redraws over.
+          view = next;
+        },
+      });
+    },
+
     dispose(): void {
       log.debug("disposing the topbar", { operation: "topbar.dispose" });
-      stream.cancel();
+      unsubscribe();
+      stream?.cancel();
       reveals.dispose();
       stopTicking(strip);
       host.replaceChildren();
     },
   };
+}
+
+/**
+ * The strip before any view: the warning chip alone, in the right-hand group
+ * it always occupies, or NOTHING when no client-local failure stands.
+ */
+export function drawTopbarFailuresOnly(cc: WarningChipContext): HTMLElement | null {
+  const chip = drawLocalWarningStrip(cc);
+  if (chip === null) return null;
+  const row = document.createElement("div");
+  row.className = "topbar-row";
+  const left = document.createElement("div");
+  left.className = "topbar-left";
+  const center = document.createElement("div");
+  const right = document.createElement("div");
+  right.className = "topbar-right";
+  right.append(chip);
+  row.append(left, center, right);
+  return row;
 }
 
 /** The whole strip, in its three groups. */
@@ -166,8 +246,8 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
     drawTopbarFastMode(u.fastMode),
     drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
   );
-  // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list yields no
-  // chip at all, not a quiet one.
+  // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list with no
+  // client-local failure standing yields no chip at all, not a quiet one.
   const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);
   if (warnings !== null) right.append(warnings);
 

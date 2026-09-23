@@ -13,8 +13,9 @@
  * `client`, because a unit run has no daemon) and the mounts (each component
  * has its own suite; what main.ts owns is WHICH host each one gets and WHEN).
  * `shell.ts`, `page-address.ts`, `workspace-ref.ts`, `context.ts`, `clock.ts`,
- * `log.ts` and the failure overlay are the app's own throughout, so a failure
- * card here is the card the browser would draw.
+ * `log.ts`, the client-local failures and the topbar's MOUNT (its warning
+ * chip) are the app's own throughout, so a failure listed here is the one the
+ * browser would show. Only the topbar's `watch` -- its stream -- is recorded.
  *
  * WHY EVERY TEST RE-IMPORTS THE MODULE. `main.ts` boots itself at import time
  * -- that top-level `void boot()` IS the production entry point, and running
@@ -162,15 +163,30 @@ async function bootMain(): Promise<void> {
       return { dispose: vi.fn(), host };
     }),
   }));
-  vi.doMock("../src/topbar/topbar.js", () => ({
-    mountTopbar: mounts.topbar.mockImplementation(
-      (_host: HTMLElement, _ctx, deps: { openLogin: (control: HTMLElement) => void }) => {
-        order.push("topbar");
-        openLogin = deps.openLogin;
-        return { dispose: vi.fn() };
-      },
-    ),
-  }));
+  vi.doMock("../src/topbar/topbar.js", async () => {
+    // THE REAL MOUNT, A RECORDED WATCH. Mounting is what draws the warning
+    // chip, and the chip is where a failed boot shows; the stream is a
+    // component suite's business, so only WHEN it starts is recorded here.
+    const actual = await vi.importActual<typeof import("../src/topbar/topbar.js")>(
+      "../src/topbar/topbar.js",
+    );
+    return {
+      ...actual,
+      mountTopbar: mounts.topbar.mockImplementation(
+        (host: HTMLElement, deps: Parameters<typeof actual.mountTopbar>[1]) => {
+          order.push("topbar-mount");
+          const handle = actual.mountTopbar(host, deps);
+          return {
+            ...handle,
+            watch: (_ctx: unknown, watchDeps: { openLogin: (control: HTMLElement) => void }) => {
+              order.push("topbar");
+              openLogin = watchDeps.openLogin;
+            },
+          };
+        },
+      ),
+    };
+  });
   vi.doMock("../src/feed/feed.js", () => ({
     mountFeed: mounts.feed.mockImplementation((_host: HTMLElement, _ctx, deps: typeof feedDeps) => {
       order.push("feed");
@@ -320,10 +336,22 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
     expect(order.indexOf("lifecycle")).toBeLessThan(order.indexOf("sidebar"));
   });
 
-  test("mounts the login overlay before the topbar that opens it", async () => {
+  test("mounts the login overlay before the topbar that opens it starts watching", async () => {
     await bootMain();
 
     expect(order.indexOf("login")).toBeLessThan(order.indexOf("topbar"));
+  });
+
+  test("mounts the topbar before adoption, so its warning chip can show a failed boot", async () => {
+    await bootMain();
+
+    expect(order.indexOf("topbar-mount")).toBeLessThan(order.indexOf("adopt"));
+  });
+
+  test("starts the topbar's stream only after adoption", async () => {
+    await bootMain();
+
+    expect(order.indexOf("adopt")).toBeLessThan(order.indexOf("topbar"));
   });
 
   test("mounts the feed before the footer whose jump rows reveal its rows", async () => {
@@ -442,16 +470,32 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
   });
 });
 
+/** The evidence lines the topbar's warning chip shows for the client-local ARM. */
+function chipEvidence(arm: string): string[] {
+  document.querySelector<HTMLElement>("#topbar .topbar-warning-chip")?.click();
+  document
+    .querySelector<HTMLElement>(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`)
+    ?.click();
+  return [...document.querySelectorAll("#topbar [data-reveal] .topbar-warning-detail-line")].map(
+    (line) => line.textContent ?? "",
+  );
+}
+
 describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
-  test("files boot_failed on the overlay when adoption never completes", async () => {
+  test("files boot_failed in the topbar's warning chip when adoption never completes", async () => {
     adopt = () => Promise.reject(new Error("adoption refused"));
 
     await bootMain();
 
-    const card = document.querySelector("#failure-overlay [data-arm='bootFailed']");
-    expect(card?.querySelector(".failure-detail-value")?.textContent).toBe(
-      "Error: adoption refused",
-    );
+    expect(chipEvidence("bootFailed")).toEqual(["cause: Error: adoption refused"]);
+  });
+
+  test("draws no failure overlay for a failed boot", async () => {
+    adopt = () => Promise.reject(new Error("adoption refused"));
+
+    await bootMain();
+
+    expect(document.querySelector("#failure-overlay, .failure-card")).toBeNull();
   });
 
   test("re-raises the adoption failure after it has been drawn", async () => {
@@ -484,13 +528,12 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
     expect(bootedContext?.isQuiesced()).toBe(false);
   });
 
-  test("words a non-Error rejection on the card as the value itself", async () => {
+  test("words a non-Error rejection in the chip as the value itself", async () => {
     adopt = () => Promise.reject("the daemon hung up");
 
     await bootMain();
 
-    const card = document.querySelector("#failure-overlay [data-arm='bootFailed']");
-    expect(card?.querySelector(".failure-detail-value")?.textContent).toBe("the daemon hung up");
+    expect(chipEvidence("bootFailed")).toEqual(["cause: the daemon hung up"]);
   });
 
   test("re-raises the shell's missing mount point by name", async () => {
@@ -511,12 +554,12 @@ describe("a boot that fails", { timeout: coverageBootTimeoutMS }, () => {
     );
   });
 
-  test("draws no failure card for an address failure, having no overlay yet", async () => {
+  test("draws no warning chip for an address failure, having no topbar yet", async () => {
     addressPage("?dir=/tmp/ws-1");
 
     await bootMain();
 
-    expect(document.querySelector("#failure-overlay [data-arm]")).toBeNull();
+    expect(document.querySelector("#topbar .topbar-warnings")).toBeNull();
   });
 });
 

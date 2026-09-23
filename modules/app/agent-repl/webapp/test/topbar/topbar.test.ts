@@ -6,6 +6,17 @@ import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/fronten
 import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
+import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
+import type { AppContext } from "../../src/rpc/context.js";
+import { clearClientFailures } from "../../src/rpc/link.js";
+import {
+  bootFailed,
+  controlPlaneFailed,
+  daemonUnreachable,
+  frameUndecodable,
+  staleBundle,
+  workspaceGone,
+} from "../../src/failure/sink.js";
 import { GEOMETRY, RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
 /** A complete view; each test overrides only what it is about. */
@@ -217,6 +228,17 @@ describe("mountTopbar", () => {
     for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
   }
 
+  /** Mount the topbar over FAILURES and start it watching CTX. */
+  function mountWatching(
+    host: HTMLElement,
+    ctx: AppContext,
+    failures: LocalFailures = createLocalFailures(),
+  ) {
+    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    handle.watch(ctx, { openLogin: () => undefined });
+    return handle;
+  }
+
   /** A daemon whose WatchTopbar yields VIEWS then stands. */
   function daemon(views: TopbarView[]) {
     return appContext({
@@ -232,10 +254,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     // ACT
-    const handle = mountTopbar(host, daemon([view()]), {
-      openLogin: () => undefined,
-      geometry: GEOMETRY,
-    });
+    const handle = mountWatching(host, daemon([view()]));
     await settle();
     // ASSERT
     expect(host.querySelector(".topbar-title")?.textContent).toBe("DWC/fix");
@@ -248,10 +267,7 @@ describe("mountTopbar", () => {
     document.body.replaceChildren(host);
     const second = view({ title: create(TopbarViewSchema, { title: { text: "other" } }).title });
     // ACT
-    const handle = mountTopbar(host, daemon([view(), second]), {
-      openLogin: () => undefined,
-      geometry: GEOMETRY,
-    });
+    const handle = mountWatching(host, daemon([view(), second]));
     await settle();
     // ASSERT
     expect(host.querySelectorAll(".topbar-title").length).toBe(1);
@@ -273,7 +289,7 @@ describe("mountTopbar", () => {
         await new Promise<never>(() => undefined);
       },
     });
-    const handle = mountTopbar(host, ctx, { openLogin: () => undefined, geometry: GEOMETRY });
+    const handle = mountWatching(host, ctx);
     await settle();
     // The TITLE is the session line's anchor; the account cell's own click is
     // the login options.
@@ -301,7 +317,7 @@ describe("mountTopbar", () => {
       sink,
     );
     // ACT
-    const handle = mountTopbar(host, ctx, { openLogin: () => undefined, geometry: GEOMETRY });
+    const handle = mountWatching(host, ctx);
     await settle();
     // ASSERT
     expect(sink.reported.map((k) => k.kind.case)).toContain("frameUndecodable");
@@ -311,12 +327,171 @@ describe("mountTopbar", () => {
   it("empties the host on dispose", async () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
-    const handle = mountTopbar(host, daemon([view()]), {
-      openLogin: () => undefined,
-      geometry: GEOMETRY,
-    });
+    const handle = mountWatching(host, daemon([view()]));
     await settle();
     handle.dispose();
+    expect(host.children.length).toBe(0);
+  });
+
+  it("refuses to watch twice", () => {
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const handle = mountWatching(host, daemon([]));
+    expect(() => handle.watch(daemon([]), { openLogin: () => undefined })).toThrow(
+      "the topbar was asked to watch twice",
+    );
+    handle.dispose();
+  });
+});
+
+/**
+ * THE WARNING CHIP LISTS THE PAGE'S OWN FAILURES, WITH OR WITHOUT A PUSH (owner
+ * ruling, 2026-09-23). The chip is the one place an error shows, and the
+ * failures that most need showing are the ones that stop a push arriving.
+ */
+describe("mountTopbar: the chip's client-local failures", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    clearClientFailures();
+  });
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+  }
+
+  /** A mounted topbar that has NOT started watching: no push can ever arrive. */
+  function mountUnwatched(failures: LocalFailures) {
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    return { host, handle };
+  }
+
+  /** The arms of the client-local rows in the chip's opened list. */
+  function listedArms(host: HTMLElement): string[] {
+    host
+      .querySelector(".topbar-warning-chip")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const arms = Array.from(openPanel(host)?.querySelectorAll<HTMLElement>("[data-local]") ?? []).map(
+      (row) => row.dataset.arm ?? "",
+    );
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return arms;
+  }
+
+  const MINTS = [
+    ["daemonUnreachable", () => daemonUnreachable(1006, "abnormal")],
+    ["workspaceGone", () => workspaceGone()],
+    ["bootFailed", () => bootFailed("Error: nope")],
+    ["controlPlaneFailed", () => controlPlaneFailed("OpenLogin", "unavailable")],
+    ["frameUndecodable", () => frameUndecodable("a oneof sets no arm", "FooterView")],
+    ["staleBundle", () => staleBundle("schema drift")],
+  ] as const;
+
+  for (const [arm, mint] of MINTS) {
+    it(`lists ${arm} in the chip when it is filed`, () => {
+      // ARRANGE
+      const failures = createLocalFailures();
+      const { host, handle } = mountUnwatched(failures);
+      // ACT
+      failures.report(mint());
+      // ASSERT
+      expect(listedArms(host)).toEqual([arm]);
+      handle.dispose();
+    });
+
+    it(`takes ${arm} off the chip when it is retracted`, () => {
+      // ARRANGE
+      const failures = createLocalFailures();
+      const { host, handle } = mountUnwatched(failures);
+      failures.report(mint());
+      // ACT
+      failures.retract(arm);
+      // ASSERT
+      expect(host.querySelector(".topbar-warning-chip")).toBeNull();
+      handle.dispose();
+    });
+  }
+
+  it("draws a failure filed before the topbar was mounted", () => {
+    const failures = createLocalFailures();
+    failures.report(bootFailed("Error: adoption refused"));
+    const { host, handle } = mountUnwatched(failures);
+    expect(listedArms(host)).toEqual(["bootFailed"]);
+    handle.dispose();
+  });
+
+  it("draws no chip at all while nothing stands", () => {
+    const { host, handle } = mountUnwatched(createLocalFailures());
+    expect(host.querySelector(".topbar-warnings")).toBeNull();
+    handle.dispose();
+  });
+
+  it("draws the chip at the strip's right edge before any push", () => {
+    const failures = createLocalFailures();
+    const { host, handle } = mountUnwatched(failures);
+    failures.report(staleBundle("drift"));
+    expect(host.querySelector(".topbar-row > .topbar-right > .topbar-warnings")).not.toBeNull();
+    handle.dispose();
+  });
+
+  it("lists the unreachable daemon when the stream fails before its first push", async () => {
+    // ARRANGE: the daemon is unreachable from the start, so no view ever
+    // arrives; the stream's own failure is filed through the chip's set.
+    const failures = createLocalFailures();
+    const ctx = appContext(
+      {
+        watchTopbar: async function* () {
+          throw new Error("connection refused");
+        },
+      },
+      failures,
+    );
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    // ACT
+    handle.watch(ctx, { openLogin: () => undefined });
+    await settle();
+    // ASSERT
+    expect(listedArms(host)).toEqual(["daemonUnreachable"]);
+    handle.dispose();
+  });
+
+  it("adds the chip over the last view when the link drops after a push", async () => {
+    // ARRANGE
+    const failures = createLocalFailures();
+    const ctx = appContext(
+      {
+        watchTopbar: async function* () {
+          yield create(WatchTopbarResponseSchema, { topbar: view() });
+          throw new Error("connection reset");
+        },
+      },
+      failures,
+    );
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    // ACT
+    handle.watch(ctx, { openLogin: () => undefined });
+    await settle();
+    // ASSERT: the stale view stays drawn, and the chip lists the dropped link.
+    expect([host.querySelector(".topbar-title")?.textContent, listedArms(host)]).toEqual([
+      "DWC/fix",
+      ["daemonUnreachable"],
+    ]);
+    handle.dispose();
+  });
+
+  it("stops drawing failures once disposed", () => {
+    const failures = createLocalFailures();
+    const { host, handle } = mountUnwatched(failures);
+    handle.dispose();
+    failures.report(staleBundle("drift"));
     expect(host.children.length).toBe(0);
   });
 });

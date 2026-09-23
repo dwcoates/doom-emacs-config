@@ -1584,3 +1584,30 @@ describe("the feed viewport as the async bubble cap's size container", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * THE WARNING CHIP IS THE ONE PLACE AN ERROR SHOWS (owner ruling, 2026-09-23).
+ * The client-local failure overlay it replaced — cards drawn over the page —
+ * left no rule behind.
+ */
+describe("the warning chip as the one error surface", () => {
+  it("carries no rule for a failure overlay", () => {
+    // Arrange / Act
+    const overlay = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes("#failure-overlay")),
+    );
+
+    // Assert
+    expect(overlay).toEqual([]);
+  });
+
+  it("carries no rule for a failure card", () => {
+    // Arrange / Act
+    const cards = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes(".failure-card")),
+    );
+
+    // Assert
+    expect(cards).toEqual([]);
+  });
+});

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { shellElements, type ShellElements } from "../src/shell.js";
+import { shellHTML } from "./shell-html.js";
 
 /**
  * The shell's ids paired with the ShellElements key each resolves to. This is
@@ -17,7 +18,6 @@ const MOUNTS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["holdTray", "hold-tray"],
   ["footer", "footer"],
   ["composer", "composer"],
-  ["failureOverlay", "failure-overlay"],
   ["loginOverlay", "login-overlay"],
 ];
 
@@ -69,5 +69,16 @@ describe("shellElements", () => {
     const doc = shellDoc(["topbar", "footer"]);
     // Act + Assert
     expect(() => shellElements(doc)).toThrow("the page shell is missing #topbar");
+  });
+});
+
+describe("the shipped shell", () => {
+  it("carries no failure overlay: the topbar's warning chip is where errors show", () => {
+    // Arrange
+    const doc = document.implementation.createHTMLDocument("shell");
+    // Act
+    doc.body.innerHTML = shellHTML();
+    // Assert
+    expect(doc.getElementById("failure-overlay")).toBeNull();
   });
 });
