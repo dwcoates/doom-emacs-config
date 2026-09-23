@@ -318,22 +318,67 @@ func TestRouteHistoryPage(t *testing.T) {
 	}
 }
 
-// TestRouteLivePromptOpensTheTurn covers the main watch's live prompt: it
-// carries the daemon's minted TurnId and names its recipient, which is how a
-// turn the watcher did not open through the queue becomes the tracked one.
-func TestRouteLivePromptOpensTheTurn(t *testing.T) {
+// TestRouteLivePromptOpensNoTurn covers the main watch's live prompt: it is
+// drawn and it names the main agent, but it opens no turn. The turn in flight
+// is the queue's to state (or the session facts'), because a prompt row can be
+// served again: after a store restart the shim re-served a finished turn's
+// prompt row and stood that turn back up in flight in the watcher alone, so the
+// queue held every later prompt behind a turn every other observer had closed.
+func TestRouteLivePromptOpensNoTurn(t *testing.T) {
+	tests := []struct {
+		name string
+		// before is what the watcher knew of the prompt's turn beforehand.
+		before func(h *harness)
+	}{
+		{
+			name:   "a prompt row for a turn the queue never stated",
+			before: func(*harness) {},
+		},
+		{
+			name: "a re-served prompt row for a turn that already ended",
+			before: func(h *harness) {
+				h.w.OnTurnOpening("ws-1", "turn-7")
+				h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-turn-7-terminal"))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+			tt.before(h)
+
+			// Act.
+			got := h.route(h.main, entryPrompt("turn-7", "main-1"))
+
+			// Assert.
+			assertNames(t, got, []string{"feed.OnPrompt"})
+			if turn := h.w.TurnInFlight(); turn != nil {
+				t.Fatalf("turn in flight = %v, want none: a prompt row opens no turn", *turn)
+			}
+		})
+	}
+}
+
+// TestRouteLivePromptNamesTheMainAgent covers what a live prompt on the main
+// watch still does: it names the main agent, which an adopted session has no
+// other source for until its next StartTurn.
+func TestRouteLivePromptNamesTheMainAgent(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
 
 	// Act.
-	got := h.route(h.main, entryPrompt("turn-7", "main-1"))
+	h.route(h.main, entryPrompt("turn-7", "main-1"))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnPrompt"})
-	turn := h.w.TurnInFlight()
-	if turn == nil || *turn != ids.TurnID("turn-7") {
-		t.Fatalf("turn in flight = %v, want turn-7", turn)
+	h.w.mu.Lock()
+	named := h.w.mainAgent.GetValue()
+	h.w.mu.Unlock()
+	if named != "main-1" {
+		t.Fatalf("main agent = %q, want main-1", named)
 	}
 }
 
@@ -484,6 +529,58 @@ func TestSubagentTerminalIsNotTheTurnsEnd(t *testing.T) {
 	assertNames(t, got, []string{"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal"})
 	if h.w.TurnInFlight() == nil {
 		t.Fatal("a subagent's terminal closed the session's turn")
+	}
+}
+
+// TestAReplayedTerminalNeverEndsTheOpenTurn covers the store-restart replay: the
+// shim re-opens a book from a pointer that walked backward and re-serves rows
+// it already served, among them the PREVIOUS turn's terminal. The frame names
+// no turn, so routing it would end whichever turn is open now. A terminal row
+// already served on the watch — live or on an opening page — is dropped whole.
+func TestAReplayedTerminalNeverEndsTheOpenTurn(t *testing.T) {
+	tests := []struct {
+		name string
+		// firstServing serves the old terminal row the first time.
+		firstServing func(h *harness)
+	}{
+		{
+			name: "a terminal first served live",
+			firstServing: func(h *harness) {
+				h.w.OnTurnOpening("ws-1", "turn-old")
+				h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-old-terminal"))
+				h.w.dispatching.Wait()
+			},
+		},
+		{
+			name: "a terminal first served on an opening page",
+			firstServing: func(h *harness) {
+				h.route(h.main, pageFrame(frameEntryAt("ptr-old-terminal", frameSuccess("main-1", completed()))))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+			tt.firstServing(h)
+			h.w.OnTurnOpening("ws-1", "turn-live")
+			h.drainNow()
+
+			// Act.
+			got := h.route(h.main, entryFrameAt(frameSuccess("main-1", completed()), "ptr-old-terminal"))
+
+			// Assert.
+			assertNames(t, got, nil)
+			turn := h.w.TurnInFlight()
+			if turn == nil || *turn != ids.TurnID("turn-live") {
+				t.Fatalf("turn in flight = %v, want turn-live still running", turn)
+			}
+			if !h.hasRecord("info", "daemon.sessionwatcher.terminal_replayed") {
+				t.Fatal("the dropped replay has no info record")
+			}
+		})
 	}
 }
 

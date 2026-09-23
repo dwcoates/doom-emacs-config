@@ -425,7 +425,7 @@ func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return
 	}
-	if err := q.popAndDeliver(ctx, ws, log); err != nil {
+	if _, err := q.popAndDeliver(ctx, ws, log); err != nil {
 		log.Error(opSubmit, "the revived hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
 }

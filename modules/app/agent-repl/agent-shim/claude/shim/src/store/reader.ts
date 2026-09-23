@@ -23,7 +23,8 @@
  * is why the tail tracks its high-water mark: it is the only thing that makes
  * the re-open lossless.
  */
-import { create } from "@bufbuild/protobuf";
+import { createHash } from "node:crypto";
+import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
@@ -92,6 +93,23 @@ function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntr
     at: toHistoryPointer(line.at),
     entry: toHistoryEntry(line.line),
   });
+}
+
+/**
+ * What a served pointer's content is unknown as: the caller's own
+ * `known_through`, which this session was never handed the line for. It matches
+ * no fingerprint, so nothing is ever withheld against it.
+ */
+const CONTENT_UNKNOWN = "";
+
+/**
+ * The identity of one line's CONTENT. A pointer names a position and an upsert
+ * keeps it, so "have I served this line as it now stands" is the pointer AND
+ * this: the same pointer with a new fingerprint is new information.
+ */
+function lineFingerprint(line: storev1.StoreLineAt): string {
+  const content = line.line === undefined ? new Uint8Array() : toBinary(storev1.StorePageLineSchema, line.line);
+  return createHash("sha256").update(content).digest("base64");
 }
 
 /** The page's completeness arm, in the history vocabulary. */
@@ -607,9 +625,11 @@ export function createReader(options: ReaderOptions): Reader {
      * member. The pointers are opaque values this shim never parses, so
      * membership is the only question it can ask of them.
      */
-    const served = new Set<string>();
-    if (knownThrough !== undefined) served.add(knownThrough.value);
-    for (const entry of page.entries) if (entry.at !== undefined) served.add(entry.at.value);
+    const served = new Map<string, string>();
+    if (knownThrough !== undefined) served.set(knownThrough.value, CONTENT_UNKNOWN);
+    for (const line of opened.page.lines) {
+      if (line.at !== undefined) served.set(line.at.value, lineFingerprint(line));
+    }
     let token: storev1.AgentSessionToken = opened.watch;
     let stopped = false;
     /**
@@ -656,7 +676,7 @@ export function createReader(options: ReaderOptions): Reader {
               }
               const entry = toHistoryEntryAt(push.line);
               servedThrough = entry.at;
-              if (entry.at !== undefined) served.add(entry.at.value);
+              if (entry.at !== undefined) served.set(entry.at.value, lineFingerprint(push.line));
               yield entry;
               barrenEnds = 0;
               if (settled()) {
@@ -733,19 +753,46 @@ export function createReader(options: ReaderOptions): Reader {
               "the store re-opened a reading session with no watch token",
             );
           }
-          // The re-open's page is bounded by `known_through`, so anything
-          // it carries is newer than what was served and must be yielded
-          // before the tail continues.
+          // The re-open's page is bounded by `known_through`, and whatever it
+          // carries beyond the lines already served must be yielded before the
+          // tail continues.
           if (reopened.page?.boundary.case === "more") {
             LOGGER.error(
               { agent: agent.value, budget: CATCHUP_PAGE_SIZE, detail: "entries exceeded the catch-up page budget" },
               "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
             );
           }
+          // A LINE ALREADY SERVED UNCHANGED IS NOT SERVED AGAIN. The re-open's
+          // lower bound is the LAST pointer served, which walks backward on an
+          // upsert of an old row, so the catch-up page can carry rows the
+          // consumer already holds -- a finished turn's prompt and terminal
+          // among them. Those carry no turn of their own, and a consumer that
+          // took them again ended the turn now running with the previous
+          // turn's terminal. The bound is kept, so an update to an old row (a
+          // new fingerprint at a served pointer) still passes.
+          const fresh: { entry: conversationv1.HistoryEntryAt; fingerprint: string }[] = [];
+          let replayed = 0;
           for (const line of [...(reopened.page?.lines ?? [])].reverse()) {
             const entry = toHistoryEntryAt(line);
+            const fingerprint = lineFingerprint(line);
+            if (entry.at !== undefined && served.get(entry.at.value) === fingerprint) {
+              replayed += 1;
+              continue;
+            }
+            fresh.push({ entry, fingerprint });
+          }
+          if (replayed > 0) {
+            // info: part of the store-restart recovery the re-open records
+            // above; the lines are withheld by design, and saying so keeps the
+            // withholding visible.
+            LOGGER.info(
+              { agent: agent.value, replayed },
+              "the re-opened book carried lines already served unchanged; they were not served again",
+            );
+          }
+          for (const { entry, fingerprint } of fresh) {
             servedThrough = entry.at;
-            if (entry.at !== undefined) served.add(entry.at.value);
+            if (entry.at !== undefined) served.set(entry.at.value, fingerprint);
             yield entry;
             barrenEnds = 0;
             if (settled()) {
