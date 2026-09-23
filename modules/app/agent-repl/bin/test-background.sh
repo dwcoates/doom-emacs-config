@@ -375,7 +375,7 @@ scan() {
         find "$root/bin" "$root/.githooks" "$root/.claude" -maxdepth 1 -name 'test-*.sh' 2>/dev/null
         find "$module" \( -name node_modules -o -name testdata \) -prune -o -name 'test-*.sh' -print
         local named
-        for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh; do
+        for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh bin/suite-slot.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
         for named in .claude/safe-test-run.sh .claude/run-subproject-tests.sh; do
