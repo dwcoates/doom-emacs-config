@@ -106,8 +106,12 @@ means the daemon and this build disagree about the contract.
   - `CLAUDE_CONFIG_DIR` (required) — which ACCOUNT the session runs as.
   - `AGENT_REPL_OWNED=1` (required) — the daemon's mark; a shim refuses to run
     unowned.
-  - `SHIM_BUILD_SHA` (required) — reported on `SessionStarted`; the daemon
-    compares it against the deploy stamp and bounces a stale survivor.
+  - `SHIM_BUILD_SHA` (required) — the content hash (lowercase hex SHA-256) of
+    the `dist/main.js` bundle the daemon spawned this process from, stated by
+    the daemon at spawn time. Reported on `SessionStarted` and on every
+    `SessionDiagnostics` frame (including a session-less shim's opening
+    WatchSession frame); the daemon's deploy compares it against a freshly
+    built bundle's own hash and bounces a shim whose reported hash differs.
   - `AGENT_REPL_STATE_DIR` (default `~/.claude-emacs`) — the one state root.
   - `AGENT_REPL_STORE_SOCKET` — the store socket when `--store-socket` is
     absent. **The flag beats the env.**
