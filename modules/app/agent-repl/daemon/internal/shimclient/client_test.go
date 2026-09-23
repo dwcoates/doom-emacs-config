@@ -1485,3 +1485,48 @@ func recordFields(t *testing.T, log *dlog.TestLogger, operation string) dlog.Con
 	t.Fatalf("no record at %q", operation)
 	return nil
 }
+
+// ---- a refused stream open ----
+
+// TestARefusedStreamOpenIsRecordedAtTheLevelItsCodeMeans pins the record a
+// refused WatchBash open writes. not_found and failed_precondition are a
+// serving shim answering that it holds no such handle -- the session watcher
+// rules on whether that was expected, and calls the ordinary case expected --
+// so they are INFO here; a code that means the open itself failed stays ERROR.
+// The error is returned in every case.
+func TestARefusedStreamOpenIsRecordedAtTheLevelItsCodeMeans(t *testing.T) {
+	tests := []struct {
+		name      string
+		code      connect.Code
+		wantLevel string
+		wrongLvl  string
+	}{
+		{name: "the store holds no rows for the run", code: connect.CodeNotFound, wantLevel: "info", wrongLvl: "error"},
+		{name: "the shim has no such handle yet", code: connect.CodeFailedPrecondition, wantLevel: "info", wrongLvl: "error"},
+		{name: "the shim failed the open", code: connect.CodeInternal, wantLevel: "error", wrongLvl: "info"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f, uds := startFakeShim(t, shortDir(t))
+			f.watchBashRefusal = connect.NewError(tt.code, errors.New("the store holds no rows for shell run"))
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+			// Act.
+			_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+			// Assert.
+			var refusal *StreamOpenError
+			if !errors.As(err, &refusal) {
+				t.Fatalf("WatchBash() error = %v, want a *StreamOpenError", err)
+			}
+			if !hasRecordAt(log, tt.wantLevel, "daemon.shimclient.watch_bash") {
+				t.Fatalf("no %q record for the refused open: %+v", tt.wantLevel, log.Records())
+			}
+			if hasRecordAt(log, tt.wrongLvl, "daemon.shimclient.watch_bash") {
+				t.Fatalf("the refused open was ALSO recorded at %q: %+v", tt.wrongLvl, log.Records())
+			}
+		})
+	}
+}

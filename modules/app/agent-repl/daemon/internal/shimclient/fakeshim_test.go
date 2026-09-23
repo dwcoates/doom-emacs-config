@@ -36,6 +36,7 @@ type fakeShim struct {
 	killTurnResp       *shimv1.KillTurnResponse
 	watchAgentRefusal  error
 	watchAgentFrames   []*shimv1.WatchAgentResponse
+	watchBashRefusal   error
 	watchSessionRefuse error
 
 	// shutdown stops the server; a test calls it through stop.
@@ -306,6 +307,9 @@ func (f *fakeShim) KillTurn(_ context.Context, _ *connect.Request[shimv1.KillTur
 
 func (f *fakeShim) WatchBash(_ context.Context, _ *connect.Request[shimv1.WatchBashRequest], stream *connect.ServerStream[shimv1.WatchBashResponse]) error {
 	f.record("WatchBash")
+	if f.watchBashRefusal != nil {
+		return f.watchBashRefusal
+	}
 	return stream.Send(&shimv1.WatchBashResponse{Bash: &conversationv1.AgentBash{}})
 }
 
