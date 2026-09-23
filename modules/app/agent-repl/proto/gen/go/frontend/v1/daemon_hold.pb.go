@@ -420,6 +420,13 @@ type HeldPrompt_ClassificationError struct {
 	// The classifier itself failed, so no verdict exists. The prompt is still
 	// held and still deliverable; what is missing is the advice, not the
 	// prompt.
+	//
+	// NO PRODUCER. The daemon no longer emits this arm: every failure on the
+	// way to a verdict (a running turn with no open record, a failed
+	// classifier call, a refused interrupt) resolves to the prompt's true
+	// state, hold_for_turn_end, and is logged by the daemon. A frontend still
+	// draws it, because removing error coverage needs the owner's sign-off;
+	// seeing it means a producer has regressed.
 	ClassificationError *HeldPromptClassificationError `protobuf:"bytes,8,opt,name=classification_error,json=classificationError,proto3,oneof"`
 }
 
