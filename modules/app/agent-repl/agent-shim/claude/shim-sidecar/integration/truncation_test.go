@@ -7,6 +7,7 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
 // SUBJECT — a file that SHRINKS under the reader.
@@ -81,7 +82,7 @@ func truncateInPlace(t *testing.T, path, content string) {
 	if err != nil {
 		t.Fatalf("truncate %s: %v", path, err)
 	}
-	defer f.Close()
+	defer testclose.OrFail(t, f)
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatalf("write %s after truncation: %v", path, err)
 	}
