@@ -80,103 +80,6 @@ export function parkAtTail(box: ScrollTail): void {
 }
 
 /**
- * The reader's PLACE in a feed, as something that survives the feed being
- * rebuilt from nothing.
- *
- * A scrollTop cannot survive a rebuild: every element is discarded and
- * recreated, so the number it named describes a layout that no longer exists.
- * What does survive is an ITEM — the topmost one still on screen — and how far
- * down the viewport it sat. Restoring the pair puts the same content back under
- * the reader's eyes whatever the rebuild did to the heights above it.
- *
- * `key` is the feed's own per-item key (`data-key`), so this depends on nothing
- * about how the items are rendered.
- */
-export interface FeedAnchor {
-  key: string;
-  /** The anchor item's offset from the viewport top, in px, at capture. */
-  offsetPx: number;
-  /** Whether the reader was following the tail: then the tail IS the anchor. */
-  pinned: boolean;
-}
-
-/** The box operations anchoring reads and writes. */
-export interface AnchorBox extends ScrollTail {
-  scrollTop: number;
-  clientHeight: number;
-  querySelector(selectors: string): { offsetTop: number } | null;
-}
-
-/** One rendered feed item, as the anchor capture reads it. */
-export interface AnchorItem {
-  key: string;
-  offsetTop: number;
-}
-
-/**
- * Sample where the reader is, BEFORE a rebuild discards the elements.
- *
- * The topmost item whose bottom is still below the viewport top is the one the
- * reader is looking at; anything above it has already scrolled away. A feed
- * with no items, or one the reader is following the tail of, anchors on the
- * tail — which is what `pinned` says and what `restoreFeedAnchor` then does.
- *
- * FOLLOWING IS TOLD TO IT, NOT MEASURED HERE. Deriving it from geometry made
- * this a second owner of the tail question (see `TailFollow`), and a second
- * owner that read the PIN_PX slack band: a reader who had just nudged a few px
- * off the bottom was captured as "following", and the rebuild's restore then
- * parked them at the tail — the same yank the render used to produce, on a
- * different trigger. The caller passes `TailFollow.isFollowing()`, and the
- * answer to the question is one answer.
- */
-export function captureFeedAnchor(
-  box: AnchorBox,
-  items: readonly AnchorItem[],
-  following: boolean,
-): FeedAnchor | null {
-  if (following) return { key: "", offsetPx: 0, pinned: true };
-  for (const item of items) {
-    if (item.offsetTop >= box.scrollTop) {
-      return { key: item.key, offsetPx: item.offsetTop - box.scrollTop, pinned: false };
-    }
-  }
-  return null;
-}
-
-/**
- * Put the reader back where `captureFeedAnchor` found them, AFTER the rebuild.
- *
- * A pinned reader is parked at the tail, which is where they were. Anyone else
- * is placed so the anchor item sits at the same offset from the viewport top it
- * sat at before — the identical pixels, however the heights above it changed.
- *
- * AN ANCHOR THAT NO LONGER EXISTS IS NOT GUESSED AT. The item may have been
- * cleared or compacted away, and inventing a position for it would move the
- * reader somewhere they never were; the box is left exactly as the rebuild left
- * it, and the caller's own tail rule applies. Returns whether the anchor was
- * restored, so a caller can say which happened.
- */
-export function restoreFeedAnchor(
-  box: AnchorBox,
-  anchor: FeedAnchor | null,
-  tail: TailWriter,
-): boolean {
-  if (anchor === null) return false;
-  if (anchor.pinned) {
-    tail.park();
-    return true;
-  }
-  const node = box.querySelector(`[data-key="${cssEscapeKey(anchor.key)}"]`);
-  if (node === null) return false;
-  // Through the owner, not a bare assignment: a restore that wrote scrollTop
-  // itself would be seen by the owner as the READER scrolling — upward, on a
-  // rebuild that shortened the feed — and would end a follow the reader never
-  // ended. `place` moves the pixels and leaves the intent alone.
-  tail.place(node.offsetTop - anchor.offsetPx);
-  return true;
-}
-
-/**
  * Did this render put a DIFFERENT item at the feed's top?
  *
  * The load-more prepend's whole hazard: a page of older messages lands above
@@ -198,17 +101,6 @@ export function feedTopChanged(previousTopKey: string | null, nextTopKey: string
   return previousTopKey !== nextTopKey;
 }
 
-/**
- * Escape a feed key for use inside an attribute selector.
- *
- * Keys are the daemon's uuids and derived strings, but a selector built from an
- * unescaped one is a parse error waiting for the first key with a quote in it —
- * and a throwing selector inside a render is a frozen feed.
- */
-function cssEscapeKey(key: string): string {
-  return key.replace(/["\\]/g, "\\$&");
-}
-
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
 
@@ -220,17 +112,6 @@ export type SubscribeInput = (onInput: () => void) => void;
 
 /** Everything the tail owner reads and writes on the box it guards. */
 export type ReanchorBox = ScrollTail & ScrollPosition;
-
-/**
- * The two writes anything moving the feed is allowed to make (see `TailFollow`).
- *
- * Narrower than the owner itself so a caller that only needs to MOVE the feed
- * cannot reach the decision, and so a test can hand one in without a box.
- */
-export interface TailWriter {
-  park(): void;
-  place(top: number): void;
-}
 
 /**
  * THE SINGLE OWNER OF "SHOULD THE FEED BE FOLLOWING ITS TAIL".
@@ -245,7 +126,7 @@ export interface TailWriter {
  *
  * So intent is LATCHED here and nowhere else. Every mechanism that wants to
  * know asks `isFollowing()`; every mechanism that wants to move the feed calls
- * `park()` or `place()`. Nothing else writes the feed's scrollTop toward the
+ * `park()` or `shift()`. Nothing else writes the feed's scrollTop toward the
  * tail, and nothing else reads geometry to decide whether it should.
  *
  * WHY LATCHED AND NOT SAMPLED. `isPinnedToBottom` has a PIN_PX slack band, and
@@ -305,7 +186,8 @@ export class TailFollow {
   /**
    * Park the box at its tail and follow from here on. Every "show me the
    * newest" act routes through this: the host's workspace-switch snap, the
-   * restored-session render, a freshly sent prompt, a render that is following.
+   * restored-session render, a replaced page (feed-view.ts's
+   * `parkAfterReplace`), and a render that is following.
    *
    * It LATCHES the follow rather than only moving the pixels, which is what
    * makes a workspace switch land at the bottom reliably: content that arrives
@@ -323,27 +205,14 @@ export class TailFollow {
   }
 
   /**
-   * Put the box at TOP without changing the follow decision — a rebuild
-   * restoring the reader's place, or a backfill shifting the view by exactly
-   * the height it grew above the viewport. Both move the pixels precisely so
-   * that nothing about what the reader is looking at has changed, so neither
-   * may be mistaken for the reader moving.
-   */
-  place(top: number): void {
-    this.sync();
-    this.box.scrollTop = top;
-    this.lastTop = this.box.scrollTop;
-  }
-
-  /**
    * Move the box BY delta without changing the follow decision — a backfill
    * that grew the feed above the viewport shifting the view by exactly that
    * growth, so what the reader is looking at does not move.
    *
-   * RELATIVE, where `place` is absolute, because the growth is only ever known
-   * as a difference. Expressing it as "read the position, add, write it back"
-   * at the call site would read one box and write another the moment the two
-   * ever differ; keeping the whole arithmetic inside the owner makes them the
+   * RELATIVE, because the growth is only ever known as a difference.
+   * Expressing it as "read the position, add, write it back" at the call site
+   * would read one box and write another the moment the two ever differ;
+   * keeping the whole arithmetic inside the owner makes them the
    * same box by construction.
    */
   shift(delta: number): void {
@@ -449,7 +318,7 @@ export class TailFollow {
    * Fold any movement this owner did not write into the decision.
    *
    * A position equal to the last one it knows about decides nothing, which is
-   * what makes its own `park`/`place` writes — and the scroll events the
+   * what makes its own `park`/`shift` writes — and the scroll events the
    * browser dispatches for them afterward — inert. Anything else is the reader,
    * and the reader moving up ends the follow while only the reader arriving at
    * the tail resumes it.
@@ -728,10 +597,9 @@ export function revealInBox(box: HTMLElement, node: HTMLElement, tail: RevealWri
 }
 
 /**
- * The geometry a CENTER-SCROLL reads, in the box's OWN coordinate space — the
- * one `restoreFeedAnchor` already works in, where a row's `offsetTop` and the
- * box's `scrollTop` are the same units, so their difference is a scroll
- * position with nothing to reconstruct.
+ * The geometry a CENTER-SCROLL reads, in the box's OWN coordinate space, where
+ * a row's `offsetTop` and the box's `scrollTop` are the same units, so their
+ * difference is a scroll position with nothing to reconstruct.
  */
 export interface CenterGeometry {
   /** The node's top, in the box's own scroll coordinates (`offsetTop`). */
