@@ -70,7 +70,7 @@ func TestStartAcceptsAnUnsetSessionStartedAsAPureAttach(t *testing.T) {
 	}
 
 	// Act.
-	w, err := Start(t.Context(), "ws-1", newFakeClient(), Session{}, sinks, newTestLogger())
+	w, err := Start(t.Context(), "ws-1", newFakeClient(), Session{Opening: WorkspaceOpened()}, sinks, newTestLogger())
 
 	// Assert.
 	if err != nil {
@@ -101,7 +101,7 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			rec := newRecorder()
-			session := Session{Started: sessionStarted("")}
+			session := Session{Started: sessionStarted(""), Opening: WorkspaceOpened()}
 			sinks := Sinks{
 				Feed:      &feedSink{rec: rec},
 				Footer:    &footerSink{rec: rec},

@@ -384,6 +384,9 @@ type event struct {
 	linkFault *LinkFault
 	// refusal is the refused-open evidence the lifecycle sink was handed.
 	refusal *WatchOpenRefusal
+	// boundary is the boundary arm of a page the feed was handed: "floor",
+	// "more" or "" for none.
+	boundary string
 }
 
 // name is the "sink.Method" spelling the assertions compare on.
@@ -516,7 +519,14 @@ func (s *feedSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.Ses
 }
 
 func (s *feedSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage, _ OutputAddress) {
-	s.rec.emit(event{sink: "feed", method: "OnHistoryPage", agent: agent.GetValue(), detail: itoa(len(page.GetEntries()))})
+	boundary := ""
+	switch page.GetBoundary().(type) {
+	case *conversationv1.HistoryPage_Floor:
+		boundary = "floor"
+	case *conversationv1.HistoryPage_More:
+		boundary = "more"
+	}
+	s.rec.emit(event{sink: "feed", method: "OnHistoryPage", agent: agent.GetValue(), detail: itoa(len(page.GetEntries())), boundary: boundary})
 }
 
 type footerSink struct{ rec *recorder }
@@ -761,6 +771,11 @@ func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harnes
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
 	if prep != nil {
 		prep(h.client)
+	}
+	// A test that states no opening is a workspace's first opening: the
+	// watcher every test before the replay rule was written against.
+	if session.Opening.validate() != nil {
+		session.Opening = WorkspaceOpened()
 	}
 
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{

@@ -21,11 +21,20 @@ import (
 // because every shim refusal is already given its typed arm in this package —
 // a second unwrapping elsewhere would answer the same failures differently.
 
-// turnPageSize is the budget the opening page of an accepted turn is asked
-// for. It matches the session watcher's opening catch-up budget: the page
-// StartTurn returns is fed through the same history path a watch's own opening
-// page takes, and two budgets for one path would page differently by accident.
-const turnPageSize = 200
+// turnPageSize is the budget of an accepted turn's opening page: ONE entry,
+// which R15 makes the turn's own prompt row. The shim writes that row durable
+// and reads the page BEFORE it submits the prompt, so the newest entry at the
+// read is the row the turn itself produced.
+//
+// A TURN OPENING NEVER REPLAYS HISTORY (owner rule, 2026-09-23). The page
+// used to be asked for at 200 with no known_through, and a pointerless page
+// is the agent's first page: the newest 200 entries, re-resolved by every view
+// on every turn, with their history effects firing again. The main agent's
+// standing watch serves everything the turn writes live, so the page owes the
+// views nothing but the turn's own row. The request also states the main
+// watch's pointer (see sender.known), so even the one entry is bounded to what
+// was written after everything the daemon has already been served.
+const turnPageSize = 1
 
 // coldThresholdPolicy is the context size, in tokens, above which a MODEL
 // CHANGE is refused as an unasked cold-cache cost rather than paid. It is
@@ -42,7 +51,15 @@ func (f *Fleet) Sender(ws ids.WorkspaceID) (promptqueue.Sender, bool) {
 	if !ok {
 		return nil, false
 	}
-	return &sender{client: client}, true
+	return &sender{client: client, known: func() *conversationv1.HistoryPointer {
+		// Read AT THE CALL, not here: the queue may hold this sender across a
+		// wait, and the pointer the turn must be bounded by is the newest one
+		// the main watch has been served when the turn is handed over.
+		if watcher, ok := f.sessionWatcher(ws); ok {
+			return watcher.MainKnownThrough()
+		}
+		return nil
+	}}, true
 }
 
 // Watcher answers the workspace's session watcher, false when no session is
@@ -72,7 +89,13 @@ func (f *Fleet) sessionWatcher(ws ids.WorkspaceID) (sessionwatcher.Watcher, bool
 }
 
 // sender narrows a shim client to the queue's delivery surface.
-type sender struct{ client shimclientSender }
+type sender struct {
+	client shimclientSender
+	// known answers the main agent's watch's newest served pointer, nil when
+	// it was served none (or no watcher is up). StartTurn states it as
+	// known_through.
+	known func() *conversationv1.HistoryPointer
+}
 
 // shimclientSender is the slice of the shim client the delivery surface uses.
 // It is named so the adapter can be exercised against a fake client without
@@ -90,10 +113,11 @@ type shimclientSender interface {
 // watcher's turn handover, and neither is recoverable from an error.
 func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
 	response, err := s.client.StartTurn(ctx, &shimv1.StartTurnRequest{
-		Turn:     &conversationv1.TurnId{Value: string(turn)},
-		Said:     said,
-		Origin:   origin,
-		PageSize: turnPageSize,
+		Turn:         &conversationv1.TurnId{Value: string(turn)},
+		Said:         said,
+		Origin:       origin,
+		PageSize:     turnPageSize,
+		KnownThrough: s.knownThrough(),
 	})
 	if err != nil {
 		return nil, err
@@ -113,6 +137,14 @@ func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		return nil, fmt.Errorf("shim StartTurn answered neither success nor failure for turn %q", turn)
 	}
 	return success, nil
+}
+
+// knownThrough is the pointer StartTurn is bounded by, nil when there is none.
+func (s *sender) knownThrough() *conversationv1.HistoryPointer {
+	if s.known == nil {
+		return nil
+	}
+	return s.known()
 }
 
 // PromptAgent delivers a bubble-composer prompt to one agent, through the same
