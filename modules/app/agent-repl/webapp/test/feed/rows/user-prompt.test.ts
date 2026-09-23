@@ -9,6 +9,12 @@ import {
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
 } from "../../../src/breathing.js";
+import {
+  BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_ROLE_ATTRIBUTE,
+  BUBBLE_VARIANT_ATTRIBUTE,
+} from "../../../src/bubble/draw.js";
+import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
 
 /** A prompt with the given blocks. */
 function prompt(blocks: unknown[], author = "You", working = false) {
@@ -20,9 +26,9 @@ function prompt(blocks: unknown[], author = "You", working = false) {
 }
 
 describe("drawFeedUserPrompt: the bubble", () => {
-  it("keeps the existing prompt-bubble classes, unchanged by the port", () => {
+  it("wears the one bubble's classes and the prompt hook the feed finds it by", () => {
     const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
-    expect(el.className).toBe("bubble user");
+    expect(el.className).toBe("bubble md user");
   });
 
   it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
@@ -121,5 +127,63 @@ describe("drawFeedUserPrompt: the record of the row", () => {
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-user-prompt");
     expect(record.level.case).toBe("info");
+  });
+});
+
+describe("drawFeedUserPrompt: its spec", () => {
+  it("is a prompt-role bubble", () => {
+    const el = drawFeedUserPrompt(prompt([]));
+    expect(el.getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("prompt");
+  });
+
+  it("is the user variant", () => {
+    const el = drawFeedUserPrompt(prompt([]));
+    expect(el.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("user");
+  });
+
+  it("collapses at the shared feed cap", () => {
+    const el = drawFeedUserPrompt(prompt([]));
+    expect(el.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("feed");
+  });
+});
+
+describe("drawFeedUserPrompt: a tree the person typed", () => {
+  const staged = useTreeLayout();
+
+  /** A prompt of one text block holding TEXT, attached under its own column. */
+  function mounted(text: string): HTMLElement {
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text } } }]));
+    const column = document.createElement("div");
+    column.append(el);
+    document.body.append(column);
+    return el;
+  }
+
+  it("wraps at the prompt bubble's own cap", () => {
+    // Arrange / Act
+    const el = mounted(WIDE_TREE);
+    // Assert — more lines than branches, none wider than the cap's budget.
+    const widths = treeLineWidths(el);
+    expect(widths.length).toBeGreaterThan(3);
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("never wraps below its max width", () => {
+    // Arrange / Act
+    const el = mounted(FITTING_TREE);
+    // Assert — one line per branch.
+    expect(treeLineWidths(el)).toHaveLength(3);
+  });
+});
+
+describe("drawFeedUserPrompt: a re-push", () => {
+  it("updates the previous draw in place, keeping its scroll box", () => {
+    // Arrange
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+    const box = first.querySelector(".bubble-scroll");
+    // Act
+    const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]), first);
+    // Assert
+    expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
   });
 });
