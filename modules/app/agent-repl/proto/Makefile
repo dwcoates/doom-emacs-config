@@ -150,8 +150,13 @@ validate: lint test-check-conversation-isolation test-check-generated check-gene
 
 # Generated stubs are dependencies, not coverage subjects.  Each consumer's
 # own coverage configuration scopes measurement to handwritten package source.
-coverage: validate
-	../bin/report-nonlisp-coverage.sh daemon sidecar store wire webapp shim
+#
+# THE COMPONENT LIST LIVES IN bin/report-nonlisp-coverage.sh ALONE.  With no
+# arguments it runs every default component, and its `proto` component is this
+# Makefile's `validate`, run first.  A list restated here drifted: it kept
+# naming `wire` after that module was deleted, and the script refused it.
+coverage:
+	../bin/report-nonlisp-coverage.sh
 
 clean:
 	rm -rf gen
