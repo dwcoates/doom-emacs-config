@@ -9,7 +9,7 @@ into remediation.
 This runbook owns the bounce-and-verdict discipline and nothing else. The
 iteration mechanics belong to `iterative-fix-verify-loop.md`, the log routing
 and JSONL shape belong to `../../logging-contract.md`, the deploy ordering
-belongs to `bin/deploy-all.sh`, the suite invocations belong to the component
+belongs to the daemon's own deploy (`daemon/internal/deploy`), the suite invocations belong to the component
 `AGENTS.md` files, and the pre-conclusion audit belongs to
 `observability-gaps.md`.
 
@@ -84,26 +84,32 @@ for.
 ## 2. Deploy
 
 ```sh
-modules/app/agent-repl/bin/deploy-all.sh
+modules/app/agent-repl/daemon/bin/claude-repld deploy
 ```
 
-The script owns its ordering and its failure semantics; do not reorder the
-store and sidecar by hand (see the restart-safety section of
-`health-and-readiness.md`).
+THE DAEMON OWNS THE DEPLOY: it builds into staging, judges every component by
+content hash against what each running process reported, installs, and puts
+what is out of date into service — the store and sidecar in the recorded safe
+order, stale shims through the bounce registry, a stale daemon by handover,
+and `reload_elisp` / `reload_webapp` pushed to the stale Emacs and webviews.
+The verb prints one line per component decision; a `build_failed` answer
+deployed NOTHING. Do not reorder the store and sidecar by hand (see the
+restart-safety section of `health-and-readiness.md`).
 
-Then hot-load every touched non-test elisp file into the live Emacs. **`emacsclient`
-is not on PATH in this harness** — use the absolute path `deploy-all.sh` itself
-resolves, `/Applications/Emacs.app/Contents/MacOS/bin/emacsclient` (overridable
-via `AGENT_REPL_EMACSCLIENT`):
+An UNFORCED deploy ends no turn, so a registered shim bounce or a handover may
+still be waiting on a busy workspace when the verb returns. Read its record
+(`daemon.promptqueue.bounce`, `daemon.rollout.handover`) before measuring a
+component the deploy has not yet put into service.
 
-```sh
-/Applications/Emacs.app/Contents/MacOS/bin/emacsclient \
-  -e '(load-file "/abs/path/modules/app/agent-repl/lisp/<module>.el")'
-```
+The elisp reload is pushed to the Emacs that reported older elisp and is
+loaded there (the whole module set in `config.el` order, then the heartbeat
+assertion). Verify a new symbol is actually bound
+(`/Applications/Emacs.app/Contents/MacOS/bin/emacsclient -e '(bound-and-true-p <new-var>)'`)
+before believing any result.
 
-Then force page convergence. `deploy-all.sh` already refreshes the webviews, but
-its sweep debounces, so a hot-load that lands after it leaves pages on the old
-bundle. Clear the debounce stamp and sweep explicitly:
+Then force page convergence when the deploy did not push a webapp reload (a
+page whose build already matched is left alone). Clear the debounce stamp and
+sweep explicitly:
 
 ```sh
 /Applications/Emacs.app/Contents/MacOS/bin/emacsclient \
@@ -232,8 +238,8 @@ met; it is unmeasured.
    - `scope=` names the conjunction actually applied. A workspace with no page
      when the outage began is measured on `emacs,wire` only; it is not owed a
      page signal and its absence is not a failure.
-   - **A `deploy-all` bounce cannot measure this criterion cleanly.** The
-     deploy's own webview refresh lands inside the window and the affected
+   - **A deploy that reloads the webviews cannot measure this criterion
+     cleanly.** The deploy's own `reload_webapp` lands inside the window and the affected
      workspaces come back `not-measured reason=deploy_refresh`, correctly.
      Measure criterion 6 across a `launchctl kickstart` /
      `agent-repl-frontend-daemon-restart-await` bounce — the same restriction
@@ -256,9 +262,9 @@ met; it is unmeasured.
      and the human-facing `query ended unexpectedly`. Both, because the card's
      prose and its reason field are different strings and either may be present.
    - MEASURE ACROSS A BOUNCE THAT DOES NOT REFRESH THE PAGES.
-     `bin/deploy-all.sh` refreshes every webview, which WIPES the very cards
-     this criterion counts — a post-deploy zero means the pages were reset, not
-     that nothing died. Bounce with `launchctl kickstart` alone when measuring
+     A deploy that pushes `reload_webapp` reloads every stale webview, which
+     WIPES the very cards this criterion counts — a post-deploy zero means the
+     pages were reset, not that nothing died. Bounce with `launchctl kickstart` alone when measuring
      this, or read a durable sink instead.
    - The durable sinks do NOT currently capture it: the workspace
      `emacs.log`s read zero while the card is on screen, because the card is
@@ -324,7 +330,8 @@ them as written; this runbook adds only the verdict.
   contention, not a hang — do not kill it and do not read the duration as a
   failure signal.
 
-- **`deploy-all` refreshes every webview, destroying DOM evidence.** Any
+- **A deploy's `reload_webapp` reloads the stale webviews, destroying DOM
+  evidence.** Any
   criterion measured by reading the live page (criterion 7, feed counts, badge
   states) must be sampled across a `launchctl kickstart` bounce rather than a
   deploy, or the measurement records the reload instead of the bounce.
@@ -362,32 +369,23 @@ them as written; this runbook adds only the verdict.
   timestamped ~13 hours earlier; the daemon logs the replay explicitly as
   `decision=retain_history_no_bring_up_fault` / `single_card_per_replayed_pair`.
 
-- **`deploy-all.sh` does NOT deploy elisp.** Its "revision gate passed" covers
-  the webapp bundle only. The long-running Emacs keeps the elisp it already
-  loaded, so a merged `lisp/` change is simply not live, and the deploy says
-  nothing about it. A measurement taken against stale elisp looks like the fix
-  failing. Verify a new symbol is actually bound
-  (`emacsclient -e '(bound-and-true-p <new-var>)'`) before believing any result,
-  and hot-load per step 2 if it is not. Note `load` does not unbind variables
-  the change DELETED, so a stale binding lingering is not proof of stale code.
-
-- **`deploy-all.sh` reports "shim: bundle unchanged" whenever you pre-build.**
-  It samples `shim_identity` before and after its OWN build step, so building
-  the shim yourself first makes it compare the new bundle against itself. It
-  never compares against what the running shims actually loaded. The message is
-  about its build, not about deployment.
+- **A deploy's elisp reload is loaded by Emacs, not by the deploy.** The daemon
+  PUSHES `reload_elisp` to an Emacs that reported older elisp and answers
+  `reload_pushed`; the load itself, and any refusal (a reload naming another
+  checkout's root), is Emacs's own record. A measurement taken against stale
+  elisp looks like the fix failing: verify a new symbol is bound before
+  believing any result. Note `load` does not unbind variables the change
+  DELETED, so a stale binding lingering is not proof of stale code.
 
 - **`emacsclient` is not on PATH.** Use
   `/Applications/Emacs.app/Contents/MacOS/bin/emacsclient`, or
   `$AGENT_REPL_EMACSCLIENT`. A "command not found" here reads exactly like a
   dead Emacs if you are not watching for it.
 
-- **`agent-repl-refresh-webviews` must return an INTEGER.** `deploy-all.sh`
-  formats its answer with `%d`; a debounced sweep returning `nil` crashed the
-  deploy with `Format specifier doesn't match argument type`. The function now
-  coerces the sweep's internal nil to `0` — do not "simplify" that coercion
-  away, and do not make the sweep itself return an integer instead: the
-  nil-for-debounced distinction is load-bearing internally.
+- **`agent-repl-refresh-webviews` returns an INTEGER.** The function coerces
+  the sweep's internal nil (a debounced sweep) to `0`; do not "simplify" that
+  coercion away, and do not make the sweep itself return an integer instead:
+  the nil-for-debounced distinction is load-bearing internally.
 
 - **Prompt sends require an explicit `PROMPT_ORIGIN_*` value.** The client
   rejects anything that is not `PROMPT_ORIGIN_`-prefixed and rejects
