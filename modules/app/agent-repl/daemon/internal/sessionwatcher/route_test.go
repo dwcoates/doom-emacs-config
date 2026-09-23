@@ -554,7 +554,7 @@ func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
 	})
 	if !h.w.LiveWork().Empty() {
 		t.Fatal("lost work stayed in the live set")
@@ -579,6 +579,35 @@ func TestRouteBashFrame(t *testing.T) {
 
 	// Assert.
 	assertNames(t, got, []string{"feed.OnBash", "footer.OnBash"})
+}
+
+// TestRouteBashTerminalSettlesTheFeedBeforeTheSetDropsIt covers the order a
+// shell's own terminal reaches the feed in: the frame first, then the set that
+// no longer lists the run. The terminal is what settles the bubble with its
+// exit; the set arriving first would settle it lost instead.
+func TestRouteBashTerminalSettlesTheFeedBeforeTheSetDropsIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	h.client.nextBashOpen(t)
+	h.quiet()
+	entry := h.shellWatchFor("w-1")
+
+	// Act.
+	got := h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+		})
+	})
+
+	// Assert.
+	assertNames(t, got, []string{
+		"feed.OnBash", "footer.OnBash",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+	})
+	feed := requireEvent(t, got, "feed.OnLiveWorkChanged")
+	if feed.live == nil || len(feed.live.Shells) != 0 {
+		t.Fatalf("the feed was told %+v, want a set without the ended shell", feed.live)
+	}
 }
 
 // TestRouteDetachedSubagentFrame covers a DETACHED run's own subagent frame:
@@ -608,7 +637,7 @@ func TestRouteDetachedSubagentFrame(t *testing.T) {
 	// same breath the chip retires.
 	assertNames(t, got, []string{
 		"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
 	})
 }
 
@@ -625,7 +654,7 @@ func TestRouteDetachedWorkAnnouncement(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"feed.OnDetachedWork", "footer.OnDetachedWork", "sidebar.OnDetachedWork",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
 	})
 }
 
@@ -797,7 +826,7 @@ func TestRouteQueryDied(t *testing.T) {
 	assertNames(t, got, []string{
 		"footer.OnSessionUpdate", "feed.OnTurnOpened", "feed.OnSessionUpdate",
 		"sidebar.OnSessionUpdate",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
 		"lifecycle.OnTurnEnded",
 	})
 	if !h.w.Free() {

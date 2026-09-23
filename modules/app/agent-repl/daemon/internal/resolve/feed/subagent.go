@@ -7,6 +7,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/figures"
+	"claude-repld/internal/sessionwatcher"
 )
 
 // THE SUBAGENT BUBBLE — sync or detached, ONE component. The bubble IS a feed:
@@ -704,6 +705,55 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	}
 
 	r.publishShell(s, workID, sh, settled)
+}
+
+// settleShellsLeftLive settles, as LOST, every drawn detached shell that the
+// live set held at its previous publication and no longer holds, unless the
+// shell has already settled.
+//
+// A RUN THAT LEFT THE LIVE SET HAS ENDED FOR EVERY READER. The live set is the
+// open watch set: a shell leaves it at its own terminal (which settled the
+// head before the set was republished, so nothing is left to do here), or
+// because nothing will report it again -- its stream could not be re-opened,
+// the link was severed, the session's query died. In those cases no terminal
+// is coming, and a head left running drew an orange dot and a stop button
+// forever over work nobody could see any more. "We stopped being able to see
+// it" is exactly FeedShellLost; no staleness ruling stated WHY, so the arm
+// carries no cause.
+//
+// ONLY A SHELL THE SET HELD. A shell the feed drew but the watcher never held
+// (its first watch open was refused while the store had no rows for it yet)
+// has not left anything: a repeated announcement is its re-open.
+func (r *resolver) settleShellsLeftLive(s *wsState, live sessionwatcher.LiveWorkSet) {
+	now := make(map[string]struct{}, len(live.Shells))
+	for _, work := range live.Shells {
+		now[work.GetValue()] = struct{}{}
+	}
+	for workID := range s.liveShells {
+		if _, still := now[workID]; still {
+			continue
+		}
+		delete(s.liveShells, workID)
+		sh, drawn := s.shells[workID]
+		if !drawn || sh.row == nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleShellsLeftLive", "condition": "!drawn || sh.row == nil"})
+			continue
+		}
+		if sh.settled != nil {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleShellsLeftLive", "condition": "sh.settled != nil"})
+			continue
+		}
+		r.publishShell(s, workID, sh, &frontendv1.FeedShellSettled{
+			EndedAtMs: r.deps.Now().UnixMilli(),
+			Outcome:   &frontendv1.FeedShellSettled_Lost{Lost: &frontendv1.FeedShellLost{}},
+		})
+		r.logger(s.id).Info("daemon.feed.detached_shell_left_live",
+			"a detached shell left the live set with no terminal; its head is settled lost",
+			dlog.Context{"work": workID})
+	}
+	for workID := range now {
+		s.liveShells[workID] = struct{}{}
+	}
 }
 
 // shellStart answers the instant a run's clock counts from. The authoritative
