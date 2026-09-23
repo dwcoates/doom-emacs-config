@@ -426,6 +426,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     adopt(row, known ? -1 : order.length);
     truncateAtSeparation(row, id);
     announce();
+    if (!known && isSentPrompt(row)) parkOnSentPrompt(id);
   }
 
   /**
@@ -445,6 +446,25 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     log.debug("a replaced page parked the feed at its tail", {
       operation: "feed.replace-parked",
       context: { feed: feedName(), rows: order.length },
+    });
+    opts.scroll.tail.park();
+  }
+
+  /**
+   * A PROMPT JUST SENT PUTS THE READER AT THE TAIL (owner ruling, 2026-09-23).
+   *
+   * Called only after the prompt's bubble has been painted, and only on its
+   * FIRST LIVE placement (see `isSentPrompt`), so a redraw of a held prompt, a
+   * replace and a history prepend never re-park. It parks at the feed's TAIL
+   * rather than on the prompt: whatever was drawn after the prompt is where
+   * the feed lands, and `park` latches the follow so the turn's output keeps
+   * autoscrolling. Root feed only, like every other move of the scroll box.
+   */
+  function parkOnSentPrompt(id: string): void {
+    if (opts.scroll === undefined) return;
+    log.debug(`a newly sent prompt ${id} parked the feed at its tail`, {
+      operation: "feed.sent-prompt-parked",
+      context: { feed: feedName(), row: id },
     });
     opts.scroll.tail.park();
   }
@@ -1076,6 +1096,18 @@ function promptWorking(row: FeedRow): boolean | null {
     default:
       return null;
   }
+}
+
+/**
+ * Whether ROW, placed live for the FIRST time, is a prompt the person just
+ * sent. Read off the row alone: a user prompt the daemon marks `working`, which
+ * it sets from the prompt's first draw until its turn's terminal. The flag is
+ * what keeps a terminal re-push (published with `working` unset) of a prompt
+ * this feed never drew, one scrolled out of the newest page, from counting as
+ * a send.
+ */
+function isSentPrompt(row: FeedRow): boolean {
+  return row.row.case === "userPrompt" && row.row.value.working;
 }
 
 /** A copy of prompt row ROW with its `working` flag set to WORKING. */
