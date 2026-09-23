@@ -32,7 +32,7 @@ import { drawFeedPermission } from "./asks/permission.js";
 import { drawFeedQuestion } from "./asks/question.js";
 import { drawFeedMerge } from "./merge/merge.js";
 import { mergeBubbleBody } from "./merge/merge-body.js";
-import type { Handle } from "../failure/overlay.js";
+import type { Handle } from "../failure/local.js";
 import { log } from "../log.js";
 import { stopTicking } from "./ticking.js";
 import {

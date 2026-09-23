@@ -20,6 +20,15 @@
  *
  * THE SPANS TICK CLIENT-SIDE from the instants the wire ships, through the
  * shared ticker.
+ *
+ * THE CHIP IS THE ONE PLACE AN ERROR IS SHOWN (owner ruling, 2026-09-23). The
+ * page's own client-local failures (`src/failure/local.ts`) — the ones the
+ * daemon cannot push because it may be what is unreachable — are listed here
+ * too, AHEAD of the pushed warnings and counted in the same badge. They are
+ * this page's own facts, so they merge in client-side; the pushed warnings are
+ * still drawn verbatim. And they never wait on a push: before the first topbar
+ * view, or over a stale one while the link is down, the chip still draws them
+ * (`drawLocalWarningStrip`).
  */
 import type {
   TopbarAccountingWarningDetail,
@@ -32,34 +41,63 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
+import type { LocalFailure } from "../failure/local.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import type { TopbarContext } from "./context.js";
+import type { TopbarContext, WarningChipContext } from "./context.js";
 import { asAnchor } from "./strip.js";
 
 /**
  * The chip, or NOTHING.
  *
- * Returns null on an empty list rather than an empty element, so the caller
- * appends nothing at all and the strip reserves no control.
+ * Returns null when the served list is empty AND no client-local failure
+ * stands, rather than an empty element, so the caller appends nothing at all
+ * and the strip reserves no control.
  */
 export function drawTopbarWarningStrip(
   u: TopbarWarningStrip,
   tc: TopbarContext,
 ): HTMLElement | null {
-  if (u.warnings.length === 0) {
-    log.debug("the daemon reports nothing to warn about; drawing no chip", {
+  return drawWarningChip(tc, u.warnings.length, () => drawWarningList(u, tc));
+}
+
+/**
+ * The chip before any topbar view has been drawn: the client-local failures
+ * alone, or NOTHING.
+ *
+ * A page whose boot failed, or whose link dropped before the first push, has
+ * no view to draw the chip inside — and those are exactly the moments these
+ * failures exist to explain.
+ */
+export function drawLocalWarningStrip(cc: WarningChipContext): HTMLElement | null {
+  return drawWarningChip(cc, 0, () => drawLocalWarningList(cc));
+}
+
+/** The chip over PUSHED warnings plus whatever client-local failures stand. */
+function drawWarningChip(
+  cc: WarningChipContext,
+  pushed: number,
+  body: () => HTMLElement,
+): HTMLElement | null {
+  const local = cc.localFailures();
+  if (pushed === 0 && local.length === 0) {
+    log.debug("nothing to warn about; drawing no chip", {
       operation: "topbar.warnings-empty",
     });
     return null;
   }
   log.debug("drawing the topbar warning chip", {
     operation: "topbar.warnings",
-    context: { warnings: u.warnings.length },
+    context: { warnings: pushed, local_failures: local.length },
   });
 
   const wrap = document.createElement("div");
   wrap.className = "topbar-warnings";
+  // The standing client-local arms, readable without opening the list: the
+  // hook a harness or a probe reads to say which failures the page is showing.
+  if (local.length > 0) {
+    wrap.setAttribute("data-local-arms", local.map((failure) => failure.arm).join(" "));
+  }
 
   const button = document.createElement("button");
   button.type = "button";
@@ -73,31 +111,107 @@ export function drawTopbarWarningStrip(
 
   const badge = document.createElement("span");
   badge.className = "topbar-warning-count";
-  // THE COUNT IS THE LIST'S LENGTH — display of what was served, not a tally
-  // this end keeps across pushes.
-  badge.textContent = String(u.warnings.length);
+  // THE COUNT IS THE LIST'S LENGTH — the served warnings plus the standing
+  // client-local failures, never a tally this end keeps across pushes.
+  badge.textContent = String(pushed + local.length);
 
   button.append(mark, badge);
   wrap.append(button);
 
   // The wrap is the control; see `drawTopbarModelSelector` for the reasoning.
   asAnchor(wrap, "warnings");
-  const body = (): HTMLElement => drawWarningList(u, tc);
-  tc.reveals.register("warnings", "warnings", body);
+  cc.reveals.register("warnings", "warnings", body);
   wrap.addEventListener("click", () => {
-    tc.reveals.toggle("warnings", "warnings", body);
+    cc.reveals.toggle("warnings", "warnings", body);
   });
   return wrap;
 }
 
-/** The first level: one row per warning, newest first as served. */
+/**
+ * The first level: the client-local failures, then one row per pushed
+ * warning, newest first as served.
+ */
 export function drawWarningList(u: TopbarWarningStrip, tc: TopbarContext): HTMLElement {
-  const list = document.createElement("div");
-  list.className = "topbar-warning-list list-rows";
+  const list = drawLocalRows(tc, () => drawWarningList(u, tc));
   for (const [index, warning] of u.warnings.entries()) {
     list.append(drawTopbarWarning(warning, tc, u, `TopbarWarningStrip.warnings[${index}]`));
   }
   return list;
+}
+
+/** The first level with no view drawn yet: the client-local failures alone. */
+export function drawLocalWarningList(cc: WarningChipContext): HTMLElement {
+  return drawLocalRows(cc, () => drawLocalWarningList(cc));
+}
+
+/** A fresh list holding one row per standing client-local failure. */
+function drawLocalRows(cc: WarningChipContext, relist: () => HTMLElement): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "topbar-warning-list list-rows";
+  for (const failure of cc.localFailures()) list.append(drawLocalFailureRow(failure, cc, relist));
+  return list;
+}
+
+/**
+ * One client-local failure's row: its headline, and its evidence behind the
+ * click — the same two levels a pushed warning has. An arm with no evidence
+ * (`workspace_gone`, or an arm whose fields were all empty) is a statement.
+ */
+export function drawLocalFailureRow(
+  failure: LocalFailure,
+  cc: WarningChipContext,
+  relist: () => HTMLElement,
+): HTMLElement {
+  if (failure.evidence.length === 0) {
+    const statement = drawTopbarWarningStatement(failure.headline);
+    statement.setAttribute("data-arm", failure.arm);
+    statement.setAttribute("data-local", "");
+    return statement;
+  }
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "topbar-warning-row";
+  row.setAttribute("data-row", "");
+  row.setAttribute("data-arm", failure.arm);
+  row.setAttribute("data-local", "");
+  row.textContent = failure.headline;
+  row.addEventListener("click", (event) => {
+    // Inside the reveal: this click must not reach the layer's outside-click
+    // handler as a close.
+    event.stopPropagation();
+    cc.reveals.open("warning-detail", "warnings", () =>
+      drawLocalFailureDetailOverlay(failure.arm, cc, relist),
+    );
+  });
+  return row;
+}
+
+/**
+ * The second level for a client-local failure: its headline and its evidence,
+ * read from the STANDING set each time it is drawn — a repeat report's newer
+ * evidence replaces the older, and a failure retracted while its detail was
+ * open falls back to the list it no longer appears in.
+ */
+export function drawLocalFailureDetailOverlay(
+  arm: LocalFailure["arm"],
+  cc: WarningChipContext,
+  relist: () => HTMLElement,
+): HTMLElement {
+  const failure = cc.localFailures().find((standing) => standing.arm === arm);
+  if (failure === undefined) return relist();
+
+  const overlay = document.createElement("div");
+  overlay.className = "topbar-warning-detail";
+  overlay.setAttribute("data-detail", "");
+  overlay.append(drawWarningBack(cc, relist));
+
+  const body = document.createElement("div");
+  body.className = "topbar-warning-body";
+  body.setAttribute("data-arm", failure.arm);
+  body.append(detailName(failure.headline));
+  for (const [label, value] of failure.evidence) body.append(detailLine(`${label}: ${value}`));
+  overlay.append(body);
+  return overlay;
 }
 
 /**
@@ -159,7 +273,13 @@ export function drawWarningDetailOverlay(
   const overlay = document.createElement("div");
   overlay.className = "topbar-warning-detail";
   overlay.setAttribute("data-detail", "");
+  overlay.append(drawWarningBack(tc, () => drawWarningList(strip, tc)));
+  overlay.append(drawWarningDetail(u, tc, path));
+  return overlay;
+}
 
+/** The detail's way back to the list it was opened from. */
+function drawWarningBack(cc: WarningChipContext, relist: () => HTMLElement): HTMLElement {
   const back = document.createElement("button");
   back.type = "button";
   back.className = "topbar-warning-back";
@@ -167,12 +287,9 @@ export function drawWarningDetailOverlay(
   back.textContent = "‹ warnings";
   back.addEventListener("click", (event) => {
     event.stopPropagation();
-    tc.reveals.open("warnings", "warnings", () => drawWarningList(strip, tc));
+    cc.reveals.open("warnings", "warnings", relist);
   });
-  overlay.append(back);
-
-  overlay.append(drawWarningDetail(u, tc, path));
-  return overlay;
+  return back;
 }
 
 /** THE ARM IS THE CONCERN. */

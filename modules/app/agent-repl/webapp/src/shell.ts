@@ -33,8 +33,6 @@ export interface ShellElements {
   footer: HTMLElement;
   /** The dev-mode composer. Ships hidden; production runs composer-less. */
   composer: HTMLElement;
-  /** The client-local failure overlay. */
-  failureOverlay: HTMLElement;
   /** The full-screen login terminal overlay. Ships hidden. */
   loginOverlay: HTMLElement;
 }
@@ -54,7 +52,6 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["holdTray", "hold-tray"],
   ["footer", "footer"],
   ["composer", "composer"],
-  ["failureOverlay", "failure-overlay"],
   ["loginOverlay", "login-overlay"],
 ];
 
