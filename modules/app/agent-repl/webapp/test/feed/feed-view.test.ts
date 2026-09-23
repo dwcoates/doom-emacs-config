@@ -281,6 +281,59 @@ describe("createFeedController: upserts", () => {
     expect(host.querySelector('[data-feed-row="a"]')).toBe(element);
   });
 
+  it("redraws nothing for a row re-pushed exactly as drawn", () => {
+    // Arrange -- REMOVED TRIGGER: the daemon repaints its opening page on
+    // every turn open, and each unchanged row used to be rebuilt.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    const before = host.querySelector('[data-feed-row="a"]')?.firstElementChild;
+    // Act
+    controller.upsert(responseRow("a", "one"));
+    // Assert
+    expect(host.querySelector('[data-feed-row="a"]')?.firstElementChild).toBe(before);
+  });
+
+  it("does not ask the tail owner to follow for an unchanged re-push", () => {
+    // Arrange
+    const h = harness();
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const follows: number[] = [];
+    const tail = {
+      follow: () => follows.push(1),
+      initialPlacement: () => undefined,
+    };
+    const controller = createFeedController({
+      ctx: h.ctx,
+      host,
+      feed: "root",
+      renderers: stubRenderers(),
+      body: defaultBubbleBody,
+      revealRow: async () => false,
+      bubble: (row) => stubBubble(row),
+      bodyContext: { ctx: h.ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => false },
+      scroll: { box: { scrollTop: 0, scrollHeight: 0, clientHeight: 0 }, tail: tail as never },
+    });
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    follows.length = 0;
+    // Act
+    controller.upsert(responseRow("a", "one"));
+    // Assert
+    expect(follows).toEqual([]);
+  });
+
+  it("records an unchanged re-push at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = fixture();
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    // Act
+    controller.upsert(responseRow("a", "one"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-unchanged");
+    expect(record.context).toMatchObject({ feed: "root", row: "a" });
+  });
+
   it("refuses a row with no id, the id being the upsert key", () => {
     const { controller } = fixture();
     expect(() => controller.upsert(create(FeedRowSchema, {}))).toThrow(MalformedView);

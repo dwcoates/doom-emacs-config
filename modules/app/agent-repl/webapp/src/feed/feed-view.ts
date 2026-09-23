@@ -427,7 +427,20 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       announce();
       return;
     }
-    const known = states.has(id);
+    const held = states.get(id);
+    // A RE-PUSH OF THE ROW EXACTLY AS DRAWN CHANGES NOTHING, so it draws
+    // nothing. The daemon repaints its opening page on every turn open (up to
+    // 200 rows re-pushed unchanged); redrawing each one rebuilt its element and
+    // could move the content under a reader (owner rule, 2026-09-23: the user
+    // owns the scroll).
+    if (held !== undefined && equals(FeedRowSchema, held.row, row)) {
+      log.debug(`feed row ${id} was re-pushed unchanged; nothing is redrawn`, {
+        operation: "feed.row-unchanged",
+        context: { feed: feedName(), row: id },
+      });
+      return;
+    }
+    const known = held !== undefined;
     log.debug(`${known ? "replacing" : "appending"} feed row ${id}`, {
       operation: known ? "feed.row-replaced" : "feed.row-appended",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
