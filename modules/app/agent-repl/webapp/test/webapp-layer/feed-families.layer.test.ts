@@ -86,9 +86,10 @@ it(
 // No new drive: this reads the SAME `md` row family the test above drove, so
 // the file spends no extra suite time on it. What it adds is the one fact only
 // this chain can show — the daemon serves the tree VERBATIM now, and the WEBAPP
-// wraps it (webapp/src/metaprompt-tree.ts). This layer runs without layout, so
-// the webapp wraps at its fallback width (DEFAULT_TREE_COLS, 105); the page
-// draws every continuation line the wrap produced instead of shearing the tree.
+// wraps it (webapp/src/metaprompt-tree.ts). jsdom lays nothing out, so the
+// layer's setup stages the bubble's geometry (test/tree-layout.ts) and the
+// webapp wraps at the column budget that geometry yields; the page draws every
+// continuation line the wrap produced instead of shearing the tree.
 it(
   "draws the tree the webapp wrapped, continuation lines and rails included",
   async () => {
