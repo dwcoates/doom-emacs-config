@@ -36,12 +36,18 @@ type LiveWorkSet = sessionwatcher.LiveWorkSet
 // is the turn's own progress"), while the ⚙ chip counts it by the contract's
 // own words ("live agent-spawned subagents (the ones with feed bubbles)"). Its
 // retirement stays with its spawning call's terminal, where it has always been.
+//
+// THE SET IS ALSO WHERE A LAUNCH IS SEEN. An item the set lists for the first
+// time is detached work that has just started, and each such change mints the
+// view's focus (see launchedWork and mintFocus).
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 	var dropped, added []string
+	var minted *mintedFocus
 	r.mutate(ws, "daemon.footer.on_live_work_changed", "the footer took the live-work set",
 		dlog.Context{
 			"agents": len(live.Agents), "shells": len(live.Shells), "monitors": len(live.Monitors),
 		}, func(s *wsState) {
+			minted = mintFocus(s, launchedWork(s, s.liveWork, live), live)
 			s.liveWork = live
 			s.liveWorkSeen = true
 			dropped, added = reconcileLiveWork(s, live, r.opts.clock.Now())
@@ -55,6 +61,16 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 			"dropped":  dropped,
 			"added":    added,
 		})
+	if minted != nil {
+		r.workspaceLog(ws).Info("daemon.footer.focus_minted",
+			"detached work started, so the footer focused the expanded section on the highest-priority live kind",
+			dlog.Context{
+				"panel":      minted.panel.String(),
+				"generation": minted.generation,
+				"work_id":    minted.trigger,
+				"launched":   minted.launched,
+			})
+	}
 }
 
 // reconcileLiveWork makes the footer's DETACHED rows agree with the set: a row

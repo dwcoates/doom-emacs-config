@@ -555,7 +555,12 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	}
 	id := work.GetWork().GetValue()
 	r.mutate(ws, "daemon.footer.on_detached_work", "the footer took a detached-work announcement",
-		dlog.Context{"work_id": id}, func(s *wsState) { r.applyDetached(s, id, work) })
+		dlog.Context{"work_id": id, "adopted": agent == nil}, func(s *wsState) {
+			if agent == nil {
+				markAdopted(s, id, work)
+			}
+			r.applyDetached(s, id, work)
+		})
 }
 
 // applyDetached folds a detachment announcement into the chips.
