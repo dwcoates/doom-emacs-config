@@ -2835,6 +2835,58 @@ describe("GetLiveWork reconciliation", () => {
     );
   });
 
+  it("scopes the StartSession live-work read to its own main agent", async () => {
+    // The store is shared by every session on the host; an unscoped read
+    // handed this session other sessions' running work to close.
+    const h = harness();
+    const response = await started(h);
+    const agent =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+
+    expect(h.persistence.liveWorkSessions).toEqual([agent]);
+  });
+
+  it("scopes a joining watch's re-announcement read to its own main agent", async () => {
+    const h = harness({ backgroundTasks: true });
+    const response = await started(h);
+    const agent =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(h.persistence.liveWorkSessions).toEqual([agent, agent]);
+  });
+
+  it("reports a refused re-announcement read as a session fault, never an empty membership", async () => {
+    // `invalid_request` is this process's defect; reading it as "no book yet"
+    // would re-announce nothing and say nothing.
+    const h = harness({ backgroundTasks: true });
+    await started(h);
+    h.persistence.liveWorkError = new PersistenceError("invalid_request", "session: refused");
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const unhealthy: boolean[] = [];
+    for (let taken = 0; taken < 8 && !unhealthy.includes(true); taken++) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      const frame = next.value.frame;
+      if (frame.case !== "update") continue;
+      const update = frame.value.update;
+      if (update.case === "diagnostics") unhealthy.push(update.value.health.case === "unhealthy");
+    }
+    await iterator.return?.();
+
+    expect(unhealthy).toContain(true);
+  });
+
   it("reports a fault rather than failing the start when the store is unreachable", async () => {
     const h = harness();
     h.persistence.liveWorkError = new PersistenceError(
@@ -8073,13 +8125,12 @@ describe("a component that recovers", () => {
 /**
  * LIVE WORK THIS SESSION HAS NO START FOR, and which of two states it is in.
  *
- * WHAT THIS GUARDS: `GetLiveWork` is the store's GLOBAL open-obligation set by
- * contract — an empty request, answering "every started thing the record holds
- * no terminal for", across every conversation the store holds. So a handle with
- * no start in THIS session's book is usually another conversation's obligation
- * and not a defect at all, and reporting every one of them as a record-plane
- * loss made a healthy shim look broken on every new watch. The vendor is the
- * authority that separates the two.
+ * WHAT THIS GUARDS: `GetLiveWork` is scoped to this session's LINEAGE — the
+ * main agent and every agent it spawned. So a handle with no start in THIS main
+ * book is either work a subagent of this session announced (its start lives in
+ * that subagent's book) or work whose start the record lost. The vendor is the
+ * authority that separates the two: work it no longer holds is not a defect of
+ * the re-announcement, and the StartSession reconciliation owns its terminal.
  */
 describe("re-announcing live work the record cannot describe", () => {
   /** A session whose store holds one live handle with no start in this book. */
@@ -8105,7 +8156,7 @@ describe("re-announcing live work the record cannot describe", () => {
     await watch.return?.();
   }
 
-  it("says the work belongs to another conversation when the vendor does not hold it", async () => {
+  it("says the work is not held by this vendor process when the vendor does not hold it", async () => {
     // Arrange.
     const h = await sessionWithForeignHandle(false);
     const before = logCursor();
@@ -8114,14 +8165,14 @@ describe("re-announcing live work the record cannot describe", () => {
     await reannounce(h);
 
     // Assert.
-    expect(logContextFor(before, "belongs to another conversation")?.work_id).toBe(
+    expect(logContextFor(before, "is not held by this vendor process")?.work_id).toBe(
       "toolu_foreign",
     );
   });
 
-  // NOT A DEFECT, SO NOT A WARNING. The shared set carrying other
-  // conversations' obligations is its ordinary state.
-  it("states another conversation's obligation below warning level", async () => {
+  // NOT A DEFECT OF THE RE-ANNOUNCEMENT, SO NOT A WARNING: work the vendor no
+  // longer holds is closed by the StartSession reconciliation.
+  it("states unheld work with no start in the main book below warning level", async () => {
     // Arrange.
     const h = await sessionWithForeignHandle(false);
     const before = logCursor();
@@ -8130,7 +8181,7 @@ describe("re-announcing live work the record cannot describe", () => {
     await reannounce(h);
 
     // Assert.
-    expect(logLevelFor(before, "belongs to another conversation")).toBe("debug");
+    expect(logLevelFor(before, "is not held by this vendor process")).toBe("debug");
   });
 
   it("reports a defect when the vendor DOES still hold the undescribable work", async () => {

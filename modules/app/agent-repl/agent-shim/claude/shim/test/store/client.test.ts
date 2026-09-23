@@ -70,7 +70,11 @@ describe("createStoreClient", () => {
     const client = createStoreClient(await fakeStore());
 
     // Act.
-    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    const response = await client.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: "main-1" }),
+      }),
+    );
 
     // Assert.
     expect(response.result.case).toBe("success");
@@ -82,7 +86,11 @@ describe("createStoreClient", () => {
     const before = mockedWriteSync.mock.calls.length;
 
     // Act.
-    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    await client.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: "main-1" }),
+      }),
+    );
 
     // Assert.
     expect(

@@ -6,7 +6,8 @@
  * ARM a reconciled ending takes, because the arm is what a reader is told
  * happened.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -22,10 +23,12 @@ import {
 } from "../../src/store/reconcile.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
-import { agent, readEntry, socketPathForTest, unit } from "./persistence-fixtures.js";
+import { agent, readEntry, socketPathForTest, spawnEntry, unit } from "./persistence-fixtures.js";
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
+/** This session's main agent: the root every live-work read is scoped to. */
+const MAIN = agent("main-1");
 const RUN = unit("run-1");
 
 /**
@@ -49,6 +52,35 @@ async function reconciler(name: string) {
   store = started;
   const client = createStoreClient(started.socketPath);
   return { started, client, reconciler: createReconciler({ client, sleep: instantly }) };
+}
+
+/** A store client whose every verb but the ones given throws if called. */
+function stubClient(overrides: Partial<StoreClient>): StoreClient {
+  const refuse = (): never => {
+    throw new Error("stub store client: this suite did not expect that call");
+  };
+  return {
+    openAgentSession: refuse,
+    watchAgentSession: refuse,
+    watchBashRun: refuse,
+    readAgentPage: refuse,
+    getWorkflow: refuse,
+    getSidecarCursors: refuse,
+    getLiveWork: refuse,
+    writeBatch: refuse,
+    ...overrides,
+  };
+}
+
+/** Every structured record the logger wrote since `before`. */
+function recordsSince(before: number): Record<string, unknown>[] {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as [number, Buffer, number, number][];
+  return calls.slice(before).map(([, bytes, offset, length]) => {
+    return JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  });
 }
 
 /** One recorded bash start, as it would come back from the agent's own book. */
@@ -92,7 +124,7 @@ function recordedBashStart(line: string): conversationv1.HistoryEntryAt {
 }
 
 describe("liveWork", () => {
-  it("answers the record's open obligations", async () => {
+  it("answers the session's open obligations", async () => {
     const { started, client, reconciler: plane } = await reconciler("live-empty");
     const writer = createPersistence({
       client,
@@ -100,13 +132,178 @@ describe("liveWork", () => {
       nowMs: () => 1_000,
       sleep: async () => undefined,
     });
-    writer.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    writer.write([spawnEntry(MAIN, "book-1"), readEntry(BOOK, "unit-1", "/tmp/a")]);
     await writer.flush();
     void started;
 
-    const live = await plane.liveWork();
+    const live = await plane.liveWork(MAIN);
 
     expect(live.liveAgents.map((id) => id.value)).toContain("book-1");
+  });
+
+  it("never answers another session's open obligations", async () => {
+    // Arrange: ONE store serves every session on the host.
+    const { client, reconciler: plane } = await reconciler("live-other-session");
+    const writer = createPersistence({
+      client,
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+    });
+    writer.write([spawnEntry(agent("main-other"), "other-sub")]);
+    await writer.flush();
+
+    // Act.
+    const live = await plane.liveWork(MAIN);
+
+    // Assert.
+    expect(live.liveAgents).toEqual([]);
+  });
+
+  it("asks the store for exactly the session it was given", async () => {
+    // Arrange.
+    const asked: storev1.GetLiveWorkRequest[] = [];
+    const client = stubClient({
+      getLiveWork: async (request) => {
+        asked.push(request);
+        return create(storev1.GetLiveWorkResponseSchema, {
+          result: { case: "success", value: create(storev1.GetLiveWorkSuccessSchema, {}) },
+        });
+      },
+    });
+
+    // Act.
+    await createReconciler({ client, sleep: instantly }).liveWork(MAIN);
+
+    // Assert.
+    expect(asked.map((request) => request.session?.value)).toEqual(["main-1"]);
+  });
+
+  it("refuses an empty session as invalid_request before the store is asked", async () => {
+    // Arrange.
+    let asked = 0;
+    const client = stubClient({
+      getLiveWork: async () => {
+        asked += 1;
+        return create(storev1.GetLiveWorkResponseSchema, {});
+      },
+    });
+
+    // Act.
+    const read = createReconciler({ client, sleep: instantly }).liveWork(agent(""));
+
+    // Assert.
+    await expect(read).rejects.toMatchObject({ kind: "invalid_request" });
+    expect(asked).toBe(0);
+  });
+
+  it("logs the refusal of an empty session at error", async () => {
+    // Arrange.
+    const client = stubClient({});
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await createReconciler({ client, sleep: instantly })
+      .liveWork(agent(""))
+      .catch(() => undefined);
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "refusing an open-obligation read that names no session",
+      }),
+    );
+  });
+
+  it("surfaces the store's invalid_request as invalid_request, never as a missing book", async () => {
+    // Arrange: `unknown_agent` is read upstream as "no book yet" and served as
+    // an EMPTY set, which would silently leave every obligation unresolved.
+    const client = stubClient({
+      getLiveWork: async () =>
+        create(storev1.GetLiveWorkResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(storev1.GetLiveWorkFailureSchema, {
+              detail: "session: GetLiveWork names no session",
+              kind: {
+                case: "invalidRequest",
+                value: create(storev1.GetLiveWorkInvalidRequestSchema, { field: "session" }),
+              },
+            }),
+          },
+        }),
+    });
+
+    // Act.
+    const read = createReconciler({ client, sleep: instantly }).liveWork(MAIN);
+
+    // Assert.
+    await expect(read).rejects.toMatchObject({ kind: "invalid_request" });
+  });
+
+  it("does not replay a request the store refused as malformed", async () => {
+    // Arrange: the same bytes are refused again, so the retry schedule would
+    // only delay a defect.
+    let asked = 0;
+    const client = stubClient({
+      getLiveWork: async () => {
+        asked += 1;
+        return create(storev1.GetLiveWorkResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(storev1.GetLiveWorkFailureSchema, {
+              detail: "session: GetLiveWork names no session",
+              kind: {
+                case: "invalidRequest",
+                value: create(storev1.GetLiveWorkInvalidRequestSchema, { field: "session" }),
+              },
+            }),
+          },
+        });
+      },
+    });
+
+    // Act.
+    await createReconciler({ client, sleep: instantly })
+      .liveWork(MAIN)
+      .catch(() => undefined);
+
+    // Assert.
+    expect(asked).toBe(1);
+  });
+
+  it("logs the store's invalid_request at error, naming the field", async () => {
+    // Arrange.
+    const client = stubClient({
+      getLiveWork: async () =>
+        create(storev1.GetLiveWorkResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(storev1.GetLiveWorkFailureSchema, {
+              detail: "session: GetLiveWork names no session",
+              kind: {
+                case: "invalidRequest",
+                value: create(storev1.GetLiveWorkInvalidRequestSchema, { field: "session" }),
+              },
+            }),
+          },
+        }),
+    });
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await createReconciler({ client, sleep: instantly })
+      .liveWork(MAIN)
+      .catch(() => undefined);
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "the store refused the open-obligation read as malformed",
+      }),
+    );
   });
 
   it("raises a PersistenceError when the store refuses", async () => {
@@ -141,7 +338,7 @@ describe("liveWork", () => {
       },
     };
 
-    await expect(createReconciler({ client: refusing, sleep: instantly }).liveWork()).rejects.toBeInstanceOf(
+    await expect(createReconciler({ client: refusing, sleep: instantly }).liveWork(MAIN)).rejects.toBeInstanceOf(
       PersistenceError,
     );
   });
@@ -196,7 +393,7 @@ describe("liveWork", () => {
     };
 
     // Act.
-    const answer = await createReconciler({ client: busyOnce, sleep: instantly }).liveWork();
+    const answer = await createReconciler({ client: busyOnce, sleep: instantly }).liveWork(MAIN);
 
     // Assert.
     expect(asked).toBe(2);
@@ -229,7 +426,7 @@ describe("liveWork", () => {
       },
     };
 
-    await expect(createReconciler({ client: empty, sleep: instantly }).liveWork()).rejects.toMatchObject({
+    await expect(createReconciler({ client: empty, sleep: instantly }).liveWork(MAIN)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
   });
@@ -426,8 +623,8 @@ describe("announceLiveWork", () => {
   });
 
   // WHO OWNS THE RECORD is whoever can tell the two cases apart, and this
-  // function cannot: the obligation set is store-global, so an undescribable
-  // handle is either a lost start or another conversation's work.
+  // function cannot: the obligation set spans the session's whole lineage, so
+  // an undescribable handle is either a lost start or a subagent's work.
   it("hands an undescribable handle to a caller that asked for it", () => {
     // Arrange.
     const undescribed: conversationv1.DetachedWorkId[] = [];
@@ -719,7 +916,7 @@ describe("liveWork against a store that cannot be reached", () => {
     };
 
     // Act, Assert.
-    await expect(createReconciler({ client, sleep: instantly }).liveWork()).rejects.toMatchObject({
+    await expect(createReconciler({ client, sleep: instantly }).liveWork(MAIN)).rejects.toMatchObject({
       kind: "store_unavailable",
       message: "connect ECONNREFUSED",
     });
