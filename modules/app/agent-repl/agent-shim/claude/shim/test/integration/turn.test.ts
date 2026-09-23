@@ -33,7 +33,6 @@ import {
   entryPrompt,
   historyPage,
   killTurnCause,
-  killTurnLive,
   readHistoryKind,
   sessionStarted,
   sessionUpdate,
@@ -1214,36 +1213,39 @@ describe("KillTurn", () => {
     watch.close();
   });
 
-  test("live detached work refuses, NAMING it", async () => {
-    // The refusal set is transitive via the spawn-provenance map — the one
-    // bounded piece of state the shim keeps, and only so this refusal can name
-    // what forcing would destroy.
+  // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN. A non-forced kill used to
+  // refuse `live` here, so an interjection could never interrupt a turn that
+  // had spawned background work; now it interrupts the turn and the agent the
+  // turn spawned runs on.
+  test("unforced, it interrupts a turn beside its own live background agent and the agent runs on", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-detached-hold" }));
     const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
     });
     const detached = entryFrame(watchAgentEntry(announced));
-    if (detached?.result.case !== "detachedWork") {
-      throw new Error("expected the run's announcement");
-    }
-    const run = detached.result.value.work?.value ?? "";
+    if (detached?.result.case !== "detachedWork") throw new Error("expected the agent's announcement");
+    const subagent = detached.result.value.work?.value ?? "";
 
     const response = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
     );
+    const terminal = await untilTerminal(watch);
 
-    expect(killTurnCause(response)).toBe("live");
-    // NAMING IT is the whole point of the refusal: a count says only that
-    // SOMETHING is live, and the refusal exists so a consumer can tell the user
-    // exactly what forcing would destroy.
-    expect(killTurnLive(response).liveWork.map((work) => work.value)).toEqual([run]);
+    expect(turnKilled(response).how.case).toBe("agentOnly");
+    const frame = entryFrame(terminal);
+    if (frame?.result.case !== "success" || frame.result.value.outcome.case !== "interrupted") {
+      throw new Error("the turn did not conclude AgentSuccess.interrupted");
+    }
+    // AND THE AGENT IS STILL LIVE: its own stop is accepted, which only a live
+    // agent's is — one the shim retired answers `unknown_agent`.
+    updateAccepted(await shim.clients.h1.updateAgent(stopAgent(agentId(subagent))));
     watch.close();
   });
 
@@ -1264,9 +1266,6 @@ describe("KillTurn", () => {
       throw new Error("expected the run's announcement");
     }
     const run = detached.result.value.work?.value ?? "";
-    const refused = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
-    );
 
     const response = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: true }),
@@ -1275,11 +1274,8 @@ describe("KillTurn", () => {
     const killed = turnKilled(response);
     expect(killed.how.case).toBe("forced");
     if (killed.how.case !== "forced") throw new Error("the forced kill did not report forced");
-    // THE SAME ITEM THE REFUSAL NAMED, now named as stopped: the two lists are
-    // the consumer's before-and-after of one act, and a count would not say
-    // they are about the same work.
+    // NAMED, not counted: the consumer learns exactly which work died.
     expect(killed.how.value.stoppedWork.map((work) => work.value)).toEqual([run]);
-    expect(killTurnLive(refused).liveWork.map((work) => work.value)).toEqual([run]);
     watch.close();
   });
 
@@ -1483,6 +1479,41 @@ describe("scope, arms and ordering the verbs owe", () => {
     stopBashAccepted(
       await shim.clients.h1.stopBash(create(shimv1.StopBashRequestSchema, { work: workId(run) })),
     );
+    watch.close();
+  });
+
+  // THE INCIDENT THIS PINS: an interjection's unforced kill of a later turn
+  // took down every background agent earlier turns had spawned, because the
+  // vendor's interrupt fails closed unless the per-task stop is declared.
+  test("an unforced KillTurn spares a background agent an EARLIER turn spawned", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!subagent-detached-utterance" }),
+    );
+    const announced = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") throw new Error("expected the agent's announcement");
+    const subagent = detached.result.value.work?.value ?? "";
+    await untilTerminal(watch);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!hold" }));
+
+    const response = await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: turnId("t2"), force: false }),
+    );
+    await untilTerminal(watch);
+
+    expect(turnKilled(response).how.case).toBe("agentOnly");
+    // AND t1'S AGENT IS STILL LIVE: its own stop is accepted, which only a live
+    // agent's is — one the shim retired answers `unknown_agent`.
+    updateAccepted(await shim.clients.h1.updateAgent(stopAgent(agentId(subagent))));
     watch.close();
   });
 

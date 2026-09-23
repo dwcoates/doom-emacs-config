@@ -358,8 +358,8 @@ the narrower/alternate state**:
   one.
 - `!send-message-refused` — declared `SendMessage` refusal; no capture
   recorded one.
-- `!subagent-detached-live`, `!subagent-failed` — declared subagent states;
-  no capture recorded either.
+- `!subagent-detached-live`, `!subagent-detached-hold`, `!subagent-failed` —
+  declared subagent states; no capture recorded any of the three.
 - `!perm-no-standing` — declared "ask offered no standing" arm; untested by
   any capture.
 - `!perm-undecidable` — a KNOWN-OPEN arm by the scenario's own doc comment:
