@@ -212,6 +212,218 @@ export class KeepaliveRewind {
   }
 }
 
+/**
+ * What one vendor message is, relative to the keep-alive turn scope.
+ *
+ * `keepalive` is THE TAG: true when the keep-alive turn produced the message,
+ * so every row and every push it gives rise to must stay off every served
+ * plane. `endsKeepalive` is true on exactly one message per keep-alive: the
+ * `result` that answers the keep-alive's own send.
+ */
+export interface KeepaliveAttribution {
+  readonly keepalive: boolean;
+  readonly endsKeepalive: boolean;
+}
+
+/** The one keep-alive send that may be outstanding. */
+interface PendingKeepalive {
+  readonly uuid: string;
+  readonly turnId: string;
+}
+
+/** The attribution of every message the keep-alive did not produce. */
+const NOT_KEEPALIVE: KeepaliveAttribution = { keepalive: false, endsKeepalive: false };
+
+/**
+ * The client uuids a vendor frame names as the send(s) it answers, or absence
+ * when the frame names none.
+ *
+ * THE SDK'S OWN ATTRIBUTION (sdk.d.ts, `user_message_uuid` /
+ * `user_message_uuids`): a send that carries a client `uuid` has it echoed on
+ * its turn's first top-level assistant message, its first non-ping stream
+ * event, every `thinking_tokens` frame and its `result`, and a queued send a
+ * running turn folds in takes the echo over from there. The list is the
+ * complete one — "a consumer that sent any of them can bind this reply to its
+ * own send by finding its uuid anywhere in the list" — and the single field is
+ * the fallback the SDK names for older producers.
+ *
+ * Read off the SDK's DECLARED fields, never an index signature, so an SDK that
+ * stops declaring them is a type error here rather than a keep-alive that
+ * silently stops being recognized.
+ */
+function answeredSends(message: SdkMessage): readonly string[] | undefined {
+  let stamps: { user_message_uuid?: string; user_message_uuids?: string[] } | undefined;
+  if (message.type === "assistant" || message.type === "stream_event") {
+    // Subagent frames are never stamped; they belong to whatever turn is running.
+    if (message.parent_tool_use_id !== null) return undefined;
+    stamps = message;
+  } else if (message.type === "result") {
+    stamps = message;
+  } else if (message.type === "system" && message.subtype === "thinking_tokens") {
+    stamps = message;
+  }
+  if (stamps === undefined) return undefined;
+  if (Array.isArray(stamps.user_message_uuids) && stamps.user_message_uuids.length > 0) {
+    return stamps.user_message_uuids;
+  }
+  if (typeof stamps.user_message_uuid === "string" && stamps.user_message_uuid !== "") {
+    return [stamps.user_message_uuid];
+  }
+  return undefined;
+}
+
+/** A frame that is a turn's REPLY rather than its preamble: the vendor stamps the first of these. */
+function isTopLevelReply(message: SdkMessage): boolean {
+  if (message.type === "assistant") return message.parent_tool_use_id === null;
+  // Every declared stream event is a reply frame: the SDK's event union has no
+  // `ping` arm, which is the one kind the vendor leaves unstamped.
+  if (message.type === "stream_event") return message.parent_tool_use_id === null;
+  return message.type === "system" && message.subtype === "thinking_tokens";
+}
+
+/**
+ * THE KEEP-ALIVE TURN SCOPE: which vendor messages the keep-alive produced.
+ *
+ * WHY THE SHIM'S OWN "OPEN TURN" IS NOT THE ANSWER (the leak of 2026-09-23).
+ * The shim used to tag every message that arrived while its keep-alive turn
+ * was open, and to close that turn on the next `result`. But the vendor runs
+ * turns no send asked for — a background task's notification starts one — and
+ * those end in a `result` exactly as a send's turn does. On the owner's
+ * workspace the keep-alive was pushed, the vendor first ran a
+ * task-notification turn, and ITS result closed the keep-alive: that turn's
+ * rows were tagged keep-alive (the store refused them as an identity change),
+ * and the keep-alive's real answer — `.` — arrived after the close, untagged,
+ * and was drawn as a green final answer.
+ *
+ * SO THE VENDOR ATTRIBUTES, NOT THE ARRIVAL ORDER. Every keep-alive send
+ * carries a client uuid the shim mints ({@link begin}); the vendor echoes it on
+ * the replies to that send ({@link answeredSends}). A vendor turn is the
+ * keep-alive's from its first frame naming the keep-alive's uuid until its
+ * `result`; a frame naming some other send, or a turn whose first reply names
+ * none, is not the keep-alive's. Frames that carry no stamp — a turn's later
+ * blocks, its tool traffic, its subagents — belong to whichever vendor turn is
+ * running, which is what {@link attribute} carries from message to message.
+ *
+ * NEVER FROM THE TEXT. A reply is never classified by what it says — the
+ * model's "." is evidence of nothing — only by the send it answers.
+ *
+ * WHAT IT DOES NOT CLAIM. The frames a vendor turn emits BEFORE its first
+ * reply — its `init`, a `UserPromptSubmit` hook, a status line — carry no
+ * stamp, and there a task-notification turn's preamble is indistinguishable
+ * from the keep-alive's. They stay untagged: `init` folds only into session
+ * facts the engine states itself, and a succeeded hook draws nothing. Tagging
+ * every unstamped message while a keep-alive is pending is exactly the defect
+ * above, turned around.
+ *
+ * ONE SEND AT A TIME, CONSTANT SIZE. The keep-alive is only ever submitted into
+ * an idle session and a real prompt is refused while it is pending
+ * (`turn_already_open.keepalive`), so at most one keep-alive uuid is ever
+ * outstanding.
+ */
+export class KeepaliveScope {
+  private send: PendingKeepalive | undefined;
+  /**
+   * The vendor turn now running, as its frames have stated it: not yet, some
+   * other send's (or nobody's), or the pending keep-alive's own.
+   */
+  private running: "unstated" | "other" | PendingKeepalive = "unstated";
+
+  /** A keep-alive send is about to be pushed under `uuid`. */
+  begin(uuid: string, turnId: string): void {
+    if (this.send !== undefined) {
+      // The cadence never beats into an open turn, so a second keep-alive
+      // while one is pending means the one-submitter bookkeeping broke.
+      throw new Error(
+        `keep-alive scope: keep-alive ${turnId} began while ${this.send.turnId} was still unanswered`,
+      );
+    }
+    this.send = { uuid, turnId };
+    LOGGER.debug({ turn: turnId, client_uuid: uuid }, "a keep-alive send opened its turn scope");
+  }
+
+  /** The pending keep-alive's client uuid, so a re-delivery carries the same one. */
+  pendingUuid(): string | undefined {
+    return this.send?.uuid;
+  }
+
+  /**
+   * The keep-alive will never be answered (its submission failed, or the query
+   * it was pushed onto is gone): close the scope without an answer.
+   */
+  abandon(reason: string): void {
+    const held = this.send;
+    this.send = undefined;
+    this.running = "unstated";
+    if (held === undefined) return;
+    LOGGER.info(
+      { turn: held.turnId, client_uuid: held.uuid, reason },
+      "a keep-alive's turn scope closed WITHOUT its answer",
+    );
+  }
+
+  /**
+   * A new query is bound: it is running no vendor turn yet. A pending
+   * keep-alive stays pending — the rewind's recovery re-delivers the same send
+   * onto the new query, uuid and all.
+   */
+  queryBound(): void {
+    this.running = "unstated";
+  }
+
+  /** Whether the vendor turn now running is the keep-alive's. For callbacks between messages. */
+  producing(): boolean {
+    return typeof this.running === "object";
+  }
+
+  /**
+   * Tag one vendor message, in arrival order. Called ONCE per message, before
+   * anything else reads it, so every consumer sees the same answer.
+   */
+  attribute(message: SdkMessage): KeepaliveAttribution {
+    const held = this.send;
+    const sends = answeredSends(message);
+    if (sends !== undefined) {
+      const next = held !== undefined && sends.includes(held.uuid) ? held : "other";
+      if (next !== this.running) {
+        LOGGER.debug(
+          {
+            answers: sends.join(","),
+            keepalive_pending: held !== undefined,
+            attributed: next === "other" ? "other" : "keepalive",
+          },
+          "a vendor frame named the send it answers; the running vendor turn is attributed",
+        );
+      }
+      this.running = next;
+    } else if (this.running === "unstated" && isTopLevelReply(message)) {
+      // THE FIRST REPLY OF A TURN STARTED BY A STAMPED SEND IS ALWAYS STAMPED
+      // (sdk.d.ts). An unstamped one opens a turn no send of the shim's started.
+      this.running = "other";
+    }
+    const running = this.running;
+    if (message.type !== "result") {
+      return typeof running === "object" ? { keepalive: true, endsKeepalive: false } : NOT_KEEPALIVE;
+    }
+    // A RESULT ENDS THE VENDOR TURN, whoever's it was.
+    this.running = "unstated";
+    if (typeof running !== "object") {
+      if (held !== undefined) {
+        LOGGER.info(
+          { keepalive_turn: held.turnId },
+          "a vendor turn the keep-alive did not start ended; the keep-alive's own turn stays open",
+        );
+      }
+      return NOT_KEEPALIVE;
+    }
+    this.send = undefined;
+    LOGGER.debug(
+      { turn: running.turnId, client_uuid: running.uuid },
+      "the keep-alive's own result closed its turn scope",
+    );
+    return { keepalive: true, endsKeepalive: true };
+  }
+}
+
 /** How the cadence schedules itself; injected so a suite never waits on a clock. */
 export interface KeepaliveScheduler {
   setInterval(handler: () => void, ms: number): unknown;

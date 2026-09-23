@@ -392,13 +392,18 @@ it(
   TURN_TEST_MS,
 );
 
+// THE SHELL BUBBLE IS A FEED (feed.proto, FeedRow.shell_head; the head/body
+// split landed in ac808eb57): the ROOT feed carries the bubble's HEAD —
+// command, clock, state — as a `shellHead` row, and the spool `detachedShell`
+// BODY rides only the bubble's own sub-feed. So the row this turn draws on the
+// root feed is the head.
 it(
   "draws a detached shell through the shell bubble",
   async () => {
     // Arrange / Act
-    const row = await family("bash-detach", "detachedShell");
+    const row = await family("bash-detach", "shellHead");
     // Assert
-    expect(row.dataset.rowKind).toBe("detachedShell");
+    expect(row.dataset.rowKind).toBe("shellHead");
     expect(row.querySelector(".shell-bubble, .shell-head")).not.toBeNull();
   },
   TURN_TEST_MS,

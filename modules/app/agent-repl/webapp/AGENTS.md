@@ -98,6 +98,8 @@ and are contract on the same terms:
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
 | `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `2` \| `0` | one-bubble, 2026-09-23 |
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
+| `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
+| `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId) and `data-jump-unresolved` (`notDrawn` \| `noFeedEntry`) | footer-rows-and-work-ids, 2026-09-23 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 
 ## Commands
@@ -278,10 +280,37 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   `latestEntry` in src/feed/feed.ts, "can see" defined once by
   `latestEntryVisible`), evaluated on every scroll event, resize and row
   upsert. That latch moves nothing; later content then keeps the tail in view.
-  An active reply selection holds it off until the selection clears. A follow
+  An active reply selection holds it off until the selection clears, and a
+  click on the feed OUTSIDE ANY BUBBLE (owner ruling 2026-09-23;
+  `isFeedBackground` in src/feed/background-click.ts is the one hit test: the
+  scroll box, its direct children, or a root row's `.feed-item` wrapper) is
+  what clears it — by sending the daemon `SelectResponse` CLEAR, never locally;
+  the daemon's cleared push parks through `selectionCleared`. A follow
   ends when the reader scrolls the latest entry away. The reader's own wheel
   redirect and
   collapse click are input, not causes, and are the only other writes.
+  `detachedWorkSelected` CENTERS the picked card in the feed's viewport
+  (`detachedWorkDelta`: midpoint onto midpoint, a card taller than the
+  viewport top-aligned, clamped at the feed's edges), and a reveal opens only
+  the containers selecting the row requires. `prependCompensation` also covers
+  a bubble whose sub-feed lies wholly above the viewport collapsing (a
+  negative shift). The expanded footer's section is capped at
+  `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
+  reader's, and a push redraws the rows INSIDE the kept section so it is never
+  detached or reset.
+- **A DETACHED-WORK ROW'S CLICK HAS EXACTLY ONE OUTCOME** (owner ruling,
+  2026-09-23). Every agent, shell and monitor row in the expanded footer
+  carries the daemon's `FooterJump`: `entry` selects that FeedId through the
+  feed's `selectDetachedWork`; `unresolved` (and an entry the reveal could not
+  land, an unreadable answer, or a throw) draws "not on screen" at the row and
+  writes `footer.expanded.jump-unreachable` with `work_id`, `kind`, `feed_id`,
+  `jump` and `reason`. The notice is the footer mount's state
+  (`JumpNotices`), painted by every draw — never a mark on the clicked
+  element, which the next whole-view push throws away.
+- **A COLLAPSED BUBBLE HOLDS NOTHING** (owner ruling, 2026-09-23). Expanding a
+  subagent or async bubble paints the sub-feed's newest `OpenFeed` page and
+  tails it; collapsing disposes the child controller, its rows and the
+  bubble's composer, and the next expansion starts from a fresh page.
   NOTHING MOVES A SCROLL BOX INDIRECTLY EITHER: a redraw never re-attaches an
   element already in place (`placeChildren`, src/dom.ts), a response re-push
   updates its bubble in place, a card holding a box the reader scrolled is
@@ -427,9 +456,17 @@ duration actually observed, never left at a tool default. Measured against
 |---|---|---|---|---|
 | unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
 | integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
+| `COLD_BOOT_TIMEOUT_MS` (`bootColdOnce`, `test/integration/harness.ts`) | 900ms (the hook bound) | 1800ms | 602ms at a load average of ~60 (971ms at 100-300) | a file's FIRST app boot compiles the whole app lazily, ~3-4x a warm boot; it is paid in a `beforeAll` so no test body carries it |
 | `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
 
-No per-site exception was needed: nothing in either suite (xterm/login
+**Every integration file that boots the app calls `bootColdOnce()` at its top
+level.** The first boot in an isolated file is its cold start, and under load
+it alone crossed the 900ms `testTimeout`, failing exactly the first test of
+each file. The helper pays it in a `beforeAll` under its own measured bound
+(above); `harness.self.test.ts` fails any file that calls `startHarness`
+without it.
+
+Apart from that cold boot, no per-site exception was needed: nothing in either suite (xterm/login
 terminal included) took long enough to need its own raised `timeout`. If a
 future test genuinely needs more than these globals, give it its own
 `{ timeout: ... }` with a one-line comment naming why, rather than raising

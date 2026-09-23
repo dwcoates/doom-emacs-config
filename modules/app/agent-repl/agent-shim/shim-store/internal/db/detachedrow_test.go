@@ -177,3 +177,61 @@ func TestARunFrameNeverDowngradesTheKindAnAnnouncementSet(t *testing.T) {
 		t.Fatalf("kind = %q, want %q", got, detachedKindBash)
 	}
 }
+
+func TestABashTerminalNeverRelabelsASubagentsRow(t *testing.T) {
+	// Arrange: a detached subagent, announced as such under its spawn handle.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "detached:work-1", "agent-1",
+		frameItem(detachedFrame("agent-1", createdWork("work-1", subagentWork("agent-2"))))))
+
+	// Act: a producer closes the same handle with a SHELL terminal.
+	writeOK(t, d, bashEntry("w2", "bash:work-1:terminal", "work-1", bashSuccess()))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT kind FROM detached_work WHERE work_id = 'work-1'`); got != detachedKindSubagent {
+		t.Fatalf("kind = %q, want the announced %q to stand", got, detachedKindSubagent)
+	}
+}
+
+func TestABashTerminalOnASubagentsRowStillClosesIt(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "detached:work-1", "agent-1",
+		frameItem(detachedFrame("agent-1", createdWork("work-1", subagentWork("agent-2"))))))
+
+	// Act
+	writeOK(t, d, bashEntry("w2", "bash:work-1:terminal", "work-1", bashSuccess()))
+
+	// Assert: the obligation the write closes is closed.
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM detached_work WHERE ended_at_ms IS NULL`); got != 0 {
+		t.Fatalf("open detached rows = %d, want 0", got)
+	}
+}
+
+func TestAKindConflictIsRecordedAtError(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	writeOK(t, d, pageEntry("w1", "detached:work-1", "agent-1",
+		frameItem(detachedFrame("agent-1", createdWork("work-1", subagentWork("agent-2"))))))
+
+	// Act
+	writeOK(t, d, bashEntry("w2", "bash:work-1:terminal", "work-1", bashSuccess()))
+
+	// Assert
+	s.assertLogged(t, "error", "the recorded kind stands")
+}
+
+func TestAMatchingKindWritesNoConflict(t *testing.T) {
+	// Arrange: an announced shell run.
+	d, s := newStore(t)
+	writeOK(t, d, pageEntry("w1", "detached:"+bashHandle, "agent-1",
+		frameItem(detachedFrame("agent-1", createdWork(bashHandle, bashWork())))))
+
+	// Act: its own terminal, under the same handle.
+	writeOK(t, d, bashEntry("w2", "bash:"+bashHandle+":terminal", bashHandle, bashSuccess()))
+
+	// Assert
+	if errs := recordsAtLevel(t, s, "error"); len(errs) != 0 {
+		t.Fatalf("error records = %v, want none", errs)
+	}
+}

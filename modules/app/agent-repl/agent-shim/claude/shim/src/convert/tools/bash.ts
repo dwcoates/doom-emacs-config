@@ -320,12 +320,27 @@ export const bashConverter: ToolConverter = {
     const exited = statedExit(outcome);
     if (outcome.isError && exited === undefined) {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a shell call could not be performed");
+      // THE SETTLED FRAME STANDS ALONE: it restates what the call named, since
+      // the start it upserts over is gone once it lands. A call that named
+      // nothing has no start either, so it gets no failure frame, exactly as
+      // it got no announcement.
+      const line = requestedLine(call);
+      if (line === undefined) {
+        LOGGER.debug(
+          { tool_use_id: call.toolUseId },
+          "a shell call failed with no command line to restate; no failure frame is produced",
+        );
+        return undefined;
+      }
       return {
         case: "bash",
         value: create(conversationv1.AgentBashSchema, {
           result: {
             case: "failure",
-            value: create(conversationv1.AgentBashFailureSchema, { error: failureOf(outcome) }),
+            value: create(conversationv1.AgentBashFailureSchema, {
+              error: failureOf(outcome),
+              command: bashCommand(call, line),
+            }),
           },
         }),
       };

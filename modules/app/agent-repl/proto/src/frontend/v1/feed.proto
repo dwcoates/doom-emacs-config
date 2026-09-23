@@ -1205,6 +1205,19 @@ message FeedSubagent {
     FeedSubagentLive live = 5;
     FeedSubagentSettled settled = 6;
   }
+  // THE DETACHED-WORK ID, drawn verbatim in the head so any async work can be
+  // referred to stably (owner ruling, 2026-09-23). SET IFF THE BUBBLE IS
+  // DETACHED WORK (the row is `detached_subagent`); a synchronous spawn is the
+  // turn's own progress and carries none. The value is the run's
+  // `conversation.v1.DetachedWorkId` exactly as the daemon and the footer hold
+  // it (`FooterWorkId` names the same work by the same string).
+  optional FeedDetachedWorkId work_id = 7;
+}
+// The detached-work id element: the id a reader uses to refer to one unit of
+// async work. Drawn verbatim; never parsed.
+message FeedDetachedWorkId {
+  // The id, exactly as the daemon holds it.
+  string text = 1;
 }
 // The label element.
 message FeedSubagentLabel {
@@ -1295,6 +1308,10 @@ message FeedShell {
     FeedShellLive live = 4;
     FeedShellSettled settled = 5;
   }
+  // THE DETACHED-WORK ID, drawn verbatim in the HEAD (owner ruling,
+  // 2026-09-23). Set on every head: a shell bubble exists only for detached
+  // work. UNSET on the spool BODY row, which draws the spool alone.
+  optional FeedDetachedWorkId work_id = 6;
 }
 // The command element.
 message FeedShellCommand {

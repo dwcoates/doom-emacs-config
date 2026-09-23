@@ -1018,6 +1018,36 @@ describe("the turn's terminal", () => {
     expect(completed.answer?.value).toBe("msg-a:0");
   });
 
+  it("names a block cut at the output ceiling as the ANSWER, since it had spoken", () => {
+    const fold = createFold();
+    fold.onSdkMessage(
+      assistant("msg-cut", [{ type: "text", text: "The answer begins and then stops mid-" }], {
+        message: { stop_reason: "max_tokens" },
+      }),
+      foldContext(),
+    );
+
+    const output = fold.onSdkMessage(streamMessage("result_success"), foldContext());
+
+    const success = output.turnEnded?.frame.result.value as conversationv1.AgentSuccess;
+    const completed = success.outcome.value as conversationv1.AgentCompleted;
+    expect(completed.answer?.value).toBe("msg-cut:0");
+  });
+
+  it("names no answer for a failed block that said nothing", () => {
+    const fold = createFold();
+    fold.onSdkMessage(
+      assistant("msg-refused", [{ type: "text", text: "" }], { message: { stop_reason: "refusal" } }),
+      foldContext(),
+    );
+
+    const output = fold.onSdkMessage(streamMessage("result_success"), foldContext());
+
+    const success = output.turnEnded?.frame.result.value as conversationv1.AgentSuccess;
+    const completed = success.outcome.value as conversationv1.AgentCompleted;
+    expect(completed.answer).toBeUndefined();
+  });
+
   it("carries the terminal in the rows too, since the feed's stop notice has no other source", () => {
     const fold = createFold();
 
