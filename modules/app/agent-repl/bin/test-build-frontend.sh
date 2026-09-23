@@ -164,6 +164,13 @@ write_webapp_index() {
 # Fresh artifacts: built outputs PLUS the source-tree stamps saying they came
 # from the revision the fixture is standing at, which is what "fresh" means now.
 make_fresh_artifacts() {
+    make_fresh_artifacts_files "$1"
+    stamp_fresh_source_trees "$1"
+}
+
+# make_fresh_artifacts_files ROOT — the built outputs alone, in their live
+# locations, without the stamps that say what they were built from.
+make_fresh_artifacts_files() {
     local root="$1"
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
     write_webapp_index "$root/webapp/dist/index.html"
@@ -172,7 +179,6 @@ make_fresh_artifacts() {
     echo built > "$root/home/.cache/agent-repl/bin/shim-store"
     echo built > "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
     echo built > "$root/home/.cache/agent-repl/bin/shim-lock"
-    stamp_fresh_source_trees "$root"
 }
 
 # PATH stubs for npm/go that log to $STUB_LOG and touch their artifact.
@@ -194,12 +200,24 @@ fi
 # Touch the conventional artifact for the cwd project. The webapp's index.html
 # carries a Vite-shaped entry-bundle reference because build-frontend.sh reads
 # the build id out of it and fails the build when it is missing.
+#
+# The outputs follow the same redirections the real builds honor, so a staging
+# run lands where build-frontend.sh pointed it: the shim's SHIM_BUILD_OUTFILE
+# (build.mjs's own override) and Vite's `--outDir`.
+outdir=dist prev=""
+for arg in "$@"; do
+    [ "$prev" = "--outDir" ] && outdir="$arg"
+    prev="$arg"
+done
 case "$PWD" in
-    *shim*)   mkdir -p dist; echo built > dist/main.js ;;
+    *shim*)
+        out="${SHIM_BUILD_OUTFILE:-dist/main.js}"
+        mkdir -p "$(dirname "$out")"; echo built > "$out"
+        ;;
     *webapp*)
-        mkdir -p dist
+        mkdir -p "$outdir"
         printf '<!doctype html><script type="module" crossorigin src="/assets/index-%s.js"></script>\n' \
-               "${WEBAPP_ENTRY_HASH:-BuiltHash0}" > dist/index.html
+               "${WEBAPP_ENTRY_HASH:-BuiltHash0}" > "$outdir/index.html"
         ;;
 esac
 exit 0
@@ -1131,6 +1149,249 @@ t_in_place_go_builds_pass_buildvcs_false() {
     rm -rf "$root"
 }
 t_in_place_go_builds_pass_buildvcs_false
+
+# --- staging mode (--out DIR) ------------------------------------------------
+#
+# THE STAGED LAYOUT IS A CONTRACT the daemon's deploy (daemon/internal/deploy)
+# reads, so every slot is pinned by path here.
+#
+# These fixtures use NO real git: a fake `git` on PATH answers the handful of
+# plumbing calls the script makes (toplevel, HEAD, ls-files, status) with fixed
+# values. Staging mode never consults staleness, so the only thing git feeds is
+# the stamps, and a fixed answer makes their expected content exact.
+
+FAKE_HEAD="0123456789abcdef0123456789abcdef01234567"
+
+# make_fake_git BINDIR — the fake git. Anything it does not model is an error,
+# so a new git call in the script fails the harness instead of passing on a
+# guess.
+make_fake_git() {
+    cat > "$1/git" <<EOF
+#!/usr/bin/env bash
+dir=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -C) dir="\$2"; shift 2 ;;
+        -c) shift 2 ;;
+        *) break ;;
+    esac
+done
+case "\$1 \${2:-}" in
+    "rev-parse --show-toplevel") printf '%s\n' "\$dir" ;;
+    "rev-parse HEAD") printf '%s\n' "$FAKE_HEAD" ;;
+    "ls-files -s") printf '100644 %s 0\t%s\n' "$FAKE_HEAD" fake/source.go ;;
+    "status --porcelain") : ;;
+    *) printf 'fake git: unexpected invocation: %s\n' "\$*" >&2; exit 2 ;;
+esac
+EOF
+    chmod +x "$1/git"
+}
+
+# new_staging_root — a fixture with no git repository at all and the fake git
+# on PATH. Echoes the root.
+new_staging_root() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root" nogit
+    make_stubs "$root/stubs"
+    make_fake_git "$root/stubs"
+    : > "$root/stub.log"
+    printf '%s' "$root"
+}
+
+# fake_source_tree NAME — the source-tree id the fake git yields for NAME,
+# computed by the SAME library function the script stamps with.
+fake_source_tree() {
+    local paths
+    paths="$(deploy_stamp_system_paths "$1" "")"
+    # shellcheck disable=SC2086
+    PATH="$STAGING_ROOT/stubs:$PATH" source_tree_id "$STAGING_ROOT" $paths
+}
+
+# live_files ROOT — every file standing in the fixture's LIVE artifact
+# locations, one per line.
+live_files() {
+    local root="$1" dir
+    for dir in "$root/agent-shim/claude/shim/dist" "$root/webapp/dist" \
+               "$root/daemon/bin" "$root/home/.cache/agent-repl/bin"; do
+        [ -d "$dir" ] && find "$dir" -type f
+    done
+    return 0
+}
+
+t_out_stages_the_shim() {
+    local root out dist; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    out="$root/staging"; dist="$out/agent-shim/claude/shim/dist"
+    run_script "$root" --out "$out" shim >/dev/null
+    if [ "$(cat "$dist/main.js" 2>/dev/null)" = built ] &&
+           [ "$(cat "$dist/.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$dist/.source-tree" 2>/dev/null)" = "$(fake_source_tree shim)" ]; then
+        pass "staging: shim -> DIR/agent-shim/claude/shim/dist/main.js with its stamps"
+    else
+        fail "staging: shim -> DIR/agent-shim/claude/shim/dist/main.js with its stamps" \
+             "staged: $(find "$out" -type f 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
+t_out_stages_the_webapp() {
+    local root out dist; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    out="$root/staging"; dist="$out/webapp/dist"
+    WEBAPP_ENTRY_HASH=StagedHash1 run_script "$root" --out "$out" webapp >/dev/null
+    if [ -f "$dist/index.html" ] &&
+           [ "$(cat "$dist/.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$dist/.source-tree" 2>/dev/null)" = "$(fake_source_tree webapp)" ] &&
+           [ "$(cat "$dist/.build-id" 2>/dev/null)" = StagedHash1 ] &&
+           grep -qxF "npm run build -- --outDir $dist --emptyOutDir" "$root/stub.log"; then
+        pass "staging: webapp -> the whole dist in DIR/webapp/dist with its stamps"
+    else
+        fail "staging: webapp -> the whole dist in DIR/webapp/dist with its stamps" \
+             "staged: $(find "$out" -type f 2>/dev/null) stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_out_stages_the_daemon() {
+    local root out bin; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    out="$root/staging"; bin="$out/daemon/bin"
+    run_script "$root" --out "$out" daemon >/dev/null
+    if [ -f "$bin/claude-repld" ] &&
+           [ "$(cat "$bin/.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$bin/.source-tree" 2>/dev/null)" = "$(fake_source_tree daemon)" ]; then
+        pass "staging: daemon -> DIR/daemon/bin/claude-repld with its stamps"
+    else
+        fail "staging: daemon -> DIR/daemon/bin/claude-repld with its stamps" \
+             "staged: $(find "$out" -type f 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
+# t_out_stages_a_cache_bin_service TARGET NAME — one staged cache-bin binary.
+t_out_stages_a_cache_bin_service() {
+    local target="$1" name="$2" root out bin; root="$(new_staging_root)"; STAGING_ROOT="$root"
+    out="$root/staging"; bin="$out/cache-bin"
+    run_script "$root" --out "$out" "$target" >/dev/null
+    if [ -f "$bin/$name" ] &&
+           [ "$(cat "$bin/.$name.built-sha" 2>/dev/null)" = "$FAKE_HEAD" ] &&
+           [ "$(cat "$bin/.$name.source-tree" 2>/dev/null)" = "$(fake_source_tree "$name")" ]; then
+        pass "staging: $target -> DIR/cache-bin/$name with its stamps"
+    else
+        fail "staging: $target -> DIR/cache-bin/$name with its stamps" \
+             "staged: $(find "$out" -type f 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
+t_out_writes_nothing_live() {
+    local root live; root="$(new_staging_root)"
+    run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
+    live="$(live_files "$root")"
+    if [ -z "$live" ] && [ "$(grep -c 'build' "$root/stub.log")" -eq 6 ]; then
+        pass "staging: a staging run writes nothing into the live artifact locations"
+    else
+        fail "staging: a staging run writes nothing into the live artifact locations" \
+             "live: $live stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# In place, a fixture whose stamps match the (fake) source revision is fresh and
+# nothing builds. This is the control for the staging case below it: the same
+# fixture under --out must build every target.
+make_fake_fresh_live_artifacts() {
+    local root="$1" name paths
+    make_fresh_artifacts_files "$root"
+    for name in shim webapp daemon shim-store shim-claude-sidecar shim-lock; do
+        paths="$(deploy_stamp_system_paths "$name" "")"
+        # shellcheck disable=SC2086
+        write_source_tree "$(tree_stamp_path "$root" "$name")" \
+            "$(PATH="$root/stubs:$PATH" source_tree_id "$root" $paths)"
+    done
+}
+
+t_in_place_fresh_fixture_builds_nothing() {
+    local root; root="$(new_staging_root)"
+    make_fake_fresh_live_artifacts "$root"
+    run_script "$root" shim webapp daemon store sidecar lock >/dev/null
+    if [ ! -s "$root/stub.log" ]; then
+        pass "staleness: in place, fresh stamps still skip every build"
+    else
+        fail "staleness: in place, fresh stamps still skip every build" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# Fresh by every stamp, live AND staged: the staging dir already holds a
+# complete build of this exact revision from a previous run. Staging never
+# consults a stamp, so every target builds again anyway.
+t_out_builds_fresh_targets_unconditionally() {
+    local root; root="$(new_staging_root)"
+    make_fake_fresh_live_artifacts "$root"
+    run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
+    : > "$root/stub.log"
+    run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^npm run build' "$root/stub.log")" -eq 2 ] &&
+           [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ]; then
+        pass "staging: every selected target builds even when the live and staged ones are fresh"
+    else
+        fail "staging: every selected target builds even when the live and staged ones are fresh" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_out_go_builds_pass_buildvcs_false() {
+    local root; root="$(new_staging_root)"
+    run_script "$root" --out "$root/staging" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           go_builds_all_pass_buildvcs_false "$root/stub.log"; then
+        pass "buildvcs: every staged go build passes -buildvcs=false"
+    else
+        fail "buildvcs: every staged go build passes -buildvcs=false" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_out_refuses_a_relative_dir() {
+    local root rc out; root="$(new_staging_root)"
+    set +e
+    out="$(run_script "$root" --out relative/staging daemon 2>&1)"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 1 ] && grep -q "must be an absolute directory" <<<"$out" &&
+           [ ! -s "$root/stub.log" ]; then
+        pass "staging: a relative --out dir is refused with exit 1 before any build"
+    else
+        fail "staging: a relative --out dir is refused with exit 1 before any build" \
+             "rc=$rc out=$out stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_out_creates_an_absent_dir() {
+    local root; root="$(new_staging_root)"
+    run_script "$root" --out "$root/not/yet/there" deps >/dev/null
+    if [ -d "$root/not/yet/there" ]; then
+        pass "staging: an absent --out dir is created"
+    else
+        fail "staging: an absent --out dir is created" "no $root/not/yet/there"
+    fi
+    rm -rf "$root"
+}
+
+t_out_stages_the_shim
+t_out_stages_the_webapp
+t_out_stages_the_daemon
+t_out_stages_a_cache_bin_service store shim-store
+t_out_stages_a_cache_bin_service sidecar shim-claude-sidecar
+t_out_stages_a_cache_bin_service lock shim-lock
+t_out_writes_nothing_live
+t_in_place_fresh_fixture_builds_nothing
+t_out_builds_fresh_targets_unconditionally
+t_out_go_builds_pass_buildvcs_false
+t_out_refuses_a_relative_dir
+t_out_creates_an_absent_dir
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
