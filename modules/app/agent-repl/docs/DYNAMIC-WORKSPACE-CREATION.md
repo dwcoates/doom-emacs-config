@@ -22,10 +22,20 @@ workspace creation modes").
 | dynamic normal | a prompt | same | daemon mints | optional |
 | dynamic fork | a prompt | same | daemon mints | required in practice; the fork's parent is the current workspace |
 | static | repository and name | picked | supplied | none |
+| static fork | a name | current workspace's repository | supplied | none; the fork's parent is the current workspace |
 
 The child variants are their own commands, not a prefix argument (owner
 ruling, 2026-09-12; `lisp/verbs.el` `agent-repl-create-child-workspace`,
 `agent-repl-create-child-workspace-static`, bound `SPC TAB c` / `SPC TAB C`).
+
+The static fork is the named counterpart of the dynamic fork
+(`agent-repl-fork-workspace-static`, bound `SPC TAB F`, beside the dynamic
+fork's `SPC TAB f`): it asks a required name and no prompt, so the fork comes
+up idle on the forked conversation. Both fork commands share
+`agent-repl-verbs--create-fork`. The daemon accepts a fork carrying a name and
+no prompt: `CreateWorkspaceStandard.name` and `CreateWorkspaceParent.fork` are
+independent in the proto, `validateCreateWorkspaceRequest` constrains neither,
+and `branchFor` takes a supplied name before it ever consults the prompt.
 
 The Emacs side already implements this shape:
 `agent-repl-verbs--dynamic-repository` (`lisp/verbs.el`) reads the repository

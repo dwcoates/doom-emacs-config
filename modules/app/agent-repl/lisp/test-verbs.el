@@ -1205,6 +1205,183 @@ branch -- so a `read-string' here would be a question the ruling removed."
       ;; Assert.
       (should-not (plist-get (agent-repl-test-verbs--request :create) :parent)))))
 
+;;;; ---- Create: the named fork ----
+
+(ert-deftest agent-repl-verbs-named-fork-sends-the-name-inside-a-forking-parent ()
+  "`SPC TAB F\=' sends its name, the current workspace as parent, and the fork."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-fork")))
+      ;; Act.
+      (agent-repl-fork-workspace-static)
+      ;; Assert.
+      (let* ((request (agent-repl-test-verbs--request :create))
+             (parent (plist-get request :parent)))
+        (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
+                       "named-fork"))
+        (should (equal (plist-get parent :workspace) (agent-repl-test-verbs--ref)))
+        (should (eq (plist-get parent :fork) t))))))
+
+(ert-deftest agent-repl-verbs-named-fork-sends-no-initial-prompt ()
+  "`SPC TAB F\=' asks no prompt and sends none: the fork comes up idle."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+              ((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (_p) (error "a named fork asks for no prompt")))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-fork")))
+      ;; Act.
+      (agent-repl-fork-workspace-static)
+      ;; Assert.
+      (should-not (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create)
+                                                   :form)
+                                        :value)
+                             :initial-prompt)))))
+
+(ert-deftest agent-repl-verbs-named-fork-refuses-a-blank-name ()
+  "The named fork\='s name is REQUIRED: a blank one is refused before send."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+              ((symbol-function 'read-string) (lambda (&rest _) "   ")))
+      ;; Act / Assert.
+      (should-error (agent-repl-fork-workspace-static) :type 'user-error)
+      (should-not agent-repl-test-verbs--sent))))
+
+(ert-deftest agent-repl-verbs-named-fork-asks-no-repository ()
+  "The named fork targets the CURRENT workspace\='s repository, never a picked one."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "named-fork"))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (error "a named fork must not ask for a repository"))))
+        ;; Act.
+        (agent-repl-fork-workspace-static)
+        ;; Assert.
+        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-named-fork-selects-the-created-workspace ()
+  "`SPC TAB F\=' stands on the fork, exactly as `SPC TAB f\=' does."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+              ((symbol-function 'read-string) (lambda (&rest _) "named-fork")))
+      ;; Act.
+      (agent-repl-fork-workspace-static)
+      (agent-repl-test-verbs--tab-arrives "fork-id" "fork-ws")
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--selected
+                     '("/tmp/agent-repl-test/fork"))))))
+
+;;;; ---- Create: invocation and abandoned-read logging ----
+
+(defconst agent-repl-test-verbs--creation-commands
+  '(agent-repl-create-workspace
+    agent-repl-create-child-workspace
+    agent-repl-create-workspace-static
+    agent-repl-create-child-workspace-static
+    agent-repl-fork-workspace
+    agent-repl-fork-workspace-static
+    agent-repl-create-oneshot)
+  "Every interactive creation command.")
+
+(defun agent-repl-test-verbs--quits-p (command)
+  "Return non-nil when calling COMMAND signals `quit'.
+`should-error' cannot observe a quit: it catches `error' conditions only,
+and a quit escaping a test is reported as QUIT rather than as a failure."
+  (condition-case nil
+      (progn (funcall command) nil)
+    (quit t)))
+
+(ert-deftest agent-repl-verbs-creation-commands-log-their-invocation-before-reading ()
+  "Each creation command records its invocation BEFORE its first question.
+A fork that left no trace was indistinguishable from one never run."
+  (dolist (command agent-repl-test-verbs--creation-commands)
+    (ert-info ((symbol-name command))
+      ;; Arrange: the first question records what was logged, then quits.
+      (let (logs logged-at-first-read)
+        (agent-repl-test-verbs--with nil
+          (cl-letf (((symbol-function 'agent-repl--info)
+                     (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                    ((symbol-function 'agent-repl-verbs--dynamic-repository)
+                     (lambda (_c)
+                       (setq logged-at-first-read (copy-sequence logs))
+                       (signal 'quit nil)))
+                    ((symbol-function 'agent-repl-verbs--read-repository)
+                     (lambda ()
+                       (setq logged-at-first-read (copy-sequence logs))
+                       (signal 'quit nil))))
+            ;; Act.
+            (should (agent-repl-test-verbs--quits-p command))))
+        ;; Assert.
+        (should (member (format "elisp.verbs.create-invoked command=%s" command)
+                        logged-at-first-read))))))
+
+(ert-deftest agent-repl-verbs-creation-commands-log-a-quit-read-and-resignal-it ()
+  "A quit out of a creation question is recorded, then propagates as a quit."
+  ;; Arrange: each command, and the question it is quit out of.
+  (dolist (case '((agent-repl-create-workspace prompt)
+                  (agent-repl-create-child-workspace prompt)
+                  (agent-repl-create-workspace-static name)
+                  (agent-repl-create-child-workspace-static name)
+                  (agent-repl-fork-workspace prompt)
+                  (agent-repl-fork-workspace-static name)
+                  (agent-repl-create-oneshot prompt)))
+    (pcase-let ((`(,command ,read) case))
+      (ert-info ((symbol-name command))
+        (let (logs)
+          (agent-repl-test-verbs--with nil
+            (cl-letf (((symbol-function 'agent-repl--info)
+                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                      ((symbol-function 'agent-repl-verbs--section-of-ws)
+                       (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+                      ((symbol-function 'agent-repl-verbs--read-repository)
+                       (lambda () (agent-repl-test-verbs--repo-ref)))
+                      ((symbol-function 'agent-repl-verbs--read-prompt)
+                       (lambda (_p) (signal 'quit nil)))
+                      ((symbol-function 'read-string)
+                       (lambda (&rest _) (signal 'quit nil))))
+              ;; Act / Assert: the quit still reaches the caller.
+              (should (agent-repl-test-verbs--quits-p command))
+              (should-not agent-repl-test-verbs--sent)))
+          ;; Assert: and it was recorded, naming the question.
+          (should (seq-some
+                   (lambda (text)
+                     (string-search
+                      (format "elisp.verbs.create-read-abandoned command=%s read=%s signal=quit"
+                              command read)
+                      text))
+                   logs)))))))
+
+(ert-deftest agent-repl-verbs-named-fork-logs-a-refused-blank-name ()
+  "A blank name's `user-error\=' is recorded against the name question."
+  ;; Arrange.
+  (let (logs)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+                ((symbol-function 'read-string) (lambda (&rest _) "")))
+        ;; Act.
+        (should-error (agent-repl-fork-workspace-static) :type 'user-error)))
+    ;; Assert.
+    (should (seq-some
+             (lambda (text)
+               (string-search
+                "elisp.verbs.create-read-abandoned command=agent-repl-fork-workspace-static read=name signal=user-error"
+                text))
+             logs))))
+
 ;;;; ---- Create: standing on what was just created ----
 
 (ert-deftest agent-repl-verbs-create-command-selects-the-created-workspace ()
