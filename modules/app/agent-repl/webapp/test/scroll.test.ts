@@ -8,11 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   PIN_PX,
   armedWheelAction,
-  captureFeedAnchor,
   feedTopChanged,
   installIntentScroll,
-  restoreFeedAnchor,
-  type AnchorBox,
   innerScrollerAt,
   TailFollow,
   isPinnedToBottom,
@@ -530,31 +527,6 @@ describe("TailFollow", () => {
     expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 1000]);
   });
 
-  it("does not end a follow when a restore places the box", () => {
-    // Arrange — a rebuild restoring the reader's place writes scrollTop; the
-    // owner must not read its own write as the reader changing their mind.
-    const box = atTail();
-    const a = armed(box);
-    // Act
-    a.tail.place(400);
-    a.scroll();
-    // Assert
-    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 400]);
-  });
-
-  it("does not begin a follow when a place lands the box on the tail", () => {
-    // Arrange — a backfill shifting the view down by the height it grew above
-    // the viewport can land exactly at the bottom. That is arithmetic, not the
-    // reader asking to follow again.
-    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-    const a = armed(box);
-    // Act
-    a.tail.place(700);
-    a.scroll();
-    // Assert
-    expect(a.tail.isFollowing()).toBe(false);
-  });
-
   it("does not begin a follow when a shift lands the box on the tail", () => {
     // Arrange — a backfill's growth compensation can add exactly enough to
     // reach the bottom. That is arithmetic about content, not the reader
@@ -812,111 +784,6 @@ describe("revealNode", () => {
 });
 
 /**
- * THE READER'S PLACE ACROSS A REBUILD.
- *
- * A resync re-delivers the same history and the feed rebuilds from nothing.
- * Nothing about the data changed, so nothing about what the reader is looking
- * at may change either — the "jerk and reset" the user reported is a rebuild
- * that dropped them wherever the new layout landed.
- */
-describe("feed anchoring across a rebuild", () => {
-  /** A scroll box whose items are at fixed offsets, mounted by key. */
-  const box = (over: Partial<AnchorBox> & { offsets?: Record<string, number> } = {}): AnchorBox => {
-    const offsets = over.offsets ?? {};
-    return {
-      scrollTop: over.scrollTop ?? 0,
-      scrollHeight: over.scrollHeight ?? 1000,
-      clientHeight: over.clientHeight ?? 200,
-      querySelector: (selector: string) => {
-        const key = /\[data-key="(.*)"\]/.exec(selector)?.[1] ?? "";
-        const offsetTop = offsets[key];
-        return offsetTop === undefined ? null : { offsetTop };
-      },
-    };
-  };
-
-  it("anchors on the topmost item still on screen", () => {
-    // Arrange — the reader is 300px down; a, at 100, has scrolled away.
-    const b = box({ scrollTop: 300 });
-    // Act
-    const anchor = captureFeedAnchor(
-      b,
-      [
-        { key: "a", offsetTop: 100 },
-        { key: "b", offsetTop: 320 },
-        { key: "c", offsetTop: 600 },
-      ],
-      false,
-    );
-    // Assert
-    expect(anchor).toEqual({ key: "b", offsetPx: 20, pinned: false });
-  });
-
-  it("restores the anchor item to the same offset from the viewport top", () => {
-    // Arrange — the rebuild moved b from 320 to 480: every height above it
-    // changed, and the reader must not notice.
-    const b = box({ scrollTop: 0, offsets: { b: 480 } });
-    // Act
-    restoreFeedAnchor(b, { key: "b", offsetPx: 20, pinned: false }, new TailFollow(b));
-    // Assert
-    expect(b.scrollTop).toBe(460);
-  });
-
-  it("puts a reader who was following the tail back at the tail", () => {
-    // Arrange — pinned readers want the newest content, not a fixed pixel.
-    const b = box({ scrollTop: 0, scrollHeight: 2000 });
-    // Act
-    restoreFeedAnchor(b, { key: "", offsetPx: 0, pinned: true }, new TailFollow(b));
-    // Assert
-    expect(b.scrollTop).toBe(2000);
-  });
-
-  it("anchors on the tail when the owner says the reader is following it", () => {
-    // Arrange — the owner's latched answer, not this function's own reading.
-    const b = box({ scrollTop: 800 - PIN_PX + 1, scrollHeight: 1000, clientHeight: 200 });
-    // Act
-    const anchor = captureFeedAnchor(b, [{ key: "a", offsetTop: 900 }], true);
-    // Assert
-    expect(anchor?.pinned).toBe(true);
-  });
-
-  it("anchors on an item for a reader inside the pin band who stopped following", () => {
-    // Arrange — THE ANCHOR'S HALF OF THE BUG. Geometry called a reader who had
-    // nudged a few px off the bottom "pinned", and the restore then parked them
-    // at the tail — the same yank, on a rebuild instead of a render. The owner
-    // says otherwise, and the owner is the only one asked.
-    const b = box({ scrollTop: 800 - PIN_PX + 1, scrollHeight: 1000, clientHeight: 200 });
-    // Act
-    const anchor = captureFeedAnchor(b, [{ key: "a", offsetTop: 900 }], false);
-    // Assert
-    expect(anchor).toEqual({ key: "a", offsetPx: 900 - b.scrollTop, pinned: false });
-  });
-
-  it("leaves the box alone when the anchor item did not survive the rebuild", () => {
-    // Arrange — a clear discarded the item the reader was on; inventing a
-    // position for it would move them somewhere they never were.
-    const b = box({ scrollTop: 77, offsets: {} });
-    // Act
-    const restored = restoreFeedAnchor(
-      b,
-      { key: "gone", offsetPx: 20, pinned: false },
-      new TailFollow(b),
-    );
-    // Assert
-    expect([restored, b.scrollTop]).toEqual([false, 77]);
-  });
-
-  it("captures nothing for an empty feed, so a rebuild has nothing to restore", () => {
-    // Arrange — scrolled up in a box with no items at all.
-    const b = box({ scrollTop: 10, scrollHeight: 1000, clientHeight: 200 });
-    // Act
-    const anchor = captureFeedAnchor(b, [], false);
-    // Assert
-    expect(anchor).toBeNull();
-  });
-});
-
-/**
  * THE DRIFT GUARD ON THE OWNER.
  *
  * The defect `TailFollow` exists to end was not a wrong formula —
@@ -970,42 +837,6 @@ describe("the tail-follow decision has exactly one owner", () => {
 });
 
 describe("a load-more prepend does not jump the viewport", () => {
-  /** A scroll box whose items are at fixed offsets, mounted by key. */
-  const box = (over: Partial<AnchorBox> & { offsets?: Record<string, number> } = {}): AnchorBox => {
-    const offsets = over.offsets ?? {};
-    return {
-      scrollTop: over.scrollTop ?? 0,
-      scrollHeight: over.scrollHeight ?? 1000,
-      clientHeight: over.clientHeight ?? 200,
-      querySelector: (selector: string) => {
-        const key = /\[data-key="(.*)"\]/.exec(selector)?.[1] ?? "";
-        const offsetTop = offsets[key];
-        return offsetTop === undefined ? null : { offsetTop };
-      },
-    };
-  };
-
-  it("preserves the reading position across a prepend of older messages", () => {
-    // Arrange — the reader sits 300px down, looking at `b` 20px below the
-    // viewport top. A page of ten older messages then lands ABOVE everything,
-    // pushing `b` down by 800px. The reader asked for MORE of what they had,
-    // not to be moved off it.
-    const before = box({ scrollTop: 300 });
-    const anchor = captureFeedAnchor(
-      before,
-      [
-        { key: "a", offsetTop: 100 },
-        { key: "b", offsetTop: 320 },
-      ],
-      false,
-    );
-    const after = box({ scrollTop: 300, scrollHeight: 1800, offsets: { b: 1120 } });
-    // Act
-    restoreFeedAnchor(after, anchor, new TailFollow(after));
-    // Assert — `b` sits at exactly the same 20px from the viewport top.
-    expect(after.scrollTop).toBe(1100);
-  });
-
   it("a NEW item at the feed's top is what says content was inserted above", () => {
     // Arrange / Act / Assert
     expect(feedTopChanged("older-1", "b-tail")).toBe(true);
@@ -1042,27 +873,6 @@ describe("sectionFor detached box", () => {
   });
 });
 
-describe("captureFeedAnchor exhausted scan", () => {
-  it("captures nothing when every item sits above the viewport top", () => {
-    // Arrange — a reader scrolled past the last item, so the walk runs off the
-    // end without ever finding an item still on screen.
-    const box: AnchorBox = {
-      scrollTop: 900,
-      scrollHeight: 1000,
-      clientHeight: 300,
-      querySelector: () => null,
-    };
-    const items = [
-      { key: "a", offsetTop: 0 },
-      { key: "b", offsetTop: 400 },
-    ];
-    // Act
-    const anchor = captureFeedAnchor(box, items, false);
-    // Assert
-    expect(anchor).toBeNull();
-  });
-});
-
 describe("TailFollow on a box shorter than its viewport", () => {
   it("clamps the reconcile baseline at zero rather than a negative reach", () => {
     // Arrange — a feed with less content than viewport: scrollHeight minus
@@ -1076,33 +886,6 @@ describe("TailFollow on a box shorter than its viewport", () => {
     expect(tail.isFollowing()).toBe(true);
   });
 });
-
-describe("restoreFeedAnchor key escaping", () => {
-  it("escapes a quote in the anchor key instead of building a broken selector", () => {
-    // Arrange — a key carrying the one character that would end the selector's
-    // attribute string early.
-    const seen: string[] = [];
-    const box: AnchorBox = {
-      scrollTop: 0,
-      scrollHeight: 1000,
-      clientHeight: 300,
-      querySelector: (sel: string) => {
-        seen.push(sel);
-        return { offsetTop: 500 };
-      },
-    };
-    const placed: number[] = [];
-    // Act
-    restoreFeedAnchor(box, { key: 'a"b', offsetPx: 20, pinned: false }, {
-      park: () => {},
-      place: (top: number) => placed.push(top),
-    });
-    // Assert
-    expect(seen).toEqual(['[data-key="a\\"b"]']);
-    expect(placed).toEqual([480]);
-  });
-});
-
 
 /**
  * `observeScrollBox` — THE FOOTER OCCLUSION, at its source.
