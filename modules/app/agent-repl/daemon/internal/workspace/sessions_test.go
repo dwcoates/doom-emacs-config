@@ -74,6 +74,17 @@ type fakeClient struct {
 	// onKill is the supervisor's deregistration, armed by the fake spawn: the
 	// real client releases the supervisor's hold on its exit decode.
 	onKill func()
+	// killTurns records every KillTurn request, and killTurnErr fails it.
+	killTurns   []*shimv1.KillTurnRequest
+	killTurnErr error
+}
+
+func (c *fakeClient) KillTurn(_ context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error) {
+	c.killTurns = append(c.killTurns, req)
+	if c.killTurnErr != nil {
+		return nil, c.killTurnErr
+	}
+	return &shimv1.KillTurnResponse{Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{}}}, nil
 }
 
 func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
@@ -278,6 +289,8 @@ func (s *fakeSupervisor) Adopt(ctx context.Context, _ ids.WorkspaceID, _ string,
 type fakeWatcher struct {
 	sessionwatcher.Watcher
 	closed bool
+	// turn is what TurnInFlight answers, nil for an idle session.
+	turn *ids.TurnID
 	// standDown is the fixture's shared step order, appended to when the
 	// daemon declares the session ending.
 	standDown *[]string
@@ -293,7 +306,7 @@ func (w *fakeWatcher) Close() error { w.closed = true; return nil }
 
 func (w *fakeWatcher) Connected() bool { return true }
 
-func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return nil }
+func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return w.turn }
 
 func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet { return sessionwatcher.LiveWorkSet{} }
 
