@@ -8509,3 +8509,241 @@ describe("foreground work on the 0.3.280 vendor, which starts a task for every c
     expect(response.result.case).toBe("failure");
   });
 });
+
+describe("refreshing the context reading after a main-agent API response", () => {
+  /** An API response as the vendor emits it, carrying usage unless told not to. */
+  function apiResponse(opts: { parent?: string | null; usage?: boolean } = {}): SdkMessage {
+    const message: Record<string, unknown> = { id: "msg_ctx", role: "assistant", content: [] };
+    if (opts.usage !== false) {
+      message.usage = {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      };
+    }
+    return {
+      type: "assistant",
+      uuid: "ctx-assistant-uuid",
+      session_id: "s",
+      parent_tool_use_id: opts.parent ?? null,
+      message,
+    } as never;
+  }
+
+  /** How many context probes the vendor has been asked for. */
+  function probes(h: Harness): number {
+    return h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
+  }
+
+  /** Let every queued probe run to its push. */
+  async function drained(): Promise<void> {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  /** A vendor whose probes each wait for the test to answer them. */
+  function heldProbes(h: Harness): { answer: (total: number) => void; asked: () => number } {
+    const pending: ((usage: ContextUsageLike) => void)[] = [];
+    const query = h.queries[0]?.query;
+    if (query === undefined) throw new Error("no query to hold");
+    const base = query.contextUsage;
+    query.getContextUsage = (): Promise<ContextUsageLike> =>
+      new Promise((resolve) => {
+        pending.push(resolve);
+      });
+    return {
+      answer: (total) => {
+        const next = pending.shift();
+        if (next === undefined) throw new Error("no probe is waiting");
+        next({ ...base, totalTokens: total });
+      },
+      asked: () => pending.length,
+    };
+  }
+
+  it.each([
+    { name: "a main-agent response carrying usage asks for one probe", message: () => apiResponse(), want: 1 },
+    { name: "a subagent's response asks for none", message: () => apiResponse({ parent: "toolu_sub" }), want: 0 },
+    { name: "a main-agent message with no usage asks for none", message: () => apiResponse({ usage: false }), want: 0 },
+  ])("$name", async ({ message, want }) => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const before = probes(h);
+
+    // Act.
+    await h.engine.onSdkMessage(message());
+    await drained();
+
+    // Assert.
+    expect(probes(h) - before).toBe(want);
+  });
+
+  it("asks for no probe on a keep-alive's response", async () => {
+    // Arrange: a keep-alive turn is open.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    h.scheduler.fire(0);
+    await drained();
+    const before = probes(h);
+
+    // Act.
+    await h.engine.onSdkMessage(apiResponse());
+    await drained();
+
+    // Assert.
+    expect(probes(h) - before).toBe(0);
+  });
+
+  it("pushes the refreshed reading while the turn is still open", async () => {
+    // Arrange: the context has grown since the session's opening reading.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const query = h.queries[0]?.query;
+    if (query === undefined) throw new Error("no query");
+    query.contextUsage = { ...query.contextUsage, totalTokens: 4242 };
+
+    // Act.
+    const seen = await pushedUpdates(
+      h,
+      (update) =>
+        update.case === "contextUsage" && update.value.totalTokens === 4242n ? update.value : undefined,
+      async () => {
+        await h.engine.onSdkMessage(apiResponse());
+        await drained();
+      },
+    );
+
+    // Assert.
+    expect(seen).toHaveLength(1);
+  });
+
+  it("coalesces the responses that land while a refresh is queued", async () => {
+    // Arrange: the first refresh is in flight and held by the vendor.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const held = heldProbes(h);
+    await h.engine.onSdkMessage(apiResponse());
+    await drained();
+
+    // Act: three more responses land while it is held.
+    await h.engine.onSdkMessage(apiResponse());
+    await h.engine.onSdkMessage(apiResponse());
+    await h.engine.onSdkMessage(apiResponse());
+    held.answer(101);
+    await drained();
+
+    // Assert: they rode ONE queued probe.
+    expect(held.asked()).toBe(1);
+  });
+
+  it("pushes a turn-end reading after the mid-turn reading it queued behind", async () => {
+    // Arrange: a mid-turn refresh is held by the vendor.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const held = heldProbes(h);
+
+    // Act: the turn ends while the refresh is still held, then the vendor
+    // answers both probes in order.
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "contextUsage" ? update.value.totalTokens : undefined),
+      async () => {
+        await h.engine.onSdkMessage(apiResponse());
+        await drained();
+        const ending = h.engine.onSdkMessage(resultMessage());
+        await drained();
+        held.answer(110);
+        await drained();
+        held.answer(120);
+        await ending;
+        await drained();
+      },
+    );
+
+    // Assert: the subscription opens on the session's standing reading (0),
+    // then the two probes' readings arrive in the order they were asked for.
+    expect(seen.filter((total) => total !== 0n)).toEqual([110n, 120n]);
+  });
+
+  /** A session whose next probe cannot even report its own failure. */
+  async function unreportableProbe(): Promise<Harness> {
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const query = h.queries[0]?.query;
+    if (query === undefined) throw new Error("no query");
+    query.getContextUsage = () => Promise.reject(new Error("the vendor is busy"));
+    vi.spyOn(h.engine.pushes, "fault").mockImplementationOnce(() => {
+      throw new Error("the fault could not be recorded");
+    });
+    return h;
+  }
+
+  it("records a refresh that failed before it could push, at ERROR with its cause", async () => {
+    // Arrange.
+    const h = await unreportableProbe();
+    const from = logCursor();
+
+    // Act.
+    await h.engine.onSdkMessage(apiResponse());
+    await drained();
+
+    // Assert.
+    expect(logLevelFor(from, "the mid-turn context refresh failed")).toBe("error");
+    expect(logContextFor(from, "the mid-turn context refresh failed")?.cause).toBe("the fault could not be recorded");
+  });
+
+  it("still runs the next probe after one failed outright", async () => {
+    // Arrange: a refresh has failed before it could push.
+    const h = await unreportableProbe();
+    await h.engine.onSdkMessage(apiResponse());
+    await drained();
+    const query = h.queries[0]?.query;
+    if (query === undefined) throw new Error("no query");
+    let asked = 0;
+    query.getContextUsage = (): Promise<ContextUsageLike> => {
+      asked += 1;
+      return Promise.resolve(query.contextUsage);
+    };
+
+    // Act.
+    await h.engine.onSdkMessage(apiResponse());
+    await drained();
+
+    // Assert.
+    expect(asked).toBe(1);
+  });
+
+  it("raises the context-usage fault when a mid-turn probe fails", async () => {
+    // Arrange: the vendor answers the session's opening probe, then refuses.
+    let answered = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = async (): Promise<ContextUsageLike> => {
+          answered += 1;
+          if (answered > 1) throw new Error("the vendor is busy mid-turn");
+          return query.contextUsage;
+        };
+      },
+    });
+    await started(h);
+    await realPrompt(h, "turn-1");
+
+    // Act.
+    await h.engine.onSdkMessage(apiResponse());
+    await drained();
+
+    // Assert.
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("diagnostics is the only arm here");
+    const health = update.value.health;
+    const components = health.case === "unhealthy" ? health.value.faults.map((fault) => fault.component) : [];
+    expect(components).toContain("vendor-context-usage");
+  });
+});
