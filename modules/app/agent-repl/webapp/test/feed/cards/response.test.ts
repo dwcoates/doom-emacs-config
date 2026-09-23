@@ -1040,7 +1040,8 @@ describe("the wrapped tree a settled response carries", () => {
       // Assert — fit-content up to the 77% cap, never pinned at the cap width.
       expect(width).toBe("fit-content");
       expect(width).not.toBe("77%");
-      expect(maxWidth).toBe("77%");
+      expect(maxWidth).toBe("var(--bubble-max-width)");
+      expect(stylesheet).toMatch(/--bubble-max-width:\s*77%;/);
       el.remove();
     } finally {
       teardown();
@@ -1652,7 +1653,7 @@ describe("the thinking bubble's two-line cap", () => {
       configurable: true,
       get: () => {
         if (cascadedValue(scroll, "max-height") === "50vh") return lines * LINE_PX;
-        return Math.min(lines, resolvedNumber(cascadedValue(scroll, "--cap-lines"))) * LINE_PX;
+        return Math.min(lines, resolvedNumber(cascadedValue(scroll, "--bubble-cap-lines"))) * LINE_PX;
       },
     });
   }
@@ -1680,7 +1681,7 @@ describe("the thinking bubble's two-line cap", () => {
       // Act
       const scroll = mounted(thinking("success"), 5);
       // Assert
-      expect(cascadedValue(scroll, "--cap-lines")).toBe("2");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("2");
     } finally {
       teardown();
     }
@@ -1693,7 +1694,7 @@ describe("the thinking bubble's two-line cap", () => {
       // Act
       const scroll = mounted(thinking("update"), 5);
       // Assert
-      expect(cascadedValue(scroll, "--cap-lines")).toBe("2");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("2");
     } finally {
       teardown();
     }
@@ -1795,7 +1796,7 @@ describe("the thinking bubble's two-line cap", () => {
       );
       // Assert — the shared budget, so three lines fit with no fade.
       expect([
-        cascadedValue(scroll, "--cap-lines"),
+        cascadedValue(scroll, "--bubble-cap-lines"),
         scroll.classList.contains(HAS_MORE_CLASS),
       ]).toEqual(["var(--feed-cap-lines)", false]);
     } finally {
@@ -1875,10 +1876,10 @@ describe("the data-driven final-answer green", () => {
     // falls back to green the moment the selection clears. (var()-resolved
     // colours are not observable under jsdom; selector + order is the
     // deterministic proof, mirrored from styles.test.ts.)
-    expect(el.matches(".bubble.assistant.final-response:not(.thinking-bubble)")).toBe(true);
-    expect(el.matches(".bubble.assistant.final-response.response-selected")).toBe(true);
-    const green = stylesheet.indexOf(".bubble.assistant.final-response:not(.thinking-bubble)");
-    const blue = stylesheet.indexOf(".bubble.assistant.final-response.response-selected");
+    expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
+    expect(el.matches(".bubble.final-response.response-selected")).toBe(true);
+    const green = stylesheet.indexOf('.bubble.final-response:not([data-variant="thinking"])');
+    const blue = stylesheet.indexOf(".bubble.final-response.response-selected");
     expect(green).toBeGreaterThanOrEqual(0);
     expect(blue).toBeGreaterThan(green);
   });
