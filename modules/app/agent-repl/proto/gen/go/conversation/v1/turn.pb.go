@@ -238,7 +238,8 @@ type isTurnKilled_How interface {
 }
 
 type TurnKilled_AgentOnly struct {
-	// Nothing it spawned was live; the main agent was interrupted.
+	// Only the main agent was interrupted: nothing it spawned was live, or
+	// the kill was not forced and what it spawned runs on.
 	AgentOnly *TurnKilledAgentOnly `protobuf:"bytes,1,opt,name=agent_only,json=agentOnly,proto3,oneof"`
 }
 
@@ -337,6 +338,7 @@ func (x *TurnKilledForced) GetStoppedWork() []*DetachedWorkId {
 }
 
 // The turn could not be killed without force: work it spawned is live.
+// NOT PRODUCED since 2026-09-23 (see shim.v1 KillTurnFailure.live).
 type TurnLive struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Every detached item this turn spawned, transitively, that is live now.

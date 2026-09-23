@@ -8207,3 +8207,15 @@ pure presentation. `ContextPanelView` rewritten as resolver-composed
 typed sections (composed header/figures — the client never does
 arithmetic), with message_breakdown.tool_calls the auto-folded foldable
 render per the ruling. THE TRIAGE'S CONTRACT INCREMENTS ARE ALL LANDED.
+
+## 2026-09-23 — KillTurn: an unforced kill ends only the synchronous turn (doc comments; landed)
+
+Owner rule: an interrupt ends ONLY the synchronous turn and never stops
+detached work, which ends only through its own per-task stop or an explicit
+forced kill. `KillTurnRequest.force = false` now interrupts the turn and
+leaves every live spawned item running with its streams open; an unforced
+kill of an already-closed turn answers `no_turn_open`. `force = true` is
+unchanged. `TurnKilled.agent_only` now also covers an unforced kill that
+spared live work. `KillTurnFailure.live` / `TurnLive` are NO LONGER
+PRODUCED; the arm is retained, documented as such, pending an owner ruling
+on removal. No field, arm or number changed.
