@@ -167,14 +167,29 @@ export interface ResultSpec {
   readonly extraModelUsage?: Record<string, Record<string, unknown>>;
 }
 
-/** One live detached item the mock is tracking. */
+/** One task the mock is tracking, foreground or background. */
 export interface LiveTask {
   readonly taskId: string;
   readonly toolUseId: string;
   readonly kind: "local_bash" | "local_agent" | "local_workflow" | "monitor";
   readonly description: string;
-  /** Set once the item has been moved to the background by the user (Ctrl-B). */
+  /**
+   * Whether the task is in the background: from its start unless it began in
+   * the foreground, and from the moment it moved (Ctrl-B, a timeout) if it did.
+   * Only background tasks are on the vendor's `background_tasks_changed` level.
+   */
   backgrounded: boolean;
+}
+
+/** What a scenario states when it starts a task. */
+export interface StartedTask extends Omit<LiveTask, "backgrounded"> {
+  /**
+   * The task began in the FOREGROUND, its spawning call blocking on it — the
+   * shape the 0.3.280 vendor gives every ordinary `Bash` call and every
+   * synchronous spawn (`task_started.is_backgrounded: false`). Unset is a
+   * background start.
+   */
+  readonly foreground?: boolean;
 }
 
 /**
@@ -311,8 +326,17 @@ export interface ScenarioContext {
   mintMessageId(): string;
 
   // -- the live set --------------------------------------------------------
-  /** Announce a task started and add it to the live set. */
-  startTask(task: Omit<LiveTask, "backgrounded">): LiveTask;
+  /**
+   * Announce a task started and track it. `is_backgrounded` is stated for the
+   * kinds the vendor flags (`local_bash`, `local_agent`), exactly as it does.
+   */
+  startTask(task: StartedTask): LiveTask;
+  /**
+   * Move a FOREGROUND task to the background the way a timeout does: the level
+   * is re-announced with it on, and no `task_updated` is emitted — the call's
+   * own result (`backgroundTaskId`) is what states the move.
+   */
+  markBackgrounded(taskId: string): void;
   /** Announce the live set after a change (REPLACE semantics). */
   announceLiveTasks(): void;
   /** Retire one task from the live set. */
