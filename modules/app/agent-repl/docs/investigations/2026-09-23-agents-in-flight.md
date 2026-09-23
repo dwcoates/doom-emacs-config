@@ -15,7 +15,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | (agent done; waiting on the child `ad454b522817243f4` porting e2e in `feat/dod-e2e`, which must merge into this branch before landing) | 17:50 |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | (agent completed twice with NO report; 6 commits, clean; the lead verifies the suites, then merges) | 18:20 |
-| `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
 | `feat/held-prompt-compact-badges` | `~/.config/doom-worktrees/held-prompt-compact-badges` | Held prompts collapse to 2 lines, with details and buttons only when expanded, at half the normal max width. Statuses are colored badges (waiting red, interrupting green, the rest mapped). ADDED: a held prompt landing jumps the feed to the bottom and follows, like a sent prompt. | `afb5bccb8f702f5d3` | 18:55 |
 | `fix/sidecar-no-unrendered-spools` | `~/.config/doom-worktrees/sidecar-no-unrendered-spools` | The sidecar stops storing unclaimed task spools and duplicate transcript symlinks as residue. Rendered spools are bounded. | `a8d17efda472949bd` | 19:05 |
 | `fix/tests-background-priority` | `~/.config/doom-worktrees/tests-background-priority` | Every test entry point runs under `taskpolicy -b` through one helper, with a source-scan guard. The live runtime is untouched. | `a8e7822fe0f97a214` | 19:05 |
@@ -29,6 +28,8 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
+- Old store rows: settles written before the restate change now log an ERROR and draw nothing on replay, instead of an empty card. That's ERROR noise until the store ages out. Accept it, or treat pre-change rows at a lower level?
+- Restating for a Subagent failure (prompt and created agent id) and an Artifact failure (the publish act) needs a contract shape. Should every settle also carry `started_at`, so replayed cards show their runtime?
 - The proto keeps a `DaemonFault.deploy_script_failed` arm with no raise site now that the script is gone. Remove it?
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
 - Background priority vs. the tight test timeouts: under `taskpolicy -b` on a loaded machine, suites time out (900ms tests, 1800ms cold boot). Which gives way?
@@ -42,6 +43,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Settles restate what their start carried: SendMessage's address and summary, plus the Read/Write/Edit/Grep/Glob/Bash/Skill failure inputs, so a replayed card draws from its settle alone (`fix/sendmessage-restates-summary`). The daemon suite is green on master after the merge.
 - e2e green (`-count=3`, 0 failures on the branch): ClientLog resolves against the registry during a handover, the idle sweep defers while a held prompt revives, a detached row's kind is final, reconcile walks the whole book, and a late start never un-settles a card (`fix/e2e-all-green`).
 - A click on the feed background clears an active reply selection through the daemon, and the cleared push parks and follows (`fix/selection-click-and-stable-gutter`). `scrollbar-gutter: stable` was NOT landed (see the owner decisions).
 - Footer and async bubbles: the detached-work id on async heads; a footer click either selects (centered) or shows and logs not-on-screen; the panel caps at 4 rows; a collapsed sub-feed is wiped and reopens on its last page; nested subagents credit their own rows (the zero-token rows fixed) (`fix/footer-rows-and-work-ids`).
