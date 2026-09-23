@@ -231,6 +231,7 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView
 			LiveWork: r.chips(s),
 		},
 		Expanded: r.expanded(ws, s),
+		Focus:    focusView(s.focus),
 	}
 }
 
