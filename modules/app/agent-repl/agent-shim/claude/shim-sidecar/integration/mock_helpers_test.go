@@ -63,6 +63,7 @@ import (
 	"agentrepl/proto/shim/v1/shimv1connect"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
 // ---------------------------------------------------------------------------
@@ -236,8 +237,7 @@ func startVendorStore() (string, func(), error) {
 	}
 	suffix := make([]byte, 4)
 	if _, err := crand.Read(suffix); err != nil {
-		os.RemoveAll(dir)
-		return "", nil, fmt.Errorf("random socket suffix: %w", err)
+		return "", nil, errors.Join(fmt.Errorf("random socket suffix: %w", err), os.RemoveAll(dir))
 	}
 	socket := filepath.Join(os.TempDir(), "ar-vendorstore-"+hex.EncodeToString(suffix)+".sock")
 	logPath := filepath.Join(dir, "store.log")
@@ -258,8 +258,7 @@ func startVendorStore() (string, func(), error) {
 	cmd.Stdout = &sink
 	cmd.Stderr = &sink
 	if err := cmd.Start(); err != nil {
-		os.RemoveAll(dir)
-		return "", nil, fmt.Errorf("start: %w", err)
+		return "", nil, errors.Join(fmt.Errorf("start: %w", err), os.RemoveAll(dir))
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -275,8 +274,16 @@ func startVendorStore() (string, func(), error) {
 			}
 			<-done
 		}
-		os.Remove(socket)
-		os.RemoveAll(dir)
+		// Nothing here has a *testing.T: this stop runs once, at process
+		// teardown (runSuite's defer), for the mocked-vendor suite's ONE
+		// shared throwaway store — so a teardown failure is stated loudly to
+		// stderr rather than checked against a test that no longer exists.
+		if err := os.Remove(socket); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "integration: removing vendor store socket %s: %v\n", socket, err)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: removing vendor store dir %s: %v\n", dir, err)
+		}
 	}
 
 	// READY IS AN ANSWERED RPC, never a duration.
@@ -954,7 +961,7 @@ func (p *proxyStore) Stop() {
 	defer cancel()
 	_ = p.srv.Shutdown(ctx)
 	<-p.done
-	os.Remove(p.Socket)
+	testclose.RemoveOrFail(p.t, p.Socket)
 }
 
 func (p *proxyStore) WriteBatch(ctx context.Context, req *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {

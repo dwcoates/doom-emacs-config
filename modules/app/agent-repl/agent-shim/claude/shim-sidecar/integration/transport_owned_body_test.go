@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
 // transport_owned_body_test.go — the guard that keeps a declared-length request
@@ -109,7 +111,7 @@ func TestOwnedRequestBodySurvivesARelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer testclose.OrFail(t, resp.Body)
 	if !bytes.Equal(delegate.body, payload) {
 		t.Errorf("the delegate was handed %q, want the declared %q", delegate.body, payload)
 	}
@@ -137,7 +139,7 @@ func TestOwnedRequestBodyClosesWhatItConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer testclose.OrFail(t, resp.Body)
 	if !body.wasClosed() {
 		t.Error("the wrapper consumed the request body and did not close it")
 	}
@@ -163,7 +165,7 @@ func TestOwnedRequestBodyRefusesAShortBody(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		resp.Body.Close()
+		testclose.OrFail(t, resp.Body)
 		t.Fatal("a request that contradicts its own content-length was sent anyway")
 	}
 	if !strings.Contains(err.Error(), "contradicts its own length") {
@@ -202,7 +204,7 @@ func TestOwnedRequestBodyPassesAnUndeclaredLengthThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer testclose.OrFail(t, resp.Body)
 	if string(delegate.body) != "streamed" {
 		t.Errorf("the delegate read %q, want the streamed bytes", delegate.body)
 	}
@@ -227,7 +229,7 @@ func TestOwnedRequestBodyPassesABodilessRequestThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer testclose.OrFail(t, resp.Body)
 	if delegate.req == nil {
 		t.Fatal("the bodiless request never reached the delegate")
 	}
@@ -257,7 +259,7 @@ func TestOwnedRequestBodyReplaysOnRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer testclose.OrFail(t, resp.Body)
 	body.release()
 	replay, replayErr := delegate.req.GetBody()
 
@@ -265,7 +267,7 @@ func TestOwnedRequestBodyReplaysOnRetry(t *testing.T) {
 	if replayErr != nil {
 		t.Fatalf("GetBody after the release: %v", replayErr)
 	}
-	defer replay.Close()
+	defer testclose.OrFail(t, replay)
 	got, readErr := io.ReadAll(replay)
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		t.Fatalf("reading the replayed body: %v", readErr)
