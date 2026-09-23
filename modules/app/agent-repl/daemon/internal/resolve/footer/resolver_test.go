@@ -12,6 +12,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
@@ -860,5 +861,117 @@ func TestPrimeOnALiveFooterIsDeduplicated(t *testing.T) {
 	case extra := <-sub:
 		t.Fatalf("Prime delivered a duplicate view %+v; an identical re-render must dedup", extra)
 	default:
+	}
+}
+
+// lineChanges is every recorded activity-line change, in publication order.
+func lineChanges(records []dlog.Record) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range records {
+		if rec.Operation == "daemon.footer.activity_line_changed" {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// vendorCompacting is the vendor's own auto-compaction start signal.
+func vendorCompacting() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}},
+	}
+}
+
+func TestTheActivityLineIsRecordedWhenItChanges(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		want map[string]any
+	}{
+		{
+			name: "a line set",
+			act:  func(h *harness) { h.r.OnSessionUpdate(testWS, vendorCompacting()) },
+			want: map[string]any{
+				"arm": "thinking", "kind": "compaction", "text": "compacting the context…",
+				"previous_kind": "none", "previous_text": "",
+				"cause": "daemon.footer.on_session_update",
+			},
+		},
+		{
+			name: "a line cleared",
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, vendorCompacting())
+				h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
+					Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
+				})
+			},
+			want: map[string]any{
+				"arm": "idle", "kind": "none", "text": "",
+				"previous_kind": "compaction", "previous_text": "compacting the context…",
+				"cause": "daemon.footer.on_context_cut",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			changes := lineChanges(h.log.Records())
+			if len(changes) == 0 {
+				t.Fatalf("no activity-line change was recorded")
+			}
+			last := changes[len(changes)-1]
+			if last.Level != dlog.LevelInfo {
+				t.Fatalf("level = %q, want INFO", last.Level)
+			}
+			for key, want := range tt.want {
+				if got := last.Context[key]; got != want {
+					t.Fatalf("%s = %v, want %v (record %+v)", key, got, want, last.Context)
+				}
+			}
+		})
+	}
+}
+
+func TestAnUnchangedActivityLineIsNotRecordedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+	before := len(lineChanges(h.log.Records()))
+
+	// Act: a fact that leaves the line where it stands.
+	h.r.SetParked(testWS, false)
+
+	// Assert
+	if got := len(lineChanges(h.log.Records())); got != before {
+		t.Fatalf("activity-line records = %d, want %d: nothing changed", got, before)
+	}
+}
+
+func TestADaemonScopedFaultRecordsTheActivityLineItStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act: a daemon-scoped fact reaches the strip through the resolver-wide path.
+	h.r.OpenFault("", faultOf(t, "fault-1", health.KindPromptsDirMissing, true))
+
+	// Assert
+	changes := lineChanges(h.log.Records())
+	if len(changes) == 0 {
+		t.Fatalf("no activity-line change was recorded for the daemon fault")
+	}
+	last := changes[len(changes)-1]
+	if last.Context["cause"] != "daemon.footer.open_fault" || last.Context["kind"] == "none" {
+		t.Fatalf("record = %+v, want the fault's line caused by open_fault", last.Context)
 	}
 }
