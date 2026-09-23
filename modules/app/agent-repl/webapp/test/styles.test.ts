@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * THE STYLESHEET'S SELECTABILITY CONTRACT.
  *
@@ -1130,17 +1131,36 @@ describe("the cost corner's hover hit area", () => {
 });
 
 /**
- * THE PROMPT BUBBLE'S IN-FLIGHT BORDER (owner ruling, 2026-09-15).
- *
- * The border must appear exactly when the thinking glimmer starts and
- * disappear exactly when it ends, so it is keyed on the SAME
- * `data-wave="working"` attribute the glimmer itself reads (see
- * `armPromptWave` / `setPromptWave` in breathing.ts, drawn from the prompt
- * row's daemon-stated `working` flag) —
- * never a separate class or a second JS toggle, since two independent
- * togglers is exactly what could drift apart.
+ * THE PROMPT BORDERS (owner ruling, 2026-09-23). A border lands on a prompt
+ * once it is RECEIVED and stays: a user prompt wears the light purple
+ * permanently, in flight and after its turn resolves, independent of the
+ * working flag and its wave; an agent-to-agent prompt (the agent-addressed row
+ * and the peer message) wears the one amber; a held prompt in the tray wears
+ * none. Each case is asked of the stylesheet as the cascade would: which
+ * border-setting rules a bubble with that role, variant, wave and hook classes
+ * matches, beyond the base rule's transparent reservation.
  */
-describe("the prompt bubble's in-flight border", () => {
+describe("the prompt borders", () => {
+  /** The border declarations every non-base rule a bubble so marked matches sets, in source order. */
+  function bordersOn(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string[] {
+    const el = document.createElement("div");
+    el.className = ["bubble", "md", ...hooks].join(" ");
+    for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+    return rulesOf(stylesheet)
+      .filter((rule) =>
+        rule.selectors.some((sel) => sel !== ".bubble" && sel.includes(".bubble") && !sel.includes("::") && el.matches(sel)),
+      )
+      .flatMap((rule) => rule.declarations.match(/(?:^|;)\s*border(?:-color)?\s*:[^;]*/g) ?? [])
+      .map((decl) => decl.replace(/^;?\s*/, "").trim());
+  }
+
+  /** A prompt bubble's attributes, waving or not. */
+  function prompt(variant: string, working: boolean): Record<string, string> {
+    const attrs: Record<string, string> = { "data-role": "prompt", "data-variant": variant };
+    if (working) attrs["data-wave"] = "working";
+    return attrs;
+  }
+
   it("reserves a 0.3px transparent border on every bubble, prompt included", () => {
     // Arrange / Act
     const bubble = declarationsOf(".bubble");
@@ -1149,43 +1169,62 @@ describe("the prompt bubble's in-flight border", () => {
     expect(bubble).toMatch(/border:\s*0\.3px solid transparent/);
   });
 
-  it("defines the light-purple token in the light theme", () => {
+  it.each([
+    ["in flight", true],
+    ["after its turn resolves", false],
+  ] as const)("borders a user prompt in the light purple %s", (_label, working) => {
     // Arrange / Act
-    const root = declarationsOf(":root");
+    const borders = bordersOn(prompt("user", working), ["user"]);
 
     // Assert
-    expect(root).toMatch(/--prompt-live-border:\s*#[0-9a-fA-F]{3,6}/);
+    expect(borders).toEqual(["border-color: var(--prompt-live-border)"]);
   });
 
-  it("redefines the token for the dark theme", () => {
+  it.each([
+    ["an agent-addressed prompt in flight", "agent", true, ["user", "prompt-agent"]],
+    ["an agent-addressed prompt at rest", "agent", false, ["user", "prompt-agent"]],
+    ["a peer message", "peer", false, ["peer"]],
+  ] as const)("borders %s in the one agent amber", (_label, variant, working, hooks) => {
     // Arrange / Act
-    const dark = darkThemeBlock();
+    const borders = bordersOn(prompt(variant, working), hooks);
 
     // Assert
-    expect(dark).toMatch(/--prompt-live-border:\s*#[0-9a-fA-F]{3,6}/);
+    expect(borders).toEqual(["border: 1px solid var(--agent-prompt-border)"]);
   });
 
-  it("colors the border with the token only while data-wave is working", () => {
-    // Arrange / Act — the wave gradient and the border-color live in separate
-    // rules on the same selector, so every rule on it is checked rather than
-    // just the first `rulesOf` finds.
-    const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
+  it.each([
+    ["a prompt held behind the turn", ["held-right"]],
+    ["a prompt held by a bounce", ["held-right", "lease-card"]],
+    ["a prompt held by a keep-alive", ["held-right", "keep-alive-card"]],
+  ] as const)("gives %s no border", (_label, hooks) => {
+    // Arrange / Act
+    const borders = bordersOn(prompt("held", false), hooks);
+
+    // Assert
+    expect(borders).toEqual([]);
+  });
+
+  it("keys no border on the working wave", () => {
+    // Arrange / Act
+    const waving = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.some((sel) => sel.includes("data-wave")) && /(?:^|;)\s*border/.test(rule.declarations),
     );
 
     // Assert
-    expect(
-      waving.some((rule) => /border-color:\s*var\(--prompt-live-border\)/.test(rule.declarations)),
-    ).toBe(true);
+    expect(waving.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("sets no border-color on the settled (non-waving) prompt bubble", () => {
-    // Arrange / Act — the settled bubble only gets the base rule's
-    // transparent reservation; nothing recolors it back to --prompt-live-border.
-    const settled = declarationsOf('.bubble[data-role="prompt"]');
+  it.each([
+    ["--prompt-live-border", "light"],
+    ["--agent-prompt-border", "light"],
+    ["--prompt-live-border", "dark"],
+    ["--agent-prompt-border", "dark"],
+  ] as const)("defines %s in the %s theme", (token, theme) => {
+    // Arrange / Act
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
 
     // Assert
-    expect(settled).not.toMatch(/border-color/);
+    expect(block).toMatch(new RegExp(`${token}:\\s*#[0-9a-fA-F]{3,6}`));
   });
 });
 
@@ -1816,13 +1855,13 @@ describe("the held prompt's collapse", () => {
     expect(folds.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("frames a held prompt in the dashed prompt blue, its variant's border", () => {
-    // Arrange / Act
+  it("frames a held prompt with no border of its variant's", () => {
+    // Arrange / Act — a held prompt is not yet received (owner ruling, 2026-09-23).
     const frames = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.includes('.bubble[data-variant="held"]') && /border:/.test(rule.declarations),
+      (rule) => rule.selectors.some((sel) => sel.includes('[data-variant="held"]')) && /border/.test(rule.declarations),
     );
     // Assert
-    expect(frames.map((rule) => rule.declarations.trim())).toEqual(["border: 1px dashed var(--user);"]);
+    expect(frames.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 });
 
