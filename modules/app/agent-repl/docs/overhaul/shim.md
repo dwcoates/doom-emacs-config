@@ -152,8 +152,8 @@ orchestration chain.
 - `AgentUnmodeled` keeps its meaning: a tool whose schema genuinely cannot be
   known. A recognizable built-in arriving there is a producer defect.
 - The one bounded state exception: spawn provenance (`task → spawning call →
-  turn`), kept solely so `KillTurn` can name its transitive refusal set; never
-  on the wire except inside a refusal.
+  turn`), kept solely so a forced `KillTurn` can name the transitive set it
+  stops; never on the wire except inside a kill's outcome.
 
 ### shim/v1 — the service the shim serves (17 rpcs, four sections)
 
@@ -232,9 +232,10 @@ purpose).
     agent (subagent, workflow agent) — never the session's own turn (that is
     StartTurn). How a prompt lands (steer-at-next-tool-round vs resume) is
     the shim's business; the consumer never learns which.
-  - `KillTurn {turn, force}`: the main agent and everything THIS turn
-    spawned, transitively (via the spawn-provenance map); refuses naming live
-    work unless forced.
+  - `KillTurn {turn, force}`: unforced, the synchronous turn ONLY — detached
+    work runs on (2026-09-23; the `live` refusal is no longer produced).
+    Forced, the main agent and everything THIS turn spawned, transitively (via
+    the spawn-provenance map).
 - DETACHED WORK — one stream per live item; bespoke verbs because the write
   surface differs per kind:
   - `WatchBash` / `StopBash` (a process's only input is stop).
