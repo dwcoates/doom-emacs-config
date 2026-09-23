@@ -47,9 +47,18 @@ type Report struct {
 	Build string `json:"build"`
 }
 
-// DefaultDir is the run directory the reports live in:
-// ~/.cache/agent-repl/run, beside the kernel locks the same processes take.
-func DefaultDir() (string, error) {
+// DirEnv redirects the run directory. It is the variable that already
+// redirects ~/.cache/agent-repl/run for the kernel locks, because the reports
+// live beside them: a harness that isolates one isolates the other, and a test
+// service can never overwrite the report the owner's own store wrote.
+const DirEnv = "AGENT_REPL_LOCK_DIR"
+
+// ResolveDir is the run directory the reports live in: DirEnv when it is set,
+// else ~/.cache/agent-repl/run. getenv is os.Getenv in production.
+func ResolveDir(getenv func(string) string) (string, error) {
+	if dir := getenv(DirEnv); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("buildreport: resolve the home directory: %w", err)
