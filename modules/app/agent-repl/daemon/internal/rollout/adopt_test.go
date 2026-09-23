@@ -1089,3 +1089,56 @@ func TestTheSuccessorOwnsWhatItWasNotHandedOnceARetriedAdvertiseLands(t *testing
 		t.Fatalf("standing = %v, want owned once daemon.addr was written", standing)
 	}
 }
+
+func TestTheSuccessorBouncesAnAdoptedShimOnAnOlderBuild(t *testing.T) {
+	// Arrange: two live shims, one on an older build and one on the deployed build.
+	h := newHarness(t)
+	stale, current := joinedWithOneOfTwo(t, h)
+	h.mu.Lock()
+	h.sessionSHA[stale] = "0ldbu1ld"
+	h.sessionSHA[current] = "deadbeef" // the deploy stamp's own sha
+	h.mu.Unlock()
+	h.fleet.live[current] = newFakeShim(4343, h.order)
+	h.fleet.live[stale].Reap() // the old process exits when it is stood down
+
+	// Act: adopting the handed-over workspace advertises, ending the join.
+	if err := h.c.AdoptHost(context.Background(), stale); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+	h.c.staleBounces.Wait()
+
+	// Assert
+	if indexOf(h.order.Taken(), "resume") < 0 {
+		t.Fatalf("steps = %v, want the stale shim relaunched onto the deployed build", h.order.Taken())
+	}
+	h.fleet.mu.Lock()
+	_, touched := h.fleet.prelaunched[current]
+	h.fleet.mu.Unlock()
+	if touched {
+		t.Fatalf("the shim already on the deployed build was prelaunched; it must be left alone")
+	}
+}
+
+func TestTheSuccessorChecksEveryLiveShimOnlyOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	first, _ := joinedWithOneOfTwo(t, h)
+
+	// Act: the takeover is announced twice (a retried advertise landing late).
+	if err := h.c.AdoptHost(context.Background(), first); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+	h.c.becomeIncumbent(nil)
+	h.c.staleBounces.Wait()
+
+	// Assert
+	checks := 0
+	for _, r := range records(h.log, opStaleness) {
+		if r.Message == "checking every adopted shim against the deployed build" {
+			checks++
+		}
+	}
+	if checks != 1 {
+		t.Fatalf("fleet checks = %d, want exactly 1", checks)
+	}
+}
