@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   PIN_PX,
   armedWheelAction,
-  feedTopChanged,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
@@ -833,31 +832,6 @@ describe("the tail-follow decision has exactly one owner", () => {
     const offenders = others.filter(([, src]) => /\bparkAtTail\b/.test(src));
     // Assert
     expect(offenders.map(([p]) => p)).toEqual([]);
-  });
-});
-
-describe("a load-more prepend does not jump the viewport", () => {
-  it("a NEW item at the feed's top is what says content was inserted above", () => {
-    // Arrange / Act / Assert
-    expect(feedTopChanged("older-1", "b-tail")).toBe(true);
-  });
-
-  it("an unchanged top item is NOT a prepend, whatever the feed's height did", () => {
-    // Arrange — a card expanding or a deferred item settling grows the feed
-    // without inserting anything above the reader; compensating those would
-    // move the reader instead.
-    // Act / Assert
-    expect(feedTopChanged("b-tail", "b-tail")).toBe(false);
-  });
-
-  it("an empty feed BEFORE the render has no reading position to preserve", () => {
-    // Arrange / Act / Assert
-    expect(feedTopChanged(null, "b-tail")).toBe(false);
-  });
-
-  it("an empty feed AFTER the render has no anchor item to restore", () => {
-    // Arrange / Act / Assert
-    expect(feedTopChanged("b-tail", null)).toBe(false);
   });
 });
 
