@@ -37,9 +37,12 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// above the rows this workspace draws live, whichever arrived first.
 	entries := page.GetEntries()
 	s.plane = planeHistory
+	// THE PAGE STANDS IN NO TURN UNTIL IT DRAWS A PROMPT: see wsState.replayTurn.
+	s.replayTurn = nil
 	for i := len(entries) - 1; i >= 0; i-- {
 		r.replayEntry(s, agent, entries[i].GetEntry(), entries[i].GetAt())
 	}
+	s.replayTurn = nil
 	s.plane = planeLive
 
 	// A REPLAY CARRIES NO START — "what history replays is SETTLED frames" —
@@ -194,8 +197,27 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 }
 
 // replayTerminal replays a terminal against the turn the replay is standing
-// in. A replayed terminal with no turn in flight belongs to a subagent's
-// bubble, exactly as a live one does.
+// in — the turn of the last prompt THIS PAGE drew (wsState.replayTurn), never
+// the live turn in flight.
+//
+// A TERMINAL THE PAGE DREW NO PROMPT FOR IS NOT CHARGED TO ANY TURN. It ends
+// a turn whose prompt is older than the page (a page that opens mid-turn), or
+// it is a subagent's stream ending on the subagent's own page; either way the
+// turn it ended is not one this replay can name, and the live turn the queue
+// has just opened is certainly not it. It is recorded and draws nothing, the
+// same as a live terminal with no turn.
 func (r *resolver) replayTerminal(s *wsState, agent *conversationv1.AgentId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
-	r.drawTerminal(s, agent, s.turnInFlight, success, failure)
+	turn := s.replayTurn
+	if turn == nil {
+		live := ""
+		if s.turnInFlight != nil {
+			live = string(*s.turnInFlight)
+		}
+		r.logger(s.id).Debug("daemon.feed.replayed_terminal_without_prompt",
+			"a replayed terminal preceded every prompt on its page; it names no turn this replay drew and is charged to none",
+			dlog.Context{"agent": agent.GetValue(), "turn_in_flight": live})
+		return
+	}
+	s.replayTurn = nil
+	r.drawTerminal(s, agent, turn, success, failure)
 }

@@ -150,6 +150,15 @@ type wsState struct {
 	// row that belongs to no turn" — so the death keeps the stamp standing
 	// while an ordinary terminal clears it.
 	turnStamp *ids.TurnID
+	// replayTurn is the turn a HISTORY REPLAY is standing in: the turn of the
+	// last main-agent prompt THIS PAGE drew, cleared by the terminal that ends
+	// it and at both ends of every page. A replayed terminal is charged to this
+	// and never to turnInFlight, because the page's head can open mid-turn: its
+	// oldest terminals end turns whose prompts are older than the page, and the
+	// live turn the queue just opened is not one of them. Charging that orphan
+	// to turnInFlight drew a turn_ended row for a turn that had only begun
+	// (every turn open repaints the opening page) and settled its prompt.
+	replayTurn *ids.TurnID
 	// clearTurns is the set of turns the daemon opened as a `/clear`. A clear's
 	// visible outcome is the cleared divider it leaves, NOT a terminal row: the
 	// turn is interrupted to make the cut, and drawing that interrupt as a
