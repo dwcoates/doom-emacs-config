@@ -1407,16 +1407,15 @@ pre {
      hidden/auto — so leaving overflow-x unset silently made the whole bubble
      side-scroll on any wide content. Pinning it to `clip` keeps overflow-x out
      of that promotion in BOTH states while still pairing cleanly with the
-     expanded box's `overflow-y: auto`. Wide inner code/tables/mp-trees keep
-     their OWN overflow-x scroller inside the clipped box; the bubble itself
-     never does. */
+     expanded box's `overflow-y: auto`. Wide inner code/tables/mp-trees wrap
+     rather than scroll, so nothing inside the clipped box is cut off. */
   overflow-x: clip;
 }
 /* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
    bubble's right padding gave up. A scrollbar is laid out between the scroll
    box's border and its padding, so this padding is the distance from the TEXT
    to the bar, never from the bar to the bubble. */
-.bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); }
+.bubble-body { flex: 1; min-width: 0; padding-right: calc(0.9rem - var(--bubble-scroll-gap)); overflow-wrap: anywhere; }
 /* THE METADATA STRIP: full width, above the scroll box, outside it. It keeps
    the right inset the bubble's padding used to give it, so the stamp sits
    where it always sat while the bar below it runs to the edge. */
@@ -1540,7 +1539,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    colors above are unscoped, so they already reach in. The first/last
    child margin resets keep a leading or trailing code card flush with the
    bubble edge, matching the .md bubble-body rules. */
-.bubble.user pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
+.bubble.user pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; }
 .bubble.user pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 .bubble.user .bubble-body > :first-child { margin-top: 0; }
 .bubble.user .bubble-body > :last-child { margin-bottom: 0; }
@@ -1594,7 +1593,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    rule then caps at 50vh and turns scrollable. */
 .bubble.peer > .bubble-scroll:not(.expanded) { display: none; }
 .bubble.peer > .bubble-scroll { margin-top: 0.4rem; }
-.bubble.peer pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
+.bubble.peer pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; }
 .bubble.peer .bubble-body > :first-child { margin-top: 0; }
 .bubble.peer .bubble-body > :last-child { margin-bottom: 0; }
 /* The bubble's top-right corner: a flex column stacking a final response's
@@ -1724,12 +1723,12 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    widest RENDERED line plus its padding via `width: fit-content`
    (`.bubble.assistant`/`.bubble.user` above), capped at the `max-width: 77%`
    ceiling — for ALL bubbles, INCLUDING those whose body drew a metaprompt tree.
-   The tree is `white-space: pre`, pre-wrapped to the cap's own column budget
+   The tree is pre-wrapped to the cap's own column budget
    (`measureTreeCols`), so its longest physical line never exceeds the cap and
    the bubble shrinks to that line rather than sitting pinned at the full cap.
    Wrapping stays STABLE while the bubble shrinks because the tree's column
    budget derives from the CAP (the bubble's resolved max-width against its
-   containing block, `resolveMaxWidthPx`), never from the bubble's shrunk
+   containing block, `resolveCapPx`), never from the bubble's shrunk
    current width — so a shrink cannot feed back into a re-wrap. The old
    `.bubble.bubble-fill-cap { width: 77% }` pin and its `markFillCap` stamping
    are gone. */
@@ -1786,14 +1785,14 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .md li { margin: 0.15em 0; }
 .md blockquote { margin: 0.4em 0; padding: 0.1em 0.8em; border-left: 3px solid var(--accent); color: var(--muted); }
 .md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
-.md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.5em 0; }
+.md pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
 .md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 .md a { color: var(--accent); }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
-/* GFM tables: bordered and compact, scrolling horizontally when wider than
-   the bubble instead of forcing the bubble to grow. */
-.md table { border-collapse: collapse; margin: 0.5em 0; font-size: calc(0.85rem * var(--feed-text-scale)); display: block; width: max-content; max-width: 100%; overflow-x: auto; }
-.md th, .md td { border: 1px solid var(--border); padding: 0.3em 0.6em; text-align: left; }
+/* GFM tables: bordered and compact, their cells wrapping when the table would
+   be wider than the bubble instead of forcing the bubble to grow. */
+.md table { border-collapse: collapse; margin: 0.5em 0; font-size: calc(0.85rem * var(--feed-text-scale)); display: block; width: max-content; max-width: 100%; clear: right; }
+.md th, .md td { border: 1px solid var(--border); padding: 0.3em 0.6em; text-align: left; overflow-wrap: anywhere; }
 .md th { background: color-mix(in srgb, var(--fg) 6%, transparent); font-weight: 600; }
 /* GFM images: never overflow the bubble's width. */
 .md img { max-width: 100%; height: auto; border-radius: 4px; }
@@ -1802,17 +1801,19 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
 .md .task-list-item-checkbox { margin: 0 0.4em 0 0; vertical-align: middle; }
 
 /* Metaprompt TLDR trees: the webapp wraps each branch to the bubble's
-   live column width (metaprompt-tree.ts, a port of the daemon's
+   column budget at its CAP (metaprompt-tree.ts, a port of the daemon's
    treefmt), so every line arrives here already fitted and the
    continuation rails (│ / spaces under a wrapped branch) are REAL
    characters the wrapper emitted, not rails the stylesheet repaints.
-   Each line is therefore a preformatted monospace line: no flexing, no
-   soft-wrap, no width reasoning left to CSS. overflow-x guards only the
-   degenerate case of an unsplittable word wider than the whole bubble,
-   which is served wider rather than truncated. */
-.mp-tree { font-family: ui-monospace, monospace; font-size: calc(0.85rem * var(--feed-text-scale)); line-height: 1.45; white-space: pre; overflow-x: auto; }
+   `pre-wrap` never breaks a fitted line; it breaks only the degenerate
+   unsplittable word wider than the whole bubble, which is wrapped rather
+   than scrolled. `clear: right` starts the tree below the response's
+   floated cost corner, so the tree's box is the body's full width — the
+   width its budget was measured for — instead of a box narrowed beside
+   the float. */
+.mp-tree { font-family: ui-monospace, monospace; font-size: calc(0.85rem * var(--feed-text-scale)); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
 .md .mp-tree { margin: 0.5em 0; }
-.mp-prefix, .mp-content { white-space: pre; }
+.mp-prefix, .mp-content { white-space: pre-wrap; }
 .mp-blank { height: 0.7em; }
 
 .thinking {
@@ -2204,8 +2205,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    scrollbar and no inner scrolling while collapsed — the overflow is CLIPPED.
    Scrolling is revealed only once expanded (see the .expanded rule below).
    `overflow-y: hidden` (not `overflow: hidden`) keeps overflow-x exactly as it
-   was — the previous `overflow-y: auto` already computed overflow-x to auto, so
-   a wide code line still gets its own horizontal scroller.
+   was — the previous `overflow-y: auto` already computed overflow-x to auto.
    THIS IS ALSO WHAT KEEPS installIntentScroll (scroll.ts) OFF a collapsed box:
    its `isScrollBox` requires overflow-y auto/scroll, so a clipped box is never
    an inner scroll target and its wheel always redirects to the feed — the
