@@ -578,6 +578,23 @@ the answering response block BEFORE the terminal that names it: a real producer
 never names an answer it did not emit, and a fake that pushes the terminal alone
 trips rule 2(b) — correctly.
 
+## A thinking row is superseded once a later response lands in its feed
+
+Owner rule, 2026-09-23. `FeedResponse.superseded` is set on a THINKING row
+exactly when some response row (thinking, prose or a final answer) sorts after
+it in the SAME feed; tool calls, prompts and every other row kind never count.
+It is decided in one place, `internal/resolve/feed/superseded.go`:
+
+- The feed keeps a per-feed record, updated only at the two structural edges
+  (a response row PLACED, a response row RETIRED), and `upsert` stamps the flag
+  from it on every draw, so a later fragment of a superseded fold keeps it.
+- Placing a response supersedes the nearest earlier thinking row and RE-PUSHES
+  it after the new row's own publication; a thinking row placed above a later
+  response (older history over live rows) is placed superseded. Retiring the
+  only later response re-pushes the thinking row un-superseded.
+- Pages serve the stored rows, so replay, pages and live agree; a sub-feed
+  follows the rule within itself and never across feeds.
+
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
