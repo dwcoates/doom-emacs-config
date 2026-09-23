@@ -32,7 +32,7 @@ func TestSigtermEndsAnOpenWatchCleanly(t *testing.T) {
 	)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 	// Prove the stream is really live before taking the store down.
 	shim.write(ctx, t,
 		shim.agentEntry("w-term-2", "u-term-2", frameLine(agentID("main"), responseFrame("main", "act-2", "L2"))),
@@ -134,11 +134,10 @@ func assertPprofServed(t *testing.T, socket string) {
 		resp, err := client.Do(req)
 		if err == nil {
 			status := resp.StatusCode
-			resp.Body.Close()
+			closeOrFail(t, resp.Body)
 			if status == http.StatusOK {
 				return
 			}
-			lastErr = nil
 			t.Fatalf("the pprof surface answered HTTP %d, want 200", status)
 		}
 		lastErr = err

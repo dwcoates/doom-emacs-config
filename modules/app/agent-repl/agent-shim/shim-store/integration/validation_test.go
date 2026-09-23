@@ -352,7 +352,7 @@ func TestWatchAgentSessionRefusesAnUnsetToken(t *testing.T) {
 
 			// Act.
 			stream := watchStream(ctx, t, store.client(), tc.token)
-			defer stream.Close()
+			defer closeOrFail(t, stream)
 
 			// Assert.
 			assertWatchRefused(t, stream)
@@ -392,7 +392,7 @@ func TestWatchBashRunRefusesAnEmptyRunAtTheTransport(t *testing.T) {
 
 	// Act.
 	stream := watchBashRun(ctx, t, store.client(), "")
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Assert.
 	err := awaitBashRunEnd(t, stream)
