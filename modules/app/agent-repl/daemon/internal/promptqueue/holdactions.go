@@ -30,10 +30,20 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
 
+	// A RELEASE IS A DELIVERY DECISION, so it is taken under the delivery
+	// lock: that is what lets a standing edit withhold it structurally.
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
+
 	held, err := q.standingHold(ctx, ws, turn)
 	if err != nil {
 		log.Warn(opRelease, "there is no such standing hold to release", dlog.Context{"cause": err.Error()})
 		return err
+	}
+	if q.withheldByEdit(ws, held) {
+		log.Info(opRelease, "the prompt is being edited or is queued after one that is; the release is refused", nil)
+		return ErrReleaseRefused
 	}
 	if held.Classification != nil && held.Classification.Arm == wsm.ArmUninterruptibleTurn {
 		log.Warn(opRelease, "the running turn is uninterruptible; the release is refused", nil)
@@ -79,6 +89,12 @@ func (q *queue) Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) e
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
 
+	// Under the delivery lock, because a drop can retire the edit that
+	// withholds the prompts behind it.
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
+
 	if _, err := q.standingHold(ctx, ws, turn); err != nil {
 		log.Warn(opDrop, "there is no such standing hold to drop", dlog.Context{"cause": err.Error()})
 		return err
@@ -89,7 +105,11 @@ func (q *queue) Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) e
 	}
 	q.clearHeadIf(ws, turn)
 	log.Info(opDrop, "the held prompt was dropped", nil)
-	return q.pushTray(ctx, ws, log)
+	if err := q.pushTray(ctx, ws, log); err != nil {
+		return err
+	}
+	q.retireEditIf(ctx, ws, turn, tombstoneDropped, log)
+	return nil
 }
 
 // Accept confirms a hold_for_turn_end verdict. It is VIEW STATE ONLY: delivery
@@ -121,7 +141,17 @@ func (q *queue) Accept(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID)
 }
 
 // deliverHeld sends a standing hold to the shim and retires it as delivered.
+// Every caller holds the delivery lock and has already filtered what a
+// standing edit withholds; the check here is the backstop that keeps a
+// caller's defect from sending an edited prompt anyway.
 func (q *queue) deliverHeld(ctx context.Context, ws ids.WorkspaceID, held wsm.HeldPrompt, log dlog.Logger) error {
+	if q.withheldByEdit(ws, held) {
+		log.Error(opDeliver, "a hold a standing edit withholds reached delivery; it was not sent", dlog.Context{
+			"invariant_violation": "delivery of a held prompt at or after a standing edit",
+			"remediation":         "filter withheldByEdit under the delivery lock before delivering",
+		})
+		return errDeliveryBehindEdit
+	}
 	sender, ok := q.deps.Client(ws)
 	if !ok {
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The hold that a hibernation
