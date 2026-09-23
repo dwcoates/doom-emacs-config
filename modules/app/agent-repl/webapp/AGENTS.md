@@ -260,7 +260,10 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   bubble) has NO implicit writer: it moves only on the reader's input. The
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
-  `replaceRestore`, `prependCompensation` — each a named `TailFollow` method,
+  `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
+  bubble wholly above the reader collapsing when the daemon marks it
+  `superseded`; the view shifts by exactly the height it lost) — each a named
+  `TailFollow` method,
   each recorded at DEBUG as `scroll.feed-moved` with its cause. A follow starts
   only from a parking cause and ends when the reader scrolls away; returning
   to the tail does not restart it. The reader's own wheel redirect and
