@@ -531,39 +531,19 @@ function preservedUuids(ctx: ScenarioContext, head: string) {
   };
 }
 
-/**
- * The `isCompactSummary` user line the vendor writes RIGHT AFTER a boundary.
- *
- * GROUNDED: `testdata/captures/compaction-directed` has it — a `user` record,
- * `isVisibleInTranscriptOnly`, parented on the boundary's uuid. It is not
- * decoration. The file plane's converter coalesces the boundary with THIS line
- * to fill `ContextCompacted.summary`, so a mock that omitted it produced a cut
- * whose summary was empty and a divider with a hole where the discarded history
- * should be.
- */
-function appendCompactSummaryLine(ctx: ScenarioContext, boundaryUuid: string, summary: string): void {
-  ctx.files.transcript.append({
-    parentUuid: boundaryUuid,
-    isSidechain: false,
-    type: "user",
-    message: { role: "user", content: summary },
-    isVisibleInTranscriptOnly: true,
-    isCompactSummary: true,
-    uuid: ctx.newUuid(),
-    timestamp: ctx.nowIso(),
-  });
-}
-
 const COMPACT = scenario({
   name: "compact",
   prompt: "!compact [summary]",
   emits:
     "a compaction: `status{compacting}`, a `compact_boundary` carrying the full corpus `compact_metadata` " +
     "(trigger, pre/post tokens, duration, the preserved segment AND the preserved-messages uuid list), then " +
-    "`status{compact_result:\"success\"}`. `ContextCompacted.Summary` is derived from the assistant prose that " +
-    "follows the boundary (`settleCompaction`), so a caller names its own distinctive summary as the prompt's " +
-    "argument instead of the fixed default",
-  writes: "a `system:compact_boundary` line whose `logicalParentUuid` names the preserved TAIL, plus a summary user line",
+    "`status{compact_result:\"success\"}`. The summary is stated as the record right after the boundary — a " +
+    "synthetic main-stream `user` record whose uuid is the boundary's `anchor_uuid` — and `ContextCompacted.Summary` " +
+    "is read off it (`settleCompaction`), so a caller names its own distinctive summary as the prompt's argument " +
+    "instead of the fixed default",
+  writes:
+    "a `system:compact_boundary` line whose `logicalParentUuid` names the preserved TAIL, plus the `isCompactSummary` " +
+    "user line under the anchor's uuid",
   arms: "SessionCompacting + AgentUpdate.context_cut(ContextCompacted) with trigger=requested",
   run(ctx) {
     const summary = ctx.args === "" ? "Compacted the conversation." : ctx.args;
@@ -600,7 +580,7 @@ const COMPACT = scenario({
         },
       },
     );
-    appendCompactSummaryLine(ctx, boundaryUuid, summary);
+    ctx.compactSummary(boundaryUuid, preserved.anchor, summary);
     ctx.systemMessage("status", { status: null, compact_result: "success" });
     conclude(ctx, summary);
   },
@@ -648,7 +628,7 @@ const COMPACT_AUTO = scenario({
       },
     );
     const autoSummary = "The conversation was compacted automatically.";
-    appendCompactSummaryLine(ctx, boundaryUuid, autoSummary);
+    ctx.compactSummary(boundaryUuid, preserved.anchor, autoSummary);
     ctx.systemMessage("status", { status: null, compact_result: "success" });
     conclude(ctx, autoSummary);
   },

@@ -260,6 +260,13 @@ export interface ScenarioContext {
   /** Write one `attachment` transcript record (no SDK message accompanies it). */
   attachment(attachment: Record<string, unknown>): void;
   /**
+   * State a compaction's summary on BOTH planes under `summaryUuid` (the
+   * boundary's anchor): the synthetic main-stream `user` record the stream
+   * carries right after the boundary, and the transcript's `isCompactSummary`
+   * line parented on `boundaryUuid`.
+   */
+  compactSummary(boundaryUuid: string, summaryUuid: string, summary: string): void;
+  /**
    * Emit one `system` SDK message AND its transcript record, under ONE uuid,
    * answering that uuid.
    *
