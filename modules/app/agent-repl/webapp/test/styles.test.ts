@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
+import { BUBBLE_CAP_LINES } from "../src/bubble/draw.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -194,22 +195,30 @@ describe("the bubble geometry: the two caps", () => {
     expect(root).toMatch(/--feed-cap-lines:\s*27\.5\s*;/);
   });
 
-  it("caps the purple response bubble 15% below the shared cap, and only its max width", () => {
+  it("caps every bubble at the one 77% token", () => {
     // Arrange / Act
-    const bubble = declarationsOf(".bubble.assistant");
+    const column = declarationsOf("#main-col");
+    const bubble = declarationsOf(".bubble");
 
-    // Assert — 77% (owner ruling 2026-09-15); margin still biases off the unscaled cap.
-    expect(bubble).toMatch(/max-width:\s*77%/);
-    expect(bubble).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+    // Assert — 77% (owner ruling 2026-09-15), one token for every bubble (2026-09-23).
+    expect(column).toMatch(/--bubble-max-width:\s*77%/);
+    expect(bubble).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
   });
 
-  it("caps the blue prompt bubble 15% below its prior 60%, and only its max width", () => {
+  it("hangs a response on the left rail, its margin biased off the unscaled cap", () => {
     // Arrange / Act
-    const bubble = declarationsOf(".bubble.user");
+    const role = declarationsOf('.bubble[data-role="response"]');
 
-    // Assert — 77% (owner ruling 2026-09-15); margin still biases off the unscaled cap.
-    expect(bubble).toMatch(/max-width:\s*77%/);
-    expect(bubble).toMatch(/margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+    // Assert
+    expect(role).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+  });
+
+  it("hangs a prompt on the right rail, its margin biased off the unscaled cap", () => {
+    // Arrange / Act
+    const role = declarationsOf('.bubble[data-role="prompt"]');
+
+    // Assert
+    expect(role).toMatch(/margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
   });
 
   it("leaves no second copy of the old 75% cap behind", () => {
@@ -296,7 +305,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     // min(the line budget, the 50vh ceiling) rather than the bare calc.
     expect(
       capped.some((rule) =>
-        /max-height:\s*min\(calc\(var\(--cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
+        /max-height:\s*min\(calc\(var\(--bubble-cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
       ),
     ).toBe(true);
   });
@@ -310,7 +319,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
 
   it("retires the prompt bubble's one-cell grid, which put the stamp BESIDE the box", () => {
     // Arrange / Act
-    const prompt = declarationsOf(".bubble.user");
+    const prompt = declarationsOf('.bubble[data-role="prompt"]');
 
     // Assert
     expect(prompt).not.toMatch(/display:\s*grid/);
@@ -404,16 +413,13 @@ describe("the shrink-to-fit width: bubbles fit their content, capped at the max"
     expect(rule).toBeUndefined();
   });
 
-  it("sizes both response and prompt bubbles to fit-content, capped at 77%", () => {
-    // Arrange / Act — the assistant and prompt bubble rules.
-    const assistant = declarationsOf(".bubble.assistant") ?? "";
-    const user = declarationsOf(".bubble.user") ?? "";
+  it("sizes every bubble to fit-content, capped at the one bubble width", () => {
+    // Arrange / Act — the one rule every bubble kind takes.
+    const bubble = declarationsOf(".bubble") ?? "";
 
-    // Assert — fit-content up to the shared 77% cap, for both.
-    expect(assistant).toMatch(/width:\s*fit-content/);
-    expect(assistant).toMatch(/max-width:\s*77%/);
-    expect(user).toMatch(/width:\s*fit-content/);
-    expect(user).toMatch(/max-width:\s*77%/);
+    // Assert — fit-content up to the shared cap.
+    expect(bubble).toMatch(/width:\s*fit-content/);
+    expect(bubble).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
   });
 });
 
@@ -473,7 +479,7 @@ describe("the collapse/expand height model", () => {
     // Assert — the same 50vh the expanded rule caps at is the ceiling here too,
     // so expanded (50vh) can never be smaller than collapsed (min(lines, 50vh)).
     expect(capRule?.declarations).toMatch(
-      /max-height:\s*min\(calc\(var\(--cap-lines\) \* var\(--cap-line-h, 1\.4em\) \+ var\(--cap-extra, 0px\)\),\s*50vh\)/,
+      /max-height:\s*min\(calc\(var\(--bubble-cap-lines\) \* var\(--md-line-h\) \* 1em\),\s*50vh\)/,
     );
   });
 
@@ -501,7 +507,7 @@ describe("the collapse/expand height model", () => {
 describe("the 'more below' affordance", () => {
   it("draws the fade from has-more, over the last 1.5em", () => {
     // Arrange / Act
-    const fade = declarationsOf(".bubble.assistant > .bubble-scroll.has-more::after");
+    const fade = declarationsOf(".bubble > .bubble-scroll.has-more::after");
 
     // Assert
     expect(fade).toMatch(/height:\s*1\.5em/);
@@ -509,36 +515,24 @@ describe("the 'more below' affordance", () => {
     expect(fade).toMatch(/pointer-events:\s*none/);
   });
 
-  it("fades the assistant bubble into the assistant background token", () => {
+  it("fades every bubble into its own background token", () => {
     // Arrange / Act — the gradient rule (the selector also names a base ::after
     // rule for geometry, so pick the copy carrying the background).
     const gradient = rulesOf(stylesheet).find(
       (rule) =>
-        rule.selectors.includes(".bubble.assistant > .bubble-scroll.has-more::after") &&
+        rule.selectors.includes(".bubble > .bubble-scroll.has-more::after") &&
         /linear-gradient/.test(rule.declarations),
     );
 
-    // Assert — dissolves into the bubble's OWN purple, not a hard edge.
+    // Assert — dissolves into the bubble's OWN fill (its role's or held's), not a hard edge.
     expect(gradient?.declarations).toMatch(
-      /linear-gradient\(to bottom, transparent, var\(--assistant\)\)/,
+      /linear-gradient\(to bottom, transparent, var\(--bubble-bg\)\)/,
     );
-  });
-
-  it("fades the user bubble into the user background token", () => {
-    // Arrange / Act
-    const gradient = rulesOf(stylesheet).find(
-      (rule) =>
-        rule.selectors.includes(".bubble.user > .bubble-scroll.has-more::after") &&
-        /linear-gradient/.test(rule.declarations),
-    );
-
-    // Assert — dissolves into the bubble's OWN blue.
-    expect(gradient?.declarations).toMatch(/linear-gradient\(to bottom, transparent, var\(--user\)\)/);
   });
 
   it("centers a chevron on the bottom edge from has-more", () => {
     // Arrange / Act
-    const chevron = declarationsOf(".bubble.assistant > .bubble-scroll.has-more::before");
+    const chevron = declarationsOf(".bubble > .bubble-scroll.has-more::before");
 
     // Assert — the ⌄ glyph (\2304), horizontally centered, click-through.
     expect(chevron).toMatch(/content:\s*"\\2304"/);
@@ -568,7 +562,7 @@ describe("the 'more below' affordance", () => {
 
   it("makes the box the affordance's containing block whether or not it wears has-more", () => {
     // Arrange
-    const boxes = [".bubble.assistant > .bubble-scroll", ".bubble.user > .bubble-scroll", ".title-fold"];
+    const boxes = [".bubble > .bubble-scroll", ".title-fold"];
 
     // Act — whether any rule on the bare box (no has-more) makes it relative.
     const relative = boxes.map((box) =>
@@ -578,7 +572,7 @@ describe("the 'more below' affordance", () => {
     );
 
     // Assert
-    expect(relative).toEqual([true, true, true]);
+    expect(relative).toEqual([true, true]);
   });
 
   it("never puts the affordance on a tool-call section", () => {
@@ -604,7 +598,7 @@ describe("the 'more below' affordance", () => {
     for (const rule of withHasMore) {
       for (const sel of rule.selectors) {
         expect(sel).toMatch(
-          /^(?:\.bubble\.(assistant|user) > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
+          /^(?:\.bubble(?:\[data-cap-lines="0"\])? > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
         );
         for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
       }
@@ -1163,7 +1157,7 @@ describe("the prompt bubble's in-flight border", () => {
     // rules on the same selector, so every rule on it is checked rather than
     // just the first `rulesOf` finds.
     const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble.user[data-wave="working"]'),
+      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
     );
 
     // Assert
@@ -1175,7 +1169,7 @@ describe("the prompt bubble's in-flight border", () => {
   it("sets no border-color on the settled (non-waving) prompt bubble", () => {
     // Arrange / Act — the settled bubble only gets the base rule's
     // transparent reservation; nothing recolors it back to --prompt-live-border.
-    const settled = declarationsOf(".bubble.user");
+    const settled = declarationsOf('.bubble[data-role="prompt"]');
 
     // Assert
     expect(settled).not.toMatch(/border-color/);
@@ -1217,7 +1211,7 @@ describe("the thinking bubble", () => {
 
   it("gives the thinking bubble a light-orange border", () => {
     // Arrange / Act
-    const rule = declarationsOf(".bubble.assistant.thinking-bubble");
+    const rule = declarationsOf('.bubble[data-variant="thinking"]');
 
     // Assert — the border is the light-orange thinking token (owner ruling
     // 2026-09-15), never green and never transparent.
@@ -1228,8 +1222,8 @@ describe("the thinking bubble", () => {
     // Arrange / Act — neither the thinking rule nor the green final-response
     // rule sets a border width or a `border` shorthand; both change only the
     // COLOR and inherit the base `.bubble { border: 0.3px solid transparent }`.
-    const thinking = declarationsOf(".bubble.assistant.thinking-bubble") ?? "";
-    const green = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)") ?? "";
+    const thinking = declarationsOf('.bubble[data-variant="thinking"]') ?? "";
+    const green = declarationsOf('.bubble.final-response:not([data-variant="thinking"])') ?? "";
 
     // Assert — same reserved thickness, only the color differs.
     for (const decls of [thinking, green]) {
@@ -1261,29 +1255,29 @@ describe("the thinking bubble", () => {
       /border-color:\s*var\(--thinking-border\)/.test(r.declarations),
     );
 
-    // Assert — at least one such rule, and EVERY selector that wears it is a
-    // `.thinking-bubble` selector, so a partial-final response (assistant, not
-    // thinking, not final) can never match it and stays borderless.
+    // Assert — at least one such rule, and EVERY selector that wears it is the
+    // thinking variant's, so a partial-final response (not thinking, not final)
+    // can never match it and stays borderless.
     expect(orangeRules.length).toBeGreaterThan(0);
     for (const rule of orangeRules) {
       for (const selector of rule.selectors) {
-        expect(selector).toContain(".thinking-bubble");
+        expect(selector).toContain('[data-variant="thinking"]');
       }
     }
   });
 
-  it("caps the thinking bubble's scroll box at two lines and sets nothing else", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".bubble.assistant.thinking-bubble > .bubble-scroll");
+  it("caps a two-line bubble at two lines and sets nothing else", () => {
+    // Arrange / Act — the thinking bubble's cap value (its spec, response.ts).
+    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
 
     // Assert — only the line budget changes; the clip, fade, chevron and
-    // expand rules stay the response bubble's own.
-    expect(rule?.trim()).toMatch(/^--cap-lines:\s*2\s*;?$/);
+    // expand rules stay every bubble's own.
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*2\s*;?$/);
   });
 
   it("excludes the thinking bubble from the green final-answer rule", () => {
     // Arrange / Act — the green rule's own selector carries the exclusion.
-    const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+    const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
 
     // Assert — the green declaration exists and applies only to non-thinking.
     expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
@@ -1315,7 +1309,7 @@ describe("the removed amber async border", () => {
 
   it("settles a final-response bubble to the green border unconditionally", () => {
     // Arrange / Act — the only border color the settled answer bubble can take.
-    const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+    const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
 
     // Assert — green, with nothing amber able to outrank it on settle.
     expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
@@ -1325,7 +1319,7 @@ describe("the removed amber async border", () => {
 describe("the selected-response border (reply-to-a-past-response)", () => {
   it("recolors the selected final-response bubble with the blue selection token", () => {
     // Arrange / Act
-    const rule = declarationsOf(".bubble.assistant.final-response.response-selected");
+    const rule = declarationsOf(".bubble.final-response.response-selected");
 
     // Assert
     expect(rule).toMatch(/border-color:\s*var\(--selected-response\)/);
@@ -1345,11 +1339,10 @@ describe("the selected-response border (reply-to-a-past-response)", () => {
     // Arrange — the green rule reserves the border and the blue rule replaces it;
     // equal specificity is broken by source order, so blue must come later.
     const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
-    // The green rule excludes thinking bubbles (`:not(.thinking-bubble)`), so
-    // the concluded answer's border can never land on an intermediate reasoning
-    // bubble that reuses `.bubble.assistant`.
-    const green = css.indexOf(".bubble.assistant.final-response:not(.thinking-bubble) {");
-    const blue = css.indexOf(".bubble.assistant.final-response.response-selected");
+    // The green rule excludes thinking bubbles (`:not([data-variant="thinking"])`),
+    // so the concluded answer's border can never land on intermediate reasoning.
+    const green = css.indexOf('.bubble.final-response:not([data-variant="thinking"]) {');
+    const blue = css.indexOf(".bubble.final-response.response-selected");
 
     // Assert
     expect(green).toBeGreaterThanOrEqual(0);
@@ -1426,7 +1419,7 @@ describe("the feed text zoom scoping", () => {
 
     // Assert: the feed's spine carries the scale.
     expect(scaled.has("#feed")).toBe(true);
-    expect(scaled.has(".md")).toBe(true);
+    expect(scaled.has(".bubble")).toBe(true);
     expect(scaled.has(".tool-card")).toBe(true);
   });
 });
@@ -1560,7 +1553,7 @@ describe("the title fold", () => {
   it("draws the fade from the response bubble's shared fade rule", () => {
     // Arrange / Act — the geometry rule the response bubble's fade lives in.
     const fade = rulesOf(stylesheet).find((r) =>
-      r.selectors.includes(".bubble.assistant > .bubble-scroll.has-more::after") &&
+      r.selectors.includes(".bubble > .bubble-scroll.has-more::after") &&
       /height:\s*1\.5em/.test(r.declarations),
     );
 
@@ -1571,7 +1564,7 @@ describe("the title fold", () => {
   it("draws the chevron from the response bubble's shared chevron rule", () => {
     // Arrange / Act
     const chevron = rulesOf(stylesheet).find((r) =>
-      r.selectors.includes(".bubble.assistant > .bubble-scroll.has-more::before"),
+      r.selectors.includes(".bubble > .bubble-scroll.has-more::before"),
     );
 
     // Assert
@@ -1626,7 +1619,7 @@ describe("regression: the response/prompt bubble collapse model", () => {
     // Assert — the same min(calc(...), 50vh) cap FIX1 established.
     expect(
       capped.some((rule) =>
-        /max-height:\s*min\(calc\(var\(--cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
+        /max-height:\s*min\(calc\(var\(--bubble-cap-lines\)[\s\S]*\),\s*50vh\)/.test(rule.declarations),
       ),
     ).toBe(true);
   });
@@ -1757,7 +1750,7 @@ describe("the prompt glimmer's intensity", () => {
   it("carries the intensity in the token alone, so the gradient rule is untouched by it", () => {
     // Arrange / Act — the band's own rule names the token and no literal wash.
     const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble.user[data-wave="working"]'),
+      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
     );
     const gradient = waving.find((rule) => /background-image/.test(rule.declarations))?.declarations ?? "";
 
@@ -1769,7 +1762,7 @@ describe("the prompt glimmer's intensity", () => {
   it("holds the 3.2s period the effect had before the intensity ruling", () => {
     // Arrange / Act — intensity is the wash alone; the pass must not speed up.
     const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble.user[data-wave="working"]'),
+      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
     );
 
     // Assert
@@ -1886,7 +1879,7 @@ describe("the response border ladder", () => {
 
   it("paints a settled mid-turn response pear", () => {
     // Arrange / Act
-    const rule = declarationsOf('.bubble.assistant[data-state="success"]:not(.final-response):not(.thinking-bubble)');
+    const rule = declarationsOf('.bubble[data-variant="response"][data-state="success"]:not(.final-response)');
     // Assert
     expect(rule).toMatch(/border-color:\s*var\(--interim-response-border\)/);
   });
@@ -1900,7 +1893,7 @@ describe("the response border ladder", () => {
 
   it("keeps the turn's answer green", () => {
     // Arrange / Act
-    const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+    const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
     // Assert
     expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
   });
@@ -2012,5 +2005,110 @@ describe("the shell head's clocks hold a fixed footprint", () => {
     const decls = declarationsOf(selector) ?? "";
     // Assert
     expect(decls).toMatch(/min-width:\s*\d+ch/);
+  });
+});
+
+/**
+ * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23). Every blue and purple
+ * bubble is drawn by src/bubble/draw.ts and styled by the rules on `.bubble`:
+ * the role sets only the side and the fill, a variant or state sets only the
+ * border, `data-cap-lines` sets the collapsed limit, and one leading and one
+ * size serve every kind.
+ */
+describe("the one bubble rule set", () => {
+  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
+  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector);
+
+  it("sets one leading for every bubble, the response's 1.5", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble") ?? "";
+    // Assert
+    expect([bubble.match(/--md-line-h:\s*1\.5\s*;/) !== null, /line-height:\s*var\(--md-line-h\)/.test(bubble)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("sets one font size for every bubble, the response's", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble") ?? "";
+    // Assert
+    expect(bubble).toMatch(/font-size:\s*calc\(0\.9rem \* var\(--feed-text-scale\)\)/);
+  });
+
+  it("lets no other rule on a bubble set its size or leading", () => {
+    // Arrange / Act
+    const others = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((sel) => onBubble(sel) && sel !== ".bubble") &&
+        /(?:^|;)\s*(?:font-size|line-height|--md-line-h)\s*:/.test(rule.declarations),
+    );
+    // Assert
+    expect(others.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("carries no second leading token for prompts", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/--prompt-line-h/);
+  });
+
+
+  it.each(BUBBLE_CAP_LINES.map((cap) => [String(cap)]))("maps the %s cap to a line count", (cap) => {
+    // Arrange / Act
+    const rule = declarationsOf(`.bubble[data-cap-lines="${cap}"]`) ?? "";
+    // Assert
+    expect(rule).toMatch(cap === "feed" ? /--bubble-cap-lines:\s*var\(--feed-cap-lines\)/ : new RegExp(`--bubble-cap-lines:\\s*${cap}\\s*;`));
+  });
+
+  it("caps the scroll box in the one leading, at most the 50vh the expanded box takes", () => {
+    // Arrange / Act
+    const cap = rulesOf(stylesheet).find(
+      (rule) => rule.selectors.includes(".bubble > .bubble-scroll") && /max-height/.test(rule.declarations),
+    );
+    // Assert
+    expect(cap?.declarations).toMatch(
+      /max-height:\s*min\(calc\(var\(--bubble-cap-lines\) \* var\(--md-line-h\) \* 1em\),\s*50vh\)/,
+    );
+  });
+
+});
+
+/** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */
+function rgbOf(block: string, token: string): [number, number, number] {
+  const hex = new RegExp(`${token}:\\s*#([0-9a-fA-F]{6})\\s*;`).exec(block)?.[1];
+  if (hex === undefined) throw new Error(`no six-digit ${token} in the block`);
+  return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+/** The spread between an RGB triple's strongest and weakest channel. */
+const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
+
+describe("the held prompt's fill: much more grey than blue", () => {
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", () => darkThemeBlock()],
+  ])("carries a subtle blue hue in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(block(), "--held-prompt-bg");
+    // Assert — blue is the strongest channel, however slightly.
+    expect(b > r && b >= g).toBe(true);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", () => darkThemeBlock()],
+  ])("is far greyer than the prompt blue in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const held = chroma(rgbOf(block(), "--held-prompt-bg"));
+    const prompt = chroma(rgbOf(block(), "--user"));
+    // Assert — at most a third of the prompt blue's saturation.
+    expect(held * 3).toBeLessThanOrEqual(prompt);
+  });
+
+  it("is the one background the held variant sets", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    // Assert
+    expect(rule).toMatch(/--bubble-bg:\s*var\(--held-prompt-bg\)/);
   });
 });

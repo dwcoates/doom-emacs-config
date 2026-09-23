@@ -26,9 +26,9 @@ function prompt(blocks: unknown[], author = "You", working = false) {
 }
 
 describe("drawFeedUserPrompt: the bubble", () => {
-  it("keeps the existing prompt-bubble classes, unchanged by the port", () => {
+  it("wears the one bubble's classes and the prompt hook the feed finds it by", () => {
     const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
-    expect(el.className).toBe("bubble user");
+    expect(el.className).toBe("bubble md user");
   });
 
   it("stamps the wave's phase inline, so a redraw does not jump it back", () => {

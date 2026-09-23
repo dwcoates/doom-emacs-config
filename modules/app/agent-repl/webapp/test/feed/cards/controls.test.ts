@@ -197,7 +197,7 @@ describe("release", () => {
 describe("agenticBubble", () => {
   it("is the response bubble plus the one purple accent", () => {
     expect(agenticBubble({ state: "published", content: [] }).className).toBe(
-      "bubble assistant md agentic",
+      "bubble md assistant agentic",
     );
   });
 
