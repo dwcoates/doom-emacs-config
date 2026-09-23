@@ -20,6 +20,8 @@
  *     thinking/response units are built from.
  *   - `forwardSubagentText` is what makes a spawned agent's prose arrive at
  *     all; without it a subagent is a black box between spawn and result.
+ *   - `perTaskStopAffordance` is what keeps an interrupt to the turn alone;
+ *     without it the CLI kills every background task on an interrupt.
  *
  * THE BINARY IS THE SDK'S OWN. `pathToClaudeCodeExecutable` is deliberately
  * NOT set (ruling R12): the shim drives the SDK's bundled, pinned agent binary
@@ -40,6 +42,23 @@ import type {
 } from "./types.js";
 
 const LOGGER = bindLog({ component: "shim-real-query", operation: "shim.sdk.real-query" });
+
+/**
+ * THE SHIM RENDERS A PER-TASK STOP, SO AN INTERRUPT ENDS THE TURN AND NOTHING ELSE.
+ *
+ * `Options.perTaskStopAffordance` tells the CLI this consumer drives
+ * `stop_task` for each background task (the footer's per-task stop). Declared,
+ * an interrupt on an OPEN-INPUT session — the streaming `AsyncIterable` prompt
+ * every query here is built with — spares running background agents and
+ * workflows, and Stop aborts only the turn. ABSENT, the CLI fails closed and
+ * the interrupt kills every background task: on 2026-09-23 at 13:23:48,
+ * 14:37:37 and 14:49:23 an ordinary interjection stopped every live subagent
+ * in the session because the shim never declared it.
+ *
+ * Exported so the mocked vendor is handed the SAME declaration: `--fake` models
+ * the CLI's interrupt both ways, and the posture it runs under is this one.
+ */
+export const PER_TASK_STOP_AFFORDANCE = true;
 
 /**
  * How the session binds to a vendor conversation. A oneof, because the two are
@@ -187,6 +206,9 @@ export function realQueryOptions(spec: RealQuerySpec): Options {
     settingSources: ["user", "project", "local"],
     includePartialMessages: true,
     forwardSubagentText: true,
+    // REGRESSION (2026-09-23): an interrupt killed every background subagent,
+    // because this was never declared. See PER_TASK_STOP_AFFORDANCE.
+    perTaskStopAffordance: PER_TASK_STOP_AFFORDANCE,
     // EXPOSE READABLE SUMMARIZED THINKING. Without a `thinking` option current
     // models default `display` to "omitted": reasoning still happens but the
     // text is withheld (empty thinking deltas), so no thinking bubble ever

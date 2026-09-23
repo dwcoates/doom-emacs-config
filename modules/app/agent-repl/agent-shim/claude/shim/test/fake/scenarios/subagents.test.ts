@@ -385,6 +385,60 @@ describe("the fan-wide cancel setup", () => {
   });
 });
 
+describe("a turn that holds beside its own live background agent", () => {
+  /** Wait for the hold's parked frame, then interrupt the turn. */
+  const interruptTheHold = async (
+    query: { interrupt: () => Promise<unknown> },
+    _prompts: unknown,
+    messages: Record<string, unknown>[],
+  ): Promise<void> => {
+    const parked = (): boolean =>
+      messages.some(
+        (m) =>
+          m.type === "assistant" &&
+          JSON.stringify((m.message as { content?: unknown } | undefined)?.content ?? "").includes("Waiting beside"),
+      );
+    for (let i = 0; i < 64 && !parked(); i++) await new Promise((r) => setImmediate(r));
+    if (!parked()) throw new Error("the hold never parked");
+    await query.interrupt();
+  };
+
+  const stoppedTasks = (driven: Awaited<ReturnType<typeof driveScenario>>): unknown[] =>
+    ofType(driven, "system", "task_notification")
+      .filter((m) => (m as Record<string, unknown>).status === "stopped")
+      .map((m) => (m as Record<string, unknown>).task_id);
+
+  it("ends the held turn the way an interrupted turn ends", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-hold"], {
+      opts: { perTaskStopAffordance: true },
+      during: interruptTheHold,
+    });
+
+    // Assert
+    expect(ofType(driven, "result")[0]).toMatchObject({ is_error: true, terminal_reason: "aborted_streaming" });
+  });
+
+  it("leaves the agent live across the interrupt under the per-task stop declaration", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-hold"], {
+      opts: { perTaskStopAffordance: true },
+      during: interruptTheHold,
+    });
+
+    // Assert
+    expect(stoppedTasks(driven)).toEqual([]);
+  });
+
+  it("stops the agent with the interrupt when the per-task stop is not declared", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-hold"], { during: interruptTheHold });
+
+    // Assert
+    expect(stoppedTasks(driven)).toEqual([ofType(driven, "system", "task_started")[0]?.task_id]);
+  });
+});
+
 describe("historical usage attributed to a nested subagent", () => {
   // UNGROUNDED, INVENTED (see MANIFEST.md): no capture carries a file-plane
   // -only historical usage record with nested-subagent attribution.

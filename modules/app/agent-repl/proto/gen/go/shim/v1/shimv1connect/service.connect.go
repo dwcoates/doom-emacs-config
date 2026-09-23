@@ -140,8 +140,8 @@ type ShimClient interface {
 	// Speak to an existing agent: stop it, answer its open ask, or prompt it
 	// (a subagent, a workflow agent — never the session's own turn).
 	UpdateAgent(context.Context, *connect.Request[v1.UpdateAgentRequest]) (*connect.Response[v1.UpdateAgentResponse], error)
-	// END the turn: the agent and everything THIS turn spawned, transitively.
-	// Refuses while any of that is live unless forced, naming it.
+	// END the turn. Unforced, the synchronous turn only: detached work runs on.
+	// Forced, the agent and everything THIS turn spawned, transitively.
 	KillTurn(context.Context, *connect.Request[v1.KillTurnRequest]) (*connect.Response[v1.KillTurnResponse], error)
 	// Follow a backgrounded shell command: the bash unit itself.
 	WatchBash(context.Context, *connect.Request[v1.WatchBashRequest]) (*connect.ServerStreamForClient[v1.WatchBashResponse], error)
@@ -454,8 +454,8 @@ type ShimHandler interface {
 	// Speak to an existing agent: stop it, answer its open ask, or prompt it
 	// (a subagent, a workflow agent — never the session's own turn).
 	UpdateAgent(context.Context, *connect.Request[v1.UpdateAgentRequest]) (*connect.Response[v1.UpdateAgentResponse], error)
-	// END the turn: the agent and everything THIS turn spawned, transitively.
-	// Refuses while any of that is live unless forced, naming it.
+	// END the turn. Unforced, the synchronous turn only: detached work runs on.
+	// Forced, the agent and everything THIS turn spawned, transitively.
 	KillTurn(context.Context, *connect.Request[v1.KillTurnRequest]) (*connect.Response[v1.KillTurnResponse], error)
 	// Follow a backgrounded shell command: the bash unit itself.
 	WatchBash(context.Context, *connect.Request[v1.WatchBashRequest], *connect.ServerStream[v1.WatchBashResponse]) error

@@ -1384,6 +1384,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
         calls.push(options);
         return Promise.resolve({ interrupt: async (): Promise<void> => {} });
       },
+      PER_TASK_STOP_AFFORDANCE: true,
     }));
     const log = await import("../src/log.js");
     log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ee", agentReplSessionId: "main-query-factory" });
@@ -1457,6 +1458,65 @@ describe("queryFactory forwards the whole spec to the real query", () => {
 
     // Assert.
     expect(calls[0]).not.toHaveProperty("resumeSessionAt");
+  });
+});
+
+/**
+ * The mocked vendor is handed the per-task stop declaration the real query
+ * makes, on every binding, so its interrupt runs under production's posture.
+ * The fake's own module is mocked here so the options it was handed are
+ * visible at the seam.
+ */
+describe("queryFactory hands the mocked vendor the per-task stop declaration", () => {
+  const handed: Array<Record<string, unknown>> = [];
+  let factory: typeof queryFactory;
+
+  beforeAll(async () => {
+    vi.resetModules();
+    vi.doMock("../src/fake/index.js", () => ({
+      createFakeQuery: (_prompt: unknown, _canUseTool: unknown, opts: Record<string, unknown>) => {
+        handed.push(opts);
+        return { interrupt: async (): Promise<void> => {} };
+      },
+    }));
+    const log = await import("../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ef", agentReplSessionId: "main-fake-factory" });
+    factory = (await import("../src/main.js")).queryFactory;
+  });
+
+  beforeEach(() => {
+    handed.length = 0;
+  });
+
+  afterAll(() => {
+    vi.doUnmock("../src/fake/index.js");
+    vi.resetModules();
+  });
+
+  const env: ShimEnvironment = {
+    claudeConfigDir: mkdtempSync(path.join(os.tmpdir(), "shim-fake-declaration-config-")),
+    stateDir: "/state",
+    shimBuildSha: "abc1234",
+    storeSocket: "/tmp/store.sock",
+  };
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "shim-fake-declaration-cwd-"));
+
+  it.each([
+    { name: "a fresh start", binding: { kind: "fresh", sessionId: "session-1" } },
+    { name: "a resume", binding: { kind: "resume", resumeSessionId: "vendor-old" } },
+  ] satisfies { name: string; binding: QuerySpec["binding"] }[])("on $name", async ({ binding }) => {
+    // Arrange: the describe block's mocked fake seam.
+    // Act.
+    await factory(true, env, cwd)({
+      binding,
+      permissionMode: "default",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+    });
+
+    // Assert.
+    expect(handed[0]).toMatchObject({ perTaskStopAffordance: true });
   });
 });
 
