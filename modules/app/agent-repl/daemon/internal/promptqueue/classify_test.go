@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -22,6 +23,15 @@ func running(t *testing.T, h *harness, turn, text string) {
 		t.Fatalf("PutTurn: %v", err)
 	}
 	h.watcher.running(idsTurn(turn))
+}
+
+// closeInStore closes a turn in the store alone, leaving the watcher — the
+// queue's own account — still reporting it in flight.
+func closeInStore(t *testing.T, h *harness, turn string) {
+	t.Helper()
+	if err := h.db.CloseTurn(context.Background(), idsTurn(turn), instant, wsm.CloseCompleted); err != nil {
+		t.Fatalf("CloseTurn: %v", err)
+	}
 }
 
 func TestJudgeStampsHoldForTurnEndOnAHoldingVerdict(t *testing.T) {
@@ -88,20 +98,73 @@ func TestJudgeStampsClassificationErrorWhenTheJudgeFails(t *testing.T) {
 	}
 }
 
-func TestJudgeStampsClassificationErrorWhenTheRunningTurnHasNoRecord(t *testing.T) {
-	// Arrange: the watcher reports a turn the store never recorded, so there is
-	// nothing to compare against.
+// Every failure on the way to a verdict resolves to the prompt's TRUE state —
+// held for the running turn's end — and never to classification_error, which
+// the tray draws as "unclassified": a failure leaking into the UI.
+func TestJudgeHoldsForTurnEndOnEveryFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{
+			name: "the running turn has no durable record",
+			arrange: func(h *harness) {
+				h.watcher.running("phantom-turn")
+			},
+		},
+		{
+			name: "the running turn was closed in the store while the queue still runs it",
+			arrange: func(h *harness) {
+				running(t, h, "running-turn", "the running work")
+				closeInStore(t, h, "running-turn")
+			},
+		},
+		{
+			name: "the open turns cannot be read",
+			arrange: func(h *harness) {
+				running(t, h, "running-turn", "the running work")
+				h.db.openTurnsErr = errors.New("the store is unreachable")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h)
+			// Act.
+			if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert.
+			if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmHoldForTurnEnd {
+				t.Fatalf("arm = %s, want hold_for_turn_end", armName(got))
+			}
+		})
+	}
+}
+
+func TestJudgeLogsARunningTurnTheStoreHasClosedAtErrorWithBothIDs(t *testing.T) {
+	// Arrange: the incident of 2026-09-23 — a false turn-end closed the
+	// queue's running turn in the store, and a newer turn stands open there.
 	h := newHarness(t)
-	h.watcher.running("phantom-turn")
-	// Act
+	running(t, h, "store-turn", "the store's open turn")
+	running(t, h, "running-turn", "the running work")
+	closeInStore(t, h, "running-turn")
+	// Act.
 	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	// Assert
-	if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmClassificationError {
-		t.Fatalf("arm = %s, want classification_error", armName(got))
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && r.Operation == opClassify && r.Context["running_turn"] == "running-turn" &&
+			reflect.DeepEqual(r.Context["store_open_turns"], []string{"store-turn"}) {
+			return
+		}
 	}
+	t.Fatalf("records = %+v, want one error naming the running turn and the store's open turns", h.log.Records())
 }
 
 func TestJudgeStampsUninterruptibleWhileAContextCutRuns(t *testing.T) {

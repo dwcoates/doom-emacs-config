@@ -62,6 +62,8 @@ type fakeDB struct {
 	acceptErr    error
 	// allHeldErr fails the boot restore's all-or-nothing read.
 	allHeldErr error
+	// openTurnsErr fails the open-turns read the judge compares against.
+	openTurnsErr error
 }
 
 func newFakeDB() *fakeDB {
@@ -238,6 +240,9 @@ func (d *fakeDB) CloseTurn(_ context.Context, turn ids.TurnID, _ time.Time, how 
 func (d *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.openTurnsErr != nil {
+		return nil, d.openTurnsErr
+	}
 	out := []wsm.Turn{}
 	for _, t := range d.turns {
 		if t.Workspace == id && t.Close == nil {
