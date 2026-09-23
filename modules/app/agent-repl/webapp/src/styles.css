@@ -463,6 +463,13 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
+  /* THE SCROLLBAR'S GUTTER: the classic bar's width (see "bubble scrollbars"
+     below), which an expanded bubble lays out inside its scroll box whenever
+     its content passes the 50vh ceiling. A metaprompt tree's column budget
+     (src/bubble/body.ts `measureTreeCols`) always takes it off, collapsed or
+     not, so a tree is wrapped as if expanded and never re-wraps on a click
+     (owner ruling, 2026-09-23). One token, read by both. */
+  --scrollbar-gutter-width: 8px;
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -6575,7 +6582,7 @@ bubble-body.bubble-body { display: block; }
 .skill-input::-webkit-scrollbar,
 .skill-content::-webkit-scrollbar,
 .fold-fixed > .agent-panel::-webkit-scrollbar {
-  width: 8px;
+  width: var(--scrollbar-gutter-width);
 }
 .bubble > .bubble-scroll::-webkit-scrollbar-track,
 .tool-input::-webkit-scrollbar-track,
