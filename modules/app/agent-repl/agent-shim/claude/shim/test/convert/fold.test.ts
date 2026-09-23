@@ -1870,3 +1870,54 @@ describe("where the fold ends a stream", () => {
     expect(detected).toEqual([]);
   });
 });
+
+describe("a subagent's prose arriving while a compaction boundary is held", () => {
+  const boundary = {
+    type: "system",
+    subtype: "compact_boundary",
+    compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
+    uuid: "uuid-boundary-interleaved",
+    session_id: "session-1",
+  } as unknown as SdkMessage;
+
+  it("is NOT taken as the summary", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(boundary, foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(
+      assistant("msg-subagent", [{ type: "text", text: "subagent prose" }], {
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(output.entries.map((entry) => entry.upsertKey)).toEqual(["activity:msg-subagent:0"]);
+  });
+
+  it("leaves the cut held for the MAIN stream's summary", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(boundary, foldContext());
+    fold.onSdkMessage(
+      assistant("msg-subagent", [{ type: "text", text: "subagent prose" }], {
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      foldContext(),
+    );
+
+    // Act.
+    const output = fold.onSdkMessage(
+      assistant("msg-summary", [], { message: { content: "the main summary" } }),
+      foldContext(),
+    );
+
+    // Assert.
+    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const cut = update.value as conversationv1.ContextCut;
+    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe("the main summary");
+  });
+});
