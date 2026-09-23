@@ -1,5 +1,15 @@
-// endpoint_get_live_work.proto — GetLiveWork: the OPEN OBLIGATIONS — every
-// started thing the record holds no terminal for.
+// endpoint_get_live_work.proto — GetLiveWork: ONE SESSION'S OPEN OBLIGATIONS —
+// every started thing the record holds no terminal for, within the lineage of
+// the caller's main agent.
+//
+// THE STORE IS SHARED. One store serves every workspace and every session on
+// the host, so "every open obligation in the record" is every OTHER session's
+// work too. The answer is therefore PER SESSION: the caller names its main
+// agent and the store answers only what descends from it. A shim that resolved
+// the whole record against its own vendor would write closing terminals into
+// other sessions' books for work its vendor never held — which is exactly
+// what happened on 2026-09-23, when opening one workspace reaped five running
+// subagents of another. An unscoped request is REFUSED, never answered.
 //
 // NOT a claim about the world: "live" here means "a start was written and no
 // terminal ever was", which is timeless and cannot go stale. The SHIM calls
@@ -27,14 +37,24 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_get_live_work.proto.
  */
 export const file_store_v1_endpoint_get_live_work: GenFile = /*@__PURE__*/
-  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSIUChJHZXRMaXZlV29ya1JlcXVlc3QigQEKE0dldExpdmVXb3JrUmVzcG9uc2USLwoHc3VjY2VzcxgBIAEoCzIcLnN0b3JlLnYxLkdldExpdmVXb3JrU3VjY2Vzc0gAEi8KB2ZhaWx1cmUYAiABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya0ZhaWx1cmVIAEIICgZyZXN1bHQitAEKEkdldExpdmVXb3JrU3VjY2VzcxItCgtsaXZlX2FnZW50cxgBIAMoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjcKDmxpdmVfd29ya2Zsb3dzGAIgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjYKDWxpdmVfZGV0YWNoZWQYAyADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWQibAoSR2V0TGl2ZVdvcmtGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI+Cg9zdG9yYWdlX2ZhaWx1cmUYAiABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya1N0b3JhZ2VGYWlsdXJlSABCBgoEa2luZCIbChlHZXRMaXZlV29ya1N0b3JhZ2VGYWlsdXJlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
+  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSI/ChJHZXRMaXZlV29ya1JlcXVlc3QSKQoHc2Vzc2lvbhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIoEBChNHZXRMaXZlV29ya1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0TGl2ZVdvcmtGYWlsdXJlSABCCAoGcmVzdWx0IrQBChJHZXRMaXZlV29ya1N1Y2Nlc3MSLQoLbGl2ZV9hZ2VudHMYASADKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI3Cg5saXZlX3dvcmtmbG93cxgCIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBI2Cg1saXZlX2RldGFjaGVkGAMgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkIqwBChJHZXRMaXZlV29ya0ZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KD3N0b3JhZ2VfZmFpbHVyZRgCIAEoCzIjLnN0b3JlLnYxLkdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVIABI+Cg9pbnZhbGlkX3JlcXVlc3QYAyABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0SABCBgoEa2luZCIqChlHZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIhsKGUdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
 
 /**
- * Ask for every open obligation.
+ * Ask for one session's open obligations.
  *
  * @generated from message store.v1.GetLiveWorkRequest
  */
 export type GetLiveWorkRequest = Message<"store.v1.GetLiveWorkRequest"> & {
+  /**
+   * REQUIRED. The caller's MAIN agent id — the root of its session's lineage.
+   * The store answers the agents spawned transitively from it (through
+   * `spawned_by_agent`, and through `spawned_by_workflow` where a workflow is
+   * the link), and the detached work owned by any agent in that set. UNSET or
+   * empty is refused with `invalid_request`; there is no unscoped answer.
+   *
+   * @generated from field: conversation.v1.AgentId session = 1;
+   */
+  session?: AgentId | undefined;
 };
 
 /**
@@ -76,8 +96,9 @@ export const GetLiveWorkResponseSchema: GenMessage<GetLiveWorkResponse> = /*@__P
   messageDesc(file_store_v1_endpoint_get_live_work, 1);
 
 /**
- * The open obligations, from the three tables' non-terminal rows. Empty
- * lists are the ordinary answer for an idle session. IDS ONLY: the caller
+ * The session's open obligations, from the three tables' non-terminal rows
+ * within the requested lineage — never another session's. Empty lists are the
+ * ordinary answer for an idle session. IDS ONLY: the caller
  * follows up per item (GetWorkflow, OpenAgentSession, the detached row's
  * state), which the reconciliation does anyway.
  *
@@ -135,6 +156,14 @@ export type GetLiveWorkFailure = Message<"store.v1.GetLiveWorkFailure"> & {
      */
     value: GetLiveWorkStorageFailure;
     case: "storageFailure";
+  } | {
+    /**
+     * `session` unset or empty: the store refuses to answer unscoped.
+     *
+     * @generated from field: store.v1.GetLiveWorkInvalidRequest invalid_request = 3;
+     */
+    value: GetLiveWorkInvalidRequest;
+    case: "invalidRequest";
   } | { case: undefined; value?: undefined };
 };
 
@@ -144,6 +173,28 @@ export type GetLiveWorkFailure = Message<"store.v1.GetLiveWorkFailure"> & {
  */
 export const GetLiveWorkFailureSchema: GenMessage<GetLiveWorkFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_get_live_work, 3);
+
+/**
+ * The request was malformed or violated the validation invariant.
+ *
+ * @generated from message store.v1.GetLiveWorkInvalidRequest
+ */
+export type GetLiveWorkInvalidRequest = Message<"store.v1.GetLiveWorkInvalidRequest"> & {
+  /**
+   * Which field, as the store names it — for the caller's logs, never
+   * switched on.
+   *
+   * @generated from field: string field = 1;
+   */
+  field: string;
+};
+
+/**
+ * Describes the message store.v1.GetLiveWorkInvalidRequest.
+ * Use `create(GetLiveWorkInvalidRequestSchema)` to create a new message.
+ */
+export const GetLiveWorkInvalidRequestSchema: GenMessage<GetLiveWorkInvalidRequest> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_live_work, 4);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -158,5 +209,5 @@ export type GetLiveWorkStorageFailure = Message<"store.v1.GetLiveWorkStorageFail
  * Use `create(GetLiveWorkStorageFailureSchema)` to create a new message.
  */
 export const GetLiveWorkStorageFailureSchema: GenMessage<GetLiveWorkStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_get_live_work, 4);
+  messageDesc(file_store_v1_endpoint_get_live_work, 5);
 
