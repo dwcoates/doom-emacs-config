@@ -608,35 +608,45 @@ func (s *Server) GetWorkflow(_ context.Context, req *connect.Request[storev1.Get
 // ---- GetLiveWork ----
 
 func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.GetLiveWorkRequest]) (*connect.Response[storev1.GetLiveWorkResponse], error) {
-	log := s.rpcLogger(storev1connect.ShimStoreGetLiveWorkProcedure, req.Header())
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"}, "reading the open obligations")
+	session := req.Msg.GetSession().GetValue()
+	log := s.rpcLogger(storev1connect.ShimStoreGetLiveWorkProcedure, req.Header()).With(logging.Fields{AgentID: session})
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work", AgentID: session}, "reading one session's open obligations")
 
-	live, err := s.store.LiveWork(correlated(ctx, req.Header()))
+	if ref := validateGetLiveWorkRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		return liveWorkFailure(ref), nil
+	}
+
+	live, err := s.store.LiveWork(correlated(ctx, req.Header()), session)
 	if err != nil {
-		ref := s.storeFailure(log, "store.rpc.get-live-work", err, logging.Fields{})
+		ref := s.storeFailure(log, "store.rpc.get-live-work", err, logging.Fields{AgentID: session})
 		return liveWorkFailure(ref), nil
 	}
 	if live == nil {
 		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no live-work answer")
-		s.logOwnFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		s.logOwnFailure(log, "store.rpc.get-live-work", ref, logging.Fields{AgentID: session})
 		return liveWorkFailure(ref), nil
 	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"},
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work", AgentID: session},
 		"open obligations served agents=%d workflows=%d detached=%d", len(live.GetLiveAgents()), len(live.GetLiveWorkflows()), len(live.GetLiveDetached()))
 	return connect.NewResponse(&storev1.GetLiveWorkResponse{
 		Result: &storev1.GetLiveWorkResponse_Success{Success: live},
 	}), nil
 }
 
-// liveWorkFailure has ONE arm, because GetLiveWork takes no request fields:
-// there is nothing a caller can have sent wrong, so every way this verb fails
-// is the database failing.
+// liveWorkFailure has TWO arms: the request named no session (the store never
+// answers unscoped), or the database failed.
 func liveWorkFailure(ref *refusal) *connect.Response[storev1.GetLiveWorkResponse] {
+	failure := &storev1.GetLiveWorkFailure{Detail: ref.detail}
+	if ref.class == classStorage {
+		failure.Kind = &storev1.GetLiveWorkFailure_StorageFailure{StorageFailure: &storev1.GetLiveWorkStorageFailure{}}
+	} else {
+		failure.Kind = &storev1.GetLiveWorkFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetLiveWorkInvalidRequest{Field: ref.field},
+		}
+	}
 	return connect.NewResponse(&storev1.GetLiveWorkResponse{
-		Result: &storev1.GetLiveWorkResponse_Failure{Failure: &storev1.GetLiveWorkFailure{
-			Detail: ref.detail,
-			Kind:   &storev1.GetLiveWorkFailure_StorageFailure{StorageFailure: &storev1.GetLiveWorkStorageFailure{}},
-		}},
+		Result: &storev1.GetLiveWorkResponse_Failure{Failure: failure},
 	})
 }
 
