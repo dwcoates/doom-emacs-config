@@ -19,6 +19,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
+import { installBackgroundClear } from "./background-click.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -168,6 +169,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     overscan: overscan ?? undefined,
   });
+
+  // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends an active reply selection
+  // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
+  // the daemon's cleared push then parks the tail through `applySelection`.
+  const uninstallClear =
+    scrollBox === null ? null : installBackgroundClear(scrollBox, ctx, () => root.selectionActive());
 
   openWatch();
 
@@ -505,6 +512,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     watch?.cancel();
     unobserve?.();
     intentScroll?.uninstall();
+    uninstallClear?.();
     overscan?.dispose();
     root.dispose();
   }
