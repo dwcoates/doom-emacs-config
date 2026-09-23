@@ -161,9 +161,9 @@ type Opts struct {
 	Pprof string
 	// SelfRepo names the daemon's own checkout via AGENT_REPL_SELF_REPO_DIR,
 	// so a merge target can be recognized as the emacs repo. The self-reload
-	// trigger stays ON under this override: test safety comes from
-	// AGENT_REPL_DEPLOY_SCRIPT naming the fake deploy script, so landed range
-	// to rollout trigger to deploy is assertable end to end.
+	// deploy stays ON under this override: test safety comes from
+	// AGENT_REPL_DEPLOY_BUILDER naming the fake build, which fails, so a
+	// landing's one deploy is assertable end to end and deploys nothing.
 	SelfRepo string
 	// MultiRepoRoot is the tree whose workspaces use the multi-repo account.
 	MultiRepoRoot string
@@ -245,9 +245,11 @@ type Daemon struct {
 	staleAddr string
 	// LockDir is the redirected kernel-lock directory.
 	LockDir string
-	// Browser, Deploy record what the daemon invoked.
-	Browser *Recorder
-	Deploy  *Recorder
+	// Browser, Deploy and Launchctl record what the daemon invoked. Deploy is
+	// the deploy's build, which always fails: a harness never builds.
+	Browser   *Recorder
+	Deploy    *Recorder
+	Launchctl *Recorder
 	// PromptsDir is the copy of prompts/ the daemon reads its briefs from.
 	PromptsDir string
 	// WebappDir is the served dist.
@@ -371,7 +373,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		MultiRepoConfigDir: NewConfigRoot(t, filepath.Join(root, "config-multi"), accountEmail(opts.MultiRepoAccountEmail, "multi@example.invalid")),
 		StoreSocket:        opts.StoreSocket,
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
-		Deploy:             NewFakeDeployScript(t, filepath.Join(root, "bin")),
+		Launchctl:          NewFakeLaunchctl(t, filepath.Join(root, "bin")),
 		t:                  t,
 		expected:           map[string]bool{},
 		shims:              map[string]*ShimControl{},
@@ -435,6 +437,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		mainJS = opts.ShimMain
 	}
 	fakeBin := filepath.Join(root, "bin")
+	d.Deploy = newFakeDeployBuilder(t, fakeBin, mainJS, d.WebappDir)
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
 	// daemon reads comes out of this test's fixture file and the real binary is
@@ -511,7 +514,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"AGENT_REPL_STORE_SOCKET="+filepath.Join(sockRoot, "unused-store.sock"),
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
-		"AGENT_REPL_DEPLOY_SCRIPT="+d.Deploy.Path,
+		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,
+		"AGENT_REPL_LAUNCHCTL="+d.Launchctl.Path,
+		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		// HOME and PATH aside, the build identity is stated in one place only.
@@ -609,6 +614,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		t.Fatalf("harness: start daemon: %v", err)
 	}
 	d.cmd = cmd
+	// EVERY DEPLOY THIS DAEMON RUNS IS A NO-OP unless the test stages another:
+	// the builds it states are the ones running.
+	d.StageDeployBuild(DeployCurrent)
 	t.Cleanup(func() {
 		// On a coverage run the teardown registered ahead of the warning
 		// sweep owns this and runs it after that sweep instead.
