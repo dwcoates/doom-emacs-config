@@ -984,3 +984,73 @@ func countOf(records []dlog.Record, level, operation string) int {
 	}
 	return n
 }
+
+func TestActivityLineOfReadsTheStandingLine(t *testing.T) {
+	tests := []struct {
+		name   string
+		status *frontendv1.FooterStatus
+		want   activityLine
+	}{
+		{
+			name:   "no status arm at all",
+			status: &frontendv1.FooterStatus{},
+			want:   activityLine{},
+		},
+		{
+			name: "a status arm with no activity",
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Idle{
+				Idle: &frontendv1.FooterStatusIdle{}}},
+			want: activityLine{},
+		},
+		{
+			name: "a kind that carries its own text",
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{
+				Thinking: &frontendv1.FooterStatusThinking{Activity: &frontendv1.FooterStatusThinkingActivity{
+					Kind: &frontendv1.FooterStatusThinkingActivity_Compaction{
+						Compaction: &frontendv1.FooterStatusActivityCompaction{Text: "compacting the context…"}},
+				}}}},
+			want: activityLine{kind: "compaction", text: "compacting the context…"},
+		},
+		{
+			name: "a kind with no text field names the kind",
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{
+				Thinking: &frontendv1.FooterStatusThinking{Activity: &frontendv1.FooterStatusThinkingActivity{
+					Kind: &frontendv1.FooterStatusThinkingActivity_Hook{
+						Hook: &frontendv1.FooterStatusActivityHook{Name: "PreToolUse"}},
+				}}}},
+			want: activityLine{kind: "hook"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got := activityLineOf(tt.status)
+
+			// Assert. A textless kind's rendering is prototext, whose spacing
+			// is deliberately unstable, so only its kind is pinned exactly.
+			if got.kind != tt.want.kind {
+				t.Fatalf("kind = %q, want %q", got.kind, tt.want.kind)
+			}
+			if tt.want.text != "" && got.text != tt.want.text {
+				t.Fatalf("text = %q, want %q", got.text, tt.want.text)
+			}
+		})
+	}
+}
+
+func TestActivityLineOfRendersATextlessKindsFields(t *testing.T) {
+	// Arrange
+	status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Thinking{
+		Thinking: &frontendv1.FooterStatusThinking{Activity: &frontendv1.FooterStatusThinkingActivity{
+			Kind: &frontendv1.FooterStatusThinkingActivity_Hook{
+				Hook: &frontendv1.FooterStatusActivityHook{Name: "PreToolUse"}},
+		}}}}
+
+	// Act
+	got := activityLineOf(status)
+
+	// Assert
+	if !contains(got.text, "PreToolUse") {
+		t.Fatalf("text = %q, want the hook's name", got.text)
+	}
+}

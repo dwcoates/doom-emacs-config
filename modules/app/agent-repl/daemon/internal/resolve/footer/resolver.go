@@ -158,6 +158,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	apply(s)
 	view := r.render(ws, s)
 	arm, armChanged, previousArm := s.observeArm(view)
+	line, lineChanged, previousLine := s.observeLine(view)
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
 	r.mu.Unlock()
@@ -167,6 +168,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	log.Debug(operation, message, ctx)
 	logArmChange(log, operation, arm, armChanged, previousArm)
+	logLineChange(log, operation, arm, line, lineChanged, previousLine)
 	topic.Publish(view)
 }
 
@@ -182,6 +184,25 @@ func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": operation})
 }
 
+// logLineChange records the PUBLISHED activity line whenever it changes — set,
+// replaced or cleared — and only then. A line that stands longer than its act
+// is diagnosable from the log alone only if the log says when it began
+// standing, what put it there, and when (and by what) it went.
+func logLineChange(log dlog.Logger, operation, arm string, line activityLine, changed bool, previous activityLine) {
+	if !changed {
+		return
+	}
+	log.Info("daemon.footer.activity_line_changed", "the footer published a new activity line",
+		dlog.Context{
+			"arm":           arm,
+			"kind":          line.name(),
+			"text":          line.text,
+			"previous_kind": previous.name(),
+			"previous_text": previous.text,
+			"cause":         operation,
+		})
+}
+
 // mutateAll applies a resolver-WIDE change and republishes every workspace
 // that has a footer, because a daemon-scoped fact stands on all of them. A
 // workspace that has observed nothing yet is left alone: its footer is not
@@ -189,12 +210,15 @@ func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous
 // that makes a workspace's strip exist.
 func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply func(*wsState), global func()) {
 	type publication struct {
-		topic       *publish.Topic[*frontendv1.FooterView]
-		view        *frontendv1.FooterView
-		log         dlog.Logger
-		arm         string
-		armChanged  bool
-		previousArm string
+		topic        *publish.Topic[*frontendv1.FooterView]
+		view         *frontendv1.FooterView
+		log          dlog.Logger
+		arm          string
+		armChanged   bool
+		previousArm  string
+		line         activityLine
+		lineChanged  bool
+		previousLine activityLine
 	}
 	r.mu.Lock()
 	global()
@@ -206,7 +230,12 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		apply(s)
 		view := r.render(ws, s)
 		arm, armChanged, previousArm := s.observeArm(view)
-		out = append(out, publication{r.topicLocked(ws), view, r.logOf(ws, s), arm, armChanged, previousArm})
+		line, lineChanged, previousLine := s.observeLine(view)
+		out = append(out, publication{
+			topic: r.topicLocked(ws), view: view, log: r.logOf(ws, s),
+			arm: arm, armChanged: armChanged, previousArm: previousArm,
+			line: line, lineChanged: lineChanged, previousLine: previousLine,
+		})
 	}
 	r.mu.Unlock()
 
@@ -216,6 +245,8 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 	r.log.Global().Debug(operation, message, ctx)
 	for _, p := range out {
 		p.log.Debug(operation, message, ctx)
+		logArmChange(p.log, operation, p.arm, p.armChanged, p.previousArm)
+		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
 		p.topic.Publish(p.view)
 	}
 }
@@ -405,10 +436,10 @@ func (r *resolver) SetColdGateAnswer(ws ids.WorkspaceID, answer *ColdGateAnswer)
 			// a stale progress sentence outliving its act is the same defect
 			// as no sentence at all.
 			if answer == nil {
-				s.compaction = nil
+				r.endCompaction(ws, s, "daemon.footer.set_cold_gate_answer")
 				return
 			}
-			s.compaction = &standing{text: answer.Text, at: r.opts.clock.Now()}
+			r.standCompaction(ws, s, answer.Text, "daemon.footer.set_cold_gate_answer")
 		})
 }
 
@@ -532,6 +563,9 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			s.queryDied = &standing{text: deadQueryLine, at: now}
 			s.blocked = &blockedState{kind: blockedQueryDied, at: now}
 			s.turn = nil
+			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
+			s.compacting = false
+			r.endCompaction(ws, s, "daemon.footer.on_session_update.query_died")
 			s.tok.settled = true
 		}
 	case *conversationv1.SessionUpdate_AccountUsage:
@@ -555,17 +589,22 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			// fact this arm carries — no phase, no figure — so the line says
 			// exactly that and nothing it does not know (owner ruling,
 			// 2026-09-14: both compactions read the same).
-			s.compaction = &standing{text: vendorCompactionLine, at: r.opts.clock.Now()}
+			r.standCompaction(ws, s, vendorCompactionLine, "daemon.footer.on_session_update.compacting")
 		}
 	case *conversationv1.SessionUpdate_CompactionProgress:
 		return "compaction_progress", func(s *wsState) {
 			r.logSessionArm(ws, s, "compaction_progress")
 			progress := u.CompactionProgress
-			s.compaction = &standing{text: CompactionLine(progress), at: r.opts.clock.Now()}
-			// A FAILED PHASE IS THE END OF THE COMPACTION, not a compaction
-			// still running; every other phase is one still in flight.
-			s.compacting = progress.GetPhase() !=
-				conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED
+			r.standCompaction(ws, s, CompactionLine(progress), "daemon.footer.on_session_update.compaction_progress")
+			// A CONCLUDED PHASE IS THE END OF THE COMPACTION, not a
+			// compaction still running: `failed` cut nothing and `started`
+			// is the resumed session up. Every other phase is one still in
+			// flight. The concluded line stands one dwell and is retired.
+			concluded := concludedPhase(progress.GetPhase())
+			s.compacting = !concluded
+			if concluded {
+				r.concludeCompaction(ws, s)
+			}
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {
@@ -869,37 +908,32 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	arm := contextCutArm(cut)
 	failed, _ := cut.GetCut().(*conversationv1.ContextCut_CompactionFailed)
 
-	r.mu.Lock()
-	s := r.stateLocked(ws)
-	s.seen = true
-	s.turn = nil
-	s.turnEverRan = true
-	s.compacting = false
-	// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the compaction's end
-	// signal, so its progress sentence stops standing here; a failed cut still
-	// says what went wrong, through the context-budget line below.
-	s.compaction = nil
-	s.tok.settled = true
-	if failed != nil {
-		s.contextBudget = &standing{
-			text: "compaction failed — " + truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth),
-			at:   r.opts.clock.Now(),
-		}
-	}
-	view := r.render(ws, s)
-	topic := r.topicLocked(ws)
-	log := r.logOf(ws, s)
-	r.mu.Unlock()
-
-	if failed != nil {
-		log.Warn("daemon.footer.on_context_cut",
-			"a compaction failed, so nothing was cut and the context is still too large",
-			dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})
-	} else {
-		log.Debug("daemon.footer.on_context_cut", "the footer took a context cut",
-			dlog.Context{"arm": arm})
-	}
-	topic.Publish(view)
+	// THROUGH THE ONE PUBLICATION SITE, like every other fact: the cut moves
+	// the status arm (the turn ends) and the activity line (the compaction's
+	// line goes), and a change published past mutate is a change no record
+	// states.
+	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
+		dlog.Context{"arm": arm}, func(s *wsState) {
+			s.turn = nil
+			s.turnEverRan = true
+			s.compacting = false
+			// THE LINE GOES WITH THE ACT IT NARRATED. The cut is the
+			// compaction's end signal, so its progress sentence stops standing
+			// here; a failed cut still says what went wrong, through the
+			// context-budget line below.
+			r.endCompaction(ws, s, "daemon.footer.on_context_cut")
+			s.tok.settled = true
+			if failed == nil {
+				return
+			}
+			s.contextBudget = &standing{
+				text: "compaction failed — " + truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth),
+				at:   r.opts.clock.Now(),
+			}
+			r.logOf(ws, s).Warn("daemon.footer.on_context_cut",
+				"a compaction failed, so nothing was cut and the context is still too large",
+				dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})
+		})
 }
 
 // contextCutArm names the cut's arm for the record.

@@ -2,8 +2,12 @@ package footer
 
 import (
 	"fmt"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 )
 
 // The compaction's progress lines, composed HERE and nowhere else.
@@ -75,6 +79,131 @@ func CompactionRequestLine(choice, detail string) string {
 	default:
 		return "answering the cold gate…"
 	}
+}
+
+// ---- the line's lifetime ---------------------------------------------------
+//
+// A COMPACTION LINE CANNOT OUTLIVE THE ACT IT NARRATES (owner's report,
+// 2026-09-23: "compacting the context…" stood on every later turn for over an
+// hour after the compaction had finished, because the one signal that ended
+// it — the context cut — never reached the footer). The line is therefore
+// ended by EVERY edge that ends its act, not by one:
+//
+//   - the CUT (OnContextCut), the compaction's own end signal;
+//   - the main TURN'S TERMINAL (OnAgentTerminal). A vendor auto-compaction
+//     runs inside a turn and a `/compact` is its own turn, so no compaction
+//     the vendor narrates survives the turn it ran in. Reaching the terminal
+//     with the line still standing means the cut was MISSED upstream, which is
+//     an invariant violation: it is recorded at ERROR with the line and its
+//     age, and the line is ended, because the terminal IS the end of the act —
+//     the record exposes the missing cut, the clearing is not a fallback;
+//   - a CONCLUDED PHASE (`started`, `failed`): the act is over, so its line
+//     stands one momentary dwell — long enough for a person to read
+//     "compacted and resumed" — and is then retired;
+//   - the vendor query DYING: no turn survives it, so no compaction does;
+//   - the COLD GATE'S ANSWER being cleared. While an answer is in flight the
+//     line is the answer's own (owner ruling, 2026-09-14): the answer's verb
+//     clears it on every way out, and no other edge takes it from under the
+//     answer, so the gate's "compacted and resumed" reads until the verb is
+//     done, exactly as ruled.
+//
+// A TURN OPENING WITH A LINE STANDING IS NOT A VIOLATION. The vendor's
+// `compacting` start signal lands BEFORE the turn-open edge of the turn it
+// belongs to (see applyTurnStarted), so a line standing at an opening is, in
+// the ordinary case, this turn's own. The turn's terminal bounds it either way.
+
+// standCompaction stands the compaction line. A repeat of the words already
+// standing keeps the instant they began standing: the vendor re-sends its
+// `compacting` signal about every thirty seconds while it compacts, and the
+// strip's age — and a violation record's — is the age of the ACT, not of the
+// latest re-send. Any pending retirement is cancelled: the new words narrate
+// an act still being reported.
+func (r *resolver) standCompaction(ws ids.WorkspaceID, s *wsState, text, cause string) {
+	r.cancelCompactionEnd(s)
+	if s.compaction != nil && s.compaction.text == text {
+		return
+	}
+	s.compaction = &standing{text: text, at: r.opts.clock.Now()}
+	r.logOf(ws, s).Debug("daemon.footer.compaction_line_stood", "the footer stood a compaction line",
+		dlog.Context{"text": text, "cause": cause})
+}
+
+// endCompaction ends the standing compaction line, if any, and records which
+// edge ended it.
+func (r *resolver) endCompaction(ws ids.WorkspaceID, s *wsState, cause string) {
+	r.cancelCompactionEnd(s)
+	if s.compaction == nil {
+		return
+	}
+	r.logOf(ws, s).Debug("daemon.footer.compaction_line_ended", "the footer ended a compaction line",
+		dlog.Context{"text": s.compaction.text, "age_ms": r.compactionAge(s).Milliseconds(), "cause": cause})
+	s.compaction = nil
+}
+
+// concludeCompaction schedules the retirement of a concluded phase's line. The
+// retirement ends THIS line only: a line stood since, or one a cold gate's
+// answer has taken over, is not this dwell's to end.
+func (r *resolver) concludeCompaction(ws ids.WorkspaceID, s *wsState) {
+	r.cancelCompactionEnd(s)
+	concluded := s.compaction
+	s.compactionEnd = r.opts.clock.AfterFunc(r.opts.dwell, func() {
+		r.mutate(ws, "daemon.footer.retire_compaction_line",
+			"the concluded compaction's dwell elapsed and the footer retired its line",
+			nil, func(s *wsState) {
+				if s.compaction != concluded || s.coldAnswer != nil {
+					return
+				}
+				r.endCompaction(ws, s, "daemon.footer.retire_compaction_line")
+			})
+	})
+}
+
+// cancelCompactionEnd stops a pending retirement.
+func (r *resolver) cancelCompactionEnd(s *wsState) {
+	if s.compactionEnd != nil {
+		s.compactionEnd.Stop()
+		s.compactionEnd = nil
+	}
+}
+
+// endCompactionAtTerminal ends the line at the main turn's terminal, recording
+// the invariant violation when the line narrates an act that should already
+// have been ended by its cut.
+func (r *resolver) endCompactionAtTerminal(ws ids.WorkspaceID, s *wsState, turn ids.TurnID) {
+	const cause = "daemon.footer.on_agent_terminal"
+	switch {
+	case s.compaction == nil:
+		return
+	case s.coldAnswer != nil:
+		// The answer owns the line; its verb ends it.
+		return
+	case s.compactionEnd != nil:
+		// A concluded phase awaiting its dwell: the act already ended.
+		r.endCompaction(ws, s, cause)
+		return
+	}
+	r.logOf(ws, s).Error("daemon.footer.compaction_line_outlived_turn",
+		"the turn ended with a compaction line still standing: the context cut that ends the compaction never reached the footer",
+		dlog.Context{
+			"turn_id":             string(turn),
+			"text":                s.compaction.text,
+			"age_ms":              r.compactionAge(s).Milliseconds(),
+			"stood_at":            s.compaction.at.UTC().Format(time.RFC3339Nano),
+			"invariant_violation": "a compaction line outlived the turn it ran in",
+			"remediation":         "find where the compaction's context_cut was held or dropped before the footer",
+		})
+	r.endCompaction(ws, s, cause)
+}
+
+// compactionAge is how long the standing line has stood.
+func (r *resolver) compactionAge(s *wsState) time.Duration {
+	return r.opts.clock.Now().Sub(s.compaction.at)
+}
+
+// concludedPhase reports whether a phase ends the compaction.
+func concludedPhase(phase conversationv1.SessionCompactionPhase) bool {
+	return phase == conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED ||
+		phase == conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED
 }
 
 // tokenFigure scales a token count the way every other figure on this strip is
