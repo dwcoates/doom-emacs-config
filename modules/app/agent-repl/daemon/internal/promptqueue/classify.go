@@ -70,7 +70,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		return disposition, nil
 	}
 	if uninterruptible != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-		log.Debug(opClassify, "the running turn is a context cut; no classifier runs", dlog.Context{
+		log.Info(opClassify, "the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs", dlog.Context{
 			"command": uninterruptible.String(),
 		})
 		return disposition, nil
@@ -196,7 +196,10 @@ func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification
 		})
 		return
 	}
-	log.Debug(opClassify, "recorded the verdict", dlog.Context{
+	// EVERY VERDICT IS ON DISK AT INFO: why a prompt interrupted or waited is
+	// the first question a stuck tray raises, and a debug record answers it
+	// nowhere the daemon keeps.
+	log.Info(opClassify, "recorded the verdict", dlog.Context{
 		"turn": string(sub.Turn), "arm": armName(c.Arm), "reason": c.Reason,
 	})
 	if err := q.pushTray(ctx, sub.WS, log); err != nil {

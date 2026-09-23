@@ -63,6 +63,61 @@ func TestAPromptHeldByAFailedClassifierDeliversAtTheTurnsEnd(t *testing.T) {
 	}
 }
 
+// Every verdict and its reason is recorded at info, so why a prompt
+// interrupted or waited is on disk.
+func TestEveryVerdictIsLoggedAtInfoWithItsReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  classifier.Verdict
+		judgeErr error
+		arm      string
+		reason   string
+	}{
+		{name: "a holding verdict", verdict: classifier.Verdict{Reason: "independent"}, arm: "hold_for_turn_end", reason: "independent"},
+		{name: "an interjecting verdict", verdict: classifier.Verdict{Interject: true, Reason: "it countermands the work"}, arm: "interject", reason: "it countermands the work"},
+		{name: "a failed classifier's verdict", judgeErr: errors.New("the vendor run failed"), arm: "hold_for_turn_end", reason: "the classifier could not decide, so the prompt waits for the running turn to end"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict, h.judge.err = tt.verdict, tt.judgeErr
+			// Act.
+			if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert.
+			for _, r := range h.log.Records() {
+				if r.Level == "info" && r.Operation == opClassify && r.Context["arm"] == tt.arm && r.Context["reason"] == tt.reason {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want the %s verdict at info with its reason", h.log.Records(), tt.arm)
+		})
+	}
+}
+
+func TestAContextCutVerdictIsLoggedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.q.state(theWorkspace).uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
+	h.watcher.running("t-running")
+	// Act.
+	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opClassify {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the uninterruptible verdict at info", h.log.Records())
+}
+
 // closeInStore closes a turn in the store alone, leaving the watcher — the
 // queue's own account — still reporting it in flight.
 func closeInStore(t *testing.T, h *harness, turn string) {
