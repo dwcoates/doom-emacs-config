@@ -307,23 +307,112 @@ func TestInterjectMovesThePromptToTheSemanticHead(t *testing.T) {
 	}
 }
 
-func TestAFailedInterruptStripsTheJumpAndStampsTheError(t *testing.T) {
-	// Arrange
+func TestARefusedInterruptReturnsThePromptToHeld(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "the shim refuses the kill", arrange: func(h *harness) { h.sender.killErr = errors.New("the turn is not the open one") }},
+		{name: "the shim refuses a live turn", arrange: func(h *harness) { h.sender.killErr = liveRefusal{} }},
+		{name: "the workspace has no session to send it to", arrange: func(h *harness) { h.noSession = true }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			release := h.judge.hold()
+			if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			tt.arrange(h)
+			// Act.
+			release()
+			h.q.waitForClassifications()
+			// Assert.
+			if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmHoldForTurnEnd {
+				t.Fatalf("arm = %s, want hold_for_turn_end", armName(got))
+			}
+		})
+	}
+}
+
+func TestARefusedInterruptClearsTheInterruptingStatus(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
 	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
 	h.sender.killErr = errors.New("the turn is not the open one")
-	// Act
+	// Act.
 	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
-	// Assert
-	if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmClassificationError {
-		t.Fatalf("arm = %s, want classification_error", armName(got))
-	}
+	// Assert.
 	if got := h.footer.interruptions(); got[len(got)-1] {
-		t.Fatal("a failed interrupt must clear the interrupting status")
+		t.Fatal("a refused interrupt must clear the interrupting status")
+	}
+}
+
+// liveRefusal is the fake's stand-in for the workspace package's KillTurn
+// refusal of a live turn, matched structurally exactly as the real one is.
+type liveRefusal struct{}
+
+func (liveRefusal) Error() string         { return "shim KillTurn refused: live" }
+func (liveRefusal) KillRefusedLive() bool { return true }
+
+func TestARefusedInterruptIsLoggedAtTheLevelItsNatureEarns(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause error
+		level string
+	}{
+		{name: "a live turn's refusal is an expected outcome", cause: liveRefusal{}, level: "info"},
+		{name: "any other refusal is unexpected", cause: errors.New("the turn is not the open one"), level: "warn"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+			h.sender.killErr = tt.cause
+			// Act.
+			if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+			// Assert.
+			var levels []string
+			for _, r := range h.log.Records() {
+				if r.Operation == opInterject && r.Context["cause"] == tt.cause.Error() {
+					levels = append(levels, r.Level)
+				}
+			}
+			if len(levels) != 1 || levels[0] != tt.level {
+				t.Fatalf("refusal records at levels %v, want exactly one at %s", levels, tt.level)
+			}
+		})
+	}
+}
+
+func TestAPromptWhoseInterruptWasRefusedDeliversAtTheTurnsEnd(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Interject: true, Reason: "it countermands the work"}
+	h.sender.killErr = liveRefusal{}
+	if _, err := h.q.Submit(context.Background(), submission("t1", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Act.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert.
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
+		t.Fatalf("started = %v, want the held prompt delivered at the turn's end", started)
 	}
 }
 
