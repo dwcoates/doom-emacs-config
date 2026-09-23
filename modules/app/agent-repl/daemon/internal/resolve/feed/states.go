@@ -343,6 +343,10 @@ type subagentState struct {
 	durationMs uint64
 	// detached records that the bubble is drawn through the detached wrapper.
 	detached bool
+	// work is the run's detached-work id once it is detached work, empty while
+	// the spawn is the turn's own progress. The head draws it verbatim
+	// (FeedSubagent.work_id).
+	work string
 	// feed is where the bubble landed.
 	feed placement
 	// held is the spawn's frames that arrived BEFORE its start, in arrival
