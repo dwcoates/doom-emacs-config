@@ -337,9 +337,12 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - status tree: idle.ready → thinking.submitting (on StartTurn) → thinking →
   idle.done; `interrupted` is retired by a daemon-side dwell into the
   successor push with no client action; `loading` likewise
-- tokens cell formats input misses (written+unwritten) and excludes cache
-  reads; usage stamped once per response is not double-counted across the
-  response's units; verdict `incomplete` when a response carried no usage
+- tokens cell is the main agent's context growth: one `context_usage` push
+  moves the topbar's chip ("118.2k") and the cell ("18.2k in", against the
+  100k the turn opened on) together; the tokens PANEL's summed input line
+  formats input misses (written+unwritten) and excludes cache reads; usage
+  stamped once per response is not double-counted across the response's
+  units; verdict `incomplete` when a response carried no usage
 - live-work chips: agents count, shells count, tasks done/total from
   task_act state, monitors, crons from AgentCron listed; unset when zero
 - wakeup: schedule_wakeup scheduled → `waiting.wakeup` only when nothing
@@ -481,7 +484,7 @@ audit's charge can be reconciled against the files.
   `line` unset, `invalid_url`, and `launch_failed` driven by a launcher that
   really exits non-zero.
 - EXACT FIGURES rather than shapes: the context chip reads "142.3k", the
-  tokens cell "1k in", breakdown rows carry `share_permille`/`emphasized`, the
+  tokens panel's input line "1k", breakdown rows carry `share_permille`/`emphasized`, the
   model selector's options are exactly the catalog in order, and the wakeup
   cell carries the scheduled instant itself.
 - EITHER/OR REFUSALS SETTLED: the unknown-workspace and no-login-open refusals
