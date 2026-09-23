@@ -5683,9 +5683,18 @@ response-body.bubble-body { display: block; }
   font-family: ui-monospace, monospace;
   overflow-wrap: anywhere;
 }
+/* THE SHELL HEAD'S TWO CLOCKS HOLD A FIXED FOOTPRINT (owner rule, 2026-09-23:
+   the user owns the scroll). The head wraps (`flex-wrap`), and a clock label
+   repainted every second that grew by a unit ("59s" -> "1m 0s") could push
+   its neighbor onto a new line and move everything under the reader. Each is
+   one unbreakable, tabular run with room reserved for its longest usual
+   label ("59m 59s"; "quiet for 59m 59s"). */
 .shell-clock {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
+  display: inline-block;
+  white-space: nowrap;
+  min-width: 7ch;
 }
 /* "quiet for 12s": the client's clock over the daemon's last observed append.
    Muted and italic like every other aside, NOT an alarm hue — quietness is a
@@ -5693,6 +5702,10 @@ response-body.bubble-body { display: block; }
 .shell-quiet {
   color: var(--muted);
   font-style: italic;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  white-space: nowrap;
+  min-width: 17ch;
 }
 .shell-spool {
   margin-top: 0.3rem;

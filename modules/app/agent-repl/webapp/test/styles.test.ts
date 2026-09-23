@@ -1983,3 +1983,34 @@ describe("the response body custom element", () => {
     expect(rule).toMatch(/display:\s*block/);
   });
 });
+
+/**
+ * THE SHELL HEAD'S CLOCKS NEVER RE-WRAP IT (owner rule, 2026-09-23: the user
+ * owns the scroll). The head is a wrapping flex row, and a clock repainted
+ * every second must hold a fixed footprint so its growth cannot push a
+ * neighbor onto a new line under the reader.
+ */
+describe("the shell head's clocks hold a fixed footprint", () => {
+  const clocks = [".shell-clock", ".shell-quiet"];
+
+  it.each(clocks)("%s is one unbreakable run", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it.each(clocks)("%s draws tabular figures", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it.each(clocks)("%s reserves a minimum width", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/min-width:\s*\d+ch/);
+  });
+});
