@@ -5,6 +5,10 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 )
 
 // subagentStart is a spawn announcing the agent it created.
@@ -1111,5 +1115,129 @@ func TestASpawnUnitReplayedAfterItsRunSettledDoesNotCountItLiveAgain(t *testing.
 	if got := h.view(t).GetStrip().GetLiveWork().GetAgents(); got != nil {
 		t.Fatalf("agents chip = %d after the spawn unit replayed behind the run's own terminal, want the run to stay retired",
 			got.GetCount())
+	}
+}
+
+// feedEncode spells a row address WITH its feed, so a test can see which feed
+// a jump target addresses; fakeEncode leaves the feed out.
+func feedEncode(ref feedid.Ref) *frontendv1.FeedId {
+	feed := "root"
+	switch {
+	case ref.Feed.Agent != nil:
+		feed = "agent:" + ref.Feed.Agent.GetValue()
+	case !ref.Feed.Root:
+		feed = "other"
+	}
+	return &frontendv1.FeedId{Value: feed + "|" + string(ref.Row.Kind) + "|" + ref.Row.ID}
+}
+
+// bashStart is a Bash call's start, as the calling agent's stream states it.
+func bashStart(unit, command string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+				Command:   &conversationv1.AgentBashCommand{Line: command},
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
+			}},
+		}},
+	}
+}
+
+// detachedFrom announces that a unit's work left, naming owner when non-nil.
+func detachedFrom(work, unit string, owner *conversationv1.AgentId) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Owner: owner,
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}
+}
+
+// TestAShellsJumpTargetAddressesTheHeadOnItsOwnersFeed pins the address half of
+// the owner's rule: the head is drawn in the feed of the agent that made the
+// call, so the $ panel's jump must land there — a subagent's sub-feed for a
+// subagent's shell. It used to address the root for every shell.
+func TestAShellsJumpTargetAddressesTheHeadOnItsOwnersFeed(t *testing.T) {
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	for _, tc := range []struct {
+		name    string
+		arrange func(h *harness)
+		want    string
+	}{
+		{
+			name: "the main agent's re-announced shell addresses the root",
+			arrange: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, createdShell("work-1", "npm test"))
+			},
+			want: "root|shell_head|work-1",
+		},
+		{
+			name: "the main agent's call that moved addresses the root",
+			arrange: func(h *harness) {
+				h.r.OnActivity(testWS, mainAgent, bashStart("work-1", "npm test"))
+				h.r.OnDetachedWork(testWS, mainAgent, detachedFrom("work-1", "work-1", nil))
+			},
+			want: "root|shell_head|work-1",
+		},
+		{
+			name: "a subagent's call announced on the main book addresses the subagent's feed",
+			arrange: func(h *harness) {
+				h.r.OnActivity(testWS, sub, bashStart("work-1", "npm test"))
+				h.r.OnDetachedWork(testWS, mainAgent, detachedFrom("work-1", "work-1", nil))
+			},
+			want: "agent:agent-sub|shell_head|work-1",
+		},
+		{
+			name: "a re-announced shell whose announcement names a subagent addresses its feed",
+			arrange: func(h *harness) {
+				work := createdShell("work-1", "npm test")
+				work.Owner = sub
+				h.r.OnDetachedWork(testWS, mainAgent, work)
+			},
+			want: "agent:agent-sub|shell_head|work-1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, WithFeedIDEncoder(feedEncode))
+			connected(h)
+
+			// Act
+			tc.arrange(h)
+
+			// Assert
+			rows := h.view(t).GetExpanded().GetShells().GetRows()
+			if len(rows) != 1 {
+				t.Fatalf("shell rows = %d, want 1", len(rows))
+			}
+			if got := rows[0].GetTarget().GetValue(); got != tc.want {
+				t.Fatalf("target = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAShellWithNoKnownOwnerIsLeftOutOfThePanelRatherThanAddressedToTheRoot:
+// no address is invented. Its head is on no feed, so a target would point at
+// nothing; the omission is recorded.
+func TestAShellWithNoKnownOwnerIsLeftOutOfThePanelRatherThanAddressedToTheRoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t, WithFeedIDEncoder(feedEncode))
+	connected(h)
+	work := createdShell("work-1", "npm test")
+	work.Owner = nil
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, work)
+
+	// Assert
+	if rows := h.view(t).GetExpanded().GetShells().GetRows(); len(rows) != 0 {
+		t.Fatalf("shell rows = %+v, want none addressed for an unknown owner", rows)
+	}
+	if !hasLevel(h.log.Records(), dlog.LevelDebug, "daemon.footer.shell_row_unaddressed") {
+		t.Fatalf("records = %+v, want the omission recorded", h.log.Records())
 	}
 }

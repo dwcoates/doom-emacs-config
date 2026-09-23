@@ -23,7 +23,10 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 			dlog.Context{"agent": agent.GetValue()})
 		return
 	}
-	at := r.place(s, agent)
+	at, ok := r.place(s, agent)
+	if !ok {
+		return
+	}
 	card := &frontendv1.FeedQuestion{}
 	served, known := s.questionAsks[askID]
 	if !known {
