@@ -79,28 +79,6 @@ export function parkAtTail(box: ScrollTail): void {
   box.scrollTop = box.scrollHeight;
 }
 
-/**
- * Did this render put a DIFFERENT item at the feed's top?
- *
- * The load-more prepend's whole hazard: a page of older messages lands above
- * everything the reader is looking at, the feed grows by the height of ten
- * messages, and without compensation the viewport is left showing content it
- * was never showing. The reader asked for MORE of what they had, not to be
- * moved off it.
- *
- * A key comparison rather than a height comparison, because height changes for
- * reasons that are not a prepend at all — a card expanding, a deferred item
- * settling — and compensating those would move the reader instead. Only the
- * item AT THE TOP changing says content was inserted above.
- *
- * An empty feed on either side answers false: there was no reading position to
- * preserve, and the caller's own tail rule owns where an empty feed lands.
- */
-export function feedTopChanged(previousTopKey: string | null, nextTopKey: string | null): boolean {
-  if (previousTopKey === null || nextTopKey === null) return false;
-  return previousTopKey !== nextTopKey;
-}
-
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
 
