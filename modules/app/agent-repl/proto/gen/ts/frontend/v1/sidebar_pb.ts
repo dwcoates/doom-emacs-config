@@ -149,11 +149,21 @@ export const RosterRowAttentionSchema: GenMessage<RosterRowAttention> = /*@__PUR
  * because the tab-bar entry and this row are two drawings of ONE mode and may
  * never disagree.
  *
- * PARTIAL means "you have already seen this workspace's information". Emacs
- * raises it (MarkWorkspaceViewed) once the user has dwelt on the workspace's
- * panels, and it says nothing about the lifecycle: the status dot keeps its
- * colour in either mode, and only the row's NAME text recedes to the muted
- * colour while the marker stands.
+ * PARTIAL means "you have already seen this workspace's finished response".
+ * Emacs reports a dwell (MarkWorkspaceViewed) once the user has dwelt on the
+ * workspace's panels, and the marker changes nothing about the lifecycle: the
+ * status dot keeps its colour in either mode, and only the row's NAME text
+ * recedes to the muted colour while the marker stands.
+ *
+ * DONE-ONLY. The marker is PRESENT only on a row whose `status` is `done`,
+ * never on any other arm, however long the user has looked at it: every other
+ * arm is live work (thinking, a permission ask, a merge running) or an
+ * exceptional state (severed, dead, vendor_blocked, a merge conflict), and
+ * neither may ever be drawn deprioritized. The daemon decides this: a dwell
+ * reported while the row is not `done` is DROPPED, not held for later, so a
+ * row that goes on to finish is FULL until the user dwells on the finished
+ * response. A row carrying this marker with any arm but `done` is a contract
+ * breach.
  *
  * THE DAEMON CLEARS IT ON ANY STATUS CHANGE, and that clear is the whole
  * reset rule: the moment a row resolves to a different `status` arm than the
