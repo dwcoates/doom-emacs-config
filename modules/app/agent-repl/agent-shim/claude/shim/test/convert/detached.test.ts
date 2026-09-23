@@ -8,7 +8,8 @@
  * arm a reader is told, which is the whole point of `lost` — and the ruling
  * itself belongs to whoever holds the live set.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
@@ -868,6 +869,28 @@ describe("convertDetached: foreground work", () => {
 
   it("announces no detachment when a SYNCHRONOUS spawn starts", () => {
     expect(convert(foregroundStart("local_agent"))).toEqual([]);
+  });
+
+  it("announces no detachment when a foreground Bash starts", () => {
+    expect(convert(foregroundStart("local_bash"))).toEqual([]);
+  });
+
+  it("records a foreground start at debug, naming the task", () => {
+    // Arrange.
+    const written = vi.mocked(writeSync);
+    const before = written.mock.calls.length;
+
+    // Act.
+    convert(foregroundStart("local_bash"));
+
+    // Assert.
+    const records = (written.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>)
+      .map(([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+      )
+      .filter((record) => record.message === "a task started in the foreground; it is not detached work and nothing is announced")
+      .map((record) => ({ level: record.level, task: (record.context as Record<string, unknown>).task_id }));
+    expect(records).toEqual([{ level: "debug", task: "t1" }]);
   });
 
   it.each(KINDS)("writes nothing when a foreground $kind concludes without ever moving", ({ kind }) => {
