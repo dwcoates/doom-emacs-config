@@ -297,6 +297,45 @@ func TestValidateReadAgentPageRequestRequiresTheAfterPointer(t *testing.T) {
 	}
 }
 
+func TestValidateGetLiveWorkRequestRefusesAnUnsetSession(t *testing.T) {
+	// Arrange.
+	req := &storev1.GetLiveWorkRequest{}
+
+	// Act.
+	ref := validateGetLiveWorkRequest(req)
+
+	// Assert.
+	if siteOf(ref) != SiteSessionEmpty {
+		t.Fatalf("site = %q, want %q", siteOf(ref), SiteSessionEmpty)
+	}
+}
+
+func TestValidateGetLiveWorkRequestRefusesAnEmptySessionValue(t *testing.T) {
+	// Arrange.
+	req := &storev1.GetLiveWorkRequest{Session: &conversationv1.AgentId{}}
+
+	// Act.
+	ref := validateGetLiveWorkRequest(req)
+
+	// Assert.
+	if siteOf(ref) != SiteSessionEmpty {
+		t.Fatalf("site = %q, want %q", siteOf(ref), SiteSessionEmpty)
+	}
+}
+
+func TestValidateGetLiveWorkRequestAcceptsANamedSession(t *testing.T) {
+	// Arrange.
+	req := &storev1.GetLiveWorkRequest{Session: &conversationv1.AgentId{Value: "main-1"}}
+
+	// Act.
+	ref := validateGetLiveWorkRequest(req)
+
+	// Assert.
+	if ref != nil {
+		t.Fatalf("refusal = %v, want none", ref)
+	}
+}
+
 func TestValidateGetSidecarCursorsRequestRefusesAPresentButEmptyFileID(t *testing.T) {
 	// Arrange.
 	empty := ""
