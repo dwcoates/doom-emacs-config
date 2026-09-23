@@ -21,7 +21,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/integration-cold-first-test` | `~/.config/doom-worktrees/integration-cold-first-test` | Root-cause the flaky integration tests (the first test in 6 files fails under load; 900ms bound). Measured cause, one shared cold-start helper, and green 5× under load. | `a77100b53ad11dbed` | 18:25 |
 | `fix/selection-click-and-stable-gutter` | `~/.config/doom-worktrees/selection-click-and-stable-gutter` | A click on the feed outside any bubble clears the reply selection (via the daemon), then snaps to the bottom and follows. `scrollbar-gutter: stable` on bubble scroll boxes. | `af0ad8918210bd694` | 18:30 |
 | `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
-| `feat/held-prompt-compact-badges` | `~/.config/doom-worktrees/held-prompt-compact-badges` | Held prompts collapse to 2 lines, with details and buttons only when expanded, at half the normal max width. Statuses are colored badges (waiting red, interrupting green, the rest mapped). | `afb5bccb8f702f5d3` | 18:55 |
+| `feat/held-prompt-compact-badges` | `~/.config/doom-worktrees/held-prompt-compact-badges` | Held prompts collapse to 2 lines, with details and buttons only when expanded, at half the normal max width. Statuses are colored badges (waiting red, interrupting green, the rest mapped). ADDED: a held prompt landing jumps the feed to the bottom and follows, like a sent prompt. | `afb5bccb8f702f5d3` | 18:55 |
 
 ## Still waiting on the owner
 
