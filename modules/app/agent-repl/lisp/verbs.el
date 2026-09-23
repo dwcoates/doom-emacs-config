@@ -1167,7 +1167,7 @@ component's decision."
                "no component was listed"))))
 
 (defun agent-repl-verbs--deploy-refusal-sentence (cause)
-  "Return the DeployError CAUSE, a (:arm ARM :value V), as the sentence it is reported by."
+  "Return the DeployError CAUSE, a (:arm ARM :value V), as its sentence."
   (let ((value (plist-get cause :value)))
     (pcase (plist-get cause :arm)
       (:build-failed
