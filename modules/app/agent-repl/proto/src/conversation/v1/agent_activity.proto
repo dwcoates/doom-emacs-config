@@ -2637,6 +2637,19 @@ message AgentSendMessageSuccess {
 
   // When the send settled. UNSET when the producer observed no instant.
   optional AgentActivitySettledAt settled_at = 4;
+
+  // WHO THE CALLER ADDRESSED, restated from the start so the settled frame
+  // stands alone. A send's start and its settle upsert ONE unit, so once the
+  // send settles the start is gone from any store that keeps the latest frame,
+  // and a replay drawing this frame alone must still name the recipient as the
+  // caller wrote it. Same value, same meaning, as AgentSendMessageStart's.
+  string addressed_to = 5;
+
+  // The one-line preview, restated from the start so the settled frame stands
+  // alone, for the same reason as the address above. UNSET exactly when the
+  // start's was: the caller supplied none, and a surface draws the recipient
+  // alone — never the body.
+  optional AgentSendMessageSummary summary = 6;
 }
 
 // The recipient was already running and the message is queued for it.
@@ -2656,6 +2669,17 @@ message AgentSendMessageResumedRecipient {}
 message AgentSendMessageFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+
+  // WHO THE CALLER ADDRESSED, restated from the start so the settled frame
+  // stands alone: a refused send is still drawn, and once it settles its start
+  // is gone from any store that keeps the latest frame of the unit. Same
+  // value, same meaning, as AgentSendMessageStart's.
+  string addressed_to = 2;
+
+  // The one-line preview, restated from the start so the settled frame stands
+  // alone. UNSET exactly when the start's was: the caller supplied none, and a
+  // surface draws the recipient alone — never the body.
+  optional AgentSendMessageSummary summary = 3;
 }
 
 // ---- The web fetch: one URL's content, read by the agent ----
