@@ -365,8 +365,19 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
       rule.selectors.includes(`${selector}::-webkit-scrollbar`),
     );
 
-    // Assert
-    expect(sized?.declarations).toMatch(/width:\s*8px/);
+    // Assert — sized by the one gutter token the tree budget also reads.
+    expect(sized?.declarations).toMatch(/width:\s*var\(--scrollbar-gutter-width\)/);
+  });
+
+  it("declares the scrollbar gutter token once, in px", () => {
+    // Arrange / Act — every declaration of the token, on the column the
+    // bubbles hang in or anywhere else.
+    const declared = rulesOf(stylesheet).flatMap(
+      (rule) => rule.declarations.match(/--scrollbar-gutter-width:[^;]*/g) ?? [],
+    );
+
+    // Assert — px, because body.ts measures it and refuses anything else.
+    expect(declared).toEqual(["--scrollbar-gutter-width: 8px"]);
   });
 
   it.each(SCROLL_BOXES)("gives %s a track in the existing border token", (selector) => {
