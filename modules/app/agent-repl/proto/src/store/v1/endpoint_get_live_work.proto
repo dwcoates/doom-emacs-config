@@ -1,5 +1,15 @@
-// endpoint_get_live_work.proto — GetLiveWork: the OPEN OBLIGATIONS — every
-// started thing the record holds no terminal for.
+// endpoint_get_live_work.proto — GetLiveWork: ONE SESSION'S OPEN OBLIGATIONS —
+// every started thing the record holds no terminal for, within the lineage of
+// the caller's main agent.
+//
+// THE STORE IS SHARED. One store serves every workspace and every session on
+// the host, so "every open obligation in the record" is every OTHER session's
+// work too. The answer is therefore PER SESSION: the caller names its main
+// agent and the store answers only what descends from it. A shim that resolved
+// the whole record against its own vendor would write closing terminals into
+// other sessions' books for work its vendor never held — which is exactly
+// what happened on 2026-09-23, when opening one workspace reaped five running
+// subagents of another. An unscoped request is REFUSED, never answered.
 //
 // NOT a claim about the world: "live" here means "a start was written and no
 // terminal ever was", which is timeless and cannot go stale. The SHIM calls
@@ -20,8 +30,15 @@ import "conversation/v1/detached_work.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
-// Ask for every open obligation.
-message GetLiveWorkRequest {}
+// Ask for one session's open obligations.
+message GetLiveWorkRequest {
+  // REQUIRED. The caller's MAIN agent id — the root of its session's lineage.
+  // The store answers the agents spawned transitively from it (through
+  // `spawned_by_agent`, and through `spawned_by_workflow` where a workflow is
+  // the link), and the detached work owned by any agent in that set. UNSET or
+  // empty is refused with `invalid_request`; there is no unscoped answer.
+  conversation.v1.AgentId session = 1;
+}
 
 // The set, or why it could not be read.
 message GetLiveWorkResponse {
@@ -31,8 +48,9 @@ message GetLiveWorkResponse {
   }
 }
 
-// The open obligations, from the three tables' non-terminal rows. Empty
-// lists are the ordinary answer for an idle session. IDS ONLY: the caller
+// The session's open obligations, from the three tables' non-terminal rows
+// within the requested lineage — never another session's. Empty lists are the
+// ordinary answer for an idle session. IDS ONLY: the caller
 // follows up per item (GetWorkflow, OpenAgentSession, the detached row's
 // state), which the reconciliation does anyway.
 message GetLiveWorkSuccess {
@@ -50,7 +68,15 @@ message GetLiveWorkFailure {
   string detail = 1;
   oneof kind {
     GetLiveWorkStorageFailure storage_failure = 2;
+    // `session` unset or empty: the store refuses to answer unscoped.
+    GetLiveWorkInvalidRequest invalid_request = 3;
   }
+}
+// The request was malformed or violated the validation invariant.
+message GetLiveWorkInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
 }
 // The database failed; `detail` carries the driver's text.
 message GetLiveWorkStorageFailure {}
