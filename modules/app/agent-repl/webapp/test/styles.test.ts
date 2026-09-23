@@ -1670,3 +1670,37 @@ describe("the warning chip as the one error surface", () => {
     expect(cards).toEqual([]);
   });
 });
+
+/**
+ * THE BORDER LADDER (owner ruling, 2026-09-23): thinking is yellow, a settled
+ * mid-turn response is pear, and the turn's answer stays green.
+ */
+describe("the response border ladder", () => {
+  it("paints thinking bubbles yellow", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toMatch(/--thinking-border:\s*#eab308/);
+  });
+
+  it("paints a settled mid-turn response pear", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble.assistant[data-state="success"]:not(.final-response):not(.thinking-bubble)');
+    // Assert
+    expect(rule).toMatch(/border-color:\s*var\(--interim-response-border\)/);
+  });
+
+  it("defines the pear border in both themes", () => {
+    // Arrange / Act
+    const matches = stylesheet.match(/--interim-response-border:\s*#[0-9a-fA-F]{6}/g) ?? [];
+    // Assert
+    expect(matches.length).toBe(2);
+  });
+
+  it("keeps the turn's answer green", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
+    // Assert
+    expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
+  });
+});
