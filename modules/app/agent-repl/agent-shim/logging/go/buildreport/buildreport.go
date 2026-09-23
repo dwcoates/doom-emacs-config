@@ -124,8 +124,7 @@ func Write(dir, service string, r Report) error {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(payload); err != nil {
-		_ = tmp.Close()
-		return errors.Join(fmt.Errorf("buildreport: write %s: %w", name, err), os.Remove(name))
+		return errors.Join(fmt.Errorf("buildreport: write %s: %w", name, err), tmp.Close(), os.Remove(name))
 	}
 	if err := tmp.Close(); err != nil {
 		return errors.Join(fmt.Errorf("buildreport: close %s: %w", name, err), os.Remove(name))
