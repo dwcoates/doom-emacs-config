@@ -195,7 +195,7 @@ export function watchStream<Res extends Message>(
     // re-arm the backoff, or a link that flaps every few minutes would creep
     // to the ceiling and stay there.
     if (unreachableFiled) {
-      log.info(`${opts.name} is receiving again; retracting the unreachable card`, {
+      log.info(`${opts.name} is receiving again; retracting the unreachable failure`, {
         operation: "rpc.stream-recovered",
         context: { rpc: opts.name },
       });
@@ -236,8 +236,8 @@ export function watchStream<Res extends Message>(
       context: { rpc: opts.name, end: end.kind, close_code: closeCode, close_reason: closeReason, backoff_ms: backoffMs },
     });
     ctx.failures.report(daemonUnreachable(closeCode, closeReason));
-    // AFTER the card, so the footer's line names this stream rather than the
-    // card's generic account of the same ending.
+    // AFTER the failure, so the footer's line names this stream rather than
+    // the failure's generic account of the same ending.
     reportClientFailure("stream_ended", `${opts.name} stream ended (${end.kind})`);
     unreachableFiled = true;
   };

@@ -1,15 +1,12 @@
 /**
  * FAILURES — the three failure vocabularies, each drawn in its own place.
  *
- *   1. the six CLIENT-LOCAL FailureKind arms, minted only by the webapp's own
- *      overlay (R4), each drawn distinctly with its typed evidence,
+ *   1. the six CLIENT-LOCAL FailureKind arms, minted only by the webapp itself
+ *      (R4) and listed in the topbar's warning chip, each drawn distinctly
+ *      with its typed evidence,
  *   2. every FeedTurnEndedErrored arm, which is where a VENDOR failure now
  *      arrives (the failure vocabulary lost its vendor band),
  *   3. every FeedPageError arm, drawn where the rows would have been.
- *
- * The client-local arms are all one side in the vocabulary (`client_local` =
- * blue), so the overlay's tone is asserted against the file rather than a
- * table copied into the test.
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -19,7 +16,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { FailureKindSchema } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { chipFailureText, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { RENDER_COLORS, failureSideColor } from "./vocab";
 import {
@@ -59,14 +56,6 @@ describe("the client-local failure vocabulary", () => {
     expect(declared).toEqual(expect.arrayContaining([...CLIENT_FAILURE_ARMS]));
   });
 
-  it("paints the client-local side the color the vocabulary assigns", async () => {
-    // Arrange / Act
-    harness = await report("daemonUnreachable");
-    const drawn = harness.$('[data-component="failure-overlay"] [data-arm]');
-    // Assert
-    expect(drawn?.className).toContain(`tone-${failureSideColor("client_local")}`);
-  });
-
   it("assigns the client-local side a color the palette declares", () => {
     // Assert: guards the vocabulary itself, not the app.
     expect(RENDER_COLORS.colors).toContain(failureSideColor("client_local"));
@@ -74,7 +63,7 @@ describe("the client-local failure vocabulary", () => {
 });
 
 describe.each(CLIENT_FAILURE_ARMS)("the %s failure", (arm) => {
-  it("draws its own arm in the overlay", async () => {
+  it("lists its own arm in the topbar's warning chip", async () => {
     // Arrange / Act
     harness = await report(arm);
     // Assert
@@ -109,16 +98,14 @@ describe("failure evidence", () => {
     // Arrange / Act
     harness = await report(arm);
     // Assert
-    expect(harness.$('[data-component="failure-overlay"]')?.textContent).toContain(
-      FAILURE_EVIDENCE[arm],
-    );
+    expect(await chipFailureText(harness, arm)).toContain(FAILURE_EVIDENCE[arm]);
   });
 
   it("draws the workspace-gone arm, which carries no evidence at all", async () => {
     // Arrange / Act
     harness = await report("workspaceGone");
     // Assert
-    expect(harness.$('[data-component="failure-overlay"] [data-arm="workspaceGone"]')).not.toBeNull();
+    expect(await chipFailureText(harness, "workspaceGone")).toContain("no longer exists");
   });
 });
 

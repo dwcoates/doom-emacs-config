@@ -36,7 +36,9 @@ test/integration/         the whole app under jsdom against a fake daemon
 ## Mount order (src/main.ts, mirrored by test/integration/harness.ts)
 
 1. `shellElements(document)` — a broken shell fails here, by id.
-2. the page address, then the transport, the client and the failure overlay.
+2. the page address, then the transport, the client, the client-local
+   failures (`createLocalFailures`) and the topbar's MOUNT — its warning chip
+   lists those failures from here on, before any stream exists.
 3. the logger, bound to this page's identity and configured from the page's
    `log_level` boot parameter.
 4. `adoptAtBoot(ctx)` — BEFORE any view stream. A joining daemon refuses every
@@ -44,10 +46,10 @@ test/integration/         the whole app under jsdom against a fake daemon
    adopting first turns a race into a wait. A terminal refusal throws
    `AdoptionFailed`, which the boot mints as `boot_failed`.
 5. the mounts, in index.html's own top-to-bottom order, with two forced
-   exceptions: the login overlay precedes the topbar (whose account control
-   opens it), and the feed precedes the footer (whose jump rows reveal rows).
-   sidebar, topbar, feed, hold tray, footer, composer (dev mode only), login
-   overlay, lifecycle.
+   exceptions: the login overlay precedes the topbar's `watch` (whose account
+   control opens it), and the feed precedes the footer (whose jump rows reveal
+   rows). sidebar, topbar `watch`, feed, hold tray, footer, composer (dev mode
+   only), login overlay, lifecycle.
 
 ## The seams
 
@@ -63,8 +65,8 @@ test/integration/         the whole app under jsdom against a fake daemon
   move handler; the refusal hook raises the signal by name. The registry lives
   in the rpc layer so a refusal can reach the mounted banner without the rpc
   layer importing a component.
-- **The failure sink.** `mountFailureOverlay` IS the `FailureSink` every layer
-  reports through.
+- **The failure sink.** `createLocalFailures` IS the `FailureSink` every layer
+  reports through; the topbar's warning chip is its one drawer.
 - **The ticker.** One `Ticker` on the context; every clock subscribes to it.
 
 ## DOM hooks
@@ -93,6 +95,7 @@ and are contract on the same terms:
 | `data-status-wave` | the `.footer-status` cell whose arm means PROGRESS | `progress` (absent on every other status, and on the client's own composed disconnected strip); the word is then per-letter `.pfooter-wave-letter` spans inside one `.pfooter-status-word` | webapp/footer-status-wave |
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
+| `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 
 ## Commands
 
@@ -144,6 +147,16 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   what lifts it), and a push does NOT lift one: only a unary the daemon
   answered, or a stream that reads again, does. Nothing else in the webapp
   composes a footer cell, and no new arm was added to the proto for it.
+- **THE TOPBAR'S WARNING CHIP IS THE ONE PLACE AN ERROR IS SHOWN** (owner
+  ruling, 2026-09-23). The chip and its dropdown (`src/topbar/warnings.ts`)
+  are the canonical surface on which the webapp makes an error visible: no
+  overlays, banners, toasts or corner cards. The daemon's pushed warnings are
+  drawn there verbatim; the page's own client-local failures
+  (`src/failure/local.ts`) merge in client-side, ahead of them and in the same
+  count, and never wait on a push — the topbar mounts before adoption so the
+  chip can list a failure that stops every stream. The chip is red (`--err`).
+  Every error is ALSO logged: filing one writes `warning-chip.report`, clearing
+  it `warning-chip.retract`.
 - **TYPED ARMS, NO FALLBACKS.** Every oneof is switched exhaustively. An unset
   oneof, an unset non-optional message field, or an unknown arm is a
   `MalformedView` — never a default, never something else drawn instead. An

@@ -578,8 +578,8 @@ in the webapp are **merge bubble tabs** (`feed/merge/merge-body.ts`,
   `webapp/src/rpc/streams.ts:watchStream` → `reportUnreachable` →
   `webapp/src/failure/sink.ts:daemonUnreachable`; the footer's own
   `disconnected` arm arrives on its stream. DOM: footer
-  `[data-arm="disconnected"]`, overlay
-  `[data-component="failure-overlay"] [data-arm="daemonUnreachable"]`.
+  `[data-arm="disconnected"]`, warning chip
+  `#topbar .topbar-warnings[data-local-arms~="daemonUnreachable"]`.
   **There is no daemon-side "the daemon is gone" push, and there cannot be** —
   a dead daemon pushes nothing. The disconnected state is drawn entirely
   client-side from the stream dying. What the daemon does publish is the

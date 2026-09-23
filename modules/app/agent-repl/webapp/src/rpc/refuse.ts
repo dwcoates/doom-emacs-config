@@ -204,8 +204,8 @@ export function drawTransportRefusal(host: HTMLElement, err?: unknown): void {
  * NO REFUSAL IS DRAWN AT THE CONTROL. Since landing 4 every error carries a
  * typed cause, so an unset one is not "a refusal with no words" — it is a frame
  * this build cannot read, and inventing a sentence for it at the control would
- * state a refusal the daemon never made. The failure overlay is the surface for
- * a frame nobody could read, and it names this one.
+ * state a refusal the daemon never made. The topbar's warning chip is the
+ * surface for a frame nobody could read, and it names this one.
  *
  * Answers whether ERR was a malformed view; anything else is not this
  * function's to interpret and the caller must rethrow it.

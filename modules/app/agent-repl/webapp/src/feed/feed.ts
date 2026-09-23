@@ -283,7 +283,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
    * head renderer refused the re-pushed row with `MalformedView`
    * ("FeedTurnActivity.unit: the row is not a subagent bubble"), the shared
    * stream machinery skipped the frame, and the page filed a
-   * `frameUndecodable` failure card -- so a detached subagent's head froze on
+   * `frameUndecodable` failure -- so a detached subagent's head froze on
    * the state it was announced with and never moved again. Caught by the G51
    * playbook, whose fan-wide cancel launches two of them.
    */
