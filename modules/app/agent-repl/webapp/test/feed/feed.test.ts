@@ -1117,3 +1117,124 @@ describe("mountFeed: the latest-visible latch", () => {
     m.feed.dispose();
   });
 });
+
+describe("mountFeed: a click on the feed background ends a reply selection", () => {
+  /**
+   * A mounted root feed in a 300px viewport over HEIGHT px of content, with r1
+   * drawn and the reader wheeled up to 100, and then r1 selected on the live
+   * tail — the reply selection holding the follow off.
+   */
+  async function selected() {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const geometry = { top: 100, height: 2000 };
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => geometry.height },
+      clientHeight: { get: () => 300 },
+      scrollTop: {
+        get: () => geometry.top,
+        set: (next: number) => {
+          geometry.top = next;
+        },
+      },
+    });
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    scroll.dispatchEvent(new Event("wheel"));
+    geometry.top = 100;
+    scroll.dispatchEvent(new Event("scroll"));
+    channel.push(pushSelection({ selected: "r1", active: true }));
+    await settle();
+    return { feed, h, host, scroll, channel, geometry };
+  }
+
+  const clickBackground = (host: HTMLElement): void => {
+    host.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  };
+
+  it("sends the daemon the clear", async () => {
+    // Arrange
+    const m = await selected();
+    // Act
+    clickBackground(m.host);
+    await settle();
+    // Assert
+    expect(m.h.calls.selectResponse).toHaveLength(1);
+    m.feed.dispose();
+  });
+
+  it("clears nothing locally before the daemon's push", async () => {
+    // Arrange
+    const m = await selected();
+    // Act
+    clickBackground(m.host);
+    await settle();
+    // Assert
+    expect(
+      [m.host.querySelector('[data-feed-row="r1"]')?.getAttribute("data-selected-response"), m.scroll.scrollTop],
+    ).toEqual(["true", 100]);
+    m.feed.dispose();
+  });
+
+  it("parks at the tail on the daemon's cleared push", async () => {
+    // Arrange
+    const m = await selected();
+    clickBackground(m.host);
+    await settle();
+    // Act
+    m.channel.push(pushSelection({ active: false }));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(2000);
+    m.feed.dispose();
+  });
+
+  it("follows later content after the daemon's cleared push", async () => {
+    // Arrange
+    const m = await selected();
+    clickBackground(m.host);
+    await settle();
+    m.channel.push(pushSelection({ active: false }));
+    await settle();
+    // Act
+    m.geometry.height = 2400;
+    m.channel.push(push(responseRow("r2")));
+    await settle();
+    // Assert
+    expect(m.scroll.scrollTop).toBe(2400);
+    m.feed.dispose();
+  });
+
+  it("sends nothing once the selection has cleared", async () => {
+    // Arrange
+    const m = await selected();
+    m.channel.push(pushSelection({ active: false }));
+    await settle();
+    // Act
+    clickBackground(m.host);
+    await settle();
+    // Assert
+    expect(m.h.calls.selectResponse).toEqual([]);
+    m.feed.dispose();
+  });
+
+  it("sends nothing once the feed is disposed", async () => {
+    // Arrange
+    const m = await selected();
+    m.feed.dispose();
+    // Act
+    clickBackground(m.host);
+    await settle();
+    // Assert
+    expect(m.h.calls.selectResponse).toEqual([]);
+  });
+});
