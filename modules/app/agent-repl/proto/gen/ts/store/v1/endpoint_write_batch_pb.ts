@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_write_batch.proto.
  */
 export const file_store_v1_endpoint_write_batch: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEidgoRV3JpdGVCYXRjaFJlcXVlc3QSEAoIcHJvZHVjZXIYASABKAkSIwoFYmF0Y2gYAiABKAsyFC5zdG9yZS52MS5FbnRyeUJhdGNoEioKBnNoYXBlcxgDIAMoCzIaLnN0b3JlLnYxLlNoYXBlT2JzZXJ2YXRpb24icwoQU2hhcGVPYnNlcnZhdGlvbhISCgpzaGFwZV9oYXNoGAEgASgJEgwKBGtpbmQYAiABKAkSFQoNa2V5X3N0cnVjdHVyZRgDIAEoCRIVCg1maXJzdF9leGFtcGxlGAQgASgMEg8KB3NlZW5fbXMYBSABKAMifgoSV3JpdGVCYXRjaFJlc3BvbnNlEi4KB3N1Y2Nlc3MYASABKAsyGy5zdG9yZS52MS5Xcml0ZUJhdGNoU3VjY2Vzc0gAEi4KB2ZhaWx1cmUYAiABKAsyGy5zdG9yZS52MS5Xcml0ZUJhdGNoRmFpbHVyZUgAQggKBnJlc3VsdCJGChFXcml0ZUJhdGNoU3VjY2VzcxIxCgdza2lwcGVkGAEgAygLMiAuc3RvcmUudjEuV3JpdGVCYXRjaFNraXBwZWRFbnRyeSJQChZXcml0ZUJhdGNoU2tpcHBlZEVudHJ5EhIKCnVwc2VydF9rZXkYASABKAkSEQoJZnJvbV9ib29rGAIgASgJEg8KB3RvX2Jvb2sYAyABKAkiqQEKEVdyaXRlQmF0Y2hGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI9Cg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoSW52YWxpZFJlcXVlc3RIABI9Cg9zdG9yYWdlX2ZhaWx1cmUYAyABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVIAEIGCgRraW5kIikKGFdyaXRlQmF0Y2hJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIaChhXcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_store_v1_store]);
+  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEioQEKEVdyaXRlQmF0Y2hSZXF1ZXN0EhAKCHByb2R1Y2VyGAEgASgJEiMKBWJhdGNoGAIgASgLMhQuc3RvcmUudjEuRW50cnlCYXRjaBIqCgZzaGFwZXMYAyADKAsyGi5zdG9yZS52MS5TaGFwZU9ic2VydmF0aW9uEikKC3dyaXRlX2NsYXNzGAQgASgLMhQuc3RvcmUudjEuV3JpdGVDbGFzcyJ9CgpXcml0ZUNsYXNzEjYKC2ludGVyYWN0aXZlGAEgASgLMh8uc3RvcmUudjEuV3JpdGVDbGFzc0ludGVyYWN0aXZlSAASKAoEYnVsaxgCIAEoCzIYLnN0b3JlLnYxLldyaXRlQ2xhc3NCdWxrSABCDQoLd3JpdGVfY2xhc3MiFwoVV3JpdGVDbGFzc0ludGVyYWN0aXZlIhAKDldyaXRlQ2xhc3NCdWxrInMKEFNoYXBlT2JzZXJ2YXRpb24SEgoKc2hhcGVfaGFzaBgBIAEoCRIMCgRraW5kGAIgASgJEhUKDWtleV9zdHJ1Y3R1cmUYAyABKAkSFQoNZmlyc3RfZXhhbXBsZRgEIAEoDBIPCgdzZWVuX21zGAUgASgDIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiRgoRV3JpdGVCYXRjaFN1Y2Nlc3MSMQoHc2tpcHBlZBgBIAMoCzIgLnN0b3JlLnYxLldyaXRlQmF0Y2hTa2lwcGVkRW50cnkiUAoWV3JpdGVCYXRjaFNraXBwZWRFbnRyeRISCgp1cHNlcnRfa2V5GAEgASgJEhEKCWZyb21fYm9vaxgCIAEoCRIPCgd0b19ib29rGAMgASgJIqkBChFXcml0ZUJhdGNoRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPQoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMiIuc3RvcmUudjEuV3JpdGVCYXRjaEludmFsaWRSZXF1ZXN0SAASPQoPc3RvcmFnZV9mYWlsdXJlGAMgASgLMiIuc3RvcmUudjEuV3JpdGVCYXRjaFN0b3JhZ2VGYWlsdXJlSABCBgoEa2luZCIpChhXcml0ZUJhdGNoSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiGgoYV3JpdGVCYXRjaFN0b3JhZ2VGYWlsdXJlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_store]);
 
 /**
  * One producer's write. The rpc is the envelope: no separate carrier message
@@ -59,6 +59,20 @@ export type WriteBatchRequest = Message<"store.v1.WriteBatchRequest"> & {
    * @generated from field: repeated store.v1.ShapeObservation shapes = 3;
    */
   shapes: ShapeObservation[];
+
+  /**
+   * WHICH QUEUE THIS WRITE TAKES INTO THE STORE'S ONE WRITER. REQUIRED: a
+   * request with this unset, or with its arm unset, is refused as an invalid
+   * request (field "write_class") and never defaulted, because a guessed class
+   * is how a bulk copy ends up ahead of a live turn.
+   *
+   * THE CALLER STATES IT; THE STORE NEVER INFERS IT FROM CONTENT. The shim
+   * writes INTERACTIVE for everything it observes live; the sidecar writes BULK
+   * for everything it copies from disk.
+   *
+   * @generated from field: store.v1.WriteClass write_class = 4;
+   */
+  writeClass?: WriteClass | undefined;
 };
 
 /**
@@ -67,6 +81,85 @@ export type WriteBatchRequest = Message<"store.v1.WriteBatchRequest"> & {
  */
 export const WriteBatchRequestSchema: GenMessage<WriteBatchRequest> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_write_batch, 0);
+
+/**
+ * The owner's rule (2026-09-23): an interactive write never queues behind a
+ * bulk one. The store serializes every SQLite write through ONE writer, and
+ * this is how the writer knows which queue a write belongs in.
+ *
+ * INTERACTIVE is always taken before any queued BULK write. Bulk still makes
+ * progress: once a bulk write is waiting, the writer takes it after a fixed
+ * number of consecutive interactive writes, or at once when no interactive
+ * write is waiting, so the longest an interactive write can wait on bulk is one
+ * bounded bulk transaction.
+ *
+ * @generated from message store.v1.WriteClass
+ */
+export type WriteClass = Message<"store.v1.WriteClass"> & {
+  /**
+   * @generated from oneof store.v1.WriteClass.write_class
+   */
+  writeClass: {
+    /**
+     * @generated from field: store.v1.WriteClassInteractive interactive = 1;
+     */
+    value: WriteClassInteractive;
+    case: "interactive";
+  } | {
+    /**
+     * @generated from field: store.v1.WriteClassBulk bulk = 2;
+     */
+    value: WriteClassBulk;
+    case: "bulk";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message store.v1.WriteClass.
+ * Use `create(WriteClassSchema)` to create a new message.
+ */
+export const WriteClassSchema: GenMessage<WriteClass> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 1);
+
+/**
+ * Live content a person is waiting to see: turn content, prompts, terminals,
+ * session updates. Written as ONE transaction exactly as the request carries
+ * it, so a failure commits nothing.
+ *
+ * @generated from message store.v1.WriteClassInteractive
+ */
+export type WriteClassInteractive = Message<"store.v1.WriteClassInteractive"> & {
+};
+
+/**
+ * Describes the message store.v1.WriteClassInteractive.
+ * Use `create(WriteClassInteractiveSchema)` to create a new message.
+ */
+export const WriteClassInteractiveSchema: GenMessage<WriteClassInteractive> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 2);
+
+/**
+ * Background copying: transcript and spool ingestion, backfills, recoveries.
+ *
+ * THE STORE SPLITS A BULK BATCH. It commits the entries in bounded
+ * transactions (bounded in rows, frame bytes and time; the store's bound is
+ * authoritative whatever size the producer sends) and yields the writer between
+ * them. The cursor advance and the shape observations ride the LAST
+ * transaction. So a bulk failure may leave LEADING entries committed, but never
+ * the cursor advance or the shapes: the producer re-reads from the unadvanced
+ * cursor and the write ledger absorbs the entries that already landed.
+ *
+ * @generated from message store.v1.WriteClassBulk
+ */
+export type WriteClassBulk = Message<"store.v1.WriteClassBulk"> & {
+};
+
+/**
+ * Describes the message store.v1.WriteClassBulk.
+ * Use `create(WriteClassBulkSchema)` to create a new message.
+ */
+export const WriteClassBulkSchema: GenMessage<WriteClassBulk> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 3);
 
 /**
  * One distinct key structure a producer observed on a line it did not store.
@@ -127,7 +220,7 @@ export type ShapeObservation = Message<"store.v1.ShapeObservation"> & {
  * Use `create(ShapeObservationSchema)` to create a new message.
  */
 export const ShapeObservationSchema: GenMessage<ShapeObservation> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 1);
+  messageDesc(file_store_v1_endpoint_write_batch, 4);
 
 /**
  * Durable, or nothing.
@@ -158,11 +251,12 @@ export type WriteBatchResponse = Message<"store.v1.WriteBatchResponse"> & {
  * Use `create(WriteBatchResponseSchema)` to create a new message.
  */
 export const WriteBatchResponseSchema: GenMessage<WriteBatchResponse> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 2);
+  messageDesc(file_store_v1_endpoint_write_batch, 5);
 
 /**
- * The batch is DURABLE — records and cursor advance committed as one
- * transaction. A replayed batch whose write_ids all landed before is this
+ * The batch is DURABLE — records and cursor advance committed (as one
+ * transaction for an interactive write; as bounded transactions with the
+ * cursor advance in the last for a bulk one, see WriteClassBulk). A replayed batch whose write_ids all landed before is this
  * same arm: absorption is success, and the producer can retire the batch
  * from its retry buffer either way.
  *
@@ -191,7 +285,7 @@ export type WriteBatchSuccess = Message<"store.v1.WriteBatchSuccess"> & {
  * Use `create(WriteBatchSuccessSchema)` to create a new message.
  */
 export const WriteBatchSuccessSchema: GenMessage<WriteBatchSuccess> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 3);
+  messageDesc(file_store_v1_endpoint_write_batch, 6);
 
 /**
  * One entry the store skipped as a legacy book-conflict (WriteBatchSuccess.
@@ -228,11 +322,14 @@ export type WriteBatchSkippedEntry = Message<"store.v1.WriteBatchSkippedEntry"> 
  * Use `create(WriteBatchSkippedEntrySchema)` to create a new message.
  */
 export const WriteBatchSkippedEntrySchema: GenMessage<WriteBatchSkippedEntry> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 4);
+  messageDesc(file_store_v1_endpoint_write_batch, 7);
 
 /**
  * Nothing was committed: the transaction failed whole, so the producer
- * holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it.
+ * holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it. (A
+ * BULK batch's leading transactions may have committed entries, never its
+ * cursor advance or shapes; the re-read replays them and the ledger absorbs
+ * what landed. See WriteClassBulk.)
  * There is deliberately NO durable producer-side spill: exhausted retries
  * are a LOUD failure (dropped frames logged with what was lost), because a
  * persistent inability to reach the store indicates a lifetime-sequencing
@@ -278,7 +375,7 @@ export type WriteBatchFailure = Message<"store.v1.WriteBatchFailure"> & {
  * Use `create(WriteBatchFailureSchema)` to create a new message.
  */
 export const WriteBatchFailureSchema: GenMessage<WriteBatchFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 5);
+  messageDesc(file_store_v1_endpoint_write_batch, 8);
 
 /**
  * The request was malformed or violated the validation invariant.
@@ -300,7 +397,7 @@ export type WriteBatchInvalidRequest = Message<"store.v1.WriteBatchInvalidReques
  * Use `create(WriteBatchInvalidRequestSchema)` to create a new message.
  */
 export const WriteBatchInvalidRequestSchema: GenMessage<WriteBatchInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 6);
+  messageDesc(file_store_v1_endpoint_write_batch, 9);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -315,5 +412,5 @@ export type WriteBatchStorageFailure = Message<"store.v1.WriteBatchStorageFailur
  * Use `create(WriteBatchStorageFailureSchema)` to create a new message.
  */
 export const WriteBatchStorageFailureSchema: GenMessage<WriteBatchStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_write_batch, 7);
+  messageDesc(file_store_v1_endpoint_write_batch, 10);
 
