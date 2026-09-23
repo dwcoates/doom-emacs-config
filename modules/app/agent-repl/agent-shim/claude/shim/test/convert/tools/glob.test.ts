@@ -197,6 +197,20 @@ describe("globConverter.settle", () => {
       1_700_000_001_000n,
     );
   });
+
+  it("restates the query on the failure arm, so the settled frame stands alone", () => {
+    // Arrange, Act.
+    const item = globConverter.settle(call({ pattern: "[", path: "src" }), outcome("bad pattern", true));
+
+    // Assert.
+    const failure = (item?.value as conversationv1.AgentGlob).result.value as conversationv1.AgentGlobFailure;
+    expect({ pattern: failure.query?.pattern, path: failure.query?.path }).toEqual({ pattern: "[", path: "src" });
+  });
+
+  it("produces NO failure frame for a call that named no pattern, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(globConverter.settle(call({}), outcome("pattern required", true))).toBeUndefined();
+  });
 });
 
 describe("globConverter.progress", () => {
