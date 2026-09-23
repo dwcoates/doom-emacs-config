@@ -651,6 +651,27 @@ guarded_daemon_line() {
         "$1" "$(cd "$2/.." && pwd)"
 }
 
+# The refusal hands the owner the one command that clears it: the daemon owns
+# deploys, so the remedy is its `deploy` subcommand.
+test_declining_names_the_daemon_deploy_remedy() {
+    local name="the not-deployed refusal names claude-repld deploy as the remedy"
+    local dir out status=0
+    dir="$(scratch_bin not-deployed-remedy)"
+    prepare_home
+    stale_json > "$SCRATCH/readiness.json"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -qF 'run daemon/bin/claude-repld deploy, then try again'; then
+        fail "$name" "the refusal does not name the deploy remedy: $out"
+        return
+    fi
+    pass "$name"
+}
+
 test_declines_when_a_system_is_not_deployed() {
     local name="the script DECLINES when a deployed system is not at this checkout"
     local dir out status=0
@@ -2212,6 +2233,7 @@ test_prune_deletes_wal_and_shm_siblings
 test_prune_defaults_to_keeping_three
 test_prune_returns_success_when_nothing_to_prune
 test_declines_when_a_system_is_not_deployed
+test_declining_names_the_daemon_deploy_remedy
 test_declines_when_emacs_is_running_without_a_takeover
 test_backs_up_before_refusing_the_takeover
 test_declines_when_the_backup_copy_totally_fails

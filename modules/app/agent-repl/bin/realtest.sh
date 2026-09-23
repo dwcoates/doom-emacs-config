@@ -425,7 +425,7 @@ for system in report["systems"]:
 if [ -n "$NOT_READY" ]; then
     printf '[realtest] DECLINED: a realtest measures the DEPLOYED stack, and these systems are not at this checkout:\n' >&2
     printf '%s\n' "$NOT_READY" >&2
-    printf '[realtest] run bin/deploy-all.sh, then try again.\n' >&2
+    printf '[realtest] run daemon/bin/claude-repld deploy, then try again.\n' >&2
     exit "$EXIT_DECLINED"
 fi
 note "every deployed system is at this checkout's revision"
@@ -636,8 +636,7 @@ REALTEST_KILL="${AGENT_REPL_REALTEST_KILL:-/bin/kill}"
 # session is stood down on the way out, so every shim it was holding survives
 # it, and the next daemon adopts processes whose bounce nobody stated an intent
 # for. `UpdateShutdownSchedule{now}` — what the editor's own
-# `agent-repl-frontend-daemon-stop` sends, and therefore what bin/deploy-all.sh
-# reaches through `agent-repl-runtime-restart-await` — stops intake, stands
+# `agent-repl-frontend-daemon-stop` sends — stops intake, stands
 # every session down, flushes the in-flight writes and exits. Its successor
 # then adopts nothing and logs an ordinary boot.
 #
@@ -1161,7 +1160,7 @@ fi
 # Emacs a realtest launches carries AGENT_REPL_FORBID_VENDOR_CALLS, and the
 # sweep left the last one standing, so from the end of a sweep the owner's
 # day-to-day editor WAS the guarded one: the daemon it spawned, and every
-# daemon bin/deploy-all.sh restarted through it, inherited the guard, and the
+# daemon a deploy restarted through it, inherited the guard, and the
 # owner's real workspaces talked to the FAKE vendor —
 # "shim.fake.query: fake vendor session STARTED" against a workspace the owner
 # does real work in.
