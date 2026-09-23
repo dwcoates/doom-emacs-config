@@ -158,6 +158,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	apply(s)
 	view := r.render(ws, s)
 	arm, armChanged, previousArm := s.observeArm(view)
+	line, lineChanged, previousLine := s.observeLine(view)
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
 	r.mu.Unlock()
@@ -167,6 +168,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	log.Debug(operation, message, ctx)
 	logArmChange(log, operation, arm, armChanged, previousArm)
+	logLineChange(log, operation, arm, line, lineChanged, previousLine)
 	topic.Publish(view)
 }
 
@@ -182,6 +184,25 @@ func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": operation})
 }
 
+// logLineChange records the PUBLISHED activity line whenever it changes — set,
+// replaced or cleared — and only then. A line that stands longer than its act
+// is diagnosable from the log alone only if the log says when it began
+// standing, what put it there, and when (and by what) it went.
+func logLineChange(log dlog.Logger, operation, arm string, line activityLine, changed bool, previous activityLine) {
+	if !changed {
+		return
+	}
+	log.Info("daemon.footer.activity_line_changed", "the footer published a new activity line",
+		dlog.Context{
+			"arm":           arm,
+			"kind":          line.name(),
+			"text":          line.text,
+			"previous_kind": previous.name(),
+			"previous_text": previous.text,
+			"cause":         operation,
+		})
+}
+
 // mutateAll applies a resolver-WIDE change and republishes every workspace
 // that has a footer, because a daemon-scoped fact stands on all of them. A
 // workspace that has observed nothing yet is left alone: its footer is not
@@ -189,12 +210,13 @@ func logArmChange(log dlog.Logger, operation, arm string, changed bool, previous
 // that makes a workspace's strip exist.
 func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply func(*wsState), global func()) {
 	type publication struct {
-		topic       *publish.Topic[*frontendv1.FooterView]
-		view        *frontendv1.FooterView
-		log         dlog.Logger
-		arm         string
-		armChanged  bool
-		previousArm string
+		topic        *publish.Topic[*frontendv1.FooterView]
+		view         *frontendv1.FooterView
+		log          dlog.Logger
+		arm          string
+		line         activityLine
+		lineChanged  bool
+		previousLine activityLine
 	}
 	r.mu.Lock()
 	global()
@@ -205,8 +227,9 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		}
 		apply(s)
 		view := r.render(ws, s)
-		arm, armChanged, previousArm := s.observeArm(view)
-		out = append(out, publication{r.topicLocked(ws), view, r.logOf(ws, s), arm, armChanged, previousArm})
+		arm, _, _ := s.observeArm(view)
+		line, lineChanged, previousLine := s.observeLine(view)
+		out = append(out, publication{r.topicLocked(ws), view, r.logOf(ws, s), arm, line, lineChanged, previousLine})
 	}
 	r.mu.Unlock()
 
@@ -216,6 +239,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 	r.log.Global().Debug(operation, message, ctx)
 	for _, p := range out {
 		p.log.Debug(operation, message, ctx)
+		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
 		p.topic.Publish(p.view)
 	}
 }
