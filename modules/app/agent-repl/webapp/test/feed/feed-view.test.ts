@@ -334,6 +334,22 @@ describe("createFeedController: upserts", () => {
     expect(record.context).toMatchObject({ feed: "root", row: "a" });
   });
 
+  it("leaves a body its renderer updated in place in the document", () => {
+    // Arrange -- a renderer that hands back the element it drew before, as the
+    // response bubble does so its scroll box keeps the reader's position.
+    const inPlace = (_u: unknown, rc: RowContext): HTMLElement => rc.previous ?? document.createElement("div");
+    const { controller, host } = fixture(undefined, {}, { renderers: { response: inPlace } });
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    const row = host.querySelector('[data-feed-row="a"]');
+    if (row === null) throw new Error("row a is not drawn");
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(row, { childList: true });
+    // Act
+    controller.upsert(responseRow("a", "two"));
+    // Assert -- nothing was removed from the row, so nothing re-attached.
+    expect(observer.takeRecords().flatMap((record) => [...record.removedNodes])).toEqual([]);
+  });
+
   it("refuses a row with no id, the id being the upsert key", () => {
     const { controller } = fixture();
     expect(() => controller.upsert(create(FeedRowSchema, {}))).toThrow(MalformedView);
