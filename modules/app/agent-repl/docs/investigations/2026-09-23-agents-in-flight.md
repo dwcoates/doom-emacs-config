@@ -13,7 +13,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
 | `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | (agent done; waiting on the child `ad454b522817243f4` porting e2e in `feat/dod-e2e`, which must merge into this branch before landing) | 17:50 |
-| `fix/e2e-all-green` | `~/.config/doom-worktrees/e2e-all-green` | REVIVED (4 commits plus uncommitted work): e2e to green. | `a915f8a8d5e7424ee` | 17:50 |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | (agent completed twice with NO report; 6 commits, clean; the lead verifies the suites, then merges) | 18:20 |
 | `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
@@ -26,7 +25,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
 - `rollout/handover.go` `beginHandover`: if `served()` fails after the spawn, the successor is leaked and the next deploy spawns a second one, which races for the manifest. If `writeManifest` fails, the latch never releases. `SuccessorSpawner` needs a stop handle.
-- The idle sweep hibernates a session that is being revived for a pending prompt. This is a production race behind the integration flake `TestAParkedWorkspacesFooterIsIdle…`.
 - A shim that dies with work recorded in flight produces no freeness edge, so its registered bounce waits until the workspace is revived.
 
 ## Still waiting on the owner
@@ -44,6 +42,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- e2e green (`-count=3`, 0 failures on the branch): ClientLog resolves against the registry during a handover, the idle sweep defers while a held prompt revives, a detached row's kind is final, reconcile walks the whole book, and a late start never un-settles a card (`fix/e2e-all-green`).
 - A click on the feed background clears an active reply selection through the daemon, and the cleared push parks and follows (`fix/selection-click-and-stable-gutter`). `scrollbar-gutter: stable` was NOT landed (see the owner decisions).
 - Footer and async bubbles: the detached-work id on async heads; a footer click either selects (centered) or shows and logs not-on-screen; the panel caps at 4 rows; a collapsed sub-feed is wiped and reopens on its last page; nested subagents credit their own rows (the zero-token rows fixed) (`fix/footer-rows-and-work-ids`).
 - Integration first-test flakes: each file's cold boot is paid in one bounded `beforeAll`, with a guard (`fix/integration-cold-first-test`).
