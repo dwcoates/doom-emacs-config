@@ -145,6 +145,91 @@ describe("a DENIED call retires its unit", () => {
   });
 });
 
+// A SETTLED SEND STANDS ALONE on every path a tool result reaches the fold by:
+// the SDK's live stream and a transcript's records are the same user record,
+// and the settle it folds into must restate the call's address and summary
+// because the start it upserts over is gone from the store once it lands.
+describe("a send's settle, folded from its tool result", () => {
+  const SEND_INPUT = { to: "vetter", message: "go", summary: "Scroll fix landed; merge master in" };
+
+  /** The send arm the one settled entry carries. */
+  function sendOf(entries: readonly PersistEntry[]): conversationv1.AgentSendMessage["result"] {
+    const activity = activityOf(entries[0]);
+    expect(activity?.item.case).toBe("sendMessage");
+    return (activity?.item.value as conversationv1.AgentSendMessage).result;
+  }
+
+  it("restates the address and summary on a delivered send", () => {
+    // Arrange.
+    const registry = createCallRegistry();
+    registry.remember(call("SendMessage", SEND_INPUT));
+
+    // Act.
+    const result = sendOf(
+      convert(
+        resultRecord([{ type: "tool_result", tool_use_id: "toolu_1", content: "sent" }], {
+          tool_use_result: { success: true, pin: { id: "b7c" } },
+        }),
+        registry,
+      ),
+    );
+
+    // Assert.
+    const success = result.value as conversationv1.AgentSendMessageSuccess;
+    expect({ to: success.addressedTo, summary: success.summary?.text }).toEqual({
+      to: "vetter",
+      summary: "Scroll fix landed; merge master in",
+    });
+  });
+
+  it("restates the address and summary on a refused send", () => {
+    // Arrange.
+    const registry = createCallRegistry();
+    registry.remember(call("SendMessage", SEND_INPUT));
+
+    // Act.
+    const result = sendOf(
+      convert(
+        resultRecord([
+          { type: "tool_result", tool_use_id: "toolu_1", content: "stopped", is_error: true },
+        ]),
+        registry,
+      ),
+    );
+
+    // Assert.
+    const failure = result.value as conversationv1.AgentSendMessageFailure;
+    expect({ to: failure.addressedTo, summary: failure.summary?.text }).toEqual({
+      to: "vetter",
+      summary: "Scroll fix landed; merge master in",
+    });
+  });
+
+  it("restates the address and summary on a DENIED send", () => {
+    // Arrange.
+    const registry = createCallRegistry();
+    registry.remember(call("SendMessage", SEND_INPUT));
+
+    // Act.
+    const result = sendOf(
+      convert(
+        resultRecord([
+          { type: "tool_result", tool_use_id: "toolu_1", content: "Error: denied", is_error: true },
+        ]),
+        registry,
+        { deniedCall: () => true },
+      ),
+    );
+
+    // Assert.
+    const failure = result.value as conversationv1.AgentSendMessageFailure;
+    expect({ to: failure.addressedTo, summary: failure.summary?.text }).toEqual({
+      to: "vetter",
+      summary: "Scroll fix landed; merge master in",
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The skill DOCUMENT, joined to its call by `sourceToolUseID`
 // ---------------------------------------------------------------------------
