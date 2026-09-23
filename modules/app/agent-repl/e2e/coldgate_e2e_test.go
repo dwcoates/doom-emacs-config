@@ -273,10 +273,11 @@ func raiseColdGate(t *testing.T) *coldGate {
 		// The first StartSession never reaches the claim (the cold refusal
 		// returns before either lock is taken), so the whole arrangement stands
 		// up and only the REMEDIATED re-open collides.
-		ExtraEnv: append([]string{
+		ExtraEnv: []string{
 			"AGENT_REPL_LOCK_DIR=" + first.LockDir,
 			"AGENT_REPL_SHIM_LOCK_BIN=" + requireLockBinary(t),
-		}, buildIdentityEnv()...),
+		},
+		ServiceBinaries: first.ServiceBinaries(),
 		// THE SUCCESSOR MUST ROUTE THROUGH THE FIRST DAEMON'S ACCOUNT ROOT,
 		// or the resume it performs looks at an empty projects tree, the
 		// source classifier finds no transcript, and the session comes up

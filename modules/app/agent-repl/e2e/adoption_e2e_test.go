@@ -271,11 +271,12 @@ func adColdBoot(t *testing.T, w *World) *harness.Daemon {
 	t.Helper()
 	w.Kill()
 	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
+		StateDir:        w.StateDir,
+		ShimNode:        requireNode(t),
+		ShimMain:        requireShimBundle(t),
+		StoreSocket:     w.Store.Socket,
+		ServiceBinaries: w.ServiceBinaries(),
+		ExtraEnv:        []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir},
 		// A cold boot's own re-adoption of a still-running real shim chains a
 		// SECOND real process's full boot onto this one test, exactly the
 		// shape AdoptionChainTimeout documents (world_test.go) — reused

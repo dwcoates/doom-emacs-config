@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -182,6 +183,19 @@ func NewWorldWithSidecarStaleness(t *testing.T, opts WorldOpts, staleness Sideca
 	return NewWorld(t, opts)
 }
 
+// worldDaemonEnv is a world daemon's environment: the caller's ExtraEnv,
+// then this suite's own statements, appended LAST so they win (the shim's env
+// is scanned front-to-back and the last assignment of a name is the effective
+// one). It names no checkout: harness.StartDaemon pins its own (see
+// checkoutEnv).
+func worldDaemonEnv(extra []string, spoolRoot, lockBin string) []string {
+	return append(append([]string{}, extra...),
+		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot,
+		// The shim inherits this from the daemon and spawns it for every
+		// kernel claim; without it no session starts at all.
+		"AGENT_REPL_SHIM_LOCK_BIN="+lockBin)
+}
+
 // NewWorld builds one test's stack: the real store, the real sidecar, and a
 // real daemon spawning the real (built-from-source, `--fake`-mode) shim.
 // Every process is killed and every socket/temp root is removed at test
@@ -228,7 +242,11 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		t.Fatalf("e2e: mkdir %s: %v", logsDir, err)
 	}
 
-	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"), filepath.Join(logsDir, "store.log"))
+	// The daemon's lock dir, settled before any process starts: the store and
+	// the sidecar write their build reports into it, and the daemon's deploy
+	// reads them from it.
+	lockDir := harness.LockDirFor(stateRoot)
+	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"), filepath.Join(logsDir, "store.log"), lockDir)
 
 	// ONE spool root for the whole world. The fake SDK inside every shim
 	// this daemon spawns writes its task spools here (via
@@ -245,14 +263,12 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
 	daemonOpts.StateDir = stateRoot
-	// Appended LAST so this suite's own invariant wins over any ExtraEnv a
-	// caller supplied: the shim's env is scanned front-to-back and the last
-	// assignment of a name is the effective one.
-	daemonOpts.ExtraEnv = append(append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...),
-		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot,
-		// The shim inherits this from the daemon and spawns it for every
-		// kernel claim; without it no session starts at all.
-		"AGENT_REPL_SHIM_LOCK_BIN="+lockBin)
+	daemonOpts.ExtraEnv = worldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
+	// THE REAL SERVICES ARE WHAT A DEPLOY JUDGES. They report their own
+	// builds into the daemon's lock dir (startStore/startSidecar are pointed
+	// at it), and the deploy's fake build stages copies of these very
+	// binaries, so a deploy that should touch no service restarts none.
+	daemonOpts.ServiceBinaries = harness.ServiceBinaries{Store: store.bin, Sidecar: sidecarBin}
 
 	// REGISTERED BEFORE THE DAEMON EXISTS, SO IT RUNS LAST OF ALL. t.Cleanup
 	// unwinds last-registered-first, and the daemon registers its own
@@ -275,7 +291,14 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		LogPath:     filepath.Join(logsDir, "sidecar.log"),
 		StateDir:    stateRoot,
 		Staleness:   opts.SidecarStaleness,
+		LockDir:     lockDir,
 	})
+	if d.LockDir != lockDir {
+		t.Fatalf("e2e: the daemon's lock dir is %s but the services report into %s; its deploy would restart them", d.LockDir, lockDir)
+	}
+	// A deploy reads the sidecar as current only once it has reported, so the
+	// world is not handed over before it has.
+	awaitBuildReport(t, d.Ctx(), lockDir, buildreport.ServiceSidecar, sidecar.cmd.Process.Pid)
 
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
 
@@ -675,21 +698,25 @@ type Store struct {
 
 // startStore launches the store on a named socket + database and blocks
 // until a real rpc against it succeeds — readiness is the store's own
-// statement, never an elapsed duration.
-func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
+// statement, never an elapsed duration. lockDir is its AGENT_REPL_LOCK_DIR:
+// the daemon's own lock dir, so the build report the store writes at boot is
+// the one the daemon's deploy reads.
+func startStore(t *testing.T, socket, dbPath, logPath, lockDir string) *Store {
 	t.Helper()
 	bin := requireStoreBinary(t)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		t.Fatalf("e2e: mkdir %s: %v", filepath.Dir(dbPath), err)
 	}
-	lockDir := filepath.Join(filepath.Dir(dbPath), "lock")
+	if lockDir == "" {
+		t.Fatal("e2e: the store needs the world's lock dir; an empty one would write its build report over the owner's own in ~/.cache/agent-repl/run")
+	}
 	cmd := exec.Command(bin, "--socket", socket, "--db", dbPath, "--log", logPath)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		// A private lock dir keeps the boot's build-report write
+		// The world's lock dir keeps the boot's build-report write
 		// (agentrepl/logging/buildreport) out of the owner's real
-		// ~/.cache/agent-repl/run.
+		// ~/.cache/agent-repl/run, and in the one the daemon's deploy reads.
 		"AGENT_REPL_LOCK_DIR="+lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
@@ -891,6 +918,11 @@ type sidecarOpts struct {
 	// Staleness is the LOST-policy window set. Zero fields are omitted from
 	// the argv entirely, leaving the sidecar's own production defaults.
 	Staleness SidecarStaleness
+	// LockDir is the sidecar's AGENT_REPL_LOCK_DIR: where it writes its build
+	// report. It is the daemon's own lock dir, so the report is the one the
+	// daemon's deploy reads. Empty is refused, because the default is the
+	// owner's real ~/.cache/agent-repl/run.
+	LockDir string
 }
 
 // startSidecar launches the sidecar against the daemon's own two account
@@ -904,6 +936,9 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 		// $HOME/.claude-emacs: a test sidecar would read the DEVELOPER'S live
 		// identity records. Refused rather than defaulted.
 		t.Fatal("e2e: the sidecar needs the world's state root; an empty --state-dir would point it at the developer's own ~/.claude-emacs")
+	}
+	if opts.LockDir == "" {
+		t.Fatal("e2e: the sidecar needs the world's lock dir; an empty one would write its build report over the owner's own in ~/.cache/agent-repl/run")
 	}
 	args := []string{
 		"--store-socket", opts.StoreSocket,
@@ -940,14 +975,14 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 			args = append(args, w.flag, w.value.String())
 		}
 	}
-	lockDir := filepath.Join(opts.StateDir, "lock")
+	lockDir := opts.LockDir
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		// A private lock dir keeps the boot's build-report write
+		// The world's lock dir keeps the boot's build-report write
 		// (agentrepl/logging/buildreport) out of the owner's real
-		// ~/.cache/agent-repl/run.
+		// ~/.cache/agent-repl/run, and in the one the daemon's deploy reads.
 		"AGENT_REPL_LOCK_DIR="+lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
@@ -962,6 +997,37 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	s := &Sidecar{t: t, bin: bin, args: args, lockDir: lockDir, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
 	t.Cleanup(s.Stop)
 	return s
+}
+
+// ServiceBinaries names this world's real store and sidecar binaries, for a
+// daemon started over the same state root by hand (a cold boot, a relaunch):
+// its deploy stages copies of them and lets their own build reports stand, as
+// the world's first daemon does.
+func (w *World) ServiceBinaries() harness.ServiceBinaries {
+	return harness.ServiceBinaries{Store: w.Store.bin, Sidecar: w.Sidecar.bin}
+}
+
+// awaitBuildReport waits until service's build report in lockDir names pid —
+// the process's own statement of its build, written at boot — bounded by
+// ctx, never a fixed sleep.
+func awaitBuildReport(t *testing.T, ctx context.Context, lockDir, service string, pid int) {
+	t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		report, found, err := buildreport.Read(lockDir, service)
+		if err != nil {
+			t.Fatalf("e2e: read the %s build report: %v", service, err)
+		}
+		if found && report.PID == pid {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("e2e: %s (pid %d) never reported its build into %s: %v", service, pid, lockDir, ctx.Err())
+		}
+	}
 }
 
 // Restart stops this sidecar and launches a new one on EXACTLY the argv the

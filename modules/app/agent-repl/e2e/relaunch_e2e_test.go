@@ -89,10 +89,11 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 		// location under a $HOME the e2e world does not have, and locks.ts's
 		// caller reports that as `conversation_owned` — a resume refused for
 		// a conversation nobody actually holds.
-		ExtraEnv: append([]string{
+		ExtraEnv: []string{
 			"AGENT_REPL_LOCK_DIR=" + w.LockDir,
 			"AGENT_REPL_SHIM_LOCK_BIN=" + requireLockBinary(t),
-		}, buildIdentityEnv()...),
+		},
+		ServiceBinaries: w.ServiceBinaries(),
 		// THE ACCOUNT ROOTS ARE THE ONES THE CONVERSATION WAS FILED UNDER. A
 		// resume is filed against the vendor transcript, and a successor that
 		// minted its own roots would find none and come up FRESH — abandoning
