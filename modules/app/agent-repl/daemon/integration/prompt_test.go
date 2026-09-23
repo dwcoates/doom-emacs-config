@@ -368,7 +368,9 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 	// the revival's new shim withholds its diagnostics, so the lease is still
 	// held when the assertions run.
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
-	f.shim.ExpectStartSession()
+	// READ FROM THE SHIM'S LOG, not its control socket: at a 50ms idle cutoff
+	// the fake can hibernate and exit before a control round trip answers.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
 	f.shim.AwaitGone()
