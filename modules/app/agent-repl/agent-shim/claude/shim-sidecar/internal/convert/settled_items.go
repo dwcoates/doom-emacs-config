@@ -2,6 +2,10 @@ package convert
 
 // settled_items.go — the per-kind settled arms.
 //
+// EVERY SETTLED ARM STANDS ALONE: it restates what its start carried, read
+// through the same per-kind reader the start used (activity.go), because the
+// start and the settle upsert one unit and the start is gone once this lands.
+//
 // EMPTY RESULTS ARE SUCCESS, NOT FAILURE: a search that matched nothing answered
 // the question it was asked. A NON-ZERO SHELL EXIT IS COMPLETED, not a failure
 // arm: the command ran, and the code is its own verdict on itself. The failure
@@ -20,7 +24,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindRead:
 		if failed {
 			return item(&conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{
-				Result: &conversationv1.AgentRead_Failure{Failure: &conversationv1.AgentReadFailure{Error: failure}},
+				Result: &conversationv1.AgentRead_Failure{Failure: &conversationv1.AgentReadFailure{
+					Error: failure,
+					Path:  requestedPath(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Read{Read: &conversationv1.AgentRead{
@@ -29,7 +36,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindWrite:
 		if failed {
 			return item(&conversationv1.AgentActivity_Write{Write: &conversationv1.AgentWrite{
-				Result: &conversationv1.AgentWrite_Failure{Failure: &conversationv1.AgentWriteFailure{Error: failure}},
+				Result: &conversationv1.AgentWrite_Failure{Failure: &conversationv1.AgentWriteFailure{
+					Error: failure,
+					Path:  requestedPath(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Write{Write: &conversationv1.AgentWrite{
@@ -38,7 +48,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindEdit:
 		if failed {
 			return item(&conversationv1.AgentActivity_Edit{Edit: &conversationv1.AgentEdit{
-				Result: &conversationv1.AgentEdit_Failure{Failure: &conversationv1.AgentEditFailure{Error: failure}},
+				Result: &conversationv1.AgentEdit_Failure{Failure: &conversationv1.AgentEditFailure{
+					Error: failure,
+					Path:  requestedPath(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Edit{Edit: &conversationv1.AgentEdit{
@@ -47,7 +60,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindGrep:
 		if failed {
 			return item(&conversationv1.AgentActivity_Grep{Grep: &conversationv1.AgentGrep{
-				Result: &conversationv1.AgentGrep_Failure{Failure: &conversationv1.AgentGrepFailure{Error: failure}},
+				Result: &conversationv1.AgentGrep_Failure{Failure: &conversationv1.AgentGrepFailure{
+					Error: failure,
+					Query: grepQuery(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Grep{Grep: &conversationv1.AgentGrep{
@@ -56,7 +72,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindGlob:
 		if failed {
 			return item(&conversationv1.AgentActivity_Glob{Glob: &conversationv1.AgentGlob{
-				Result: &conversationv1.AgentGlob_Failure{Failure: &conversationv1.AgentGlobFailure{Error: failure}},
+				Result: &conversationv1.AgentGlob_Failure{Failure: &conversationv1.AgentGlobFailure{
+					Error: failure,
+					Query: globQuery(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Glob{Glob: &conversationv1.AgentGlob{
@@ -89,7 +108,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		exit := bashExitCode(result, block, failed)
 		if failed && exit == nil {
 			return item(&conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
-				Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{Error: failure}},
+				Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{
+					Error:   failure,
+					Command: bashCommand(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
@@ -105,7 +127,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		// left this plane's START row as the last word on the unit, which
 		// overwrote the stream plane's failed card back to running.
 		if failed {
-			return c.skillFailed(failure)
+			return c.skillFailed(call, failure)
 		}
 		// A SKILL'S OWN RETURN IS WORTHLESS TO DRAW: the producer answers with a
 		// bare acknowledgement restating the name. The unit settles when the
@@ -121,7 +143,11 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindSendMessage:
 		if failed {
 			return item(&conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{
-				Result: &conversationv1.AgentSendMessage_Failure{Failure: &conversationv1.AgentSendMessageFailure{Error: failure}},
+				Result: &conversationv1.AgentSendMessage_Failure{Failure: &conversationv1.AgentSendMessageFailure{
+					Error:       failure,
+					AddressedTo: sendAddressedTo(call.input),
+					Summary:     sendMessageSummary(call.input),
+				}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{
