@@ -674,6 +674,32 @@ describe("the said body", () => {
   });
 });
 
+describe("the Cancel control", () => {
+  it("labels the drop control Cancel", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.querySelector('[data-held-action="drop"]')?.textContent).toBe("Cancel");
+  });
+
+  it("still drops the held prompt when Cancel is clicked", async () => {
+    // Arrange
+    const seen: UpdateHeldPromptRequest[] = [];
+    const { tc } = trayContext(successResponse, seen);
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    const cancel = [...card.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Cancel",
+    );
+    // Act
+    cancel?.click();
+    await settle();
+    // Assert
+    expect(seen[0]?.action.case).toBe("drop");
+  });
+});
+
 describe("sessionCommandLiteral", () => {
   it("reads /clear off the enum value's own spec", () => {
     expect(sessionCommandLiteral(SessionCommand.CLEAR, "p")).toBe("/clear");
