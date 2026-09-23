@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"context"
 	"testing"
 
@@ -56,7 +57,7 @@ func (w *bashWatcher) open(t *testing.T) *connect.ServerStreamForClient[storev1.
 	t.Helper()
 	select {
 	case stream := <-w.streamc:
-		t.Cleanup(func() { closeOrFail(t, stream) })
+		t.Cleanup(func() { testclose.OrFail(t, stream) })
 		return stream
 	case err := <-w.errc:
 		t.Fatalf("WatchBashRun = %v, want a stream", err)
@@ -70,7 +71,7 @@ func (w *bashWatcher) refusal(t *testing.T) error {
 	case err := <-w.errc:
 		return err
 	case stream := <-w.streamc:
-		defer closeOrFail(t, stream)
+		defer testclose.OrFail(t, stream)
 		for stream.Receive() {
 		}
 		return stream.Err()
