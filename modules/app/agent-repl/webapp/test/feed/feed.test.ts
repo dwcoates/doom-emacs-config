@@ -344,7 +344,7 @@ describe("mountFeed: selectDetachedWork", () => {
     row.getBoundingClientRect = rect(rowTop, 100);
   }
 
-  it("scrolls the feed to the selected detached-work card", async () => {
+  it("centers the selected detached-work card in the feed's viewport", async () => {
     // Arrange -- the card hangs 500..600 under a 300px viewport at 100.
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
@@ -352,8 +352,8 @@ describe("mountFeed: selectDetachedWork", () => {
     scripted(scroll, host, "r1", 500);
     // Act
     await feed.selectDetachedWork(feedId("r1"));
-    // Assert -- moved by the card's 300px overhang: 100 + 300.
-    expect(scroll.scrollTop).toBe(400);
+    // Assert -- its midpoint (550) onto the viewport's (150): 100 + 400.
+    expect(scroll.scrollTop).toBe(500);
   });
 
   it("does not scroll the feed for a breadcrumb's reveal", async () => {

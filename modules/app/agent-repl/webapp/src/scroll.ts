@@ -71,7 +71,9 @@ export interface ScrollPosition {
  *   selection by keybinding; the selected row is centered, and a cleared
  *   selection returns to the tail.
  * - `detachedWorkSelected`: the reader picked a detached-work item in the
- *   expanded footer; the feed brings that item's card into view.
+ *   expanded footer; the feed CENTERS that item's card in its viewport
+ *   (owner ruling, 2026-09-23), clamped at the feed's edges, and a card
+ *   taller than the viewport lands with its top at the viewport's top.
  * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
@@ -190,11 +192,11 @@ export class TailFollow {
 
   /**
    * The reader picked a detached-work item in the footer: stop following, and
-   * bring the item's card as far into view as fits (`revealDelta`).
+   * CENTER the item's card in the viewport (`detachedWorkDelta`).
    */
   detachedWorkSelected(geometry: RevealGeometry): void {
     this.release();
-    this.shift("detachedWorkSelected", revealDelta(geometry));
+    this.shift("detachedWorkSelected", detachedWorkDelta(geometry, this.box));
   }
 
   /**
@@ -443,26 +445,30 @@ export interface RevealGeometry {
 }
 
 /**
- * How far the box must move for NODE to be as visible as it can be, WITHOUT
- * pushing the node's own top off the viewport.
+ * How far the box must move to CENTER NODE in its viewport — the detached-work
+ * selection (`TailFollow.detachedWorkSelected`) as an arithmetic (owner ruling,
+ * 2026-09-23: the item the reader picked in the footer lands in the middle of
+ * their view of the feed, where it used to land at the fold's edge).
  *
- * This is the detached-work selection (`TailFollow.detachedWorkSelected`), as
- * an arithmetic. The node is the card the reader picked in the footer:
+ * - a card that fits is placed with its vertical MIDPOINT on the viewport's;
+ * - a card TALLER than the viewport lands with its own top at the viewport's
+ *   top, so its head is what the reader sees;
+ * - either way the move is CLAMPED at the feed's edges: a card near the start
+ *   cannot pull the feed above its first row, one near the end cannot push it
+ *   past the last reachable position, and there it lands as near center as
+ *   the feed allows.
  *
- * - a card already wholly on screen is not moved at all (0);
- * - a card running BELOW the fold is scrolled up by exactly its overhang,
- *   capped at the card's distance from the top of the viewport, so a card
- *   taller than the viewport lands with its own top flush with the box's;
- * - a card above the viewport top is brought down to it.
- *
- * Positive is downward, matching `scrollTop`.
+ * The rects are viewport coordinates (see `RevealGeometry`); BOX supplies the
+ * scroll range the clamp needs. Positive is downward, matching `scrollTop`.
  */
-export function revealDelta(g: RevealGeometry): number {
-  const boxBottom = g.boxTop + g.boxHeight;
-  const nodeBottom = g.nodeTop + g.nodeHeight;
-  if (g.nodeTop < g.boxTop) return g.nodeTop - g.boxTop;
-  if (nodeBottom <= boxBottom) return 0;
-  return Math.min(nodeBottom - boxBottom, g.nodeTop - g.boxTop);
+export function detachedWorkDelta(g: RevealGeometry, box: ScrollPosition): number {
+  const offset =
+    g.nodeHeight > g.boxHeight
+      ? g.nodeTop - g.boxTop
+      : g.nodeTop + g.nodeHeight / 2 - (g.boxTop + g.boxHeight / 2);
+  const maxScrollTop = Math.max(0, box.scrollHeight - box.clientHeight);
+  const target = Math.min(Math.max(box.scrollTop + offset, 0), maxScrollTop);
+  return target - box.scrollTop;
 }
 
 /** Read BOX and NODE's reveal geometry off the live layout (reading moves nothing). */
