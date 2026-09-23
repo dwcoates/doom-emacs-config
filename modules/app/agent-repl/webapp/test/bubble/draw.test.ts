@@ -267,14 +267,31 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
     ]);
   });
 
-  it("keeps a strip element that says the same thing", () => {
+  /** A chrome element of CLASSNAME that states SAYS. */
+  function said(className: string, says: string): HTMLElement {
+    const node = el(className, says);
+    node.setAttribute(SAYS_ATTRIBUTE, says);
+    return node;
+  }
+
+  it("keeps a strip element that states the same thing", () => {
     // Arrange
-    const first = drawBubble(spec("agent", { strip: [el("address", "→ Explore")] })).bubble;
-    const address = first.querySelector(".address");
+    const first = drawBubble(spec("response", { strip: [said("notice", "Interrupted")] })).bubble;
+    const notice = first.querySelector(".notice");
     // Act
-    drawBubble(spec("agent", { strip: [el("address", "→ Explore")] }), first);
+    drawBubble(spec("response", { strip: [said("notice", "Interrupted")] }), first);
     // Assert
-    expect(first.querySelector(".address")).toBe(address);
+    expect(first.querySelector(".notice")).toBe(notice);
+  });
+
+  it("never keeps an element that states nothing, however equal it looks", () => {
+    // Arrange — chrome like a held prompt's actions, whose listeners belong to their push.
+    const first = drawBubble(spec("held", { footer: [el("queued-actions", "Release")] })).bubble;
+    const actions = first.querySelector(".queued-actions");
+    // Act
+    drawBubble(spec("held", { footer: [el("queued-actions", "Release")] }), first);
+    // Assert
+    expect(first.querySelector(".queued-actions")).not.toBe(actions);
   });
 
   it("replaces a strip element whose words changed", () => {
