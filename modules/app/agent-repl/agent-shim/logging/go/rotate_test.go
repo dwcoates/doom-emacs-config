@@ -60,7 +60,11 @@ func TestExplicitRollKeepsTheRetiredDescriptorOnItsGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open the retiring process's descriptor: %v", err)
 	}
-	defer held.Close()
+	defer func() {
+		if err := held.Close(); err != nil {
+			t.Errorf("close the retiring process's descriptor: %v", err)
+		}
+	}()
 
 	// Act: roll explicitly and write through the fresh generation.
 	if err := w.Roll(); err != nil {
