@@ -18,6 +18,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/shim-hides-keepalive` | `~/.config/doom-worktrees/shim-hides-keepalive` | The shim never serves a keep-alive turn's prompt, reply, usage or terminal. | `a5f0d85cf57c43d07` | 17:50 |
 | `fix/footer-rows-and-work-ids` | `~/.config/doom-worktrees/footer-rows-and-work-ids` | The detached-work id in every async bubble header. A footer row click either selects its entry or shows and logs "not on screen", never neither. The 0-token rows. The footer capped at 4 rows. ADDED: an async bubble shows only the last page, streams while open, and is WIPED on collapse. | `a0ac08889b72fae26` | 17:50 |
 | `fix/thinking-collapses-when-superseded` | `~/.config/doom-worktrees/thinking-collapses-when-superseded` | A thinking bubble shows in full until the next agent response in its feed. The daemon's `superseded` flag then collapses it to 2 lines. A user expansion is kept, and the collapse never moves the reader. | `a46d90f097aab0cae` | 17:55 |
+| `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 
 ## Still waiting on the owner
 
