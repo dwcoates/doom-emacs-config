@@ -383,6 +383,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "agent-repl: %s%s"
      "tells the user their prompt met the cold gate and where to answer it")
     ("input.el" agent-repl--input-on-error
+     "agent-repl: model change refused%s"
+     "tells the user their /model change was refused, in the refusal's own words")
+    ("input.el" agent-repl--input-on-error
      "agent-repl: %s"
      "tells the user the workspace has no session yet and the daemon is starting one")
     ("input.el" agent-repl--input-on-error
