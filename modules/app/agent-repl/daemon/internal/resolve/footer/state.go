@@ -483,6 +483,9 @@ type wsState struct {
 	// lastArm is the status arm the last published view carried, so a CHANGE
 	// of arm is recorded once rather than on every push.
 	lastArm string
+	// lastLine is the activity line the last published view carried, so a
+	// CHANGE to it can be recorded and a push that leaves it standing is not.
+	lastLine activityLine
 
 	// retiredWork are the detached handles that have already reached a
 	// terminal, so a REPLAY of the run's opening frames cannot count it live
@@ -567,6 +570,18 @@ func (s *wsState) observeArm(view *frontendv1.FooterView) (arm string, changed b
 	}
 	s.lastArm = arm
 	return arm, true, previous
+}
+
+// observeLine folds the published view's activity line in, answering the line,
+// whether it CHANGED, and the line it replaced.
+func (s *wsState) observeLine(view *frontendv1.FooterView) (line activityLine, changed bool, previous activityLine) {
+	line = activityLineOf(view.GetStrip().GetStatus())
+	previous = s.lastLine
+	if line == previous {
+		return line, false, previous
+	}
+	s.lastLine = line
+	return line, true, previous
 }
 
 // nextOrder mints the next panel order.
