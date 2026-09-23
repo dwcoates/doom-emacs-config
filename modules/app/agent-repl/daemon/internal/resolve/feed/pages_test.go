@@ -288,10 +288,10 @@ func TestBreadcrumbsRunOutermostFirst(t *testing.T) {
 	s := h.resolver.state(testWorkspace)
 	f := h.resolver.feed(s, rootFeed())
 	f.rows[outerHead.GetValue()] = &frontendv1.FeedRow{Id: outerHead}
-	h.resolver.mintSubFeed(s, outerHead, feedid.Feed{Agent: outer}, "Explore the daemon")
+	h.resolver.mintSubFeed(s, outerHead, rootFeed(), feedid.Feed{Agent: outer}, "Explore the daemon")
 	outerFeed := h.resolver.feed(s, feedid.Feed{Agent: outer})
 	outerFeed.rows[innerHead.GetValue()] = &frontendv1.FeedRow{Id: innerHead}
-	h.resolver.mintSubFeed(s, innerHead, feedid.Feed{Agent: inner}, "Read the protos")
+	h.resolver.mintSubFeed(s, innerHead, feedid.Feed{Agent: outer}, feedid.Feed{Agent: inner}, "Read the protos")
 	h.resolver.mu.Unlock()
 
 	// Act.
@@ -307,12 +307,36 @@ func TestBreadcrumbsRunOutermostFirst(t *testing.T) {
 	}
 }
 
+func TestBreadcrumbsClimbThroughAHeadMintedBeforeItsRowIsPlaced(t *testing.T) {
+	// Arrange: a subagent of a subagent whose head is minted BEFORE its row is
+	// upserted on the outer sub-feed, which is the order composeSubagent takes.
+	h := newHarness(t)
+	outer := &conversationv1.AgentId{Value: "agent-outer"}
+	inner := &conversationv1.AgentId{Value: "agent-inner"}
+	outerHead := &frontendv1.FeedId{Value: "row|outer"}
+	innerHead := &frontendv1.FeedId{Value: "row|inner"}
+	h.resolver.mu.Lock()
+	s := h.resolver.state(testWorkspace)
+	h.resolver.mintSubFeed(s, outerHead, rootFeed(), feedid.Feed{Agent: outer}, "Explore the daemon")
+	h.resolver.mintSubFeed(s, innerHead, feedid.Feed{Agent: outer}, feedid.Feed{Agent: inner}, "Read the protos")
+	h.resolver.mu.Unlock()
+
+	// Act.
+	page, _ := h.openPage(feedid.Feed{Agent: inner}, "reader-1")
+
+	// Assert: the chain reaches the root through the outer bubble.
+	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
+	if len(crumbs) != 2 || crumbs[0].GetTarget().GetValue() != "row|outer" || crumbs[1].GetTarget().GetValue() != "row|inner" {
+		t.Fatalf("crumbs = %+v, want [outer, inner]: the inner head's parent is the feed it is drawn on", crumbs)
+	}
+}
+
 func TestBreadcrumbLabelIsTheMergesBranchLine(t *testing.T) {
 	// Arrange: the orchestrator records its own head's label.
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-7")
 	head := &frontendv1.FeedId{Value: "row|merge-head"}
-	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
+	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Root: true}, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
 
 	// Act.
 	page, _ := h.openPage(feedid.Feed{Merge: &lease}, "reader-1")

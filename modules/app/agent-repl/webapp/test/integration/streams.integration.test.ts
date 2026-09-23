@@ -15,7 +15,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import type { FakeDaemon, RpcName } from "./fake-daemon";
 import { ROOT_FEED } from "./fake-daemon";
 import {
@@ -34,6 +34,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

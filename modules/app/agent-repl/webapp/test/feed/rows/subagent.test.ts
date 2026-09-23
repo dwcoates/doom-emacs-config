@@ -596,3 +596,16 @@ describe("drawFeedSubagent: the title fold", () => {
     }
   });
 });
+
+describe("drawFeedSubagent: the detached-work id", () => {
+  it.each([
+    { name: "a detached bubble names its work in the head", opts: { detached: true, workId: "work-1" }, want: "work-1" },
+    { name: "a synchronous spawn names none", opts: { detached: false }, want: null },
+  ])("$name", ({ opts, want }) => {
+    // Arrange, Act
+    const { el } = drawRow(subagentRow("b1", opts));
+
+    // Assert
+    expect(el.querySelector(".async-work-id")?.textContent ?? null).toBe(want);
+  });
+});
