@@ -1627,3 +1627,46 @@ describe("the held prompt's one-line fold", () => {
     expect(rule).toMatch(/cursor:\s*zoom-in/);
   });
 });
+
+/**
+ * THE WARNING CHIP IS RED, AND IS THE ONE PLACE AN ERROR SHOWS (owner ruling,
+ * 2026-09-23). The chip took the alarm `--err`, and the client-local failure
+ * overlay it replaced — cards drawn over the page — left no rule behind.
+ */
+describe("the warning chip as the one error surface", () => {
+  it("paints the chip in the alarm red: the LAST color the cascade reaches it with is --err", () => {
+    // Arrange — every non-hover rule naming the chip that sets its color, in
+    // file order; with equal specificity the last one is what paints it.
+    const coloring = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.includes(".topbar-warning-chip") &&
+        /(?:^|[\s;{])color\s*:/.test(rule.declarations),
+    );
+
+    // Act
+    const last = coloring.at(-1)?.declarations ?? "";
+
+    // Assert
+    expect(last).toMatch(/(?:^|[\s;{])color\s*:\s*var\(--err\)\s*(?:;|$)/);
+  });
+
+  it("carries no rule for a failure overlay", () => {
+    // Arrange / Act
+    const overlay = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes("#failure-overlay")),
+    );
+
+    // Assert
+    expect(overlay).toEqual([]);
+  });
+
+  it("carries no rule for a failure card", () => {
+    // Arrange / Act
+    const cards = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes(".failure-card")),
+    );
+
+    // Assert
+    expect(cards).toEqual([]);
+  });
+});

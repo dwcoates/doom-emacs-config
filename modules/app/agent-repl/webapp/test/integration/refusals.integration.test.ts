@@ -26,7 +26,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { chipFailureArms, startHarness, type Harness } from "./harness";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import {
   ACCOUNT_CONFIG_DIR,
@@ -851,7 +851,7 @@ describe("AdoptWebWorkspace's refusals", () => {
       startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", arm) }),
     ).rejects.toThrow();
     // Assert
-    expect(overlayArms()).toContain("controlPlaneFailed");
+    expect(chipFailureArms()).toContain("controlPlaneFailed");
   });
 
   it.each(TERMINAL_ARMS)("fails the boot on the %s arm", async (arm) => {
@@ -860,16 +860,9 @@ describe("AdoptWebWorkspace's refusals", () => {
       startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", arm) }),
     ).rejects.toThrow();
     // Assert
-    expect(overlayArms()).toContain("bootFailed");
+    expect(chipFailureArms()).toContain("bootFailed");
   });
 });
-
-/** The failure overlay's arms, read off the document rather than a harness. */
-function overlayArms(): string[] {
-  return [...document.querySelectorAll<HTMLElement>('[data-component="failure-overlay"] [data-arm]')].map(
-    (el) => el.dataset.arm ?? "",
-  );
-}
 
 // ---------------------------------------------------------------------------
 // A BUBBLE COMPOSER'S REFUSAL IS THE BUBBLE'S (audit 1, item 8)
