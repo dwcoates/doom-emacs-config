@@ -480,7 +480,8 @@ interface ActionSpec {
 export type HeldAction = "release" | "drop" | "accept";
 
 /**
- * The entry's controls: release, drop, and — on one arm only — accept.
+ * The entry's controls: release, drop (labelled "Cancel"), and — on one arm
+ * only — accept.
  *
  * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the three actions
  * are mutually exclusive answers about one entry, and a drop landing while a
@@ -512,7 +513,10 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     release.classList.add("queued-action-unlikely");
   }
   actions.appendChild(release);
-  actions.appendChild(actionButton("drop", "Drop", spec));
+  // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
+  // takes back a prompt they sent, and the text comes back to the composer. The
+  // wire verb is still `drop`, and so are the hooks it is found by.
+  actions.appendChild(actionButton("drop", "Cancel", spec));
   if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   return actions;
 }
