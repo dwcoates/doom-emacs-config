@@ -14,12 +14,8 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 |---|---|---|---|---|
 | `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a9939024139796b9d` | 17:50 |
 | `fix/e2e-all-green` | `~/.config/doom-worktrees/e2e-all-green` | REVIVED (4 commits plus uncommitted work): e2e to green. | `a915f8a8d5e7424ee` | 17:50 |
-| `fix/shim-hides-keepalive` | `~/.config/doom-worktrees/shim-hides-keepalive` | The shim never serves a keep-alive turn's prompt, reply, usage or terminal. | `a5f0d85cf57c43d07` | 17:50 |
-| `fix/footer-rows-and-work-ids` | `~/.config/doom-worktrees/footer-rows-and-work-ids` | The detached-work id in every async bubble header. A footer row click either selects its entry or shows and logs "not on screen", never neither. The 0-token rows. The footer capped at 4 rows. ADDED: an async bubble shows only the last page, streams while open, and is WIPED on collapse. ADDED: selecting a footer entry CENTERS it in the feed. | `a0ac08889b72fae26` | 17:50 |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `a68a3514a8fb89b75` | 18:05 |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | `a3cde9e9c734a7c27` | 18:20 |
-| `fix/integration-cold-first-test` | `~/.config/doom-worktrees/integration-cold-first-test` | Root-cause the flaky integration tests (the first test in 6 files fails under load; 900ms bound). Measured cause, one shared cold-start helper, and green 5× under load. | `a77100b53ad11dbed` | 18:25 |
-| `fix/selection-click-and-stable-gutter` | `~/.config/doom-worktrees/selection-click-and-stable-gutter` | A click on the feed outside any bubble clears the reply selection (via the daemon), then snaps to the bottom and follows. `scrollbar-gutter: stable` on bubble scroll boxes. | `af0ad8918210bd694` | 18:30 |
 | `fix/sendmessage-restates-summary` | `~/.config/doom-worktrees/sendmessage-restates-summary` | The SendMessage settle restates `summary` and `addressed_to` (proto, shim, sidecar, daemon), plus an audit of other settles that don't restate their start. | `a7ce629aa3694c20d` | 18:30 |
 | `feat/held-prompt-compact-badges` | `~/.config/doom-worktrees/held-prompt-compact-badges` | Held prompts collapse to 2 lines, with details and buttons only when expanded, at half the normal max width. Statuses are colored badges (waiting red, interrupting green, the rest mapped). ADDED: a held prompt landing jumps the feed to the bottom and follows, like a sent prompt. | `afb5bccb8f702f5d3` | 18:55 |
 | `fix/sidecar-no-unrendered-spools` | `~/.config/doom-worktrees/sidecar-no-unrendered-spools` | The sidecar stops storing unclaimed task spools and duplicate transcript symlinks as residue. Rendered spools are bounded. | `a8d17efda472949bd` | 19:05 |
@@ -29,11 +25,22 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
+- The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
+- Background priority vs. the tight test timeouts: under `taskpolicy -b` on a loaded machine, suites time out (900ms tests, 1800ms cold boot). Which gives way?
+- Proto: footer rows retired field tag 1 (`FeedId target`), a removal rather than an addition. Confirm.
+- Monitor rows are now clickable and always show "not on screen" (a small visible change). Confirm.
+- The selected-row mark is a 3px bar at the feed's far left, away from a centered card. Should it be restyled?
+- The keep-alive hold is still visible to the daemon through the proto-ruled `turn_already_open.keepalive` refusal. Remove it (a proto change)?
+- The sidecar still classifies keep-alive rows by a marker, so the two planes disagree (41 kind-change refusals today). Fix it on the sidecar side?
 - The new name for "Release" (suggested: "Send now").
 - A retry of `SPC TAB f`, which now logs.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- A click on the feed background clears an active reply selection through the daemon, and the cleared push parks and follows (`fix/selection-click-and-stable-gutter`). `scrollbar-gutter: stable` was NOT landed (see the owner decisions).
+- Footer and async bubbles: the detached-work id on async heads; a footer click either selects (centered) or shows and logs not-on-screen; the panel caps at 4 rows; a collapsed sub-feed is wiped and reopens on its last page; nested subagents credit their own rows (the zero-token rows fixed) (`fix/footer-rows-and-work-ids`).
+- Integration first-test flakes: each file's cold boot is paid in one bounded `beforeAll`, with a guard (`fix/integration-cold-first-test`).
+- Keep-alive turns are scoped by the SDK's uuid echo and nothing they produce is served (`fix/shim-hides-keepalive`).
 - Follow mode also turns on whenever the latest feed entry is visible, so scrolling back down resumes it. It's held off while a reply selection is active (`fix/follow-when-latest-visible`, 5443 tests pass).
 - A thinking bubble shows in full until superseded by the next agent response in its feed. The daemon's `FeedResponse.superseded` collapses it to 2 lines, a user expansion survives, and a collapse above the viewport never moves the reader (`fix/thinking-collapses-when-superseded`, 5405 tests pass).
 - The border ladder spreads: thinking is nearer red (#e3a008), mid-turn prose nearer yellow (#b0b00c), and a hue-monotonic test covers it (lead, 5383 tests pass).
