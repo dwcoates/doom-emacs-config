@@ -757,10 +757,56 @@ Refusals, all preconditions rather than failures:
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 
+(defun agent-repl--frontend-page-host-label (id)
+  "Return the DNS label that names workspace ID's page host.
+A real workspace id is already a valid label (lowercase hex), and is used
+as is so the host reads as the workspace in any log.  Anything else is
+hashed, because the label only has to be STABLE and DISTINCT per
+workspace — it is never parsed back into an id."
+  (if (string-match-p "\\`[a-z0-9-]\\{1,60\\}\\'" id)
+      id
+    (substring (secure-hash 'sha1 id) 0 16)))
+
+(defun agent-repl--frontend-page-origin (ws conn)
+  "Return the origin WS's page is served from over CONN, or signal.
+
+  http://ws-<id>.localhost:<daemon port>
+
+EACH WORKSPACE'S PAGE GETS A HOST OF ITS OWN, and that is what keeps the
+page's requests moving.  WebKit caps HTTP/1.1 at six connections PER
+HOST, and the cap is shared by every page of that host in the one
+networking process — not per page.  Each page holds exactly one standing
+stream (`WatchPage'), so six pages on the daemon's bare address pinned
+all six connections, and every later request from every page — its log
+forwarding, its cold-gate answer, every unary verb — queued forever with
+nothing on the wire and no error.  A host per workspace gives each page
+its own six, which is what the one-stream-per-page rule was written
+assuming.
+
+`*.localhost' resolves to loopback in WebKit (RFC 6761), the daemon does
+not check the Host header, and the page addresses the daemon through its
+own origin, so nothing but this string changes.  The daemon's address
+must be loopback: a `localhost' name for any other host would address
+this machine instead."
+  (let* ((address (agent-repl-connect-connection-address conn))
+         (colon (and address (string-match ":\\([0-9]+\\)\\'" address)))
+         (host (and colon (substring address 0 (match-beginning 0))))
+         (port (and colon (match-string 1 address)))
+         (ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))))
+    (unless (and host (member host '("127.0.0.1" "localhost")))
+      (agent-repl--fatal ws "elisp.frontend.page-origin: the daemon address %S is not a loopback host:port" address))
+    (unless ref
+      (agent-repl--fatal ws "elisp.frontend.page-origin: no ref for ws=%s" ws))
+    (format "http://ws-%s.localhost:%s"
+            (agent-repl--frontend-page-host-label (plist-get ref :id)) port)))
+
 (defun agent-repl-frontend-webview-url (ws)
   "Return the webapp URL WS's webview loads.
 
-  http://<daemon address>/?workspace=<id>&dir=<dir>&log_level=<level>
+  http://ws-<id>.localhost:<daemon port>/?workspace=<id>&dir=<dir>&log_level=<level>
+
+The host is the workspace's own (`agent-repl--frontend-page-origin' says
+why); the port is the owning daemon's.
 
 THE WORKSPACE VALUES COME FROM THE WorkspaceRef VERBATIM — the one the daemon
 minted and handed back (RegisterWorkspace's answer, or the roster) —
@@ -794,8 +840,8 @@ than no webview."
       (agent-repl--fatal ws "elisp.frontend.webview-url: no ref for ws=%s" ws))
     (unless conn
       (agent-repl--fatal ws "elisp.frontend.webview-url: no connection for ws=%s" ws))
-    (let ((url (format "http://%s/?workspace=%s&dir=%s&log_level=%s"
-                       (agent-repl-connect-connection-address conn)
+    (let ((url (format "%s/?workspace=%s&dir=%s&log_level=%s"
+                       (agent-repl--frontend-page-origin ws conn)
                        (url-hexify-string (plist-get ref :id))
                        (url-hexify-string (plist-get ref :dir))
                        (url-hexify-string (agent-repl--frontend-log-level ws)))))
@@ -866,11 +912,12 @@ There is no global base URL to ask instead: a workspace handed over to
 another daemon is served by THAT daemon, and a module-wide address would
 call its perfectly-correct page stray.
 
-Nil when WS has no connection: a workspace whose daemon cannot be named
-cannot certify any page as home."
-  (let ((conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))))
-    (when conn
-      (format "http://%s" (agent-repl-connect-connection-address conn)))))
+Nil when WS has no connection or no ref: a workspace whose daemon or
+page host cannot be named cannot certify any page as home."
+  (let ((conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws)))
+        (ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))))
+    (when (and conn ref)
+      (agent-repl--frontend-page-origin ws conn))))
 
 (defun agent-repl--frontend-webview-at-home-p (ws uri)
   "Return non-nil when URI is served by the daemon that owns WS.
