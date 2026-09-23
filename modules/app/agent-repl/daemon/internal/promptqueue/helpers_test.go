@@ -300,11 +300,14 @@ func (d *fakeDB) startedTurn(turn ids.TurnID) (wsm.Turn, bool) {
 type fakeSender struct {
 	mu sync.Mutex
 
-	turns       []ids.TurnID
-	said        []*conversationv1.UserSaid
-	origins     []conversationv1.PromptOrigin
-	agents      []*conversationv1.AgentId
-	kills       []ids.TurnID
+	turns   []ids.TurnID
+	said    []*conversationv1.UserSaid
+	origins []conversationv1.PromptOrigin
+	agents  []*conversationv1.AgentId
+	kills   []ids.TurnID
+	// killForces is each recorded kill's force flag, index-aligned with
+	// kills, so a test can assert an interrupt never forced one.
+	killForces  []bool
 	models      []string
 	modes       []string
 	startErr    error
@@ -379,14 +382,23 @@ func (s *fakeSender) PromptAgent(_ context.Context, agent *conversationv1.AgentI
 	return nil
 }
 
-func (s *fakeSender) KillTurn(_ context.Context, turn ids.TurnID, _ bool) error {
+func (s *fakeSender) KillTurn(_ context.Context, turn ids.TurnID, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.killErr != nil {
 		return s.killErr
 	}
 	s.kills = append(s.kills, turn)
+	s.killForces = append(s.killForces, force)
 	return nil
+}
+
+func (s *fakeSender) killedForces() []bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]bool, len(s.killForces))
+	copy(out, s.killForces)
+	return out
 }
 
 func (s *fakeSender) SetModel(_ context.Context, model string) error {

@@ -224,12 +224,16 @@ func (q *queue) redriveBehindKeepalive(ctx context.Context, sub Submission, send
 // one of the two wins. When the interrupt won the race — the turn opened in the
 // same instant it was cancelled — the turn is accepted so its terminal is
 // attributable and then killed, so a stopped turn does not run on unnoticed.
+//
+// THE KILL IS UNFORCED. It answers the user's interrupt, and an interrupt ends
+// only the synchronous turn: whatever detached work the turn managed to spawn
+// runs on until its own per-task stop, exactly as for any other interrupt.
 func (q *queue) commitRedriveSuccess(ctx context.Context, sub Submission, success *shimv1.StartTurnSuccess, sender Sender, watcher Watcher, log dlog.Logger, attempt int) {
 	if q.consumeRedrive(sub.WS, sub.Turn) {
 		log.Info(opDeliver, "the re-driven turn opened as an interrupt cancelled it; stopping it",
 			dlog.Context{"attempts": attempt})
 		q.acceptOpenedTurn(ctx, sub, success, watcher, log)
-		if err := sender.KillTurn(ctx, sub.Turn, true); err != nil {
+		if err := sender.KillTurn(ctx, sub.Turn, false); err != nil {
 			log.Error(opDeliver, "could not stop the interrupt-cancelled turn that had just opened",
 				dlog.Context{"cause": err.Error()})
 		}
