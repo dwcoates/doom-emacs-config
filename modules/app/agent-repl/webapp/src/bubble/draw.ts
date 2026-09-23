@@ -24,9 +24,17 @@
  * same for every kind. `test/bubble/consolidation.test.ts` fails any source
  * that builds a bubble, a scroll box or a body of its own.
  */
-import { armPromptWave } from "../breathing.js";
-import { bubbleScroll } from "../feed/bubble-scroll.js";
-import { createBubbleBody, paintBody, type BubbleBody } from "./body.js";
+import { armPromptWave, setPromptWave } from "../breathing.js";
+import { placeChildren } from "../dom.js";
+import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../feed/bubble-scroll.js";
+import { stopTicking } from "../feed/ticking.js";
+import {
+  BUBBLE_BODY_CLASS,
+  createBubbleBody,
+  isBubbleBody,
+  paintBody,
+  type BubbleBody,
+} from "./body.js";
 
 /** The side and the background a bubble takes. */
 export type BubbleRole = "prompt" | "response";
@@ -84,7 +92,7 @@ interface BubbleSpecBase {
   /** The response's usage corner, floated top-right inside the scroll box. */
   corner?: HTMLElement;
   /** The content: nodes, markdown slots among them (see body.ts). */
-  content: readonly Node[];
+  content: readonly ChildNode[];
   /** Chrome after the scroll box (a cut-short marker, a held prompt's actions). */
   footer?: readonly HTMLElement[];
   /** The collapsed line limit. */
@@ -107,35 +115,127 @@ export interface ResponseBubbleSpec extends BubbleSpecBase {
 
 export type BubbleSpec = PromptBubbleSpec | ResponseBubbleSpec;
 
-/** A drawn bubble: the element, and the body its content was painted into. */
+/** A drawn bubble: the element, the body, and the content nodes the body now holds. */
 export interface DrawnBubble {
   bubble: HTMLElement;
   body: BubbleBody;
+  /** The live content, position for position with the spec's (see `paintBody`). */
+  content: readonly ChildNode[];
 }
 
-/** Draw one bubble from its spec. */
-export function drawBubble(spec: BubbleSpec): DrawnBubble {
-  const bubble = document.createElement("div");
-  bubble.className = [BUBBLE_CLASS, ...(spec.hooks ?? [])].join(" ");
+/** The attribute a chrome element may state what it says on, for the in-place compare. */
+export const SAYS_ATTRIBUTE = "data-says";
+
+/** The hook classes each bubble was last drawn with, so a redraw can take them back. */
+const drawnHooks = new WeakMap<Element, readonly string[]>();
+
+/**
+ * Draw one bubble from its spec.
+ *
+ * A REDRAW IS IN PLACE (owner rule, 2026-09-23: the user owns the scroll). When
+ * PREVIOUS — the element the previous draw of the same row returned — is a
+ * bubble of the same role, it is UPDATED and returned instead of replaced: the
+ * element, its scroll box and its body keep their identity (so a reader
+ * scrolled inside the box keeps their place), its classes and attributes are
+ * brought to the spec (a class the bubble did not get from a spec — the
+ * controller's `response-selected` — is left alone), a header, corner or footer
+ * element that says the same thing is kept (a replaced one's clock stops), the
+ * working wave keeps its phase, and the content is repainted in place
+ * (`paintBody`). Nothing already in its place is moved (`placeChildren`).
+ */
+export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubble {
+  const reused = reusableParts(previous, spec.role);
+  const bubble = reused?.bubble ?? document.createElement("div");
+  const body = reused?.body ?? createBubbleBody();
+  const scroll = reused?.scroll ?? bubbleScroll(body);
+
+  const hooks = [BUBBLE_CLASS, ...(spec.hooks ?? [])];
+  for (const old of drawnHooks.get(bubble) ?? []) {
+    if (!hooks.includes(old)) bubble.classList.remove(old);
+  }
+  bubble.classList.add(...hooks);
+  drawnHooks.set(bubble, hooks);
   bubble.setAttribute(BUBBLE_ROLE_ATTRIBUTE, spec.role);
   bubble.setAttribute(BUBBLE_VARIANT_ATTRIBUTE, spec.variant);
   bubble.setAttribute(BUBBLE_CAP_ATTRIBUTE, String(spec.capLines));
-  if (spec.state !== undefined) bubble.setAttribute("data-state", spec.state);
-  if (spec.role === "prompt") armPromptWave(bubble, spec.working);
-
-  for (const el of spec.strip ?? []) {
-    el.classList.add(BUBBLE_STRIP_CLASS);
-    bubble.append(el);
+  if (spec.state === undefined) bubble.removeAttribute("data-state");
+  else bubble.setAttribute("data-state", spec.state);
+  if (spec.role === "prompt") {
+    // A fresh bubble takes the wave's phase; a reused one keeps its own, so a
+    // push that flips nothing but the flag never jumps the band.
+    if (reused === null) armPromptWave(bubble, spec.working);
+    else setPromptWave(bubble, spec.working);
   }
 
-  const body = createBubbleBody();
-  const scroll = bubbleScroll(body);
-  if (spec.corner !== undefined) scroll.insertBefore(spec.corner, body);
-  bubble.append(scroll);
+  const strip = keepSaid(liveChrome(bubble, "strip", scroll), spec.strip ?? []);
+  for (const el of strip) el.classList.add(BUBBLE_STRIP_CLASS);
+  const footer = keepSaid(liveChrome(bubble, "footer", scroll), spec.footer ?? []);
+  placeChildren(bubble, [...strip, scroll, ...footer]);
 
-  for (const el of spec.footer ?? []) bubble.append(el);
+  const liveCorner = reused === null ? [] : [...scroll.children].filter((el) => el !== body);
+  const corner = keepSaid(liveCorner as HTMLElement[], spec.corner === undefined ? [] : [spec.corner]);
+  placeChildren(scroll, [...corner, body]);
+
   // Painted LAST, inside the finished bubble: a slot holding a tree measures
   // against the bubble around it, so the body must already hang in one.
-  paintBody(body, spec.content);
-  return { bubble, body };
+  const content = paintBody(body, spec.content);
+  return { bubble, body, content };
+}
+
+/** The parts of a bubble a redraw keeps. */
+interface BubbleParts {
+  bubble: HTMLElement;
+  scroll: HTMLElement;
+  body: BubbleBody;
+}
+
+/**
+ * The parts of PREVIOUS when it is a bubble of ROLE this module drew, to be
+ * updated in place; null for anything else (a first draw, a row whose kind
+ * changed), which then gets a fresh bubble.
+ */
+function reusableParts(previous: HTMLElement | undefined, role: BubbleRole): BubbleParts | null {
+  if (previous === undefined || !previous.classList.contains(BUBBLE_CLASS)) return null;
+  if (previous.getAttribute(BUBBLE_ROLE_ATTRIBUTE) !== role) return null;
+  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
+  const body = scroll?.querySelector(`:scope > .${BUBBLE_BODY_CLASS}`);
+  if (scroll === null || !isBubbleBody(body)) return null;
+  return { bubble: previous, scroll, body };
+}
+
+/** The bubble's current header strip (before the box) or footer (after it). */
+function liveChrome(bubble: HTMLElement, side: "strip" | "footer", scroll: HTMLElement): HTMLElement[] {
+  const children = [...bubble.children] as HTMLElement[];
+  const at = children.indexOf(scroll);
+  if (at < 0) return [];
+  return side === "strip" ? children.slice(0, at) : children.slice(at + 1);
+}
+
+/**
+ * The chrome to draw: each of NEXT, except that the live element in the same
+ * position is KEPT when it says the same thing — a replaced corner would
+ * restart its clock and drop a hover reveal for nothing. What says the same
+ * thing: the same `data-says` when either states one, else an equal node. A
+ * discarded element's clock stops, whichever side it was on.
+ */
+function keepSaid(live: readonly HTMLElement[], next: readonly HTMLElement[]): HTMLElement[] {
+  const drawn = next.map((want, i) => {
+    const have = live[i];
+    if (have === undefined || !saysTheSame(have, want)) return want;
+    stopTicking(want);
+    return have;
+  });
+  for (const have of live) {
+    if (!drawn.includes(have)) stopTicking(have);
+  }
+  return drawn;
+}
+
+/** Whether A and B state the same thing (see `keepSaid`). */
+function saysTheSame(a: HTMLElement, b: HTMLElement): boolean {
+  if (a.hasAttribute(SAYS_ATTRIBUTE) || b.hasAttribute(SAYS_ATTRIBUTE)) {
+    return a.getAttribute(SAYS_ATTRIBUTE) === b.getAttribute(SAYS_ATTRIBUTE);
+  }
+  b.classList.toggle(BUBBLE_STRIP_CLASS, a.classList.contains(BUBBLE_STRIP_CLASS));
+  return a.isEqualNode(b);
 }

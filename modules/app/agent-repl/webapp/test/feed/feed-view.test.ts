@@ -47,6 +47,7 @@ import {
 } from "./harness.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { centerDelta, type CenterGeometry } from "../../src/scroll.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -278,6 +279,95 @@ describe("createFeedController: upserts", () => {
     const element = host.querySelector('[data-feed-row="a"]');
     controller.upsert(responseRow("a", "two"));
     expect(host.querySelector('[data-feed-row="a"]')).toBe(element);
+  });
+
+  it("redraws nothing for a row re-pushed exactly as drawn", () => {
+    // Arrange -- REMOVED TRIGGER: the daemon repaints its opening page on
+    // every turn open, and each unchanged row used to be rebuilt.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    const before = host.querySelector('[data-feed-row="a"]')?.firstElementChild;
+    // Act
+    controller.upsert(responseRow("a", "one"));
+    // Assert
+    expect(host.querySelector('[data-feed-row="a"]')?.firstElementChild).toBe(before);
+  });
+
+  it("does not ask the tail owner to follow for an unchanged re-push", () => {
+    // Arrange
+    const h = harness();
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const follows: number[] = [];
+    const tail = {
+      follow: () => follows.push(1),
+      initialPlacement: () => undefined,
+    };
+    const controller = createFeedController({
+      ctx: h.ctx,
+      host,
+      feed: "root",
+      renderers: stubRenderers(),
+      body: defaultBubbleBody,
+      revealRow: async () => false,
+      bubble: (row) => stubBubble(row),
+      bodyContext: { ctx: h.ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => false },
+      scroll: { box: { scrollTop: 0, scrollHeight: 0, clientHeight: 0 }, tail: tail as never },
+    });
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    follows.length = 0;
+    // Act
+    controller.upsert(responseRow("a", "one"));
+    // Assert
+    expect(follows).toEqual([]);
+  });
+
+  it("records an unchanged re-push at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = fixture();
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    // Act
+    controller.upsert(responseRow("a", "one"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-unchanged");
+    expect(record.context).toMatchObject({ feed: "root", row: "a" });
+  });
+
+  it("leaves a body its renderer updated in place in the document", () => {
+    // Arrange -- a renderer that hands back the element it drew before, as the
+    // response bubble does so its scroll box keeps the reader's position.
+    const inPlace = (_u: unknown, rc: RowContext): HTMLElement => rc.previous ?? document.createElement("div");
+    const { controller, host } = fixture(undefined, {}, { renderers: { response: inPlace } });
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    const row = host.querySelector('[data-feed-row="a"]');
+    if (row === null) throw new Error("row a is not drawn");
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(row, { childList: true });
+    // Act
+    controller.upsert(responseRow("a", "two"));
+    // Assert -- nothing was removed from the row, so nothing re-attached.
+    expect(observer.takeRecords().flatMap((record) => [...record.removedNodes])).toEqual([]);
+  });
+
+  it("keeps a box the reader scrolled when its card is re-pushed", () => {
+    // Arrange -- a card whose output box the reader scrolled 80px into.
+    const boxed = (): HTMLElement => {
+      const card = document.createElement("div");
+      const box = document.createElement("pre");
+      box.className = "tool-output";
+      card.append(box);
+      return card;
+    };
+    const { controller, host } = fixture(undefined, {}, { renderers: { response: boxed } });
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    const box = host.querySelector<HTMLElement>('[data-feed-row="a"] .tool-output');
+    if (box === null) throw new Error("the card drew no box");
+    box.scrollTop = 80;
+    // Act
+    controller.upsert(responseRow("a", "two"));
+    // Assert -- the same box, still where the reader left it.
+    expect([host.querySelector('[data-feed-row="a"] .tool-output') === box, box.scrollTop]).toEqual([true, 80]);
   });
 
   it("refuses a row with no id, the id being the upsert key", () => {
@@ -925,22 +1015,30 @@ describe("createFeedController: the working prompt's thinking wave", () => {
 
 describe("createFeedController: following the tail", () => {
   /**
-   * A scroll box and a tail owner whose decisions the test dictates. Every
-   * park records the rows drawn at that moment, so a test can say what was
-   * already painted when the feed moved.
+   * A scroll box and a tail owner recording which named cause the feed asked
+   * for. Every park records the rows drawn at that moment, so a test can say
+   * what was already painted when the feed moved. The follow decision itself is
+   * TailFollow's (test/scroll.test.ts); FOLLOWING only says whether this stub's
+   * `follow` records a move.
    */
   function scrollStub(following: boolean, host: HTMLElement) {
     const acts: string[] = [];
     const parkedOver: string[][] = [];
     const shifts: number[] = [];
     const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100 };
+    const park = (cause: string) => (): void => {
+      acts.push(cause);
+      parkedOver.push(drawnIds(host));
+    };
     const tail = {
       isFollowing: () => following,
-      park: () => {
-        acts.push("park");
-        parkedOver.push(drawnIds(host));
+      follow: () => {
+        if (following) park("follow")();
       },
-      shift: (delta: number) => shifts.push(delta),
+      promptSent: park("promptSent"),
+      initialPlacement: park("initialPlacement"),
+      replaceRestore: park("replaceRestore"),
+      prependCompensation: (grown: number) => shifts.push(grown),
     };
     return { box, tail, acts, parkedOver, shifts };
   }
@@ -984,35 +1082,39 @@ describe("createFeedController: following the tail", () => {
     return el;
   }
 
-  it("pulls the view to the tail while the reader is following it", () => {
+  it("asks the tail owner to keep a standing follow when a row arrives", () => {
     const { controller, acts } = scrolled(true);
     acts.length = 0;
     controller.upsert(responseRow("r1"));
-    expect(acts).toContain("park");
+    expect(acts).toContain("follow");
   });
 
-  it("leaves a reader who has scrolled away exactly where they are", () => {
-    const { controller, acts } = scrolled(false);
-    acts.length = 0;
-    controller.upsert(responseRow("r1"));
-    expect(acts).not.toContain("park");
-  });
-
-  it("anchors a following reader at the tail when older rows land above", () => {
+  it("asks the tail owner to keep a standing follow when older rows land above", () => {
     const { controller, acts } = scrolled(true);
     controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
     acts.length = 0;
     controller.applyPage(page([responseRow("older")]), "prepend");
-    expect(acts).toContain("park");
+    expect(acts).toContain("follow");
   });
 
-  it("parks a reader who was scrolled away at the tail after a replace", () => {
-    // Arrange — the reader is not following; a re-open replaces the page.
+  it("places a feed's first page at its tail as initialPlacement", () => {
+    // Arrange
     const { controller, acts } = scrolled(false);
     // Act
     controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
+    // Assert
+    expect(acts).toEqual(["initialPlacement"]);
+  });
+
+  it("lands a later replace at the tail as replaceRestore", () => {
+    // Arrange — the feed already painted once; a re-open replaces the page.
+    const { controller, acts } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    acts.length = 0;
+    // Act
+    controller.applyPage(page([responseRow("a"), responseRow("b")]), "replace");
     // Assert — there is no saved spot: a replace lands at the tail.
-    expect(acts).toEqual(["park"]);
+    expect(acts).toEqual(["replaceRestore"]);
   });
 
   it("paints the replaced rows before it parks", () => {
@@ -1032,7 +1134,7 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("a")]), "replace");
     // Assert
     const record = await forwardedRecord(capture, "feed.replace-parked");
-    expect(record.context).toMatchObject({ feed: "root", rows: 1 });
+    expect(record.context).toMatchObject({ feed: "root", rows: 1, first: true });
   });
 
   it("parks at the tail when a new prompt is drawn while the reader was scrolled up", () => {
@@ -1043,7 +1145,7 @@ describe("createFeedController: following the tail", () => {
     // Act
     controller.upsert(userPromptRow("p", "hi", "t1", true));
     // Assert
-    expect(acts).toEqual(["park"]);
+    expect(acts).toEqual(["promptSent"]);
   });
 
   it("paints the new prompt before it parks", () => {
@@ -1077,7 +1179,7 @@ describe("createFeedController: following the tail", () => {
     // Act
     controller.upsert(userPromptRow("p", "hi, edited", "t1", true));
     // Assert
-    expect(acts).not.toContain("park");
+    expect(acts).not.toContain("promptSent");
   });
 
   it("does not re-park when a replace redraws a prompt it already drew", async () => {
@@ -1102,7 +1204,7 @@ describe("createFeedController: following the tail", () => {
     // Act
     controller.applyPage(page([userPromptRow("old", "hi", "t0", true)]), "prepend");
     // Assert
-    expect(acts).not.toContain("park");
+    expect(acts).not.toContain("promptSent");
   });
 
   it("does not park on a turn's terminal re-push of a prompt this feed never drew", () => {
@@ -1113,7 +1215,7 @@ describe("createFeedController: following the tail", () => {
     // Act
     controller.upsert(userPromptRow("p", "hi", "t1", false));
     // Assert
-    expect(acts).not.toContain("park");
+    expect(acts).not.toContain("promptSent");
   });
 
   it("keeps the reader's content in place when older rows land above it", () => {
@@ -1125,17 +1227,6 @@ describe("createFeedController: following the tail", () => {
     controller.applyPage(page([responseRow("older")]), "prepend");
     // Assert — the view moves down by exactly the 400px that grew above.
     expect(shifts).toEqual([400]);
-  });
-
-  it("does not shift a following reader on a prepend", () => {
-    // Arrange
-    const { controller, host, shifts } = scrolled(true);
-    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
-    layOutByIndex(host, "a");
-    // Act
-    controller.applyPage(page([responseRow("older")]), "prepend");
-    // Assert
-    expect(shifts).toEqual([]);
   });
 
   it("does not shift when a prepend lands on an empty feed", () => {
@@ -1175,7 +1266,7 @@ describe("createFeedController: the response selection", () => {
     return el;
   }
 
-  /** A scroll box and tail owner whose writes the test records. */
+  /** A scroll box and tail owner recording the named causes asked for. */
   function selectionScroll(geometry: {
     scrollTop: number;
     scrollHeight: number;
@@ -1186,9 +1277,12 @@ describe("createFeedController: the response selection", () => {
     const box = { ...geometry, querySelector: () => null };
     const tail = {
       isFollowing: () => false,
-      park: () => acts.push("park"),
-      release: () => acts.push("release"),
-      shift: (delta: number) => shifts.push(delta),
+      follow: () => undefined,
+      selectionCleared: () => acts.push("selectionCleared"),
+      selectionMoved: (g: CenterGeometry | null) => {
+        acts.push("selectionMoved");
+        if (g !== null) shifts.push(centerDelta(g));
+      },
     };
     return { box, tail, acts, shifts };
   }
@@ -1285,17 +1379,17 @@ describe("createFeedController: the response selection", () => {
     expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(false);
   });
 
-  it("releases the tail while a selection is active, so streaming rows do not pull the view", () => {
+  it("hands an active selection to the tail owner as selectionMoved", () => {
     // Arrange
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
     // Act
     controller.applySelection(sel({ selected: "r1", active: true }));
     // Assert
-    expect(acts).toContain("release");
+    expect(acts).toEqual(["selectionMoved"]);
   });
 
-  it("returns to the bottom by re-parking when the selection clears", () => {
+  it("returns to the bottom when the selection clears", () => {
     // Arrange
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
@@ -1304,7 +1398,41 @@ describe("createFeedController: the response selection", () => {
     // Act
     controller.applySelection(sel({ active: false }));
     // Assert
-    expect(acts).toContain("park");
+    expect(acts).toEqual(["selectionCleared"]);
+  });
+
+  it("does not move the feed when an inactive selection is restated", () => {
+    // Arrange — REMOVED TRIGGER: every inactive push used to park the feed,
+    // including the one a re-opened stream restates with nothing selected.
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ active: false }));
+    // Assert
+    expect(acts).toEqual([]);
+  });
+
+  it("does not re-center when the same center is restated", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    acts.length = 0;
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Assert
+    expect(acts).toEqual([]);
+  });
+
+  it("records a restated selection at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = selecting();
+    // Act
+    controller.applySelection(sel({ active: false }));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.selection-unchanged");
+    expect(record.context).toMatchObject({ feed: "root", active: false });
   });
 
   it("center-scrolls the selected row to the middle of the viewport", () => {
@@ -1327,6 +1455,17 @@ describe("createFeedController: the response selection", () => {
     controller.applySelection(sel({ selected: "gone", active: true, center: "gone" }));
     // Assert — nothing is scrolled, and nothing throws.
     expect(shifts).toEqual([]);
+  });
+
+  it("records a center this feed has not drawn at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = selecting();
+    // Act
+    controller.applySelection(sel({ selected: "gone", active: true, center: "gone" }));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.selection-center-absent");
+    expect(record.context).toMatchObject({ feed: "root", row: "gone" });
   });
 
   it("applies the border even with no scroll box", () => {

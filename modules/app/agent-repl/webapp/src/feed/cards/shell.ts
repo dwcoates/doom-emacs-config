@@ -230,10 +230,10 @@ export function drawFeedShellCommand(u: FeedShellCommand, path: string): HTMLEle
 /**
  * The spool tail, and the truncation line above it.
  *
- * The box is scrolled to its bottom on every draw, so the newest output is what
- * a redraw shows — which is what makes a live spool worth having on screen at
- * all. `scrollTop` on a jsdom element is a plain number, so the suite can read
- * back that the follow happened without a layout engine.
+ * The box is never scrolled for the reader (owner rule, 2026-09-23: the user
+ * owns the scroll, and a bubble's box moves only on their input). The spool the
+ * daemon serves is already its newest end, and output appended beneath a
+ * reader scrolled inside the expanded box does not move what they are reading.
  */
 export function drawFeedShellSpool(u: FeedShellSpool, path: string): HTMLElement {
   log.debug("drawing a shell spool", {
@@ -251,7 +251,6 @@ export function drawFeedShellSpool(u: FeedShellSpool, path: string): HTMLElement
   const box = document.createElement("pre");
   box.className = "tool-output bash-output shell-tail";
   box.textContent = u.text;
-  followTail(box);
   wrap.append(box);
   return wrap;
 }
@@ -311,11 +310,6 @@ function drawSettledClock(
   el.className = "shell-clock";
   el.textContent = formatElapsed(endedMs - startedMs);
   return el;
-}
-
-/** Show the newest end of a scrolling box. */
-function followTail(box: HTMLElement): void {
-  box.scrollTop = box.scrollHeight;
 }
 
 /** The stop control on a live shell. */

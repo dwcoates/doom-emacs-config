@@ -437,6 +437,38 @@ describe("the usage corner's slider markup", () => {
     expect(shape(corner)).toEqual([{ className: "usage-slider", children: ["usage-stamp"] }]);
   });
 
+  it("marks an arriving corner, so its empty slot never slides out", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(0n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(true);
+  });
+
+  it("does not mark a settled corner as arriving", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(false);
+  });
+
+  it("reserves the same slot width arriving and settled, so the settle moves nothing", () => {
+    // Arrange -- the real stylesheet.
+    const teardown = installStylesheet();
+    const arrivingEl = drawFeedResponse(withUsage(0n), rowContext());
+    const settledEl = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.append(arrivingEl, settledEl);
+    try {
+      // Act
+      const widths = [arrivingEl, settledEl].map((el) =>
+        cascadedValue(el.querySelector(".usage-slider") as HTMLElement, "width"),
+      );
+      // Assert
+      expect([widths[0] === widths[1], widths[0] !== "" && widths[0] !== "auto"]).toEqual([true, true]);
+    } finally {
+      teardown();
+    }
+  });
+
   it("keeps the spacer's text and the visible token identical", () => {
     // Arrange / Act
     const el = drawFeedResponse(withUsage(1_000n), rowContext());
@@ -1849,5 +1881,181 @@ describe("the data-driven final-answer green", () => {
     const blue = stylesheet.indexOf(".bubble.assistant.final-response.response-selected");
     expect(green).toBeGreaterThanOrEqual(0);
     expect(blue).toBeGreaterThan(green);
+  });
+});
+
+/**
+ * A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user owns
+ * the scroll). A fresh bubble per push replaced the scroll box, throwing a
+ * reader scrolled inside an expanded response back to its top on every
+ * fragment. jsdom lays nothing out, so the invariants are asserted on the DOM:
+ * the scroll box is the same element, its `scrollTop` (a plain number under
+ * jsdom) is untouched, and unchanged prose nodes keep their identity.
+ */
+describe("a re-push updates the bubble in place", () => {
+  /** What a re-push may carry besides its prose. */
+  interface Extra {
+    usage?: { text: string; atMs?: bigint };
+    notice?: { heading: string };
+  }
+
+  /** An arriving response carrying MARKDOWN. */
+  function arriving(markdown: string, extra: Extra = {}) {
+    return response({ ...extra, result: { case: "update", value: { prose: { markdown } } } });
+  }
+
+  /** A settled response carrying MARKDOWN. */
+  function settledAs(markdown: string, extra: Extra = {}) {
+    return response({ ...extra, result: { case: "success", value: { prose: { markdown } } } });
+  }
+
+  /** Draw FIRST, mount it, then draw NEXT over it as feed-view would. */
+  function redraw(first: FeedResponse, next: FeedResponse): { before: HTMLElement; after: HTMLElement } {
+    const before = drawFeedResponse(first, rowContext());
+    mount(before);
+    vi.advanceTimersByTime(2000);
+    const after = drawFeedResponse(next, rowContext(before));
+    return { before, after };
+  }
+
+  it("returns the previous bubble itself", () => {
+    // Arrange + Act
+    const { before, after } = redraw(arriving("hello"), arriving("hello world"));
+    // Assert
+    expect(after).toBe(before);
+  });
+
+  it("keeps the scroll box, so its position survives a streaming push", () => {
+    // Arrange -- the reader scrolled 120px inside the expanded bubble.
+    const before = drawFeedResponse(arriving("hello"), rowContext());
+    mount(before);
+    vi.advanceTimersByTime(2000);
+    const box = before.querySelector<HTMLElement>(".bubble-scroll");
+    if (box === null) throw new Error("the bubble drew no scroll box");
+    box.scrollTop = 120;
+    // Act
+    const after = drawFeedResponse(arriving("hello world"), rowContext(before));
+    // Assert
+    expect([after.querySelector(".bubble-scroll") === box, box.scrollTop]).toEqual([true, 120]);
+  });
+
+  it("keeps the scroll box when the response settles", () => {
+    // Arrange + Act
+    const { before, after } = redraw(arriving("hello"), settledAs("hello"));
+    // Assert
+    expect(after.querySelector(".bubble-scroll")).toBe(before.querySelector(".bubble-scroll"));
+  });
+
+  it("keeps an unchanged paragraph's node when the prose grows", () => {
+    // Arrange
+    const before = drawFeedResponse(settledAs("first paragraph"), rowContext());
+    mount(before);
+    const paragraph = before.querySelector(".bubble-body p");
+    // Act
+    drawFeedResponse(settledAs("first paragraph\n\nsecond paragraph"), rowContext(before));
+    // Assert
+    expect(before.querySelector(".bubble-body p")).toBe(paragraph);
+  });
+
+  it("stops the previous push's type-out painting over the update", () => {
+    // Arrange -- a long arrival still typing when the row settles to less.
+    const before = drawFeedResponse(arriving("x".repeat(5000)), rowContext());
+    mount(before);
+    vi.advanceTimersByTime(50);
+    // Act
+    drawFeedResponse(settledAs("done"), rowContext(before));
+    vi.advanceTimersByTime(5000);
+    // Assert
+    expect(before.querySelector(".bubble-body")?.textContent?.trim()).toBe("done");
+  });
+
+  it("keeps the controller's blue selection mark", () => {
+    // Arrange
+    const before = drawFeedResponse(arriving("hello"), rowContext());
+    mount(before);
+    before.classList.add("response-selected");
+    // Act
+    drawFeedResponse(arriving("hello world"), rowContext(before));
+    // Assert
+    expect(before.classList.contains("response-selected")).toBe(true);
+  });
+
+  it("keeps the usage corner when its figure did not change", () => {
+    // Arrange
+    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k" } }), rowContext());
+    mount(before);
+    const corner = before.querySelector(".usage-corner");
+    // Act
+    drawFeedResponse(arriving("hello world", { usage: { text: "1k" } }), rowContext(before));
+    // Assert
+    expect(before.querySelector(".usage-corner")).toBe(corner);
+  });
+
+  it("replaces the usage corner when its figure changed", () => {
+    // Arrange
+    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k" } }), rowContext());
+    mount(before);
+    // Act
+    drawFeedResponse(arriving("hello world", { usage: { text: "2k" } }), rowContext(before));
+    // Assert
+    expect(before.querySelectorAll(".usage-stamp")[0]?.textContent).toBe("2k");
+  });
+
+  it("stops the clock of a corner it replaced", () => {
+    // Arrange -- a settled corner ticks its "ago".
+    const before = drawFeedResponse(settledAs("done", { usage: { text: "1k", atMs: 1_000n } }), rowContext());
+    mount(before);
+    const corner = before.querySelector(".usage-corner");
+    // Act
+    drawFeedResponse(settledAs("done", { usage: { text: "2k", atMs: 1_000n } }), rowContext(before));
+    // Assert
+    expect(corner?.querySelector(`[${TICKING_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it("draws one cut-short marker however often the broken state is pushed", () => {
+    // Arrange
+    const broken = response({ result: { case: "error", value: { prose: { markdown: "half" } } } });
+    // Act
+    const { after } = redraw(broken, broken);
+    // Assert
+    expect(after.querySelectorAll(".response-cut-short-marker")).toHaveLength(1);
+  });
+
+  it("drops the notice heading when a re-push carries none", () => {
+    // Arrange + Act
+    const { after } = redraw(settledAs("hi", { notice: { heading: "interrupted" } }), settledAs("hi"));
+    // Assert
+    expect([after.querySelector(".response-notice-heading"), after.hasAttribute("data-notice")]).toEqual([
+      null,
+      false,
+    ]);
+  });
+
+  it("leaves the bubble untouched when a re-push is malformed", () => {
+    // Arrange
+    const before = drawFeedResponse(settledAs("hello"), rowContext());
+    mount(before);
+    const malformed = response({ result: { case: "success", value: {} } });
+    // Act
+    let refused: unknown = null;
+    try {
+      drawFeedResponse(malformed, rowContext(before));
+    } catch (err) {
+      refused = err;
+    }
+    // Assert -- refused, and the bubble on screen is the one drawn before.
+    expect([refused instanceof MalformedView, before.querySelector(".bubble-body")?.textContent?.trim()]).toEqual([
+      true,
+      "hello",
+    ]);
+  });
+
+  it("draws a fresh bubble when the previous body is not a response bubble", () => {
+    // Arrange -- a row whose arm changed hands over some other card's element.
+    const previous = document.createElement("div");
+    // Act
+    const after = drawFeedResponse(settledAs("hi"), rowContext(previous));
+    // Assert
+    expect(after).not.toBe(previous);
   });
 });

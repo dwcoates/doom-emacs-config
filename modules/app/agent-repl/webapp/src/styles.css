@@ -2389,10 +2389,15 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    fold. `pointer-events: none` keeps a click on either one falling through to
    click-to-expand. A tool card's TITLE fold (above) wears the same fade and
    chevron from the same rules, fading into its card's `--title-fold-bg`; an
-   output section still never does. */
-.bubble.assistant > .bubble-scroll.has-more,
-.bubble.user > .bubble-scroll.has-more,
-.title-fold.has-more {
+   output section still never does.
+   THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
+   scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
+   (`position: relative` on the box itself, not on `.has-more`), and the fade
+   and chevron are out of flow, so the measurer toggling the class moves
+   nothing inside or around the box. */
+.bubble.assistant > .bubble-scroll,
+.bubble.user > .bubble-scroll,
+.title-fold {
   position: relative;
 }
 /* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
@@ -4377,24 +4382,24 @@ bubble-body.bubble-body { display: block; }
 /* THE COST CORNER: the token figure, and — once the response has settled —
    the relative duration it reveals on hover. Collapsed, only the token shows,
    at a fixed inset from the bubble's top and right edges whatever its digit
-   count. Revealed, the token slides left by exactly the duration's width (plus
-   its gap), so a shorter duration means a shorter slide.
+   count. Revealed, the token slides left by the duration's fixed-width slot
+   (plus its gap), and the duration reads beside it.
 
-   THE SLIDE EQUALS THE DURATION'S WIDTH BY CONSTRUCTION, never by measuring
-   or by a guessed length. The corner holds two in-flow pieces:
-     1. `::before`, an invisible copy of the token text (`data-tokens`), which
-        reserves the token's width;
-     2. `.usage-slider`, whose ONLY in-flow content is `.usage-ago` (the gap is
-        that element's `margin-left`), so the slider's own width is exactly
-        gap + duration.
+   THE SLIDE IS THE DURATION SLOT'S WIDTH, and every width here is FIXED
+   (owner rule, 2026-09-23: the user owns the scroll), so no figure, tick or
+   settle moves the float. The corner holds two in-flow pieces:
+     1. `::before`, an invisible copy of the token text (`data-tokens`) in a
+        fixed-width slot;
+     2. `.usage-slider`, the fixed-width duration slot, whose ONLY in-flow
+        content is `.usage-ago` (the gap is that element's `margin-left`).
    The visible `.usage-stamp` is taken out of flow and pinned to the slider's
    left edge (`right: 100%`). Collapsed, the slider is `translateX(100%)` — a
    percentage of its OWN width — so the duration sits just past the corner's
    right edge (clipped by `overflow: hidden`) and the token's right edge lands
    exactly on that edge. Revealed, the slider is `translateX(0)`: the duration
    fills its slot and the token sits exactly over the spacer. A corner with no
-   duration yet (still arriving) has a zero-width slider, so the token sits at
-   the right edge and nothing moves on hover.
+   duration yet (still arriving, `data-arriving`) keeps its slot reserved and
+   collapsed, so the token sits at the right edge and nothing moves on hover.
 
    FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling,
    2026-09-15). The corner floats top-right INSIDE the scroll box, before the
@@ -4435,22 +4440,33 @@ bubble-body.bubble-body { display: block; }
   --usage-ago-font-size: 0.85em;
 }
 /* The token's width reservation: the token text again, invisible, in the
-   token's own size and figures so its width is the visible token's width. */
+   token's own size and figures. ITS WIDTH IS FIXED (owner rule, 2026-09-23:
+   the user owns the scroll): an arriving response restates its figure as it
+   grows, and a spacer as wide as the text reflowed the first prose line --
+   and every line under it -- whenever the figure gained a character. 6ch
+   holds the widest figure the one token formatter writes ("999.9k"). */
 .usage-corner::before {
   content: attr(data-tokens);
   visibility: hidden;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-size: var(--usage-ago-font-size);
+  width: 6ch;
 }
-/* The element the reveal moves. Its width is its in-flow content — the
-   duration and its gap, nothing else — so `translateX(100%)` is exactly the
-   duration's width. It is the token's containing block (`position: relative`)
-   and stretches to the row's height so the token's `top: 0` lines it up with
-   the spacer. */
+/* The element the reveal moves: the duration's fixed-width slot, so
+   `translateX(100%)` is exactly the slot's width. It is the token's containing
+   block (`position: relative`) and stretches to the row's height so the
+   token's `top: 0` lines it up with the spacer. */
 .usage-slider {
   position: relative;
   align-self: stretch;
+  /* THE DURATION SLOT IS A FIXED WIDTH, arriving or settled (owner rule,
+     2026-09-23: the user owns the scroll). The live clock repaints the
+     duration every second, and a slot as wide as its text moved the float --
+     and reflowed the first prose line under a reader -- on every tick that
+     changed a digit's width or the label's length. The gap plus 11ch of the
+     duration's own 0.85em font holds its longest label ("364d 23h ago"). */
+  width: calc(0.35rem + 11ch * 0.85);
   transform: translateX(100%);
   transition: transform 0.5s ease;
 }
@@ -4474,6 +4490,7 @@ bubble-body.bubble-body { display: block; }
 .usage-ago {
   color: var(--muted);
   font-size: var(--usage-ago-font-size);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   margin-left: 0.35rem;
   opacity: 0;
@@ -4498,6 +4515,12 @@ bubble-body.bubble-body { display: block; }
 .usage-corner:focus-within .usage-ago,
 .usage-corner.usage-corner--revealed .usage-ago {
   opacity: 1;
+}
+/* AN ARRIVING CORNER NEVER SLIDES: its duration slot is reserved but empty
+   until the response settles, so revealing it would move the token over
+   nothing. (0,5,0) outranks every reveal trigger above. */
+.bubble.assistant .usage-corner[data-arriving] .usage-slider {
+  transform: translateX(100%);
 }
 /* Reduced motion: the duration appears and the token moves with no slide or
    fade. */
@@ -5660,9 +5683,18 @@ bubble-body.bubble-body { display: block; }
   font-family: ui-monospace, monospace;
   overflow-wrap: anywhere;
 }
+/* THE SHELL HEAD'S TWO CLOCKS HOLD A FIXED FOOTPRINT (owner rule, 2026-09-23:
+   the user owns the scroll). The head wraps (`flex-wrap`), and a clock label
+   repainted every second that grew by a unit ("59s" -> "1m 0s") could push
+   its neighbor onto a new line and move everything under the reader. Each is
+   one unbreakable, tabular run with room reserved for its longest usual
+   label ("59m 59s"; "quiet for 59m 59s"). */
 .shell-clock {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
+  display: inline-block;
+  white-space: nowrap;
+  min-width: 7ch;
 }
 /* "quiet for 12s": the client's clock over the daemon's last observed append.
    Muted and italic like every other aside, NOT an alarm hue — quietness is a
@@ -5670,6 +5702,10 @@ bubble-body.bubble-body { display: block; }
 .shell-quiet {
   color: var(--muted);
   font-style: italic;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  white-space: nowrap;
+  min-width: 17ch;
 }
 .shell-spool {
   margin-top: 0.3rem;

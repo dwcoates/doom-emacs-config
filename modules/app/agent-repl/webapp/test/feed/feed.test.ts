@@ -38,9 +38,6 @@ import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
-  // jsdom implements no scrolling at all, and `revealNode` is the browser's
-  // own affordance rather than anything this module computes.
-  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -293,7 +290,7 @@ describe("mountFeed: the bubble kinds", () => {
   });
 });
 
-describe("mountFeed: revealRow", () => {
+describe("mountFeed: selectDetachedWork", () => {
   /** A page whose rows are ROWS, for the root feed only. */
   function rootPage(rows: FeedRow[], crumbs: ReturnType<typeof crumb>[] = []) {
     return harness({
@@ -311,31 +308,80 @@ describe("mountFeed: revealRow", () => {
   it("finds a row already drawn on the root feed", async () => {
     const { feed } = mount(rootPage([responseRow("r1")]));
     await settle();
-    expect(await feed.revealRow(feedId("r1"))).toBe(true);
+    expect(await feed.selectDetachedWork(feedId("r1"))).toBe(true);
   });
 
   it("marks the revealed row, so the reader's eye lands on it", async () => {
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
-    await feed.revealRow(feedId("r1"));
+    await feed.selectDetachedWork(feedId("r1"));
     expect(host.querySelector('[data-feed-row="r1"]')?.classList.contains(REVEAL_CLASS)).toBe(true);
   });
 
   it("clears the mark once the eye has had time to land", async () => {
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
-    await feed.revealRow(feedId("r1"));
+    await feed.selectDetachedWork(feedId("r1"));
     await vi.advanceTimersByTimeAsync(3000);
     expect(host.querySelector('[data-feed-row="r1"]')?.classList.contains(REVEAL_CLASS)).toBe(
       false,
     );
   });
 
+  /** The feed's scroll box, with rects scripted since jsdom lays out nothing. */
+  function scripted(scroll: HTMLElement, host: HTMLElement, rowId: string, rowTop: number): void {
+    const rect = (top: number, height: number) => (): DOMRect =>
+      ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+    let top = 100;
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => 2000 },
+      clientHeight: { get: () => 300 },
+      scrollTop: { get: () => top, set: (next: number) => { top = next; } },
+    });
+    scroll.getBoundingClientRect = rect(0, 300);
+    const row = host.querySelector<HTMLElement>(`[data-feed-row="${rowId}"]`);
+    if (row === null) throw new Error(`row ${rowId} is not drawn`);
+    row.getBoundingClientRect = rect(rowTop, 100);
+  }
+
+  it("scrolls the feed to the selected detached-work card", async () => {
+    // Arrange -- the card hangs 500..600 under a 300px viewport at 100.
+    const { feed, host } = mount(rootPage([responseRow("r1")]));
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scripted(scroll, host, "r1", 500);
+    // Act
+    await feed.selectDetachedWork(feedId("r1"));
+    // Assert -- moved by the card's 300px overhang: 100 + 300.
+    expect(scroll.scrollTop).toBe(400);
+  });
+
+  it("does not scroll the feed for a breadcrumb's reveal", async () => {
+    // Arrange -- REMOVED TRIGGER: a breadcrumb click used to scroll the feed to
+    // its target. The root page here carries a crumb naming its own row.
+    const h = harness({
+      openFeed: (req) =>
+        openSuccess(page([responseRow("r1")], { crumbs: [crumb("r1", "here")] }), tokenFor(req)),
+    });
+    const { host } = mount(h);
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scripted(scroll, host, "r1", 500);
+    // Act
+    host.querySelector<HTMLElement>(".feed-breadcrumb")?.click();
+    await settle();
+    // Assert -- the row is marked, and the feed is where the reader left it.
+    expect([
+      host.querySelector('[data-feed-row="r1"]')?.classList.contains(REVEAL_CLASS),
+      scroll.scrollTop,
+    ]).toEqual([true, 100]);
+  });
+
   it("asks the daemon where an undrawn row lives", async () => {
     const h = rootPage([]);
     const { feed } = mount(h);
     await settle();
-    await feed.revealRow(feedId("deep"));
+    await feed.selectDetachedWork(feedId("deep"));
     await settle();
     expect(h.calls.openFeed.map((req) => req.feed?.value)).toContain("deep");
   });
@@ -354,7 +400,7 @@ describe("mountFeed: revealRow", () => {
     });
     const { feed } = mount(h);
     await settle();
-    const revealed = await feed.revealRow(feedId("deep"));
+    const revealed = await feed.selectDetachedWork(feedId("deep"));
     await settle();
     expect(revealed).toBe(true);
   });
@@ -368,7 +414,7 @@ describe("mountFeed: revealRow", () => {
     });
     const { feed } = mount(h);
     await settle();
-    expect(await feed.revealRow(feedId("shell"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("shell"))).toBe(false);
   });
 
   it("answers false when a breadcrumb names a bubble this feed does not hold", async () => {
@@ -380,7 +426,7 @@ describe("mountFeed: revealRow", () => {
     });
     const { feed } = mount(h);
     await settle();
-    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
   });
 
   it("answers false when the walk finished without the row appearing", async () => {
@@ -392,7 +438,7 @@ describe("mountFeed: revealRow", () => {
     });
     const { feed } = mount(h);
     await settle();
-    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
   });
 });
 
@@ -603,7 +649,7 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
   });
 });
 
-describe("mountFeed: revealRow's harder answers", () => {
+describe("mountFeed: selectDetachedWork's harder answers", () => {
   it("answers false when the probe never reached the daemon", async () => {
     // Arrange: the root open succeeds, the reveal probe throws.
     const h = harness({
@@ -615,7 +661,7 @@ describe("mountFeed: revealRow's harder answers", () => {
     const { feed } = mount(h);
     await settle();
     // Act / Assert
-    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
   });
 
   it("answers false when the probe's own page could not be served", async () => {
@@ -643,7 +689,7 @@ describe("mountFeed: revealRow's harder answers", () => {
     const { feed } = mount(h);
     await settle();
     // Act / Assert
-    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
   });
 
   it("answers false when a breadcrumb names a row that is no bubble", async () => {
@@ -662,7 +708,7 @@ describe("mountFeed: revealRow's harder answers", () => {
     const { feed } = mount(h);
     await settle();
     // Act / Assert
-    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
   });
 
   it("does not search inside a bubble the reader has left closed", async () => {
@@ -677,7 +723,7 @@ describe("mountFeed: revealRow's harder answers", () => {
     const { feed, h: used } = mount(h);
     await settle();
     // Act
-    await feed.revealRow(feedId("deep"));
+    await feed.selectDetachedWork(feedId("deep"));
     await settle();
     // Assert
     expect(used.calls.openFeed.map((req) => req.feed?.value)).toEqual([undefined, "deep"]);
@@ -743,7 +789,7 @@ describe("mountFeed: a walk whose container will not open", () => {
     const { feed } = mount(h);
     await settle();
     // Act / Assert
-    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+    expect(await feed.selectDetachedWork(feedId("deep"))).toBe(false);
   });
 });
 
@@ -805,7 +851,7 @@ describe("mountFeed and the client's link verdict", () => {
     });
     const { feed } = mount(h);
     await settle();
-    await feed.revealRow(feedId("deep"));
+    await feed.selectDetachedWork(feedId("deep"));
     expect(standingClientFailure()?.activity).toBe(
       "OpenFeed (the feed's reveal probe) could not reach the daemon",
     );
@@ -820,7 +866,7 @@ describe("mountFeed and the client's link verdict", () => {
     });
     const { feed } = mount(h);
     await settle();
-    await feed.revealRow(feedId("shell"));
+    await feed.selectDetachedWork(feedId("shell"));
     expect(standingClientFailure()).toEqual({
       kind: "feed_not_tailing",
       substatus: "feed not tailing",

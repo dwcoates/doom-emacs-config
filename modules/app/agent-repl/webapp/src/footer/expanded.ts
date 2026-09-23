@@ -85,7 +85,7 @@ export const EXPANDED_FOOTER_MAX_ROWS = 8;
 /** What the panels need: the context to call and click through, and the jump. */
 export interface ExpandedDeps {
   ctx: AppContext;
-  readonly revealRow: (id: FeedId) => Promise<boolean>;
+  readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
   /**
    * The activity line the strip is drawing right now, when there is one.
    *
@@ -719,14 +719,14 @@ function jumpRow(panelName: FooterPanel, target: FeedId, deps: ExpandedDeps): HT
 /**
  * Reveal the row's bubble, saying so at the row when it could not be reached.
  *
- * `revealRow` answers `false` for a target it could not get to — a jump into a
+ * `selectDetachedWork` answers `false` for a target it could not get to — a jump into a
  * collapsed shell bubble degrades to scroll-if-rendered — and that answer is
  * surfaced at the row rather than swallowed, because the user just clicked and
  * nothing else on the page would tell them the click went nowhere.
  */
 async function jump(row: HTMLElement, target: FeedId, deps: ExpandedDeps): Promise<void> {
   row.removeAttribute("data-unreachable");
-  const reached = await deps.revealRow(target);
+  const reached = await deps.selectDetachedWork(target);
   if (reached) return;
   row.setAttribute("data-unreachable", "true");
   const note = document.createElement("span");

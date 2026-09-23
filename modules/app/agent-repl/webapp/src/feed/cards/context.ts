@@ -29,14 +29,17 @@ export interface RowContext {
   /** The whole row, for renderers that need its identity or its parent. */
   row: FeedRow;
   /**
-   * Scroll a row into view, opening what must open to get there. Answers
-   * whether the row could be reached (a collapsed shell bubble degrades to
-   * scroll-if-rendered, so `false` is a real answer, not an error).
+   * Find a row and mark it, opening what must open to get there; it NEVER
+   * scrolls (the user owns the scroll, scroll.ts). Answers whether the row
+   * could be reached (a collapsed shell bubble cannot, so `false` is a real
+   * answer, not an error).
    */
   readonly revealRow: (id: FeedId) => Promise<boolean>;
   /**
    * The body element the PREVIOUS draw of this same row returned, when there
-   * was one. Absent on a row's first draw.
+   * was one. Absent on a row's first draw. A renderer MAY update it in place
+   * and return it, and the core then replaces nothing: that is how a bubble
+   * whose scroll box the reader is inside keeps its position across a push.
    */
   previous?: HTMLElement;
 }

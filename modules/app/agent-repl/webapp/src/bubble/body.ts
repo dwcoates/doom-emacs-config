@@ -15,7 +15,8 @@
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
-import { onDiscard } from "../feed/ticking.js";
+import { placeChildren } from "../dom.js";
+import { onDiscard, stopTicking } from "../feed/ticking.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
 const logTreeIssue: TreeIssue = (message, context) => {
@@ -256,10 +257,60 @@ export function markdownSlot(className: string, markdown: string): HTMLElement {
   return slot;
 }
 
-/** Paint BODY with CONTENT: its nodes, every markdown slot among them drawn. */
-export function paintBody(body: BubbleBody, content: readonly Node[]): void {
-  body.replaceChildren(...content);
-  painterOf(body).paint();
+/**
+ * Paint BODY with CONTENT: its nodes, every markdown slot among them drawn.
+ * Answers the nodes the body now holds, position for position with CONTENT.
+ *
+ * A REPAINT IS IN PLACE (owner rule, 2026-09-23: the user owns the scroll). On
+ * a body that already holds content, a top-level markdown slot of the same
+ * class keeps its element and takes the new source, which the painter then
+ * RECONCILES node by node, so prose that did not change keeps its nodes. Every
+ * other node is the new content's own — a kind's badges and links carry
+ * listeners bound to the push that drew them, so a stale one is never kept —
+ * and nothing already in place is moved (`placeChildren`). Every paint takes
+ * the body's next generation (`paintGeneration`).
+ */
+export function paintBody(body: BubbleBody, content: readonly ChildNode[]): readonly ChildNode[] {
+  const painter = painterOf(body);
+  const live = [...body.childNodes];
+  const next = content.map((want, i) => {
+    const have = live[i];
+    if (isSlot(have) && isSlot(want) && have.className === want.className) {
+      slotSources.set(have, sourceOf(want));
+      return have;
+    }
+    return want;
+  });
+  const kept = new Set<Node>(next);
+  for (const have of live) {
+    if (!kept.has(have) && have instanceof Element) stopTicking(have);
+  }
+  placeChildren(body, next);
+  generations.set(body, paintGeneration(body) + 1);
+  painter.paint();
+  return next;
+}
+
+/** Every body's paint generation, taken by each `paintBody`. */
+const generations = new WeakMap<Element, number>();
+
+/**
+ * BODY's current paint generation. A loop that repaints a body over time (the
+ * response's type-out) reads it when it starts and stops the moment it moved:
+ * a later `paintBody` — an in-place update — owns the body from then on.
+ */
+export function paintGeneration(body: BubbleBody): number {
+  return generations.get(body) ?? 0;
+}
+
+/** Whether NODE is a markdown slot this pipeline made. */
+function isSlot(node: ChildNode | undefined): node is HTMLElement {
+  return node instanceof HTMLElement && slotSources.has(node);
+}
+
+/** Whether EL is a bubble body this pipeline made (and so can repaint). */
+export function isBubbleBody(el: Element | null | undefined): el is BubbleBody {
+  return el !== null && el !== undefined && painters.has(el);
 }
 
 /**
