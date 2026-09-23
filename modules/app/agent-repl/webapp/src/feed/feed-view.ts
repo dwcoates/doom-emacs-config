@@ -880,7 +880,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       case "agentPrompt":
         return drawFeedAgentPrompt(arm.value, rc.previous);
       case "peerMessage":
-        return drawFeedPeerMessage(arm.value);
+        return drawFeedPeerMessage(arm.value, rc.previous);
       case "turnEnded":
         return drawFeedTurnEnded(arm.value, rc);
       case "separation":

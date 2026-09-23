@@ -552,7 +552,12 @@ describe("the 'more below' affordance", () => {
       const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
       if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
       const positioned = /position:\s*absolute/.test(rule.declarations);
-      const decorative = /^\s*background:[^;]*;?\s*$/.test(rule.declarations);
+      // A rule that only repaints or re-places a pseudo-element the base rule
+      // already took out of flow (the zero-line cap's chevron at the strip's end).
+      const decorative = rule.declarations
+        .split(";")
+        .map((decl) => decl.split(":")[0]?.trim() ?? "")
+        .every((prop) => prop === "" || ["background", "left", "right", "transform"].includes(prop));
       return !positioned && !decorative;
     });
 
@@ -1635,16 +1640,19 @@ describe("regression: the response/prompt bubble collapse model", () => {
     expect(clip?.declarations).toMatch(/overflow-y:\s*hidden\s*;/);
   });
 
-  it("keeps hide-while-collapsed to the PEER bubble alone", () => {
-    // Arrange / Act — the only bubble whose body is hidden (not capped) while
-    // collapsed is the peer bubble, unchanged by this work.
+  it("gives the peer message its header-only face through a zero-line cap, not a hider", () => {
+    // Arrange / Act — the peer's own hide-while-collapsed rule is gone; its
+    // collapsed face is the one cap mechanism's zero (peer-message.ts).
     const peer = declarationsOf(".bubble.peer > .bubble-scroll:not(.expanded)");
 
     // Assert
-    expect(peer).toMatch(/display:\s*none/);
+    expect([peer, declarationsOf('.bubble[data-cap-lines="0"]')]).toEqual([
+      undefined,
+      " --bubble-cap-lines: 0; ",
+    ]);
   });
 
-  it("never hides a response or prompt bubble's body while collapsed", () => {
+  it("never hides any bubble's body while collapsed", () => {
     // Arrange / Act — every rule that removes an element from layout.
     const hiders = rulesOf(stylesheet).filter((rule) => /display:\s*none/.test(rule.declarations));
 
@@ -1653,8 +1661,7 @@ describe("regression: the response/prompt bubble collapse model", () => {
     // cards' hidden-section one.
     for (const rule of hiders) {
       for (const sel of rule.selectors) {
-        expect(/\.bubble\.assistant\s*>\s*\.bubble-scroll/.test(sel)).toBe(false);
-        expect(/\.bubble\.user\s*>\s*\.bubble-scroll/.test(sel)).toBe(false);
+        expect(/^\.bubble\S*\s*>\s*\.bubble-scroll(?!\S*::)/.test(sel)).toBe(false);
       }
     }
   });

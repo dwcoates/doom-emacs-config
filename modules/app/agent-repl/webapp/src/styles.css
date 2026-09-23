@@ -1550,58 +1550,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   from { background-position-x: 200%; }
   to { background-position-x: -100%; }
 }
-/* THE PEER BUBBLE — a message another Claude session sent in (an inter-session
-   peer message or a subagent hand-back). Right-aligned like a prompt (the same
-   side of the feed), but PURPLE, not the blue --user fill: a low-priority,
-   non-intrusive aside, drawn with the --assistant purple so it reads as
-   "another agent" rather than "you". It is deliberately NOT `.bubble.user`, so
-   none of the blue fill, the working wave or the prompt cap reaches it. */
-.bubble.peer {
-  background: var(--assistant);
-  width: fit-content;
-  max-width: 77%;
-  margin-left: auto;
-  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
-}
-/* The always-visible head: the sender label and the chevron, the whole of a
-   COLLAPSED peer bubble. A borderless button that fills the bubble's width so a
-   click anywhere on the collapsed bubble expands it. */
-.bubble.peer > .peer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  background: none;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.bubble.peer .peer-label {
+/* THE PEER MESSAGE'S HEADER STRIP: the sender label, the whole of its
+   collapsed face (its cap is zero lines, src/feed/rows/peer-message.ts). One
+   line, ellipsized, clear of the has-more chevron that sits at its right. */
+.peer-label {
   font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.85;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 1.5em;
 }
-/* The chevron names the next move: pointing right (collapsed) it says "opens",
-   rotated down (expanded) it says "closes". Pure CSS content, so no glyph asset. */
-.bubble.peer .peer-chevron::before { content: "\203A"; display: inline-block; transition: transform 0.12s ease; }
-.bubble.peer.peer-expanded .peer-chevron::before { transform: rotate(90deg); }
-/* COLLAPSED = NO BODY (owner spec): the body's scroll box is hidden entirely
-   while collapsed — the peer bubble shows only its head. Expanding it adds
-   `.expanded` to the scroll box, which the shared `.bubble > .bubble-scroll.expanded`
-   rule then caps at 50vh and turns scrollable. */
-.bubble.peer > .bubble-scroll:not(.expanded) { display: none; }
-.bubble.peer > .bubble-scroll { margin-top: 0.4rem; }
-.bubble.peer pre.md-code { background: color-mix(in srgb, var(--fg) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; }
-.bubble.peer .bubble-body > :first-child { margin-top: 0; }
-.bubble.peer .bubble-body > :last-child { margin-bottom: 0; }
 /* The bubble's top-right corner: a flex column stacking a final response's
    stats (duration, input tokens) above its timestamp. Smaller and quieter
    than the body text, lifted clear of its first line. Negative top/right
@@ -2378,6 +2338,17 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   font-size: 1.05em;
   line-height: 1;
   color: var(--muted);
+}
+/* A ZERO-LINE CAP shows its header strip and nothing below it, so there is no
+   last line to fade: the chevron alone says there is more, at the strip's
+   right end where the box (zero tall) meets it. */
+.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::after {
+  background: none;
+}
+.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::before {
+  left: auto;
+  right: calc(0.9rem - var(--bubble-scroll-gap));
+  transform: none;
 }
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
