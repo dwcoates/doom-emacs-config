@@ -99,7 +99,8 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 }
 
 // MarkViewed records that the user has SEEN the workspace, which draws its
-// roster row PARTIAL (the name recedes; the status dot keeps its colour).
+// roster row PARTIAL (the name recedes; the status dot keeps its colour) —
+// only while the row is DONE, which the roster decides (`sidebar.SetViewed`).
 //
 // It does ONE thing, and the things it deliberately does NOT do are the point:
 // it writes no durable record, because the display mode is a view fact that
@@ -112,7 +113,7 @@ func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
-	log.Debug(opMarkViewed, "the user has seen the workspace; its row goes PARTIAL", nil)
+	log.Debug(opMarkViewed, "the user has seen the workspace; its row goes PARTIAL if it is done", nil)
 	v.deps.Sidebar.SetViewed(ws)
 	return nil
 }

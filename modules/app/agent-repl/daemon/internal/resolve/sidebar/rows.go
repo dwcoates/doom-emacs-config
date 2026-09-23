@@ -27,9 +27,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
 
 	armName := statusArm(s, rec, session, rowLog)
-	// THE STATUS CHANGE IS THE RESET. Recording the arm here is what clears a
-	// standing viewed marker, so the row's display mode is decided in the same
-	// breath as its status and cannot lag it by a push.
+	// THE STATUS CHANGE IS THE RESET, AND DONE IS THE ONLY ARM THAT HOLDS THE
+	// MARKER. Recording the arm here is what clears a standing viewed marker,
+	// so the row's display mode is decided in the same breath as its status
+	// and cannot lag it by a push.
+	wasViewed := s.viewed
 	armChanged := s.noteArm(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
@@ -44,6 +46,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if armChanged {
 		rowLog.Debug("daemon.sidebar.row_viewed_cleared",
 			"the row's status changed, so it is drawn FULL again", dlog.Context{
+				"status": armName,
+			})
+	} else if wasViewed && !s.viewed {
+		rowLog.Debug("daemon.sidebar.row_viewed_refused",
+			"the row is not done, so the viewed report was dropped and the row stays FULL", dlog.Context{
 				"status": armName,
 			})
 	}

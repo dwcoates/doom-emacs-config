@@ -583,7 +583,8 @@ func (s *server) SelectWorkspace(
 }
 
 // MarkWorkspaceViewed records that the user has SEEN this workspace, which
-// draws its roster row PARTIAL until the row's status changes. It is
+// draws its roster row PARTIAL until the row's status changes — if the row is
+// DONE; on any other status the roster drops the report. It is
 // idempotent, and it is the editor's verb: dwell is an editor fact.
 func (s *server) MarkWorkspaceViewed(
 	ctx context.Context,
