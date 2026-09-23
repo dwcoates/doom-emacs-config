@@ -1103,6 +1103,35 @@ t_dirty_tree_always_rebuilds
 t_change_outside_the_pathspec_leaves_the_system_fresh
 t_build_records_the_source_tree_stamp
 
+# --- -buildvcs=false on every go build ---------------------------------------
+# The deploy decides staleness by each binary's CONTENT HASH, and Go's default
+# VCS stamping embeds the commit and dirty flag, so without the flag every
+# commit would change every binary and bounce every service for nothing.
+
+# go_builds_all_pass_buildvcs_false LOG — true when LOG records at least one go
+# build and every one of them carried -buildvcs=false.
+go_builds_all_pass_buildvcs_false() {
+    local log="$1"
+    grep -q '^go build' "$log" || return 1
+    ! grep '^go build' "$log" | grep -qv -- ' -buildvcs=false '
+}
+
+t_in_place_go_builds_pass_buildvcs_false() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"
+    : > "$root/stub.log"
+    run_script "$root" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           go_builds_all_pass_buildvcs_false "$root/stub.log"; then
+        pass "buildvcs: every in-place go build passes -buildvcs=false"
+    else
+        fail "buildvcs: every in-place go build passes -buildvcs=false" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+t_in_place_go_builds_pass_buildvcs_false
+
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]
