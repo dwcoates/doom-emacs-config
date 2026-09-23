@@ -336,6 +336,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       composerFactory: deps.composerFactory,
       head: bubbleHead,
       overscan: overscan ?? undefined,
+      scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     };
     if (unitCase(row) === "merge") {
       return mountBubble({
@@ -434,7 +435,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     );
     if (page.case !== "success") return false;
     const crumbs = requireMessage(page.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
-    const walked = await walk(crumbs);
+    const walked = await walk(crumbs, id);
     if (!walked) return false;
     const found = findAcrossOpenFeeds(root, id);
     if (found === null) {
@@ -448,10 +449,27 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     return true;
   }
 
-  /** Expand each container top-down, each awaiting its own open. */
-  async function walk(crumbs: readonly FeedBreadcrumb[]): Promise<boolean> {
+  /**
+   * Expand each container top-down, each awaiting its own open — and STOP the
+   * moment the row being revealed is on the page.
+   *
+   * ONLY WHAT SELECTING THE ROW REQUIRES IS OPENED. The probe answers the crumbs
+   * of the row's OWN feed, and for a bubble head (a subagent's, a shell's) the
+   * last crumb is that head itself: the row is already drawn once its container
+   * is open, so expanding it too would open a bubble the reader never asked
+   * for. Each crumb is therefore expanded only while the row is still not
+   * found.
+   */
+  async function walk(crumbs: readonly FeedBreadcrumb[], id: FeedId): Promise<boolean> {
     let controller: FeedController = root;
     for (const crumb of crumbs) {
+      if (findAcrossOpenFeeds(root, id) !== null) {
+        log.debug("the reveal target is drawn; the walk opens nothing further", {
+          operation: "feed.reveal-walk-stopped",
+          context: { row: id.value, crumb: crumb.target?.value ?? "unset" },
+        });
+        return true;
+      }
       const target = requireMessage(crumb.target, "FeedBreadcrumb.target");
       const bubble = bubbleOn(controller, target);
       if (bubble === null) {
