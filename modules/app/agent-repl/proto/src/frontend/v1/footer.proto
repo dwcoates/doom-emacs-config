@@ -66,6 +66,10 @@ message FooterView {
   // The expanded section's content, one panel per selectable strip element.
   // Drawn only while a strip element is selected; the selection picks which.
   FooterExpanded expanded = 2;
+  // WHICH EXPANDED PANEL THE DAEMON WANTS IN FRONT OF THE USER, when detached
+  // work has just started. Unset until the first such launch. See
+  // FooterExpandedFocus.
+  optional FooterExpandedFocus focus = 3;
 }
 
 // ==========================================================================
@@ -1170,6 +1174,48 @@ message FooterExpanded {
   // The scheduled jobs — the ⏱ chip's expansion.
   FooterExpandedCrons crons = 6;
 }
+
+// ---- The daemon's focus ----------------------------------------------------
+
+// The panel the expanded section is opened on when DETACHED WORK STARTS.
+//
+// THE DAEMON DECIDES IT, the webapp draws it (no business logic in the
+// webapp). Each time a unit of detached work starts — a subagent, a detached
+// shell, a monitor — the daemon picks the HIGHEST-PRIORITY kind that is live
+// right now, AGENTS then SHELLS then MONITORS, and publishes it here with a new
+// `generation`. So a subagent launched while a shell runs focuses agents; a
+// shell launched while no subagent is live focuses shells; a monitor launched
+// while neither is live focuses monitors; and a shell launched while a
+// subagent is live re-focuses agents.
+//
+// AN EDGE, NOT A LEVEL. A client applies a focus ONCE, when it sees a
+// `generation` it has not applied: it opens the expanded section (if closed)
+// and selects the named panel. Between focuses the user's own chip clicks
+// stand — collapsing the section or picking another panel is theirs until the
+// next launch. A client that attaches later applies the standing focus once,
+// as it would any unapplied generation.
+//
+// Nothing here closes the section: when the detached work ends, the panel's
+// chip goes unset exactly as before, and the existing rules for an emptied
+// panel apply.
+message FooterExpandedFocus {
+  // THE ARM IS THE PANEL.
+  oneof panel {
+    FooterFocusAgents agents = 1;
+    FooterFocusShells shells = 2;
+    FooterFocusMonitors monitors = 3;
+  }
+  // Strictly increasing per workspace, minted by the daemon at each launch
+  // that sets a focus. Starts at 1. A client compares for equality with the
+  // last generation it applied; it never does arithmetic on it.
+  uint64 generation = 4;
+}
+// The agents panel (the ⚙ chip's expansion) is the focus.
+message FooterFocusAgents {}
+// The shells panel (the $ chip's expansion) is the focus.
+message FooterFocusShells {}
+// The monitors panel (the 👁 chip's expansion) is the focus.
+message FooterFocusMonitors {}
 
 // ---- The scheduled-jobs panel ----------------------------------------------
 
