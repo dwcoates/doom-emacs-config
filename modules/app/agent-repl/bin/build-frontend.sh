@@ -184,6 +184,14 @@ STORE_TREE_STAMP="$CACHE_BIN/.shim-store.source-tree"
 SIDECAR_TREE_STAMP="$CACHE_BIN/.shim-claude-sidecar.source-tree"
 LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
 
+# Flags every `go build` here passes.
+#
+# -buildvcs=false: the deploy decides staleness by the CONTENT HASH of each
+# binary, and Go's default VCS stamping embeds the commit and the dirty flag
+# into the binary, so every commit would change every binary's hash and bounce
+# every service for nothing. Nothing in this repo reads the VCS build info.
+GO_BUILD_FLAGS=(-buildvcs=false)
+
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
 FORCE=0
@@ -526,7 +534,7 @@ build_daemon() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] daemon: building..."
     mkdir -p "$DAEMON_DIR/bin"
-    ( cd "$DAEMON_DIR" && go build -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
+    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"
@@ -563,7 +571,7 @@ build_service() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] $name: building..."
     mkdir -p "$CACHE_BIN"
-    ( cd "$dir" && go build -o "$artifact" . )
+    ( cd "$dir" && go build "${GO_BUILD_FLAGS[@]}" -o "$artifact" . )
     write_built_sha "$sha_stamp" "$ROOT"
     stamp_source_tree "$name" "$tree_stamp"
     echo "[build-frontend] $name: done"
