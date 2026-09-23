@@ -685,6 +685,39 @@ component (`shim-engine-keepalive-rewind`, cleared by the next rewind that
 lands) so the footer says what happened. The refusal never reaches the fold, so
 the feed shows the answer rather than "the run broke while executing".
 
+## The keep-alive turn scope: what the keep-alive produced, and who may see it
+
+A keep-alive turn is NEVER served to anyone: not its prompt, its reply, its
+thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
+`KeepaliveScope`).
+
+- **THE VENDOR ATTRIBUTES, NOT ARRIVAL ORDER.** The keep-alive send carries a
+  client `uuid` the shim mints; the vendor echoes it (`user_message_uuid` /
+  `user_message_uuids`) on the first reply frames and the `result` of the turn
+  that answers it. A vendor turn is the keep-alive's from its first frame
+  naming that uuid to its result. Paid for on 2026-09-23: the vendor ran a
+  background task's notification turn between the keep-alive's send and its
+  answer, that turn's `result` closed the keep-alive, and the keep-alive's `.`
+  arrived untagged and was drawn as a green final answer.
+- **ONE TAG, TAKEN ONCE.** `onSdkMessage` asks the scope once per message; the
+  answer is the fold context's `keepalive`, so every row the fold produces
+  carries it. The store writer lands a tagged row on `unserved_item.keepalive`
+  (recorded, never paged, never streamed); `serveSessionUpdates` never pushes
+  a tagged session fact. Only the keep-alive's own result closes it, and that
+  close pushes nothing (no context usage, title or account re-probe).
+- **THE DAEMON NEVER SEES ONE.** No verb names a keep-alive as the turn in
+  flight (`servedOpenTurn`): not `SessionStarted`, not `SessionLive`, not
+  `KillSession`, not `Hibernate`. The one keep-alive fact on the wire is the
+  ruled `turn_already_open.keepalive` refusal the daemon re-drives past.
+- **PERSISTED, NOT DROPPED.** The rows are kept (unserved) because the
+  keep-alive made a real, billed API call and the file plane writes the same
+  keys; dropping them would lose accounting and let the sidecar's copy be the
+  only one.
+- **WHAT IT DOES NOT CLAIM.** A vendor turn's preamble (`init`, a
+  `UserPromptSubmit` hook, a status line) carries no stamp and stays untagged.
+- **THE FILE PLANE is the marker, not the stamp**: the title digest and the
+  transcript listing skip a prompt that begins with the keep-alive marker.
+
 ## The hibernate contract: at most one compaction per idle period
 
 `Hibernate` is the daemon's pre-hibernation directive, and the shim's answer to
