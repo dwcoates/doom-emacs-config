@@ -73,14 +73,15 @@ export interface RowContext {
   feed: FeedId | "root";
   /** The whole row, so a renderer can reach its id, turn and placement arm. */
   row: FeedRow;
-  /** Bring another row into view, opening bubbles along the way if needed. */
+  /** Find and mark another row, opening bubbles along the way; never scrolls. */
   readonly revealRow: (id: FeedId) => Promise<boolean>;
   /**
    * The element this row's PREVIOUS draw produced, when it had one.
    *
    * The ONLY channel for local UI state across a re-push: a renderer reads its
    * own `data-*` off it (a fold the reader toggled, a section they expanded)
-   * and re-applies it, so a push can never undo the reader's own act.
+   * and re-applies it, so a push can never undo the reader's own act. A
+   * renderer may also update it in place and return it (see context.ts).
    */
   previous?: HTMLElement;
   /**
