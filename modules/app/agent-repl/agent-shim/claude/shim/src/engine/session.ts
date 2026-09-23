@@ -2011,8 +2011,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function applyModel(model: conversationv1.AgentModel): Promise<void> {
     const active = query;
     if (active === undefined) return;
-    await active.setModel(model.name);
-    effectiveModel = model.name;
+    const name = normalizeModel(model.name);
+    await active.setModel(name === "" ? undefined : name);
+    effectiveModel = name;
     pushModel();
   }
 
@@ -2646,7 +2647,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // a second one would key the retry's rows to a book the first attempt's
       // rows are not on.
       vendorSessionId = recordedOriginalVendorSessionId ?? mintVendorSessionId();
-      requestedModel = source.value.model?.name ?? "";
+      requestedModel = normalizeModel(source.value.model?.name ?? "");
       if (source.value.permissionMode !== undefined) permissionMode = source.value.permissionMode;
     } else {
       vendorSessionId = source.value.vendorSessionId;
@@ -2662,7 +2663,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // A RESUME RESTORES THE CONVERSATION'S OWN POSTURE. The SDK records the
       // model and permission mode in the transcript but does not restore them,
       // so the shim reads the last of each back and passes them.
-      requestedModel = facts.lastModel ?? "";
+      // NEVER THE `<synthetic>` MARKER: the facts reader already skips the
+      // records the CLI wrote itself, and the normalize here is the same rule
+      // at the one assignment every launch reads, so no other source of a
+      // marker can reach the SDK option either.
+      requestedModel = normalizeModel(facts.lastModel ?? "");
       if (facts.lastPermissionMode !== undefined) {
         permissionMode = fromVendorPermissionMode(
           facts.lastPermissionMode as PermissionModeLike,

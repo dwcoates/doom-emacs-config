@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_submit_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIsECChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SOwoZcmVmZXJlbmNlX3Jlc3BvbnNlX2ZlZWRpZBgGIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgBiAEBQgcKBV9mZWVkQhwKGl9yZWZlcmVuY2VfcmVzcG9uc2VfZmVlZGlkIogBChRTdWJtaXRQcm9tcHRSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCKXAgoTU3VibWl0UHJvbXB0U3VjY2VzcxIuCgR0dXJuGAEgASgLMh4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFR1cm5IABI/Cg1jb21tYW5kX3BhbmVsGAIgASgLMiYuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRQYW5lbEgAEkMKD2NvbW1hbmRfcmVmdXNlZBgDIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZEgAEj8KDWNvbW1hbmRfYWN0ZWQYBCABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZEFjdGVkSABCCQoHb3V0Y29tZSIaChhTdWJtaXRQcm9tcHRDb21tYW5kQWN0ZWQiLQoaU3VibWl0UHJvbXB0Q29tbWFuZFJlZnVzZWQSDwoHY29tbWFuZBgBIAEoCSI5ChBTdWJtaXRQcm9tcHRUdXJuEiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkIrkCChhTdWJtaXRQcm9tcHRDb21tYW5kUGFuZWwSLgoGc3RhdHVzGAEgASgLMhwuZnJvbnRlbmQudjEuU3RhdHVzUGFuZWxWaWV3SAASLAoFdG9kb3MYBCABKAsyGy5mcm9udGVuZC52MS5Ub2Rvc1BhbmVsVmlld0gAEi4KBmFnZW50cxgFIAEoCzIcLmZyb250ZW5kLnYxLkFnZW50c1BhbmVsVmlld0gAEigKA21jcBgGIAEoCzIZLmZyb250ZW5kLnYxLk1jcFBhbmVsVmlld0gAEjAKB2NvbnRleHQYByABKAsyHS5mcm9udGVuZC52MS5Db250ZXh0UGFuZWxWaWV3SAASKgoEaGVscBgIIAEoCzIaLmZyb250ZW5kLnYxLkhlbHBQYW5lbFZpZXdIAEIHCgVwYW5lbCK3BgoRU3VibWl0UHJvbXB0RXJyb3ISOwoHbWVyZ2luZxgBIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRSZWZ1c2VkTWVyZ2luZ0gAEkcKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiouYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAMgASgLMi4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFdvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYBCABKAsyKi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0VHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzInLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHROb3RZZXRBZG9wdGVkSAASTQoVZmVlZF9ub3RfaW5fd29ya3NwYWNlGAYgASgLMiwuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEZlZWROb3RJbldvcmtzcGFjZUgAEkUKEGZlZWRfdW5kZWNvZGFibGUYByABKAsyKS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RmVlZFVuZGVjb2RhYmxlSAASOQoKbm9fc2Vzc2lvbhgJIAEoCzIjLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHROb1Nlc3Npb25IABJNChRkdXBsaWNhdGVfc3VibWlzc2lvbhgKIAEoCzItLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHREdXBsaWNhdGVTdWJtaXNzaW9uSAASQQoOYnViYmxlX3JlZnVzZWQYCyABKAsyJy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0QnViYmxlUmVmdXNlZEgAEjcKCWNvbGRfZ2F0ZRgMIAEoCzIiLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb2xkR2F0ZUgAQggKBnJlYXNvbkoECAgQCVIRdHVybl9hbHJlYWR5X29wZW4iJgoUU3VibWl0UHJvbXB0Q29sZEdhdGUSDgoGZGV0YWlsGAEgASgJIr8BChlTdWJtaXRQcm9tcHRCdWJibGVSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCRJJCg9ub3RfZGVsaXZlcmFibGUYAiABKAsyLi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0QnViYmxlTm90RGVsaXZlcmFibGVIABI/CgphZ2VudF9idXN5GAMgASgLMikuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEJ1YmJsZUFnZW50QnVzeUgAQgYKBGtpbmQiIgogU3VibWl0UHJvbXB0QnViYmxlTm90RGVsaXZlcmFibGUiHQobU3VibWl0UHJvbXB0QnViYmxlQWdlbnRCdXN5IiEKH1N1Ym1pdFByb21wdER1cGxpY2F0ZVN1Ym1pc3Npb24iHAoaU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmciHgocU3VibWl0UHJvbXB0VW5rbm93bldvcmtzcGFjZSI4CiBTdWJtaXRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLwocU3VibWl0UHJvbXB0VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhsKGVN1Ym1pdFByb21wdE5vdFlldEFkb3B0ZWQiIAoeU3VibWl0UHJvbXB0RmVlZE5vdEluV29ya3NwYWNlIh0KG1N1Ym1pdFByb21wdEZlZWRVbmRlY29kYWJsZSIXChVTdWJtaXRQcm9tcHROb1Nlc3Npb25CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIsECChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SOwoZcmVmZXJlbmNlX3Jlc3BvbnNlX2ZlZWRpZBgGIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgBiAEBQgcKBV9mZWVkQhwKGl9yZWZlcmVuY2VfcmVzcG9uc2VfZmVlZGlkIogBChRTdWJtaXRQcm9tcHRSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCKXAgoTU3VibWl0UHJvbXB0U3VjY2VzcxIuCgR0dXJuGAEgASgLMh4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFR1cm5IABI/Cg1jb21tYW5kX3BhbmVsGAIgASgLMiYuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRQYW5lbEgAEkMKD2NvbW1hbmRfcmVmdXNlZBgDIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZEgAEj8KDWNvbW1hbmRfYWN0ZWQYBCABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZEFjdGVkSABCCQoHb3V0Y29tZSIaChhTdWJtaXRQcm9tcHRDb21tYW5kQWN0ZWQiLQoaU3VibWl0UHJvbXB0Q29tbWFuZFJlZnVzZWQSDwoHY29tbWFuZBgBIAEoCSI5ChBTdWJtaXRQcm9tcHRUdXJuEiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkIrkCChhTdWJtaXRQcm9tcHRDb21tYW5kUGFuZWwSLgoGc3RhdHVzGAEgASgLMhwuZnJvbnRlbmQudjEuU3RhdHVzUGFuZWxWaWV3SAASLAoFdG9kb3MYBCABKAsyGy5mcm9udGVuZC52MS5Ub2Rvc1BhbmVsVmlld0gAEi4KBmFnZW50cxgFIAEoCzIcLmZyb250ZW5kLnYxLkFnZW50c1BhbmVsVmlld0gAEigKA21jcBgGIAEoCzIZLmZyb250ZW5kLnYxLk1jcFBhbmVsVmlld0gAEjAKB2NvbnRleHQYByABKAsyHS5mcm9udGVuZC52MS5Db250ZXh0UGFuZWxWaWV3SAASKgoEaGVscBgIIAEoCzIaLmZyb250ZW5kLnYxLkhlbHBQYW5lbFZpZXdIAEIHCgVwYW5lbCLFBwoRU3VibWl0UHJvbXB0RXJyb3ISOwoHbWVyZ2luZxgBIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRSZWZ1c2VkTWVyZ2luZ0gAEkcKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiouYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAMgASgLMi4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFdvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYBCABKAsyKi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0VHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzInLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHROb3RZZXRBZG9wdGVkSAASTQoVZmVlZF9ub3RfaW5fd29ya3NwYWNlGAYgASgLMiwuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEZlZWROb3RJbldvcmtzcGFjZUgAEkUKEGZlZWRfdW5kZWNvZGFibGUYByABKAsyKS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RmVlZFVuZGVjb2RhYmxlSAASOQoKbm9fc2Vzc2lvbhgJIAEoCzIjLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHROb1Nlc3Npb25IABJNChRkdXBsaWNhdGVfc3VibWlzc2lvbhgKIAEoCzItLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHREdXBsaWNhdGVTdWJtaXNzaW9uSAASQQoOYnViYmxlX3JlZnVzZWQYCyABKAsyJy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0QnViYmxlUmVmdXNlZEgAEjcKCWNvbGRfZ2F0ZRgMIAEoCzIiLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb2xkR2F0ZUgAEksKFG1vZGVsX25vdF9pbl9jYXRhbG9nGA0gASgLMisuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdE1vZGVsTm90SW5DYXRhbG9nSAASPwoNbW9kZWxfcmVmdXNlZBgOIAEoCzImLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRNb2RlbFJlZnVzZWRIAEIICgZyZWFzb25KBAgIEAlSEXR1cm5fYWxyZWFkeV9vcGVuIi8KHVN1Ym1pdFByb21wdE1vZGVsTm90SW5DYXRhbG9nEg4KBmRldGFpbBgBIAEoCSIqChhTdWJtaXRQcm9tcHRNb2RlbFJlZnVzZWQSDgoGZGV0YWlsGAEgASgJIiYKFFN1Ym1pdFByb21wdENvbGRHYXRlEg4KBmRldGFpbBgBIAEoCSK/AQoZU3VibWl0UHJvbXB0QnViYmxlUmVmdXNlZBIOCgZkZXRhaWwYASABKAkSSQoPbm90X2RlbGl2ZXJhYmxlGAIgASgLMi4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEJ1YmJsZU5vdERlbGl2ZXJhYmxlSAASPwoKYWdlbnRfYnVzeRgDIAEoCzIpLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRCdWJibGVBZ2VudEJ1c3lIAEIGCgRraW5kIiIKIFN1Ym1pdFByb21wdEJ1YmJsZU5vdERlbGl2ZXJhYmxlIh0KG1N1Ym1pdFByb21wdEJ1YmJsZUFnZW50QnVzeSIhCh9TdWJtaXRQcm9tcHREdXBsaWNhdGVTdWJtaXNzaW9uIhwKGlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nIh4KHFN1Ym1pdFByb21wdFVua25vd25Xb3Jrc3BhY2UiOAogU3VibWl0UHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHFN1Ym1pdFByb21wdFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlTdWJtaXRQcm9tcHROb3RZZXRBZG9wdGVkIiAKHlN1Ym1pdFByb21wdEZlZWROb3RJbldvcmtzcGFjZSIdChtTdWJtaXRQcm9tcHRGZWVkVW5kZWNvZGFibGUiFwoVU3VibWl0UHJvbXB0Tm9TZXNzaW9uQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
 
 /**
  * What the user typed, submitted whole.
@@ -463,6 +463,26 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
      */
     value: SubmitPromptColdGate;
     case: "coldGate";
+  } | {
+    /**
+     * A `/model` act named a model the session's own catalog does not hold.
+     * The act was NOT applied and the prompt was not submitted; the session
+     * runs on as before. Before this arm the refusal left the daemon as a
+     * bare failed_precondition, which every client read as a daemon it could
+     * not reach and HELD the prompt as an outage (owner's report, 2026-09-23).
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptModelNotInCatalog model_not_in_catalog = 13;
+     */
+    value: SubmitPromptModelNotInCatalog;
+    case: "modelNotInCatalog";
+  } | {
+    /**
+     * A `/model` act the vendor itself refused. Same disposition as above.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptModelRefused model_refused = 14;
+     */
+    value: SubmitPromptModelRefused;
+    case: "modelRefused";
   } | { case: undefined; value?: undefined };
 };
 
@@ -472,6 +492,49 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
  */
 export const SubmitPromptErrorSchema: GenMessage<SubmitPromptError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 7);
+
+/**
+ * The model a `/model` act named is not in this session's catalog.
+ *
+ * @generated from message agentrepl.v1.SubmitPromptModelNotInCatalog
+ */
+export type SubmitPromptModelNotInCatalog = Message<"agentrepl.v1.SubmitPromptModelNotInCatalog"> & {
+  /**
+   * The shim's own account, verbatim, naming the model that was asked for.
+   * A client shows it; it never switches on it.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptModelNotInCatalog.
+ * Use `create(SubmitPromptModelNotInCatalogSchema)` to create a new message.
+ */
+export const SubmitPromptModelNotInCatalogSchema: GenMessage<SubmitPromptModelNotInCatalog> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 8);
+
+/**
+ * The vendor refused the model change a `/model` act asked for.
+ *
+ * @generated from message agentrepl.v1.SubmitPromptModelRefused
+ */
+export type SubmitPromptModelRefused = Message<"agentrepl.v1.SubmitPromptModelRefused"> & {
+  /**
+   * The vendor's own sentence, verbatim.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptModelRefused.
+ * Use `create(SubmitPromptModelRefusedSchema)` to create a new message.
+ */
+export const SubmitPromptModelRefusedSchema: GenMessage<SubmitPromptModelRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 9);
 
 /**
  * The cold-gate refusal: the session is parked on the user's remediation
@@ -496,7 +559,7 @@ export type SubmitPromptColdGate = Message<"agentrepl.v1.SubmitPromptColdGate"> 
  * Use `create(SubmitPromptColdGateSchema)` to create a new message.
  */
 export const SubmitPromptColdGateSchema: GenMessage<SubmitPromptColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 8);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 10);
 
 /**
  * The shim's refusal of a bubble-addressed prompt, relayed. ONE arm, the
@@ -542,7 +605,7 @@ export type SubmitPromptBubbleRefused = Message<"agentrepl.v1.SubmitPromptBubble
  * Use `create(SubmitPromptBubbleRefusedSchema)` to create a new message.
  */
 export const SubmitPromptBubbleRefusedSchema: GenMessage<SubmitPromptBubbleRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 9);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 11);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptBubbleNotDeliverable
@@ -555,7 +618,7 @@ export type SubmitPromptBubbleNotDeliverable = Message<"agentrepl.v1.SubmitPromp
  * Use `create(SubmitPromptBubbleNotDeliverableSchema)` to create a new message.
  */
 export const SubmitPromptBubbleNotDeliverableSchema: GenMessage<SubmitPromptBubbleNotDeliverable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 10);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 12);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptBubbleAgentBusy
@@ -568,7 +631,7 @@ export type SubmitPromptBubbleAgentBusy = Message<"agentrepl.v1.SubmitPromptBubb
  * Use `create(SubmitPromptBubbleAgentBusySchema)` to create a new message.
  */
 export const SubmitPromptBubbleAgentBusySchema: GenMessage<SubmitPromptBubbleAgentBusy> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 11);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 13);
 
 /**
  * The duplicate-key refusal. Empty on purpose (see the arm).
@@ -583,7 +646,7 @@ export type SubmitPromptDuplicateSubmission = Message<"agentrepl.v1.SubmitPrompt
  * Use `create(SubmitPromptDuplicateSubmissionSchema)` to create a new message.
  */
 export const SubmitPromptDuplicateSubmissionSchema: GenMessage<SubmitPromptDuplicateSubmission> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 12);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 14);
 
 /**
  * The merge-in-flight refusal. Empty: the set arm is the whole assertion —
@@ -600,7 +663,7 @@ export type SubmitPromptRefusedMerging = Message<"agentrepl.v1.SubmitPromptRefus
  * Use `create(SubmitPromptRefusedMergingSchema)` to create a new message.
  */
 export const SubmitPromptRefusedMergingSchema: GenMessage<SubmitPromptRefusedMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 13);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 15);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptUnknownWorkspace
@@ -613,7 +676,7 @@ export type SubmitPromptUnknownWorkspace = Message<"agentrepl.v1.SubmitPromptUnk
  * Use `create(SubmitPromptUnknownWorkspaceSchema)` to create a new message.
  */
 export const SubmitPromptUnknownWorkspaceSchema: GenMessage<SubmitPromptUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 14);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 16);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptWorkspaceRefMismatch
@@ -632,7 +695,7 @@ export type SubmitPromptWorkspaceRefMismatch = Message<"agentrepl.v1.SubmitPromp
  * Use `create(SubmitPromptWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SubmitPromptWorkspaceRefMismatchSchema: GenMessage<SubmitPromptWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 15);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 17);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptTransferringAway
@@ -651,7 +714,7 @@ export type SubmitPromptTransferringAway = Message<"agentrepl.v1.SubmitPromptTra
  * Use `create(SubmitPromptTransferringAwaySchema)` to create a new message.
  */
 export const SubmitPromptTransferringAwaySchema: GenMessage<SubmitPromptTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 16);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 18);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptNotYetAdopted
@@ -664,7 +727,7 @@ export type SubmitPromptNotYetAdopted = Message<"agentrepl.v1.SubmitPromptNotYet
  * Use `create(SubmitPromptNotYetAdoptedSchema)` to create a new message.
  */
 export const SubmitPromptNotYetAdoptedSchema: GenMessage<SubmitPromptNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 17);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 19);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptFeedNotInWorkspace
@@ -677,7 +740,7 @@ export type SubmitPromptFeedNotInWorkspace = Message<"agentrepl.v1.SubmitPromptF
  * Use `create(SubmitPromptFeedNotInWorkspaceSchema)` to create a new message.
  */
 export const SubmitPromptFeedNotInWorkspaceSchema: GenMessage<SubmitPromptFeedNotInWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 18);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 20);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptFeedUndecodable
@@ -690,7 +753,7 @@ export type SubmitPromptFeedUndecodable = Message<"agentrepl.v1.SubmitPromptFeed
  * Use `create(SubmitPromptFeedUndecodableSchema)` to create a new message.
  */
 export const SubmitPromptFeedUndecodableSchema: GenMessage<SubmitPromptFeedUndecodable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 19);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 21);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptNoSession
@@ -703,5 +766,5 @@ export type SubmitPromptNoSession = Message<"agentrepl.v1.SubmitPromptNoSession"
  * Use `create(SubmitPromptNoSessionSchema)` to create a new message.
  */
 export const SubmitPromptNoSessionSchema: GenMessage<SubmitPromptNoSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 20);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 22);
 
