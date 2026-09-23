@@ -394,11 +394,33 @@ func (e event) name() string { return e.sink + "." + e.method }
 
 // recorder is the ordered record of every sink call, on a channel so a test
 // waits for routing to finish rather than sleeping through it.
-type recorder struct{ ch chan event }
+type recorder struct {
+	ch chan event
+
+	// mu guards mains.
+	mu sync.Mutex
+	// mains is every main-agent naming the views were given, as
+	// "<sink>:<agent>", in order.
+	mains []string
+}
 
 func newRecorder() *recorder { return &recorder{ch: make(chan event, 512)} }
 
 func (r *recorder) emit(e event) { r.ch <- e }
+
+// nameMain records one main-agent naming a view was given.
+func (r *recorder) nameMain(sink, agent string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mains = append(r.mains, sink+":"+agent)
+}
+
+// mainNamings answers every main-agent naming the views were given so far.
+func (r *recorder) mainNamings() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.mains...)
+}
 
 // until reads events until the named one arrives and returns everything
 // BEFORE it. Sending a sentinel frame down the same stream after the frame
@@ -501,6 +523,13 @@ func (s *feedSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.Agen
 	s.rec.emit(event{sink: "feed", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn})
 }
 
+// OnMainAgent is recorded BESIDE the event stream rather than in it: the
+// naming precedes the routing it serves, and threading it through every exact
+// routing sequence would restate one fact in every assertion.
+func (s *feedSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId) {
+	s.rec.nameMain("feed", agent.GetValue())
+}
+
 func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue()})
 }
@@ -561,6 +590,10 @@ func (s *footerSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId
 
 func (s *footerSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, _ *conversationv1.AgentSuccess, _ *conversationv1.AgentFailure) {
 	s.rec.emit(event{sink: "footer", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn})
+}
+
+func (s *footerSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId) {
+	s.rec.nameMain("footer", agent.GetValue())
 }
 
 func (s *footerSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {

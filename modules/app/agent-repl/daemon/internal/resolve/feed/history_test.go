@@ -336,7 +336,8 @@ func TestAReplayedDetachedWorkDrawsItsBubble(t *testing.T) {
 	created := &conversationv1.AgentId{Value: "agent-remote"}
 	h.replay(historyPage(&conversationv1.HistoryFloor{},
 		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
-			Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+			Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+			Owner: mainAgent(),
 			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 				WorkCreated: &conversationv1.DetachableWork{
 					Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
@@ -459,7 +460,8 @@ func TestAReplayedDetachedSubagentSettlesSucceededNeverFailed(t *testing.T) {
 			}},
 		}),
 		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
-			Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+			Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+			Owner: mainAgent(),
 			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 				WorkCreated: &conversationv1.DetachableWork{
 					Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
@@ -525,5 +527,46 @@ func TestAReplayedConcludedTurnStampsItsAnswerRowFinal(t *testing.T) {
 	}
 	if !answer.GetFinalAnswer() {
 		t.Fatal("a replayed concluded turn's answer row was not stamped final_answer=true")
+	}
+}
+
+// TestAnEmptyPageOfAnUnnamedWatchDrawsNothingAndReportsNothing: a fresh
+// session's main watch opens on an empty floor before any row has named the
+// main agent. There is nothing to place, so nothing is reported unplaceable.
+func TestAnEmptyPageOfAnUnnamedWatchDrawsNothingAndReportsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.resolver.OnHistoryPage(testWorkspace, nil, historyPage(&conversationv1.HistoryFloor{}), noAddress())
+
+	// Assert.
+	if h.hasRecord("error", "daemon.feed.unplaceable_agent") {
+		t.Fatalf("records = %+v, want no unplaceable report for an empty page", h.records())
+	}
+	if !h.hasRecord("debug", "daemon.feed.history_page_empty") {
+		t.Fatalf("records = %+v, want the empty page recorded", h.records())
+	}
+}
+
+// TestAPageOfAnUnnamedAgentWithRowsIsReportedUnplaceable: a page that DOES
+// carry rows for an agent nothing named cannot be placed, and says so.
+func TestAPageOfAnUnnamedAgentWithRowsIsReportedUnplaceable(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.resolver.OnHistoryPage(testWorkspace, &conversationv1.AgentId{Value: "agent-ghost"},
+		historyPage(&conversationv1.HistoryFloor{}, frameEntry(&conversationv1.AgentId{Value: "agent-ghost"},
+			&conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{
+				Activity: responseSuccessActivity("unit-1", "orphaned prose"),
+			}})), noAddress())
+
+	// Assert.
+	if rows := h.everyRow(); len(rows) != 0 {
+		t.Fatalf("rows = %+v, want nothing drawn", rows)
+	}
+	if !h.hasRecord("error", "daemon.feed.unplaceable_agent") {
+		t.Fatalf("records = %+v, want the ERROR", h.records())
 	}
 }

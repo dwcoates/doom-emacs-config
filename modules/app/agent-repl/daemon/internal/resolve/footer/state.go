@@ -255,6 +255,10 @@ type shellRow struct {
 	startedAt time.Time
 	// order is the announcement order the panel draws in.
 	order int
+	// owner is the agent whose work the shell is — the agent that made its
+	// call — which decides the feed its head is drawn on and so the panel
+	// row's jump target. Empty until something states it.
+	owner string
 }
 
 // monitorRow is one live background monitor. Monitors have no feed bubble, so
@@ -475,6 +479,10 @@ type wsState struct {
 	// id, so a shell that DETACHES from a unit can be described from the unit
 	// it detached from (the announcement carries no command of its own).
 	bashUnits map[string]*shellRow
+	// mainAgent is the session's main agent as the watcher named it: the one
+	// agent whose detached work is on the ROOT feed. Every other owner's is on
+	// that owner's sub-feed (feedid.AgentFeed, the rule the feed places by).
+	mainAgent string
 	// liveWork is the watcher's AUTHORITATIVE live-work set: the one party
 	// that reaps each detached item's watch at its terminal, and therefore the
 	// only one that can say a detached item has ENDED. It governs which

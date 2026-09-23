@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
 )
@@ -47,7 +48,10 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 // session's in-flight turn).
 func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId) {
 	log := r.logger(s.id)
-	at := r.place(s, agent)
+	at, ok := r.place(s, agent)
+	if !ok {
+		return
+	}
 	unit := act.GetActivityId().GetValue()
 	if unit == "" {
 		log.Error("daemon.feed.activity_without_identity",
@@ -108,6 +112,11 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	case *conversationv1.AgentActivity_Subagent:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Subagent"})
 		row, err = r.drawSubagent(s, at, act, item.Subagent, false)
+		// The bubble is upserted where it LIVES, which a later frame carried
+		// on another book does not move (see drawSubagent).
+		if state, ok := s.subagents[unit]; ok && state.feed.feed != (feedid.Feed{}) {
+			at = state.feed
+		}
 	case *conversationv1.AgentActivity_Hook:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Hook"})
 		row, err = r.drawHook(s, at, act, item.Hook)
@@ -167,7 +176,21 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		"an activity row was upserted",
 		dlog.Context{"unit": unit, "agent": agent.GetValue(), "row": row.GetId().GetValue()})
 	r.upsert(s, at, row, true)
-	r.applyHeldDetachment(s, at, unit)
+	r.recordCarrier(s, unit, agent, at)
+	r.applyHeldDetachment(s, unit)
+}
+
+// recordCarrier remembers, at a unit's first drawn row, WHOSE call it is and
+// WHERE its row stands: a detachment from the unit belongs to that agent, and
+// its head is drawn at that row.
+func (r *resolver) recordCarrier(s *wsState, unit string, agent *conversationv1.AgentId, at placement) {
+	if u, ok := s.units[unit]; ok && u.carrier == "" {
+		u.carrier = agent.GetValue()
+		u.at = at
+	}
+	if state, ok := s.subagents[unit]; ok && state.carrier == "" {
+		state.carrier = agent.GetValue()
+	}
 }
 
 // stampTurn puts the turn a row belongs to on it. A separation belongs to no
@@ -300,6 +323,24 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	r.drawTerminal(s, agent, turn, success, failure)
+}
+
+// OnMainAgent records the session's main agent: the one agent whose rows are
+// the root feed's. It draws nothing.
+func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	if s.mainAgent != "" && s.mainAgent != agent.GetValue() {
+		r.logger(ws).Warn("daemon.feed.main_agent_renamed",
+			"the session's main agent was renamed; the root feed now holds the new agent's rows",
+			dlog.Context{"previous_agent": s.mainAgent, "agent": agent.GetValue()})
+	} else {
+		r.logger(ws).Debug("daemon.feed.main_agent",
+			"the session's main agent was named for the root feed",
+			dlog.Context{"agent": agent.GetValue()})
+	}
+	s.mainAgent = agent.GetValue()
 }
 
 // OnDetachedWork draws the bubble of work that left the stream.

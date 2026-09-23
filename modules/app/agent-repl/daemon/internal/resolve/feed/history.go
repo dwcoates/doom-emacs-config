@@ -58,7 +58,22 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// what is on screen has older history behind it that this replay did not
 	// deliver, and a walk that runs out must say so rather than claim a
 	// beginning it never saw.
-	at := r.place(s, agent)
+	if len(entries) == 0 && agent.GetValue() == "" {
+		// AN EMPTY PAGE OF A WATCH THAT HAS NAMED NO AGENT YET draws nothing and
+		// has nothing older behind it to mark: a fresh session's main watch
+		// opens this way before its first row names the main agent. Placing it
+		// would report an agent that simply has not spoken yet as unplaceable.
+		log.Debug("daemon.feed.history_page_empty",
+			"an empty opening page of a watch with no agent named yet was replayed; nothing to place",
+			dlog.Context{"boundary": boundaryName(page)})
+		return
+	}
+	at, placed := r.place(s, agent)
+	if !placed {
+		// place has reported the page's agent as unplaceable; its replay drew
+		// nothing, so there is no feed to mark truncated either.
+		return
+	}
 	f := r.feed(s, at.feed)
 	switch boundary := page.GetBoundary().(type) {
 	case *conversationv1.HistoryPage_Floor:
@@ -220,4 +235,16 @@ func (r *resolver) replayTerminal(s *wsState, agent *conversationv1.AgentId, suc
 	}
 	s.replayTurn = nil
 	r.drawTerminal(s, agent, turn, success, failure)
+}
+
+// boundaryName names a page's boundary arm for a record.
+func boundaryName(page *conversationv1.HistoryPage) string {
+	switch page.GetBoundary().(type) {
+	case *conversationv1.HistoryPage_Floor:
+		return "floor"
+	case *conversationv1.HistoryPage_More:
+		return "more"
+	default:
+		return "unset"
+	}
 }

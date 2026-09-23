@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"slices"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -1775,5 +1776,75 @@ func TestARetiredDetachedHandleIsNeverReadmitted(t *testing.T) {
 				t.Fatal("the re-served announcement left no debug record")
 			}
 		})
+	}
+}
+
+// TestTheMainWatchNamesTheRootsOwnerForTheViews pins the feed's one source for
+// the root's owner: the feed used to latch the FIRST agent it ever saw as the
+// main one, a default that a subagent's frame arriving first would have turned
+// into the whole conversation drawn on a sub-feed. The main watch names it
+// instead, before the frame that needs it is routed.
+func TestTheMainWatchNamesTheRootsOwnerForTheViews(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// frames are routed on the main watch, in order.
+		frames []*shimv1.WatchAgentResponse
+		want   []string
+	}{
+		{
+			name:   "a main-watch frame names its agent for the feed and the footer",
+			frames: []*shimv1.WatchAgentResponse{entryFrame(frameSuccess("main-1", backgrounded()))},
+			want:   []string{"feed:main-1", "footer:main-1"},
+		},
+		{
+			name:   "a main-watch page names the agent of its first row",
+			frames: []*shimv1.WatchAgentResponse{pageFrame(frameEntryAt("ptr-1", frameSuccess("main-1", completed())))},
+			want:   []string{"feed:main-1", "footer:main-1"},
+		},
+		{
+			name: "a later row naming another agent on the main watch is not a rename",
+			frames: []*shimv1.WatchAgentResponse{
+				entryFrame(frameSuccess("main-1", backgrounded())),
+				entryFrame(frameSuccess("sub-9", backgrounded())),
+			},
+			want: []string{"feed:main-1", "footer:main-1"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			// NO quiet(): the harness's sentinel rides the main watch as its own
+			// agent, and would itself be the first row to name the main agent.
+
+			// Act.
+			for _, frame := range tc.frames {
+				h.route(h.main, frame)
+			}
+
+			// Assert.
+			if got := h.rec.mainNamings(); !slices.Equal(got, tc.want) {
+				t.Fatalf("main namings = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAMainWatchPageReachesTheFeedWithItsAgentBeforeStartTurnNamesIt pins the
+// replay half: an adopted session's opening page arrives before any StartTurn,
+// and the feed must still be told whose rows it is drawing rather than being
+// handed no agent at all.
+func TestAMainWatchPageReachesTheFeedWithItsAgentBeforeStartTurnNamesIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	// NO quiet(): the harness's sentinel rides the main watch as its own
+	// agent, and would itself be the first row to name the main agent.
+
+	// Act.
+	got := h.route(h.main, pageFrame(frameEntryAt("ptr-1", frameSuccess("main-1", completed()))))
+
+	// Assert.
+	e := requireEvent(t, got, "feed.OnHistoryPage")
+	if e.agent != "main-1" {
+		t.Fatalf("the feed replayed the main page as %q, want main-1", e.agent)
 	}
 }

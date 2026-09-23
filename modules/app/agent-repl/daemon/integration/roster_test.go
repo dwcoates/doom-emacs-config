@@ -109,7 +109,7 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	awaitRoster(t, f.d, roster, "done after the turn concludes", statusIs(func(row *frontendv1.RosterRow) bool { return row.GetDone() != nil }))
 
 	// Act / Assert: idle_async with detached work live and no turn.
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 1")))
+	pushDetachedShell(f.shim, "work-1", "sleep 1")
 	awaitRoster(t, f.d, roster, "idle_async with detached work and no turn", statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil }))
 }
 

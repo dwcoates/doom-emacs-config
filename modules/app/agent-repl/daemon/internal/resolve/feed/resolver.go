@@ -59,9 +59,12 @@ type wsState struct {
 	// feed.
 	address *sessionwatcher.OutputAddress
 
-	// mainAgent is the first agent this workspace ever produced a frame for.
-	// Every later agent the resolver has not seen created is UNPLACEABLE, and
-	// lands on the root feed with a warning rather than being dropped.
+	// mainAgent is the session's main agent, as the session watcher NAMED it
+	// (OnMainAgent). Its rows are the root feed's; every other agent's rows are
+	// on the sub-feed its spawn minted. An agent that is neither is
+	// UNPLACEABLE: nothing is drawn for it, and the failure is reported loudly
+	// rather than landing on the root — the root is the main agent's because it
+	// IS the main agent, never as a default.
 	mainAgent string
 	// agentFeeds maps a created subagent's id to its sub-feed key.
 	agentFeeds map[string]string
@@ -104,6 +107,11 @@ type wsState struct {
 	// its last publication, keyed by work id. A shell that leaves it without
 	// having settled is settled lost (settleShellsLeftLive).
 	liveShells map[string]struct{}
+	// heldDetachments are what a held detachment's announcement said about
+	// whose work it is, by unit, kept so the claim can check it against the
+	// agent that turns out to carry the unit, and so a detachment that never
+	// finds its unit is reported with its full context.
+	heldDetachments map[string]heldDetachment
 	// detachedUnits are the units a detachment announced BEFORE this resolver
 	// had drawn them, kept so the placement survives the order the frames
 	// arrive in. A store replay is the ordinary case: a unit's row replays at
@@ -496,6 +504,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		shells:               map[string]*shellState{},
 		liveShells:           map[string]struct{}{},
 		detachedUnits:        map[string]string{},
+		heldDetachments:      map[string]heldDetachment{},
 		subagents:            map[string]*subagentState{},
 		standing:             map[string]*conversationv1.AgentPermissionStanding{},
 		permissionRows:       map[string]*permissionState{},
@@ -590,46 +599,70 @@ func (r *resolver) feedKey(ws ids.WorkspaceID, addr feedid.Feed) string {
 type placement struct {
 	feed   feedid.Feed
 	parent *frontendv1.FeedRowParent
+	// inherit, when set, is the ordering key a row TAKES OVER at its first
+	// draw instead of minting a new one: a detached shell's head replacing the
+	// running card it was, at that card's own position in the feed.
+	inherit *rowRank
 }
 
-// place answers where an agent's rows go. WHILE AN OUTPUT ADDRESS IS SET every
-// row the session produces goes on the addressed feed under the addressed row;
-// cleared, an agent's rows go on its own sub-feed, and the main agent's on the
-// root.
+// place answers where an agent's rows go, and whether they can go anywhere.
+// WHILE AN OUTPUT ADDRESS IS SET every row the session produces goes on the
+// addressed feed under the addressed row; cleared, the main agent's rows go on
+// the root and any other agent's on its own sub-feed.
 //
-// An agent the resolver never saw created is placed on the ROOT with a WARN —
-// never dropped: a row nobody can place is still a row the user must see.
-func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) placement {
+// THERE IS NO FALLBACK. An agent that is neither the named main agent nor one
+// whose spawn minted a sub-feed is UNPLACEABLE: the caller draws nothing, and
+// the failure is logged at ERROR and raised on the topbar. It used to land on
+// the root feed with a WARN — and that is how a subagent's background shell
+// came to be drawn under the main agent's last answer.
+func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) (placement, bool) {
 	if s.address != nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address != nil"})
-		return r.outputPlacement(s)
+		return r.outputPlacement(s), true
 	}
 	id := agent.GetValue()
-	if id == "" || id == s.mainAgent {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "id == \"\" || id == s.mainAgent"})
-		if s.mainAgent == "" {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.mainAgent == \"\""})
-			s.mainAgent = id
+	feed, err := feedid.AgentFeed(id, s.mainAgent)
+	if err == nil && feed.Agent != nil {
+		if _, minted := s.agentFeeds[id]; !minted {
+			err = errAgentFeedUnminted
 		}
-		return placement{feed: feedid.Feed{Root: true}}
 	}
-	if s.mainAgent == "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.mainAgent == \"\""})
-		s.mainAgent = id
-		return placement{feed: feedid.Feed{Root: true}}
+	if err != nil {
+		r.reportUnplaceableAgent(s, id, err)
+		return placement{}, false
 	}
-	if _, ok := s.agentFeeds[id]; ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := s.agentFeeds[id]; ok"})
-		return placement{feed: feedid.Feed{Agent: agent}}
-	}
-	r.logger(s.id).Warn("daemon.feed.unplaceable_agent",
-		"a frame arrived for an agent whose creation was never seen; the row lands on the root feed",
-		dlog.Context{"agent": id, "main_agent": s.mainAgent})
-	return placement{feed: feedid.Feed{Root: true}}
+	return placement{feed: feed}, true
 }
 
-// outputPlacement is where a row the LEASE HOLDER draws for this session
-// belongs: the standing output address, or the root feed when none stands.
+// errAgentFeedUnminted is why an agent that is not the main one has no feed:
+// no spawn this resolver drew ever created it.
+var errAgentFeedUnminted = errors.New("feed: no drawn spawn created this agent, so it has no sub-feed")
+
+// reportUnplaceableAgent records, loudly and once per frame, that an agent's
+// row could not be placed and was not drawn, and puts it on the topbar.
+func (r *resolver) reportUnplaceableAgent(s *wsState, agent string, cause error) {
+	r.logger(s.id).Error("daemon.feed.unplaceable_agent",
+		"a frame arrived for an agent that has no feed; nothing was drawn for it",
+		dlog.Context{"agent": agent, "main_agent": s.mainAgent, "cause": cause.Error()})
+	r.raiseWarning(s, "unplaceable_agent:"+agent,
+		fmt.Sprintf("rows of agent %q could not be placed in any feed and were not drawn", agent))
+}
+
+// raiseWarning puts a resolution failure on the topbar's warning chip, the
+// webapp's one error surface. The caller has already logged it with its full
+// context; nil Warnings leaves the log as the only record, which is what a
+// test that is not about the topbar wants.
+func (r *resolver) raiseWarning(s *wsState, key, line string) {
+	if r.deps.Warnings == nil {
+		return
+	}
+	r.deps.Warnings.RaiseWarning(s.id, key, line)
+}
+
+// outputPlacement is where a row the SESSION ITSELF draws belongs — a person's
+// prompt, a clear's divider, a turn's terminal the daemon composes — rather
+// than any agent's work: the standing output address, or the root feed, which
+// is the session's own, when none stands.
 func (r *resolver) outputPlacement(s *wsState) placement {
 	if s.address == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.address == nil"})
@@ -690,7 +723,14 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	f.seq++
 	if !seen {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
-		f.insert(id, rowRank{plane: s.plane, seq: f.seq})
+		rank := rowRank{plane: s.plane, seq: f.seq}
+		if at.inherit != nil {
+			// THE ROW TAKES THE PLACE OF THE ONE IT REPLACES, so a page walk
+			// draws it where that row stood rather than below everything
+			// drawn since.
+			rank = *at.inherit
+		}
+		f.insert(id, rank)
 		// THE ORDERING TRACE. A row's plane and seq are fixed HERE, at first
 		// draw, and the feed sorts by (plane, seq) forever after — so this one
 		// line per row is the whole account of why any row landed where it did
@@ -703,8 +743,8 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 			dlog.Context{
 				"feed":  f.key,
 				"row":   id,
-				"plane": s.plane.String(),
-				"seq":   f.seq,
+				"plane": f.rank[id].plane.String(),
+				"seq":   f.rank[id].seq,
 				"turn":  row.GetTurn().GetValue(),
 			})
 	}

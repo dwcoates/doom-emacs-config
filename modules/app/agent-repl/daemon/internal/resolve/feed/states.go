@@ -63,6 +63,13 @@ type unitState struct {
 	row *frontendv1.FeedRow
 	// feedKey is the feed that row landed on.
 	feedKey string
+	// carrier is the agent whose stream carried this unit's call: the unit's
+	// OWNER, the agent a detachment from it belongs to. Recorded at the unit's
+	// first drawn row.
+	carrier string
+	// at is where that row was drawn. A detached shell's head is drawn HERE,
+	// in place of the card, and nowhere else.
+	at placement
 	// artifactFavicon is the emoji the PUBLISH announced. Kept because the
 	// published outcome restates the title and never the favicon, and
 	// feed.proto words the artifact heading as "favicon emoji + title" — so a
@@ -238,8 +245,14 @@ type shellState struct {
 	lastProgressMs int64
 	// row is the bubble's identity.
 	row *frontendv1.FeedId
-	// feed is where the bubble landed.
+	// feed is where the bubble landed: the spawning card's own placement, and
+	// the zero value until that card is known. A run whose head has nowhere to
+	// land accumulates its spool and publishes nothing.
 	feed placement
+	// turn is the SPAWNING TURN — the turn the replaced card was stamped with —
+	// which the head carries rather than whatever turn is running when it is
+	// drawn.
+	turn *conversationv1.TurnId
 	// settled is HOW THE RUN ENDED, once it has, kept for the same reason
 	// `denied` and `sendDelivery` are kept: a later frame must never redraw a
 	// settled bubble as unsettled.
@@ -321,6 +334,8 @@ type questionState struct {
 type subagentState struct {
 	// row is the bubble's identity.
 	row *frontendv1.FeedId
+	// carrier is the agent whose stream carried the spawn: the bubble's owner.
+	carrier string
 	// created is the agent the spawn produced — the sub-feed's address.
 	created *conversationv1.AgentId
 	// bubble is the head as last drawn.
@@ -356,6 +371,21 @@ type subagentState struct {
 	// rather than hypothetical, so a pre-start frame waits here and is folded
 	// the moment the start supplies the identity.
 	held []*conversationv1.AgentSubagent
+}
+
+// heldDetachment is what a detachment held against an undrawn unit said about
+// the work, for the claim's owner check and for the report if it never lands.
+type heldDetachment struct {
+	// work is the handle.
+	work string
+	// owner is the owner the announcement stated, empty when it stated none.
+	owner string
+	// announcer is the agent whose stream carried the announcement.
+	announcer string
+	// plane is the ordering plane the announcement arrived on. A detachment
+	// REPLAYED from history names a unit that may lie in older history this
+	// daemon never replayed, which is not a unit that failed to draw.
+	plane rowPlane
 }
 
 // markDetached remembers that a unit this resolver has not drawn yet has

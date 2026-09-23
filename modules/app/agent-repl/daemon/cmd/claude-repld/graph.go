@@ -363,6 +363,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// decorated client, so a fault opened anywhere lands on the strip.
 	p.DB = health.ObserveFaults(p.DB, footerFaults{footerResolver}, p.Surfaces)
 
+	// THE TOPBAR IS BUILT BEFORE THE FEED, which raises onto its warning chip
+	// every row it cannot place.
+	topbarResolver, err := topbar.New(colors, p.Surfaces)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the topbar resolver: %w", err)
+	}
+
 	// THE FEED RESOLVER IS BUILT AFTER THE DECORATION, and that ordering is the
 	// wiring. It raises the `final_answer_unresolved` fault when a turn concludes
 	// with no green answer standing, and it must raise it into the SAME state
@@ -379,6 +386,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ResolveImage:  resolveImage,
 		PortedPrompts: portedPrompts,
 		Faults:        p.DB,
+		// A row the feed cannot place is drawn nowhere and raised on the
+		// topbar's warning chip, the webapp's one error surface.
+		Warnings: topbarResolver,
 		// Zero leaves the resolver's own DefaultTailRetention in force; the
 		// flag and its environment knob are what make token_expired reachable.
 		TailRetention: p.Opts.feedTailRetention,
@@ -387,10 +397,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
 
-	topbarResolver, err := topbar.New(colors, p.Surfaces)
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the topbar resolver: %w", err)
-	}
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
