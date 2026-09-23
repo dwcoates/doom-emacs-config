@@ -245,10 +245,16 @@ func (q *queue) interject(ctx context.Context, sub Submission, running ids.TurnI
 // refused interrupt is not a failed classification: the verdict was reached,
 // the session declined to act on it, and the prompt's true state is waiting.
 //
-// The refusal is narrated at the level its nature earns: the shim's `live`
-// refusal (the turn spawned live detached work an ordinary interrupt will not
-// tear down) is an expected outcome, recorded at info; any other refusal is
-// unexpected but costs the prompt nothing, recorded at warn.
+// The interjection's kill is UNFORCED, so the shim interrupts the synchronous
+// turn only and never refuses because the turn spawned detached work: that
+// work runs on. The refusals that remain are narrated at the level their
+// nature earns:
+//   - `no_turn_open` is the turn having ended on its own before the interrupt
+//     landed, an expected race, recorded at info;
+//   - `live` is a refusal the shim no longer produces, so one arriving is a
+//     contract breach, recorded at warn under its own message;
+//   - any other refusal, or a missing session, is unexpected but costs the
+//     prompt nothing, recorded at warn.
 func (q *queue) stripJump(ctx context.Context, sub Submission, running ids.TurnID, cause error, log dlog.Logger) {
 	q.mu.Lock()
 	if state, ok := q.states[sub.WS]; ok {
@@ -258,10 +264,14 @@ func (q *queue) stripJump(ctx context.Context, sub Submission, running ids.TurnI
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(sub.WS, false)
 	fields := dlog.Context{"turn": string(sub.Turn), "interrupted_turn": string(running), "cause": cause.Error()}
+	var ended interface{ KillFoundNoTurnOpen() bool }
 	var live interface{ KillRefusedLive() bool }
-	if errors.As(cause, &live) && live.KillRefusedLive() {
-		log.Info(opInterject, "the running turn is live and refused the interrupt; the jump is stripped and the prompt waits for the turn to end", fields)
-	} else {
+	switch {
+	case errors.As(cause, &ended) && ended.KillFoundNoTurnOpen():
+		log.Info(opInterject, "the running turn had already ended when the interrupt landed; the jump is stripped and the prompt waits for the turn's end", fields)
+	case errors.As(cause, &live) && live.KillRefusedLive():
+		log.Warn(opInterject, "the shim refused an unforced interrupt as live, which its contract no longer produces; the jump is stripped and the prompt waits for the turn to end", fields)
+	default:
 		log.Warn(opInterject, "the interrupt was refused; the jump is stripped and the prompt waits for the turn to end", fields)
 	}
 	q.record(ctx, sub, wsm.Classification{
