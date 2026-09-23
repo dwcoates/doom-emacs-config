@@ -86,9 +86,11 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	return disposition, nil
 }
 
-// judge asks the classifier about one held prompt and records what it said. An
-// error is NOT a verdict: it is stamped as classification_error rather than
-// guessed either way.
+// judge asks the classifier about one held prompt and records what it said.
+// NO FAILURE ON THE WAY IS EVER STAMPED classification_error: the tray draws
+// that arm as "unclassified", which is a failure leaking into the UI rather
+// than a state. Each failure is resolved to the prompt's true state — held
+// for the running turn's end — and logged where the daemon can see it.
 func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
 	// AN UNINTERRUPTIBLE RUNNING TURN is decided before the model is asked: a
 	// context cut cannot be interrupted, so there is nothing to judge.
@@ -133,12 +135,21 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, l
 		return
 	}
 
+	// A FAILED CLASSIFIER IS NOT A VERDICT, but the prompt still has a true
+	// state: it is waiting for the running turn, and holding for that turn's
+	// end is the verdict that can never interrupt work wrongly. The failure is
+	// the daemon's to see, on disk, at error; the user sees a held prompt that
+	// delivers when the turn ends. It is not retried: the retry would sit
+	// between the prompt and its verdict, and the safe verdict loses nothing
+	// but an interjection.
 	verdict, err := q.deps.Judge.Judge(ctx, runningText, saidText(sub.Said))
 	if err != nil {
-		log.Error(opClassify, "the classifier failed; the prompt keeps waiting",
-			dlog.Context{"cause": err.Error()})
+		log.Error(opClassify, "the classifier failed; the prompt waits for the running turn to end",
+			dlog.Context{"running_turn": string(running), "cause": err.Error()})
 		q.record(ctx, sub, wsm.Classification{
-			Arm: wsm.ArmClassificationError, Reason: err.Error(), At: q.deps.Now(),
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the classifier could not decide, so the prompt waits for the running turn to end",
+			At:     q.deps.Now(),
 		}, log)
 		return
 	}
