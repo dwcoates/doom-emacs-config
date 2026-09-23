@@ -275,10 +275,18 @@ describe("drawFeedShellBody spool", () => {
     );
   });
 
-  it("follows the tail, so a redraw shows the newest output", () => {
-    const el = drawFeedShellBody(shell({ spool: { text: "x" } }), ctxFor().rc);
-    const box = el.querySelector<HTMLElement>(".shell-tail");
-    expect(box?.scrollTop).toBe(box?.scrollHeight);
+  it("never scrolls its own tail box (removed trigger: the user owns the scroll)", () => {
+    // Arrange -- a box with 500px of content, which the old self-follow would
+    // have scrolled to its end on every draw.
+    const height = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(500);
+    try {
+      // Act
+      const el = drawFeedShellBody(shell({ spool: { text: "x" } }), ctxFor().rc);
+      // Assert
+      expect(el.querySelector<HTMLElement>(".shell-tail")?.scrollTop).toBe(0);
+    } finally {
+      height.mockRestore();
+    }
   });
 
   it("draws the omitted line above the box when the daemon capped", () => {
