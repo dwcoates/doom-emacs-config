@@ -5914,6 +5914,126 @@ describe("reconciliation when the record cannot describe the work", () => {
     ).toBe(true);
   });
 
+  /** One book entry stating a unit's activity item, at pointer `at`. */
+  function unitEntry(
+    at: string,
+    unit: string,
+    item: conversationv1.AgentActivity["item"],
+  ): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: at }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item,
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+  const spawnStart: conversationv1.AgentActivity["item"] = {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {
+      result: { case: "start", value: create(conversationv1.AgentSubagentStartSchema, {}) },
+    }),
+  };
+  const monitorStart: conversationv1.AgentActivity["item"] = {
+    case: "monitor",
+    value: create(conversationv1.AgentMonitorSchema, {
+      result: { case: "start", value: create(conversationv1.AgentMonitorStartSchema, {}) },
+    }),
+  };
+
+  it("closes a spawn that started before the newest page as a subagent", async () => {
+    // A long session's live agent started pages ago; reading only the newest
+    // page closed it as a shell run and the store relabelled it `bash`.
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_old_spawn" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [unitEntry("9", "toolu_recent", monitorStart)],
+      boundary: { case: "more", value: create(conversationv1.HistoryMoreSchema, {}) },
+    });
+    h.persistence.olderPages = [
+      create(conversationv1.HistoryPageSchema, {
+        entries: [unitEntry("1", "toolu_old_spawn", spawnStart)],
+        boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+      }),
+    ];
+
+    await started(h);
+
+    const discriminators = h.persistence.buffered.map((entry) => entry.source.discriminator);
+    expect(discriminators).toContain("activity.subagent.failure.lost.swept_up");
+    expect(discriminators).not.toContain("agent_bash.success.interrupted.lost.swept_up");
+  });
+
+  it("walks down from the oldest entry it already holds", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_old_spawn" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [unitEntry("9", "toolu_a", monitorStart), unitEntry("8", "toolu_b", monitorStart)],
+      boundary: { case: "more", value: create(conversationv1.HistoryMoreSchema, {}) },
+    });
+    h.persistence.olderPages = [
+      create(conversationv1.HistoryPageSchema, {
+        entries: [unitEntry("1", "toolu_old_spawn", spawnStart)],
+        boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+      }),
+    ];
+
+    await started(h);
+
+    expect(h.persistence.olderPageAfter[0]).toBe("8");
+  });
+
+  it("reads no older page when the newest one describes every live unit", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_spawn" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [unitEntry("1", "toolu_spawn", spawnStart)],
+      boundary: { case: "more", value: create(conversationv1.HistoryMoreSchema, {}) },
+    });
+
+    await started(h);
+
+    expect(h.persistence.olderPageAfter).toEqual([]);
+  });
+
+  it("closes a MONITOR the book describes with the monitor's ended arm, not as a shell run", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_watch" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [unitEntry("1", "toolu_watch", monitorStart)],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    const discriminators = h.persistence.buffered.map((entry) => entry.source.discriminator);
+    expect(discriminators).toContain("activity.monitor.ended.swept_up");
+    expect(discriminators).not.toContain("agent_bash.success.interrupted.lost.swept_up");
+  });
+
   it("neither re-adopts nor closes a live WORKFLOW run", async () => {
     // WORKFLOW IS KICKED this wave: a terminal written for one would close an
     // obligation nothing in this build owns.

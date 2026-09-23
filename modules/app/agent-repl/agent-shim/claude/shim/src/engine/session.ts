@@ -42,6 +42,7 @@ import {
   announceLiveWork,
   closingAgentTerminal,
   closingBashTerminal,
+  closingMonitorTerminal,
   closingSubagentTerminal,
   findBashStart,
   findUnit,
@@ -3318,11 +3319,57 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * How much of the book a reconciliation reads to describe live work.
    *
    * Generous rather than exact: the descriptions it needs are the STARTS of
-   * units that are still open, which are near the end of the book by
-   * definition, and a budget too small would silently leave live work
-   * undescribed — which reads to a consumer as work that does not exist.
+   * units that are still open, which are USUALLY near the end of the book, so
+   * one page ordinarily finds them all. It is a page size, not a bound: work
+   * that started earlier is found by walking back (readBookFor).
    */
   const RECONCILE_PAGE_SIZE = 512;
+
+  /**
+   * The book, read from its newest page back until every unit in `units` has
+   * been found or the book's floor is reached.
+   *
+   * THE NEWEST PAGE IS NOT "WHERE LIVE WORK STARTED". A long session's detached
+   * agents can have started thousands of entries ago, and a unit the read never
+   * reached was closed as a SHELL run: on 2026-09-23 eight running subagents of
+   * the owner's main session were closed with shell terminals and relabelled
+   * `bash` in the store. The walk stops as soon as nothing is missing, so the
+   * ordinary case still reads one page.
+   */
+  async function readBookFor(
+    agentId: conversationv1.AgentId,
+    units: readonly string[],
+  ): Promise<conversationv1.HistoryEntryAt[]> {
+    const first = await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE, undefined, () =>
+      knowsAgent(agentId),
+    );
+    const book = [...first.entries];
+    const missing = new Set(units);
+    const mark = (entries: readonly conversationv1.HistoryEntryAt[]): void => {
+      for (const unit of [...missing]) {
+        const id = create(conversationv1.AgentActivityIdSchema, { value: unit });
+        if (findUnit(entries, id) !== undefined) missing.delete(unit);
+      }
+    };
+    mark(first.entries);
+    let boundary = first.boundary;
+    let pages = 1;
+    while (missing.size > 0 && boundary.case === "more") {
+      const oldest = book[book.length - 1]?.at;
+      if (oldest === undefined) break;
+      const older = await deps.persistence.readAgentPage(agentId, RECONCILE_PAGE_SIZE, oldest);
+      if (older.entries.length === 0) break;
+      book.push(...older.entries);
+      mark(older.entries);
+      boundary = older.boundary;
+      pages++;
+    }
+    LOGGER.debug(
+      { agent: agentId.value, pages, entries: book.length, unfound: missing.size },
+      "read the book back for the live work it must describe",
+    );
+    return book;
+  }
 
   /**
    * Whether the record plane ANSWERED "no rows under that agent yet".
@@ -3378,11 +3425,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let book: readonly conversationv1.HistoryEntryAt[] = [];
     if (open.liveDetached.length > 0 || open.liveAgents.length > 0) {
       try {
-        book = (
-          await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE, undefined, () =>
-            knowsAgent(agentId),
-          )
-        ).entries;
+        book = await readBookFor(
+          agentId,
+          open.liveDetached.map((work) => work.value),
+        );
       } catch (err) {
         if (answeredNoBookYet(err)) {
           LOGGER.debug(
@@ -3462,6 +3508,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const item = findUnit(book, run);
       if (item?.case === "subagent") {
         closing.push(closingSubagentTerminal(agentId, run));
+        continue;
+      }
+      if (item?.case === "monitor") {
+        closing.push(closingMonitorTerminal(agentId, run));
         continue;
       }
       const recorded = findBashStart(book, run);
@@ -3817,14 +3867,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
-      const page = await deps.persistence.readFirstPage(
+      const book = await readBookFor(
         agentId,
-        RECONCILE_PAGE_SIZE,
-        undefined,
-        () => knowsAgent(agentId),
+        handles.map((handle) => handle.value),
       );
       const undescribed: conversationv1.DetachedWorkId[] = [];
-      const announcements = announceLiveWork(page.entries, handles, (handle) => {
+      const announcements = announceLiveWork(book, handles, (handle) => {
         undescribed.push(handle);
       });
       for (const handle of undescribed) await recordUndescribedHandle(handle);
