@@ -1988,6 +1988,21 @@ describe("a compaction's summary record", () => {
     });
   });
 
+  it("releases the cut without a summary when its content is neither text nor blocks", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(compactBoundary("uuid-boundary"), foldContext());
+
+    // Act.
+    const output = fold.onSdkMessage(compactSummaryRecord("uuid-boundary-summary", 42), foldContext());
+
+    // Assert.
+    expect({ key: output.entries[0]?.upsertKey, summary: compactedOf(output.entries[0])?.summary }).toEqual({
+      key: "session:context_cut:uuid-boundary",
+      summary: undefined,
+    });
+  });
+
   it("releases nothing on a restarted shim's fold, which holds no boundary", () => {
     // Arrange: the fold is per process, so a shim that restarted between the
     // boundary and its summary holds nothing. The file plane records that cut
