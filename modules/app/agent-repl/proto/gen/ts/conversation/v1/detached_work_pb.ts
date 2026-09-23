@@ -12,7 +12,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { AgentActivityId, AgentBash, AgentMonitor, AgentSubagent } from "./agent_activity_pb";
+import type { AgentActivityId, AgentBash, AgentId, AgentMonitor, AgentSubagent } from "./agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "./agent_activity_pb";
 import type { AgentWorkflowStart } from "./workflow_pb";
 import { file_conversation_v1_workflow } from "./workflow_pb";
@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/detached_work.proto.
  */
 export const file_conversation_v1_detached_work: GenFile = /*@__PURE__*/
-  fileDesc("CiNjb252ZXJzYXRpb24vdjEvZGV0YWNoZWRfd29yay5wcm90bxIPY29udmVyc2F0aW9uLnYxIoUCChFBZ2VudERldGFjaGVkV29yaxItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjgKBm91dHB1dBgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRIAYgBARI5CghkZXRhY2hlZBgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtEZXRhY2hlZEgAEjcKB2NyZWF0ZWQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrQ3JlYXRlZEgAQggKBm9yaWdpbkIJCgdfb3V0cHV0IrcBChJEZXRhY2hlZFdvcmtPdXRwdXQSDAoEcGF0aBgBIAEoCRI/CghyZWFkYWJsZRgCIAEoCzIrLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRSZWFkYWJsZUgAEkMKCnVucmVhZGFibGUYAyABKAsyLS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrT3V0cHV0VW5yZWFkYWJsZUgAQg0KC3JlYWRhYmlsaXR5IhwKGkRldGFjaGVkV29ya091dHB1dFJlYWRhYmxlIh4KHERldGFjaGVkV29ya091dHB1dFVucmVhZGFibGUijwIKFERldGFjaGVkV29ya0RldGFjaGVkEjoKEGRldGFjaGVkX2Zyb21faWQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEjwKCXJlcXVlc3RlZBgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlUmVxdWVzdGVkSAASNwoHYnlfdXNlchgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlQnlVc2VySAASOwoJdGltZWRfb3V0GAQgASgLMiYuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VUaW1lZE91dEgAQgcKBWNhdXNlIhgKFkRldGFjaGVkQ2F1c2VSZXF1ZXN0ZWQiFQoTRGV0YWNoZWRDYXVzZUJ5VXNlciIrChVEZXRhY2hlZENhdXNlVGltZWRPdXQSEgoKdGltZW91dF9tcxgBIAEoBCJMChNEZXRhY2hlZFdvcmtDcmVhdGVkEjUKDHdvcmtfY3JlYXRlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hhYmxlV29yayLjAQoORGV0YWNoYWJsZVdvcmsSMgoIc3ViYWdlbnQYASABKAsyHi5jb252ZXJzYXRpb24udjEuQWdlbnRTdWJhZ2VudEgAEioKBGJhc2gYAiABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoSAASNwoId29ya2Zsb3cYAyABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N0YXJ0SAASMAoHbW9uaXRvchgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vbml0b3JIAEIGCgR3b3JrIh8KDkRldGFjaGVkV29ya0lkEg0KBXZhbHVlGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_workflow]);
+  fileDesc("CiNjb252ZXJzYXRpb24vdjEvZGV0YWNoZWRfd29yay5wcm90bxIPY29udmVyc2F0aW9uLnYxIq4CChFBZ2VudERldGFjaGVkV29yaxItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjgKBm91dHB1dBgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRIAYgBARInCgVvd25lchgFIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjkKCGRldGFjaGVkGAIgASgLMiUuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0RldGFjaGVkSAASNwoHY3JlYXRlZBgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtDcmVhdGVkSABCCAoGb3JpZ2luQgkKB19vdXRwdXQitwEKEkRldGFjaGVkV29ya091dHB1dBIMCgRwYXRoGAEgASgJEj8KCHJlYWRhYmxlGAIgASgLMisuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya091dHB1dFJlYWRhYmxlSAASQwoKdW5yZWFkYWJsZRgDIAEoCzItLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRVbnJlYWRhYmxlSABCDQoLcmVhZGFiaWxpdHkiHAoaRGV0YWNoZWRXb3JrT3V0cHV0UmVhZGFibGUiHgocRGV0YWNoZWRXb3JrT3V0cHV0VW5yZWFkYWJsZSKPAgoURGV0YWNoZWRXb3JrRGV0YWNoZWQSOgoQZGV0YWNoZWRfZnJvbV9pZBgBIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5SWQSPAoJcmVxdWVzdGVkGAIgASgLMicuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VSZXF1ZXN0ZWRIABI3CgdieV91c2VyGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VCeVVzZXJIABI7Cgl0aW1lZF9vdXQYBCABKAsyJi5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRDYXVzZVRpbWVkT3V0SABCBwoFY2F1c2UiGAoWRGV0YWNoZWRDYXVzZVJlcXVlc3RlZCIVChNEZXRhY2hlZENhdXNlQnlVc2VyIisKFURldGFjaGVkQ2F1c2VUaW1lZE91dBISCgp0aW1lb3V0X21zGAEgASgEIkwKE0RldGFjaGVkV29ya0NyZWF0ZWQSNQoMd29ya19jcmVhdGVkGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGFibGVXb3JrIuMBCg5EZXRhY2hhYmxlV29yaxIyCghzdWJhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN1YmFnZW50SAASKgoEYmFzaBgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2hIABI3Cgh3b3JrZmxvdxgDIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3RhcnRIABIwCgdtb25pdG9yGAQgASgLMh0uY29udmVyc2F0aW9uLnYxLkFnZW50TW9uaXRvckgAQgYKBHdvcmsiHwoORGV0YWNoZWRXb3JrSWQSDQoFdmFsdWUYASABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_workflow]);
 
 /**
  * Work that has left the turn. It is announced HERE and nowhere else after
@@ -55,6 +55,28 @@ export type AgentDetachedWork = Message<"conversation.v1.AgentDetachedWork"> & {
    * @generated from field: optional conversation.v1.DetachedWorkOutput output = 4;
    */
   output?: DetachedWorkOutput | undefined;
+
+  /**
+   * WHOSE WORK THIS IS: the agent that made the spawning call. Detached work
+   * is drawn ONLY in its owner's feed — the main agent's work on the root
+   * feed, a subagent's in that subagent's own feed — at the spawning call's
+   * own row.
+   *
+   * THE OWNER IS NOT THE ANNOUNCER. The book this announcement rides is the
+   * agent that happened to state it, which is frequently the main agent even
+   * for a subagent's work: the vendor's task stream is session-wide and names
+   * no agent at all. Reading the announcer as the owner drew a subagent's
+   * background shell on the root feed.
+   *
+   * UNSET when the producer never observed the spawning call — a backgrounded
+   * subagent's own calls never reach the stream plane. A consumer then takes
+   * the owner from the agent whose stream carried the spawning call, and when
+   * neither states one the work is unplaceable: it is reported, never
+   * defaulted to the main agent.
+   *
+   * @generated from field: conversation.v1.AgentId owner = 5;
+   */
+  owner?: AgentId | undefined;
 
   /**
    * HOW it came to be detached. The two are genuinely different situations for
