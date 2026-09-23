@@ -67,6 +67,7 @@ import type {
   SubfeedView,
 } from "./renderers.js";
 import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
+import { keepScrolled } from "./keep-scroll.js";
 import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
@@ -817,6 +818,14 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       // (`.tool-fold` and its siblings — a whole skill or tool-call card is
       // one) are keyed by class, and this is the one seam that carries them.
       carryExpanded(previous, body);
+      // A CARD THE READER IS SCROLLED INSIDE IS MORPHED, NOT REPLACED
+      // (keep-scroll.ts): the box they scrolled never leaves the document, so
+      // a push cannot throw them back to its top. It runs after the fold
+      // carry, so the morph brings `.expanded` along.
+      if (keepScrolled(previous, body)) {
+        mirrorState(state);
+        return;
+      }
       stopTicking(previous);
       previous.remove();
     }

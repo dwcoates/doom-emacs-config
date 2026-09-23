@@ -350,6 +350,26 @@ describe("createFeedController: upserts", () => {
     expect(observer.takeRecords().flatMap((record) => [...record.removedNodes])).toEqual([]);
   });
 
+  it("keeps a box the reader scrolled when its card is re-pushed", () => {
+    // Arrange -- a card whose output box the reader scrolled 80px into.
+    const boxed = (): HTMLElement => {
+      const card = document.createElement("div");
+      const box = document.createElement("pre");
+      box.className = "tool-output";
+      card.append(box);
+      return card;
+    };
+    const { controller, host } = fixture(undefined, {}, { renderers: { response: boxed } });
+    controller.applyPage(page([responseRow("a", "one")]), "replace");
+    const box = host.querySelector<HTMLElement>('[data-feed-row="a"] .tool-output');
+    if (box === null) throw new Error("the card drew no box");
+    box.scrollTop = 80;
+    // Act
+    controller.upsert(responseRow("a", "two"));
+    // Assert -- the same box, still where the reader left it.
+    expect([host.querySelector('[data-feed-row="a"] .tool-output') === box, box.scrollTop]).toEqual([true, 80]);
+  });
+
   it("refuses a row with no id, the id being the upsert key", () => {
     const { controller } = fixture();
     expect(() => controller.upsert(create(FeedRowSchema, {}))).toThrow(MalformedView);
