@@ -246,15 +246,20 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 		})
 }
 
-// SetViewed raises the workspace's VIEWED marker, which draws its row PARTIAL.
+// SetViewed raises the workspace's VIEWED marker, which draws its row PARTIAL
+// — but only while the row is DONE.
 //
 // The editor is the only caller (MarkWorkspaceViewed): dwell is an editor
-// fact. There is no companion lowering setter, deliberately — the marker is
-// cleared by the row's next STATUS CHANGE and by nothing else (`wsState.
-// noteArm`), so the sidebar and the Emacs tab-bar reset on the same rule.
+// fact, and the editor reports it whatever the status. Whether it takes is
+// the roster's decision, made in the render this mutation runs (`wsState.
+// noteArm`): a report on a row that is not done is dropped there, under the
+// same lock, before anything is published. There is no companion lowering
+// setter, deliberately — the marker is cleared by the row's next STATUS
+// CHANGE (`wsState.noteArm`), so the sidebar and the Emacs tab-bar reset on
+// the same rule.
 func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_viewed",
-		"the roster took the editor's viewed report and drew the row PARTIAL",
+		"the roster took the editor's viewed report; the row is PARTIAL only while it is done",
 		nil, func(s *wsState) { s.viewed = true })
 }
 
