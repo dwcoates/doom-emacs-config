@@ -339,6 +339,52 @@ func (s *store) TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombst
 	})
 }
 
+// ReplaceHeldPromptSaid replaces a standing hold's content and discards its
+// verdict in one transaction: the classification columns go NULL and the
+// acceptance goes false, because both were about the content being replaced.
+// queued_at is untouched, so the hold keeps its place in the queue. A retired
+// or unknown hold is refused.
+func (s *store) ReplaceHeldPromptSaid(ctx context.Context, turn TurnID, said *conversationv1.UserSaid) error {
+	const op = "daemon.wsm.replace_held_prompt_said"
+	fields := dlog.Context{"turn": string(turn)}
+	if said == nil {
+		err := errors.New("wsm: a held prompt carries what the user said")
+		s.log.Error(op, "refused a replacement with no submission", withError(fields, err))
+		return err
+	}
+	blob, err := proto.Marshal(said)
+	if err != nil {
+		wrapped := fmt.Errorf("wsm: encode held prompt submission: %w", err)
+		s.log.Error(op, "refused an unencodable replacement submission", withError(fields, wrapped))
+		return wrapped
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireStandingHold(ctx, tx, turn); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`UPDATE held_prompts SET said = ?, classification_arm = NULL, classification_reason = NULL,
+			   classification_command = NULL, classification_at = NULL, accepted = 0
+			 WHERE turn_id = ?`, blob, turn)
+		return err
+	})
+}
+
+// HeldPromptByTurn loads one hold by its turn, INCLUDING a retired one, so a
+// caller can tell a turn nothing was ever held under from a hold that was
+// delivered or dropped. The bool reports whether any row exists.
+func (s *store) HeldPromptByTurn(ctx context.Context, turn TurnID) (HeldPrompt, bool, error) {
+	loaded, err := s.loadHeldPrompts(ctx, "daemon.wsm.held_prompt_by_turn", dlog.Context{"turn": string(turn)},
+		`SELECT `+heldPromptColumns+` FROM held_prompts WHERE turn_id = ?`, turn)
+	if err != nil {
+		return HeldPrompt{}, false, err
+	}
+	if len(loaded) == 0 {
+		return HeldPrompt{}, false, nil
+	}
+	return loaded[0], true, nil
+}
+
 // HeldPrompts loads one workspace's STANDING holds, all-or-nothing. Retired
 // holds are not standing and are not returned.
 func (s *store) HeldPrompts(ctx context.Context, id WorkspaceID) ([]HeldPrompt, error) {
