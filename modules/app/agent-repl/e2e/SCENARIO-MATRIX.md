@@ -90,7 +90,7 @@ Two further limits, stated rather than hidden:
 | `!bash-detach-live` | ungrounded | detachedbash_e2e_test.go, detachedlost_e2e_test.go | — | — | Go: TestBashDetachedLiveNeverSettles asserts the live, never-settling shape. detachedlost_e2e_test.go then drives all three `DetachedLost` arms off this same scenario — TestDetachedLostWentSilent, TestDetachedLostFileVanished, TestDetachedLostSweptUp — each asserting `FeedShellSettled.outcome.lost` plus the sidecar's own `reason` key naming the arm. | covered |
 | `!bash-detach-poll` | ungrounded | detachedbash_e2e_test.go | — | — | Go: TestBashDetachExplicitPoll asserts settled exit 0, spool text, and a negative check that no TopbarWarning.UnmodeledTool names TaskOutput. | covered |
 | `!bash-fail` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashNonzeroExit asserts Succeeded verdict despite nonzero exit, exact stdout text, and FeedToolCallReturned.exit.code == 3 — the command's own verdict on itself, drawn on the same FeedShellExit chip the detached shell wears. | covered |
-| `!bash-hold` | ungrounded | detachedbash_e2e_test.go | — | — | Go: TestBashHoldStaysForegroundUntilInterrupted asserts the live FOREGROUND Bash unit, the negative that no detached_shell row is ever drawn for it, and that a real daemon Interrupt is the only terminal it reaches (turn_ended.interrupted). GAP recorded at the test: DetachForeground's `unsupported` refusal is a shim.v1 verb with no caller-facing rpc, so that arm stays out of reach from this layer. | covered |
+| `!bash-hold` | ungrounded | detachedbash_e2e_test.go, rollout_e2e_test.go | — | — | Go: TestBashHoldStaysForegroundUntilInterrupted asserts the live FOREGROUND Bash unit, the negative that no detached_shell row is ever drawn for it, and that a real daemon Interrupt is the only terminal it reaches (turn_ended.interrupted). GAP recorded at the test: DetachForeground's `unsupported` refusal is a shim.v1 verb with no caller-facing rpc, so that arm stays out of reach from this layer. | covered |
 | `!bash-image` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashImageOutput asserts Succeeded verdict and specifically the FeedToolCallReturned.image arm — a FeedImageBlock whose src is the data url the daemon composed, captioned with the command line. | covered |
 | `!bash-spill` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashPartialOutputWithSpill asserts Succeeded verdict, exact truncation-phrase text. | covered |
 | `!bash-timeout` | grounded | interrupt_e2e_test.go | — | — | Go: TestBashInterruptedByTimeout asserts terminal is Concluded (not Interrupted), detached shell stays Live, non-empty spool text. | covered |
@@ -189,9 +189,11 @@ Two further limits, stated rather than hidden:
 | `!slash-shape-a-unnamed` | ungrounded | slashcommands_e2e_test.go | — | — | Go: TestSlashShapeAUnnamed asserts exact transcript content string, absence of command-name, exact conclusion text. | covered |
 | `!subagent` | grounded | refusals_e2e_test.go, subagents_e2e_test.go | feed-families.layer.test.ts, subfeeds.layer.test.ts | — | Go: TestSubagentSyncNestedActivity/TestBubbleRefusedNotDeliverable assert exact Label/Description text, sub-feed confinement. Web: subfeeds.layer asserts exact SYNC_COMMISSION string, feedContainer structure. | covered |
 | `!subagent-detached` | grounded | subagents_e2e_test.go | feed-families.layer.test.ts, subfeeds.layer.test.ts | — | Go: TestSubagentDetached asserts root row is the detached wrapper, exact completion text confined to sub-feed. Web: subfeeds.layer asserts exact DETACHED_COMMISSION string. | covered |
+| `!subagent-detached-hold` | TODO | — | — | — | No counted e2e layer drives this scenario. | uncovered |
 | `!subagent-detached-live` | ungrounded | refusals_e2e_test.go | — | — | Go: TestBubbleRefusedAgentBusy asserts AgentBusy()!=nil; TestUnknownAgentOnUpdateAgent asserts exact Connect code + message substring. | covered |
 | `!subagent-detached-utterance` | grounded-in-shape | subagents_e2e_test.go | — | — | Go: TestSubagentDetachedUtteranceStaysOffTopLevel asserts bubble stays Live, exact utterance text confined to sub-feed (positive+negative on exact string). | covered |
 | `!subagent-failed` | ungrounded | subagents_e2e_test.go | — | — | Go: TestSubagentFailed asserts the DETACHED wrapper placement, the head still naming the commission, and FeedSubagentSettled.outcome == failed with all three neighbouring arms (succeeded, cancelled, lost) checked ABSENT — the discrimination a resolver that collapsed the four would fail. | covered |
+| `!subagent-interleaved` | TODO | — | — | — | No counted e2e layer drives this scenario. | uncovered |
 | `!task-change` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts a checklist row with Status.GetRunning()!=nil. | covered |
 | `!task-create` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts turn concluded and footer LiveWork.Tasks.Total==2. | covered |
 | `!task-reject` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts checklist rows persist and LiveWork.Tasks chip still non-nil after rejection. | covered |
@@ -226,11 +228,11 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 
 - Covered (at least one STRONG, specific-shape assertion in a counted layer): **150**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
-- Uncovered (no counted layer drives the scenario at all): **0**
-- Total canonical scenarios: 150
+- Uncovered (no counted layer drives the scenario at all): **2**
+- Total canonical scenarios: 152
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 149 scenarios referenced across 24 files
+- Go e2e (non-emacs): 149 scenarios referenced across 25 files
 - Webapp layer: 35 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -247,7 +249,8 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
-_None._
+- `!subagent-detached-hold`
+- `!subagent-interleaved`
 
 <!-- END DERIVED: uncovered -->
 
