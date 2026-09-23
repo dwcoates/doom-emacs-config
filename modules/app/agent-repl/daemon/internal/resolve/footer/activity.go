@@ -3,6 +3,9 @@ package footer
 import (
 	"time"
 
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/reflect/protoreflect"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -576,4 +579,61 @@ func (r *resolver) loadingActivity(s *wsState) *frontendv1.FooterStatusLoadingAc
 		Kind: &frontendv1.FooterStatusLoadingActivity_ContextInjected{
 			ContextInjected: &frontendv1.FooterStatusActivityContextInjected{Text: s.loading.line}},
 	}
+}
+
+// activityLine is the published activity line as the log states it: the kind
+// arm that stands and what it says. The zero value is no line at all.
+type activityLine struct {
+	kind string
+	text string
+}
+
+// name is the kind for the record, "none" when no line stands.
+func (l activityLine) name() string {
+	if l.kind == "" {
+		return "none"
+	}
+	return l.kind
+}
+
+// activityLineOf reads the one activity line a status carries, whichever status
+// arm and whichever kind arm it is. It reads the contract's SHAPE — every
+// status arm has an `activity` field whose line is its `kind` oneof — rather
+// than enumerating the arms, so a kind added to the contract is recorded the
+// day it is published instead of the day someone remembers this function.
+//
+// THE `at` STAMP IS NOT PART OF THE LINE. The line is what the reader sees;
+// a re-stamp of the same words is not a change to it.
+func activityLineOf(status *frontendv1.FooterStatus) activityLine {
+	m := status.ProtoReflect()
+	armField := m.WhichOneof(m.Descriptor().Oneofs().ByName("status"))
+	if armField == nil || armField.Kind() != protoreflect.MessageKind {
+		return activityLine{}
+	}
+	arm := m.Get(armField).Message()
+	activityField := arm.Descriptor().Fields().ByName("activity")
+	if activityField == nil || activityField.Kind() != protoreflect.MessageKind || !arm.Has(activityField) {
+		return activityLine{}
+	}
+	activity := arm.Get(activityField).Message()
+	kinds := activity.Descriptor().Oneofs().ByName("kind")
+	if kinds == nil {
+		return activityLine{}
+	}
+	kindField := activity.WhichOneof(kinds)
+	if kindField == nil {
+		return activityLine{}
+	}
+	line := activityLine{kind: string(kindField.Name())}
+	if kindField.Kind() != protoreflect.MessageKind {
+		line.text = activity.Get(kindField).String()
+		return line
+	}
+	kind := activity.Get(kindField).Message()
+	if text := kind.Descriptor().Fields().ByName("text"); text != nil && text.Kind() == protoreflect.StringKind {
+		line.text = kind.Get(text).String()
+		return line
+	}
+	line.text = prototext.MarshalOptions{}.Format(kind.Interface())
+	return line
 }

@@ -380,8 +380,14 @@ type wsState struct {
 	compacting bool
 	// compaction is the compaction's own progress line, from whichever
 	// producer is compacting — the vendor's auto-compaction or the cold gate's
-	// answered remediation. Nil when nothing is compacting.
+	// answered remediation. Nil when nothing is compacting. It is only ever
+	// stood and ended through compaction.go's standCompaction/endCompaction,
+	// which bind it to the act it narrates.
 	compaction *standing
+	// compactionEnd is the dwell that retires a CONCLUDED phase's line
+	// (`started`, `failed`), nil when the standing line narrates an act still
+	// in flight.
+	compactionEnd Timer
 
 	// interrupting is the registered-interrupt flag SetInterrupting installs.
 	interrupting bool
@@ -483,6 +489,9 @@ type wsState struct {
 	// lastArm is the status arm the last published view carried, so a CHANGE
 	// of arm is recorded once rather than on every push.
 	lastArm string
+	// lastLine is the activity line the last published view carried, so a
+	// CHANGE to it can be recorded and a push that leaves it standing is not.
+	lastLine activityLine
 
 	// retiredWork are the detached handles that have already reached a
 	// terminal, so a REPLAY of the run's opening frames cannot count it live
@@ -567,6 +576,18 @@ func (s *wsState) observeArm(view *frontendv1.FooterView) (arm string, changed b
 	}
 	s.lastArm = arm
 	return arm, true, previous
+}
+
+// observeLine folds the published view's activity line in, answering the line,
+// whether it CHANGED, and the line it replaced.
+func (s *wsState) observeLine(view *frontendv1.FooterView) (line activityLine, changed bool, previous activityLine) {
+	line = activityLineOf(view.GetStrip().GetStatus())
+	previous = s.lastLine
+	if line == previous {
+		return line, false, previous
+	}
+	s.lastLine = line
+	return line, true, previous
 }
 
 // nextOrder mints the next panel order.
