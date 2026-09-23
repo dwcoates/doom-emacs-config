@@ -128,3 +128,39 @@ func TestStagedNamesTheBuildFrontendLayout(t *testing.T) {
 		}
 	}
 }
+
+func TestAnOverrideReplacesEveryStepWithOneCommand(t *testing.T) {
+	// Arrange
+	b, runner, _ := newScriptBuilder(t, map[string]runAnswer{})
+	b.Override = "/harness/fake-build"
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	calls := runner.Calls()
+	if len(calls) != 1 || strings.Join(calls[0], " ") != "/harness/fake-build --out /staging/1" {
+		t.Fatalf("steps = %v, want the override alone, given the staging directory", calls)
+	}
+}
+
+func TestAFailedOverrideIsTheBuildStep(t *testing.T) {
+	// Arrange
+	b, _, log := newScriptBuilder(t, map[string]runAnswer{"/harness/fake-build --out /staging/1": {out: "fake build refused", code: 1}})
+	b.Override = "/harness/fake-build"
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "build" || !strings.Contains(failed.Detail, "fake build refused") {
+		t.Fatalf("Build = %v, want the override's failure named as the build step", err)
+	}
+	if !loggedTo(log, "error", "a build step failed") {
+		t.Fatalf("records = %+v, want the failure at ERROR", log.Records())
+	}
+}

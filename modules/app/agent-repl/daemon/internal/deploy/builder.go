@@ -51,9 +51,13 @@ type ScriptBuilder struct {
 	ModuleRoot string
 	// LogDir is where each build's whole output is archived.
 	LogDir string
-	Runner Runner
-	Clock  Clock
-	Log    dlog.Logger
+	// Override, when set, is ONE executable run as `<Override> --out
+	// <staging>` in place of every step: a harness's stand-in for the whole
+	// build, so no test ever regenerates protobufs or runs a real build.
+	Override string
+	Runner   Runner
+	Clock    Clock
+	Log      dlog.Logger
 }
 
 // buildStep is one command of a build.
@@ -69,13 +73,7 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 		return &BuildFailed{Step: "setup", Detail: err.Error(), Log: b.LogDir}
 	}
 	logPath := filepath.Join(b.LogDir, fmt.Sprintf("build-%d.log", b.Clock.Now().UnixNano()))
-	steps := []buildStep{{name: "proto", argv: []string{"make", "-C", filepath.Join(b.ModuleRoot, "proto"), "all"}}}
-	for _, target := range Targets {
-		steps = append(steps, buildStep{
-			name: target,
-			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},
-		})
-	}
+	steps := b.steps(staging)
 	var archive strings.Builder
 	for _, step := range steps {
 		fields := dlog.Context{"step": step.name, "argv": step.argv, "log": logPath}
@@ -99,6 +97,22 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 	b.archive(logPath, archive.String())
 	b.Log.Info(opBuild, "every component built into staging", dlog.Context{"staging": staging, "log": logPath})
 	return nil
+}
+
+// steps are the build's commands, in order: the protobufs, then every
+// build-frontend target into staging — or the Override alone.
+func (b *ScriptBuilder) steps(staging string) []buildStep {
+	if b.Override != "" {
+		return []buildStep{{name: "build", argv: []string{b.Override, "--out", staging}}}
+	}
+	steps := []buildStep{{name: "proto", argv: []string{"make", "-C", filepath.Join(b.ModuleRoot, "proto"), "all"}}}
+	for _, target := range Targets {
+		steps = append(steps, buildStep{
+			name: target,
+			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},
+		})
+	}
+	return steps
 }
 
 // archive writes a build's output. A failure to archive is loud but does not
