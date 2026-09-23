@@ -64,3 +64,40 @@ Status: catalog only, nothing fixed. Evidence: `bin/logs.sh --workspace doom|gli
 
 - 92 `detached_unknown_unit`, 4 `subagent_without_start`, 1 `row_without_identity` in doom —
   the 200-entry replay (09-21 item 2), still unfixed.
+
+---
+
+## Follow-ups found while fixing (2026-09-23, after the fixes landed)
+
+- A handover's successor never checks whether the shims it adopted are on the deployed build:
+  it records a shim's build only at StartSession, so an adopted shim reports none and is left
+  alone. The bounce added in `becomeIncumbent` therefore relaunches nothing today.
+- The staleness check compares the shim's reported build with the DAEMON's `.built-sha`, not
+  the shim bundle's, so a daemon-only deploy would read every shim as stale.
+- The sessions were moved to the new SDK by hand with RestartWorkspace. glimmer's old shim
+  (pid 99409) was left running beside its parked replacement.
+
+## Log audit, all backends, 09-15 → 09-23 (8001 warn/error records)
+
+Still happening after 11:50 today:
+- Store refuses sidecar batches: a row's kind would change "keepalive" → "page_line" (202 total,
+  14 today); the sidecar then parks the whole transcript file for the process's life.
+- Replay noise: `detached_unknown_unit` (723), `subagent_without_start` (185),
+  `row_without_identity` (110).
+- Every handover: Emacs logs WatchDaemon/WatchWorkspaceRoster "producer closed without an end
+  frame" at ERROR, and the relaunch force-kills old shims that miss the stand-down window.
+- ClientLog refusals during a handover: `transferring_away` (663) and `not_yet_adopted` (667)
+  are unlanded arms, logged as WARN floods. The not_yet_adopted half is fixed.
+
+Historical, since fixed or not seen for days:
+- Store unreachable 09-15 to 09-18 (sidecar panic `makeslice: cap out of range` twice; shim
+  store writes DROPPED 366, cursor recovery, suspended production).
+- `store.rpc.watch-bash-run` refusals (1833) plus `shimclient.watch_bash` ERROR (48) for a
+  refusal the daemon calls expected; last seen 09-21.
+- Emacs log routing "owned target vanished" (195 push-invalid, 09-17 to 09-18).
+- The select/bind revival cancelled by the caller's 10s deadline (SelectWorkspace 11, bind 7).
+- ReadTranscripts BigInt float (fixed 09-21), synthesized-title splice (09-15/16), the
+  frameUndecodable card (fixed today), the quarantined merge (fixed), classifier interrupt refusals.
+- Smaller: 33 slow write_batch queries, context-panel category color "warning", KillWorkspace on
+  a missing session row, a held-prompt verdict written after tombstone, `ListAgents` unmodeled,
+  7 absent log sinks for deleted worktrees and test directories.
