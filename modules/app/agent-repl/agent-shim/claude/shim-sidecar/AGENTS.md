@@ -1054,8 +1054,11 @@ vendor equivalent in turn.
 From this directory:
 
 ```bash
-go build ./... && go vet ./... && go test -race ./...
+go build ./... && go vet ./... && ../../../bin/background.sh go test -race ./...
 ```
+
+Every test run goes through `../../../bin/background.sh`, at background
+priority; the bare `go test` lines below are the arguments to prefix with it.
 
 THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
 unit packages and `integration/`, run once each — it is not a third suite. The

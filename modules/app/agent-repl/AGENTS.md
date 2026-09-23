@@ -27,9 +27,47 @@ Sources resolve module-root siblings (`prompts/`, `images/`, `hooks/`, `bin/`,
 The canonical suite invocation, from `modules/app/agent-repl/`:
 
 ```bash
-emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit   # everything
-emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
+bin/background.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit   # everything
+bin/background.sh emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
 ```
+
+### Every test runs at background priority: `bin/background.sh`
+
+Test load must never starve the owner's live runtime (shim, daemon, store,
+sidecar, Emacs, webview). `bin/background.sh <cmd>` runs a command and its
+whole process tree at the host's background priority, and it is the ONE
+helper every test entry point goes through.
+
+- macOS: `taskpolicy -b` (PRIO_DARWIN_BG), which throttles CPU and disk I/O.
+- Linux: `nice -n 19`, which only the e2e sandbox container ever reaches.
+- Any other platform: REFUSED with exit 78, never run at normal priority.
+- It is idempotent: a process already at background priority (read with
+  `getpriority`, not from the environment) runs its command straight through.
+- It exports `AGENT_REPL_BACKGROUND_PRIORITY`, and only it sets it.
+
+How each kind of entry point routes through it:
+
+- Every bash test entry point (`test-*.sh`, `test-all.sh`, `suite-slot.sh`,
+  the coverage and repeat runners, the `.claude/` test hooks) carries this
+  prologue as its FIRST executable line:
+  `[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"`
+- Every Makefile test recipe runs under `$(BACKGROUND)`, defined with the
+  standard `BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))<rel>/bin/background.sh)`.
+- Every npm `test*`, `coverage*` and `smoke` script and its `pre*` hook starts
+  with the helper; a compound one is wrapped whole as `<helper> sh -c '...'`.
+- The runners that cannot be wrapped from outside refuse to start without the
+  marker: every vitest config imports `bin/require-background.mjs`,
+  `lisp/test-helpers.el` signals in batch, and the Go integration harness's
+  `WithRunRoot` (daemon integration and e2e) returns 1.
+  - So a bare `npx vitest`, `emacs -batch -l lisp/test-*.el` or
+    `go test -tags integration` fails loudly; prefix it with `bin/background.sh`.
+- The e2e sandbox entrypoint execs every command through the helper.
+- The live runtime and the deploy builds (`deploy-all.sh`, `build-frontend.sh`,
+  `launchd/`, the non-test `lisp/*.el`, npm `build`/`dev`) are NEVER demoted.
+
+`bin/test-background.sh` (the `background-harness` suite) scans the repository
+and fails on any entry point that bypasses the helper, and on any live-runtime
+or deploy path that references it.
 
 ### One suite at a time: `bin/suite-slot.sh`
 
@@ -49,6 +87,9 @@ with nothing wrong with the product. So:
 bin/suite-slot.sh npm test          # from the package dir; wraps, never relocates
 bin/suite-slot.sh go test ./... -count=1
 ```
+
+`bin/suite-slot.sh` re-execs itself through `bin/background.sh`, so a command
+it runs is at background priority too.
 
 The gate counts what is actually running, claiming slots as directories via
 `mkdir` (atomic, fails if the name exists), and reclaims a slot whose recorded
@@ -1535,7 +1576,7 @@ never set it.
   on this machine (Emacs.app, `emacs` interactive, emacsclient, probe
   instances included); only the lead does, and only through
   `bin/realtest.sh` or a deliberate owner-facing action.**
-  - Batch ERT suites (`emacs -batch -Q -l ert -l lisp/test-*.el ...`) remain
+  - Batch ERT suites (`bin/background.sh emacs -batch -Q -l ert -l lisp/test-*.el ...`) remain
     allowed because they open no frame and no server.
   - A realtest starts Emacs once per test with `open -g -a Emacs` only.
   - Reason (owner, 2026-09-11): an agent's repeated `Emacs -Q` probes stole
