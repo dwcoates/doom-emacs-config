@@ -943,7 +943,7 @@ async function jump_(click: JumpClick, deps: ExpandedDeps): Promise<void> {
  */
 function notice(click: JumpClick, deps: ExpandedDeps, reason: string): void {
   deps.notices.raise(click.key, click.resolution);
-  log.warn("a footer detached-work row's entry is not on screen", {
+  const record = {
     operation: "footer.expanded.jump-unreachable",
     context: {
       work_id: click.work,
@@ -952,7 +952,15 @@ function notice(click: JumpClick, deps: ExpandedDeps, reason: string): void {
       jump: click.resolution,
       reason,
     },
-  });
+  };
+  // A KIND THAT DRAWS NO ENTRY BY DESIGN (a monitor) is not a defect to
+  // remediate, so its record is INFO; every other miss — an entry the daemon
+  // has not drawn, or one it named that the page could not show — is WARN.
+  if (click.resolution === "noFeedEntry") {
+    log.info("a footer detached-work row's kind draws no feed entry", record);
+  } else {
+    log.warn("a footer detached-work row's entry is not on screen", record);
+  }
   deps.redraw();
 }
 
