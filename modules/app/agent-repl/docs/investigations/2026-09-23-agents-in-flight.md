@@ -19,6 +19,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/usage-corner-gap-animation` | `~/.config/doom-worktrees/usage-corner-gap-animation` | Right gap equals the top gap, a two-phase hover slide, the same font size and alignment, and no hover reflow. | `aba2fd3eb1ac85a69` | 17:50 |
 | `fix/shim-hides-keepalive` | `~/.config/doom-worktrees/shim-hides-keepalive` | The shim never serves a keep-alive turn's prompt, reply, usage or terminal. | `a5f0d85cf57c43d07` | 17:50 |
 | `fix/footer-rows-and-work-ids` | `~/.config/doom-worktrees/footer-rows-and-work-ids` | The detached-work id in every async bubble header. A footer row click either selects its entry or shows and logs "not on screen", never neither. The 0-token rows. The footer capped at 4 rows. | `a0ac08889b72fae26` | 17:50 |
+| `fix/thinking-collapses-when-superseded` | `~/.config/doom-worktrees/thinking-collapses-when-superseded` | A thinking bubble shows in full until the next agent response in its feed. The daemon's `superseded` flag then collapses it to 2 lines. A user expansion is kept, and the collapse never moves the reader. | `a46d90f097aab0cae` | 17:55 |
 
 ## Still waiting on the owner
 
