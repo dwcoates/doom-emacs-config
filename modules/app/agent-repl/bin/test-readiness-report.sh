@@ -6,11 +6,16 @@
 #
 # test-readiness-report.sh — hermetic tests for readiness-report.sh.
 #
-# Builds a throwaway GIT repository around a copy of readiness-report.sh (the
-# script is all git plumbing, so a scratch repo with real commits is the honest
+# Builds a throwaway repository around a copy of readiness-report.sh (the
+# script is all git plumbing, so a scratch repo with commits is the honest
 # fixture — the same approach test-build-frontend.sh takes with a scratch tree)
 # and stubs `pgrep` and `ps` on PATH so no real process, launchd job, or
-# machine state is consulted. Tests assert what the JSON says under each
+# machine state is consulted.
+#
+# NO REAL GIT RUNS HERE (owner rule). The repository is bin/fake-git.sh's model
+# (history, index and working tree as files under <root>/.fakegit), installed as
+# the only `git` on PATH for the harness AND the script it runs; the harness
+# refuses to start if any other `git` would answer. Tests assert what the JSON says under each
 # deployed-vs-source scenario.
 #
 # Every scenario also re-asserts that the document PARSES. "Valid JSON always,
@@ -22,9 +27,8 @@
 
 set -euo pipefail
 
-# A pre-commit hook exports its live index to children. This harness owns only
-# scratch repositories, so inheriting that binding would let fixture `git add`
-# and `git commit` rewrite the caller's real staging index.
+# A pre-commit hook exports its live index to children. The fake git ignores
+# them, but nothing here should carry a binding to the caller's repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 # The services' build reports live under $AGENT_REPL_LOCK_DIR when it is set.
 # A value inherited from the caller would point every fixture at a real run
@@ -34,6 +38,19 @@ unset AGENT_REPL_LOCK_DIR
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/readiness-report.sh"
 LIB_UNDER_TEST="$THIS_DIR/lib-deploy-stamp.sh"
+
+# The fake git, first on PATH for the whole run. Every invocation's argv is
+# recorded in FAKE_GIT_LOG.
+FAKE_GIT_BIN="$(mktemp -d)"
+cp "$THIS_DIR/fake-git.sh" "$FAKE_GIT_BIN/git"
+chmod +x "$FAKE_GIT_BIN/git"
+export PATH="$FAKE_GIT_BIN:$PATH"
+export FAKE_GIT_LOG="$FAKE_GIT_BIN/argv.log"
+trap 'rm -rf "$FAKE_GIT_BIN"' EXIT
+if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
+    echo "test-readiness-report.sh: the fake git is not the git on PATH; refusing to run real git" >&2
+    exit 2
+fi
 
 # The fixtures stamp with the SAME functions the report reads with, so a
 # hand-rolled id here can never agree with a broken script.
@@ -52,11 +69,9 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 
 # --- fixture ----------------------------------------------------------------
 
+# git_c ROOT ARGS... — git (the fake) run in the fixture ROOT.
 git_c() {
-    # Scratch commits are fixture construction, not authored repository
-    # changes. Isolate them from the parent checkout's absolute shared hook.
-    git -c user.name=t -c user.email=t@example.com \
-        -c core.hooksPath=/dev/null -C "$1" "${@:2}"
+    git -C "$1" "${@:2}"
 }
 
 # make_repo ROOT — a scratch git repo whose top level IS the module root, with
