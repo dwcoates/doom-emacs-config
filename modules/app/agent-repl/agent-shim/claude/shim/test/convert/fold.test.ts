@@ -1476,6 +1476,24 @@ describe("the vendor's API failure class reaching the terminal", () => {
     expect(failed.kind.case).toBe("billingError");
   });
 
+  it("ignores a SUBAGENT's failed assistant message, whose request is not the turn's", () => {
+    // Arrange
+    const withoutSubagent = apiKindOf([apiRetry("rate_limit", 549), apiResult(null)]);
+
+    // Act
+    const failed = apiKindOf([
+      apiRetry("rate_limit", 549),
+      assistant("msg-sub-api", [{ type: "text", text: "billing" }], {
+        error: "billing_error",
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      apiResult(null),
+    ]);
+
+    // Assert
+    expect(failed.kind.case).toBe(withoutSubagent.kind.case);
+  });
+
   it("carries the vendor's own sentence when the result states no errors", () => {
     // Arrange
     const sentence =
