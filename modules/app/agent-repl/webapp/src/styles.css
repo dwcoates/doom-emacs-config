@@ -1546,7 +1546,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* THE PEER MESSAGE'S HEADER STRIP: the sender label, the whole of its
    collapsed face (its cap is zero lines, src/feed/rows/peer-message.ts). One
-   line, ellipsized, clear of the has-more chevron that sits at its right. */
+   line, ellipsized, its right padding the room a has-more chevron once took
+   (the chevron is gone, owner ruling 2026-09-23; the padding is kept so the
+   label does not move). */
 .peer-label {
   font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.85;
@@ -2248,7 +2250,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    a shell bubble runs, a tool call's input line (command, path, query or plain
    input), a skill's invocation, a hook's headline, a subagent's description —
    is capped at TWO LINES while the fold that owns it is collapsed, and wears the
-   response bubble's fade and chevron (the `has-more` rules below) when it
+   response bubble's fade (the `has-more` rules below) when it
    actually overflows them. `line-clamp` caps by text rows and `max-height: none`
    drops each line's own preview cap (`.tool-input`, `.bash-input`), so the two
    rows are the only limit. This is the ONE title cap: title-fold.ts marks every
@@ -2286,16 +2288,16 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    scroll box wears it (one measurer, one rule) — never a tool-call section —
    and each fades into its OWN bubble background (`--bubble-bg`) so the last
    line dissolves rather than being hard-clipped.
-   Both pseudo-elements are absolutely positioned against the box, which the cap
-   holds still while collapsed (overflow-y: hidden), so bottom:0 is the visible
-   fold. `pointer-events: none` keeps a click on either one falling through to
-   click-to-expand. A tool card's TITLE fold (above) wears the same fade and
-   chevron from the same rules, fading into its card's `--title-fold-bg`; an
-   output section still never does.
+   The fade is absolutely positioned against the box, which the cap holds
+   still while collapsed (overflow-y: hidden), so bottom:0 is the visible
+   fold. `pointer-events: none` keeps a click on it falling through to
+   click-to-expand. A tool card's TITLE fold (above) wears the same fade from
+   the same rule, fading into its card's `--title-fold-bg`; an output section
+   still never does.
    THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
    scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
    (`position: relative` on the box itself, not on `.has-more`), and the fade
-   and chevron are out of flow, so the measurer toggling the class moves
+   is out of flow, so the measurer toggling the class moves
    nothing inside or around the box. */
 .bubble > .bubble-scroll,
 .title-fold {
@@ -2318,32 +2320,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .title-fold.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
 }
-/* The chevron, centered on the bottom edge over the fade. Generated content is
-   not selectable, so it needs no user-select carve-out. */
-.bubble > .bubble-scroll.has-more::before,
-.title-fold.has-more::before {
-  content: "\2304";
-  position: absolute;
-  left: 50%;
-  bottom: 0.05em;
-  transform: translateX(-50%);
-  z-index: 1;
-  pointer-events: none;
-  font-size: 1.05em;
-  line-height: 1;
-  color: var(--muted);
-}
-/* A ZERO-LINE CAP shows its header strip and nothing below it, so there is no
-   last line to fade: the chevron alone says there is more, at the strip's
-   right end where the box (zero tall) meets it. */
-.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::after {
-  background: none;
-}
-.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::before {
-  left: auto;
-  right: calc(0.9rem - var(--bubble-scroll-gap));
-  transform: none;
-}
+/* "MORE BELOW" IS THE FADE ONLY, NEVER A CHEVRON (owner ruling, 2026-09-23),
+   on every bubble and every title fold: nothing draws a glyph from `has-more`,
+   and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
    light up. The bars ride the SECTION (the whole card) rather than the

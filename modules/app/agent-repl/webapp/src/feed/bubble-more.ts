@@ -6,18 +6,19 @@
  * more to reveal" on the response and prompt bubbles. When a bubble is collapsed
  * and its content actually overflows the cap (`scrollHeight > clientHeight` on
  * the `.bubble-scroll` box), the box wears `has-more`; the stylesheet draws a
- * bottom fade into the bubble's own background plus a small chevron from that
- * class. Every bubble's scroll box is served (owner ruling, 2026-09-23: one
- * measurer for every blue and purple bubble) — never a tool-call section or
- * any other capped box — which is what MORE_BUBBLE_SELECTOR encodes.
+ * bottom fade into the bubble's own background from that class — the fade
+ * ONLY, never a chevron (owner ruling, 2026-09-23). Every bubble's scroll box
+ * is served (owner ruling, 2026-09-23: one measurer for every blue and purple
+ * bubble) — never a tool-call section or any other capped box — which is what
+ * MORE_BUBBLE_SELECTOR encodes.
  *
  * TITLE FOLDS (owner ruling, 2026-09-23): a tool card's TITLE — the command a
  * shell bubble runs, a tool call's input line, and the other title lines
  * title-fold.ts marks — is capped at two lines while its fold is collapsed and
- * wears the SAME fade and chevron when it overflows them. It is the one other
+ * wears the SAME fade when it overflows them. It is the one other
  * kind in MORE_KINDS; an output section still never wears the affordance.
  *
- * Nothing here draws the fade or the chevron: those are pure CSS keyed on
+ * Nothing here draws the fade: it is pure CSS keyed on
  * `has-more` (styles.css). This module only MEASURES the overflow and toggles
  * the class, at the three moments it can change: on draw and on width re-wrap
  * (the `ResizeObserver` in `installHasMore`, which also catches a viewport
@@ -28,7 +29,7 @@
 import { EXPANDED_CLASS } from "../expand.js";
 import { onDiscard } from "./ticking.js";
 
-/** The class the stylesheet turns into the bottom fade + chevron. */
+/** The class the stylesheet turns into the bottom fade. */
 export const HAS_MORE_CLASS = "has-more";
 
 /**

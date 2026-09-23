@@ -37,7 +37,7 @@ export function bubbleScroll(body: HTMLElement): HTMLElement {
   const scroll = document.createElement("div");
   scroll.className = BUBBLE_SCROLL_CLASS;
   scroll.append(body);
-  // FIX2 (owner ruling, 2026-09-15): keep the "more below" fade + chevron in
+  // FIX2 (owner ruling, 2026-09-15): keep the "more below" fade in
   // step with the box's overflow for its whole life. The gate to response/prompt
   // bubbles ONLY lives in refreshHasMore (bubble-more.ts) — this factory is
   // shared, so the observer is armed on every bubble and self-restricts.
