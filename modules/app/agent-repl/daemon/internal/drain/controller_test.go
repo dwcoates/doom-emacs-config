@@ -937,6 +937,27 @@ func TestNewRefusesWithoutASpawnSweep(t *testing.T) {
 	}
 }
 
+// TestNewRefusesWithoutARevivalAnswer pins that the prompt queue's revival
+// state is REQUIRED wiring: a sweep that cannot see a revival hibernates the
+// session the revival is bringing up.
+func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
+	// Arrange & Act
+	_, err := New(Deps{
+		DB:        newHarness(t).db,
+		Stand:     newFakeStand(),
+		Spawns:    newFakeSpawns(),
+		Freeness:  newFakeFreeness(),
+		Announcer: &fakeAnnouncer{},
+		Exit:      func(context.Context) error { return nil },
+		Log:       dlog.NewTestSurfaces(),
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "revival") {
+		t.Fatalf("New = %v, want the missing revival answer refused", err)
+	}
+}
+
 // TestCancellingAScheduleRepublishesEveryHostView is the composer's other way
 // back open. The host view's composer arm is composed from the occupancy
 // lease, so every push taken while the schedule's drain hold stood said
