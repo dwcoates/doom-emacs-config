@@ -80,6 +80,13 @@ func probeWorkspaceLock(log dlog.Logger) ProbeFunc {
 // WatcherStarter opens one workspace's watch fleet against its shim client.
 type WatcherStarter func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, session sessionwatcher.Session, sinks sessionwatcher.Sinks, log dlog.Logger) (sessionwatcher.Watcher, error)
 
+// ShimBundle is the installed shim bundle a spawn runs: buildid.ShimBundle.
+type ShimBundle interface {
+	// Hold answers the bundle's build and holds it installed until release,
+	// which the caller runs once the spawned shim has answered.
+	Hold() (build string, release func(), err error)
+}
+
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
 	// DB holds the session record the fresh-versus-resume decision is made
@@ -109,8 +116,11 @@ type FleetDeps struct {
 	StoreSocket string
 	// NodeBin and MainJS are the shim's command line.
 	NodeBin, MainJS string
-	// ShimBuildSHA is the build every spawn is stamped with.
-	ShimBuildSHA string
+	// ShimBundle is the installed shim bundle every spawn runs. A spawn HOLDS
+	// it from the moment it hashes the bundle — the build it stamps the shim
+	// with, and the build the shim reports back — until the shim has answered,
+	// so an install can never swap the bytes between the hash and node's read.
+	ShimBundle ShimBundle
 	// Fake forces the shim's offline scripted SDK.
 	Fake bool
 	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS on every spawn.
@@ -220,10 +230,6 @@ type Fleet struct {
 	// is what makes a prelaunched shim's socket path distinct from the running
 	// one's.
 	generation map[ids.WorkspaceID]int
-	// buildSHA is the shim build each live session reported at start. It is a
-	// fact of the RUNNING process, which is why it is remembered here and not
-	// persisted.
-	buildSHA map[ids.WorkspaceID]string
 	// startGates serialize the STARTS of one workspace. See Start: the
 	// liveness check cannot do it, because a session is remembered only once
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
@@ -319,6 +325,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a shim supervisor")
 	case deps.SocketPath == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a socket path resolver")
+	case deps.ShimBundle == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the installed shim bundle")
 	case deps.Log == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs log surfaces")
 	}
@@ -369,7 +377,6 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		coldGates:       map[ids.WorkspaceID]ServedColdGate{},
 		lastCold:        map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		generation:      map[ids.WorkspaceID]int{},
-		buildSHA:        map[ids.WorkspaceID]string{},
 		startGates:      map[ids.WorkspaceID]*sync.Mutex{},
 	}, nil
 }
@@ -1320,6 +1327,14 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			log.Error(opBringUp, "could not borrow the shim log sink", dlog.Context{"cause": err.Error()})
 			return nil, pathNone, fmt.Errorf("start session for %q: shim log sink: %w", ws, err)
 		}
+		// THE BUNDLE IS HELD FROM THE HASH TO THE SHIM'S ANSWER: the build the
+		// spawn states is the bytes node runs.
+		build, release, err := f.deps.ShimBundle.Hold()
+		if err != nil {
+			log.Error(opBringUp, "the installed shim bundle's build is unresolvable; no shim is spawned", dlog.Context{"cause": err.Error()})
+			f.noteStartFailed(ctx, log, ws, err)
+			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
+		}
 		client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
 			WorkspaceID:  ws,
 			WorkspaceDir: dir,
@@ -1331,7 +1346,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			// account is exactly the configDir it spends under.
 			DisableAutoCompact: f.deps.Accounts.IsMultiRepo(configDir),
 			SessionID:          hostSessionID,
-			ShimBuildSHA:       f.deps.ShimBuildSHA,
+			ShimBuildSHA:       build,
 			NodeBin:            f.deps.NodeBin,
 			MainJS:             f.deps.MainJS,
 			Fake:               f.deps.Fake,
@@ -1342,6 +1357,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			// leaves a shim its successor cannot tell from no shim at all.
 			Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
 		})
+		release()
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
 			// A BRING-UP DEATH IS A WORKSPACE FAULT, not only a failed rpc.
@@ -1832,14 +1848,6 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "next.StartedAt.IsZero()"})
 		next.StartedAt = now
 	}
-	if sha := started.GetRuntime().GetShimBuildSha(); sha != "" {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "sha := started.GetRuntime().GetShimBuildSha(); sha != \"\""})
-		f.mu.Lock()
-		previousSHA := f.buildSHA[ws]
-		f.buildSHA[ws] = sha
-		f.mu.Unlock()
-		f.logTransition(ws, "shim_build_sha", previousSHA, sha, nil)
-	}
 	if err := f.deps.DB.PutSession(ctx, next); err != nil {
 		log.Error(opBringUp, "could not record the session facts", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: record the session facts: %w", ws, err)
@@ -1865,7 +1873,6 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
-	delete(f.buildSHA, ws)
 	f.mu.Unlock()
 	if !ok {
 		return nil
@@ -2004,7 +2011,6 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
-	delete(f.buildSHA, ws)
 	f.mu.Unlock()
 	f.logTransition(ws, "session_live", true, false,
 		dlog.Context{"reason": "shim_reaped", "shim_pid": session.client.PID()})

@@ -205,6 +205,16 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		return nil, fmt.Errorf("workspace: prelaunch %q: shim log sink: %w", ws, err)
 	}
 	uds := f.freshSocketPath(ws)
+	// THE BUNDLE IS HELD FROM THE HASH TO THE SHIM'S ANSWER, as every spawn
+	// holds it: the build the prelaunch states is the bytes node runs.
+	build, release, err := f.deps.ShimBundle.Hold()
+	if err != nil {
+		log.Error(opFleetRollout, "the installed shim bundle's build is unresolvable; no shim is prelaunched", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return nil, fmt.Errorf("workspace: prelaunch %q: %w", ws, err)
+	}
+	defer release()
 	client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
 		WorkspaceID:  ws,
 		WorkspaceDir: record.Dir,
@@ -218,7 +228,7 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		// The relaunched shim carries the SAME host session identity: a
 		// relaunch rotates the process, never the session.
 		SessionID:    session.HostSessionID,
-		ShimBuildSHA: f.deps.ShimBuildSHA,
+		ShimBuildSHA: build,
 		NodeBin:      f.deps.NodeBin,
 		MainJS:       f.deps.MainJS,
 		Fake:         f.deps.Fake,
@@ -788,17 +798,6 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 	}
 	f.raiseColdGate(ws, session.VendorSessionID, cold)
 	return nil
-}
-
-// SessionBuildSHA reports the shim build a workspace's LIVE session says it is
-// running. It is a fact of the running process rather than of the session — a
-// shim that dies takes its build with it — so it lives in the fleet's memory
-// and not in a durable column.
-func (f *Fleet) SessionBuildSHA(ws ids.WorkspaceID) (string, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	sha, ok := f.buildSHA[ws]
-	return sha, ok
 }
 
 // ProbeLock probes ONE workspace's shim-held kernel lock from its worktree. It

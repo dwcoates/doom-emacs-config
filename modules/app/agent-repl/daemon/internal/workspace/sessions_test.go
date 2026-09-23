@@ -340,6 +340,8 @@ func coldResponse() *shimv1.StartSessionResponse {
 
 // fleetFixture is one arranged Fleet plus the fakes behind it.
 type fleetFixture struct {
+	// bundle is the installed shim bundle every spawn holds.
+	bundle *fakeBundle
 	fleet      *Fleet
 	db         *fakeDB
 	accounts   *fakeAccounts
@@ -472,9 +474,10 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		socketState: shimsocket.StateAbsent,
 	}
 	f.supervisor = &fakeSupervisor{client: f.client}
+	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
-		DB: f.db, Accounts: f.accounts, Supervisor: f.supervisor,
+		DB: f.db, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Footer:  footerLinkSink{rec: f.links},
@@ -533,10 +536,17 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 			deps: FleetDeps{DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
 		},
 		{
-			name: "no log surfaces",
+			name: "no shim bundle",
 			deps: FleetDeps{
 				DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" },
+			},
+		},
+		{
+			name: "no log surfaces",
+			deps: FleetDeps{
+				DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 			},
 		},
 	}
@@ -1103,6 +1113,75 @@ func TestStartSpawnsWhenTheWorkspaceLockIsFree(t *testing.T) {
 	// Assert.
 	if len(f.supervisor.spawns) != 1 || len(f.supervisor.adopts) != 0 {
 		t.Fatalf("bring-ups = %d spawns, %d adopts; want one spawn", len(f.supervisor.spawns), len(f.supervisor.adopts))
+	}
+}
+
+// fakeBundle is the installed shim bundle a spawn holds.
+type fakeBundle struct {
+	mu       sync.Mutex
+	build    string
+	err      error
+	held     int
+	released int
+}
+
+func (b *fakeBundle) Hold() (string, func(), error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err != nil {
+		return "", func() {}, b.err
+	}
+	b.held++
+	return b.build, func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		b.released++
+	}, nil
+}
+
+// holding reports whether a hold is outstanding right now.
+func (b *fakeBundle) holding() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.held > b.released
+}
+
+func TestStartStampsTheSpawnWithTheBundleItHolds(t *testing.T) {
+	// Arrange: the spawn is observed while it runs.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	heldDuringSpawn := false
+	f.supervisor.onSpawn = func() { heldDuringSpawn = f.bundle.holding() }
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if got := f.supervisor.spawns[0].ShimBuildSHA; got != "installed-build" {
+		t.Fatalf("spawn build = %q, want the bundle's own", got)
+	}
+	if !heldDuringSpawn || f.bundle.holding() {
+		t.Fatalf("held during the spawn = %v, still held after = %v; want held across the spawn and released after", heldDuringSpawn, f.bundle.holding())
+	}
+}
+
+func TestStartRefusesToSpawnAnUnresolvableBundle(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.bundle.err = errors.New("main.js does not exist and SHIM_BUILD_SHA is unset")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the unresolvable bundle refused")
+	}
+	if f.supervisor.spawnAttempts != 0 {
+		t.Fatalf("spawn attempts = %d, want none for a bundle with no build", f.supervisor.spawnAttempts)
 	}
 }
 
