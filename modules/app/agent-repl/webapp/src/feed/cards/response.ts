@@ -339,27 +339,34 @@ export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
  * The cost corner: the token figure, drawn verbatim, and — once the response
  * has SETTLED — the relative timestamp it reveals when hovered or focused.
  *
- * THE TWO SIT IN A RIGHT-ANCHORED ROW whose width is RESERVED IN FULL — token
- * plus duration — at all times, so the figure never moves and, because the
- * corner is a `float: right` in the prose body (see `drawFeedResponse`), the
- * first prose line that wrapped around it never reflows when the duration is
- * exposed (owner ruling, 2026-09-15, superseding the 2026-09-14 slide-the-
- * figure-left reveal). The reveal is one continuous ~0.5s CSS transition on the
- * timestamp's opacity and offset ALONE — no width or margin animates, since the
- * duration keeps its layout slot whether or not it is shown — so mouse-leave
- * runs the same transition backwards for free rather than snapping; the
- * stylesheet owns it, and `prefers-reduced-motion` drops it. A state class is
- * toggled here too, so a keyboard focus reveals the same timestamp a hover does.
+ * THE MARKUP IS BUILT SO THE REVEAL'S SLIDE IS THE DURATION'S WIDTH BY
+ * CONSTRUCTION (the stylesheet's `.usage-corner` comment has the mechanism):
+ *
+ *   span.usage-corner[data-tokens=<token text>]   ::before is a hidden copy of
+ *     span.usage-slider                           the token, reserving its width
+ *       span.usage-stamp  <token text>            out of flow, at the slider's left
+ *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content
+ *
+ * The slider's own width is the duration (plus its gap), and it is translated
+ * by a percentage of that width, so the collapsed token sits exactly at the
+ * right edge and the revealed token slides left exactly as far as the duration
+ * needs. The corner's floated width is spacer + slider in both states, so the
+ * first prose line that wraps around it never reflows on the reveal. The
+ * stylesheet owns the 0.5s transition; `prefers-reduced-motion` drops it. A
+ * state class is toggled here too, so a keyboard focus reveals the same
+ * timestamp a hover does.
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.
+ * As it grows the slider grows with it, and the collapsed token stays put.
  * The subscription is taken through `tick`, which marks the element, so the
  * feed's teardown of the bubble — a re-push replacing the row, or the turn-end
  * backstop that stops every clock in a settled turn — unsubscribes it with no
  * disposer to remember here.
  *
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
- * a corner with no settled instant is the plain figure alone.
+ * a corner with no settled instant has an empty slider, so the token sits at
+ * the right edge and nothing slides.
  */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
@@ -374,11 +381,16 @@ export function drawFeedResponseUsageStamp(
 
   const corner = document.createElement("span");
   corner.className = "usage-corner";
+  corner.dataset.tokens = u.text;
+
+  const slider = document.createElement("span");
+  slider.className = "usage-slider";
+  corner.appendChild(slider);
 
   const stamp = document.createElement("span");
   stamp.className = "usage-stamp";
   stamp.textContent = u.text;
-  corner.appendChild(stamp);
+  slider.appendChild(stamp);
 
   if (atMs > 0) {
     const ago = document.createElement("span");
@@ -386,7 +398,7 @@ export function drawFeedResponseUsageStamp(
     tick(ago, rc.ctx.ticker, (nowMs) => {
       ago.textContent = `${formatAge(nowMs - atMs)} ago`;
     });
-    corner.appendChild(ago);
+    slider.appendChild(ago);
 
     // A focusable hover target: focus reveals the same timestamp a hover does.
     corner.tabIndex = 0;
