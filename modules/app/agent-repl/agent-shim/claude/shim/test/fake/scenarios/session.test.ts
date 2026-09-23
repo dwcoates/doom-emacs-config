@@ -362,22 +362,75 @@ describe("compaction", () => {
     expect(typeof record?.logicalParentUuid).toBe("string");
   });
 
-  it("defaults the settled summary to the fixed conclusion", async () => {
-    // `ContextCompacted.Summary` is derived from the assistant prose FOLLOWING
-    // the boundary, which is what `conclude` writes.
+  /** The stream record right after the boundary, which is where the vendor states the summary. */
+  function afterBoundary(driven: Awaited<ReturnType<typeof driveScenario>>): Record<string, unknown> | undefined {
+    const index = driven.messages.findIndex(
+      (message) => message.type === "system" && message.subtype === "compact_boundary",
+    );
+    return driven.messages[index + 1];
+  }
+
+  it.each(["!compact", "!compact-auto"] as const)(
+    "states the summary as a synthetic main-stream user record right after the boundary (%s)",
+    async (prompt) => {
+      // Arrange + Act
+      const driven = await driveScenario([prompt]);
+      const summary = afterBoundary(driven);
+
+      // Assert. GROUNDED: compaction-directed and auto-compaction, both.
+      expect({ type: summary?.type, synthetic: summary?.isSynthetic, parent: summary?.parent_tool_use_id }).toEqual({
+        type: "user",
+        synthetic: true,
+        parent: null,
+      });
+    },
+  );
+
+  it.each(["!compact", "!compact-auto"] as const)(
+    "gives the summary record the uuid the boundary's anchor names (%s)",
+    async (prompt) => {
+      // Arrange + Act
+      const driven = await driveScenario([prompt]);
+      const boundary = ofType(driven, "system", "compact_boundary")[0]?.compact_metadata as {
+        preserved_messages: { anchor_uuid: string };
+      };
+
+      // Assert
+      expect(afterBoundary(driven)?.uuid).toBe(boundary.preserved_messages.anchor_uuid);
+    },
+  );
+
+  it("writes the transcript's isCompactSummary line under the stream record's uuid, parented on the boundary", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!compact"]);
+    const boundary = recordsOfType(driven.transcript(), "system").find((l) => l.subtype === "compact_boundary");
+    const line = recordsOfType(driven.transcript(), "user").find((l) => l.isCompactSummary === true);
+
+    // Assert
+    expect({ uuid: line?.uuid, parent: line?.parentUuid }).toEqual({
+      uuid: afterBoundary(driven)?.uuid,
+      parent: boundary?.uuid,
+    });
+  });
+
+  it("defaults the summary to the fixed text", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!compact"]);
 
     // Assert
-    expect(theResult(driven).result).toBe("Compacted the conversation.");
+    expect((afterBoundary(driven)?.message as { content?: unknown } | undefined)?.content).toBe(
+      "Compacted the conversation.",
+    );
   });
 
-  it("lets a caller override the settled summary with a distinctive string", async () => {
+  it("lets a caller override the summary with a distinctive string", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!compact what the discarded history said"]);
 
     // Assert
-    expect(theResult(driven).result).toBe("what the discarded history said");
+    expect((afterBoundary(driven)?.message as { content?: unknown } | undefined)?.content).toBe(
+      "what the discarded history said",
+    );
   });
 
   it("emits NO boundary when the compaction failed", async () => {
