@@ -642,3 +642,153 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 		t.Fatalf("OpenFeed(replayed bubble) = %v, want a success rather than a refusal", sub.Msg)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// !subagent-detached-hold — an interjection ends the turn, never the agent.
+// ---------------------------------------------------------------------------
+
+// TestSubagentDetachedSurvivesAnInterjection drives `!subagent-detached-hold`
+// (subagents.ts): a detached agent is launched LIVE and the turn that spawned
+// it then holds until an interrupt lands. The owner's ruling ("an interrupt
+// only necessitates the interrupt of the synchronous TURN, not the detached
+// work", 2026-09-23) is carried by the queue's interjection, whose kill is
+// unforced, and by the shim declaring `perTaskStopAffordance`.
+//
+// An explicit-interrupt prompt ("stop") interjects the held turn; the turn
+// must end `interrupted` while the agent stays live. LIVENESS IS PROVED BY AN
+// ANSWER, not by a window: stopping the agent's bubble afterwards succeeds
+// only against a live agent, and the bubble then settles `cancelled`, the arm
+// a hand stop draws. An interrupt that had taken the agent down with the turn
+// would have settled it already, and the stop would be refused.
+func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
+	t.Parallel()
+	// Arrange: the held turn, with its detached agent live beneath it.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	_, rootToken := openFeed(t, w, ws, nil)
+	rootStream := w.WatchFeed(rootToken)
+
+	held := SubmitPrompt(t, w, ws, "!subagent-detached-hold")
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	harness.AwaitView(t, ctx, rootStream, "the held turn's waiting prose", func(row *frontendv1.FeedRow) bool {
+		md, ok := responseMarkdown(row.GetActivity())
+		return ok && row.GetTurn().GetValue() == held.GetValue() && md == "Waiting beside the sweep…"
+	})
+	bubbleRow := awaitFeedRow(t, w, ws, "the live detached-subagent bubble", func(row *frontendv1.FeedRow) bool {
+		return row.GetDetachedSubagent().GetSubagent().GetLive() != nil
+	})
+
+	// Act: interject the held turn with an explicit interrupt.
+	SubmitPrompt(t, w, ws, "stop")
+
+	// Assert: the held turn ends interrupted...
+	ended := AwaitTurnEnded(t, w, ws, held)
+	if ended.GetTurnEnded().GetInterrupted() == nil {
+		t.Fatalf("the held turn's terminal = %v, want turn_ended.interrupted", ended.GetTurnEnded())
+	}
+
+	// ...and the agent it spawned is still live: its own stop is accepted.
+	resp, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ws,
+		Target:    &agentreplv1.InterruptRequest_Detached{Detached: bubbleRow.GetId()},
+	}))
+	if err != nil {
+		t.Fatalf("Interrupt(detached) after the interjection = error %v, want the live agent stopped", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedDetached(); got == nil {
+		t.Fatalf("Interrupt(detached) after the interjection = %v, want success.interrupted_detached", resp.Msg)
+	}
+	page, token := openFeed(t, w, ws, nil)
+	bubble := awaitSubagentSettled(t, w, page, w.WatchFeed(token), bubbleRow.GetId())
+	if bubble.GetSettled().GetCancelled() == nil {
+		t.Fatalf("the agent settled %v after its own stop, want cancelled", bubble.GetSettled().GetOutcome())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// !subagent-interleaved — a subagent streaming INTO the main agent's blocks.
+// ---------------------------------------------------------------------------
+
+// TestSubagentInterleavedResponsesStayOnTheirOwnFeeds drives
+// `!subagent-interleaved` (subagents.ts): a detached agent's two whole
+// responses land BETWEEN the deltas of the main agent's open thinking block
+// and open text block. A fold that kept one block cursor for every agent would
+// re-key the rest of the main block onto the subagent's message, splitting the
+// main thinking and answer or pulling the subagent's words onto the root feed.
+//
+// The scenario's stated arms are asserted through the daemon's feed: the main
+// turn draws exactly ONE thinking unit and exactly ONE answer, each whole and
+// the answer marked final; the subagent's own two responses reach its bubble's
+// sub-feed and never the root feed; and the bubble settles succeeded.
+func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	const (
+		thinking   = "Answering while the sweep runs."
+		conclusion = "The sweep is running in the background."
+		started    = "Sweep started."
+		finished   = "Sweep finished."
+	)
+
+	// Act: the turn ends; the agent's own completion follows it.
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-interleaved")
+	firstPage, firstToken := openFeed(t, w, ws, nil)
+	bubbleRow := findRow(firstPage.GetSuccess().GetRows(), func(row *frontendv1.FeedRow) bool {
+		return row.GetDetachedSubagent() != nil
+	})
+	if bubbleRow == nil {
+		t.Fatalf("root feed page %v, want a detached_subagent row for the launched sweep", firstPage)
+	}
+	bubble := awaitSubagentSettled(t, w, firstPage, w.WatchFeed(firstToken), bubbleRow.GetId())
+	rootPage, _ := openFeed(t, w, ws, nil)
+
+	// Assert: the bubble settled succeeded.
+	if bubble.GetSettled().GetSucceeded() == nil {
+		t.Errorf("the interleaved agent settled %v, want succeeded", bubble.GetSettled().GetOutcome())
+	}
+
+	// Assert: the main turn's prose is ONE thinking unit and ONE final answer.
+	var thinkingRows, answerRows []*frontendv1.FeedResponse
+	for _, row := range rootPage.GetSuccess().GetRows() {
+		resp := row.GetActivity().GetResponse()
+		if row.GetTurn().GetValue() != turn.GetValue() || resp == nil {
+			continue
+		}
+		if resp.GetThinking() {
+			thinkingRows = append(thinkingRows, resp)
+			continue
+		}
+		answerRows = append(answerRows, resp)
+	}
+	if len(thinkingRows) != 1 {
+		t.Fatalf("the main turn drew %d thinking units, want exactly one: %v", len(thinkingRows), thinkingRows)
+	}
+	if got := thinkingRows[0].GetSuccess().GetProse().GetMarkdown(); got != thinking {
+		t.Errorf("the main thinking unit = %q, want it whole: %q", got, thinking)
+	}
+	if len(answerRows) != 1 {
+		t.Fatalf("the main turn drew %d response units, want exactly one answer: %v", len(answerRows), answerRows)
+	}
+	if got := answerRows[0].GetSuccess().GetProse().GetMarkdown(); got != conclusion {
+		t.Errorf("the main answer = %q, want it whole: %q", got, conclusion)
+	}
+	if !answerRows[0].GetFinalAnswer() {
+		t.Errorf("the main answer is not marked final_answer, want the turn's concluded answer")
+	}
+
+	// Assert: the agent's own words are on its sub-feed, and never on the root.
+	for _, text := range []string{started, finished} {
+		if pageHasResponseText(rootPage.GetSuccess().GetRows(), text) {
+			t.Errorf("the root feed carried the subagent's %q, want it on the sub-feed alone", text)
+		}
+	}
+	subPage, subToken := openFeed(t, w, ws, bubbleRow.GetId())
+	subStream := w.WatchFeed(subToken)
+	awaitResponseText(t, w, subPage, subStream, started)
+	awaitResponseText(t, w, subPage, subStream, finished)
+}
