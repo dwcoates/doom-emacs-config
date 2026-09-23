@@ -15,6 +15,12 @@
  * `localStorage` per workspace, behind try/catch — a webview-local preference,
  * which R14 allows and which is the only thing this component persists.
  *
+ * THE DAEMON MAY MOVE IT, ONCE PER GENERATION. `FooterView.focus` names the
+ * panel the daemon wants in front of the reader when detached work starts; the
+ * daemon has already picked it, so the name is applied verbatim. It is an EDGE:
+ * a push whose generation this page has already applied changes nothing, so
+ * between launches the reader's own clicks stand.
+ *
  * `onStatus` EXISTS FOR THE COMPOSERS. R7 disables a bubble composer while the
  * footer reads merging, closing or disconnected, and the footer's stream is the
  * one place that fact arrives — so the status ARM is published to subscribers
@@ -83,6 +89,8 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   // the push the stop itself caused. See `StopControls`.
   const stops = createStopControls(ctx);
   let view: FooterView | null = null;
+  // The last focus generation this page applied; see `applyFocus`.
+  let appliedFocus: bigint | null = null;
   let statusCase: string | null = null;
   let disposed = false;
 
@@ -118,6 +126,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     open: (_client, signal) => ctx.streams.watch("footer", buildWatchFooterRequest(ctx), signal),
     onPush: (response) => {
       view = requireMessage(response.footer, "WatchFooterResponse.footer");
+      applyFocus(view);
       draw();
       publishStatus();
       publishProgress();
@@ -232,6 +241,29 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     });
     writeSelection(ctx, selection);
     draw();
+  }
+
+  /**
+   * Open the panel the daemon's focus names, when this page has not applied
+   * its generation yet.
+   *
+   * APPLIED ONCE, THEN THE READER'S. The generation is compared for equality
+   * only, never ordered: an unseen one is applied (opening the section if it
+   * was closed) and remembered, and a repeat of it is ignored, so a click
+   * between launches is never overridden by the pushes that follow it. The
+   * choice is persisted exactly as a click's is, so a reload restores it.
+   */
+  function applyFocus(pushed: FooterView): void {
+    const focus = pushed.focus;
+    if (focus === undefined || focus.generation === appliedFocus) return;
+    const panel: FooterPanel = requireCase(focus.panel, "FooterExpandedFocus.panel").case;
+    appliedFocus = focus.generation;
+    selection = panel;
+    log.info(`the daemon focused the footer on the ${panel} panel`, {
+      operation: "footer.focus-applied",
+      context: { panel, generation: String(focus.generation) },
+    });
+    writeSelection(ctx, selection);
   }
 
   /** Tell every subscriber which status arm this push carried. */
