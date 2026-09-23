@@ -94,6 +94,7 @@
 (declare-function agent-repl-wire-decode-interrupt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-roll-out-build-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-roll-out-build-response "wire-verbs" (alist))
+(declare-function agent-repl-elisp-build "elisp-build" ())
 (declare-function agent-repl-wire-encode-update-shutdown-schedule-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-shutdown-schedule-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-merge-queue-request "wire-verbs" (request))
@@ -449,16 +450,20 @@ push."
 
 (defun agent-repl-rpc-watch-daemon (conn on-push on-close &optional on-open)
   "Subscribe to CONN's daemon-scoped host stream.
-Carries the graceful-shutdown announcement and the drain schedule, and
-nothing workspace-scoped.  The request message is empty.  ON-PUSH receives
-the decoded push plist; ON-OPEN, when given, runs once the stream is
-ACCEPTED — which is what the link keys its up hooks on, since a healthy
-daemon may send no daemon-scoped push for hours."
+Carries the graceful-shutdown announcement, the drain schedule and a
+deploy's elisp reload, and nothing workspace-scoped.  The request names
+this client as EMACS and states the elisp it has loaded
+\(`agent-repl-elisp-build'), because every process reports its build when
+it connects; it is built HERE, so no WatchDaemon Emacs opens can go without
+it.  ON-PUSH receives the decoded push plist; ON-OPEN, when given, runs
+once the stream is ACCEPTED — which is what the link keys its up hooks on,
+since a healthy daemon may send no daemon-scoped push for hours."
   (agent-repl-rpc--stream
    conn "WatchDaemon"
    #'agent-repl-wire-encode-watch-daemon-request
    #'agent-repl-wire-decode-watch-daemon-response
-   nil
+   (list :client (list :arm :emacs
+                       :value (list :elisp-build (agent-repl-elisp-build))))
    on-push on-close on-open))
 
 (defun agent-repl-rpc-watch-workspace-roster (conn on-push on-close &optional on-open)

@@ -459,25 +459,65 @@ missing here or there is a broken seam.")
       (should (equal encoded (list :workspace ref)))
       (should (eq (plist-get encoded :workspace) ref)))))
 
-(ert-deftest agent-repl-test-rpc-daemon-and-roster-streams-send-an-empty-request ()
-  "The two daemon-scoped subscriptions carry no request fields at all."
+(ert-deftest agent-repl-test-rpc-roster-stream-sends-an-empty-request ()
+  "The roster subscription carries no request fields at all."
   ;; Arrange
   (agent-repl-test-rpc--with-logs
     (let ((requests nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
                  (lambda (_conn _method _json _on-push _on-close &optional _on-open) nil))
-                ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
-                 (lambda (request) (push request requests) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-workspace-roster-request)
                  (lambda (request) (push request requests) nil))
-                ((symbol-function 'agent-repl-wire-decode-watch-daemon-response) (lambda (_a) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-workspace-roster-response)
                  (lambda (_a) nil)))
         ;; Act
-        (agent-repl-rpc-watch-daemon nil #'ignore #'ignore)
         (agent-repl-rpc-watch-workspace-roster nil #'ignore #'ignore))
       ;; Assert
-      (should (equal requests '(nil nil))))))
+      (should (equal requests '(nil))))))
+
+(ert-deftest agent-repl-test-rpc-daemon-stream-names-emacs-and-its-elisp-build ()
+  "Every WatchDaemon Emacs opens names it as `emacs' with the elisp it loaded."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((requests nil))
+      (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                 (lambda (_conn _method _json _on-push _on-close &optional _on-open) nil))
+                ((symbol-function 'agent-repl-elisp-build) (lambda () "b-test"))
+                ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
+                 (lambda (request) (push request requests) nil))
+                ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
+                 (lambda (_a) nil)))
+        ;; Act
+        (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
+      ;; Assert
+      (should (equal requests
+                     '((:client (:arm :emacs :value (:elisp-build "b-test")))))))))
+
+(ert-deftest agent-repl-test-rpc-daemon-stream-sends-the-build-on-the-wire ()
+  "The encoded WatchDaemon body carries `elispBuild' under the `emacs' arm."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                 (lambda (_conn _method json _on-push _on-close &optional _on-open)
+                   (setq sent json) nil))
+                ((symbol-function 'agent-repl-elisp-build) (lambda () "b-test")))
+        ;; Act
+        (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
+      ;; Assert
+      (should (equal sent "{\"emacs\":{\"elispBuild\":\"b-test\"}}")))))
+
+(ert-deftest agent-repl-test-rpc-daemon-stream-without-a-build-never-opens ()
+  "An Emacs with no elisp build to report fails loudly and opens nothing."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((opened nil)
+          (agent-repl--elisp-module-builds nil))
+      (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                 (lambda (&rest _args) (setq opened t) nil)))
+        ;; Act / Assert
+        (should-error (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
+        (should-not opened)))))
 
 (ert-deftest agent-repl-test-rpc-hands-the-decoded-push-to-on-push ()
   "Each push reaches ON-PUSH decoded, never as raw JSON."
