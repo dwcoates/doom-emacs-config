@@ -11,6 +11,7 @@ import (
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
 func testLog() *logging.Bound {
@@ -58,7 +59,7 @@ func appendFile(t *testing.T, path, content string) {
 	if err != nil {
 		t.Fatalf("open append: %v", err)
 	}
-	defer f.Close()
+	defer testclose.OrFail(t, f)
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatalf("append: %v", err)
 	}
