@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -181,31 +183,61 @@ func TestDeployAnswersEveryRefusalAsItsArm(t *testing.T) {
 	}
 }
 
+// deployErrorLogged reports whether the Deploy handler recorded its failure.
+func deployErrorLogged(log *recordingLogger, cause string) bool {
+	for _, rec := range log.at("ERROR") {
+		if rec.Operation == "Deploy" && strings.Contains(fmt.Sprint(rec.Context["cause"]), cause) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDeployAnswersAnUntypedFailureAsAFailure(t *testing.T) {
 	// Arrange
-	h := newHarness(t)
+	log := &recordingLogger{}
+	h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log} })
 	h.Deployer.err = errors.New("the staging root is gone")
 
 	// Act
 	_, err := h.Client.Deploy(context.Background(), connect.NewRequest(&agentreplv1.DeployRequest{}))
 
 	// Assert
-	if err == nil {
-		t.Fatalf("Deploy answered an untyped failure as success")
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("Deploy = %v, want an internal failure", err)
+	}
+	if !deployErrorLogged(log, "the staging root is gone") {
+		t.Fatalf("records = %+v, want the failure at ERROR", log.at("ERROR"))
 	}
 }
 
 func TestDeployRefusesADecisionTheContractDoesNotName(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.Deployer.result = deploy.Result{Outcomes: []deploy.Outcome{{Component: "lint", Kind: deploy.UpToDate}}}
+	tests := []struct {
+		name    string
+		outcome deploy.Outcome
+		cause   string
+	}{
+		{name: "a component", outcome: deploy.Outcome{Component: "lint", Kind: deploy.UpToDate}, cause: "a component the contract does not name"},
+		{name: "a decision", outcome: deploy.Outcome{Component: deploy.ComponentShim, Kind: "vanished"}, cause: "a decision the contract does not name"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := &recordingLogger{}
+			h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log} })
+			h.Deployer.result = deploy.Result{Outcomes: []deploy.Outcome{tc.outcome}}
 
-	// Act
-	_, err := h.Client.Deploy(context.Background(), connect.NewRequest(&agentreplv1.DeployRequest{}))
+			// Act
+			_, err := h.Client.Deploy(context.Background(), connect.NewRequest(&agentreplv1.DeployRequest{}))
 
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInternal {
-		t.Fatalf("Deploy = %v, want an internal failure, never a defaulted arm", err)
+			// Assert
+			if connect.CodeOf(err) != connect.CodeInternal {
+				t.Fatalf("Deploy = %v, want an internal failure, never a defaulted arm", err)
+			}
+			if !deployErrorLogged(log, tc.cause) {
+				t.Fatalf("records = %+v, want the violation at ERROR", log.at("ERROR"))
+			}
+		})
 	}
 }
 

@@ -130,19 +130,21 @@ func hashOf(t *testing.T, content string) string {
 
 // fakeBuilder stages a scripted build, or fails a step.
 type fakeBuilder struct {
-	mu      sync.Mutex
-	t       *testing.T
-	build   artifacts
-	fail    *BuildFailed
-	builds  int
-	started chan struct{}
-	gate    chan struct{}
+	mu    sync.Mutex
+	t     *testing.T
+	build artifacts
+	// stageNothing makes the build succeed and stage no artifact at all.
+	stageNothing bool
+	fail         *BuildFailed
+	builds       int
+	started      chan struct{}
+	gate         chan struct{}
 }
 
 func (b *fakeBuilder) Build(_ context.Context, staging string) error {
 	b.mu.Lock()
 	b.builds++
-	fail, build, gate, started := b.fail, b.build, b.gate, b.started
+	fail, build, gate, started, nothing := b.fail, b.build, b.gate, b.started, b.stageNothing
 	b.mu.Unlock()
 	if started != nil {
 		started <- struct{}{}
@@ -152,6 +154,9 @@ func (b *fakeBuilder) Build(_ context.Context, staging string) error {
 	}
 	if fail != nil {
 		return fail
+	}
+	if nothing {
+		return nil
 	}
 	build.stageInto(b.t, staging)
 	return nil
