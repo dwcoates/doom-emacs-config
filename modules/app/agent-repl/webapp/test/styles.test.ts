@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
+import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -553,7 +554,8 @@ describe("the 'more below' affordance", () => {
     );
 
     // Assert — every such selector is scoped to a response/prompt bubble scroll
-    // box, and none names a tool-call section's capped box.
+    // box or to a card's TITLE fold (owner ruling, 2026-09-23, which extended the
+    // affordance to tool titles), and none names a tool-call section's capped box.
     expect(withHasMore.length).toBeGreaterThan(0);
     const toolBoxes = [
       ".tool-input",
@@ -567,7 +569,9 @@ describe("the 'more below' affordance", () => {
     ];
     for (const rule of withHasMore) {
       for (const sel of rule.selectors) {
-        expect(sel).toMatch(/\.bubble\.(assistant|user) > \.bubble-scroll\.has-more/);
+        expect(sel).toMatch(
+          /^(?:\.bubble\.(assistant|user) > \.bubble-scroll|\.title-fold(?:-standalone)?)\.has-more/,
+        );
         for (const box of toolBoxes) expect(sel.includes(box)).toBe(false);
       }
     }
@@ -1387,55 +1391,6 @@ describe("the card-level tool fold", () => {
     expect(rule).toMatch(/overflow-y:\s*auto/);
   });
 
-  it("caps a collapsed card's input line at two text rows", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".tool-fold:not(.expanded) > .bash-input");
-
-    // Assert
-    expect(rule).toMatch(/-webkit-line-clamp:\s*2/);
-  });
-
-  it("applies that two-row cap to every input-line form, not just Bash", () => {
-    // Arrange / Act — the one rule that clamps the collapsed header body.
-    const clamp = rulesOf(stylesheet).find(
-      (r) =>
-        r.selectors.includes(".tool-fold:not(.expanded) > .bash-input") &&
-        /-webkit-line-clamp:\s*2/.test(r.declarations),
-    );
-
-    // Assert — plain input, command, path and query all get the same cap.
-    expect(clamp?.selectors).toEqual(
-      expect.arrayContaining([
-        ".tool-fold:not(.expanded) > .tool-input",
-        ".tool-fold:not(.expanded) > .bash-input",
-        ".tool-fold:not(.expanded) > .file-path",
-        ".tool-fold:not(.expanded) > .tool-query",
-      ]),
-    );
-  });
-
-  it("excludes the TITLE from the two-row cap: the head is never clamped", () => {
-    // Arrange / Act — every rule that clamps to two rows.
-    const clamps = rulesOf(stylesheet).filter((r) => /-webkit-line-clamp:\s*2/.test(r.declarations));
-
-    // Assert — none of them names the head or the title.
-    expect(clamps.length).toBeGreaterThan(0);
-    for (const rule of clamps) {
-      for (const sel of rule.selectors) {
-        expect(sel.includes(".tool-head")).toBe(false);
-        expect(sel.includes(".tool-name")).toBe(false);
-      }
-    }
-  });
-
-  it("lifts the two-row header cap once the card is expanded", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".tool-fold.expanded > .bash-input");
-
-    // Assert
-    expect(rule).toMatch(/-webkit-line-clamp:\s*none/);
-  });
-
   it("never caps the card itself, so only the section scrolls at 50vh", () => {
     // Arrange / Act
     const rule = declarationsOf(".tool-fold.expanded");
@@ -1445,16 +1400,137 @@ describe("the card-level tool fold", () => {
   });
 
   it("scopes the whole fold model to tool cards, never to a bubble", () => {
-    // Arrange / Act — every rule that mentions the card fold.
-    const foldRules = rulesOf(stylesheet).filter((r) =>
-      r.selectors.some((sel) => sel.includes("tool-fold")),
+    // Arrange / Act — every SELECTOR that mentions the card fold. Per selector
+    // rather than per rule: the title fold's lift rule lists each fold that can
+    // own a title, the `.tool-fold` card beside the `.bubble-fold` head (itself a
+    // tool card), in one selector list.
+    const foldSelectors = rulesOf(stylesheet).flatMap((r) =>
+      r.selectors.filter((sel) => sel.includes("tool-fold")),
     );
 
     // Assert — not one of them reaches a response/prompt/peer bubble.
-    expect(foldRules.length).toBeGreaterThan(0);
-    for (const rule of foldRules) {
-      for (const sel of rule.selectors) expect(sel.includes("bubble")).toBe(false);
-    }
+    expect(foldSelectors.length).toBeGreaterThan(0);
+    for (const sel of foldSelectors) expect(sel.includes("bubble")).toBe(false);
+  });
+});
+
+/**
+ * THE TITLE FOLD (owner ruling, 2026-09-23). A tool card's TITLE — the shell
+ * bubble's command, a tool call's input line, a skill's invocation, a hook's
+ * headline, a subagent's description — is capped at two lines while the fold
+ * that owns it is collapsed, and wears the response bubble's fade and chevron
+ * when it overflows. It replaced the tool-call card's own input-line clamp
+ * (`.tool-fold:not(.expanded) > .bash-input` and its three siblings), which had
+ * no fade; the input line is now one of the title fold's sites.
+ */
+describe("the title fold", () => {
+  /** The title-level classes a card draws its title line with. */
+  const TITLE_CLASSES = [
+    ".tool-input",
+    ".bash-input",
+    ".file-path",
+    ".tool-query",
+    ".shell-command",
+    ".tool-name",
+    ".subagent-description",
+  ];
+
+  it("caps a collapsed title at two text rows", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".title-fold");
+
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(rule).toMatch(/overflow:\s*hidden/);
+  });
+
+  it("drops each title line's own preview cap so two rows are the only limit", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".title-fold");
+
+    // Assert
+    expect(rule).toMatch(/max-height:\s*none/);
+  });
+
+  it("is the only two-row clamp: no title class is clamped by its own name", () => {
+    // Arrange / Act — every rule that clamps to two rows.
+    const clamps = rulesOf(stylesheet).filter((r) => /-webkit-line-clamp:\s*2/.test(r.declarations));
+
+    // Assert — one shared cap, keyed on the one class every title site wears.
+    expect(clamps.map((r) => r.selectors)).toEqual([[".title-fold"]]);
+  });
+
+  it("has retired the tool-call card's own input-line clamp", () => {
+    // Arrange / Act — any rule still naming a title class under the card fold.
+    const handRolled = rulesOf(stylesheet).filter((r) =>
+      r.selectors.some((sel) => sel.startsWith(".tool-fold") && TITLE_CLASSES.some((c) => sel.endsWith(c))),
+    );
+
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+
+  it("lifts the cap on exactly the folds that can own a title", () => {
+    // Arrange / Act
+    const lift = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes(".title-fold.expanded") && /line-clamp:\s*none/.test(r.declarations),
+    );
+
+    // Assert — the stylesheet and the measurer read the same owners.
+    expect(lift?.selectors).toEqual(TITLE_FOLD_OPEN_SELECTOR.split(",").map((one) => one.trim()));
+  });
+
+  it("shows the whole title once its fold is expanded", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".tool-fold.expanded .title-fold");
+
+    // Assert
+    expect(rule).toMatch(/-webkit-line-clamp:\s*none/);
+    expect(rule).toMatch(/max-height:\s*none/);
+    expect(rule).toMatch(/overflow:\s*visible/);
+  });
+
+  it("draws the fade from the response bubble's shared fade rule", () => {
+    // Arrange / Act — the geometry rule the response bubble's fade lives in.
+    const fade = rulesOf(stylesheet).find((r) =>
+      r.selectors.includes(".bubble.assistant > .bubble-scroll.has-more::after") &&
+      /height:\s*1\.5em/.test(r.declarations),
+    );
+
+    // Assert
+    expect(fade?.selectors).toContain(".title-fold.has-more::after");
+  });
+
+  it("draws the chevron from the response bubble's shared chevron rule", () => {
+    // Arrange / Act
+    const chevron = rulesOf(stylesheet).find((r) =>
+      r.selectors.includes(".bubble.assistant > .bubble-scroll.has-more::before"),
+    );
+
+    // Assert
+    expect(chevron?.selectors).toContain(".title-fold.has-more::before");
+  });
+
+  it("fades a title into its own card's background", () => {
+    // Arrange / Act
+    const gradient = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes(".title-fold.has-more::after") && /linear-gradient/.test(r.declarations),
+    );
+
+    // Assert
+    expect(gradient?.declarations).toMatch(
+      /linear-gradient\(to bottom, transparent, var\(--title-fold-bg\)\)/,
+    );
+  });
+
+  it("sets the fade's background to the tool card's own fill", () => {
+    // Arrange / Act
+    const card = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes(".tool-card") && /--title-fold-bg/.test(r.declarations),
+    );
+
+    // Assert
+    expect(card?.declarations).toMatch(/--title-fold-bg:\s*var\(--card\)/);
   });
 });
 
