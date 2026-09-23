@@ -400,7 +400,10 @@ const (
 	// ArmUninterruptibleTurn waits because the running turn refuses interrupts;
 	// Command names the session command that made it uninterruptible.
 	ArmUninterruptibleTurn
-	// ArmClassificationError is the verdict after the classifier failed.
+	// ArmClassificationError is the verdict after the classifier failed. It
+	// has NO PRODUCER: the prompt queue resolves every failure to
+	// ArmHoldForTurnEnd. It is kept, with its tray projection, because
+	// removing error coverage needs the owner's sign-off.
 	ArmClassificationError
 )
 
