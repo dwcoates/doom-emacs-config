@@ -25,6 +25,44 @@ func running(t *testing.T, h *harness, turn, text string) {
 	h.watcher.running(idsTurn(turn))
 }
 
+func TestJudgeLogsAFailedClassifierAtErrorWithItsCauseAndTheRunningTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.err = errors.New("the vendor run failed")
+	// Act.
+	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && r.Operation == opClassify && r.Context["cause"] == "the vendor run failed" &&
+			r.Context["running_turn"] == "running-turn" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want one error carrying the classifier's cause and the running turn", h.log.Records())
+}
+
+func TestAPromptHeldByAFailedClassifierDeliversAtTheTurnsEnd(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.err = errors.New("the vendor run failed")
+	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Act.
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert.
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
+		t.Fatalf("started = %v, want the held prompt delivered at the turn's end", started)
+	}
+}
+
 // closeInStore closes a turn in the store alone, leaving the watcher — the
 // queue's own account — still reporting it in flight.
 func closeInStore(t *testing.T, h *harness, turn string) {
@@ -82,22 +120,6 @@ func TestJudgeComparesTheRunningTurnAgainstTheIncomingPrompt(t *testing.T) {
 	}
 }
 
-func TestJudgeStampsClassificationErrorWhenTheJudgeFails(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	running(t, h, "running-turn", "the running work")
-	h.judge.err = errors.New("the vendor run failed")
-	// Act
-	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	h.q.waitForClassifications()
-	// Assert: an error is never a verdict.
-	if got := h.db.hold("t1").Classification.Arm; got != wsm.ArmClassificationError {
-		t.Fatalf("arm = %s, want classification_error", armName(got))
-	}
-}
-
 // Every failure on the way to a verdict resolves to the prompt's TRUE state —
 // held for the running turn's end — and never to classification_error, which
 // the tray draws as "unclassified": a failure leaking into the UI.
@@ -117,6 +139,13 @@ func TestJudgeHoldsForTurnEndOnEveryFailure(t *testing.T) {
 			arrange: func(h *harness) {
 				running(t, h, "running-turn", "the running work")
 				closeInStore(t, h, "running-turn")
+			},
+		},
+		{
+			name: "the classifier call fails",
+			arrange: func(h *harness) {
+				running(t, h, "running-turn", "the running work")
+				h.judge.err = errors.New("the vendor run failed")
 			},
 		},
 		{
