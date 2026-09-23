@@ -821,303 +821,417 @@ describe("the footer status wave's stylesheet contract", () => {
   });
 });
 
-describe("the cost corner's hover hit area", () => {
-  it("enlarges the hover region with padding and cancels it on three sides with an equal negative margin", () => {
-    // Arrange / Act
-    const corner = declarationsOf(".usage-corner");
-
-    // Assert — the padding grows the hoverable box (roughly 2x wide, 2x tall).
-    // Top/bottom/left cancel it exactly, keeping the token figure in place on
-    // those sides and shifting no neighbor. The right margin is asserted
-    // separately below — it departs from full cancellation on purpose, by
-    // exactly one extra `--bubble-scroll-gap` (the corner-scoped edge gap).
-    expect(corner).toMatch(/padding:\s*0\.4rem\s+1\.25rem/);
-    expect(corner).toMatch(/margin-top:\s*-0\.4rem/);
-    expect(corner).toMatch(/margin-bottom:\s*-0\.4rem/);
-    expect(corner).toMatch(/margin-left:\s*-1\.25rem/);
-  });
-
-  it("reveals the duration off a hover anywhere in the bubble, not only the small corner", () => {
-    // Arrange / Act — hovering the small corner used to put the cursor right
-    // on top of the timestamp it had just revealed. Keying the reveal off the
-    // whole bubble means most hover positions never sit near the duration.
-    const bubbleWide = declarationsOf(".bubble.assistant:hover .usage-ago");
-
-    // Assert — the reveal is opacity/offset only (see the constant-width test
-    // below); it makes the already-reserved duration visible, it does not size it.
-    expect(bubbleWide).toMatch(/opacity:\s*1/);
-  });
-
-  it("keeps the reveal on keyboard focus anywhere in the bubble, not only the corner", () => {
-    // Arrange / Act
-    const bubbleFocus = declarationsOf(".bubble.assistant:focus-within .usage-ago");
-
-    // Assert
-    expect(bubbleFocus).toMatch(/opacity:\s*1/);
-  });
-
-  it("floats the corner top-right so the prose's first line wraps beside it", () => {
-    // Arrange / Act — the one-line-tall corner floats right inside the prose
-    // body, so the FIRST prose line flows to its left and every line below it
-    // (past the corner's single-row height) runs the bubble's full width.
-    const corner = declarationsOf(".usage-corner");
-
-    // Assert
-    expect(corner).toMatch(/float:\s*right/);
-  });
-
-  it("reserves the duration's width even while it is collapsed, so it never sizes on reveal", () => {
-    // Arrange / Act — the base rule keeps the duration's layout gap
-    // (`margin-left`) whether or not it is exposed, and animates only opacity
-    // and offset, so its footprint is constant and the first line cannot reflow.
-    const base = declarationsOf(".usage-ago") ?? "";
-
-    // Assert — the reserved gap is present in the base state, and no width or
-    // margin is ever transitioned (the reveal touches neither).
-    expect(base).toMatch(/margin-left:\s*0\.35rem/);
-    expect(base).not.toMatch(/max-width/);
-    expect(base).toMatch(/transition:\s*opacity 0\.5s ease/);
-    expect(base).not.toMatch(/transition:[^;]*(?:max-width|margin)/s);
-  });
-
-  it("sizes the duration slot identically whether or not the corner is revealed", () => {
-    // Arrange — the base declarations and the declarations the reveal adds.
-    const base = declarationsOf(".usage-ago") ?? "";
-    const revealed = declarationsOf(".usage-corner.usage-corner--revealed .usage-ago") ?? "";
-
-    // Assert — neither state touches a width/margin property, so the corner's
-    // reserved footprint is byte-for-byte the same collapsed and revealed and
-    // exposing the duration cannot reflow the first prose line.
-    for (const decls of [base, revealed]) {
-      expect(decls).not.toMatch(/(?:^|[\s;])max-width\s*:/);
-      expect(decls).not.toMatch(/(?:^|[\s;])width\s*:/);
-    }
-    expect(revealed).not.toMatch(/(?:^|[\s;])margin-left\s*:/);
-  });
-
-  it("renders the token figure at the same size as the revealed duration (owner ruling, 2026-09-15)", () => {
-    // Arrange / Act — both read the one size declared on their shared
-    // `.usage-corner` ancestor rather than each carrying its own number.
-    const corner = declarationsOf(".usage-corner") ?? "";
-    const stamp = declarationsOf(".usage-stamp") ?? "";
-    const ago = declarationsOf(".usage-ago") ?? "";
-
-    // Assert
-    expect(corner).toMatch(/--usage-ago-font-size:\s*0\.85em/);
-    expect(stamp).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
-    expect(ago).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
-  });
-
-  it("sits the corner's right-edge gap at one --bubble-scroll-gap, twice as close as before, without touching --bubble-scroll-gap itself (owner ruling, 2026-09-15)", () => {
-    // Arrange / Act
-    const mainCol = declarationsOf("#main-col") ?? "";
-    const corner = declarationsOf(".usage-corner") ?? "";
-
-    // Assert — the global scrollbar-inset unit is untouched...
-    expect(mainCol).toMatch(/--bubble-scroll-gap:\s*2px/);
-    // ...the corner names its own edge gap as exactly one such unit (halved
-    // from the previous 2x, so the token sits twice as close to the edge)...
-    expect(corner).toMatch(/--usage-corner-edge-gap:\s*var\(--bubble-scroll-gap\)\s*;/);
-    // ...and the corner's own right margin is the one place that departs
-    // from the padding/margin cancellation (unlike top/bottom/left, asserted
-    // above): it is less negative than the fully-cancelling `-1.25rem` by
-    // exactly one `--bubble-scroll-gap`, which is what pulls the content the
-    // extra, real, un-cancelled distance left of the flush position. Since
-    // `.bubble`'s own right padding already contributes one
-    // `--bubble-scroll-gap`, this second one brings the total gap from the
-    // bubble's true edge to `--usage-corner-edge-gap` (2x).
-    expect(corner).toMatch(
-      /margin-right:\s*calc\(\s*var\(--usage-corner-edge-gap\)\s*-\s*var\(--bubble-scroll-gap\)\s*-\s*1\.25rem\s*\)/,
-    );
-  });
-
-  it("keeps the corner's right-edge gap constant whether or not the duration is revealed", () => {
-    // Arrange / Act — the edge gap must live ONLY on the base `.usage-corner`
-    // rule and never be touched by any rule keyed on the revealed state, so
-    // revealing the duration cannot change it (the no-reflow-on-hover
-    // invariant extends to this gap, not only to the duration's own width).
-    const revealedRules = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.some((selector) => selector.includes("usage-corner--revealed")),
-    );
-
-    // Assert
-    for (const rule of revealedRules) {
-      expect(rule.declarations).not.toMatch(/margin-right/);
-      expect(rule.declarations).not.toMatch(/--usage-corner-edge-gap/);
-    }
-  });
-
-  it("collapses the slider by 100% of its own width, the duration's width by construction", () => {
-    // Arrange / Act
-    const slider = declarationsOf(".usage-slider") ?? "";
-
-    // Assert — a percentage transform on the element whose width is the
-    // duration, never a length.
-    expect(slider).toMatch(/transform:\s*translateX\(100%\)/);
-  });
-
-  it("declares no fixed-length slide distance anywhere in the sheet", () => {
-    // Arrange / Act
-    const withoutComments = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
-
-    // Assert
-    expect(withoutComments).not.toMatch(/--usage-slide-distance/);
-  });
-
-  it("gives the slider no in-flow content but the duration, so its width is the duration's", () => {
-    // Arrange / Act — the token is out of flow, so it adds nothing to the
-    // slider's width; the duration (with its gap) is all that remains.
-    const stamp = declarationsOf(".usage-stamp") ?? "";
-
-    // Assert
-    expect(stamp).toMatch(/position:\s*absolute/);
-  });
-
-  it("anchors the token to the slider's left edge", () => {
-    // Arrange / Act
-    const slider = declarationsOf(".usage-slider") ?? "";
-    const stamp = declarationsOf(".usage-stamp") ?? "";
-
-    // Assert — the slider is the token's containing block, and the token's
-    // right edge is the slider's left edge.
-    expect(slider).toMatch(/position:\s*relative/);
-    expect(stamp).toMatch(/right:\s*100%/);
-  });
-
-  it("gives the token no transform of its own, so it moves only with the slider", () => {
-    // Arrange / Act
-    const stamp = declarationsOf(".usage-stamp") ?? "";
-
-    // Assert
-    expect(stamp).not.toMatch(/(?:^|[\s;])transform\s*:/);
-    expect(stamp).not.toMatch(/(?:^|[\s;])transition\s*:/);
-  });
-
-  it("reserves the token's width with a hidden in-flow copy of the token text", () => {
-    // Arrange / Act
-    const spacer = declarationsOf(".usage-corner::before") ?? "";
-
-    // Assert — the copy is the token text itself, never a guessed length.
-    expect(spacer).toMatch(/content:\s*attr\(data-tokens\)/);
-    expect(spacer).toMatch(/visibility:\s*hidden/);
-  });
-
-  it("sizes the token's spacer in the token's own font size and figures", () => {
-    // Arrange / Act
-    const spacer = declarationsOf(".usage-corner::before") ?? "";
-
-    // Assert
-    expect(spacer).toMatch(/font-size:\s*var\(--usage-ago-font-size\)/);
-    expect(spacer).toMatch(/font-variant-numeric:\s*tabular-nums/);
-  });
-
-  it("keeps the token's text on one line so its zero-width anchor cannot wrap it", () => {
-    // Arrange / Act
-    const stamp = declarationsOf(".usage-stamp") ?? "";
-    const spacer = declarationsOf(".usage-corner::before") ?? "";
-
-    // Assert
-    expect(stamp).toMatch(/white-space:\s*nowrap/);
-    expect(spacer).toMatch(/white-space:\s*nowrap/);
-  });
-
-  it.each([
+describe("the cost corner", () => {
+  /** The five reveal triggers: the whole bubble, the corner, and the state class. */
+  const TRIGGERS = [
     ".bubble.assistant:hover",
     ".bubble.assistant:focus-within",
     ".usage-corner:hover",
     ".usage-corner:focus-within",
     ".usage-corner.usage-corner--revealed",
-  ])("slides the slider to translateX(0) under %s", (trigger) => {
-    // Arrange / Act
-    const slider = declarationsOf(`${trigger} .usage-slider`) ?? "";
+  ] as const;
 
-    // Assert
-    expect(slider).toMatch(/transform:\s*translateX\(0\)/);
+  describe("the one gap token", () => {
+    it("defines the gap as the bubble's top padding plus the line's half-leading", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect(corner).toMatch(
+        /--usage-corner-gap:\s*calc\(var\(--usage-bubble-pad-top\) \+ var\(--usage-half-leading\)\)/,
+      );
+    });
+
+    it("derives the half-leading from the bubble's one leading", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect(corner).toMatch(
+        /--usage-half-leading:\s*calc\(\(var\(--md-line-h\) - 1\) \/ 2 \* 1em\)/,
+      );
+    });
+
+    it("mirrors .bubble's top padding exactly", () => {
+      // Arrange / Act
+      const bubblePadTop = /padding:\s*(\S+)/.exec(declarationsOf(".bubble") ?? "")?.[1];
+      const mirrored = /--usage-bubble-pad-top:\s*([^;]+);/.exec(
+        declarationsOf(".usage-corner") ?? "",
+      )?.[1];
+
+      // Assert
+      expect(mirrored).toBe(bubblePadTop);
+    });
+
+    it("derives the top margin from the gap token", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect(corner).toMatch(
+        /margin-top:\s*calc\(\s*var\(--usage-corner-gap\)\s*-\s*var\(--usage-half-leading\)\s*-\s*var\(--usage-bubble-pad-top\)\s*-\s*var\(--usage-hit-y\)\s*\)/,
+      );
+    });
+
+    it("derives the right margin from the same gap token", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect(corner).toMatch(
+        /margin-right:\s*calc\(\s*var\(--usage-corner-gap\)\s*-\s*var\(--bubble-scroll-gap\)\s*-\s*var\(--usage-hit-x\)\s*\)/,
+      );
+    });
+
+    it("leaves the global --bubble-scroll-gap untouched", () => {
+      // Arrange / Act
+      const mainCol = declarationsOf("#main-col") ?? "";
+
+      // Assert
+      expect(mainCol).toMatch(/--bubble-scroll-gap:\s*2px/);
+    });
+
+    it("never touches a margin or the gap token from a reveal rule", () => {
+      // Arrange / Act
+      const revealRules = rulesOf(stylesheet).filter((rule) =>
+        rule.selectors.some((selector) => TRIGGERS.some((trigger) => selector.startsWith(trigger))),
+      );
+
+      // Assert
+      for (const rule of revealRules) {
+        expect(rule.declarations).not.toMatch(/margin|--usage-corner-gap\s*:/);
+      }
+    });
   });
 
-  it.each([
-    ".bubble.assistant:hover",
-    ".bubble.assistant:focus-within",
-    ".usage-corner:hover",
-    ".usage-corner:focus-within",
-    ".usage-corner.usage-corner--revealed",
-  ])("fades the duration in under %s", (trigger) => {
-    // Arrange / Act
-    const ago = declarationsOf(`${trigger} .usage-ago`) ?? "";
+  describe("the hover hit area", () => {
+    it("pads the corner by the hit tokens", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
 
-    // Assert
-    expect(ago).toMatch(/opacity:\s*1/);
+      // Assert
+      expect(corner).toMatch(/padding:\s*var\(--usage-hit-y\) var\(--usage-hit-x\)/);
+    });
+
+    it("cancels the hit padding at the bottom and the left", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect([
+        /margin-bottom:\s*calc\(0px - var\(--usage-hit-y\)\)/.test(corner),
+        /margin-left:\s*calc\(0px - var\(--usage-hit-x\)\)/.test(corner),
+      ]).toEqual([true, true]);
+    });
+
+    it("keeps the hit area's size", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect([
+        /--usage-hit-x:\s*1\.25rem/.test(corner),
+        /--usage-hit-y:\s*0\.4rem/.test(corner),
+      ]).toEqual([true, true]);
+    });
   });
 
-  it("transitions the slide and the fade on the same half-second ease", () => {
-    // Arrange / Act
-    const slider = declarationsOf(".usage-slider") ?? "";
-    const ago = declarationsOf(".usage-ago") ?? "";
+  describe("the resting layout", () => {
+    it("floats the corner top-right so the prose's first line wraps beside it", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
 
-    // Assert
-    expect(slider).toMatch(/transition:\s*transform 0\.5s ease/);
-    expect(ago).toMatch(/transition:\s*opacity 0\.5s ease/);
+      // Assert
+      expect(corner).toMatch(/float:\s*right/);
+    });
+
+    it("parks the slider at 100% of its own width", () => {
+      // Arrange / Act
+      const slider = declarationsOf(".usage-slider") ?? "";
+
+      // Assert
+      expect(slider).toMatch(/transform:\s*translateX\(100%\)/);
+    });
+
+    it("parks the duration one gap token beyond its normal gap", () => {
+      // Arrange / Act
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect(ago).toMatch(/transform:\s*translateX\(var\(--usage-corner-gap\)\)/);
+    });
+
+    it("fades the duration out at rest", () => {
+      // Arrange / Act
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect(ago).toMatch(/opacity:\s*0/);
+    });
+
+    it("keeps the normal gap between the token and the duration", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect([
+        /--usage-pair-gap:\s*0\.35rem/.test(corner),
+        /margin-left:\s*var\(--usage-pair-gap\)/.test(ago),
+      ]).toEqual([true, true]);
+    });
+
+    it("makes the duration a block, so its transform applies", () => {
+      // Arrange / Act
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect(ago).toMatch(/display:\s*block/);
+    });
+
+    it("declares no fixed-length slide distance anywhere in the sheet", () => {
+      // Arrange / Act
+      const transforms = rulesOf(stylesheet)
+        .filter((rule) => rule.selectors.some((selector) => /usage-(?:slider|ago|stamp)/.test(selector)))
+        .flatMap((rule) => rule.declarations.match(/translateX\([^)]*\)+/g) ?? []);
+
+      // Assert: a percentage, zero, or the gap token, never a length.
+      for (const transform of transforms) {
+        expect(transform).toMatch(/^translateX\((?:100%|0|var\(--usage-corner-gap\))\)$/);
+      }
+    });
   });
 
-  it("never re-sizes the slider when revealed, nor the token, so the reserved footprint stays constant", () => {
-    // Arrange / Act — the revealed-state rule and the token's rule. (The base
-    // slider rule now FIXES the slot's width, below: owner rule 2026-09-23.)
-    const decls = [
-      declarationsOf(".usage-corner.usage-corner--revealed .usage-slider") ?? "",
-      declarationsOf(".usage-stamp") ?? "",
-    ];
+  describe("the two-phase reveal", () => {
+    it.each(TRIGGERS)("phase A slides the duration to its normal gap under %s", (trigger) => {
+      // Arrange / Act
+      const ago = declarationsOf(`${trigger} .usage-ago`) ?? "";
 
-    // Assert — only `transform` moves; no width, max-width or margin is
-    // declared, so the float's width is spacer + slider in both states.
-    for (const one of decls) {
-      expect(one).not.toMatch(/(?:^|[\s;])width\s*:/);
-      expect(one).not.toMatch(/(?:^|[\s;])max-width\s*:/);
-      expect(one).not.toMatch(/(?:^|[\s;])margin/);
-    }
+      // Assert
+      expect([/transform:\s*translateX\(0\)/.test(ago), /opacity:\s*1/.test(ago)]).toEqual([
+        true,
+        true,
+      ]);
+    });
+
+    it.each(TRIGGERS)("phase B slides the pair to rest under %s", (trigger) => {
+      // Arrange / Act
+      const slider = declarationsOf(`${trigger} .usage-slider`) ?? "";
+
+      // Assert
+      expect(slider).toMatch(/transform:\s*translateX\(0\)/);
+    });
+
+    it.each(TRIGGERS)("phase A starts at once under %s", (trigger) => {
+      // Arrange / Act
+      const ago = declarationsOf(`${trigger} .usage-ago`) ?? "";
+
+      // Assert
+      expect(ago).toMatch(/transition-delay:\s*0s/);
+    });
+
+    it.each(TRIGGERS)("phase B waits out phase A under %s", (trigger) => {
+      // Arrange / Act
+      const slider = declarationsOf(`${trigger} .usage-slider`) ?? "";
+
+      // Assert
+      expect(slider).toMatch(/transition-delay:\s*var\(--usage-phase\)/);
+    });
+
+    it("runs phase B back first on mouse-leave", () => {
+      // Arrange / Act
+      const slider = declarationsOf(".usage-slider") ?? "";
+
+      // Assert
+      expect(slider).toMatch(/transition:\s*transform var\(--usage-phase\) ease 0s/);
+    });
+
+    it("runs phase A back once phase B has returned", () => {
+      // Arrange / Act
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect(ago).toMatch(
+        /transition:\s*transform var\(--usage-phase\) ease var\(--usage-phase\),\s*opacity var\(--usage-phase\) ease var\(--usage-phase\)/,
+      );
+    });
+
+    it("splits the half-second reveal into two quarter-second phases", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+
+      // Assert
+      expect(corner).toMatch(/--usage-phase:\s*0\.25s/);
+    });
+
+    it("gives the token no transform of its own, so it moves only with the slider", () => {
+      // Arrange / Act
+      const stamp = declarationsOf(".usage-stamp") ?? "";
+
+      // Assert
+      expect(stamp).not.toMatch(/(?:^|[\s;])transform\s*:|(?:^|[\s;])transition\s*:/);
+    });
+
+    it("never slides an arriving corner's empty slider out, whatever reveals it", () => {
+      // Arrange / Act
+      const arriving =
+        declarationsOf(".bubble.assistant .usage-corner[data-arriving] .usage-slider") ?? "";
+
+      // Assert
+      expect(arriving).toMatch(/transform:\s*translateX\(100%\)/);
+    });
+
+    it("disables both phases under reduced motion", () => {
+      // Arrange / Act
+      const reduced = rulesOf(stylesheet).find(
+        (rule) => rule.selectors.includes(".usage-slider") && rule.selectors.includes(".usage-ago"),
+      );
+
+      // Assert
+      expect(reduced?.declarations).toMatch(/transition:\s*none/);
+    });
   });
 
-  it("fixes the duration slot's width, so the live clock never moves the float", () => {
-    // Arrange / Act — THE USER OWNS THE SCROLL (owner rule, 2026-09-23): a
-    // slot as wide as its text reflowed the first prose line on every tick.
-    const slider = declarationsOf(".usage-slider") ?? "";
+  describe("the pair's anchoring", () => {
+    it("takes the slider out of flow at the corner's content edge", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
+      const slider = declarationsOf(".usage-slider") ?? "";
 
-    // Assert
-    expect(slider).toMatch(/(?:^|[\s;])width:\s*calc\(0\.35rem \+ 11ch \* 0\.85\)/);
+      // Assert
+      expect([
+        /position:\s*relative/.test(corner),
+        /position:\s*absolute/.test(slider),
+        /top:\s*var\(--usage-hit-y\)/.test(slider),
+        /right:\s*var\(--usage-hit-x\)/.test(slider),
+      ]).toEqual([true, true, true, true]);
+    });
+
+    it("hangs the token off the slider's left edge", () => {
+      // Arrange / Act
+      const stamp = declarationsOf(".usage-stamp") ?? "";
+
+      // Assert
+      expect([/position:\s*absolute/.test(stamp), /right:\s*100%/.test(stamp)]).toEqual([
+        true,
+        true,
+      ]);
+    });
+
+    it("keeps the token's text on one line so its zero-width anchor cannot wrap it", () => {
+      // Arrange / Act
+      const stamp = declarationsOf(".usage-stamp") ?? "";
+
+      // Assert
+      expect(stamp).toMatch(/white-space:\s*nowrap/);
+    });
   });
 
-  it("fixes the token spacer's width, so a growing figure never moves the float", () => {
-    // Arrange / Act
-    const spacer = declarationsOf(".usage-corner::before") ?? "";
+  describe("one size and one baseline", () => {
+    it("sets the one font size on the corner", () => {
+      // Arrange / Act
+      const corner = declarationsOf(".usage-corner") ?? "";
 
-    // Assert
-    expect(spacer).toMatch(/(?:^|[\s;])width:\s*6ch/);
-  });
+      // Assert
+      expect(corner).toMatch(/(?:^|[\s;])font-size:\s*0\.85em/);
+    });
 
-  it("draws the duration in fixed-width figures", () => {
-    // Arrange / Act
-    const ago = declarationsOf(".usage-ago") ?? "";
+    it.each([".usage-stamp", ".usage-ago", ".usage-slider", ".usage-reserve", ".usage-corner::before"])(
+      "lets %s inherit the corner's size and leading",
+      (selector) => {
+        // Arrange / Act
+        const declarations = declarationsOf(selector) ?? "";
 
-    // Assert
-    expect(ago).toMatch(/font-variant-numeric:\s*tabular-nums/);
-  });
-
-  it("never slides an arriving corner's empty slot out, whatever reveals it", () => {
-    // Arrange / Act
-    const arriving = declarationsOf(".bubble.assistant .usage-corner[data-arriving] .usage-slider") ?? "";
-
-    // Assert
-    expect(arriving).toMatch(/transform:\s*translateX\(100%\)/);
-  });
-
-  it("disables the slide and the fade under reduced motion", () => {
-    // Arrange / Act
-    const reduced = rulesOf(stylesheet).find(
-      (rule) =>
-        rule.selectors.includes(".usage-slider") && rule.selectors.includes(".usage-ago"),
+        // Assert
+        expect(declarations).not.toMatch(/font-size|line-height|font:/);
+      },
     );
 
-    // Assert
-    expect(reduced?.declarations).toMatch(/transition:\s*none/);
+    it("aligns the token to the top of the line the duration starts on", () => {
+      // Arrange / Act
+      const stamp = declarationsOf(".usage-stamp") ?? "";
+
+      // Assert
+      expect(stamp).toMatch(/(?:^|[\s;])top:\s*0/);
+    });
+
+    it("keeps each figure's own color", () => {
+      // Arrange / Act
+      const stamp = declarationsOf(".usage-stamp") ?? "";
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect([
+        /color:\s*var\(--info-tokens\)/.test(stamp),
+        /color:\s*var\(--muted\)/.test(ago),
+      ]).toEqual([true, true]);
+    });
+
+    it("draws the duration in fixed-width figures", () => {
+      // Arrange / Act
+      const ago = declarationsOf(".usage-ago") ?? "";
+
+      // Assert
+      expect(ago).toMatch(/font-variant-numeric:\s*tabular-nums/);
+    });
+  });
+
+  describe("the reserved footprint", () => {
+    it("reserves the token's slot with a hidden in-flow copy of the token text", () => {
+      // Arrange / Act
+      const spacer = declarationsOf(".usage-corner::before") ?? "";
+
+      // Assert
+      expect([
+        /content:\s*attr\(data-tokens\)/.test(spacer),
+        /visibility:\s*hidden/.test(spacer),
+        /(?:^|[\s;])width:\s*6ch/.test(spacer),
+        /font-variant-numeric:\s*tabular-nums/.test(spacer),
+      ]).toEqual([true, true, true, true]);
+    });
+
+    it("reserves the duration's gap in front of its widest label", () => {
+      // Arrange / Act
+      const reserve = declarationsOf(".usage-reserve") ?? "";
+
+      // Assert
+      expect([
+        /visibility:\s*hidden/.test(reserve),
+        /margin-left:\s*var\(--usage-pair-gap\)/.test(reserve),
+        /font-variant-numeric:\s*tabular-nums/.test(reserve),
+      ]).toEqual([true, true, true]);
+    });
+
+    it("stacks every reserved label in one grid cell, so the reserve is the widest", () => {
+      // Arrange / Act
+      const reserve = declarationsOf(".usage-reserve") ?? "";
+      const label = declarationsOf(".usage-reserve > .usage-reserve-label") ?? "";
+
+      // Assert
+      expect([
+        /display:\s*grid/.test(reserve),
+        /grid-area:\s*1 \/ 1/.test(label),
+        /white-space:\s*nowrap/.test(label),
+      ]).toEqual([true, true, true]);
+    });
+
+    it("sizes nothing from a reveal rule, so hovering never reflows the first line", () => {
+      // Arrange / Act
+      const revealRules = rulesOf(stylesheet).filter((rule) =>
+        rule.selectors.some((selector) => TRIGGERS.some((trigger) => selector.startsWith(trigger))),
+      );
+
+      // Assert: a reveal rule declares only transform, opacity and delay.
+      for (const rule of revealRules) {
+        const properties = rule.declarations
+          .split(";")
+          .map((declaration) => declaration.split(":")[0]?.trim())
+          .filter((property) => property !== undefined && property !== "");
+        expect(properties.every((p) => ["transform", "opacity", "transition-delay"].includes(p))).toBe(
+          true,
+        );
+      }
+    });
   });
 });
 

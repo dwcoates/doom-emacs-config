@@ -20,9 +20,11 @@ import {
   REVEALED_ATTRIBUTE,
   RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
+  USAGE_AGE_RESERVE_LABELS,
   USAGE_REVEALED_CLASS,
   drawFeedResponse,
   revealedSoFar,
+  usageAgeWithinReserve,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
@@ -368,11 +370,11 @@ describe("the usage corner's hover timestamp", () => {
     expect(el.querySelectorAll(`.usage-ago[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
   });
 
-  it("slides the timestamp over one continuous half-second transition", () => {
+  it("slides the timestamp on the phase transition, waiting out the other phase at rest", () => {
     // Arrange / Act: the rule the .usage-ago element is styled by.
     const rule = /\.usage-ago\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
-    // Assert: a 0.5s transition is what gives the reveal AND the reverse.
-    expect(rule).toMatch(/transition:[^;]*0\.5s/);
+    // Assert: phase A's slide, delayed by one phase so the reverse runs it last.
+    expect(rule).toMatch(/transform var\(--usage-phase\) ease var\(--usage-phase\)/);
   });
 
   it("shows and hides the timestamp with no slide under reduced motion", () => {
@@ -417,24 +419,31 @@ describe("the usage corner's slider markup", () => {
     expect(corner.dataset.tokens).toBe("12.4k");
   });
 
-  it("nests the token then the duration inside the one slider once settled", () => {
+  /** The reserve's children, as class names: one label per reserved age shape. */
+  const RESERVE_CHILDREN = USAGE_AGE_RESERVE_LABELS.map(() => "usage-reserve-label");
+
+  it("draws the reserve, then the token and the duration inside the one slider, once settled", () => {
     // Arrange / Act
     const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Assert — the slider is the corner's only element, and the duration is
-    // the slider's only in-flow content besides the out-of-flow token.
+    // Assert — the reserve holds the corner's width; the duration is the
+    // slider's only in-flow content besides the out-of-flow token.
     const corner = el.querySelector(".usage-corner") as HTMLElement;
     expect(shape(corner)).toEqual([
+      { className: "usage-reserve", children: RESERVE_CHILDREN },
       { className: "usage-slider", children: ["usage-stamp", "usage-ago"] },
     ]);
   });
 
-  it("nests only the token inside an empty-width slider while arriving", () => {
+  it("draws the reserve and only the token inside an empty-width slider while arriving", () => {
     // Arrange / Act
     const el = drawFeedResponse(withUsage(0n), rowContext());
     // Assert — no duration, so the slider has no in-flow content and the
-    // token stays at the right edge.
+    // token stays at the right edge; the reserve is already the settled width.
     const corner = el.querySelector(".usage-corner") as HTMLElement;
-    expect(shape(corner)).toEqual([{ className: "usage-slider", children: ["usage-stamp"] }]);
+    expect(shape(corner)).toEqual([
+      { className: "usage-reserve", children: RESERVE_CHILDREN },
+      { className: "usage-slider", children: ["usage-stamp"] },
+    ]);
   });
 
   it("marks an arriving corner, so its empty slot never slides out", () => {
@@ -451,20 +460,72 @@ describe("the usage corner's slider markup", () => {
     expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(false);
   });
 
-  it("reserves the same slot width arriving and settled, so the settle moves nothing", () => {
-    // Arrange -- the real stylesheet.
-    const teardown = installStylesheet();
+  it("reserves the same labels arriving and settled, so the settle moves nothing", () => {
+    // Arrange
     const arrivingEl = drawFeedResponse(withUsage(0n), rowContext());
     const settledEl = drawFeedResponse(withUsage(1_000n), rowContext());
-    document.body.append(arrivingEl, settledEl);
+    // Act
+    const [arriving, settled] = [arrivingEl, settledEl].map((el) =>
+      Array.from(el.querySelectorAll(".usage-reserve-label"), (label) => label.textContent),
+    );
+    // Assert
+    expect(arriving).toEqual(settled);
+  });
+
+  it("sizes the reserve by the widest label of every age shape, figures zeroed", () => {
+    // Arrange
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Act
+    const labels = Array.from(el.querySelectorAll(".usage-reserve-label"), (label) => label.textContent);
+    // Assert
+    expect(labels).toEqual([
+      "000d 00h ago",
+      "000d ago",
+      "00h 00m ago",
+      "00h ago",
+      "00m 00s ago",
+      "00m ago",
+      "00s ago",
+    ]);
+  });
+
+  it("hides the reserve from assistive technology", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    // Assert
+    expect(el.querySelector(".usage-reserve")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps the reserve's labels unchanged as the live clock advances", async () => {
+    // Arrange
+    vi.setSystemTime(31_000);
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.appendChild(el);
+    const read = (): unknown =>
+      Array.from(el.querySelectorAll(".usage-reserve-label"), (label) => label.textContent);
+    const before = read();
+    try {
+      // Act — the duration crosses a unit ("30s ago" to "1m ago").
+      await vi.advanceTimersByTimeAsync(30_000);
+      // Assert
+      expect(read()).toEqual(before);
+    } finally {
+      el.remove();
+    }
+  });
+
+  it("takes the slider out of flow, so the reserve alone sizes the corner", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    const el = drawFeedResponse(withUsage(1_000n), rowContext());
+    document.body.appendChild(el);
     try {
       // Act
-      const widths = [arrivingEl, settledEl].map((el) =>
-        cascadedValue(el.querySelector(".usage-slider") as HTMLElement, "width"),
-      );
+      const slider = el.querySelector(".usage-slider") as HTMLElement;
       // Assert
-      expect([widths[0] === widths[1], widths[0] !== "" && widths[0] !== "auto"]).toEqual([true, true]);
+      expect(cascadedValue(slider, "position")).toBe("absolute");
     } finally {
+      el.remove();
       teardown();
     }
   });
@@ -548,6 +609,109 @@ describe("the usage corner's slider markup", () => {
       el.remove();
       teardown();
     }
+  });
+});
+
+describe("the usage corner's duration reserve check", () => {
+  it.each(["0s ago", "59s ago", "5m 30s ago", "59m 59s ago", "23h 59m ago", "999d 23h ago", "999d ago"])(
+    "admits %s",
+    (label) => {
+      // Arrange / Act
+      const fits = usageAgeWithinReserve(label);
+      // Assert
+      expect(fits).toBe(true);
+    },
+  );
+
+  it("refuses a label with more figures than its shape reserves", () => {
+    // Arrange / Act
+    const fits = usageAgeWithinReserve("1000d ago");
+    // Assert
+    expect(fits).toBe(false);
+  });
+
+  it("refuses a label whose shape is not reserved at all", () => {
+    // Arrange / Act
+    const fits = usageAgeWithinReserve("5y ago");
+    // Assert
+    expect(fits).toBe(false);
+  });
+});
+
+describe("the usage corner's error paths", () => {
+  /** A settled response whose corner settled at AT_MS. */
+  function settled(atMs: bigint) {
+    return response({
+      usage: { text: "2.1k", atMs },
+      result: { case: "success", value: { prose: { markdown: "done" } } },
+    });
+  }
+
+  /** A thousand days, the first age the reserve cannot hold. */
+  const THOUSAND_DAYS_MS = 1000 * 86_400_000;
+
+  it("logs a duration that outgrew its reserve at error", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    vi.setSystemTime(THOUSAND_DAYS_MS + 1_000);
+    // Act
+    drawFeedResponse(settled(1_000n), rowContext());
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.usage-reserve-exceeded");
+    expect(record.level.case).toBe("error");
+  });
+
+  it("names the label that outgrew the reserve", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    vi.setSystemTime(THOUSAND_DAYS_MS + 1_000);
+    // Act
+    drawFeedResponse(settled(1_000n), rowContext());
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.usage-reserve-exceeded");
+    expect(record.context?.label).toBe("1000d ago");
+  });
+
+  it("logs the overflow once per corner, not on every tick", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    vi.setSystemTime(THOUSAND_DAYS_MS + 1_000);
+    const el = drawFeedResponse(settled(1_000n), rowContext());
+    document.body.appendChild(el);
+    try {
+      // Act
+      await vi.advanceTimersByTimeAsync(3_000);
+      capture.logger.flush();
+      await Promise.resolve();
+      // Assert
+      const overflows = capture.sent.filter(
+        (record) => record.operation === "feed.cards.response.usage-reserve-exceeded",
+      );
+      expect(overflows).toHaveLength(1);
+    } finally {
+      el.remove();
+    }
+  });
+
+  it("logs nothing while the duration fits its reserve", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    vi.setSystemTime(331_000);
+    // Act
+    drawFeedResponse(settled(1_000n), rowContext());
+    capture.logger.flush();
+    await Promise.resolve();
+    // Assert
+    expect(capture.sent.filter((record) => record.level.case === "error")).toEqual([]);
+  });
+
+  it("refuses a settle instant beyond a safe integer as a malformed view", () => {
+    // Arrange
+    const malformed = settled(BigInt(Number.MAX_SAFE_INTEGER) + 1n);
+    // Act
+    const draw = (): HTMLElement => drawFeedResponse(malformed, rowContext());
+    // Assert
+    expect(draw).toThrow(MalformedView);
   });
 });
 
