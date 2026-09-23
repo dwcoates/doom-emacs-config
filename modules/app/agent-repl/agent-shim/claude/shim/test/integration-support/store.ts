@@ -323,6 +323,74 @@ export async function seedDetachedAnnouncement(
   ]);
 }
 
+/**
+ * Seed a SUBAGENT SPAWN as a page line of the spawner's book.
+ *
+ * The spawn frame's start names the created agent, which is what the store
+ * records `agent.spawned_by_agent` from — so the created agent is an open
+ * obligation IN THE SPAWNER'S SESSION LINEAGE, and in no other session's.
+ */
+export async function seedSubagentSpawn(
+  client: StoreClient,
+  producer: string,
+  init: { readonly spawner: string; readonly created: string },
+): Promise<void> {
+  const spawner = create(conversationv1.AgentIdSchema, { value: init.spawner });
+  await writeEntries(client, producer, [
+    create(storev1.StoreEntrySchema, {
+      plane: filePlane(),
+      writeId: `seed-${init.created}-spawn`,
+      upsertKey: `activity:spawn-${init.created}`,
+      entry: {
+        case: "agentUpdate",
+        value: create(storev1.StoreAgentUpdateSchema, {
+          topLevel: spawner,
+          agentInfo: {
+            case: "serveableFrame",
+            value: create(storev1.StorePageLineSchema, {
+              pageAgentId: spawner,
+              agentItem: create(storev1.StoreAgentItemSchema, {
+                item: {
+                  case: "agentFrame",
+                  value: create(conversationv1.AgentFrameSchema, {
+                    agentId: spawner,
+                    result: {
+                      case: "update",
+                      value: create(conversationv1.AgentUpdateSchema, {
+                        update: {
+                          case: "activity",
+                          value: create(conversationv1.AgentActivitySchema, {
+                            activityId: create(conversationv1.AgentActivityIdSchema, {
+                              value: `spawn-${init.created}`,
+                            }),
+                            item: {
+                              case: "subagent",
+                              value: create(conversationv1.AgentSubagentSchema, {
+                                result: {
+                                  case: "start",
+                                  value: create(conversationv1.AgentSubagentStartSchema, {
+                                    createdAgentId: create(conversationv1.AgentIdSchema, {
+                                      value: init.created,
+                                    }),
+                                  }),
+                                },
+                              }),
+                            },
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            }),
+          },
+        }),
+      },
+    }),
+  ]);
+}
+
 // ---------------------------------------------------------------------------
 // reading what the SHIM wrote
 // ---------------------------------------------------------------------------

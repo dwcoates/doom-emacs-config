@@ -76,7 +76,7 @@ func TestJSONCodecServesARawPost(t *testing.T) {
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		baseURL+storev1connect.ShimStoreGetLiveWorkProcedure, bytes.NewReader([]byte(`{}`)))
+		baseURL+storev1connect.ShimStoreGetLiveWorkProcedure, bytes.NewReader([]byte(`{"session":{"value":"main"}}`)))
 	if err != nil {
 		t.Fatalf("building the raw JSON request: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestUnknownProcedureIsAConnectErrorNotAHang(t *testing.T) {
 	)
 
 	// Act.
-	_, err := wrong.CallUnary(ctx, connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+	_, err := wrong.CallUnary(ctx, connect.NewRequest(&storev1.GetLiveWorkRequest{Session: agentID("main")}))
 
 	// Assert.
 	if err == nil {

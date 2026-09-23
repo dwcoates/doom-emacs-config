@@ -1,5 +1,15 @@
-// endpoint_get_live_work.proto — GetLiveWork: the OPEN OBLIGATIONS — every
-// started thing the record holds no terminal for.
+// endpoint_get_live_work.proto — GetLiveWork: ONE SESSION'S OPEN OBLIGATIONS —
+// every started thing the record holds no terminal for, within the lineage of
+// the caller's main agent.
+//
+// THE STORE IS SHARED. One store serves every workspace and every session on
+// the host, so "every open obligation in the record" is every OTHER session's
+// work too. The answer is therefore PER SESSION: the caller names its main
+// agent and the store answers only what descends from it. A shim that resolved
+// the whole record against its own vendor would write closing terminals into
+// other sessions' books for work its vendor never held — which is exactly
+// what happened on 2026-09-23, when opening one workspace reaped five running
+// subagents of another. An unscoped request is REFUSED, never answered.
 //
 // NOT a claim about the world: "live" here means "a start was written and no
 // terminal ever was", which is timeless and cannot go stale. The SHIM calls
@@ -35,9 +45,15 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Ask for every open obligation.
+// Ask for one session's open obligations.
 type GetLiveWorkRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED. The caller's MAIN agent id — the root of its session's lineage.
+	// The store answers the agents spawned transitively from it (through
+	// `spawned_by_agent`, and through `spawned_by_workflow` where a workflow is
+	// the link), and the detached work owned by any agent in that set. UNSET or
+	// empty is refused with `invalid_request`; there is no unscoped answer.
+	Session       *v1.AgentId `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -70,6 +86,13 @@ func (x *GetLiveWorkRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetLiveWorkRequest.ProtoReflect.Descriptor instead.
 func (*GetLiveWorkRequest) Descriptor() ([]byte, []int) {
 	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GetLiveWorkRequest) GetSession() *v1.AgentId {
+	if x != nil {
+		return x.Session
+	}
+	return nil
 }
 
 // The set, or why it could not be read.
@@ -155,8 +178,9 @@ func (*GetLiveWorkResponse_Success) isGetLiveWorkResponse_Result() {}
 
 func (*GetLiveWorkResponse_Failure) isGetLiveWorkResponse_Result() {}
 
-// The open obligations, from the three tables' non-terminal rows. Empty
-// lists are the ordinary answer for an idle session. IDS ONLY: the caller
+// The session's open obligations, from the three tables' non-terminal rows
+// within the requested lineage — never another session's. Empty lists are the
+// ordinary answer for an idle session. IDS ONLY: the caller
 // follows up per item (GetWorkflow, OpenAgentSession, the detached row's
 // state), which the reconciliation does anyway.
 type GetLiveWorkSuccess struct {
@@ -230,6 +254,7 @@ type GetLiveWorkFailure struct {
 	// Types that are valid to be assigned to Kind:
 	//
 	//	*GetLiveWorkFailure_StorageFailure
+	//	*GetLiveWorkFailure_InvalidRequest
 	Kind          isGetLiveWorkFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -288,6 +313,15 @@ func (x *GetLiveWorkFailure) GetStorageFailure() *GetLiveWorkStorageFailure {
 	return nil
 }
 
+func (x *GetLiveWorkFailure) GetInvalidRequest() *GetLiveWorkInvalidRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*GetLiveWorkFailure_InvalidRequest); ok {
+			return x.InvalidRequest
+		}
+	}
+	return nil
+}
+
 type isGetLiveWorkFailure_Kind interface {
 	isGetLiveWorkFailure_Kind()
 }
@@ -296,7 +330,61 @@ type GetLiveWorkFailure_StorageFailure struct {
 	StorageFailure *GetLiveWorkStorageFailure `protobuf:"bytes,2,opt,name=storage_failure,json=storageFailure,proto3,oneof"`
 }
 
+type GetLiveWorkFailure_InvalidRequest struct {
+	// `session` unset or empty: the store refuses to answer unscoped.
+	InvalidRequest *GetLiveWorkInvalidRequest `protobuf:"bytes,3,opt,name=invalid_request,json=invalidRequest,proto3,oneof"`
+}
+
 func (*GetLiveWorkFailure_StorageFailure) isGetLiveWorkFailure_Kind() {}
+
+func (*GetLiveWorkFailure_InvalidRequest) isGetLiveWorkFailure_Kind() {}
+
+// The request was malformed or violated the validation invariant.
+type GetLiveWorkInvalidRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which field, as the store names it — for the caller's logs, never
+	// switched on.
+	Field         string `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLiveWorkInvalidRequest) Reset() {
+	*x = GetLiveWorkInvalidRequest{}
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLiveWorkInvalidRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLiveWorkInvalidRequest) ProtoMessage() {}
+
+func (x *GetLiveWorkInvalidRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLiveWorkInvalidRequest.ProtoReflect.Descriptor instead.
+func (*GetLiveWorkInvalidRequest) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetLiveWorkInvalidRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
 
 // The database failed; `detail` carries the driver's text.
 type GetLiveWorkStorageFailure struct {
@@ -307,7 +395,7 @@ type GetLiveWorkStorageFailure struct {
 
 func (x *GetLiveWorkStorageFailure) Reset() {
 	*x = GetLiveWorkStorageFailure{}
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -319,7 +407,7 @@ func (x *GetLiveWorkStorageFailure) String() string {
 func (*GetLiveWorkStorageFailure) ProtoMessage() {}
 
 func (x *GetLiveWorkStorageFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -332,15 +420,16 @@ func (x *GetLiveWorkStorageFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLiveWorkStorageFailure.ProtoReflect.Descriptor instead.
 func (*GetLiveWorkStorageFailure) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{4}
+	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{5}
 }
 
 var File_store_v1_endpoint_get_live_work_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_get_live_work_proto_rawDesc = "" +
 	"\n" +
-	"%store/v1/endpoint_get_live_work.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\"\x14\n" +
-	"\x12GetLiveWorkRequest\"\x93\x01\n" +
+	"%store/v1/endpoint_get_live_work.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\"H\n" +
+	"\x12GetLiveWorkRequest\x122\n" +
+	"\asession\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\asession\"\x93\x01\n" +
 	"\x13GetLiveWorkResponse\x128\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1c.store.v1.GetLiveWorkSuccessH\x00R\asuccess\x128\n" +
 	"\afailure\x18\x02 \x01(\v2\x1c.store.v1.GetLiveWorkFailureH\x00R\afailureB\b\n" +
@@ -349,11 +438,14 @@ const file_store_v1_endpoint_get_live_work_proto_rawDesc = "" +
 	"\vlive_agents\x18\x01 \x03(\v2\x18.conversation.v1.AgentIdR\n" +
 	"liveAgents\x12F\n" +
 	"\x0elive_workflows\x18\x02 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\rliveWorkflows\x12D\n" +
-	"\rlive_detached\x18\x03 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\fliveDetached\"\x84\x01\n" +
+	"\rlive_detached\x18\x03 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\fliveDetached\"\xd4\x01\n" +
 	"\x12GetLiveWorkFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12N\n" +
-	"\x0fstorage_failure\x18\x02 \x01(\v2#.store.v1.GetLiveWorkStorageFailureH\x00R\x0estorageFailureB\x06\n" +
-	"\x04kind\"\x1b\n" +
+	"\x0fstorage_failure\x18\x02 \x01(\v2#.store.v1.GetLiveWorkStorageFailureH\x00R\x0estorageFailure\x12N\n" +
+	"\x0finvalid_request\x18\x03 \x01(\v2#.store.v1.GetLiveWorkInvalidRequestH\x00R\x0einvalidRequestB\x06\n" +
+	"\x04kind\"1\n" +
+	"\x19GetLiveWorkInvalidRequest\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\"\x1b\n" +
 	"\x19GetLiveWorkStorageFailureB\"Z agentrepl/proto/store/v1;storev1b\x06proto3"
 
 var (
@@ -368,28 +460,31 @@ func file_store_v1_endpoint_get_live_work_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_get_live_work_proto_rawDescData
 }
 
-var file_store_v1_endpoint_get_live_work_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_store_v1_endpoint_get_live_work_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_store_v1_endpoint_get_live_work_proto_goTypes = []any{
 	(*GetLiveWorkRequest)(nil),        // 0: store.v1.GetLiveWorkRequest
 	(*GetLiveWorkResponse)(nil),       // 1: store.v1.GetLiveWorkResponse
 	(*GetLiveWorkSuccess)(nil),        // 2: store.v1.GetLiveWorkSuccess
 	(*GetLiveWorkFailure)(nil),        // 3: store.v1.GetLiveWorkFailure
-	(*GetLiveWorkStorageFailure)(nil), // 4: store.v1.GetLiveWorkStorageFailure
-	(*v1.AgentId)(nil),                // 5: conversation.v1.AgentId
-	(*v1.DetachedWorkId)(nil),         // 6: conversation.v1.DetachedWorkId
+	(*GetLiveWorkInvalidRequest)(nil), // 4: store.v1.GetLiveWorkInvalidRequest
+	(*GetLiveWorkStorageFailure)(nil), // 5: store.v1.GetLiveWorkStorageFailure
+	(*v1.AgentId)(nil),                // 6: conversation.v1.AgentId
+	(*v1.DetachedWorkId)(nil),         // 7: conversation.v1.DetachedWorkId
 }
 var file_store_v1_endpoint_get_live_work_proto_depIdxs = []int32{
-	2, // 0: store.v1.GetLiveWorkResponse.success:type_name -> store.v1.GetLiveWorkSuccess
-	3, // 1: store.v1.GetLiveWorkResponse.failure:type_name -> store.v1.GetLiveWorkFailure
-	5, // 2: store.v1.GetLiveWorkSuccess.live_agents:type_name -> conversation.v1.AgentId
-	6, // 3: store.v1.GetLiveWorkSuccess.live_workflows:type_name -> conversation.v1.DetachedWorkId
-	6, // 4: store.v1.GetLiveWorkSuccess.live_detached:type_name -> conversation.v1.DetachedWorkId
-	4, // 5: store.v1.GetLiveWorkFailure.storage_failure:type_name -> store.v1.GetLiveWorkStorageFailure
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 0: store.v1.GetLiveWorkRequest.session:type_name -> conversation.v1.AgentId
+	2, // 1: store.v1.GetLiveWorkResponse.success:type_name -> store.v1.GetLiveWorkSuccess
+	3, // 2: store.v1.GetLiveWorkResponse.failure:type_name -> store.v1.GetLiveWorkFailure
+	6, // 3: store.v1.GetLiveWorkSuccess.live_agents:type_name -> conversation.v1.AgentId
+	7, // 4: store.v1.GetLiveWorkSuccess.live_workflows:type_name -> conversation.v1.DetachedWorkId
+	7, // 5: store.v1.GetLiveWorkSuccess.live_detached:type_name -> conversation.v1.DetachedWorkId
+	5, // 6: store.v1.GetLiveWorkFailure.storage_failure:type_name -> store.v1.GetLiveWorkStorageFailure
+	4, // 7: store.v1.GetLiveWorkFailure.invalid_request:type_name -> store.v1.GetLiveWorkInvalidRequest
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_get_live_work_proto_init() }
@@ -403,6 +498,7 @@ func file_store_v1_endpoint_get_live_work_proto_init() {
 	}
 	file_store_v1_endpoint_get_live_work_proto_msgTypes[3].OneofWrappers = []any{
 		(*GetLiveWorkFailure_StorageFailure)(nil),
+		(*GetLiveWorkFailure_InvalidRequest)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -410,7 +506,7 @@ func file_store_v1_endpoint_get_live_work_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_get_live_work_proto_rawDesc), len(file_store_v1_endpoint_get_live_work_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

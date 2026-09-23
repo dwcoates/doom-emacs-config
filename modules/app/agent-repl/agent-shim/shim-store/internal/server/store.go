@@ -47,7 +47,7 @@ type Store interface {
 	ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error)
 	LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error)
 	BashRun(ctx context.Context, runID string) (BashRunReplay, error)
-	LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error)
+	LiveWork(ctx context.Context, session string) (*storev1.GetLiveWorkSuccess, error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
 	ResidueShapes(ctx context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error)
 	Close() error
