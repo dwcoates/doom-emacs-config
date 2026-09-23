@@ -32,6 +32,10 @@ type Resolver interface {
 	// SetHeldPrompts installs a workspace's standing holds, whole. The prompt
 	// queue is the only caller.
 	SetHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt)
+	// SetEditing names the held prompt being edited (EditHeldPrompt), or
+	// clears it with the empty turn. Its entry carries HeldPrompt.editing.
+	// The prompt queue is the only caller.
+	SetEditing(ws ids.WorkspaceID, turn ids.TurnID)
 	// SetOffer installs the parked question the tray poses — currently the
 	// merge dequeue offer — or clears it with nil. The merge orchestrator is
 	// the only caller.
