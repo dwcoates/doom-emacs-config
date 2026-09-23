@@ -1823,3 +1823,12 @@ describe("a double-width character in a tree", () => {
     expect(rule).not.toMatch(/font/);
   });
 });
+
+describe("the response body custom element", () => {
+  it("is laid out as a block, not a custom element's default inline", () => {
+    // Arrange / Act
+    const rule = declarationsOf("response-body.bubble-body") ?? "";
+    // Assert
+    expect(rule).toMatch(/display:\s*block/);
+  });
+});
