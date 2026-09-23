@@ -439,6 +439,10 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return bubbleRefusedSentence(reason.value);
     case "coldGate":
       return coldGateSentence(reason.value);
+    case "modelNotInCatalog":
+      return modelRefusalSentence("that model is not in this session's catalog", reason.value.detail);
+    case "modelRefused":
+      return modelRefusalSentence("the vendor refused that model", reason.value.detail);
     default: {
       const other: { case: string } = reason;
       return unreachableArm("SubmitPromptError.reason", other.case);
@@ -459,6 +463,16 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
 function coldGateSentence(gate: SubmitPromptColdGate): string {
   const stem = "the session is parked at its cold gate — answer it in the panel; your text is kept";
   return gate.detail === "" ? stem : `${stem} (${gate.detail})`;
+}
+
+/**
+ * A REFUSED `/model` ACT: the model change was not applied and the session runs
+ * on as before. `detail` is the refusal's own sentence (it names the model),
+ * drawn after the stem when sent and never switched on.
+ */
+function modelRefusalSentence(stem: string, detail: string): string {
+  const said = `${stem} — the model was not changed`;
+  return detail === "" ? said : `${said} (${detail})`;
 }
 
 /**
