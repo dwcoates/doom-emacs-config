@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -245,6 +246,110 @@ func TestCaptureDisplacedReportsNothingInFlight(t *testing.T) {
 	}
 	if captured {
 		t.Fatal("CaptureDisplaced captured a turn on a workspace with no session")
+	}
+}
+
+// TestCaptureDisplacedEndsOnlyTheTurn covers a merge admitted over a running
+// user turn. The turn is marked displaced BEFORE it is ended, and it is ended
+// UNFORCED: the user asked for a merge, never for the turn's detached work to
+// stop. Every failure is recorded through the fleet's own logger or returned.
+func TestCaptureDisplacedEndsOnlyTheTurn(t *testing.T) {
+	const ws, turn = ids.WorkspaceID("ws-1"), ids.TurnID("turn-1")
+	record := wsm.Turn{ID: turn, Workspace: ws, Text: "keep going"}
+	tests := []struct {
+		name         string
+		openTurns    []wsm.Turn
+		openTurnsErr error
+		putTurnErr   error
+		killTurnErr  error
+		wantCaptured bool
+		wantErr      string
+		wantMarked   bool
+		wantKills    int
+		wantLevel    string
+		wantMsg      string
+		wantCause    any
+	}{
+		{
+			name: "the turn is marked and ended unforced", openTurns: []wsm.Turn{record},
+			wantCaptured: true, wantMarked: true, wantKills: 1,
+			wantLevel: "debug", wantMsg: "captured the displaced turn",
+		},
+		{
+			name: "a refused kill leaves the turn captured", openTurns: []wsm.Turn{record},
+			killTurnErr:  errors.New("the shim would not answer"),
+			wantCaptured: true, wantMarked: true, wantKills: 1,
+			wantLevel: "warn", wantMsg: "the displaced turn could not be ended", wantCause: "the shim would not answer",
+		},
+		{
+			name:         "an unreadable record captures and ends nothing",
+			openTurnsErr: errors.New("the store is down"),
+			wantErr:      "the store is down",
+		},
+		{
+			name: "an unwritable mark ends nothing", openTurns: []wsm.Turn{record},
+			putTurnErr: errors.New("the store is read-only"),
+			wantErr:    "the store is read-only",
+		},
+		{
+			name:      "a turn with no durable record is left running",
+			wantLevel: "warn", wantMsg: "the in-flight turn has no open durable record to displace",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			f.db.openTurns = tt.openTurns
+			f.db.openTurnsErr = tt.openTurnsErr
+			f.db.putTurnErr = tt.putTurnErr
+			f.client.killTurnErr = tt.killTurnErr
+			inFlight := turn
+			f.fleet.remember(ws, &live{client: f.client, watcher: &fakeWatcher{turn: &inFlight}})
+
+			// Act
+			got, captured, err := f.fleet.CaptureDisplaced(context.Background(), ws)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("CaptureDisplaced = error %v, want one carrying %q", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("CaptureDisplaced = error %v, want none", err)
+			}
+			if captured != tt.wantCaptured {
+				t.Fatalf("captured = %v, want %v", captured, tt.wantCaptured)
+			}
+			if tt.wantCaptured && (got != Displaced{Turn: turn, Text: "keep going"}) {
+				t.Fatalf("displaced = %+v, want the in-flight turn and its text", got)
+			}
+			marked := len(f.db.putTurns) == 1 && f.db.putTurns[0].ID == turn && f.db.putTurns[0].Displaced
+			if marked != tt.wantMarked {
+				t.Fatalf("durable marks = %+v, want marked=%v", f.db.putTurns, tt.wantMarked)
+			}
+			if len(f.client.killTurns) != tt.wantKills {
+				t.Fatalf("KillTurn requests = %d, want %d", len(f.client.killTurns), tt.wantKills)
+			}
+			for _, req := range f.client.killTurns {
+				if req.GetForce() {
+					t.Fatal("the displaced turn's KillTurn was forced, want an unforced kill that spares its detached work")
+				}
+				if req.GetTurn().GetValue() != string(turn) {
+					t.Fatalf("KillTurn turn = %q, want %q", req.GetTurn().GetValue(), turn)
+				}
+			}
+			if tt.wantMsg == "" {
+				return
+			}
+			for _, r := range f.log.logger.Records() {
+				if r.Level == tt.wantLevel && r.Operation == opFleetRollout && r.Message == tt.wantMsg &&
+					r.Context["turn"] == string(turn) && (tt.wantCause == nil || r.Context["cause"] == tt.wantCause) {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %s %q", f.log.logger.Records(), tt.wantLevel, tt.wantMsg)
+		})
 	}
 }
 

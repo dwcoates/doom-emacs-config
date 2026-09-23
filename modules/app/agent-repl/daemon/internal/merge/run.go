@@ -274,7 +274,45 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID),
 		"method": methodName(r.emacsRepo), "self_checkout": r.selfCheckout,
 	})
+	if err := r.awaitFree(ctx); err != nil {
+		if !r.stopped(ctx, err) {
+			r.abort(ctx, err.Error())
+		}
+		return err
+	}
 	return r.execute(ctx)
+}
+
+// awaitFree holds an admitted merge in its queue until the workspace is free:
+// no turn in flight and no live detached work.
+//
+// THE MERGE WAITS; IT NEVER KILLS. The displaced turn was ended unforced, so
+// whatever it spawned — background agents, shells, monitors — runs on. The
+// merge is about to drive this session with its own briefs and, on landing, to
+// stop it and remove its worktree, so it cannot proceed underneath that work:
+// it would race it for the conversation and then take its working directory
+// away. And it may not stop it either, because detached work ends only by its
+// own per-task stop or a forced kill the user explicitly asked for. So it
+// waits, on the same watcher-driven freeness the rollout's relaunch waits on,
+// for as long as the work runs. The user ends the wait by letting the work
+// finish or by stopping it themselves.
+//
+// A wait that ends without the workspace falling free is returned, never
+// swallowed; the caller records it once, as an abort or a stop.
+func (r *run) awaitFree(ctx context.Context) error {
+	const op = "daemon.merge.await_free"
+	log := r.o.log(ctx, r.ws)
+	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID)}
+	if r.o.deps.Freeness.Free(r.ws) {
+		log.Debug(op, "the workspace is free; the merge proceeds", fields)
+		return nil
+	}
+	log.Info(op, "the merge waits for the workspace's turn and detached work to end; nothing is stopped to hurry it", fields)
+	if err := r.o.deps.Freeness.AwaitFree(ctx, r.ws); err != nil {
+		return fmt.Errorf("the workspace never fell free: %w", err)
+	}
+	log.Info(op, "the workspace fell free; the merge proceeds", fields)
+	return nil
 }
 
 // roundKey addresses one tab round's recorded start.

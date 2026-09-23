@@ -552,6 +552,23 @@ arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
 
+## A forced kill is the user's to ask for
+
+An interrupt ends only the synchronous turn: `KillTurn(..., false)`. Detached
+work (background agents, shells, monitors, workflows) ends only by its own
+per-task stop, or by a forced kill the user explicitly asked for. The daemon
+never forces a kill on the user's behalf for a merge, a rollout, a redrive or
+any other act of its own; a holder that needs the session quiet waits on the
+fleet's watcher-driven freeness (`Fleet.AwaitFree`), as the rollout's relaunch
+and an admitted merge do.
+
+`forced_kill_guard_test.go` enforces it. Every `KillTurn` call whose force is
+not the literal `false`, and every `KillTurnRequest` literal whose `Force` is
+not the literal `false`, must be listed there with the user request that
+authorizes it: today the confirm challenge (`interruptTurn`), a restart
+(`forceEndTurn`), and the two adapters that forward their caller's force. A new
+forced site fails the unit suite until it is listed with its reason.
+
 ## The roster row's viewed mode is cleared by the RENDER, not by a setter
 
 `RosterRowViewed` is the row's display mode: present is PARTIAL (the client
