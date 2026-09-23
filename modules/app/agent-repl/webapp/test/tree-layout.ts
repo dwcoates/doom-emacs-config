@@ -21,6 +21,7 @@
  *     horizontal padding, border and margin as `0px`.
  * Every other read passes through to jsdom untouched.
  */
+import { afterEach, beforeEach } from "vitest";
 
 /** The geometry a staged tree measurement reads. */
 export interface TreeLayout {
@@ -125,4 +126,26 @@ export function stagedCols(layout: TreeLayout): number {
   const capPx =
     pct === null ? Number.parseFloat(layout.maxWidth) : (Number.parseFloat(pct[1]) / 100) * layout.containingPx;
   return Math.floor((capPx - 2 * layout.bodyPaddingPx) / layout.charPx);
+}
+
+/**
+ * Install a fresh default layout before every test of the calling `describe`
+ * and remove it after, answering a handle whose `layout` is the live one the
+ * current test may move.
+ */
+export function useTreeLayout(): { readonly layout: TreeLayout } {
+  let installed: ReturnType<typeof installTreeLayout> | null = null;
+  beforeEach(() => {
+    installed = installTreeLayout();
+  });
+  afterEach(() => {
+    installed?.uninstall();
+    installed = null;
+  });
+  return {
+    get layout(): TreeLayout {
+      if (installed === null) throw new Error("useTreeLayout: no layout is installed outside a test");
+      return installed.layout;
+    },
+  };
 }
