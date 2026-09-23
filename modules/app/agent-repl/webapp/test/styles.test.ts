@@ -1754,3 +1754,56 @@ describe("the response border ladder", () => {
     expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
   });
 });
+
+/**
+ * NO BUBBLE SCROLLS HORIZONTALLY (owner ruling, 2026-09-23). A bubble's content
+ * wraps when it reaches the bubble's max width and never side-scrolls; no text
+ * is ever off the bubble. So no rule over bubble content — the bubble, its
+ * markdown (`.md`), a metaprompt tree (`.mp-*`) or a code block — may turn a
+ * horizontal scroller on, and each wide kind wraps instead.
+ */
+describe("no bubble content scrolls horizontally", () => {
+  /** A selector that reaches content drawn inside a bubble. */
+  const bubbleContent = (selector: string): boolean => /\.bubble|\.md\b|\.mp-|pre\.md-code/.test(selector);
+
+  it("has no bubble-content rule that turns on a horizontal scroller", () => {
+    // Arrange / Act — every bubble-content rule allowing horizontal overflow.
+    const scrolling = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some(bubbleContent))
+      .filter((rule) => /overflow(?:-x)?\s*:\s*(?:auto|scroll)/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors);
+    // Assert
+    expect(scrolling).toEqual([]);
+  });
+
+  it.each([".mp-tree", ".mp-prefix, .mp-content"])("wraps %s rather than holding every line whole", (selector) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.join(", ") === selector)?.declarations ?? "";
+    // Assert
+    expect(rule).toMatch(/white-space:\s*pre-wrap/);
+  });
+
+  it("breaks an unsplittable word in bubble prose rather than letting it run off", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble-body") ?? "";
+    // Assert
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("breaks a table cell's unsplittable word rather than widening the table", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md td") ?? "";
+    // Assert
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it.each([".mp-tree", ".md pre.md-code", ".md table"])(
+    "starts %s below the cost corner's float, so its box is the body's full width",
+    (selector) => {
+      // Arrange / Act
+      const rule = declarationsOf(selector) ?? "";
+      // Assert
+      expect(rule).toMatch(/clear:\s*right/);
+    },
+  );
+});
