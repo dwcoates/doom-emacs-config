@@ -246,3 +246,50 @@ var errNoSink = errSink("no sink")
 type errSink string
 
 func (e errSink) Error() string { return string(e) }
+
+func TestTrayMarksThePromptBeingEdited(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one"), hold("t2", "two")})
+
+	// Act.
+	r.SetEditing(testWS, "t2")
+
+	// Assert.
+	items := latest(t, r).GetItems()
+	if items[0].GetPrompt().GetEditing() != nil {
+		t.Fatal("a prompt nobody is editing carried the editing marker")
+	}
+	if items[1].GetPrompt().GetEditing() == nil {
+		t.Fatal("the prompt being edited carried no editing marker")
+	}
+}
+
+func TestTrayClearsTheEditingMarker(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
+	r.SetEditing(testWS, "t1")
+
+	// Act.
+	r.SetEditing(testWS, "")
+
+	// Assert.
+	if latest(t, r).GetItems()[0].GetPrompt().GetEditing() != nil {
+		t.Fatal("the editing marker survived the edit's end")
+	}
+}
+
+func TestTrayKeepsTheEditingMarkerAcrossAHoldsPush(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetEditing(testWS, "t1")
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
+
+	// Assert.
+	if latest(t, r).GetItems()[0].GetPrompt().GetEditing() == nil {
+		t.Fatal("a holds push dropped the standing editing marker")
+	}
+}
