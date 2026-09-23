@@ -361,6 +361,13 @@ background arm. A footer that kept its own ledger reported a background task
 for a workspace the roster and the tab-bar both called ready, and the ledger
 had already been patched per delivery path twice before that.
 
+THE SAME SET IS WHERE A LAUNCH IS SEEN. `FooterView.focus` is minted in
+`resolve/footer/focus.go` when a set lists an id the PREVIOUS SET did not
+(never off reconcile's `added`: the announcement opens the row first), less
+ids the watcher ADOPTED (an `OnDetachedWork` with no announcer, the one shape
+adoption takes) and ids already retired (a replay). A re-take of the same set
+mints nothing, and crons, tasks and workflows are never in the set.
+
 ## Deploy chain
 
 `bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →

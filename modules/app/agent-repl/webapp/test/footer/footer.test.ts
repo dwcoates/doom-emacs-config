@@ -4,7 +4,12 @@ import { create } from "@bufbuild/protobuf";
 import {
   WatchFooterResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
-import { FooterStripSchema, type FooterStatus } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import {
+  FooterExpandedFocusSchema,
+  FooterStripSchema,
+  type FooterStatus,
+  type FooterView,
+} from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
 import { compactionProgress } from "../../src/footer/progress.js";
 import {
@@ -326,6 +331,143 @@ describe("mountFooter: the panel selection", () => {
     h.tail.push(pushView(footerView()));
     await settle();
     expect(host.querySelector("[data-empty]")?.textContent).toBe("nothing scheduled");
+  });
+});
+
+/** VIEW carrying the daemon's focus on PANEL under GENERATION. */
+function focused(
+  view: FooterView,
+  panel: "agents" | "shells" | "monitors",
+  generation: bigint,
+): FooterView {
+  view.focus = create(FooterExpandedFocusSchema, { generation, panel: { case: panel, value: {} } });
+  return view;
+}
+
+/** A view with a live agent, shell and monitor, so any focusable panel can be open. */
+function withLiveWork(): FooterView {
+  const view = withAgents();
+  view.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 }, monitors: { count: 1 } } });
+  return view;
+}
+
+/** Whichever panel the expanded section is drawing, or null when it is closed. */
+function openPanel(host: HTMLElement): string | null {
+  return host.querySelector<HTMLElement>(".footer-expanded")?.getAttribute("data-panel") ?? null;
+}
+
+// THE DAEMON'S FOCUS (owner's requirement): when detached work starts, the
+// daemon names the panel to open, and the page applies each generation ONCE.
+describe("mountFooter: the daemon's focus", () => {
+  it.each(["agents", "shells", "monitors"] as const)(
+    "opens the closed section on the %s panel for a generation it has not applied",
+    async (panel) => {
+      // Arrange
+      const { host, h } = mount();
+      await settle();
+
+      // Act
+      h.tail.push(pushView(focused(withLiveWork(), panel, 1n)));
+      await settle();
+
+      // Assert
+      expect(openPanel(host)).toBe(panel);
+    },
+  );
+
+  it("moves an open panel onto the focused one", async () => {
+    // Arrange: the reader has the shells panel open.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(withLiveWork()));
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+
+    // Act
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("agents");
+  });
+
+  it("leaves a reader's click standing across a push of the SAME generation", async () => {
+    // Arrange: generation 1 opened agents, then the reader picked shells.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
+    await settle();
+    expect(openPanel(host), "the arrangement did not apply the focus").toBe("agents");
+    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+
+    // Act
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("leaves a reader's close standing across a push of the SAME generation", async () => {
+    // Arrange: generation 1 opened agents, then the reader closed it.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
+    await settle();
+    expect(openPanel(host), "the arrangement did not apply the focus").toBe("agents");
+    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+
+    // Act
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("overrides a reader's click with a LATER generation", async () => {
+    // Arrange: generation 1 opened agents, then the reader picked shells.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 1n)));
+    await settle();
+    expect(openPanel(host), "the arrangement did not apply the focus").toBe("agents");
+    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+
+    // Act
+    h.tail.push(pushView(focused(withLiveWork(), "agents", 2n)));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("agents");
+  });
+
+  it("remembers the focused panel as a click's would be", async () => {
+    // Arrange
+    const { h } = mount();
+    await settle();
+
+    // Act
+    h.tail.push(pushView(focused(withLiveWork(), "shells", 1n)));
+    await settle();
+
+    // Assert
+    expect(window.localStorage.getItem(panelStorageKey("ws-1"))).toBe("shells");
+  });
+
+  it("skips a push whose focus names no panel and files it as undecodable", async () => {
+    // Arrange
+    const { h } = mount();
+    await settle();
+    const view = withLiveWork();
+    view.focus = create(FooterExpandedFocusSchema, { generation: 1n });
+
+    // Act
+    h.tail.push(pushView(view));
+    await settle();
+
+    // Assert
+    expect(h.sink.reported).toContain("frameUndecodable");
   });
 });
 
