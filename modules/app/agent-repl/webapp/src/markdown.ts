@@ -17,7 +17,10 @@
  * escaped text — no auto-detection, so rendering stays deterministic and
  * cheap under per-delta re-renders. A plain (language-less) fence whose
  * body reads as a metaprompt TLDR tree renders as hanging-indent tree
- * lines instead of a code block.
+ * lines instead of a code block — but ONLY for a caller that hands in a
+ * measured column budget (`TreeCols`). A caller with no measured width gets
+ * the fence as an ordinary code block, which wraps on its own; there is no
+ * default tree width.
  *
  * Streaming-safe: markdown-it parses partial input on every call without
  * throwing (an unterminated fence renders as a still-open code block, a
@@ -28,7 +31,14 @@
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { escapeHtml, highlightCode } from "./highlight.js";
-import { DEFAULT_TREE_COLS, isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
+import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
+
+/**
+ * The column budget a metaprompt tree wraps to, asked for only when a tree is
+ * actually drawn: measuring needs layout, and prose with no tree must not pay
+ * for (or fail on) a measurement it never uses.
+ */
+export type TreeCols = () => number;
 
 /** Inline markup within one already-escaped line. Exported for the
  * metaprompt-tree renderer (and the question picker), which inject it
@@ -81,19 +91,27 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
 
+/** A fence token's language tag and its body, as the fence rule reads them. */
+function fenceParts(token: { info: string; content: string }): { lang: string; body: string } {
+  return { lang: token.info.trim().split(/\s+/)[0] ?? "", body: token.content.replace(/\n$/, "") };
+}
+
+/** Whether a fence is a metaprompt tree: language-less, tree-shaped. */
+function isTreeFence(lang: string, body: string): boolean {
+  return lang === "" && isMetapromptTree(body);
+}
+
 // Fenced code: keep the md-code + hljs shape, and divert a language-less
-// metaprompt tree to the hanging-indent tree renderer. highlightCode
-// escapes in both branches (hljs escapes its own output), so the
-// escape-first guarantee holds.
+// metaprompt tree to the hanging-indent tree renderer when the caller measured
+// a width for it. highlightCode escapes in both branches (hljs escapes its own
+// output), so the escape-first guarantee holds.
 md.renderer.rules.fence = (tokens, idx, _options, env): string => {
-  const token = tokens[idx];
-  const lang = token.info.trim().split(/\s+/)[0] ?? "";
-  const body = token.content.replace(/\n$/, "");
-  if (lang === "" && isMetapromptTree(body)) {
-    // The wrap width rides the render env so a fenced tree re-flows to the same
-    // live width as a bare one (see renderMarkdown's treeCols).
-    const cols = (env as { treeCols?: number } | undefined)?.treeCols ?? DEFAULT_TREE_COLS;
-    return `<div class="mp-tree">${renderTreeHtml(body, inline, cols)}</div>`;
+  const { lang, body } = fenceParts(tokens[idx]);
+  // The wrap width rides the render env so a fenced tree re-flows to the same
+  // live width as a bare one (see renderMarkdown's treeCols).
+  const treeCols = (env as { treeCols?: TreeCols } | undefined)?.treeCols;
+  if (treeCols !== undefined && isTreeFence(lang, body)) {
+    return `<div class="mp-tree">${renderTreeHtml(body, inline, treeCols())}</div>`;
   }
   const html = highlightCode(body, lang);
   const langClass = lang === "" ? "" : ` lang-${escapeHtml(lang)}`;
@@ -101,10 +119,19 @@ md.renderer.rules.fence = (tokens, idx, _options, env): string => {
 };
 
 /**
- * Render markdown to HTML. TREECOLS is the column limit a metaprompt tree wraps
- * to — the live width the response bubble measured, or the default when no
- * width is known — threaded to the fence rule through the render env.
+ * Render markdown to HTML. TREECOLS, when given, is the measured column budget a
+ * fenced metaprompt tree wraps to, threaded to the fence rule through the render
+ * env; without it a fenced tree is drawn as the ordinary code block it is.
  */
-export function renderMarkdown(src: string, treeCols: number = DEFAULT_TREE_COLS): string {
+export function renderMarkdown(src: string, treeCols?: TreeCols): string {
   return md.render(src, { treeCols });
+}
+
+/** Whether SRC holds a fenced metaprompt tree, which only a measured width can draw. */
+export function hasFencedTree(src: string): boolean {
+  return md.parse(src, {}).some((token) => {
+    if (token.type !== "fence") return false;
+    const { lang, body } = fenceParts(token);
+    return isTreeFence(lang, body);
+  });
 }

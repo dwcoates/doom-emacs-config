@@ -20,12 +20,17 @@ import {
   REVEALED_ATTRIBUTE,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
+  RESPONSE_BODY_TAG,
+  TREE_WIDTH_UNMEASURABLE,
+  createResponseBody,
   drawFeedResponse,
   measureTreeCols,
   proseHtml,
+  proseNeedsWidth,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
-import { DEFAULT_TREE_COLS, visibleWidth } from "../../../src/metaprompt-tree.js";
+import { visibleWidth } from "../../../src/metaprompt-tree.js";
+import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
@@ -58,6 +63,35 @@ function rowContext(previous?: HTMLElement): RowContext {
 
 function response(init: MessageInitShape<typeof FeedResponseSchema>): FeedResponse {
   return create(FeedResponseSchema, init);
+}
+
+/**
+ * Place a drawn bubble in the document under its own containing block (the
+ * `.feed-item` stand-in), the way feed-view attaches a row after drawing it,
+ * and answer that block.
+ */
+function mount(el: HTMLElement): HTMLElement {
+  const column = document.createElement("div");
+  column.append(el);
+  document.body.append(column);
+  return column;
+}
+
+/**
+ * A body inside a scroll box inside a bubble (of BUBBLECLASS), attached under
+ * its own column unless DETACHED.
+ */
+function stageBody(opts: { detached?: boolean; bubbleClass?: string } = {}): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = opts.bubbleClass ?? "bubble assistant md";
+  const scroll = document.createElement("div");
+  scroll.className = "bubble-scroll";
+  const body = document.createElement("div");
+  body.className = "bubble-body";
+  scroll.append(body);
+  bubble.append(scroll);
+  if (opts.detached !== true) mount(bubble);
+  return body;
 }
 
 /** The tree the metaprompt renderer recognizes, with its header. */
@@ -120,11 +154,17 @@ describe("the settled state", () => {
   });
 
   it("re-renders a metaprompt tree as tree lines rather than markdown", () => {
-    const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
-      rowContext(),
-    );
-    expect(el.querySelector(".mp-tree")).not.toBeNull();
+    const { uninstall } = installTreeLayout();
+    try {
+      const el = drawFeedResponse(
+        response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
+        rowContext(),
+      );
+      mount(el);
+      expect(el.querySelector(".mp-tree")).not.toBeNull();
+    } finally {
+      uninstall();
+    }
   });
 });
 
@@ -827,11 +867,13 @@ const SHOWCASE_TREE = [
 ].join("\n");
 
 describe("the wrapped tree a settled response carries", () => {
+  const staged = useTreeLayout();
+
   it("wraps a too-wide branch onto continuation lines with real ancestor rails", () => {
     // Arrange
     const host = document.createElement("div");
-    // Act — width 105, the fallback the bubble measures to under jsdom.
-    host.innerHTML = proseHtml(SHOWCASE_TREE, 105);
+    // Act — at 105 columns.
+    host.innerHTML = proseHtml(SHOWCASE_TREE, () => 105);
     const prefixes = [...host.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
     // Assert — 1.1 wrapped, and its continuation carries the ancestor rail plus
     // 1.1's own held-open child rail as REAL characters, so the wrap does not
@@ -856,7 +898,7 @@ describe("the wrapped tree a settled response carries", () => {
     ].join("\n");
     // Act
     const host = document.createElement("div");
-    host.innerHTML = proseHtml(markdown, 105);
+    host.innerHTML = proseHtml(markdown, () => 105);
     // Assert — one tree, the code opaque (in a <pre><code>, `__name__` literal
     // and never bolded), and 1.4 kept a tree line rather than spilled into
     // generic markdown after the tree.
@@ -877,7 +919,7 @@ describe("the wrapped tree a settled response carries", () => {
     ].join("\n");
     // Act — a width narrower than the branch text forces a wrap.
     const host = document.createElement("div");
-    host.innerHTML = proseHtml(tree, 60);
+    host.innerHTML = proseHtml(tree, () => 60);
     // Assert — a tree rendered, and no rendered tree line exceeds the width.
     const lines = [...host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")];
     expect(host.querySelector(".mp-tree")).not.toBeNull();
@@ -890,8 +932,8 @@ describe("the wrapped tree a settled response carries", () => {
     const narrow = document.createElement("div");
     const wide = document.createElement("div");
     // Act — the same tree at two widths, the mechanism a resize drives.
-    narrow.innerHTML = proseHtml(SHOWCASE_TREE, 40);
-    wide.innerHTML = proseHtml(SHOWCASE_TREE, 200);
+    narrow.innerHTML = proseHtml(SHOWCASE_TREE, () => 40);
+    wide.innerHTML = proseHtml(SHOWCASE_TREE, () => 200);
     // Assert
     const narrowLines = narrow.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
     const wideLines = wide.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
@@ -911,6 +953,8 @@ describe("the wrapped tree a settled response carries", () => {
       response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
+    mount(settled);
+    mount(streaming);
     // Assert — the tree element is byte-for-byte the same on both paths.
     expect(streaming.querySelector(".mp-tree")?.outerHTML).toBe(
       settled.querySelector(".mp-tree")?.outerHTML,
@@ -923,6 +967,7 @@ describe("the wrapped tree a settled response carries", () => {
       response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
+    mount(el);
     // Assert — the tree drew, but the bubble carries NO full-cap width pin
     // (owner ruling 2026-09-15, reversing the fill-cap): it stays fit-content
     // so it shrinks to its widest wrapped line, capped at 77%.
@@ -947,6 +992,7 @@ describe("the wrapped tree a settled response carries", () => {
       response({ result: { case: "error", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
+    mount(el);
     // Assert
     expect(el.querySelector(".mp-tree")).not.toBeNull();
     expect(el.classList.contains("bubble-fill-cap")).toBe(false);
@@ -961,6 +1007,7 @@ describe("the wrapped tree a settled response carries", () => {
       response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
+    mount(el);
     // Assert
     expect(el.querySelector(".mp-tree")).not.toBeNull();
     expect(el.classList.contains("bubble-fill-cap")).toBe(false);
@@ -989,390 +1036,407 @@ describe("the wrapped tree a settled response carries", () => {
     }
   });
 
-  it("subscribes a resize observer to the bubble body and tears it down with it", () => {
+  it("subscribes a resize observer to the bubble's containing block", () => {
     // Arrange
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
-    const body = el.querySelector<HTMLElement>(".bubble-body");
-    if (body === null) throw new Error("no bubble body");
-    // Act + Assert — a resize reaches an attached observer (fireResize throws
+    // Act
+    const column = mount(el);
+    // Assert — a resize reaches an observer on the column (fireResize throws
     // when nothing observes the element), and the tree survives the re-wrap.
-    expect(() => fireResize(body)).not.toThrow();
+    expect(() => fireResize(column)).not.toThrow();
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-    // And discarding the bubble disconnects the observer.
-    stopTicking(el);
-    expect(() => fireResize(body)).toThrow();
-  });
-});
-
-/**
- * `measureTreeCols` reports the columns the tree wraps to. The regression it
- * guards: it once measured `body.clientWidth` — the bubble's ALREADY-shrunk
- * fit-content width — so a tree wrapped to whatever narrow width its shortest
- * line produced, prematurely. It now measures the MAX width the bubble may
- * occupy (its resolved `max-width` cap), so a line wraps only when it truly
- * exceeds the cap. jsdom does no layout, so each case stages the layout the
- * measure reads: a monospace char width (the internal probe), the bubble's cap
- * (`getComputedStyle().maxWidth`), its containing-block width and current
- * border box, and the body's shrunk `clientWidth`.
- */
-describe("the columns the tree wraps to are measured against the bubble cap", () => {
-  const CHAR_PX = 8;
-  const rect = (width: number): DOMRect =>
-    ({ width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) });
-
-  let protoRect: typeof Element.prototype.getBoundingClientRect;
-
-  beforeEach(() => {
-    // The internal probe (a `.mp-tree` div of 100 zeros) is created inside the
-    // measure and cannot be reached to stub directly, so the char width is
-    // staged on the prototype, keyed on the probe's class.
-    // Captured to be ASSIGNED back in afterEach, never called off the reference.
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
-    protoRect = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
-      if (this.className === "mp-tree") return rect(CHAR_PX * 100);
-      return rect(0);
-    };
   });
 
-  afterEach(() => {
-    Element.prototype.getBoundingClientRect = protoRect;
-    vi.restoreAllMocks();
-  });
-
-  /** A staged bubble/body pair with the geometry the measure reads. */
-  function stage(opts: {
-    maxWidth: string;
-    containingWidth: number;
-    bubbleOuter: number;
-    bodyClientWidth: number;
-    bodyPad?: number;
-  }): HTMLElement {
-    const pad = opts.bodyPad ?? 0;
-    const parent = document.createElement("div");
-    Object.defineProperty(parent, "clientWidth", { value: opts.containingWidth, configurable: true });
-    const bubble = document.createElement("div");
-    bubble.className = "bubble assistant md";
-    // The bubble's current (fit-content) border box, an own property so it wins
-    // over the prototype stub that serves the probe.
-    bubble.getBoundingClientRect = () => rect(opts.bubbleOuter);
-    const body = document.createElement("div");
-    body.className = "bubble-body";
-    Object.defineProperty(body, "clientWidth", { value: opts.bodyClientWidth, configurable: true });
-    bubble.appendChild(body);
-    parent.appendChild(bubble);
-    document.body.appendChild(parent);
-    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
-      if (el === bubble) return { maxWidth: opts.maxWidth } as unknown as CSSStyleDeclaration;
-      return {
-        maxWidth: "none",
-        paddingLeft: `${pad}px`,
-        paddingRight: `${pad}px`,
-      } as unknown as CSSStyleDeclaration;
-    });
-    return body;
-  }
-
-  /**
-   * A DETACHED bubble (built but never attached, the shape at synchronous first
-   * paint) plus an optional attached `#feed` reference of known content width.
-   * The chrome insets are staged on the body's padding — the styles path reads
-   * them when there is no geometry to measure. When `feedContentWidth` is
-   * omitted, no feed is attached, so nothing can resolve the cap.
-   */
-  function stageDetached(opts: { maxWidth: string; feedContentWidth?: number; bodyPad?: number }): HTMLElement {
-    const pad = opts.bodyPad ?? 0;
-    if (opts.feedContentWidth !== undefined) {
-      const feed = document.createElement("main");
-      feed.id = "feed";
-      Object.defineProperty(feed, "clientWidth", { value: opts.feedContentWidth, configurable: true });
-      document.body.appendChild(feed);
-    }
-    // The bubble is NEVER appended: it stays detached, so every rect reads 0.
-    const bubble = document.createElement("div");
-    bubble.className = "bubble assistant md";
-    const scroll = document.createElement("div");
-    scroll.className = "bubble-scroll";
-    const body = document.createElement("div");
-    body.className = "bubble-body";
-    scroll.appendChild(body);
-    bubble.appendChild(scroll);
-    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
-      if (el === bubble) {
-        return { maxWidth: opts.maxWidth, paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
-      }
-      if (el === body) {
-        return {
-          maxWidth: "none",
-          paddingLeft: `${pad}px`,
-          paddingRight: `${pad}px`,
-        } as unknown as CSSStyleDeclaration;
-      }
-      // The scroll wrapper and #feed: no padding, no border.
-      return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
-    });
-    return body;
-  }
-
-  it("resolves the cap against the attached feed reference when the bubble is DETACHED at first paint", () => {
-    // Arrange — the bubble is built but not yet attached (drawFeedResponse paints
-    // before feed-view attaches the row); the root feed column is attached at a
-    // known content width, standing in for the containing block the row lands in.
-    const body = stageDetached({ maxWidth: "70.125%", feedContentWidth: 1000, bodyPad: 10 });
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — cap 701.25px, insets 20px (body padding), 681.25px content,
-    // floor(/8)=85: the cap-based count, NOT the detached fallback default.
-    expect(cols).toBe(85);
-    expect(cols).not.toBe(DEFAULT_TREE_COLS);
-  });
-
-  it("resolves the TRUE 77%-of-feed cap at synchronous first paint (detached), never the default", () => {
-    // Arrange — the real cap fraction the stylesheet uses (77%), staged against
-    // an attached feed of known content width while the bubble is still DETACHED
-    // (the shape at first paint, before feed-view attaches the row). This is the
-    // Part A(a) regression guard: the percentage cap must resolve to feed-based
-    // px, not fall back to DEFAULT_TREE_COLS.
-    const body = stageDetached({ maxWidth: "77%", feedContentWidth: 1000, bodyPad: 10 });
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — cap 770px, insets 20px (body padding) → 750px content,
-    // floor(750/8)=93: the feed-based count, NOT the detached fallback default.
-    expect(cols).toBe(93);
-    expect(cols).not.toBe(DEFAULT_TREE_COLS);
-  });
-
-  it("falls back to the default width when nothing is attached to resolve the cap against", () => {
-    // Arrange — a detached bubble AND no feed in the document: no reference at all.
-    const body = stageDetached({ maxWidth: "70.125%", bodyPad: 10 });
-    // Act + Assert — no throw, the genuine no-layout fallback.
-    expect(measureTreeCols(body)).toBe(DEFAULT_TREE_COLS);
-  });
-
-  it("uses the bubble's OWN containing block, not the feed reference, when it is attached", () => {
-    // Arrange — a wide #feed also sits in the document, but the bubble is
-    // attached under a NARROWER parent; the measure must follow the bubble's own
-    // parent so the feed reference never leaks into a laid-out bubble.
-    const feed = document.createElement("main");
-    feed.id = "feed";
-    Object.defineProperty(feed, "clientWidth", { value: 4000, configurable: true });
-    document.body.appendChild(feed);
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — 85, from the 1000px own parent, not the ~350 a 4000px feed cap
-    // would give.
-    expect(cols).toBe(85);
-  });
-
-  it("wraps a detached first-paint tree to the SAME cap the attached bubble uses, so it does not overflow", () => {
-    // Arrange — the live reproduction shape: a settled tree measured while
-    // detached, with the feed reference attached; the attached equivalent wraps
-    // at the cap, and the detached first paint must match it, not overflow at the
-    // 105-column default.
-    const detached = stageDetached({ maxWidth: "70.125%", feedContentWidth: 1000, bodyPad: 10 });
-    const detachedCols = measureTreeCols(detached);
-    vi.restoreAllMocks();
-    const attached = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    const attachedCols = measureTreeCols(attached);
-    // Act — wrap the showcase tree at the detached first-paint cap.
-    const host = document.createElement("div");
-    host.innerHTML = proseHtml(SHOWCASE_TREE, detachedCols);
-    // Assert — the detached first paint wraps at the cap, identical to attached,
-    // and never at the overflowing default; the tree actually wrapped.
-    expect(detachedCols).toBe(attachedCols);
-    expect(detachedCols).not.toBe(DEFAULT_TREE_COLS);
-    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
-  });
-
-  it("measures the max-width cap, not the shrunk fit-content clientWidth", () => {
-    // Arrange — cap 70.125% of a 1000px column = 701.25px; the bubble currently
-    // renders at 220px (outer) around a 200px body, so the fixed insets are 20px
-    // and the body's content at the cap is 681.25px.
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — floor(681.25 / 8) = 85, the cap-based count, NOT floor(200/8)=25.
-    expect(cols).toBe(85);
-  });
-
-  it("does not let the shrunk clientWidth drag the column count down", () => {
-    // Arrange — same cap, but an even narrower current bubble; the cap-based
-    // count must not follow the shrink.
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 90, bodyClientWidth: 72 });
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — insets 18px, body at cap 683.25px, floor(/8)=85; clientWidth would give floor(72/8)=9.
-    expect(cols).toBe(85);
-    expect(cols).toBeGreaterThan(9);
-  });
-
-  it("honors a px max-width cap directly", () => {
-    // Arrange — a browser that resolves the cap to px hands it back as px.
-    const body = stage({ maxWidth: "560px", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — insets 20px, 540px content, floor(540/8)=67.
-    expect(cols).toBe(67);
-  });
-
-  it("resolves the percentage cap against the containing block, so a wider column yields more columns", () => {
-    // Arrange — the same bubble in two feed-column widths.
-    const narrow = stage({ maxWidth: "70.125%", containingWidth: 600, bubbleOuter: 220, bodyClientWidth: 200 });
-    const narrowCols = measureTreeCols(narrow);
-    vi.restoreAllMocks();
-    const wide = stage({ maxWidth: "70.125%", containingWidth: 1400, bubbleOuter: 220, bodyClientWidth: 200 });
-    // Act
-    const wideCols = measureTreeCols(wide);
-    // Assert
-    expect(wideCols).toBeGreaterThan(narrowCols);
-  });
-
-  it("falls back to the default width when there is no resolvable cap and no layout", () => {
-    // Arrange — no cap (`none`) and a zero-width body: no measurement at all.
-    const body = stage({ maxWidth: "none", containingWidth: 1000, bubbleOuter: 0, bodyClientWidth: 0 });
-    // Act + Assert
-    expect(measureTreeCols(body)).toBe(DEFAULT_TREE_COLS);
-  });
-
-  it("falls back to the clientWidth measure when a laid-out bubble has no cap", () => {
-    // Arrange — layout exists but no cap resolves, so the legacy clientWidth
-    // measure still applies.
-    const body = stage({ maxWidth: "none", containingWidth: 1000, bubbleOuter: 420, bodyClientWidth: 400 });
-    // Act + Assert — floor(400/8)=50.
-    expect(measureTreeCols(body)).toBe(50);
-  });
-
-  it("does not wrap a tree whose longest line fits under the cap though the bubble renders narrower", () => {
-    // Arrange — cap-based cols is 85; a tree whose longest branch is ~60 columns
-    // fits under the cap but would wrap at the shrunk clientWidth (25 cols).
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    const tree = [
-      "1 🌳 A tree whose longest branch is comfortably under the cap.",
-      "├── 1.1 A branch of about sixty rendered columns, fitting the cap.",
-      "└── 1.2 Another branch, also short enough to stand on one line.",
-    ].join("\n");
-    // Act
-    const cols = measureTreeCols(body);
-    const host = document.createElement("div");
-    host.innerHTML = proseHtml(tree, cols);
-    // Assert — one line per branch: nothing wrapped.
-    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBe(3);
-  });
-
-  it("still wraps a tree whose line genuinely exceeds the cap", () => {
-    // Arrange — cap-based cols is 85; a branch far past it must still wrap.
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    // Act
-    const cols = measureTreeCols(body);
-    const host = document.createElement("div");
-    host.innerHTML = proseHtml(SHOWCASE_TREE, cols);
-    // Assert — more rendered lines than the four source branches: it wrapped.
-    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length).toBeGreaterThan(4);
-  });
-
-  it("measures the cap even when the body is EMPTY, so the first paint is at the final width", () => {
-    // Arrange — an EMPTY body (no children yet), but a laid-out bubble: the
-    // chrome (insets) is present regardless of content, so the cap-based measure
-    // holds before anything is drawn. bubbleOuter 40 around a 20px body = 20px of
-    // chrome even with nothing inside.
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 40, bodyClientWidth: 20 });
-    expect(body.children.length).toBe(0);
-    // Act
-    const cols = measureTreeCols(body);
-    // Assert — 681.25px content at the cap, floor(/8)=85; NOT the default width,
-    // so an empty first-paint body does not fall to DEFAULT_TREE_COLS.
-    expect(cols).toBe(85);
-    expect(cols).not.toBe(DEFAULT_TREE_COLS);
-  });
-
-  it("returns the SAME cols after a content-only fit-content change, so nothing can oscillate", () => {
-    // Arrange — the settle transition: the bubble's fit-content shrinks (the
-    // streaming ellipsis removed, the final-answer border recolored) while the
-    // feed column (the cap's containing block) is unchanged.
-    const body = stage({ maxWidth: "70.125%", containingWidth: 1000, bubbleOuter: 220, bodyClientWidth: 200 });
-    const before = measureTreeCols(body);
-    // Act — both the bubble border box and the body content shrink together (the
-    // chrome between them is constant), the shape a content-driven change takes.
-    const bubble = body.closest<HTMLElement>(".bubble");
-    if (bubble === null) throw new Error("no bubble");
-    bubble.getBoundingClientRect = () => rect(180);
-    Object.defineProperty(body, "clientWidth", { value: 160, configurable: true });
-    const after = measureTreeCols(body);
-    // Assert — the measured width did not move, so `reflowOnResize` sees the same
-    // integer column count and cannot re-wrap: the flicker cascade has no source.
-    expect(after).toBe(before);
-  });
-
-  it("keeps the column budget cap-derived when the pin is gone and the bubble shrinks to fit", () => {
-    // Arrange — the shrink-to-fit change (owner ruling 2026-09-15): with the
-    // `bubble-fill-cap` width pin removed, a tree bubble now collapses to its
-    // widest wrapped line, far below the 77% cap. The tree budget must still be
-    // measured from the CAP (the containing block), never the shrunk width, or
-    // the shrink would feed a re-wrap and oscillate.
-    const body = stage({ maxWidth: "77%", containingWidth: 1000, bubbleOuter: 760, bodyClientWidth: 750 });
-    const atCap = measureTreeCols(body);
-    // Act — the bubble collapses hard to its widest line (a genuine fit-content
-    // shrink the pin used to prevent); measure a SECOND time.
-    const bubble = body.closest<HTMLElement>(".bubble");
-    if (bubble === null) throw new Error("no bubble");
-    bubble.getBoundingClientRect = () => rect(300);
-    Object.defineProperty(body, "clientWidth", { value: 290, configurable: true });
-    const afterShrink = measureTreeCols(body);
-    // Assert — the second measure equals the first: the budget is cap-derived
-    // (77% of the 1000px containing block, minus the constant chrome insets),
-    // so shrinking the bubble cannot change the column count and nothing
-    // oscillates.
-    expect(afterShrink).toBe(atCap);
-  });
-
-  it("does not re-wrap a settled tree when only the bubble's own fit-content width changes", () => {
-    // Arrange — a settled response with a tree; its reflow observer is wired at
-    // draw (when the bubble is still detached, so it starts at the default
-    // width). getComputedStyle is keyed by class because the elements are minted
-    // inside the draw.
-    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
-      if (el.classList.contains("bubble")) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
-      return { maxWidth: "none", paddingLeft: "0px", paddingRight: "0px" } as unknown as CSSStyleDeclaration;
-    });
+  it("does not observe the fit-content body, whose width never follows the column", () => {
+    // Arrange
     const el = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
+    mount(el);
     const body = el.querySelector<HTMLElement>(".bubble-body");
     if (body === null) throw new Error("no bubble body");
-    // Attach under a sized containing block and stage the bubble's real box.
-    const parent = document.createElement("div");
-    Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
-    parent.appendChild(el);
-    document.body.appendChild(parent);
-    el.getBoundingClientRect = () => rect(220);
-    Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
-    const treeInitial = body.querySelector(".mp-tree");
-
-    // Act 1 — the mount correction: the observer's first measurement moves from
-    // the detached default width to the real cap, so the tree is repainted ONCE.
+    const tree = el.querySelector(".mp-tree");
+    // Act — the column narrows, but the resize is delivered for the body alone.
+    staged.layout.containingPx = 500;
     fireResize(body);
     vi.runOnlyPendingTimers();
-    const treeAfterMount = body.querySelector(".mp-tree");
+    // Assert — no re-wrap: the very same tree node.
+    expect(el.querySelector(".mp-tree")).toBe(tree);
+  });
 
-    // Act 2 — a content-only fit-content shrink (the settle transition), column
-    // unchanged: the bubble box and body content shrink together.
-    el.getBoundingClientRect = () => rect(180);
-    Object.defineProperty(body, "clientWidth", { value: 160, configurable: true });
-    fireResize(body);
-    vi.runOnlyPendingTimers();
-    const treeAfterShrink = body.querySelector(".mp-tree");
-
-    // Assert — the mount correction repainted (a new tree node), but the
-    // content-only change did NOT: the tree node is the very same one, so no
-    // re-wrap fired and there is no cascade.
-    expect(treeAfterMount).not.toBe(treeInitial);
-    expect(treeAfterShrink).toBe(treeAfterMount);
+  it("tears the containing block's observer down with the bubble", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const column = mount(el);
+    // Act — discarding the bubble.
     stopTicking(el);
+    // Assert — the observer is gone.
+    expect(() => fireResize(column)).toThrow();
+  });
+});
+
+/**
+ * `measureTreeCols` reports the columns a tree wraps to: the body's content
+ * width at the bubble's CAP, in columns of the tree font — and nothing else.
+ * `installTreeLayout` stages the reads the way a real engine answers them, so a
+ * DETACHED element reads as no box and no style, exactly as in the webview.
+ */
+describe("the columns a tree wraps to are measured against the bubble cap", () => {
+  const staged = useTreeLayout();
+
+
+  it("measures the cap less the chrome, in columns of the tree font", () => {
+    // Arrange — 77% of 1000px = 770px, less 2 x 10px body padding = 750px.
+    const body = stageBody();
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — floor(750 / 8).
+    expect(cols).toBe(93);
+  });
+
+  it("resolves the percentage cap against the containing block, so a wider column yields more columns", () => {
+    // Arrange
+    const body = stageBody();
+    const narrow = measureTreeCols(body);
+    // Act
+    staged.layout.containingPx = 1400;
+    const wide = measureTreeCols(body);
+    // Assert
+    expect(wide).toBeGreaterThan(narrow);
+  });
+
+  it("honors a px max-width cap directly", () => {
+    // Arrange — an engine that resolves the cap to px hands it back as px.
+    staged.layout.maxWidth = "560px";
+    const body = stageBody();
+    // Act + Assert — 560 - 20 = 540px, floor(540 / 8).
+    expect(measureTreeCols(body)).toBe(67);
+  });
+
+  it("resolves a single-percentage calc() cap as that percentage", () => {
+    // Arrange
+    staged.layout.maxWidth = "calc(77%)";
+    const body = stageBody();
+    // Act + Assert
+    expect(measureTreeCols(body)).toBe(93);
+  });
+
+  it("never reads the bubble's own fit-content width", () => {
+    // Arrange — the bubble renders far narrower than its cap.
+    const body = stageBody();
+    const bubble = body.closest<HTMLElement>(".bubble");
+    if (bubble === null) throw new Error("no bubble");
+    const atCap = measureTreeCols(body);
+    // Act — shrink the bubble's box and the body's own width.
+    bubble.style.width = "120px";
+    bubble.getBoundingClientRect = () => ({ width: 120 }) as DOMRect;
+    Object.defineProperty(body, "clientWidth", { value: 100, configurable: true });
+    // Assert — the budget is the cap's, unmoved.
+    expect(measureTreeCols(body)).toBe(atCap);
+  });
+
+  it("records the measured budget at debug", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const body = stageBody();
+    // Act
+    measureTreeCols(body);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.tree-cols");
+    expect(record.context).toMatchObject({ cols: 93, char_px: 8 });
+  });
+});
+
+describe("an unmeasurable tree width is an invariant violation", () => {
+  const staged = useTreeLayout();
+
+
+  /** Measure BODY, and answer the reason the violation was recorded with. */
+  async function violation(body: HTMLElement): Promise<string> {
+    const capture = captureLogRecords();
+    expect(() => measureTreeCols(body)).toThrow(/metaprompt tree width unmeasurable/);
+    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
+    expect(record.level.case).toBe("error");
+    const reason = record.context?.reason;
+    return typeof reason === "string" ? reason : "";
+  }
+
+  it("refuses a body that is not in the document", async () => {
+    // Arrange
+    const body = stageBody({ detached: true });
+    // Act + Assert
+    expect(await violation(body)).toBe("the bubble body is not in the document");
+  });
+
+  it("refuses a body with no bubble around it", async () => {
+    // Arrange
+    const body = stageBody({ bubbleClass: "not-a-bubble" });
+    // Act + Assert
+    expect(await violation(body)).toBe("the body has no bubble around it");
+  });
+
+  it("refuses a bubble with no containing block", async () => {
+    // Arrange — the document element is the one connected element with no parent.
+    const root = document.documentElement;
+    root.classList.add("bubble");
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    document.body.append(body);
+    try {
+      // Act + Assert
+      expect(await violation(body)).toBe("the bubble has no containing block");
+    } finally {
+      root.classList.remove("bubble");
+    }
+  });
+
+  it("refuses a tree font whose column measures no width", async () => {
+    // Arrange — a laid-out page that gave the probe no box.
+    staged.layout.charPx = 0;
+    const body = stageBody();
+    // Act + Assert
+    expect(await violation(body)).toBe("the tree font's column measured no width");
+  });
+
+  it("refuses a containing block with no width", async () => {
+    // Arrange
+    staged.layout.containingPx = 0;
+    const body = stageBody();
+    // Act + Assert
+    expect(await violation(body)).toBe("the bubble's containing block has no width");
+  });
+
+  it("refuses a max-width that does not resolve", async () => {
+    // Arrange
+    staged.layout.maxWidth = "none";
+    const body = stageBody();
+    // Act + Assert
+    expect(await violation(body)).toBe("the bubble's max-width does not resolve");
+  });
+
+  it("refuses a computed length that is not in px", async () => {
+    // Arrange — jsdom's own unit-less answer, which no laid-out engine gives.
+    const body = stageBody();
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      () => ({ maxWidth: "77%", paddingLeft: "0", paddingRight: "0" }) as unknown as CSSStyleDeclaration,
+    );
+    // Act + Assert
+    expect(await violation(body)).toBe("a computed length is not in px");
+    vi.restoreAllMocks();
+  });
+
+  it("refuses a cap whose content width holds no column", async () => {
+    // Arrange — a body padding wider than the whole cap.
+    staged.layout.bodyPaddingPx = 400;
+    const body = stageBody();
+    // Act + Assert
+    expect(await violation(body)).toBe("the bubble's content width at its cap holds no column");
+  });
+
+  it("refuses to follow the column on a page with no ResizeObserver", async () => {
+    // Arrange
+    vi.stubGlobal("ResizeObserver", undefined);
+    const capture = captureLogRecords();
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
+      rowContext(),
+    );
+    // Act — the attach is where the tree first paints and the observer is armed;
+    // jsdom reports a custom element reaction's throw rather than rethrowing it.
+    const reported: unknown[] = [];
+    const onError = (event: ErrorEvent): void => {
+      event.preventDefault();
+      reported.push(event.error);
+    };
+    window.addEventListener("error", onError);
+    try {
+      mount(el);
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+    // Assert
+    expect(reported).toHaveLength(1);
+    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
+    expect(record.context).toMatchObject({
+      reason: "the page has no ResizeObserver to follow the column's width",
+    });
+  });
+});
+
+describe("a tree's first paint waits for the body to join the document", () => {
+  const staged = useTreeLayout();
+
+  /** Every rendered tree line's column width. */
+  function lineWidths(el: HTMLElement): number[] {
+    return [...el.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")].map((line) =>
+      visibleWidth(line.textContent ?? ""),
+    );
+  }
+
+  it("draws nothing of a tree while the bubble is detached", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    // Assert — no wrong-width tree was ever drawn.
+    expect(el.querySelector(".mp-tree")).toBeNull();
+  });
+
+  it("draws the tree at the cap's budget the moment it is attached", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    // Act
+    mount(el);
+    // Assert — it wrapped, and no line is wider than the budget.
+    const widths = lineWidths(el);
+    expect(widths.length).toBeGreaterThan(4);
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("never wraps a tree whose lines fit under the cap's budget", () => {
+    // Arrange — every branch is far shorter than the 93-column budget, though
+    // longer than the 60 a narrow fit-content bubble would give.
+    const tree = [
+      "1 🌳 A tree whose longest branch is comfortably under the cap.",
+      "├── 1.1 A branch of about seventy rendered columns, well inside the cap here.",
+      "└── 1.2 Another branch, also short enough to stand on one line.",
+    ].join("\n");
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: tree } } } }),
+      rowContext(),
+    );
+    // Act
+    mount(el);
+    // Assert — one line per branch: nothing wrapped.
+    expect(lineWidths(el)).toHaveLength(3);
+  });
+
+  it("draws an arriving tree at attach too", () => {
+    // Arrange
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".mp-tree")).toBeNull();
+    // Act
+    mount(el);
+    // Assert
+    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("draws plain prose at once, detached, since it needs no width", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(".bubble-body strong")?.textContent).toBe("done");
+  });
+
+  it("re-wraps when the containing block's width moves the budget", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const column = mount(el);
+    const before = lineWidths(el).length;
+    // Act — the column narrows.
+    staged.layout.containingPx = 500;
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    // Assert — more lines, none past the narrower budget.
+    expect(lineWidths(el).length).toBeGreaterThan(before);
+    expect(Math.max(...lineWidths(el))).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("does not repaint when the column resizes without moving the budget", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const column = mount(el);
+    const tree = el.querySelector(".mp-tree");
+    // Act — a height-only change: the observer fires, the budget is the same.
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    // Assert — the very same tree node.
+    expect(el.querySelector(".mp-tree")).toBe(tree);
+  });
+
+  it("re-measures against the new containing block when the row is moved", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    mount(el);
+    const before = lineWidths(el).length;
+    // Act — moved into a narrower column.
+    staged.layout.containingPx = 500;
+    mount(el);
+    // Assert
+    expect(lineWidths(el).length).toBeGreaterThan(before);
+  });
+
+  it("follows the NEW containing block after a move", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const first = mount(el);
+    // Act
+    const second = mount(el);
+    // Assert — the old column is no longer observed; the new one is.
+    expect(() => fireResize(first)).toThrow();
+    expect(() => fireResize(second)).not.toThrow();
+  });
+});
+
+describe("proseNeedsWidth", () => {
+  it.each([
+    { name: "a bare tree", markdown: TREE, want: true },
+    { name: "a fenced tree", markdown: ["```", TREE, "```"].join("\n"), want: true },
+    { name: "plain prose", markdown: "**done**, nothing tree-shaped", want: false },
+  ])("says whether $name needs a measured width", ({ markdown, want }) => {
+    // Act + Assert
+    expect(proseNeedsWidth(markdown)).toBe(want);
+  });
+});
+
+describe("the response body", () => {
+  it("is the custom element that knows when it joins the document", () => {
+    // Arrange / Act
+    const body = createResponseBody();
+    // Assert
+    expect([body.localName, body.className]).toEqual([RESPONSE_BODY_TAG, "bubble-body"]);
+  });
+
+  it("runs its hooks every time it joins the document", () => {
+    // Arrange
+    const body = createResponseBody();
+    let runs = 0;
+    body.onConnect(() => runs++);
+    // Act
+    document.body.append(body);
+    document.body.prepend(body);
+    // Assert — an attach and a move.
+    expect(runs).toBe(2);
   });
 });
 
@@ -1512,6 +1576,8 @@ describe("the record of the drawn response", () => {
  * did not change keep their identity so the reader sees no teardown.
  */
 describe("the incremental reveal reconciles the prose without rebuilding it", () => {
+  const staged = useTreeLayout();
+
   /** The body's prose HTML, compared against the whole-render oracle. The
    * streaming reveal carries no trailing indicator node, so it is exactly the
    * oracle's markup. */
@@ -1531,10 +1597,12 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Act — drive the type-out to completion.
     vi.advanceTimersByTime(5000);
     // The settled draw of the same text is the oracle: one-shot `paintWhole`.
-    const settledBody = drawFeedResponse(
+    const settled = drawFeedResponse(
       response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
       rowContext(),
-    ).querySelector<HTMLElement>(".bubble-body");
+    );
+    mount(settled);
+    const settledBody = settled.querySelector<HTMLElement>(".bubble-body");
     if (settledBody === null) throw new Error("no settled body");
     // Assert — the reconciled reveal lands exactly where the one-shot render does.
     expect(prose(streamingBody)).toBe(settledBody.innerHTML);
@@ -1572,54 +1640,28 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
   });
 
   it("re-wraps the arriving tree to the whole render at a new width on resize", () => {
-    // The measure reads a monospace char width off a hidden `.mp-tree` probe;
-    // jsdom lays nothing out, so the probe's width is staged on the prototype.
-    const CHAR_PX = 8;
-    const rect = (w: number): DOMRect =>
-      ({ width: w, height: 0, top: 0, left: 0, right: w, bottom: 0, x: 0, y: 0, toJSON: () => ({}) });
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- reassigned back below
-    const protoRect = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
-      return this.className === "mp-tree" ? rect(CHAR_PX * 100) : rect(0);
-    };
-    try {
-      // Arrange — draw detached (cols = default 105), then mount under a sized
-      // column and stage a resolvable cap so a resize measures 85 columns.
-      const el = drawFeedResponse(
-        response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
-        rowContext(),
-      );
-      const body = el.querySelector<HTMLElement>(".bubble-body");
-      if (body === null) throw new Error("no bubble body");
-      const parent = document.createElement("div");
-      Object.defineProperty(parent, "clientWidth", { value: 1000, configurable: true });
-      parent.appendChild(el);
-      document.body.appendChild(parent);
-      // Drive the type-out to completion so no reveal frame is left pending; the
-      // resize is then the only work the timers run.
-      vi.advanceTimersByTime(5000);
-      el.getBoundingClientRect = () => rect(220);
-      Object.defineProperty(body, "clientWidth", { value: 200, configurable: true });
-      vi.spyOn(window, "getComputedStyle").mockImplementation((node: Element) => {
-        if (node === el) return { maxWidth: "70.125%" } as unknown as CSSStyleDeclaration;
-        return {
-          maxWidth: "none",
-          paddingLeft: "0px",
-          paddingRight: "0px",
-        } as unknown as CSSStyleDeclaration;
-      });
-      // Act — the width changed: the observer re-measures (85) and repaints.
-      fireResize(body);
-      vi.runOnlyPendingTimers();
-      // Assert — the re-wrapped prose equals the whole render at the NEW width,
-      // and is no longer the render at the 105 columns it first drew at.
-      const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
-      expect(prose(body)).toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), 85));
-      expect(prose(body)).not.toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), 105));
-    } finally {
-      Element.prototype.getBoundingClientRect = protoRect;
-      vi.restoreAllMocks();
-    }
+    // Arrange — the tree types out in a 1000px column (93 columns).
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      rowContext(),
+    );
+    const column = mount(el);
+    const body = el.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no bubble body");
+    // Drive the type-out to completion so no reveal frame is left pending; the
+    // resize is then the only work the timers run.
+    vi.advanceTimersByTime(5000);
+    const before = stagedCols(staged.layout);
+    // Act — the column narrows: the observer re-measures and repaints.
+    staged.layout.containingPx = 600;
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    // Assert — the re-wrapped prose equals the whole render at the NEW width,
+    // and is no longer the render at the width it first drew at.
+    const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
+    const after = stagedCols(staged.layout);
+    expect(prose(body)).toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => after));
+    expect(prose(body)).not.toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => before));
   });
 
   it("appends to a growing plain paragraph in place rather than rebuilding it", () => {
