@@ -1568,3 +1568,19 @@ describe("the prompt glimmer's intensity", () => {
     ).toBe(true);
   });
 });
+
+// THE ASYNC BUBBLE'S EXPANDED CAP (owner ruling, 2026-09-23) is `75cqh`, which
+// only means "three quarters of the feed" while the feed's scrolling viewport is
+// the size container `cqh` resolves against. The cap itself is asserted on a
+// mounted bubble in test/feed/bubble.test.ts; this pins the unit's anchor.
+describe("the feed viewport as the async bubble cap's size container", () => {
+  it("makes #feed-scroll a size container so cqh measures the feed's visible height", () => {
+    // Arrange / Act
+    const feedScroll = rulesOf(stylesheet).filter((rule) => rule.selectors.includes("#feed-scroll"));
+
+    // Assert
+    expect(
+      feedScroll.some((rule) => /(?:^|[\s;])container-type\s*:\s*size\s*(?:;|$)/.test(rule.declarations)),
+    ).toBe(true);
+  });
+});
