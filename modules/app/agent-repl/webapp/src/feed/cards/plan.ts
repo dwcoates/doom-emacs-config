@@ -30,7 +30,7 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderEditorLink } from "../../link.js";
 import { log } from "../../log.js";
-import { renderMarkdown } from "../../markdown.js";
+import { markdownSlot } from "../../bubble/body.js";
 import type { AppContext } from "../../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
@@ -114,10 +114,9 @@ export function drawFeedPlanProse(u: FeedPlanProse, path: string): HTMLElement {
     operation: "feed.cards.plan.prose",
     context: { path, length: u.markdown.length },
   });
-  const el = document.createElement("div");
-  el.className = "plan-prose";
-  el.innerHTML = renderMarkdown(u.markdown);
-  return el;
+  // A markdown slot: the bubble's body paints it, so a tree in the plan wraps
+  // at the bubble's cap like one in any other bubble.
+  return markdownSlot("plan-prose", u.markdown);
 }
 
 /**

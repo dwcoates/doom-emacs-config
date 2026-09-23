@@ -15,7 +15,7 @@
  */
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
-import { renderMarkdown } from "../../markdown.js";
+import { markdownSlot } from "../../bubble/body.js";
 import { armName } from "../renderers.js";
 import type {
   FeedImageBlock,
@@ -35,16 +35,16 @@ export type PromptBlockArm =
   | { case: "unsupported"; value: FeedUnsupportedBlock }
   | { case: undefined; value?: undefined };
 
-/** A text block, drawn as markdown by the client's prose renderer. */
+/**
+ * A text block: a markdown slot the bubble's body paints, so a tree the person
+ * typed wraps at the prompt bubble's own cap exactly as one in a response does.
+ */
 export function drawFeedTextBlock(block: FeedTextBlock): HTMLElement {
   log.info("drawing a prompt text block", {
     operation: "feed.draw-text-block",
     context: { characters: block.text.length },
   });
-  const el = document.createElement("div");
-  el.className = "prompt-block prompt-block-text md";
-  el.innerHTML = renderMarkdown(block.text);
-  return el;
+  return markdownSlot("prompt-block prompt-block-text md", block.text);
 }
 
 /**

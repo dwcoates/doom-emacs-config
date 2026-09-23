@@ -62,19 +62,12 @@ import type {
   FeedResponseNotice,
   FeedResponseProse,
   FeedResponseSuccess,
-  FeedResponseUpdate,
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
 import { drawBubble } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
-import {
-  createTreeWrap,
-  paintWhole,
-  proseHtml,
-  reconcileChildren,
-  type BubbleBody,
-} from "../../bubble/body.js";
+import { markdownSlot, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
 import { tick } from "../ticking.js";
@@ -107,6 +100,9 @@ export const THINKING_BUBBLE_CLASS = "thinking-bubble";
  * where the number comes from.
  */
 const RESPONSE_PROSE_BLOCKS = 1;
+
+/** The class of the one markdown slot a response's prose is painted into. */
+export const RESPONSE_PROSE_CLASS = "response-prose";
 
 /** The prose bubble: its spec, drawn through the one bubble (src/bubble/draw.ts). */
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
@@ -164,6 +160,30 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     }
   }
 
+  // The prose is ONE markdown slot, painted by the one body pipeline: the whole
+  // prose once settled, and — while arriving — only what the previous draw of
+  // this row had already shown, from which the type-out resumes.
+  let markdown: string;
+  let shown: number;
+  switch (result.case) {
+    case "update":
+      markdown = drawFeedResponseProse(
+        requireMessage(result.value.prose, `${path}.update.prose`),
+        `${path}.update.prose`,
+      );
+      shown = revealedSoFar(rc.previous, markdown.length);
+      break;
+    case "success":
+      markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
+      shown = markdown.length;
+      break;
+    case "error":
+      markdown = drawFeedResponseError(result.value, `${path}.error`);
+      shown = markdown.length;
+      break;
+  }
+  const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown.slice(0, shown));
+
   const { bubble, body } = drawBubble({
     role: "response",
     variant: u.thinking ? "thinking" : "response",
@@ -171,33 +191,15 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     hooks,
     strip,
     ...(corner === undefined ? {} : { corner }),
-    content: [],
+    content: [prose],
     footer: result.case === "error" ? [cutShortMarker()] : [],
     capLines: u.thinking ? 2 : "feed",
   });
   if (u.thinking) bubble.setAttribute("data-thinking", "");
   if (u.notice !== undefined) bubble.setAttribute("data-notice", "");
-
-  let characters: number;
-  switch (result.case) {
-    case "update":
-      characters = drawFeedResponseUpdate(result.value, rc, `${path}.update`, bubble, body);
-      break;
-    case "success": {
-      const markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
-      paintWhole(body, markdown);
-      markRevealed(bubble, markdown.length);
-      characters = markdown.length;
-      break;
-    }
-    case "error": {
-      const markdown = drawFeedResponseError(result.value, `${path}.error`);
-      paintWhole(body, markdown);
-      markRevealed(bubble, markdown.length);
-      characters = markdown.length;
-      break;
-    }
-  }
+  markRevealed(bubble, shown);
+  if (result.case === "update") drawFeedResponseUpdate(markdown, shown, rc, bubble, body, prose);
+  const characters = markdown.length;
   recordDraw(u, rc, result.case, characters);
   return bubble;
 }
@@ -258,28 +260,23 @@ function recordDraw(
 /**
  * The arriving state: the markdown so far, paced.
  *
- * The reveal resumes from the previous draw's shown length and stops the moment
- * it reaches the frontier; a redraw whose prose did not grow therefore does no
- * animation at all.
- *
- * It answers the prose's length — what ARRIVED, not what is shown yet — so the
- * draw record states the same figure in every arm.
+ * The reveal resumes from the previous draw's shown length (RESUMED, already
+ * painted into PROSE) and stops the moment it reaches the frontier; a redraw
+ * whose prose did not grow therefore does no animation at all.
  */
 export function drawFeedResponseUpdate(
-  u: FeedResponseUpdate,
+  markdown: string,
+  resumed: number,
   rc: RowContext,
-  path: string,
   bubble: HTMLElement,
   body: BubbleBody,
-): number {
-  const markdown = drawFeedResponseProse(requireMessage(u.prose, `${path}.prose`), `${path}.prose`);
-  const resumed = revealedSoFar(rc.previous, markdown.length);
+  prose: HTMLElement,
+): void {
   log.debug("drawing an arriving response", {
     operation: "feed.cards.response.update",
-    context: { path, length: markdown.length, resumed },
+    context: { length: markdown.length, resumed },
   });
-  animate(bubble, body, markdown, resumed, rc);
-  return markdown.length;
+  animate(bubble, body, prose, markdown, resumed, rc);
 }
 
 /** The settled state: the whole markdown. */
@@ -453,35 +450,28 @@ function cutShortMarker(): HTMLElement {
 function animate(
   bubble: HTMLElement,
   body: BubbleBody,
+  prose: HTMLElement,
   markdown: string,
   resumed: number,
   rc: RowContext,
 ): void {
-  // The arriving prose wraps through the SAME path as the settled whole, at the
-  // same measured width, so nothing shrinks or re-wraps when the final lands. A
-  // width change re-runs the latest paint, re-wrapping the slice already shown.
-  const wrap = createTreeWrap(body);
+  // The arriving prose wraps through the SAME body pipeline as the settled
+  // whole, at the same measured width, so nothing shrinks or re-wraps when the
+  // final lands. A width change repaints the slice already shown.
   const paint = (shown: number): void => {
-    const slice = markdown.slice(0, shown);
     // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
     // `body.replaceChildren(...proseHtml(slice).childNodes, freshIndicator())`
     // on EVERY animation frame — a full teardown and rebuild of the whole prose
     // subtree ~60 times a second, so every settled line was destroyed and
-    // recreated under the reader and the bubble flickered. It now renders the
-    // authoritative `proseHtml(slice, cols)` into a DETACHED target and
-    // RECONCILES the live body against it (reconcileChildren): unchanged leading
-    // nodes — stable prose paragraphs, final tree lines — keep their identity and
-    // are never touched, and only the growing tail (and, inside a tree, the one
-    // last line whose wrap can still change) is patched or appended. The
-    // reconciled result is byte-identical to a fresh `proseHtml(slice, cols)`,
-    // the same whole render `paintWhole` writes at settle, so the reveal never
-    // diverges from the oracle. Do NOT reintroduce a whole-subtree rebuild per
-    // frame. This is a watch flag, not a lock.
-    wrap.paint(slice, () => {
-      const target = document.createElement("div");
-      target.innerHTML = proseHtml(slice, wrap.cols);
-      reconcileChildren(body, target, null);
-    });
+    // recreated under the reader and the bubble flickered. `repaintSlot`
+    // RECONCILES the live slot against the authoritative render
+    // (reconcileChildren): unchanged leading nodes — stable prose paragraphs,
+    // final tree lines — keep their identity and are never touched, and only
+    // the growing tail is patched or appended. The reconciled result is
+    // byte-identical to a fresh settled paint of the same text, so the reveal
+    // never diverges from the oracle. Do NOT reintroduce a whole-subtree
+    // rebuild per frame. This is a watch flag, not a lock.
+    repaintSlot(body, prose, markdown.slice(0, shown));
     markRevealed(bubble, shown);
   };
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
@@ -498,9 +488,9 @@ function animate(
   const blockId = "response";
   // Seeding through the module's own "already shown" entry point rather than
   // reaching into its cursor map: this is exactly a restored render, which is
-  // what `markShown` exists for.
+  // what `markShown` exists for. The resumed slice itself was painted with the
+  // bubble.
   reveal.markShown({ items: [{ kind: "text", blockId, text: markdown.slice(0, resumed), done: false }] });
-  paint(resumed);
 
   // A bubble that WAS in the document and no longer is has been replaced by a
   // re-push, and its animation is over. One that was never mounted (a test, a

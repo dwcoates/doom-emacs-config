@@ -26,7 +26,7 @@
  */
 import { armPromptWave } from "../breathing.js";
 import { bubbleScroll } from "../feed/bubble-scroll.js";
-import { createBubbleBody, type BubbleBody } from "./body.js";
+import { createBubbleBody, paintBody, type BubbleBody } from "./body.js";
 
 /** The side and the background a bubble takes. */
 export type BubbleRole = "prompt" | "response";
@@ -129,11 +129,13 @@ export function drawBubble(spec: BubbleSpec): DrawnBubble {
   }
 
   const body = createBubbleBody();
-  body.append(...spec.content);
   const scroll = bubbleScroll(body);
   if (spec.corner !== undefined) scroll.insertBefore(spec.corner, body);
   bubble.append(scroll);
 
   for (const el of spec.footer ?? []) bubble.append(el);
+  // Painted LAST, inside the finished bubble: a slot holding a tree measures
+  // against the bubble around it, so the body must already hang in one.
+  paintBody(body, spec.content);
   return { bubble, body };
 }
