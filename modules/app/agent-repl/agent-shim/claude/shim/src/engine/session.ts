@@ -472,7 +472,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deps.identityStore ?? createAgentIdentityStore(deps.env.stateDir, workspaceKey, deps.nowMs);
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
   const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
-  const pushes = new SessionPushes(deps.nowMs);
+  const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
   const live = new LiveWorkTable();
   const foreground = new ForegroundUnitTable();
   const rewind = new KeepaliveRewind();
