@@ -141,7 +141,7 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 	if err != nil {
 		return err
 	}
-	defer database.Close()
+	defer joinClose(&err, database.Close)
 
 	// THE LEDGER SWEEP RUNS FOR AS LONG AS THE STORE SERVES, AND STOPS BEFORE
 	// THE DATABASE CLOSES. Its defer is registered AFTER database.Close's, so
@@ -189,6 +189,17 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 			return serveErr
 		}
 		return nil
+	}
+}
+
+// joinClose runs a deferred close and joins its failure onto the run's result,
+// so a store whose database failed to close never reports a clean exit. The
+// closer owns the failure's record (db.Close logs its own error with the pool
+// it was closing); this only carries the error to logProcessExit and the exit
+// status.
+func joinClose(err *error, close func() error) {
+	if closeErr := close(); closeErr != nil {
+		*err = errors.Join(*err, closeErr)
 	}
 }
 
