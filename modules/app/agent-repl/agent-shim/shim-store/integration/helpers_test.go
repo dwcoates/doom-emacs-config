@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -110,7 +111,9 @@ func TestMain(m *testing.M) {
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "integration: building the store binary: %v\n", err)
-		os.RemoveAll(binDir)
+		if rmErr := os.RemoveAll(binDir); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "integration: removing the store binary dir: %v\n", rmErr)
+		}
 		os.Exit(1)
 	}
 
@@ -236,7 +239,7 @@ func (s *storeProcess) launch() {
 	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
-		stderr.Close()
+		closeOrFail(s.t, stderr)
 		s.t.Fatalf("starting the store: %v", err)
 	}
 
@@ -248,7 +251,10 @@ func (s *storeProcess) launch() {
 
 	go func(c *exec.Cmd, f *os.File, done chan struct{}) {
 		err := c.Wait()
-		f.Close()
+		// The test is still running here: its Cleanup (stop) waits on done,
+		// which closes only after this, so failing it from this goroutine is
+		// sound.
+		closeOrFail(s.t, f)
 		s.mu.Lock()
 		s.exitErr = err
 		s.mu.Unlock()
@@ -409,6 +415,16 @@ func (s *storeProcess) socketExists() bool {
 	return err == nil
 }
 
+// closeOrFail closes c and fails the test if the close fails. A subject's own
+// close is part of what it observes: a stream, body or file that will not close
+// cleanly is a fault the subject would otherwise hide.
+func closeOrFail(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("closing %T: %v", c, err)
+	}
+}
+
 // shortSocketPath keeps the unix path inside the platform's ~104-byte limit;
 // a path under t.TempDir() is routinely too long on macOS.
 func shortSocketPath(t *testing.T) string {
@@ -513,7 +529,7 @@ func (s *storeProcess) logRecords() []logRecord {
 	if err != nil {
 		s.t.Fatalf("opening the store log %q: %v", s.logPath, err)
 	}
-	defer f.Close()
+	defer closeOrFail(s.t, f)
 
 	var records []logRecord
 	scanner := bufio.NewScanner(f)

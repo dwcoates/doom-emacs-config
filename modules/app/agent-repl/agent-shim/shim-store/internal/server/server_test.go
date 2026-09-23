@@ -79,6 +79,16 @@ func records(t *testing.T, sink *syncBuffer) []logRecord {
 	return out
 }
 
+// closeOrFail closes c and fails the test if the close fails. A subject's own
+// close is part of what it observes: a stream, body or listener that will not
+// close cleanly is a fault the subject would otherwise hide.
+func closeOrFail(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("closing %T: %v", c, err)
+	}
+}
+
 func findRecord(t *testing.T, sink *syncBuffer, operation, level string) (logRecord, bool) {
 	t.Helper()
 	for _, rec := range records(t, sink) {
@@ -939,7 +949,7 @@ func (w *watcher) open(t *testing.T) *connect.ServerStreamForClient[storev1.Watc
 	t.Helper()
 	select {
 	case stream := <-w.streamc:
-		t.Cleanup(func() { stream.Close() })
+		t.Cleanup(func() { closeOrFail(t, stream) })
 		return stream
 	case err := <-w.errc:
 		t.Fatalf("WatchAgentSession = %v, want a stream", err)
@@ -954,7 +964,7 @@ func (w *watcher) refusal(t *testing.T) error {
 	case err := <-w.errc:
 		return err
 	case stream := <-w.streamc:
-		defer stream.Close()
+		defer closeOrFail(t, stream)
 		for stream.Receive() {
 		}
 		return stream.Err()
@@ -1721,7 +1731,7 @@ func TestServesTheJSONCodec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer res.Body.Close()
+	defer closeOrFail(t, res.Body)
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)

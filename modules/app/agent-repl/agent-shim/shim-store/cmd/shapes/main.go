@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -70,30 +71,40 @@ func run(socket, kind string, limit uint32, example bool) error {
 	if failure := res.Msg.GetFailure(); failure != nil {
 		return fmt.Errorf("the store refused the listing: %s", failure.GetDetail())
 	}
-	render(os.Stdout, res.Msg.GetSuccess().GetShapes(), example)
+	if err := render(os.Stdout, res.Msg.GetSuccess().GetShapes(), example); err != nil {
+		return fmt.Errorf("writing the catalog: %w", err)
+	}
 	return nil
 }
 
 // render writes the catalog to w. An empty catalog says so rather than printing
 // nothing, because "no shapes" and "the tool did not run" must not look alike.
-func render(w io.Writer, shapes []*storev1.ResidueShapeRow, example bool) {
+//
+// THE REPORT IS COMPOSED IN MEMORY AND WRITTEN ONCE, so the one write that can
+// fail is the one that is checked: a closed or full stdout is an error the
+// tool exits nonzero on, never a truncated listing that looks complete.
+func render(w io.Writer, shapes []*storev1.ResidueShapeRow, example bool) error {
+	var b strings.Builder
 	if len(shapes) == 0 {
-		fmt.Fprintln(w, "the residue shape catalog is empty")
-		return
+		b.WriteString("the residue shape catalog is empty\n")
 	}
 	for _, s := range shapes {
 		hash := s.GetShapeHash()
 		if len(hash) > shortHash {
 			hash = hash[:shortHash]
 		}
-		fmt.Fprintf(w, "%s  count=%d  kind=%s\n", hash, s.GetCount(), s.GetKind())
-		fmt.Fprintf(w, "  first_seen=%s  last_seen=%s\n", millis(s.GetFirstSeenMs()), millis(s.GetLastSeenMs()))
-		fmt.Fprintf(w, "  structure: %s\n", s.GetKeyStructure())
+		fmt.Fprintf(&b, "%s  count=%d  kind=%s\n", hash, s.GetCount(), s.GetKind())
+		fmt.Fprintf(&b, "  first_seen=%s  last_seen=%s\n", millis(s.GetFirstSeenMs()), millis(s.GetLastSeenMs()))
+		fmt.Fprintf(&b, "  structure: %s\n", s.GetKeyStructure())
 		if example {
-			fmt.Fprintf(w, "  example:   %s\n", s.GetFirstExample())
+			fmt.Fprintf(&b, "  example:   %s\n", s.GetFirstExample())
 		}
 	}
-	fmt.Fprintf(w, "\n%d shape(s)\n", len(shapes))
+	if len(shapes) > 0 {
+		fmt.Fprintf(&b, "\n%d shape(s)\n", len(shapes))
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 // shortHash is how much of a digest identifies a row on screen. Twelve hex
