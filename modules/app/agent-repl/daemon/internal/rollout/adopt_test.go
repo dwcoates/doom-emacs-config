@@ -1011,3 +1011,81 @@ func TestAdvertiseDoesNotRetryAFailureThatIsNotAHeldClaim(t *testing.T) {
 		t.Fatalf("ERROR records = %d, want 1", got)
 	}
 }
+
+// joinedWithOneOfTwo is a successor that joined with a manifest naming only
+// FIRST: SECOND is registered but was never handed over (a closed workspace).
+func joinedWithOneOfTwo(t *testing.T, h *harness) (first, second ids.WorkspaceID) {
+	t.Helper()
+	first, _ = h.workspace(t)
+	second, _ = h.workspace(t)
+	firstRecord, _ := h.db.Workspace(context.Background(), first)
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Sessions: []ManifestSession{
+			{Workspace: first, Dir: firstRecord.Dir, Intent: IntentPreserve, ExpectedHost: true},
+		},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	return first, second
+}
+
+func TestAWorkspaceNeverHandedOverIsNotYetAdoptedWhileTheOutgoingDaemonLives(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(context.Context) error { return daemonaddr.ErrClaimed }
+	})
+	_, second := joinedWithOneOfTwo(t, h)
+
+	// Act
+	standing := h.c.Standing(second)
+
+	// Assert
+	if standing != StandingNotYetAdopted {
+		t.Fatalf("standing = %v, want not_yet_adopted while another daemon may still serve it", standing)
+	}
+}
+
+func TestAWorkspaceNeverHandedOverIsOwnedOnceTheSuccessorAdvertises(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	first, second := joinedWithOneOfTwo(t, h)
+
+	// Act: the one handed-over workspace is adopted, which advertises.
+	if err := h.c.AdoptHost(context.Background(), first); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+
+	// Assert
+	if standing := h.c.Standing(second); standing != StandingOwned {
+		t.Fatalf("standing = %v, want owned: no other daemon is left to serve it", standing)
+	}
+}
+
+func TestTheSuccessorOwnsWhatItWasNotHandedOnceARetriedAdvertiseLands(t *testing.T) {
+	// Arrange: the claim is held once, then released.
+	var writes *scriptedAddrWrites
+	h := newHarness(t, func(d *Deps) {
+		d.WriteDaemonAddr = func(ctx context.Context) error { return writes.write(ctx) }
+	})
+	writes = &scriptedAddrWrites{t: t, clock: h.clock, script: []error{nil}}
+	_, second := joinedWithOneOfTwo(t, h)
+	done := make(chan struct{})
+
+	// Act
+	go func() {
+		defer close(done)
+		h.c.retryAdvertise(context.Background(), nil)
+	}()
+	h.clock.awaitArmed(t, manifestPoll)
+	h.clock.Fire(manifestPoll)
+	<-done
+
+	// Assert
+	if standing := h.c.Standing(second); standing != StandingOwned {
+		t.Fatalf("standing = %v, want owned once daemon.addr was written", standing)
+	}
+}
