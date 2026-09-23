@@ -3980,8 +3980,8 @@ describe("the context usage the vendor states, mapped field by field", () => {
   function fullUsage(overrides: Partial<ContextUsageLike> = {}): ContextUsageLike {
     return {
       categories: [
-        { name: "messages", tokens: 10, color: "#111", isDeferred: true },
-        { name: "tools", tokens: 20, color: "#222" },
+        { name: "messages", tokens: 10, color: "#111", isDeferred: true, kind: "deferred" },
+        { name: "tools", tokens: 20, color: "#222", kind: "used" },
       ],
       totalTokens: 100,
       maxTokens: 200,
