@@ -1031,6 +1031,13 @@ describe("main", () => {
     });
 
     process.argv = ["node", "/shim/dist/main.js", ...argv];
+    // HERMETIC: the shim is spawned with exactly the daemon's environment, so
+    // the harness replaces the runner's rather than layering over it. A suite
+    // run from inside an agent-repl session inherits that session's
+    // AGENT_REPL_* exports, which would otherwise decide the outcome.
+    for (const key of Object.keys(process.env)) {
+      if (key !== "PATH" && key !== "HOME" && key !== "TMPDIR") delete process.env[key];
+    }
     Object.assign(process.env, spawnEnv(env));
 
     vi.resetModules();
