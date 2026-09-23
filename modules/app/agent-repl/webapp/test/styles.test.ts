@@ -1151,6 +1151,15 @@ describe("the thinking bubble", () => {
     }
   });
 
+  it("caps the thinking bubble's scroll box at two lines and sets nothing else", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.assistant.thinking-bubble > .bubble-scroll");
+
+    // Assert — only the line budget changes; the clip, fade, chevron and
+    // expand rules stay the response bubble's own.
+    expect(rule?.trim()).toMatch(/^--cap-lines:\s*2\s*;?$/);
+  });
+
   it("excludes the thinking bubble from the green final-answer rule", () => {
     // Arrange / Act — the green rule's own selector carries the exclusion.
     const rule = declarationsOf(".bubble.assistant.final-response:not(.thinking-bubble)");
