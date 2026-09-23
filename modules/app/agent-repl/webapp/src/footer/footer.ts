@@ -39,6 +39,7 @@ import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
+import { placeChildren } from "../dom.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -46,7 +47,13 @@ import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { drawFooterExpanded, FOOTER_PANELS, type FooterPanel } from "./expanded.js";
+import {
+  createJumpNotices,
+  drawFooterExpanded,
+  FOOTER_PANELS,
+  WORK_ID_ATTRIBUTE,
+  type FooterPanel,
+} from "./expanded.js";
 import { publishCompactionProgress } from "./progress.js";
 import { drawClientDisconnectedStrip, drawFooterStrip, footerStatusActivity } from "./strip.js";
 import { createStopControls } from "./stop.js";
@@ -88,6 +95,16 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   // and appending the same elements each draw is what lets an answer survive
   // the push the stop itself caused. See `StopControls`.
   const stops = createStopControls(ctx);
+  // THE THIRD: each detached-work row's click outcome, for the same reason.
+  // A notice drawn onto the clicked element was gone with the next push; held
+  // here, every draw paints it (see `JumpNotices`).
+  const notices = createJumpNotices();
+  // THE DOCK AND THE OPEN SECTION ARE KEPT ACROSS PUSHES, so the section's own
+  // scroll box — the reader's — is never detached and never reset. Only their
+  // children are redrawn.
+  let dock: HTMLElement | null = null;
+  let section: HTMLElement | null = null;
+  let divider: HTMLElement | null = null;
   let view: FooterView | null = null;
   // The last focus generation this page applied; see `applyFocus`.
   let appliedFocus: bigint | null = null;
@@ -189,42 +206,69 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
       bare.appendChild(drawClientDisconnectedStrip(verdict.substatus, verdict.activity));
       stopTicking(host);
       host.replaceChildren(bare);
+      dock = null;
+      section = null;
       return;
     }
     const strip = requireMessage(view.strip, "FooterView.strip");
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
-    const dock = document.createElement("div");
-    dock.className = "pfooter";
-    dock.setAttribute("role", "status");
-    dock.setAttribute("aria-live", "polite");
-
     // THE SHEET IS HANDED THE STRIP'S OWN ACTIVITY. The tokens sheet expands
     // the usage line the strip is drawing, and handing the message across is
     // what keeps the two from disagreeing about a figure.
-    const panel = drawFooterExpanded(expanded, selection, {
-      ctx,
-      stops,
-      selectDetachedWork: deps.selectDetachedWork,
-      activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
-    });
+    const panel = drawFooterExpanded(
+      expanded,
+      selection,
+      {
+        ctx,
+        stops,
+        notices,
+        redraw: draw,
+        selectDetachedWork: deps.selectDetachedWork,
+        activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
+      },
+      section,
+    );
+    section = panel;
+    notices.prune(drawnRowKeys(panel));
     const stripDeps = { ctx, selection, onSelect: select, stops };
-    dock.appendChild(
+    const stripEl =
       verdict === null
         ? drawFooterStrip(strip, stripDeps)
         : drawClientDisconnectedStrip(verdict.substatus, verdict.activity, {
             strip,
             deps: stripDeps,
-          }),
-    );
-    if (verdict !== null) dock.setAttribute("data-client-verdict", verdict.kind);
-    if (panel !== null) {
-      dock.appendChild(drawFooterDivider());
-      dock.appendChild(panel);
-    }
+          });
 
-    stopTicking(host);
-    host.replaceChildren(dock);
+    const target = dock ?? createDock();
+    if (verdict !== null) target.setAttribute("data-client-verdict", verdict.kind);
+    else target.removeAttribute("data-client-verdict");
+    const next: HTMLElement[] = [stripEl];
+    if (panel !== null) {
+      divider ??= drawFooterDivider();
+      next.push(divider, panel);
+    }
+    // Stop what this draw drops, then place what it keeps WITHOUT re-attaching
+    // it: the kept section must never leave the document (placeChildren).
+    const kept = new Set<Node>(next);
+    for (const child of [...target.children]) {
+      if (!kept.has(child)) stopTicking(child);
+    }
+    placeChildren(target, next);
+    if (dock !== target || target.parentElement !== host) {
+      stopTicking(host);
+      host.replaceChildren(target);
+    }
+    dock = target;
+  }
+
+  /** The dock element, built once and kept for the mount's life. */
+  function createDock(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "pfooter";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    return el;
   }
 
   /**
@@ -302,6 +346,17 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     const kind = activity?.kind;
     publishCompactionProgress(kind?.case === "compaction" ? kind.value.text : null);
   }
+}
+
+/** The notice keys of every jump row PANEL draws, so a gone row's notice goes. */
+function drawnRowKeys(panel: HTMLElement | null): ReadonlySet<string> {
+  const keys = new Set<string>();
+  if (panel === null) return keys;
+  const name = panel.getAttribute("data-panel") ?? "";
+  for (const row of panel.querySelectorAll(`[${WORK_ID_ATTRIBUTE}]`)) {
+    keys.add(`${name}:${row.getAttribute(WORK_ID_ATTRIBUTE) ?? ""}`);
+  }
+  return keys;
 }
 
 /**

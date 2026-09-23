@@ -8,10 +8,10 @@
  * HISTORY IS SERVED FROM THE STORE (never from memory), which is what makes a
  * restarted daemon able to reattach and miss nothing.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, toJsonString } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
-import { conversationv1, shimv1 } from "../../src/proto.js";
+import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
 import {
   agentId,
@@ -1423,6 +1423,62 @@ describe("keep-alives", () => {
       (record) => record.uuid === target,
     );
     expect(named?.type).toBe("assistant");
+  });
+
+  /**
+   * The first row to land whose content carries `needle`, other than a prompt.
+   *
+   * The mocked vendor ECHOES the prompt into its reply, so the keep-alive's
+   * answer is the one non-prompt row that carries the keep-alive marker.
+   */
+  const answerLanded = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    needle: string,
+  ): Promise<storev1.StoreEntry> =>
+    shim.store?.entryLanded((entry) => {
+      if (entry.entry.case !== "agentUpdate") return false;
+      const info = entry.entry.value.agentInfo;
+      const item =
+        info.case === "serveableFrame"
+          ? info.value.agentItem
+          : info.case === "unservedItem" && info.value.unservedItem.case === "keepalive"
+            ? info.value.unservedItem.value
+            : undefined;
+      if (item?.item.case !== "agentFrame") return false;
+      return toJsonString(conversationv1.AgentFrameSchema, item.item.value).includes(needle);
+    }) ?? Promise.reject(new Error("this shim has no store"));
+
+  test("a keep-alive's answer lands unserved", async () => {
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+
+    const answer = await answerLanded(shim, KEEPALIVE_MARKER);
+
+    expect(answer.entry.case === "agentUpdate" ? answer.entry.value.agentInfo.case : undefined).toBe("unservedItem");
+  });
+
+  test("a keep-alive's answer lands unserved when the vendor runs a turn of its own first", async () => {
+    // THE 2026-09-23 LEAK: a turn the vendor ran by itself ended first, its
+    // result closed the keep-alive, and the keep-alive's answer was served.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+
+    const answer = await answerLanded(shim, KEEPALIVE_MARKER);
+
+    expect(answer.entry.case === "agentUpdate" ? answer.entry.value.agentInfo.case : undefined).toBe("unservedItem");
+  });
+
+  test("the vendor's own turn ahead of a keep-alive is still served", async () => {
+    // The fix must not overcorrect: a turn nobody's send started is real
+    // conversation, and hiding it with the keep-alive would lose it.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+
+    const answer = await answerLanded(shim, "A background task finished.");
+
+    expect(answer.entry.case === "agentUpdate" ? answer.entry.value.agentInfo.case : undefined).toBe("serveableFrame");
   });
 
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {

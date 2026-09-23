@@ -49,20 +49,24 @@
 //     any kind, so there was no real figure to prefer — and the weekly cell
 //     is asserted on the drawn shape below.
 //
-//  3. THE ACCOUNT-USAGE OUTCOME ARMS NOW REACH A DRAWN SHAPE (Landing 13).
-//     `observeAccountUsage` used to file five_hour/seven_day FIGURES and
-//     return early for every unavailable arm, so no arm of that oneof moved
-//     a pixel: opus_absent drew exactly what available drew, and the four
-//     unavailable reasons drew exactly what the previous sample drew.
-//     `FooterStatusActivityRateLimited.sample` (frontend/v1/footer.proto,
-//     FooterAllowanceSample) now carries the outcome BY NAME beside the
-//     figures, and the rate line's newsworthiness gate opens on an unread
-//     sample as well as on a newsworthy allowance — otherwise the cell would
-//     stay unreachable from this mock, whose figures (five_hour 41,
+//  3. AN UNREAD SAMPLE NO LONGER DRAWS A CAVEAT (owner ruling, fc4917be4,
+//     2026-09-15). Landing 13 once drew the account-usage outcome BY NAME on
+//     the strip (`FooterStatusActivityRateLimited.sample`) and opened the
+//     rate line on an unread sample alone. The ruling retired both: the line
+//     draws on NEWSWORTHY figures only, carries `figures_read_at_ms` (stamped
+//     by a READABLE sample and never by an unread attempt or an event), and
+//     an unread sample's outcome — its reason, and a sampling failure's
+//     cause — is recorded on the daemon's `daemon.footer.usage_sample_
+//     unreadable` breadcrumb instead. The mock's figures (five_hour 41,
 //     seven_day 63 — catalogs.ts fakeAccountUsage) sit under the 0.8
-//     threshold. The daemon files a fresh sample at every turn close (the
-//     shim reprobes: agent-shim/claude/shim/src/engine/session.ts
-//     `reprobeSessionFacts`, "A TURN CAN CHANGE WHAT THE PROBES ANSWER").
+//     threshold, so the tests below open the line with `!rate-limit-seven-
+//     day`'s 0.91 weekly EVENT and read the sampled session figure beside it.
+//     The daemon files a fresh sample at every turn close (the shim
+//     reprobes: agent-shim/claude/shim/src/engine/session.ts
+//     `reprobeSessionFacts`, "A TURN CAN CHANGE WHAT THE PROBES ANSWER"), so
+//     a readable reprobe after the event would re-file the weekly figure at
+//     63% and close the line: every test switches the probe to an unread arm
+//     BEFORE the event.
 //
 // Every scenario here runs against the scripted fake git (harness.NewRepo)
 // and the fake-SDK vendor inside the real shim: no real git, no vendor
@@ -72,6 +76,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -571,105 +576,107 @@ func footerOf(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *harness.Str
 // session.proto's SessionAccountUsageUnavailable is a four-arm oneof and
 // SessionAccountUsageAvailable's optional windows are "each UNSET when the
 // account has no such allowance" — catalogs.ts fakeAccountUsage produces one
-// distinct vendor shape per arm for exactly that reason ("A single canned
-// answer could produce only the first arm, so the mock keeps all five and a
-// scenario picks").
+// distinct vendor shape per arm for exactly that reason.
 //
-// LANDING 13 STRENGTHENED THESE TESTS (see the file header's dispute 3). Each
-// arm now reaches FooterStatusActivityRateLimited.sample by name, and the
-// assertions below are on that drawn arm — plus, for every unavailable one,
-// the standing contract that a failed read LEAVES THE FIGURES ON HAND
-// STANDING ("A sample that could read no figure... leaves the figures on hand
-// standing", daemon/internal/resolve/footer/resolver.go).
-//
-// THE FAKE'S FIGURES ARE THE PROOF OF THAT SECOND HALF: five_hour 41 and
-// seven_day 63 (catalogs.ts fakeAccountUsage) are the figures an available
-// sample files, and they are what must still be drawn after an unread.
+// WHAT THE STRIP OWES AN UNREAD SAMPLE, per the owner ruling of 2026-09-15
+// (fc4917be4, "drop the usage-unread line"): NOTHING DRAWN. The figures LAST
+// READ stand, the age they are drawn with stays the age of that reading, and
+// the unread's reason is named on the daemon's own breadcrumb rather than on
+// the strip. These tests assert all three through the real stack.
 // ===========================================================================
 
 // The five-hour and seven-day utilizations catalogs.ts's available shape
-// files, as the footer draws them (percent on the wire, fraction on the
-// contract).
+// files, and the weekly figure `!rate-limit-seven-day`'s EVENT files, as the
+// footer draws them (percent on the wire, fraction on the contract).
 const (
-	sfFiveHourUtilization = 0.41
-	sfSevenDayUtilization = 0.63
+	sfFiveHourUtilization      = 0.41
+	sfSevenDayEventUtilization = 0.91
 )
 
-// sfSampleArm names the footer's drawn account-usage outcome, or "" when the
-// rate line carries none (including when no line is drawn at all).
-func sfSampleArm(v *frontendv1.FooterView) string {
-	switch sfRateLimited(v).GetSample().GetOutcome().(type) {
-	case *frontendv1.FooterAllowanceSample_Available:
-		return "available"
-	case *frontendv1.FooterAllowanceSample_ServiceUnavailable:
-		return "service_unavailable"
-	case *frontendv1.FooterAllowanceSample_WindowUnavailable:
-		return "window_unavailable"
-	case *frontendv1.FooterAllowanceSample_UtilizationUnavailable:
-		return "utilization_unavailable"
-	case *frontendv1.FooterAllowanceSample_SamplingFailure:
-		return "sampling_failure"
-	default:
-		return ""
-	}
+// sfUnreadableOperation is the daemon's breadcrumb for a sample that read no
+// figure (daemon/internal/resolve/footer/resolver.go logUnreadableSample).
+const sfUnreadableOperation = "daemon.footer.usage_sample_unreadable"
+
+// sfAwaitUnreadable waits for the workspace's daemon sink to record an unread
+// sample under `reason`, and answers the record.
+func sfAwaitUnreadable(t *testing.T, w *World, workspaceDir, reason string) harness.LogRecord {
+	t.Helper()
+	return w.Daemon.AwaitWorkspaceLogRecord(workspaceDir, "the "+reason+" unread sample's breadcrumb",
+		func(r harness.LogRecord) bool {
+			return r.Operation == sfUnreadableOperation && r.Context["reason"] == reason
+		})
 }
 
-// sfAwaitSampleArm waits for the footer to draw the named account-usage
-// outcome and answers the view that did.
-func sfAwaitSampleArm(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, want string) *frontendv1.FooterView {
+// sfOpenTheRateLine drives `!rate-limit-seven-day`, whose 0.91 weekly EVENT
+// is the one thing in this mock that makes the rate line newsworthy, and
+// answers the line it draws. The caller has already switched the probe to an
+// unread arm, so the turn-close reprobe cannot re-file the weekly figure.
+func sfOpenTheRateLine(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *frontendv1.FooterStatusActivityRateLimited {
 	t.Helper()
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-seven-day")
+	sfAwaitConclusion(t, w, ws, turn, "The seven_day window is 91% used.")
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
-	return harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to draw the "+want+" usage sample",
-		func(v *frontendv1.FooterView) bool { return sfSampleArm(v) == want })
+	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the rate line the weekly event opens",
+		func(v *frontendv1.FooterView) bool {
+			return sfRateLimited(v).GetWeekly().GetUtilization() == sfSevenDayEventUtilization
+		})
+	return sfRateLimited(view)
 }
 
-func TestAccountUsageUnreadArmsAreNamedOnTheFooter(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w, ws, _ := sfNewWorkspace(t)
+// sfSwitchedToUnread waits for a driven unread-arm scenario's conclusion and
+// for the daemon to have taken the reprobe that read nothing. The caller
+// drives the scenario itself, with the name as a literal, so the scenario
+// matrix check can read which scenario this file drives.
+func sfSwitchedToUnread(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId, reason string) {
+	t.Helper()
+	sfAwaitConclusion(t, w, ws, turn, "The account-usage probe now answers with the "+reason+" shape.")
+	sfAwaitUnreadable(t, w, ws.GetDir(), reason)
+}
 
+// sfAssertNoCaveat fails if the line carries an account-usage outcome: the
+// ruling retired the unread caveat, and a daemon that still filled it would
+// draw a warning the owner removed.
+func sfAssertNoCaveat(t *testing.T, line *frontendv1.FooterStatusActivityRateLimited) {
+	t.Helper()
+	if line.GetSample() != nil {
+		t.Errorf("FooterStatusActivityRateLimited.sample = %v, want UNSET: an unread sample draws no caveat (owner ruling, fc4917be4)", line.GetSample())
+	}
+}
+
+func TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
-		name     string
+		reason   string
 		scenario string
 	}{
-		{name: "service_unavailable", scenario: "usage-service-unavailable"},
-		{name: "window_unavailable", scenario: "usage-window-unavailable"},
-		{name: "utilization_unavailable", scenario: "usage-utilization-unavailable"},
-		{name: "sampling_failure", scenario: "usage-sampling-failure"},
+		{reason: "service_unavailable", scenario: "usage-service-unavailable"},
+		{reason: "window_unavailable", scenario: "usage-window-unavailable"},
+		{reason: "utilization_unavailable", scenario: "usage-utilization-unavailable"},
+		{reason: "sampling_failure", scenario: "usage-sampling-failure"},
 	}
-
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: a READ sample first, so the figures this arm must
-			// leave standing are figures the daemon actually holds. Driven
-			// rather than assumed: the session's own start-time probe is not
-			// this test's to rely on.
-			readable := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-available")
-			sfAwaitConclusion(t, w, ws, readable,
-				"The account-usage probe now answers with the available shape.")
+		t.Run(tc.reason, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: the session's start-time probe READ the available
+			// shape, so the figures standing are figures actually read.
+			w, ws, _ := sfNewWorkspace(t)
 
 			// Act
-			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
+			sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario), tc.reason)
+			line := sfOpenTheRateLine(t, w, ws)
 
-			// Assert: the arm the scenario switched to, named in its own
-			// conclusion (session.ts usageScenario composes it verbatim) and
-			// then named again on the drawn footer.
-			sfAwaitConclusion(t, w, ws, turn,
-				"The account-usage probe now answers with the "+tc.name+" shape.")
-			view := sfAwaitSampleArm(t, w, ws, tc.name)
-
-			// Assert: ALONGSIDE, never instead of. The figures the last
-			// readable sample filed are still drawn.
-			line := sfRateLimited(view)
+			// Assert: ALONGSIDE, never instead of. The five-hour figure the
+			// last readable sample filed is still drawn, with the age of THAT
+			// reading, and no caveat is drawn for the unread.
 			if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
-				t.Errorf("FooterAllowance(session).utilization = %v, want the standing %v left alone by an unread sample",
-					got, sfFiveHourUtilization)
+				t.Errorf("FooterAllowance(session).utilization = %v, want the standing %v left alone by the %s sample",
+					got, sfFiveHourUtilization, tc.reason)
 			}
-			if got := line.GetWeekly().GetUtilization(); got != sfSevenDayUtilization {
-				t.Errorf("FooterAllowance(weekly).utilization = %v, want the standing %v left alone by an unread sample",
-					got, sfSevenDayUtilization)
+			if line.FiguresReadAtMs == nil {
+				t.Errorf("figures_read_at_ms is UNSET, want the instant the start-time probe's figures were read")
 			}
+			sfAssertNoCaveat(t, line)
 		})
 	}
 }
@@ -685,32 +692,27 @@ func TestAccountUsageUnreadArmsAreNamedOnTheFooter(t *testing.T) {
 // the fake's own clock, and this asserts the ordering the countdown needs:
 // the drawn reset is AFTER the moment the footer was read.
 //
-// The unread arm is the vehicle because 41% / 63% are under the 0.8
-// newsworthiness gate, so an available sample alone draws no line at all; an
-// unread one draws the line carrying exactly the standing figures.
+// THE SESSION CELL IS THE SAMPLED ONE. The ruling of 2026-09-15 (fc4917be4)
+// draws the line on newsworthy figures only, so the weekly EVENT (0.91) opens
+// it; the weekly cell then carries the event's own reset, and the SESSION
+// cell — 41%, filed by the start-time probe — is the sample's. The unread arm
+// ahead of the event keeps the turn-close reprobes from re-filing either.
 func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
-	readable := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-available")
-	sfAwaitConclusion(t, w, ws, readable,
-		"The account-usage probe now answers with the available shape.")
+	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable")
-	sfAwaitConclusion(t, w, ws, turn,
-		"The account-usage probe now answers with the service_unavailable shape.")
-	view := sfAwaitSampleArm(t, w, ws, "service_unavailable")
+	line := sfOpenTheRateLine(t, w, ws)
 	readAt := time.Now().Unix()
 
 	// Assert
-	line := sfRateLimited(view)
+	if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
+		t.Fatalf("FooterAllowance(session).utilization = %v, want the sampled %v: this cell must be the sample's", got, sfFiveHourUtilization)
+	}
 	if got := line.GetSession().GetResetsAtS(); got <= readAt {
 		t.Errorf("FooterAllowance(session).resets_at_s = %d, want an instant after the read at %d: a sampled window must reset in the FUTURE, never at `resets in 0m`",
-			got, readAt)
-	}
-	if got := line.GetWeekly().GetResetsAtS(); got <= readAt {
-		t.Errorf("FooterAllowance(weekly).resets_at_s = %d, want an instant after the read at %d: a sampled window must reset in the FUTURE, never at `resets in 0m`",
 			got, readAt)
 	}
 }
@@ -729,36 +731,34 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 // footer's first sighting of any account usage was the turn-close reprobe
 // 41ms later.
 //
-// The FIRST turn of the workspace is an unread one on purpose: the figures it
-// draws cannot have come from its own close (that sample read nothing), so
-// drawing them at all is the start-time probe having survived. It is the same
-// shape the D33 playbook photographs.
+// BOTH TURNS HERE READ NOTHING on purpose: the probe is switched to an unread
+// arm by the first, so neither turn-close reprobe files a figure, and the
+// session's 41% on the line the second turn's event opens cannot have come
+// from anything but the start-time probe.
 func TestAccountUsageProbedAtSessionStartReachesTheFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
 
 	// Act: the workspace's very first turn, and it reads nothing.
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable")
-	sfAwaitConclusion(t, w, ws, turn,
-		"The account-usage probe now answers with the service_unavailable shape.")
+	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
+	line := sfOpenTheRateLine(t, w, ws)
 
 	// Assert
-	view := sfAwaitSampleArm(t, w, ws, "service_unavailable")
-	line := sfRateLimited(view)
 	if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
 		t.Errorf("FooterAllowance(session).utilization = %v, want %v from the session's own start-time probe",
 			got, sfFiveHourUtilization)
 	}
-	if got := line.GetWeekly().GetUtilization(); got != sfSevenDayUtilization {
-		t.Errorf("FooterAllowance(weekly).utilization = %v, want %v from the session's own start-time probe",
-			got, sfSevenDayUtilization)
+	if line.FiguresReadAtMs == nil {
+		t.Errorf("figures_read_at_ms is UNSET, want the start-time probe's read instant")
 	}
 }
 
 // THE SAMPLING FAILURE KEEPS THE SHIM'S OWN CAUSE. The arm exists so a reader
-// learns WHY the shim could not sample, and a cause the daemon dropped would
-// leave the arm saying only "something".
+// learns WHY the shim could not sample. The strip no longer draws the unread
+// (owner ruling, fc4917be4), so the daemon's breadcrumb is where the cause
+// lands, and a cause dropped there would leave the record saying only
+// "something".
 func TestAccountUsageSamplingFailureCarriesACause(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -770,40 +770,35 @@ func TestAccountUsageSamplingFailureCarriesACause(t *testing.T) {
 		"The account-usage probe now answers with the sampling_failure shape.")
 
 	// Assert
-	view := sfAwaitSampleArm(t, w, ws, "sampling_failure")
-	failure, ok := sfRateLimited(view).GetSample().GetOutcome().(*frontendv1.FooterAllowanceSample_SamplingFailure)
-	if !ok {
-		t.Fatalf("sample outcome = %v, want the sampling_failure arm", sfRateLimited(view).GetSample())
-	}
-	if failure.SamplingFailure.GetCause() == "" {
-		t.Error("FooterAllowanceSampleSamplingFailure.cause is empty, want the shim's own account of what failed")
+	record := sfAwaitUnreadable(t, w, ws.GetDir(), "sampling_failure")
+	if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, "transcript scan") {
+		t.Errorf("the sampling failure's breadcrumb cause = %q, want the shim's own account of what failed (catalogs.ts: the local transcript scan)", cause)
 	}
 }
 
 // `!usage-opus-absent` IS NOT AN UNAVAILABILITY, and that is the whole
 // scenario: the service answered in full and this account simply has no opus
 // window (catalogs.ts: "An ABSENT OPTIONAL WINDOW, which is NOT an
-// unavailability"). So the drawn fact is that it RETIRES a standing unread —
-// the sample reads again, and with the fake's figures under the
-// newsworthiness gate the rate line goes away entirely.
-func TestAccountUsageOpusAbsentRetiresAStandingUnread(t *testing.T) {
+// unavailability"). So the sample READS: its turn-close reprobe re-files the
+// weekly figure at the sample's 63%, which replaces the event's 91% and — the
+// figures being unremarkable — retires the line. An unread arm in its place
+// would have left the line standing, exactly as the tests above assert.
+func TestAccountUsageOpusAbsentIsReadAndRetiresTheLine(t *testing.T) {
 	t.Parallel()
-	// Arrange: an unread standing on the footer to be retired.
+	// Arrange: a line standing on the event's figure, over an unread probe.
 	w, ws, _ := sfNewWorkspace(t)
-	unread := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable")
-	sfAwaitConclusion(t, w, ws, unread,
-		"The account-usage probe now answers with the service_unavailable shape.")
-	sfAwaitSampleArm(t, w, ws, "service_unavailable")
+	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
+	sfOpenTheRateLine(t, w, ws)
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-opus-absent")
 	sfAwaitConclusion(t, w, ws, turn,
 		"The account-usage probe now answers with the opus_absent shape.")
 
-	// Assert: the sample reads again, so the unread is gone and — the figures
-	// being unremarkable — so is the line it rode on.
+	// Assert: the sample reads again, so the weekly figure is the sample's and
+	// the line it rode on is gone.
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
-	harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to retire the unread an absent optional window is not",
+	harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to retire the line an absent optional window re-read",
 		func(v *frontendv1.FooterView) bool { return sfRateLimited(v) == nil })
 }

@@ -444,6 +444,56 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 	}
 }
 
+// TestKeepAliveAnswerAfterVendorTurnNeverServed — the owner's leak of
+// 2026-09-23. The vendor ran a turn of its OWN (a background task's
+// notification) between the shim's keep-alive send and its answer; that
+// turn's result closed the keep-alive early, and the keep-alive's answer then
+// arrived untagged and was drawn as a green final-answer bubble.
+//
+// `!queue-vendor-turn` makes the mocked vendor run exactly such a turn ahead
+// of the next send, and the compressed cadence makes that next send the
+// shim's keep-alive. The mock ECHOES a prompt into its reply, so a served row
+// of the keep-alive's answer would carry the keep-alive marker.
+//
+// SYNCHRONIZATION: the shim's own "closed a turn" record with keepalive=true
+// proves the keep-alive was answered; a real prompt submitted AFTER it and
+// seen to end in the feed proves every row the shim wrote before it — the
+// keep-alive's included — reached the store, because the shim writes in
+// order. Only then is absence asserted.
+func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
+	// Arrange
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+	}})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
+	AwaitTurnEnded(t, w, ws, queued)
+
+	// Act: the keep-alive beats, the vendor runs its own turn first, then
+	// answers the keep-alive.
+	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive turn to close",
+		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
+	after := SubmitPrompt(t, w, ws, "after the keep-alive")
+	AwaitTurnEnded(t, w, ws, after)
+
+	// Assert: the vendor's own turn is served; nothing of the keep-alive is.
+	rows := feedRows(t, w, ws)
+	var vendorTurnDrawn bool
+	for _, row := range rows {
+		drawn := row.String()
+		if strings.Contains(drawn, "agent-repl:keepalive") {
+			t.Errorf("feed row %v carries the keep-alive marker, want no keep-alive row served", row)
+		}
+		if strings.Contains(drawn, "A background task finished.") {
+			vendorTurnDrawn = true
+		}
+	}
+	if !vendorTurnDrawn {
+		t.Errorf("feed drew no row for the vendor's own turn, want it served beside the hidden keep-alive")
+	}
+}
+
 // TestRevivalAfterHibernate — SPEC.md #46. Contract: the yield obligation
 // (docs/overhaul/shim.md: "a real prompt submitted after trailing keep-alive
 // turns → the served context excludes them") combined with daemon.md's
