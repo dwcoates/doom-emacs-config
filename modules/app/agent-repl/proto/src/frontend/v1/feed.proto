@@ -1571,6 +1571,20 @@ message FeedUserPrompt {
   oneof result {
     FeedUserPromptSuccess success = 2;
   }
+  // SET while this prompt's TURN IS WORKING — the prompt bubble's "working"
+  // wave and border. A DAEMON FACT read off the daemon's own turn lifecycle,
+  // never inferred by a client: set from the moment the row is first drawn
+  // (the queue's mirror of an accepted prompt, before the turn has even
+  // opened) until the turn's TERMINAL — the same terminal FeedRow.turn_ended
+  // is drawn from, whichever way it ended (concluded, errored, interrupted,
+  // a query death). An interim response, and a final answer drawn before the
+  // terminal names it, leave it SET: only the terminal ends the turn. The
+  // daemon RE-PUBLISHES the row with this UNSET on that edge, and draws every
+  // later copy (a history replay, a reconnect's page) of a turn it has seen
+  // end UNSET. UNSET = the turn has ended, or the row names no turn, or the
+  // row is a fork's ported prompt (settled in another workspace). The client
+  // draws the wave from this flag verbatim and from nothing else.
+  bool working = 3;
 }
 
 // The row's content.
@@ -1653,6 +1667,11 @@ message FeedAgentPrompt {
     // start (AgentSendMessage.failure); this is where it reaches a surface.
     FeedAgentPromptRefused refused = 5;
   }
+  // SET while the TURN THIS ROW IS STAMPED WITH (FeedRow.turn) IS WORKING —
+  // the same daemon fact, the same edges and the same re-publication as
+  // FeedUserPrompt.working, this row's sibling in every other way. UNSET =
+  // that turn has ended, or the row names no turn.
+  bool working = 6;
 }
 message FeedAgentPromptQueuedToLive {}
 message FeedAgentPromptResumedRecipient {}

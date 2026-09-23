@@ -11214,7 +11214,21 @@ type FeedUserPrompt struct {
 	// Types that are valid to be assigned to Result:
 	//
 	//	*FeedUserPrompt_Success
-	Result        isFeedUserPrompt_Result `protobuf_oneof:"result"`
+	Result isFeedUserPrompt_Result `protobuf_oneof:"result"`
+	// SET while this prompt's TURN IS WORKING — the prompt bubble's "working"
+	// wave and border. A DAEMON FACT read off the daemon's own turn lifecycle,
+	// never inferred by a client: set from the moment the row is first drawn
+	// (the queue's mirror of an accepted prompt, before the turn has even
+	// opened) until the turn's TERMINAL — the same terminal FeedRow.turn_ended
+	// is drawn from, whichever way it ended (concluded, errored, interrupted,
+	// a query death). An interim response, and a final answer drawn before the
+	// terminal names it, leave it SET: only the terminal ends the turn. The
+	// daemon RE-PUBLISHES the row with this UNSET on that edge, and draws every
+	// later copy (a history replay, a reconnect's page) of a turn it has seen
+	// end UNSET. UNSET = the turn has ended, or the row names no turn, or the
+	// row is a fork's ported prompt (settled in another workspace). The client
+	// draws the wave from this flag verbatim and from nothing else.
+	Working       bool `protobuf:"varint,3,opt,name=working,proto3" json:"working,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11270,6 +11284,13 @@ func (x *FeedUserPrompt) GetSuccess() *FeedUserPromptSuccess {
 		}
 	}
 	return nil
+}
+
+func (x *FeedUserPrompt) GetWorking() bool {
+	if x != nil {
+		return x.Working
+	}
+	return false
 }
 
 type isFeedUserPrompt_Result interface {
@@ -11687,7 +11708,12 @@ type FeedAgentPrompt struct {
 	//	*FeedAgentPrompt_QueuedToLive
 	//	*FeedAgentPrompt_ResumedRecipient
 	//	*FeedAgentPrompt_Refused
-	Delivery      isFeedAgentPrompt_Delivery `protobuf_oneof:"delivery"`
+	Delivery isFeedAgentPrompt_Delivery `protobuf_oneof:"delivery"`
+	// SET while the TURN THIS ROW IS STAMPED WITH (FeedRow.turn) IS WORKING —
+	// the same daemon fact, the same edges and the same re-publication as
+	// FeedUserPrompt.working, this row's sibling in every other way. UNSET =
+	// that turn has ended, or the row names no turn.
+	Working       bool `protobuf:"varint,6,opt,name=working,proto3" json:"working,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11768,6 +11794,13 @@ func (x *FeedAgentPrompt) GetRefused() *FeedAgentPromptRefused {
 		}
 	}
 	return nil
+}
+
+func (x *FeedAgentPrompt) GetWorking() bool {
+	if x != nil {
+		return x.Working
+	}
+	return false
 }
 
 type isFeedAgentPrompt_Delivery interface {
@@ -16855,10 +16888,11 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x15FeedQuestionOtherText\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"*\n" +
 	"\x13FeedQuestionExpired\x12\x13\n" +
-	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"\x95\x01\n" +
+	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"\xaf\x01\n" +
 	"\x0eFeedUserPrompt\x129\n" +
 	"\x06author\x18\x01 \x01(\v2!.frontend.v1.FeedUserPromptAuthorR\x06author\x12>\n" +
-	"\asuccess\x18\x02 \x01(\v2\".frontend.v1.FeedUserPromptSuccessH\x00R\asuccessB\b\n" +
+	"\asuccess\x18\x02 \x01(\v2\".frontend.v1.FeedUserPromptSuccessH\x00R\asuccess\x12\x18\n" +
+	"\aworking\x18\x03 \x01(\bR\aworkingB\b\n" +
 	"\x06result\"L\n" +
 	"\x15FeedUserPromptSuccess\x123\n" +
 	"\x04body\x18\x01 \x01(\v2\x1f.frontend.v1.FeedUserPromptBodyR\x04body\",\n" +
@@ -16877,13 +16911,14 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x03src\x18\x01 \x01(\tR\x03src\x12\x10\n" +
 	"\x03alt\x18\x02 \x01(\tR\x03alt\"*\n" +
 	"\x14FeedUnsupportedBlock\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\"\x82\x03\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\"\x9c\x03\n" +
 	"\x0fFeedAgentPrompt\x12=\n" +
 	"\aaddress\x18\x01 \x01(\v2#.frontend.v1.FeedAgentPromptAddressR\aaddress\x124\n" +
 	"\x04body\x18\x02 \x01(\v2 .frontend.v1.FeedAgentPromptBodyR\x04body\x12P\n" +
 	"\x0equeued_to_live\x18\x03 \x01(\v2(.frontend.v1.FeedAgentPromptQueuedToLiveH\x00R\fqueuedToLive\x12[\n" +
 	"\x11resumed_recipient\x18\x04 \x01(\v2,.frontend.v1.FeedAgentPromptResumedRecipientH\x00R\x10resumedRecipient\x12?\n" +
-	"\arefused\x18\x05 \x01(\v2#.frontend.v1.FeedAgentPromptRefusedH\x00R\arefusedB\n" +
+	"\arefused\x18\x05 \x01(\v2#.frontend.v1.FeedAgentPromptRefusedH\x00R\arefused\x12\x18\n" +
+	"\aworking\x18\x06 \x01(\bR\aworkingB\n" +
 	"\n" +
 	"\bdelivery\"\x1d\n" +
 	"\x1bFeedAgentPromptQueuedToLive\"!\n" +
