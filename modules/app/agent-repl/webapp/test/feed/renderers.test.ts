@@ -193,6 +193,96 @@ describe("arrangeSubfeedRows", () => {
   });
 });
 
+/**
+ * THE ARRANGE PASS NEVER RE-ATTACHES A ROW ALREADY IN PLACE (owner rule,
+ * 2026-09-23: the user owns the scroll). A re-attached element loses the
+ * reader's scroll position inside it, and the pass runs on every live push.
+ * jsdom lays nothing out, so the invariant is asserted on the DOM itself: the
+ * mutation records name no removed row.
+ */
+describe("arrangeSubfeedRows leaves placed rows in the document", () => {
+  /** Every row a mutation batch on ROOT's subtree removed, by id. */
+  function removedRows(observer: MutationObserver): string[] {
+    return observer
+      .takeRecords()
+      .flatMap((record) => [...record.removedNodes])
+      .filter((node): node is Element => node instanceof Element && node.hasAttribute("data-feed-row"))
+      .map((node) => node.getAttribute("data-feed-row") ?? "");
+  }
+
+  /** Watch HOST's whole subtree's child lists. */
+  function watch(host: HTMLElement): MutationObserver {
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(host, { childList: true, subtree: true });
+    return observer;
+  }
+
+  it("removes no top-level row when a row is appended", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [responseRow("a"), responseRow("b")];
+    const view = viewOf(rows);
+    arrangeSubfeedRows(host, view);
+    const observer = watch(host);
+    // Act
+    rows.push(responseRow("c"));
+    arrangeSubfeedRows(host, view);
+    // Assert
+    expect(removedRows(observer)).toEqual([]);
+  });
+
+  it("removes no row when nothing changed", () => {
+    // Arrange -- a push that only redrew a row inside its own chrome.
+    const host = document.createElement("div");
+    const view = viewOf([responseRow("a"), responseRow("b")]);
+    arrangeSubfeedRows(host, view);
+    const observer = watch(host);
+    // Act
+    arrangeSubfeedRows(host, view);
+    // Assert
+    expect(removedRows(observer)).toEqual([]);
+  });
+
+  it("removes no nested row when its container is re-arranged", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const view = viewOf([responseRow("a"), responseRow("b", "x", "a")]);
+    arrangeSubfeedRows(host, view);
+    const observer = watch(host);
+    // Act
+    arrangeSubfeedRows(host, view);
+    // Assert
+    expect(removedRows(observer)).toEqual([]);
+  });
+
+  it("removes no grouped member when its group is re-arranged", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const groups = createToolGroupStore();
+    const view = viewOf([toolCallRow("t1", "running"), toolCallRow("t2", "running")]);
+    arrangeSubfeedRows(host, view, groups);
+    if (host.querySelector(".feed-group") === null) throw new Error("the fixture formed no group");
+    const observer = watch(host);
+    // Act
+    arrangeSubfeedRows(host, view, groups);
+    // Assert
+    expect(removedRows(observer)).toEqual([]);
+  });
+
+  it("empties a nesting slot whose row left the feed", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [responseRow("a"), responseRow("b", "x", "a")];
+    const view = viewOf(rows);
+    arrangeSubfeedRows(host, view);
+    // Act
+    rows.pop();
+    arrangeSubfeedRows(host, view);
+    // Assert
+    expect(host.querySelector('[data-feed-row="b"]')).toBeNull();
+  });
+});
+
 describe("arrangeSubfeedRows tabbed grouping", () => {
   it("batches a run of >=2 same-kind tool cards into ONE tabbed container", () => {
     // Arrange
