@@ -30,7 +30,7 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderEditorLink } from "../../link.js";
 import { log } from "../../log.js";
-import { renderMarkdown } from "../../markdown.js";
+import { markdownSlot } from "../../bubble/body.js";
 import type { AppContext } from "../../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
@@ -60,8 +60,6 @@ export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
     context: { state: state.case },
   });
 
-  const { bubble, body } = agenticBubble({ state: state.case });
-
   // THE ARM IS CHECKED BEFORE ANYTHING IS DRAWN FROM IT, so an arm a newer
   // daemon set reaches the refusal that quotes its name rather than a table
   // lookup that has no entry for it.
@@ -70,16 +68,19 @@ export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
       // The planning treatment: the badge, and the same animated ellipsis every
       // other live face on this page wears. A breathing wash of its own would
       // be a second visual language for "still working".
-      body.append(badge(state.case), planningIndicator());
-      return bubble;
+      return agenticBubble({ previous: rc.previous, state: state.case, content: [badge(state.case), planningIndicator()] });
     case "planned":
-      body.append(badge(state.case));
-      body.append(drawFeedPlanPlanned(state.value, rc.ctx, `${PATH}.planned`));
-      return bubble;
+      return agenticBubble({
+        previous: rc.previous,
+        state: state.case,
+        content: [badge(state.case), drawFeedPlanPlanned(state.value, rc.ctx, `${PATH}.planned`)],
+      });
     case "failed":
-      body.append(badge(state.case));
-      body.append(drawFeedPlanFailed(state.value, `${PATH}.failed`));
-      return bubble;
+      return agenticBubble({
+        previous: rc.previous,
+        state: state.case,
+        content: [badge(state.case), drawFeedPlanFailed(state.value, `${PATH}.failed`)],
+      });
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
   }
@@ -115,10 +116,9 @@ export function drawFeedPlanProse(u: FeedPlanProse, path: string): HTMLElement {
     operation: "feed.cards.plan.prose",
     context: { path, length: u.markdown.length },
   });
-  const el = document.createElement("div");
-  el.className = "plan-prose";
-  el.innerHTML = renderMarkdown(u.markdown);
-  return el;
+  // A markdown slot: the bubble's body paints it, so a tree in the plan wraps
+  // at the bubble's cap like one in any other bubble.
+  return markdownSlot("plan-prose", u.markdown);
 }
 
 /**
