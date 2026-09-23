@@ -39,7 +39,7 @@
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_CLAUDE_BIN                 the claude binary for the login pty and the classifier
-//	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's always fails)
+//	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's stages what runs)
 //
 // Fake-shim-only (read by the fake, never by the daemon; they ride the
 // daemon's own environment into the spawned shim):
