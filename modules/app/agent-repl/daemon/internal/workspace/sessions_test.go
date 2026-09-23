@@ -294,7 +294,16 @@ type fakeWatcher struct {
 	// standDown is the fixture's shared step order, appended to when the
 	// daemon declares the session ending.
 	standDown *[]string
+	// pointers is what Pointers answers.
+	pointers sessionwatcher.Pointers
 }
+
+// Pointers answers the pointers the fixture states; a fixture that states none
+// is a watcher that was served nothing.
+func (w *fakeWatcher) Pointers() sessionwatcher.Pointers { return w.pointers }
+
+// MainKnownThrough answers the main watch's pointer the fixture states.
+func (w *fakeWatcher) MainKnownThrough() *conversationv1.HistoryPointer { return w.pointers.Main }
 
 func (w *fakeWatcher) SessionEnding(string) {
 	if w.standDown != nil {
@@ -384,6 +393,10 @@ type fleetFixture struct {
 	// Nil means every recorded pid is dead, which is what every scenario that
 	// is not about the starting window wants.
 	shimAlive func(pid int) bool
+	// openings is every Opening a watcher was started with, in order.
+	openings []sessionwatcher.Opening
+	// watchErr, when set, is what starting a watcher answers.
+	watchErr error
 }
 
 // fleetStepClock is a Clock that never sleeps: After fires at once and ADVANCES
@@ -498,7 +511,11 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			}
 			return f.socketState, f.socketErr
 		},
-		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Session, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
+		StartWatcher: func(_ context.Context, _ ids.WorkspaceID, _ shimclient.Client, session sessionwatcher.Session, _ sessionwatcher.Sinks, _ dlog.Logger) (sessionwatcher.Watcher, error) {
+			f.openings = append(f.openings, session.Opening)
+			if f.watchErr != nil {
+				return nil, f.watchErr
+			}
 			return f.watcher, nil
 		},
 		Now:        func() time.Time { return fixedNow },

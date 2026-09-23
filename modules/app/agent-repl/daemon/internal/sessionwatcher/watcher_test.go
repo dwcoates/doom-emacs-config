@@ -117,8 +117,8 @@ func TestStartOpensTheSessionAndMainWatches(t *testing.T) {
 func TestStartCatchesUpFromThePersistedPointer(t *testing.T) {
 	// Arrange / Act.
 	h := newHarness(t, Session{
-		Started:          sessionStarted(""),
-		MainKnownThrough: &conversationv1.HistoryPointer{Value: "ptr-main"},
+		Started: sessionStarted(""),
+		Opening: ResumeFrom(Pointers{Main: &conversationv1.HistoryPointer{Value: "ptr-main"}}),
 	})
 
 	// Assert.
@@ -1837,6 +1837,180 @@ func TestAReOpenedWatchCatchesUpOnlyAfterItWasServed(t *testing.T) {
 				t.Fatalf("re-opened with known_through %q, want %q", req.GetKnownThrough().GetValue(), tt.wantPointer)
 			}
 			assertNames(t, got, tt.want)
+		})
+	}
+}
+
+// TestStartRefusesAnUndecidedOpening covers the rule's structural half in the
+// watcher: a caller that did not decide whether the watcher replays is refused
+// loudly, because the undecided default would be a silent replay.
+func TestStartRefusesAnUndecidedOpening(t *testing.T) {
+	// Arrange.
+	rec := newRecorder()
+	log := newTestLogger()
+	sinks := Sinks{
+		Feed:      &feedSink{rec: rec},
+		Footer:    &footerSink{rec: rec},
+		Topbar:    &topbarSink{rec: rec},
+		Sidebar:   &sidebarSink{rec: rec},
+		Lifecycle: &lifecycleSink{rec: rec},
+	}
+
+	// Act.
+	_, err := Start(t.Context(), "ws-1", newFakeClient(), Session{Started: sessionStarted("")}, sinks, log)
+
+	// Assert.
+	if !errors.Is(err, errUndecidedOpening) {
+		t.Fatalf("Start with no opening = %v, want %v", err, errUndecidedOpening)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Operation == "daemon.sessionwatcher.start_refused" {
+			return
+		}
+	}
+	t.Fatal("the refused start has no error record")
+}
+
+// TestOpeningDecidesEachWatchsFirstRequest covers what each opening asks the
+// shim for: a replay asks every watch for its first page, and a resume asks
+// every watch its predecessor was served for only what came after.
+func TestOpeningDecidesEachWatchsFirstRequest(t *testing.T) {
+	tests := []struct {
+		name     string
+		opening  Opening
+		wantMain string
+		wantSub  string
+	}{
+		{
+			name:    "a workspace's opening asks every watch for its first page",
+			opening: WorkspaceOpened(),
+		},
+		{
+			name:    "a transcript selection asks every watch for its first page",
+			opening: TranscriptSelected(),
+		},
+		{
+			name: "a resume asks every served watch for what came after its pointer",
+			opening: ResumeFrom(Pointers{
+				Main:   &conversationv1.HistoryPointer{Value: "ptr-main"},
+				Agents: map[string]*conversationv1.HistoryPointer{"sub-1": {Value: "ptr-sub"}},
+			}),
+			wantMain: "ptr-main",
+			wantSub:  "ptr-sub",
+		},
+		{
+			name:     "a resume asks a watch it was never served for its first page",
+			opening:  ResumeFrom(Pointers{Main: &conversationv1.HistoryPointer{Value: "ptr-main"}}),
+			wantMain: "ptr-main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act: the live subagent is adopted at start.
+			h := newHarness(t, Session{
+				Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1"))),
+				Opening: tt.opening,
+			})
+			sub := h.client.nextAgentOpen(t)
+
+			// Assert.
+			if got := h.mainReq.GetKnownThrough().GetValue(); got != tt.wantMain {
+				t.Fatalf("main known_through = %q, want %q", got, tt.wantMain)
+			}
+			if got := sub.req.GetKnownThrough().GetValue(); got != tt.wantSub {
+				t.Fatalf("sub-1 known_through = %q, want %q", got, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestAReopenedDetachedWatchResumesFromItsPointer covers the detached half of
+// a re-open: a subagent's watch that was served rows re-opens after them, so
+// its sub-feed is never re-placed from nothing.
+func TestAReopenedDetachedWatchResumesFromItsPointer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
+	sub := h.client.nextAgentOpen(t)
+	h.quiet()
+	sub.stream.send(t, entryFrameAt(frameUpdate("sub-1", activityUpdate(readActivity("act-1"))), "ptr-sub-7"))
+	h.rec.until(t, "footer.OnActivity")
+
+	// Act.
+	h.relink(t)
+	reopened := h.client.nextAgentOpen(t)
+
+	// Assert.
+	if reopened.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("re-opened %q, want sub-1", reopened.req.GetTarget().GetValue())
+	}
+	if got := reopened.req.GetKnownThrough().GetValue(); got != "ptr-sub-7" {
+		t.Fatalf("sub-1 re-opened with known_through %q, want ptr-sub-7", got)
+	}
+}
+
+// TestPointersAreAnsweredAfterClose covers the successor's read: the fleet
+// asks a RETIRED watcher for what it was served, so Close must not lose it.
+func TestPointersAreAnsweredAfterClose(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", subagentWork("sub-1")))})
+	sub := h.client.nextAgentOpen(t)
+	h.quiet()
+	sub.stream.send(t, entryFrameAt(frameUpdate("sub-1", activityUpdate(readActivity("act-1"))), "ptr-sub-3"))
+	h.rec.until(t, "footer.OnActivity")
+	main := h.w.MainKnownThrough()
+
+	// Act.
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := h.w.Pointers()
+
+	// Assert.
+	if got.Main.GetValue() != main.GetValue() || got.Main == nil {
+		t.Fatalf("main pointer after close = %v, want %v", got.Main, main)
+	}
+	if got.Agents["sub-1"].GetValue() != "ptr-sub-3" {
+		t.Fatalf("sub-1 pointer after close = %v, want ptr-sub-3", got.Agents["sub-1"])
+	}
+}
+
+// TestMainKnownThroughIsTheNewestMainEntry covers the pointer StartTurn is
+// bounded by: nothing before the main watch is served, then its newest row.
+func TestMainKnownThroughIsTheNewestMainEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		// served is what the main watch was served.
+		served func(w *watcher)
+		want   string
+	}{
+		{
+			name:   "a main watch served nothing has no pointer",
+			served: func(*watcher) {},
+		},
+		{
+			name: "a main watch served rows answers the newest",
+			served: func(w *watcher) {
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-1"))
+				w.routeAgentResponseLocked(w.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-2"))), "ptr-2"))
+			},
+			want: "ptr-2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.routeNow(tt.served)
+
+			// Act.
+			got := h.w.MainKnownThrough()
+
+			// Assert.
+			if got.GetValue() != tt.want {
+				t.Fatalf("MainKnownThrough() = %q, want %q", got.GetValue(), tt.want)
+			}
 		})
 	}
 }
