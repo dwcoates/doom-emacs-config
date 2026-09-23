@@ -285,3 +285,44 @@ func TestCloseRemovesTheSocketItCreated(t *testing.T) {
 		t.Fatalf("socket after Close: %v, want it gone", statErr)
 	}
 }
+
+// failingCloseListener is a net.Listener whose Close fails, which is the one
+// input abandonListener's second fault needs and the kernel will not produce
+// on demand.
+type failingCloseListener struct {
+	net.Listener
+	closeErr error
+}
+
+func (l failingCloseListener) Close() error { return l.closeErr }
+
+func TestAbandonListenerReturnsTheCauseWhenTheCloseSucceeds(t *testing.T) {
+	// Arrange.
+	ln, err := net.Listen("unix", shortSock(t, "a.sock"))
+	if err != nil {
+		t.Fatalf("stage listener: %v", err)
+	}
+	cause := errors.New("the setup failed")
+
+	// Act.
+	got := abandonListener(ln, "/a.sock", cause)
+
+	// Assert.
+	if got != cause {
+		t.Fatalf("abandonListener = %v, want exactly the cause", got)
+	}
+}
+
+func TestAbandonListenerJoinsAFailedCloseOntoTheCause(t *testing.T) {
+	// Arrange.
+	cause := errors.New("the setup failed")
+	closeErr := errors.New("the close failed")
+
+	// Act.
+	got := abandonListener(failingCloseListener{closeErr: closeErr}, "/a.sock", cause)
+
+	// Assert.
+	if !errors.Is(got, cause) || !errors.Is(got, closeErr) {
+		t.Fatalf("abandonListener = %v, want both the cause and the close failure", got)
+	}
+}
