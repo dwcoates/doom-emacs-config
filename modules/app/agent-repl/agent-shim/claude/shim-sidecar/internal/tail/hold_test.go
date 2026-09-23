@@ -304,3 +304,22 @@ func TestTailerHoldingEveryFrameIsNotAChangeToWrite(t *testing.T) {
 		t.Fatal("a fully deferred batch reported a change; there is nothing to write and nothing to commit")
 	}
 }
+
+func TestAHeldBoundedBatchReportsNoMore(t *testing.T) {
+	// Arrange: a batch cut by its frame bound whose last kept frame is HELD. A
+	// hold waits for the next line on purpose, so an immediate re-poll would
+	// force the redelivery early.
+	tr, _, _, _ := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n"+`{"c":3}`+"\n", holdLast)
+	tr.maxFrames = 2
+
+	// Act.
+	r, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	// Assert.
+	if r.More {
+		t.Fatal("a batch holding a frame reported more; its re-poll would force the hold")
+	}
+}
