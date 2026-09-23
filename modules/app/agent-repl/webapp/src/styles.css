@@ -2389,10 +2389,15 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    fold. `pointer-events: none` keeps a click on either one falling through to
    click-to-expand. A tool card's TITLE fold (above) wears the same fade and
    chevron from the same rules, fading into its card's `--title-fold-bg`; an
-   output section still never does. */
-.bubble.assistant > .bubble-scroll.has-more,
-.bubble.user > .bubble-scroll.has-more,
-.title-fold.has-more {
+   output section still never does.
+   THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
+   scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
+   (`position: relative` on the box itself, not on `.has-more`), and the fade
+   and chevron are out of flow, so the measurer toggling the class moves
+   nothing inside or around the box. */
+.bubble.assistant > .bubble-scroll,
+.bubble.user > .bubble-scroll,
+.title-fold {
   position: relative;
 }
 /* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
