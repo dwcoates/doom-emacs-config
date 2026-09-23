@@ -278,7 +278,12 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   `latestEntry` in src/feed/feed.ts, "can see" defined once by
   `latestEntryVisible`), evaluated on every scroll event, resize and row
   upsert. That latch moves nothing; later content then keeps the tail in view.
-  An active reply selection holds it off until the selection clears. A follow
+  An active reply selection holds it off until the selection clears, and a
+  click on the feed OUTSIDE ANY BUBBLE (owner ruling 2026-09-23;
+  `isFeedBackground` in src/feed/background-click.ts is the one hit test: the
+  scroll box, its direct children, or a root row's `.feed-item` wrapper) is
+  what clears it — by sending the daemon `SelectResponse` CLEAR, never locally;
+  the daemon's cleared push parks through `selectionCleared`. A follow
   ends when the reader scrolls the latest entry away. The reader's own wheel
   redirect and
   collapse click are input, not causes, and are the only other writes.
