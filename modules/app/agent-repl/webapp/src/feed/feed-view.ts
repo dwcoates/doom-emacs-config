@@ -876,11 +876,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     const arm = requireCase(row.row, "FeedRow.row");
     switch (arm.case) {
       case "userPrompt":
-        return drawFeedUserPrompt(arm.value);
+        return drawFeedUserPrompt(arm.value, rc.previous);
       case "agentPrompt":
-        return drawFeedAgentPrompt(arm.value);
+        return drawFeedAgentPrompt(arm.value, rc.previous);
       case "peerMessage":
-        return drawFeedPeerMessage(arm.value);
+        return drawFeedPeerMessage(arm.value, rc.previous);
       case "turnEnded":
         return drawFeedTurnEnded(arm.value, rc);
       case "separation":

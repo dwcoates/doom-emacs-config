@@ -15,15 +15,27 @@ import {
   drawPromptBlockArm,
 } from "../../../src/feed/rows/blocks.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
+
+/** Paint BLOCK through the one bubble body, as a prompt bubble does. */
+function painted(block: HTMLElement): HTMLElement {
+  paintBody(createBubbleBody(), [block]);
+  return block;
+}
 
 describe("drawFeedTextBlock", () => {
-  it("renders the text as markdown, which is what the schema says it is", () => {
+  it("is a markdown slot, so the bubble's body pipeline paints it", () => {
     const el = drawFeedTextBlock(create(FeedTextBlockSchema, { text: "**bold**" }));
+    expect(el.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)).toBe(true);
+  });
+
+  it("renders the text as markdown, which is what the schema says it is", () => {
+    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "**bold**" })));
     expect(el.querySelector("strong")?.textContent).toBe("bold");
   });
 
   it("draws an empty block as an empty body rather than refusing", () => {
-    expect(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "" })).textContent).toBe("");
+    expect(painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "" }))).textContent).toBe("");
   });
 });
 

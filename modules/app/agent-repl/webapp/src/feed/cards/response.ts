@@ -65,13 +65,12 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../bubble-scroll.js";
+import { SAYS_ATTRIBUTE, drawBubble } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
-import { hasFencedTree, inline, renderMarkdown, type TreeCols } from "../../markdown.js";
-import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../../metaprompt-tree.js";
+import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
-import { onDiscard, stopTicking, tick } from "../ticking.js";
+import { tick } from "../ticking.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 
@@ -102,45 +101,55 @@ export const THINKING_BUBBLE_CLASS = "thinking-bubble";
  */
 const RESPONSE_PROSE_BLOCKS = 1;
 
-/** The parts of a response bubble a redraw updates IN PLACE. */
-interface ResponseParts {
-  bubble: HTMLElement;
-  scroll: HTMLElement;
-  body: ResponseBody;
-}
+/** The class of the one markdown slot a response's prose is painted into. */
+export const RESPONSE_PROSE_CLASS = "response-prose";
 
-/**
- * The prose bubble.
- *
- * A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user owns
- * the scroll). The daemon re-pushes the whole row on every fragment of an
- * arriving response and again when it settles; building a fresh bubble for
- * each push replaced the scroll box, so a reader scrolled inside an expanded
- * response was thrown back to its top on every fragment. When the previous
- * draw of this row is a response bubble, it is updated and returned instead:
- * the scroll box keeps its identity (and so its position), the prose is
- * reconciled node by node (`reconcileChildren`), and the corner and the
- * notice are replaced only when what they say changed.
- *
- * Everything the wire can refuse is read BEFORE the bubble is touched, so a
- * malformed push leaves the bubble on screen exactly as it was.
- */
+/** The prose bubble: its spec, drawn through the one bubble (src/bubble/draw.ts). */
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const path = "FeedResponse";
   const result = requireCase(u.result, `${path}.result`);
-  let markdown: string;
+
+  // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
+  // the prose is intermediate reasoning is orthogonal to whether it is still
+  // arriving. The class draws the bubble's thinking border and keeps the green
+  // final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
+  const hooks = ["assistant"];
+  if (u.thinking) hooks.push(THINKING_BUBBLE_CLASS);
+
+  // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When
+  // the daemon has stamped this response as the turn's concluded answer, the
+  // flag rides the row data — so the green is (re)applied here on every push,
+  // redraw, tool-group re-arrange, and history replay, and no rebuild of this
+  // bubble can lose it. A THINKING BUBBLE IS EXCLUDED: it is never the answer,
+  // so it never greens — the guard here matches the stylesheet's own
+  // `.final-response:not(.thinking-bubble)` rule. The BLUE selected-response
+  // border still wins over the green: the controller toggles
+  // `.response-selected` on this same bubble.
+  if (u.finalAnswer && !u.thinking) hooks.push(FINAL_RESPONSE_CLASS);
+
+  // The heading is the header strip, outside the body: the body is rewritten
+  // by the prose painters (and by every frame of the type-out), so a heading
+  // placed inside it would be wiped by the first repaint of an arriving response.
+  const strip: HTMLElement[] = [];
+  if (u.notice !== undefined) {
+    hooks.push("response-notice");
+    strip.push(drawFeedResponseNotice(u.notice, `${path}.notice`));
+  }
+  if (result.case === "error") hooks.push("response-cut-short");
+
+  // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
+  // The cost corner rides INSIDE the scroll box, before the body, floated
+  // top-right, so the prose's FIRST line wraps around it and every later line
+  // runs the full width (see `.usage-corner`).
+  const corner =
+    u.usage === undefined ? undefined : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`);
+
+  // The arm is read BEFORE anything is drawn, so an arm a newer daemon set
+  // reaches the refusal that names it rather than half a bubble.
   switch (result.case) {
     case "update":
-      markdown = drawFeedResponseProse(
-        requireMessage(result.value.prose, `${path}.update.prose`),
-        `${path}.update.prose`,
-      );
-      break;
     case "success":
-      markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
-      break;
     case "error":
-      markdown = drawFeedResponseError(result.value, `${path}.error`);
       break;
     default: {
       // The narrowed value is `never` here, which is the compile-time half of
@@ -150,128 +159,65 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       return unreachableArm(`${path}.result`, other.case);
     }
   }
-  const notice = u.notice === undefined ? null : drawFeedResponseNotice(u.notice, `${path}.notice`);
-  const corner =
-    u.usage === undefined ? null : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`);
 
-  const reused = reusableParts(rc.previous);
-  const { bubble, scroll, body } = reused ?? freshParts();
-  bubble.setAttribute("data-state", result.case);
+  // The prose is ONE markdown slot, painted by the one body pipeline: the whole
+  // prose once settled, and — while arriving — only what the previous draw of
+  // this row had already shown, from which the type-out resumes.
+  let markdown: string;
+  let shown: number;
+  switch (result.case) {
+    case "update":
+      markdown = drawFeedResponseProse(
+        requireMessage(result.value.prose, `${path}.update.prose`),
+        `${path}.update.prose`,
+      );
+      shown = revealedSoFar(rc.previous, markdown.length);
+      break;
+    case "success":
+      markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
+      shown = markdown.length;
+      break;
+    case "error":
+      markdown = drawFeedResponseError(result.value, `${path}.error`);
+      shown = markdown.length;
+      break;
+  }
+  const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown.slice(0, shown));
 
-  // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
-  // the prose is intermediate reasoning is orthogonal to whether it is still
-  // arriving. The class draws the bubble purple and non-bordered and keeps the
-  // green final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
-  bubble.classList.toggle(THINKING_BUBBLE_CLASS, u.thinking);
+  // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
+  // owns the scroll). The daemon re-pushes the whole row on every fragment of an
+  // arriving response and again when it settles; the one bubble updates the
+  // previous draw's bubble instead of building a fresh one, so the scroll box
+  // keeps its identity (and a reader scrolled inside it keeps their place) and
+  // the prose is reconciled node by node. Everything the wire can refuse was
+  // read above, so a malformed push leaves the bubble exactly as it was.
+  const { bubble, body, content } = drawBubble(
+    {
+      role: "response",
+      variant: u.thinking ? "thinking" : "response",
+      state: result.case,
+      hooks,
+      strip,
+      ...(corner === undefined ? {} : { corner }),
+      content: [prose],
+      footer: result.case === "error" ? [cutShortMarker()] : [],
+      capLines: u.thinking ? 2 : "feed",
+    },
+    rc.previous,
+  );
   bubble.toggleAttribute("data-thinking", u.thinking);
-
-  // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When
-  // the daemon has stamped this response as the turn's concluded answer, the
-  // flag rides the row data -- so the green is (re)applied on every push,
-  // redraw, tool-group re-arrange and history replay. A THINKING BUBBLE IS
-  // EXCLUDED: it is never the answer, so it never greens. The BLUE
-  // selected-response class is the controller's, and an in-place update leaves
-  // it alone.
-  bubble.classList.toggle(FINAL_RESPONSE_CLASS, u.finalAnswer && !u.thinking);
-
-  // BEFORE the scroll box, and outside it: the body is rewritten by the prose
-  // painters, so a heading placed inside it would be wiped by a repaint.
-  bubble.classList.toggle("response-notice", notice !== null);
-  bubble.toggleAttribute("data-notice", notice !== null);
-  placeNotice(bubble, scroll, notice);
-
-  // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
-  // The cost corner is INSIDE the scroll box, BEFORE the body, and floats
-  // top-right, so the prose's FIRST line flows to its left and every later line
-  // runs the full width. Its reserved width is fixed (styles.css), so neither
-  // the hover reveal, the live clock nor a growing figure reflows that line.
-  placeCorner(scroll, body, corner);
-
-  const broken = result.case === "error";
-  bubble.classList.toggle("response-cut-short", broken);
-  placeCutShortMarker(bubble, broken);
-
+  bubble.toggleAttribute("data-notice", u.notice !== undefined);
+  markRevealed(bubble, shown);
   if (result.case === "update") {
-    const resumed = revealedSoFar(rc.previous, markdown.length);
     log.debug("drawing an arriving response", {
       operation: "feed.cards.response.update",
-      context: { path: `${path}.update`, length: markdown.length, resumed, in_place: reused !== null },
+      context: { path: `${path}.update`, length: markdown.length, resumed: shown, in_place: bubble === rc.previous },
     });
-    animate(bubble, body, markdown, resumed, rc);
-  } else {
-    paintWhole(body, markdown);
-    markRevealed(bubble, markdown.length);
+    animate(bubble, body, content[0] as HTMLElement, markdown, shown, rc);
   }
-  recordDraw(u, rc, result.case, markdown.length);
+  const characters = markdown.length;
+  recordDraw(u, rc, result.case, characters);
   return bubble;
-}
-
-/** A new bubble: the chrome, its scroll box and the body inside it. */
-function freshParts(): ResponseParts {
-  const bubble = document.createElement("div");
-  bubble.className = "bubble assistant md";
-  // The body is the CONTENT WRAPPER; the element appended to the bubble is the
-  // scroll box that holds it (see bubble-scroll.ts).
-  const body = createResponseBody();
-  const scroll = bubbleScroll(body);
-  bubble.appendChild(scroll);
-  return { bubble, scroll, body };
-}
-
-/**
- * The parts of PREVIOUS when it is a response bubble this renderer drew, to be
- * updated in place; null for anything else (a first draw, a row whose arm
- * changed), which then gets a fresh bubble.
- */
-function reusableParts(previous: HTMLElement | undefined): ResponseParts | null {
-  if (previous === undefined) return null;
-  if (!previous.classList.contains("bubble") || !previous.classList.contains("assistant")) return null;
-  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
-  const body = scroll?.querySelector<ResponseBody>(`:scope > ${RESPONSE_BODY_TAG}`) ?? null;
-  if (scroll === null || body === null) return null;
-  return { bubble: previous, scroll, body };
-}
-
-/** The attribute a notice heading and a usage corner carry what they say on. */
-const SAYS_ATTRIBUTE = "data-says";
-
-/**
- * Put the notice heading NEXT above the scroll box, keeping the one already
- * there when it says the same thing.
- */
-function placeNotice(bubble: HTMLElement, scroll: HTMLElement, next: HTMLElement | null): void {
-  const current = bubble.querySelector<HTMLElement>(":scope > .response-notice-heading");
-  if (next !== null) next.setAttribute(SAYS_ATTRIBUTE, next.textContent ?? "");
-  if (current !== null && next !== null && current.getAttribute(SAYS_ATTRIBUTE) === next.getAttribute(SAYS_ATTRIBUTE)) {
-    return;
-  }
-  current?.remove();
-  if (next !== null) bubble.insertBefore(next, scroll);
-}
-
-/**
- * Put the usage corner first in the scroll box, keeping the one already there
- * when it says the same thing -- a replaced corner would restart its clock and
- * drop a hover reveal for nothing. A discarded corner's clock is stopped.
- */
-function placeCorner(scroll: HTMLElement, body: HTMLElement, next: HTMLElement | null): void {
-  const current = scroll.querySelector<HTMLElement>(":scope > .usage-corner");
-  if (current !== null && next !== null && current.getAttribute(SAYS_ATTRIBUTE) === next.getAttribute(SAYS_ATTRIBUTE)) {
-    stopTicking(next);
-    return;
-  }
-  if (current !== null) {
-    stopTicking(current);
-    current.remove();
-  }
-  if (next !== null) scroll.insertBefore(next, body);
-}
-
-/** Add or drop the cut-short marker after the scroll box. */
-function placeCutShortMarker(bubble: HTMLElement, broken: boolean): void {
-  const current = bubble.querySelector(":scope > .response-cut-short-marker");
-  if (broken && current === null) bubble.appendChild(cutShortMarker());
-  if (!broken) current?.remove();
 }
 
 /**
@@ -369,6 +315,8 @@ export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTM
   const heading = document.createElement("div");
   heading.className = "response-notice-heading";
   heading.textContent = u.heading;
+  // What it says, so an in-place redraw keeps a heading that did not change.
+  heading.setAttribute(SAYS_ATTRIBUTE, u.heading);
   return heading;
 }
 
@@ -426,7 +374,7 @@ export function drawFeedResponseUsageStamp(
   const corner = document.createElement("span");
   corner.className = "usage-corner";
   corner.dataset.tokens = u.text;
-  corner.setAttribute("data-says", `${u.text}|${String(atMs)}`);
+  corner.setAttribute(SAYS_ATTRIBUTE, `${u.text}|${String(atMs)}`);
 
   const slider = document.createElement("span");
   slider.className = "usage-slider";
@@ -461,366 +409,6 @@ export function drawFeedResponseUsageStamp(
   return corner;
 }
 
-/** The webapp surfaces a wrap issue through the client logger. */
-const logTreeIssue: TreeIssue = (message, context) => {
-  log.debug(message, { operation: "feed.cards.response.tree", context });
-};
-
-/**
- * Markdown → HTML, with the metaprompt TLDR tree WRAPPED to the measured COLS.
- *
- * The tree arrives unwrapped, one physical line per branch; the wrapper
- * (metaprompt-tree.ts, a port of the daemon's treefmt) breaks every branch too
- * wide for COLS onto continuation lines under its own text column, so the tree
- * fills the bubble and re-flows when the bubble's width changes. Stray prose
- * around the tree keeps the markdown path — which itself wraps a fenced tree to
- * the same COLS — so a model that wrapped the tree in a sentence still reads
- * correctly. COLS is asked for only when a tree is actually drawn.
- */
-export function proseHtml(markdown: string, cols: TreeCols): string {
-  const region = findTreeRegion(markdown);
-  if (region === null) return renderMarkdown(markdown, cols);
-  const before = region.before.trim() === "" ? "" : renderMarkdown(region.before, cols);
-  const after = region.after.trim() === "" ? "" : renderMarkdown(region.after, cols);
-  return `${before}<div class="mp-tree">${renderTreeHtml(region.tree, inline, cols(), logTreeIssue)}</div>${after}`;
-}
-
-/**
- * Whether drawing MARKDOWN needs a measured column budget: it holds a tree,
- * bare or fenced. Prose that holds none draws the same at every width, so it
- * can be drawn before the body has a containing block.
- */
-export function proseNeedsWidth(markdown: string): boolean {
-  return findTreeRegion(markdown) !== null || hasFencedTree(markdown);
-}
-
-/** The operation every unmeasurable-width violation is recorded under. */
-export const TREE_WIDTH_UNMEASURABLE = "feed.cards.response.tree-width-unmeasurable";
-
-/**
- * A tree's column budget could not be measured: record it once, with what was
- * read, and fail. There is no default width to fall back to — a guessed width is
- * how trees came to wrap at 105 columns inside bubbles with room for 140.
- */
-function unmeasurable(reason: string, context: Record<string, unknown>): never {
-  log.error(`a metaprompt tree's column budget could not be measured: ${reason}`, {
-    operation: TREE_WIDTH_UNMEASURABLE,
-    context: { reason, ...context },
-  });
-  throw new Error(`metaprompt tree width unmeasurable: ${reason}`);
-}
-
-/** A computed length, which a laid-out element always reports in px. */
-function computedPx(el: Element, style: CSSStyleDeclaration, property: ComputedLength): number {
-  const value = style[property];
-  const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
-  if (px === null) {
-    unmeasurable("a computed length is not in px", { element: el.className, property, value });
-  }
-  return Number.parseFloat(px[1]);
-}
-
-/** The computed lengths the budget reads. */
-type ComputedLength =
-  | "paddingLeft"
-  | "paddingRight"
-  | "borderLeftWidth"
-  | "borderRightWidth"
-  | "marginLeft"
-  | "marginRight";
-
-/** One element's horizontal padding (plus border, when BORDER), from computed styles. */
-function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: boolean }): number {
-  const s = view.getComputedStyle(el);
-  let px = computedPx(el, s, "paddingLeft") + computedPx(el, s, "paddingRight");
-  if (parts.border) px += computedPx(el, s, "borderLeftWidth") + computedPx(el, s, "borderRightWidth");
-  if (parts.margin) px += computedPx(el, s, "marginLeft") + computedPx(el, s, "marginRight");
-  return px;
-}
-
-/**
- * The column budget a tree in BODY wraps to: the body's content width WHEN THE
- * BUBBLE IS AT ITS CAP, in columns of the tree's monospace font.
- *
- * We never scroll horizontally; lines wider than the max bubble width wrap instead.
- *
- * The budget derives from the CAP ALONE — the bubble's `max-width` resolved
- * against its containing block, less the bubble's fixed chrome summed from
- * computed styles — and never from the bubble's current fit-content width, so
- * a tree below the cap never wraps and a shrink cannot feed back into a re-wrap.
- *
- * It measures only a body that is IN THE DOCUMENT, and anything it cannot read
- * is an invariant violation (`unmeasurable`), never a default.
- *
- * REGRESSION WATCH (breadcrumb, per AGENTS.md): this used to run while the
- * bubble was still DETACHED (drawFeedResponse paints before feed-view attaches
- * the row) and fall back to 105 columns when it read nothing. A real engine
- * neither lays out nor styles a detached node — the character probe measured
- * 0px and `getComputedStyle` answered empty strings — so EVERY first paint
- * wrapped at the fallback, whatever the bubble's room. jsdom styles detached
- * nodes and the unit suite stubbed geometry regardless of attachment, which is
- * why the tests never saw it. The first paint of a tree now waits for the body
- * to join the document (`createTreeWrap`). This is a watch flag, not a lock.
- */
-export function measureTreeCols(body: HTMLElement): number {
-  if (!body.isConnected) unmeasurable("the bubble body is not in the document", {});
-  const view = body.ownerDocument.defaultView;
-  if (view === null) unmeasurable("the bubble body's document has no window", {});
-  const bubble = requireBubble(body);
-  const containing = containingBlockOf(bubble);
-
-  const probe = body.ownerDocument.createElement("div");
-  probe.className = "mp-tree";
-  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
-  probe.textContent = "0".repeat(100);
-  body.appendChild(probe);
-  const charPx = probe.getBoundingClientRect().width / 100;
-  probe.remove();
-  if (!(charPx > 0)) unmeasurable("the tree font's column measured no width", { char_px: charPx });
-
-  const containingPx =
-    containing.clientWidth - insetXPx(containing, view, { border: false, margin: false });
-  if (!(containingPx > 0)) {
-    unmeasurable("the bubble's containing block has no width", { containing_px: containingPx });
-  }
-  const maxWidth = view.getComputedStyle(bubble).maxWidth;
-  const capPx = resolveCapPx(maxWidth, containingPx);
-  if (capPx === null) unmeasurable("the bubble's max-width does not resolve", { max_width: maxWidth });
-
-  // The fixed chrome from the bubble's border box in to the body's content box:
-  // every border and padding on the way, plus the margins of the boxes inside
-  // the bubble. None of it depends on content.
-  let chromePx = insetXPx(bubble, view, { border: true, margin: false });
-  for (let el: HTMLElement | null = body; el !== null && el !== bubble; el = el.parentElement) {
-    chromePx += insetXPx(el, view, { border: true, margin: true });
-  }
-
-  const contentPx = capPx - chromePx;
-  const cols = Math.floor(contentPx / charPx);
-  const context = { cols, char_px: charPx, cap_px: capPx, chrome_px: chromePx, containing_px: containingPx };
-  if (cols < 1) unmeasurable("the bubble's content width at its cap holds no column", context);
-  log.debug("measured a metaprompt tree's column budget", {
-    operation: "feed.cards.response.tree-cols",
-    context,
-  });
-  return cols;
-}
-
-/** The block the bubble's percentage cap resolves against: its parent. */
-function containingBlockOf(bubble: HTMLElement): HTMLElement {
-  const containing = bubble.parentElement;
-  if (containing === null) unmeasurable("the bubble has no containing block", {});
-  return containing;
-}
-
-/**
- * The bubble's `max-width`, resolved to px against CONTAININGPX. Per CSSOM the
- * resolved value of `max-width` is the COMPUTED value (a percentage stays a
- * percentage, a calc of one percentage serializes as `calc(N%)`), so a
- * percentage is resolved here; a browser that hands back px is honored as is.
- * Anything else answers `null`.
- */
-function resolveCapPx(maxWidth: string, containingPx: number): number | null {
-  const px = /^(-?[\d.]+)px$/.exec(maxWidth);
-  if (px !== null) return Number.parseFloat(px[1]);
-  const pct = /^(?:calc\()?\s*(-?[\d.]+)%\s*\)?$/.exec(maxWidth);
-  if (pct !== null) return (Number.parseFloat(pct[1]) / 100) * containingPx;
-  return null;
-}
-
-/** The tag of a response's body: a custom element, so it knows when it joins the document. */
-export const RESPONSE_BODY_TAG = "response-body";
-
-/** A response's body, which runs its hooks every time it joins the document. */
-export interface ResponseBody extends HTMLElement {
-  onConnect(hook: () => void): void;
-}
-
-/**
- * The response body as a custom element. `connectedCallback` runs synchronously
- * inside the DOM operation that attaches the row — before any frame is painted,
- * and whether or not the webview is visible — which is what lets a tree's first
- * paint wait for a containing block without ever showing a wrong-width frame.
- */
-function responseBodyClass(): CustomElementConstructor {
-  return class extends HTMLElement implements ResponseBody {
-    private readonly hooks: Array<() => void> = [];
-
-    onConnect(hook: () => void): void {
-      this.hooks.push(hook);
-    }
-
-    connectedCallback(): void {
-      for (const hook of this.hooks) hook();
-    }
-  };
-}
-
-/** A fresh response body, the custom element defined on first use. */
-export function createResponseBody(): ResponseBody {
-  if (customElements.get(RESPONSE_BODY_TAG) === undefined) {
-    customElements.define(RESPONSE_BODY_TAG, responseBodyClass());
-  }
-  const body = document.createElement(RESPONSE_BODY_TAG) as ResponseBody;
-  body.className = "bubble-body";
-  return body;
-}
-
-/** What a body's painters draw through, so a tree is only ever drawn at a measured width. */
-interface TreeWrap {
-  /** The body's measured column budget, measured on first ask after each attach. */
-  readonly cols: TreeCols;
-  /**
-   * Draw TEXT through DRAW: at once, unless TEXT holds a tree and the body is
-   * not in the document yet, in which case the draw runs the moment it joins.
-   * The latest draw is also what a width change re-runs.
-   */
-  paint(text: string, draw: () => void): void;
-}
-
-/**
- * Keep BODY's tree wrapped to the cap for its whole life.
- *
- * The FIRST paint of a tree waits for the body to join the document, since only
- * then is there a containing block to measure against. Every later attach (a
- * tool-group re-arrange moves the row) re-measures, and a `ResizeObserver` on
- * the CONTAINING BLOCK — the box the cap is a percentage of, not the
- * fit-content body, which keeps its width when the column grows around a bubble
- * below its cap — re-wraps when the column's width moves the budget. The
- * observer is torn down with the body through `stopTicking` (see ticking.ts).
- */
-function createTreeWrap(body: ResponseBody): TreeWrap {
-  let cols: number | null = null;
-  let latest: (() => void) | null = null;
-  let deferred = false;
-  let observer: ResizeObserver | null = null;
-
-  const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
-  const rewrap = (): void => {
-    const next = measureTreeCols(body);
-    if (next === cols) return;
-    cols = next;
-    latest?.();
-  };
-  const watch = (): void => {
-    if (observer === null) onDiscard(body, () => observer?.disconnect());
-    else observer.disconnect();
-    observer = observeContainingBlock(body, rewrap);
-  };
-
-  body.onConnect(() => {
-    if (deferred) {
-      deferred = false;
-      latest?.();
-    } else if (drawsTree()) {
-      rewrap();
-    }
-    if (drawsTree()) watch();
-  });
-
-  return {
-    cols: () => {
-      cols ??= measureTreeCols(body);
-      return cols;
-    },
-    paint(text, draw) {
-      latest = draw;
-      if (!body.isConnected && proseNeedsWidth(text)) {
-        deferred = true;
-        return;
-      }
-      draw();
-      if (body.isConnected && observer === null && drawsTree()) watch();
-    },
-  };
-}
-
-/**
- * Run REWRAP whenever BODY's containing block changes size. The recompute is
- * deferred to an animation frame so a burst of resizes coalesces and the
- * repaint's own height change is not re-observed inside the same delivery; it
- * repaints only when the integer column count moved.
- */
-function observeContainingBlock(body: HTMLElement, rewrap: () => void): ResizeObserver {
-  const view = body.ownerDocument.defaultView;
-  if (view === null || typeof view.ResizeObserver !== "function") {
-    unmeasurable("the page has no ResizeObserver to follow the column's width", {});
-  }
-  const containing = containingBlockOf(requireBubble(body));
-  let scheduled = false;
-  const recompute = (): void => {
-    scheduled = false;
-    rewrap();
-  };
-  const observer = new view.ResizeObserver(() => {
-    if (scheduled) return;
-    scheduled = true;
-    const raf = view.requestAnimationFrame?.bind(view);
-    if (raf !== undefined) raf(recompute);
-    else recompute();
-  });
-  observer.observe(containing);
-  return observer;
-}
-
-/** The bubble around BODY, which a drawn response body always has. */
-function requireBubble(body: HTMLElement): HTMLElement {
-  const bubble = body.closest<HTMLElement>(".bubble");
-  if (bubble === null) unmeasurable("the body has no bubble around it", {});
-  return bubble;
-}
-
-/** Each body's ONE tree wrap: a body updated in place keeps the wrap it has. */
-const wraps = new WeakMap<ResponseBody, TreeWrap>();
-
-/** The tree wrap BODY paints through, created on its first paint. */
-function wrapFor(body: ResponseBody): TreeWrap {
-  let wrap = wraps.get(body);
-  if (wrap === undefined) {
-    wrap = createTreeWrap(body);
-    wraps.set(body, wrap);
-  }
-  return wrap;
-}
-
-/**
- * Each body's paint GENERATION. Every paint of a body takes the next one, and a
- * type-out loop stops the moment its generation is no longer the body's: an
- * in-place update never leaves the previous push's loop painting over it.
- */
-const generations = new WeakMap<ResponseBody, number>();
-
-/** Claim the next paint generation of BODY. */
-function nextGeneration(body: ResponseBody): number {
-  const next = (generations.get(body) ?? 0) + 1;
-  generations.set(body, next);
-  return next;
-}
-
-/**
- * Bring BODY's prose to MARKDOWN, wrapped to COLS, by RECONCILING it node by
- * node rather than rewriting it: a node that did not change keeps its identity
- * and never re-lays out, so a settle, a re-wrap or an in-place update moves
- * nothing the reader did not see change (owner rule, 2026-09-23: the user owns
- * the scroll). The result is byte-identical to `proseHtml(markdown, cols)`.
- */
-function reconcileProse(body: ResponseBody, markdown: string, cols: TreeCols): void {
-  const target = document.createElement("div");
-  target.innerHTML = proseHtml(markdown, cols);
-  reconcileChildren(body, target, null);
-}
-
-/**
- * Bring the whole settled prose into the body, wrapped to the cap (see
- * `createTreeWrap`). Plain prose reflows on its own (CSS), so it takes no
- * observer and no measurement. A type-out still running on this body stops.
- */
-function paintWhole(body: ResponseBody, markdown: string): void {
-  const wrap = wrapFor(body);
-  nextGeneration(body);
-  wrap.paint(markdown, () => reconcileProse(body, markdown, wrap.cols));
-}
-
 /** Record the shown length, so the next draw of this row resumes from it. */
 function markRevealed(bubble: HTMLElement, length: number): void {
   bubble.setAttribute(REVEALED_ATTRIBUTE, String(length));
@@ -853,101 +441,6 @@ function cutShortMarker(): HTMLElement {
 }
 
 /**
- * Reconcile PARENT's children in place so they match TARGET's, preserving the
- * identity of every node that did not change.
- *
- * This is the whole anti-flicker mechanism. The reveal renders the authoritative
- * `proseHtml(slice, cols)` into a DETACHED target each frame; rather than swap
- * the live subtree for it (which destroys and recreates every settled node under
- * the reader), this walks the two child lists in order and, position by
- * position:
- *
- *   - a node that `isEqualNode` the target's is left exactly as it is — a stable
- *     prose paragraph or a final tree line keeps its identity and never repaints;
- *   - a node that only changed inside (same tag and attributes, or a text node)
- *     is PATCHED in place recursively — a growing paragraph's text node gets its
- *     data updated, a `.mp-tree` is descended into and line-diffed, the one tail
- *     line whose wrap can still change is patched — so the node stays put and
- *     only its altered interior moves;
- *   - anything else is replaced, extra target nodes are appended, and trailing
- *     nodes the target no longer has are removed.
- *
- * Because every position ends structurally equal to the target, the reconciled
- * result is byte-identical to a fresh `proseHtml(slice, cols)` — the same string
- * `paintWhole` writes in one shot.
- *
- * TAIL, when given, is a node kept as PARENT's last child: it is never matched
- * against the target and never removed, so the prose reconciles ahead of it and
- * it stays put. The streaming reveal passes `null` (no trailing node), and the
- * in-place tree line-diff (`patchNode`) does too.
- */
-export function reconcileChildren(parent: Node, target: Node, tail: Node | null): void {
-  const goal = Array.from(target.childNodes);
-  let i = 0;
-  for (; i < goal.length; i++) {
-    const want = goal[i];
-    // `.item` returns null past the end at run time even where the DOM lib types
-    // it non-null, so the range check below is real, not dead.
-    let existing: ChildNode | null = parent.childNodes.item(i);
-    // Reaching the preserved tail means the prose ran out: the rest is new and
-    // is inserted ahead of the tail rather than matched against it.
-    if (existing === tail) existing = null;
-    if (existing === null) {
-      parent.insertBefore(want, tail);
-      continue;
-    }
-    if (existing.isEqualNode(want)) continue;
-    if (patchable(existing, want)) {
-      patchNode(existing, want);
-      continue;
-    }
-    parent.replaceChild(want, existing);
-  }
-  // Drop any prose nodes the target no longer carries, without touching the tail.
-  let extra: ChildNode | null = parent.childNodes.item(i);
-  while (extra !== null && extra !== tail) {
-    parent.removeChild(extra);
-    extra = parent.childNodes.item(i);
-  }
-}
-
-/**
- * Whether EXISTING can be patched into WANT in place (keeping EXISTING's node
- * identity) rather than replaced wholesale: two text nodes, or two elements of
- * the same tag carrying the same attributes. A tag or attribute difference means
- * the node genuinely changed shape and is replaced instead.
- */
-function patchable(existing: Node, want: Node): boolean {
-  if (existing.nodeType !== want.nodeType) return false;
-  if (existing.nodeType === Node.TEXT_NODE) return true;
-  if (existing.nodeType !== Node.ELEMENT_NODE) return false;
-  const a = existing as Element;
-  const b = want as Element;
-  return a.tagName === b.tagName && sameAttributes(a, b);
-}
-
-/** Whether two elements carry the same attribute set, name for name and value. */
-function sameAttributes(a: Element, b: Element): boolean {
-  if (a.attributes.length !== b.attributes.length) return false;
-  for (const attr of Array.from(a.attributes)) {
-    if (b.getAttribute(attr.name) !== attr.value) return false;
-  }
-  return true;
-}
-
-/** Patch EXISTING to match WANT in place: text data for a text node, otherwise
- * recurse so the element's own children reconcile the same way. */
-function patchNode(existing: Node, want: Node): void {
-  if (existing.nodeType === Node.TEXT_NODE) {
-    const from = existing as Text;
-    const to = want as Text;
-    if (from.data !== to.data) from.data = to.data;
-    return;
-  }
-  reconcileChildren(existing, want, null);
-}
-
-/**
  * Pace the visible growth from RESUMED up to the whole arrived prose.
  *
  * THE FRAME IS AN ANIMATION FRAME, not the app ticker: the shared ticker steps
@@ -960,33 +453,29 @@ function patchNode(existing: Node, want: Node): void {
  */
 function animate(
   bubble: HTMLElement,
-  body: ResponseBody,
+  body: BubbleBody,
+  prose: HTMLElement,
   markdown: string,
   resumed: number,
   rc: RowContext,
 ): void {
-  // The arriving prose wraps through the SAME path as the settled whole, at the
-  // same measured width, so nothing shrinks or re-wraps when the final lands. A
-  // width change re-runs the latest paint, re-wrapping the slice already shown.
-  const wrap = wrapFor(body);
-  const generation = nextGeneration(body);
+  // The arriving prose wraps through the SAME body pipeline as the settled
+  // whole, at the same measured width, so nothing shrinks or re-wraps when the
+  // final lands. A width change repaints the slice already shown.
   const paint = (shown: number): void => {
-    const slice = markdown.slice(0, shown);
     // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
     // `body.replaceChildren(...proseHtml(slice).childNodes, freshIndicator())`
     // on EVERY animation frame — a full teardown and rebuild of the whole prose
     // subtree ~60 times a second, so every settled line was destroyed and
-    // recreated under the reader and the bubble flickered. It now renders the
-    // authoritative `proseHtml(slice, cols)` into a DETACHED target and
-    // RECONCILES the live body against it (reconcileChildren): unchanged leading
-    // nodes — stable prose paragraphs, final tree lines — keep their identity and
-    // are never touched, and only the growing tail (and, inside a tree, the one
-    // last line whose wrap can still change) is patched or appended. The
-    // reconciled result is byte-identical to a fresh `proseHtml(slice, cols)`,
-    // the same whole render `paintWhole` writes at settle, so the reveal never
-    // diverges from the oracle. Do NOT reintroduce a whole-subtree rebuild per
-    // frame. This is a watch flag, not a lock.
-    wrap.paint(slice, () => reconcileProse(body, slice, wrap.cols));
+    // recreated under the reader and the bubble flickered. `repaintSlot`
+    // RECONCILES the live slot against the authoritative render
+    // (reconcileChildren): unchanged leading nodes — stable prose paragraphs,
+    // final tree lines — keep their identity and are never touched, and only
+    // the growing tail is patched or appended. The reconciled result is
+    // byte-identical to a fresh settled paint of the same text, so the reveal
+    // never diverges from the oracle. Do NOT reintroduce a whole-subtree
+    // rebuild per frame. This is a watch flag, not a lock.
+    repaintSlot(body, prose, markdown.slice(0, shown));
     markRevealed(bubble, shown);
   };
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
@@ -1003,18 +492,20 @@ function animate(
   const blockId = "response";
   // Seeding through the module's own "already shown" entry point rather than
   // reaching into its cursor map: this is exactly a restored render, which is
-  // what `markShown` exists for.
+  // what `markShown` exists for. The resumed slice itself was painted with the
+  // bubble.
   reveal.markShown({ items: [{ kind: "text", blockId, text: markdown.slice(0, resumed), done: false }] });
-  paint(resumed);
 
   // A bubble that WAS in the document and no longer is has been replaced by a
   // re-push, and its animation is over. One that was never mounted (a test, a
   // draw into a detached fragment) keeps animating: absence of a document is
   // not the same fact as removal from one.
   let mounted = bubble.isConnected;
+  // A later paint of this same body (an in-place update) owns it from then on,
+  // so this loop never paints the previous push's prose over it.
+  const generation = paintGeneration(body);
   const step = (): void => {
-    // A later paint of this same body (an in-place update) owns it now.
-    if (generations.get(body) !== generation) return;
+    if (paintGeneration(body) !== generation) return;
     if (bubble.isConnected) mounted = true;
     else if (mounted) return;
     const shown = reveal.reveal({

@@ -196,23 +196,23 @@ describe("release", () => {
 
 describe("agenticBubble", () => {
   it("is the response bubble plus the one purple accent", () => {
-    expect(agenticBubble({ state: "published" }).bubble.className).toBe(
-      "bubble assistant md agentic",
+    expect(agenticBubble({ state: "published", content: [] }).className).toBe(
+      "bubble md assistant agentic",
     );
   });
 
   it("carries the message's own arm as its state", () => {
-    expect(agenticBubble({ state: "publishing" }).bubble.getAttribute("data-state")).toBe(
+    expect(agenticBubble({ state: "publishing", content: [] }).getAttribute("data-state")).toBe(
       "publishing",
     );
   });
 
   it("draws the heading verbatim, favicon emoji and all", () => {
-    const { bubble } = agenticBubble({ state: "published", heading: "📊 Merge Queue Report" });
+    const bubble = agenticBubble({ state: "published", heading: "📊 Merge Queue Report", content: [] });
     expect(bubble.querySelector(".agentic-heading")?.textContent).toBe("📊 Merge Queue Report");
   });
 
   it("draws no heading element for a message that has none", () => {
-    expect(agenticBubble({ state: "planning" }).bubble.querySelector(".agentic-heading")).toBeNull();
+    expect(agenticBubble({ state: "planning", content: [] }).querySelector(".agentic-heading")).toBeNull();
   });
 });

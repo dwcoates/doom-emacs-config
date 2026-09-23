@@ -185,7 +185,9 @@ describe("every bubble kind: the strip is above the scroll box", () => {
 describe("the agentic bubbles: the same box as the response they copy", () => {
   it("hangs the purple bubble's body in the shared scroll box", () => {
     // Arrange / Act
-    const { bubble, body } = agenticBubble({ state: "published" });
+    const bubble = agenticBubble({ state: "published", content: [] });
+    const body = bubble.querySelector<HTMLElement>(".bubble-body");
+    if (body === null) throw new Error("no body");
 
     // Assert
     expect(body.parentElement?.className).toBe(BUBBLE_SCROLL_CLASS);

@@ -20,7 +20,8 @@
  * than resetting it.
  */
 import { log } from "../../log.js";
-import { renderMarkdown } from "../../markdown.js";
+import { markdownSlot } from "../../bubble/body.js";
+import { drawBubble } from "../../bubble/draw.js";
 import { renderEditorLink } from "../../link.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -185,9 +186,17 @@ export function drawFeedContextCutCompacted(
   toggle.className = "sep-fold-toggle";
   toggle.setAttribute("data-fold", "compaction-summary");
 
-  const body = document.createElement("div");
-  body.className = "bubble assistant md compact-summary sep-summary";
-  body.innerHTML = renderMarkdown(summary.markdown);
+  // THE SUMMARY IS A RESPONSE BUBBLE, drawn by the one bubble: the response
+  // fill and rail, the shared cap, the one expand toggle and has-more, and a
+  // tree in it wrapped at its cap. Its border is the divider bar's own color
+  // (the compaction variant, styles.css). The fold below hides it whole.
+  const body = drawBubble({
+    role: "response",
+    variant: "compaction",
+    hooks: ["assistant", "compact-summary", "sep-summary"],
+    content: [markdownSlot("compact-summary-prose", summary.markdown)],
+    capLines: "feed",
+  }).bubble;
 
   const apply = (next: boolean): void => {
     toggle.setAttribute("data-folded", next ? "true" : "false");

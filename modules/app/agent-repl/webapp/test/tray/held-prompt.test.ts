@@ -23,13 +23,20 @@ import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
-  HELD_FOLDABLE_CLASS,
   drawHeldPrompt,
   drawUnsupportedBlock,
   sessionCommandLiteral,
   type HeldPromptDroppedDetail,
 } from "../../src/tray/held-prompt.js";
 import type { TrayContext } from "../../src/tray/context.js";
+import {
+  BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_ROLE_ATTRIBUTE,
+  BUBBLE_STRIP_CLASS,
+  BUBBLE_VARIANT_ATTRIBUTE,
+} from "../../src/bubble/draw.js";
+import { PROMPT_WAVE_ATTRIBUTE } from "../../src/breathing.js";
+import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -679,155 +686,119 @@ describe("the said body", () => {
 const saying = (text: string): HeldPrompt =>
   heldPrompt({ said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } } });
 
-/** The card's fold: the one element that shows the first line or the whole. */
-const foldOf = (card: HTMLElement): HTMLElement => {
-  const fold = card.querySelector<HTMLElement>(":scope > .held-fold");
-  if (fold === null) throw new Error("the card drew no fold");
-  return fold;
-};
-
-describe("the held prompt's one-line fold", () => {
-  it("shows only the first line of a multi-line prompt while collapsed", () => {
-    // Arrange
+describe("the held prompt's spec: a prompt bubble on the held fill", () => {
+  it("is a prompt-role bubble", () => {
     const { tc } = trayContext();
-    // Act
-    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
-    // Assert
-    expect([fold.querySelector(".held-line")?.textContent?.trim(), fold.classList.contains("expanded")])
-      .toEqual(["first line", false]);
+    expect(drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("prompt");
   });
 
-  it("offers the expand affordance on a multi-line prompt", () => {
-    // Arrange
+  it("is the held variant, whose fill is the held grey", () => {
     const { tc } = trayContext();
-    // Act
-    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
-    // Assert
-    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
+    expect(drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("held");
   });
 
-  it("expands to the whole prompt on a click", () => {
-    // Arrange
+  it("collapses at two lines", () => {
     const { tc } = trayContext();
-    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
-    // Act
-    fold.click();
-    // Assert
-    expect([fold.classList.contains("expanded"), fold.querySelector(".queued-text")?.textContent])
-      .toEqual([true, expect.stringContaining("second line")]);
-  });
-
-  it("collapses back to the first line on a second click", () => {
-    // Arrange
-    const { tc } = trayContext();
-    const fold = foldOf(drawHeldPrompt(saying("first line\nsecond line"), tc));
-    fold.click();
-    // Act
-    fold.click();
-    // Assert
-    expect(fold.classList.contains("expanded")).toBe(false);
-  });
-
-  it("offers no expand affordance on a one-line prompt", () => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const fold = foldOf(drawHeldPrompt(saying("fix the test"), tc));
-    // Assert
-    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(false);
-  });
-
-  it("does not expand a one-line prompt on a click", () => {
-    // Arrange
-    const { tc } = trayContext();
-    const fold = foldOf(drawHeldPrompt(saying("fix the test"), tc));
-    // Act
-    fold.click();
-    // Assert
-    expect(fold.classList.contains("expanded")).toBe(false);
-  });
-
-  it("offers the affordance on a one-line prompt whose line overruns its row", () => {
-    // Arrange — a layout engine, faked: the line measures taller than its row.
-    const { tc } = trayContext();
-    const fold = foldOf(drawHeldPrompt(saying("a single line far too long for its row"), tc));
-    const line = fold.querySelector(".held-line");
-    if (line === null) throw new Error("the fold drew no first line");
-    Object.defineProperty(line, "scrollHeight", { value: 40 });
-    Object.defineProperty(line, "clientHeight", { value: 20 });
-    // Act
-    fold.dispatchEvent(new Event("pointerenter"));
-    // Assert
-    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
-  });
-
-  it("keeps an open fold closable when its hidden line measures nothing", () => {
-    // Arrange — an overrunning line opened, then hidden and measuring 0/0.
-    const { tc } = trayContext();
-    const fold = foldOf(drawHeldPrompt(saying("a single line far too long for its row"), tc));
-    const line = fold.querySelector(".held-line");
-    if (line === null) throw new Error("the fold drew no first line");
-    Object.defineProperty(line, "scrollHeight", { value: 40, configurable: true });
-    Object.defineProperty(line, "clientHeight", { value: 20, configurable: true });
-    fold.dispatchEvent(new Event("pointerenter"));
-    fold.click();
-    Object.defineProperty(line, "scrollHeight", { value: 0 });
-    Object.defineProperty(line, "clientHeight", { value: 0 });
-    // Act
-    fold.dispatchEvent(new Event("pointerenter"));
-    // Assert
-    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
-  });
-
-  it("offers the affordance on a one-line prompt carrying an attachment", () => {
-    // Arrange
-    const { tc } = trayContext();
-    // Act
-    const fold = foldOf(
-      drawHeldPrompt(
-        heldPrompt({
-          said: {
-            content: {
-              blocks: [
-                { block: { case: "text", value: { text: "see this" } } },
-                {
-                  block: {
-                    case: "image",
-                    value: { location: { case: "path", value: { path: "/tmp/a.png" } }, mediaType: "image/png" },
-                  },
-                },
-              ],
-            },
-          },
-        }),
-        tc,
-      ),
+    expect(drawHeldPrompt(saying("first line\nsecond line\nthird line"), tc).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(
+      "2",
     );
-    // Assert
-    expect(fold.classList.contains(HELD_FOLDABLE_CLASS)).toBe(true);
   });
 
-  it("skips leading blank lines to find the first line", () => {
+  it("never waves: a held prompt has no turn in flight", () => {
+    const { tc } = trayContext();
+    expect(drawHeldPrompt(heldPrompt(), tc).hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("puts its badges and queued age in the header strip", () => {
+    const { tc } = trayContext();
+    const head = drawHeldPrompt(heldPrompt(), tc).querySelector(".queued-head");
+    expect([head?.classList.contains(BUBBLE_STRIP_CLASS), head?.querySelector("[data-queued]") !== null]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("puts the whole prompt in the one scroll box, every line of it", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(saying("first line\nsecond line"), tc);
+    expect(card.querySelector(".bubble-scroll .queued-text")?.textContent).toContain("second line");
+  });
+
+  it("keeps its actions after the scroll box, outside the cap", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    expect(card.lastElementChild?.classList.contains("queued-actions")).toBe(true);
+  });
+
+  it("carries no private fold of its own", () => {
+    const { tc } = trayContext();
+    expect(drawHeldPrompt(saying("first line\nsecond line"), tc).querySelector(".held-fold, .held-line")).toBeNull();
+  });
+
+  it.each([
+    ["no hold", null, []],
+    ["a lease hold", { case: "shutdown", value: { scheduleId: "s" } }, ["lease-card"]],
+    ["a keep-alive hold", { case: "keepAlive", value: { turn: { value: "ka-1" } } }, ["keep-alive-card"]],
+  ] as const)("names %s's frame with its hook, which selects only the border", (_name, hold, frames) => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt(hold === null ? {} : { hold: hold as never }), tc);
+    expect(["lease-card", "keep-alive-card"].filter((frame) => card.classList.contains(frame))).toEqual(frames);
+  });
+});
+
+describe("a tree the held prompt carries", () => {
+  const staged = useTreeLayout();
+
+  /** A held prompt of TEXT, attached under its own column. */
+  function mounted(text: string): HTMLElement {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(saying(text), tc);
+    const column = document.createElement("div");
+    column.append(card);
+    document.body.append(column);
+    return card;
+  }
+
+  it("wraps at the held bubble's own cap", () => {
+    // Arrange / Act
+    const card = mounted(WIDE_TREE);
+    // Assert
+    const widths = treeLineWidths(card);
+    expect(widths.length).toBeGreaterThan(3);
+    expect(Math.max(...widths)).toBeLessThanOrEqual(stagedCols(staged.layout));
+  });
+
+  it("never wraps below its max width", () => {
+    // Arrange / Act
+    const card = mounted(FITTING_TREE);
+    // Assert
+    expect(treeLineWidths(card)).toHaveLength(3);
+  });
+});
+
+describe("a held prompt's redraw", () => {
+  it("updates the previous card in place, keeping its scroll box", () => {
     // Arrange
     const { tc } = trayContext();
+    const first = drawHeldPrompt(heldPrompt(), tc);
+    const box = first.querySelector(".bubble-scroll");
     // Act
-    const fold = foldOf(drawHeldPrompt(saying("\n\nfirst line\nsecond line"), tc));
+    const again = drawHeldPrompt(heldPrompt(), tc, first);
     // Assert
-    expect(fold.querySelector(".held-line")?.textContent?.trim()).toBe("first line");
+    expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
   });
 
-  it("leaves a link click in the first line to the link", () => {
+  it("drops the acceptance mark when the new arm has none", () => {
     // Arrange
     const { tc } = trayContext();
-    const fold = foldOf(
-      drawHeldPrompt(saying("see [the docs](https://example.test/docs)\nmore"), tc),
+    const first = drawHeldPrompt(
+      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } }),
+      tc,
     );
-    const link = fold.querySelector<HTMLAnchorElement>(".held-line a");
-    link?.addEventListener("click", (event) => event.preventDefault());
     // Act
-    link?.click();
+    drawHeldPrompt(heldPrompt({ classification: { case: "classifying", value: {} } }), tc, first);
     // Assert
-    expect(fold.classList.contains("expanded")).toBe(false);
+    expect(first.hasAttribute("data-accepted")).toBe(false);
   });
 });
 

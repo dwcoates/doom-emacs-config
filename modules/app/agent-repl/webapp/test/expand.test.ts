@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  BUBBLE_STRIP_CLASS,
   CAPPED_CLASSES,
   CAPPED_SELECTOR,
   EXPANDED_CLASS,
@@ -18,6 +19,7 @@ import {
   installClickExpand,
   isExpanded,
   ownsSection,
+  sectionAt,
   toggleExpanded,
 } from "../src/expand.js";
 
@@ -708,5 +710,69 @@ describe("retainRows", () => {
     retainRows(snapshot, new Set(["kept"]));
     // Assert
     expect(snapshot.get("kept")).toEqual(["tool-fold:0"]);
+  });
+});
+
+describe("sectionAt: a bubble's header strip opens its scroll box", () => {
+  /** A bubble with a strip element and a scroll box, under FEED. */
+  function bubble(feed: HTMLElement): { strip: HTMLElement; scroll: HTMLElement } {
+    const el = document.createElement("div");
+    el.className = "bubble";
+    const strip = document.createElement("span");
+    strip.className = BUBBLE_STRIP_CLASS;
+    const scroll = document.createElement("div");
+    scroll.className = "bubble-scroll";
+    el.append(strip, scroll);
+    feed.append(el);
+    return { strip, scroll };
+  }
+
+  it("answers the bubble's scroll box for a click on its strip", () => {
+    // Arrange
+    const feed = document.createElement("div");
+    const { strip, scroll } = bubble(feed);
+    // Act / Assert
+    expect(sectionAt(strip, feed)).toBe(scroll);
+  });
+
+  it("answers the scroll box for a click inside a strip element", () => {
+    // Arrange
+    const feed = document.createElement("div");
+    const { strip, scroll } = bubble(feed);
+    const word = document.createElement("b");
+    strip.append(word);
+    // Act / Assert
+    expect(sectionAt(word, feed)).toBe(scroll);
+  });
+
+  it("still answers the innermost capped section for a click in the box", () => {
+    // Arrange
+    const feed = document.createElement("div");
+    const { scroll } = bubble(feed);
+    const text = document.createElement("p");
+    scroll.append(text);
+    // Act / Assert
+    expect(sectionAt(text, feed)).toBe(scroll);
+  });
+
+  it("answers nothing for a strip whose bubble has no scroll box", () => {
+    // Arrange
+    const feed = document.createElement("div");
+    const strip = document.createElement("span");
+    strip.className = BUBBLE_STRIP_CLASS;
+    feed.append(strip);
+    // Act / Assert
+    expect(sectionAt(strip, feed)).toBeNull();
+  });
+
+  it("toggles the scroll box through the one click handler", () => {
+    // Arrange
+    const feed = document.createElement("div");
+    const { strip, scroll } = bubble(feed);
+    installClickExpand(feed, () => "");
+    // Act
+    strip.click();
+    // Assert
+    expect(scroll.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 });
