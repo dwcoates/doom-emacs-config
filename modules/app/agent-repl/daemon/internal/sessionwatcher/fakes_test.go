@@ -404,11 +404,18 @@ func (r *recorder) emit(e event) { r.ch <- e }
 // before it has been.
 func (r *recorder) until(t *testing.T, name string) []event {
 	t.Helper()
+	return r.untilEvent(t, name, func(e event) bool { return e.name() == name })
+}
+
+// untilEvent is until for the first event the predicate accepts, which is how
+// a sentinel is told from a call of the same name the frame under test made.
+func (r *recorder) untilEvent(t *testing.T, name string, is func(event) bool) []event {
+	t.Helper()
 	var seen []event
 	for {
 		select {
 		case e := <-r.ch:
-			if e.name() == name {
+			if is(e) {
 				return seen
 			}
 			seen = append(seen, e)
@@ -692,6 +699,11 @@ type harness struct {
 	session *fakeStream[*shimv1.WatchSessionResponse]
 	main    *fakeStream[*shimv1.WatchAgentResponse]
 	mainReq *shimv1.WatchAgentRequest
+
+	// sentinels counts the sentinels sent, so each one is a row of its own:
+	// a cut is routed once per pointer, and a second sentinel at the first
+	// one's pointer would be dropped as a replay.
+	sentinels int
 }
 
 // newHarness starts a watcher on the given opening session and drains
@@ -773,18 +785,22 @@ func (h *harness) quiet() {
 // Everything returned is what the frame under test provoked.
 func (h *harness) sentinel(stream *fakeStream[*shimv1.WatchAgentResponse]) []event {
 	h.t.Helper()
-	stream.send(h.t, entryFrame(frameUpdate("sentinel", &conversationv1.AgentUpdate{
+	h.sentinels++
+	stream.send(h.t, entryFrameAt(frameUpdate("sentinel", &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
-	})))
+	}), "ptr-sentinel-"+itoa(h.sentinels)))
 	// The cut reaches the feed, the footer AND the topbar in that order, so
 	// the TOPBAR's call is the sentinel: reading to any earlier one would
 	// leave the later cut calls behind to pollute the next assertion. The two
 	// that precede it are the sentinel's own, not the frame's, so they are
-	// stripped from the tail.
-	seen := h.rec.until(h.t, "topbar.OnContextCut")
+	// stripped from the tail. EVERY MATCH IS ON THE SENTINEL'S OWN AGENT, so a
+	// frame under test that is itself a cut is never taken for the sentinel.
+	seen := h.rec.untilEvent(h.t, "the sentinel's topbar.OnContextCut", func(e event) bool {
+		return e.name() == "topbar.OnContextCut" && e.agent == "sentinel"
+	})
 	for _, name := range []string{"footer.OnContextCut", "feed.OnContextCut"} {
-		if len(seen) > 0 && seen[len(seen)-1].name() == name {
-			seen = seen[:len(seen)-1]
+		if n := len(seen); n > 0 && seen[n-1].name() == name && seen[n-1].agent == "sentinel" {
+			seen = seen[:n-1]
 		}
 	}
 	return seen
@@ -1637,6 +1653,21 @@ func (h *harness) recordContext(t *testing.T, level, operation string) dlog.Cont
 	return nil
 }
 
+// relink severs the session's standing stream and brings the link back, which
+// re-opens the whole fleet. The main watch's re-open is taken as the harness's
+// main stream, and its request is returned so a test can read what it asked
+// for. Nothing emitted is drained: the caller quiets when it wants to.
+func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
+	t.Helper()
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.links <- shimclient.LinkConnected
+	h.session = h.client.nextSessionOpen(t)
+	open := h.client.nextAgentOpen(t)
+	h.main, h.mainReq = open.stream, open.req
+	return open.req
+}
+
 // withTitle installs a recording title sink, under the watcher's own lock
 // because the stream goroutines read the sink set under it.
 func (h *harness) withTitle() *recordingTitleSink {
@@ -1645,4 +1676,36 @@ func (h *harness) withTitle() *recordingTitleSink {
 	h.w.sinks.Title = ts
 	h.w.mu.Unlock()
 	return ts
+}
+
+// cutUpdate wraps a context cut as an agent-plane update.
+func cutUpdate(cut *conversationv1.ContextCut) *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: cut}}
+}
+
+// compactedCut is a completed compaction.
+func compactedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}}}
+}
+
+// clearedCut is a /clear.
+func clearedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}}
+}
+
+// failedCompactionCut is a compaction that cut nothing.
+func failedCompactionCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+		CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "prompt too long"},
+	}}
+}
+
+// cutEntryAt is one page entry carrying the main agent's context cut.
+func cutEntryAt(pointer string, cut *conversationv1.ContextCut) *conversationv1.HistoryEntryAt {
+	return frameEntryAt(pointer, frameUpdate("main-1", cutUpdate(cut)))
+}
+
+// liveCutAt is the main agent's context cut served as a live entry.
+func liveCutAt(pointer string, cut *conversationv1.ContextCut) *shimv1.WatchAgentResponse {
+	return entryFrameAt(frameUpdate("main-1", cutUpdate(cut)), pointer)
 }

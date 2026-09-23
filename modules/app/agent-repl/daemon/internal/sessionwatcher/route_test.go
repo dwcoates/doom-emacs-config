@@ -1283,3 +1283,267 @@ func TestOpeningPageOpensWatchesForNestedSpawnsRecursively(t *testing.T) {
 		t.Fatalf("second open = %q, want the grandchild sub-2", grandchild.req.GetTarget().GetValue())
 	}
 }
+
+// TestACutOnACatchUpPageReachesEveryViewOnce covers the cut a re-opened watch
+// finds on its catch-up page: it was written while no stream stood, so it is an
+// edge the views missed, and it reaches the footer and the topbar exactly as a
+// live cut does — once, and after the page itself. The feed takes no second
+// call: it draws the divider from the page it was just handed.
+func TestACutOnACatchUpPageReachesEveryViewOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		cut  *conversationv1.ContextCut
+		// titleReset is whether the cut moved the digest boundary.
+		titleReset bool
+	}{
+		{name: "a completed compaction", cut: compactedCut(), titleReset: true},
+		{name: "a clear", cut: clearedCut(), titleReset: true},
+		{name: "a failed compaction", cut: failedCompactionCut(), titleReset: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.relink(t)
+			h.quiet()
+			ts := h.withTitle()
+
+			// Act.
+			got := h.route(h.main, pageFrame(cutEntryAt("ptr-cut", tt.cut)))
+
+			// Assert.
+			assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"})
+			if ts.has("OnContextReset") != tt.titleReset {
+				t.Fatalf("title reset = %v, want %v", ts.has("OnContextReset"), tt.titleReset)
+			}
+			ctx := h.recordContext(t, "info", "daemon.sessionwatcher.context_cut")
+			if ctx["source"] != "caught_up" || ctx["pointer"] != "ptr-cut" {
+				t.Fatalf("the caught-up cut's record = %v, want source caught_up at ptr-cut", ctx)
+			}
+		})
+	}
+}
+
+// TestACutIsRoutedOncePerPointer covers the cut's identity: whichever serving
+// comes first — live, or on a page — is the only one routed, and a second
+// serving of the same row is a replay, dropped whole and recorded.
+func TestACutIsRoutedOncePerPointer(t *testing.T) {
+	tests := []struct {
+		name string
+		// first serves the cut row the first time, and leaves the harness quiet.
+		first func(t *testing.T, h *harness)
+		// again serves the same row a second time and returns what it provoked.
+		again func(t *testing.T, h *harness) []event
+		want  []string
+	}{
+		{
+			name: "seen live, then re-served on a catch-up page",
+			first: func(t *testing.T, h *harness) {
+				h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
+				h.relink(t)
+				h.quiet()
+			},
+			again: func(t *testing.T, h *harness) []event {
+				return h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
+			},
+			want: []string{"feed.OnHistoryPage", "footer.OnHistoryPage"},
+		},
+		{
+			name: "caught up on a page, then re-served live",
+			first: func(t *testing.T, h *harness) {
+				h.relink(t)
+				h.quiet()
+				h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
+			},
+			again: func(t *testing.T, h *harness) []event {
+				return h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
+			},
+			want: nil,
+		},
+		{
+			name: "seen live, then re-served live",
+			first: func(t *testing.T, h *harness) {
+				h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
+			},
+			again: func(t *testing.T, h *harness) []event {
+				return h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
+			},
+			want: nil,
+		},
+		{
+			name: "history on a first page, then re-served live",
+			first: func(t *testing.T, h *harness) {
+				h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
+			},
+			again: func(t *testing.T, h *harness) []event {
+				return h.route(h.main, liveCutAt("ptr-cut", compactedCut()))
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			tt.first(t, h)
+
+			// Act.
+			got := tt.again(t, h)
+
+			// Assert.
+			assertNames(t, got, tt.want)
+			ctx := h.recordContext(t, "info", "daemon.sessionwatcher.context_cut_replayed")
+			if ctx["pointer"] != "ptr-cut" {
+				t.Fatalf("the replay's record names pointer %v, want ptr-cut", ctx["pointer"])
+			}
+		})
+	}
+}
+
+// TestACutOnAFirstPageIsHistory covers a watch's FIRST page, a repaint: the
+// cuts on it ended acts this daemon never saw begin, so none reaches the
+// footer or the topbar — routed, it would end the turn the footer is drawing
+// and drop the context figure the topbar read after it.
+func TestACutOnAFirstPageIsHistory(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, pageFrame(cutEntryAt("ptr-cut", compactedCut())))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage"})
+	if !h.hasRecord("debug", "daemon.sessionwatcher.context_cut_history") {
+		t.Fatal("the history cut left no debug record")
+	}
+}
+
+// TestACompactingEndedByACaughtUpCutLeavesNothingStanding covers the defect:
+// the vendor's `compacting` is seen live, the watch re-opens, and the cut that
+// ends the compaction is on the catch-up page. The footer must take the cut —
+// the compaction's end — and nothing on the page may raise `compacting` again.
+func TestACompactingEndedByACaughtUpCutLeavesNothingStanding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(compactingUpdate()) })
+	h.relink(t)
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, pageFrame(
+		cutEntryAt("ptr-cut", compactedCut()),
+		frameEntryAt("ptr-before", frameUpdate("main-1", activityUpdate(readActivity("act-1")))),
+	))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"})
+}
+
+// TestAPagesClosingsAreTakenOldestFirst covers two cuts on one catch-up page:
+// the page is newest first, and the views take the cuts in the order they were
+// written, so the one left standing is the newest.
+func TestAPagesClosingsAreTakenOldestFirst(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.relink(t)
+	h.quiet()
+
+	// Act.
+	h.route(h.main, pageFrame(
+		cutEntryAt("ptr-newer", clearedCut()),
+		cutEntryAt("ptr-older", compactedCut()),
+	))
+
+	// Assert.
+	var pointers []any
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == "daemon.sessionwatcher.context_cut" {
+			pointers = append(pointers, r.Context["pointer"])
+		}
+	}
+	if len(pointers) != 2 || pointers[0] != "ptr-older" || pointers[1] != "ptr-newer" {
+		t.Fatalf("cuts routed at %v, want ptr-older then ptr-newer", pointers)
+	}
+}
+
+// TestACutOnAStartTurnPageIsLeftToTheMainWatch covers the page StartTurn's
+// answer carries: the standing main watch serves the same rows live, so a cut
+// on that page is neither routed nor counted served, and the live row that
+// follows still reaches the views.
+func TestACutOnAStartTurnPageIsLeftToTheMainWatch(t *testing.T) {
+	tests := []struct {
+		name string
+		// act is the serving under test, returning what it provoked.
+		act  func(h *harness) []event
+		want []string
+	}{
+		{
+			name: "the page itself routes no cut",
+			act: func(h *harness) []event {
+				h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+					Id: &conversationv1.TurnId{Value: "turn-1"}, Agent: agentID("main-1"),
+				}, &conversationv1.HistoryPage{Entries: []*conversationv1.HistoryEntryAt{cutEntryAt("ptr-cut", clearedCut())}})
+				return h.drainNow()
+			},
+			want: []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnHistoryPage", "footer.OnHistoryPage"},
+		},
+		{
+			name: "the live row that follows is routed",
+			act: func(h *harness) []event {
+				h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+					Id: &conversationv1.TurnId{Value: "turn-1"}, Agent: agentID("main-1"),
+				}, &conversationv1.HistoryPage{Entries: []*conversationv1.HistoryEntryAt{cutEntryAt("ptr-cut", clearedCut())}})
+				h.drainNow()
+				return h.route(h.main, liveCutAt("ptr-cut", clearedCut()))
+			},
+			want: []string{"feed.OnContextCut", "footer.OnContextCut", "topbar.OnContextCut"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.w.OnTurnOpening("ws-1", "turn-1")
+			h.drainNow()
+
+			// Act.
+			got := tt.act(h)
+
+			// Assert.
+			assertNames(t, got, tt.want)
+			if !h.hasRecord("debug", "daemon.sessionwatcher.context_cut_on_turn_page") {
+				t.Fatal("the turn page's cut left no debug record")
+			}
+		})
+	}
+}
+
+// TestAClosingRowWithNoPointerIsRoutedAndRecorded covers a producer defect: a
+// row closing an act that carries no pointer has no identity, so it can never
+// be recognized as a replay. It is routed rather than lost, and the missing
+// pointer is recorded at ERROR.
+func TestAClosingRowWithNoPointerIsRoutedAndRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.relink(t)
+	h.quiet()
+	entry := cutEntryAt("", compactedCut())
+	entry.At = nil
+
+	// Act.
+	got := h.route(h.main, pageFrame(entry))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnHistoryPage", "footer.OnHistoryPage", "footer.OnContextCut", "topbar.OnContextCut"})
+	ctx := h.recordContext(t, "error", "daemon.sessionwatcher.closing_unaddressed")
+	if ctx["closing"] != "context_cut" || ctx["agent_id"] != "main-1" {
+		t.Fatalf("the missing pointer's record = %v, want a context_cut of main-1", ctx)
+	}
+}
