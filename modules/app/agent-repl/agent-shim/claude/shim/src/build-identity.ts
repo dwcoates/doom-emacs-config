@@ -1,17 +1,21 @@
 /**
  * build-identity.ts — THE one reader of what this process IS, as
- * `conversation.v1.SessionRuntime` reports it on every SessionStarted.
+ * `conversation.v1.SessionRuntime` reports it on every SessionStarted and
+ * `conversation.v1.SessionDiagnostics.shim_build` reports on every
+ * WatchSession frame (including a session-less shim's opening one).
  *
  * Three values, three different sources, three different failure modes:
  *
  *   - `shim_build_sha`: read from the SPAWN ENV at runtime, never baked into
- *     the bundle. `bin/build-frontend.sh` computes the source revision once and
- *     writes it to `dist/.built-sha`; the daemon exports that same stamp into
- *     the shim's environment when it spawns it, so stamp and reported identity
- *     agree by construction. The daemon compares them and bounces a stale
- *     survivor at freeness — which only works if the value follows the SPAWN,
- *     not the bundle: a shim outlives its daemon, and an esbuild `define` would
- *     make a survivor report the sha of whatever build it was bundled from
+ *     the bundle. `bin/build-frontend.sh` computes the CONTENT HASH (lowercase
+ *     hex SHA-256) of the built `dist/main.js` bundle's bytes once and writes
+ *     it to `dist/.built-sha`; the daemon exports that same hash into the
+ *     shim's environment when it spawns it, so stamp and reported identity
+ *     agree by construction. The daemon's deploy compares the reported hash
+ *     against a freshly built bundle's own hash and bounces a shim whose
+ *     hash differs — which only works if the value follows the SPAWN, not the
+ *     bundle: a shim outlives its daemon, and an esbuild `define` would make a
+ *     survivor report the hash of whatever build it was bundled from
  *     regardless of what the daemon that started it said.
  *
  *     `src/main.ts` REFUSES TO START when the variable is unset, so production
