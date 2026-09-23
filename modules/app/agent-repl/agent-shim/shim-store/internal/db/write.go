@@ -6,9 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
-	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
 )
@@ -57,10 +54,6 @@ type SkippedEntry struct {
 type WriteResult struct {
 	Written  int
 	Absorbed int
-	// Settled is how many entries restated a unit's non-concluding state
-	// after the stored row had already concluded it, and were not applied
-	// (see concludedUnitStands).
-	Settled int
 	// Skipped is the entries left unchanged as legacy book-conflicts (see
 	// SkippedEntry). A skip commits nothing for that entry and keeps the stored
 	// row, but the batch still commits every other entry.
@@ -218,16 +211,6 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			continue
 		}
 
-		stands, err := d.concludedUnitStands(ctx, tx, r)
-		if err != nil {
-			return WriteResult{}, d.refuse(fields, err)
-		}
-		if stands {
-			result.Settled++
-			d.log.LogVerbose(fields, "entry not applied: the stored row already concludes this unit, and this write restates a state before its conclusion entries_index=%d", i)
-			continue
-		}
-
 		if r.workflowNotImplemented {
 			// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing
 			// is lost, and the warning says why nothing serves it yet.
@@ -288,8 +271,8 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
-	}, "transaction committed written=%d absorbed=%d settled=%d skipped=%d lines=%d shapes=%d cursor_advance=%t",
-		result.Written, result.Absorbed, result.Settled, len(result.Skipped), len(result.Lines), result.Shapes, cursor != nil)
+	}, "transaction committed written=%d absorbed=%d skipped=%d lines=%d shapes=%d cursor_advance=%t",
+		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), result.Shapes, cursor != nil)
 	return result, nil
 }
 
@@ -458,46 +441,6 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (*Sk
 		}, nil
 	}
 	return nil, nil
-}
-
-// concludedUnitStands reports whether the stored row for this entry's unit has
-// already CONCLUDED it while this entry restates a state before the
-// conclusion, in which case the entry is not applied.
-//
-// A UNIT'S ROW NEVER WALKS BACK FROM ITS CONCLUSION. The two planes write one
-// unit under ONE key (`activity:<id>`) and neither waits for the other, so the
-// sidecar can read a tool call's transcript line — its START — after the
-// shim's stream plane has already written the call's success. Applied, that
-// start superseded the success, bumped the row's write order and re-delivered
-// it to every watcher: the daemon redrew a loaded skill card as running and
-// nothing ever settled it again (TestSkillNamedAndArgsParameterized,
-// 2026-09-23). A conclusion superseding a conclusion is still applied — the
-// later plane may state it more fully — and so is anything on a row that has
-// not concluded.
-func (d *DB) concludedUnitStands(ctx context.Context, tx *sql.Tx, r routed) (bool, error) {
-	incoming := activityOf(r.entry)
-	if incoming == nil || activityIsTerminal(incoming) {
-		return false, nil
-	}
-	var blob []byte
-	switch err := tx.QueryRowContext(ctx,
-		`SELECT frame FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&blob); {
-	case errors.Is(err, sql.ErrNoRows):
-		return false, nil
-	case err != nil:
-		return false, storagef(err, "reading the stored state of row %q", r.upsertKey)
-	}
-	var stored storev1.StoreEntry
-	if err := proto.Unmarshal(blob, &stored); err != nil {
-		return false, storagef(err, "decoding the stored state of row %q", r.upsertKey)
-	}
-	standing := activityOf(&stored)
-	return standing != nil && activityIsTerminal(standing), nil
-}
-
-// activityOf answers the activity an entry carries, nil when it carries none.
-func activityOf(entry *storev1.StoreEntry) *conversationv1.AgentActivity {
-	return entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity()
 }
 
 // nullableBook renders a book column for a human, distinguishing the never-served
