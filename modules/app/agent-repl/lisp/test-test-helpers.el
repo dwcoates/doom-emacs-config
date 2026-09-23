@@ -138,6 +138,42 @@ clean; BODY runs after the load with the same bindings still active."
     ;; Assert
     (should (null log-calls))))
 
+;;;; ---- Background-priority gate ----
+
+(ert-deftest agent-repl-test-helpers-background-gate-refuses-unset-marker ()
+  "A batch run with no background-priority marker is refused."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl-test--require-background-priority nil t)))
+
+(ert-deftest agent-repl-test-helpers-background-gate-refuses-empty-marker ()
+  "A batch run whose marker is the empty string is refused."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl-test--require-background-priority "" t)))
+
+(ert-deftest agent-repl-test-helpers-background-gate-names-the-helper ()
+  "The refusal tells the reader how to run the suite: through bin/background.sh."
+  ;; Arrange / Act
+  (let ((err (should-error (agent-repl-test--require-background-priority nil t))))
+    ;; Assert
+    (should (string-match-p "bin/background\\.sh" (error-message-string err)))))
+
+(ert-deftest agent-repl-test-helpers-background-gate-admits-marked-batch-run ()
+  "A batch run carrying the marker bin/background.sh exports is admitted."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl-test--require-background-priority "darwin-bg" t)))
+
+(ert-deftest agent-repl-test-helpers-background-gate-ignores-interactive-load ()
+  "An interactive load is already inert, so it is never refused."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl-test--require-background-priority nil nil)))
+
+(ert-deftest agent-repl-test-helpers-background-gate-ran-for-this-run ()
+  "This very batch run reached its tests only because it carried the marker."
+  ;; Arrange / Act
+  (let ((marker (getenv "AGENT_REPL_BACKGROUND_PRIORITY")))
+    ;; Assert
+    (should (and marker (not (string-empty-p marker))))))
+
 (ert-deftest agent-repl-test-helpers-interactive-load-warns ()
   "Interactive load must announce itself via `display-warning'."
   ;; Arrange
