@@ -11,10 +11,11 @@ import {
 } from "../../../src/breathing.js";
 
 /** A prompt with the given blocks. */
-function prompt(blocks: unknown[], author = "You") {
+function prompt(blocks: unknown[], author = "You", working = false) {
   return create(FeedUserPromptSchema, {
     author: { label: author },
     result: { case: "success", value: { body: { blocks: blocks as never } } },
+    working,
   });
 }
 
@@ -29,11 +30,14 @@ describe("drawFeedUserPrompt: the bubble", () => {
     expect(el.getAttribute("style")).toMatch(/animation-delay:-\d+ms/);
   });
 
-  it("waves from the moment it is drawn, before the feed has said anything", () => {
-    // The invariant (owner ruling, 2026-09-14): a prompt bubble waves from its
-    // draw. The feed is what stops it, never what starts it.
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]));
+  it("waves when its row says the turn is working", () => {
+    const el = drawFeedUserPrompt(prompt([], "You", true));
     expect(el.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
+  });
+
+  it("does not wave when its row says the turn is not working", () => {
+    const el = drawFeedUserPrompt(prompt([], "You", false));
+    expect(el.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
   });
 
   it("draws no author label, however the daemon resolved it", () => {

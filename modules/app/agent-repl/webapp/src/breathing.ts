@@ -220,19 +220,14 @@ export const bubbleWave = new BubbleWave();
  * The attribute a prompt bubble wears WHILE ITS TURN IS IN FLIGHT, and the ONE
  * thing the `bubble-wave` rule keys on.
  *
- * THE INVARIANT (owner ruling, 2026-09-14): A PROMPT BUBBLE WAVES FROM THE
- * MOMENT IT IS DRAWN UNTIL ITS TURN'S FINAL ANSWER LANDS. So the attribute is
- * stamped by the CONSTRUCTION of the bubble (`startPromptWave` below, the one
- * call every `.bubble.user` site makes), not by a later pass that might not
- * run: a prompt the reader can see and cannot yet have an answer to is, by the
- * only fact that matters, still being worked on — including one this page
- * minted locally and the daemon has not yet stamped with a turn.
- *
- * WHAT ENDS IT is the turn's own settlement, and only that: the final-answer
- * mark on the answering row, or the turn's `turn_ended` row, whichever the
- * feed sees first (`markWorkingPrompts` in feed-view.ts). A turn that ends
- * with no answer at all — errored, interrupted — settles it just the same, so
- * a dead turn never keeps waving.
+ * WHETHER A TURN IS IN FLIGHT IS THE DAEMON'S FACT, NEVER THIS PAGE'S. The
+ * prompt row carries it (`FeedUserPrompt.working`, `FeedAgentPrompt.working`):
+ * set from the row's first draw until the turn's terminal, whichever way the
+ * turn ended, and re-pushed unset on that edge. The bubble wears this
+ * attribute exactly while its row says so — drawn from the flag at
+ * construction ({@link armPromptWave}) and moved by it on a re-push
+ * ({@link setPromptWave}) — and from nothing else: no final-answer mark, no
+ * `turn_ended` row, no inference over the feed's other rows.
  *
  * A stylesheet that ran the band on `.bubble.user` outright animated every
  * prompt in the scrollback forever: a settled conversation of thirty prompts
@@ -242,8 +237,8 @@ export const bubbleWave = new BubbleWave();
  *
  * It is an ATTRIBUTE ON THE BUBBLE rather than a fact rendered into the
  * bubble's body, because the transition out of flight must not redraw a word
- * of the prompt: the feed clears it on the element already on screen, so the
- * wave stops without the text under it moving.
+ * of the prompt: a re-push that changes only the flag moves it on the element
+ * already on screen, so the wave stops without the text under it moving.
  */
 export const PROMPT_WAVE_ATTRIBUTE = "data-wave";
 
@@ -265,22 +260,31 @@ export function bubbleWaveStyle(nowMs: number = Date.now()): string {
 }
 
 /**
- * ARM A FRESH PROMPT BUBBLE: the wave's phase, and the wave itself.
+ * ARM A FRESH PROMPT BUBBLE: the wave's phase, and the wave iff WORKING.
  *
- * THE ONE CALL EVERY `.bubble.user` CONSTRUCTION SITE MAKES, because the two
- * things it does are not separable in practice — a bubble that carried the
- * phase but not the mark is a bubble drawn mid-turn that says nothing is
- * happening, which is precisely the defect the ruling above names. Doing both
- * here means a new prompt-bubble site cannot get one and forget the other.
- *
- * It STARTS the wave unconditionally. Whether this particular prompt's turn has
- * already settled is a fact about the FEED's rows, not about the message being
- * drawn, so the feed clears it on the same synchronous pass that drew it
- * (`drawRow` in feed-view.ts) and a settled prompt never paints a frame of it.
+ * THE ONE CALL EVERY `.bubble.user` CONSTRUCTION SITE MAKES, handed its row's
+ * `working` flag verbatim, so a new prompt-bubble site cannot carry the phase
+ * and forget the mark, or decide the mark on some ground of its own.
  */
-export function startPromptWave(bubble: HTMLElement, nowMs: number = Date.now()): void {
+export function armPromptWave(
+  bubble: HTMLElement,
+  working: boolean,
+  nowMs: number = Date.now(),
+): void {
   bubble.setAttribute("style", bubbleWaveStyle(nowMs));
-  bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
+  setPromptWave(bubble, working);
+}
+
+/**
+ * Put the wave on BUBBLE iff WORKING, and take it off otherwise. The phase is
+ * left as it stands, so a bubble whose flag flips mid-pass never jumps.
+ */
+export function setPromptWave(bubble: HTMLElement, working: boolean): void {
+  if (working) {
+    bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
+    return;
+  }
+  bubble.removeAttribute(PROMPT_WAVE_ATTRIBUTE);
 }
 
 /**

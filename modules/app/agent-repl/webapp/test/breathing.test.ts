@@ -23,7 +23,8 @@ import {
   STATUS_WAVE_PERIOD_MS,
   StatusWave,
   WAVING_STATUS_ARMS,
-  startPromptWave,
+  armPromptWave,
+  setPromptWave,
   statusWordWaves,
 } from "../src/breathing.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
@@ -494,21 +495,62 @@ describe("AnimationEpoch: both animations really share it", () => {
 });
 
 
-describe("startPromptWave: a fresh prompt bubble arrives waving", () => {
-  it("marks the bubble, so the stylesheet's wave rule reaches it", () => {
+describe("armPromptWave: a fresh prompt bubble waves iff its row says working", () => {
+  it("marks a working bubble, so the stylesheet's wave rule reaches it", () => {
     // Arrange
     const bubble = document.createElement("div");
     // Act
-    startPromptWave(bubble, NOW);
+    armPromptWave(bubble, true, NOW);
     // Assert
     expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
+  });
+
+  it("leaves a bubble whose row is not working unmarked", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    // Act
+    armPromptWave(bubble, false, NOW);
+    // Assert
+    expect(bubble.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
   });
 
   it("stamps the page-global phase, so the rebuilt node does not jump back", () => {
     // Arrange
     const bubble = document.createElement("div");
     // Act
-    startPromptWave(bubble, NOW);
+    armPromptWave(bubble, true, NOW);
+    // Assert
+    expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
+  });
+});
+
+describe("setPromptWave: the flag moves the wave on a drawn bubble", () => {
+  it("takes the wave off when the flag falls", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    armPromptWave(bubble, true, NOW);
+    // Act
+    setPromptWave(bubble, false);
+    // Assert
+    expect(bubble.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+  });
+
+  it("puts the wave on when the flag rises", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    armPromptWave(bubble, false, NOW);
+    // Act
+    setPromptWave(bubble, true);
+    // Assert
+    expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
+  });
+
+  it("leaves the phase as it stands", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    armPromptWave(bubble, true, NOW);
+    // Act
+    setPromptWave(bubble, false);
     // Assert
     expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
   });

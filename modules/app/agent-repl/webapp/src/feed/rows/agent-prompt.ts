@@ -12,7 +12,7 @@
  * mapping is one base function per message; sharing the BODY vocabulary is what
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
-import { startPromptWave } from "../../breathing.js";
+import { armPromptWave } from "../../breathing.js";
 import { log } from "../../log.js";
 import { bubbleScroll } from "../bubble-scroll.js";
 import { armName } from "../renderers.js";
@@ -56,7 +56,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
   });
   const bubble = document.createElement("div");
   bubble.className = "bubble user prompt-agent";
-  startPromptWave(bubble);
+  armPromptWave(bubble, msg.working);
   bubble.append(drawFeedAgentPromptAddress(requireMessage(msg.address, `${PATH}.address`)));
   // The address line is the metadata strip and the body hangs in the shared
   // scroll box beneath it, exactly as a person's own prompt does.
