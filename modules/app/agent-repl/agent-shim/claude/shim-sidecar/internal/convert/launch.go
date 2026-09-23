@@ -9,6 +9,8 @@ package convert
 // with no shared mutable map across the package boundary.
 
 import (
+	"regexp"
+
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -65,4 +67,44 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	// genuinely cannot derive is WHOSE book the spawn happened in, which is what
 	// a detached run's frames are attributed to.
 	c.observer.TaskSpawned(taskID, call.activityID, call.agentID, output, backgrounded)
+}
+
+// backgroundSentence is the vendor's own account of a shell it launched into the
+// background, as the RESULT TEXT the model reads states it:
+//
+//	Command running in background with ID: bmo77o6cu. Output is being written
+//	to: /private/tmp/…/tasks/bmo77o6cu.output. …
+//
+// The shim's stream plane reads the same sentence for the output path
+// (outputPathFromProse); this is its file-plane twin for the task id.
+var backgroundSentence = regexp.MustCompile(`Command running in background with ID: ([A-Za-z0-9_-]+)\.`)
+
+// backgroundLaunchFromProse restates a shell result's backgrounding SENTENCE as
+// the structured launch the vendor writes beside it everywhere else, answering
+// false when the result text states no launch.
+//
+// A SUBAGENT'S TRANSCRIPT SOMETIMES OMITS `toolUseResult` OUTRIGHT (measured on
+// one session, 2026-09-23: 17 of 1409 backgrounded shell results in subagent
+// transcripts, none in the main transcript). The sentence is then the ONLY
+// statement that the call's work left rather than ended, and without it the
+// launch was never reported: the spool sat unclaimed until its hold expired and
+// was ingested as residue, so the store held no rows for the run and every
+// WatchBash for it was refused — while the call itself settled as a success
+// whose output was the sentence.
+//
+// IT IS THE VENDOR'S STATEMENT, NOT A GUESS: the id is read from the sentence
+// that names it, and a result that does not carry the sentence reports nothing.
+// The restated shape is the one the vendor writes for this launch (empty
+// output, the task id), so every reader downstream treats both alike.
+func backgroundLaunchFromProse(block map[string]any) (map[string]any, bool) {
+	match := backgroundSentence.FindStringSubmatch(resultText(block["content"]))
+	if match == nil {
+		return nil, false
+	}
+	return map[string]any{
+		"stdout":           "",
+		"stderr":           "",
+		"interrupted":      false,
+		"backgroundTaskId": match[1],
+	}, true
 }
