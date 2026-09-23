@@ -694,7 +694,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // `task_started` states BOTH ids in one message, which is exactly the
       // join the live table already holds -- so the task id is translated to
       // the announced book through it, never guessed.
-      const byTask = live.get(vendorAgentId);
+      // FOREGROUND WORK INCLUDED: a synchronous subagent is a task the vendor
+      // tracks too, and its asks name that task id exactly as a detached one's
+      // do. `tracked` translates the id; it says nothing about liveness.
+      const byTask = live.tracked(vendorAgentId);
       if (byTask?.toolUseId !== undefined && byTask.toolUseId !== "") {
         return subagentId(byTask.toolUseId);
       }
@@ -741,7 +744,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         noteConverterDefect(detail);
       },
       liveTask: (taskId) => {
-        const entry = live.get(taskId);
+        // LIVE OR FOREGROUND: a task frame of work that has not moved yet — the
+        // patch that moves it among them — still needs its spawning call.
+        const entry = live.tracked(taskId);
         if (entry === undefined) return undefined;
         return entry.toolUseId === undefined ? { toolUseId: "" } : { toolUseId: entry.toolUseId };
       },
@@ -1928,6 +1933,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   function noteDetachedWork(message: SdkMessage): void {
+    if (message.type === "user") {
+      // A TOOL RESULT CAN STATE THE MOVE: a `Bash` result naming a
+      // `backgroundTaskId` says its foreground task left the turn, which is
+      // one of the three statements the shared rule reads.
+      live.onToolResult(message.tool_use_result);
+      return;
+    }
     if (message.type !== "system") return;
     switch (message.subtype) {
       case "task_started":
