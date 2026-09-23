@@ -1306,6 +1306,98 @@ scheduled push's own required field."
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (should (null agent-repl-link-drain)))))
 
+;;;; ---- The elisp build and the deploy's reload ----
+;;
+;; Every process reports its build when it connects: Emacs's WatchDaemon
+;; names it as the `emacs' client with the elisp it loaded, and the fake
+;; daemon refuses one that does not, as the daemon does.  A deploy that
+;; finds that build stale pushes `reload_elisp' on the same stream.
+;;
+;; THE LOAD IS STUBBED, NOT RESTORED.  `agent-repl--elisp-reload-load-file'
+;; is a registered boundary, but its real target is this very batch
+;; process: loading the module set here would re-`defun' every production
+;; boundary wrapper and disarm the harness's guards for the rest of the run.
+;; So the scenario stubs that one call (and the heartbeat assertion, whose
+;; timers the batch never arms) and drives everything else for real: the
+;; wire, the decode, the dispatch, the root check and the timer.
+
+(declare-function agent-repl-elisp-build "elisp-build")
+(declare-function agent-repl-elisp-build-of "elisp-build")
+(declare-function agent-repl-elisp-build-entries "elisp-build")
+(defvar agent-repl--elisp-module-builds)
+(defvar agent-repl--frontend-root)
+
+(defun agent-repl-itest-link--write-bytes (file content)
+  "Write CONTENT to FILE as its UTF-8 bytes, creating its directory."
+  (make-directory (file-name-directory file) t)
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert (encode-coding-string content 'utf-8))
+    (let ((coding-system-for-write 'no-conversion))
+      (write-region (point-min) (point-max) file nil 'silent))))
+
+(ert-deftest agent-repl-itest-link-watch-daemon-reports-the-elisp-build ()
+  "The WatchDaemon the link opens names Emacs and the elisp build it loaded."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act.
+      (let ((body (car (last (agent-repl-itest--call-bodies daemon "WatchDaemon")))))
+        ;; Assert.
+        (should (equal (alist-get 'elispBuild (alist-get 'emacs body))
+                       (agent-repl-elisp-build)))))))
+
+(ert-deftest agent-repl-itest-link-reload-elisp-for-another-root-is-refused ()
+  "A reload naming another checkout is refused at ERROR; the link stays up."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      (let ((loaded nil))
+        (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                   (lambda (file) (push file loaded))))
+          ;; Act.
+          (agent-repl-itest--push
+           daemon "daemon"
+           '((reloadElisp . ((moduleRoot . "/not/this/checkout/agent-repl/")
+                             (build . "b-elsewhere")))))
+          ;; Assert.
+          (agent-repl-itest--await-log daemon "elisp.elisp-build.reload-refused" "error")
+          (should (equal (list loaded (agent-repl-link-up-p)) '(nil t))))))))
+
+(ert-deftest agent-repl-itest-link-reload-elisp-for-this-root-loads-the-set ()
+  "A reload naming this Emacs's root loads config.el's modules in order."
+  ;; Arrange.
+  (let ((root (file-name-as-directory (make-temp-file "agent-repl-itest-root" t)))
+        (loaded nil)
+        (agent-repl--elisp-module-builds agent-repl--elisp-module-builds))
+    (unwind-protect
+        (progn
+          (agent-repl-itest-link--write-bytes
+           (expand-file-name "config.el" root)
+           "(agent-repl--load-module \"core\")\n(agent-repl--load-module \"status\")\n")
+          (agent-repl-itest-link--write-bytes (expand-file-name "lisp/core.el" root) ";; core\n")
+          (agent-repl-itest-link--write-bytes (expand-file-name "lisp/status.el" root) ";; status\n")
+          (let ((agent-repl--frontend-root root))
+            (agent-repl-itest--with-fake-daemon daemon
+              (agent-repl-itest-link--with-link daemon
+                (cl-letf (((symbol-function 'agent-repl--elisp-reload-load-file)
+                           (lambda (file) (push (file-name-base file) loaded)))
+                          ((symbol-function 'agent-repl--assert-heartbeat-armed)
+                           (lambda () '(:armed nil :rearmed nil :failed nil :unavailable nil))))
+                  ;; Act.
+                  (agent-repl-itest--push
+                   daemon "daemon"
+                   `((reloadElisp
+                      . ((moduleRoot . ,root)
+                         (build . ,(agent-repl-elisp-build-of
+                                    (agent-repl-elisp-build-entries root '("core" "status"))))))))
+                  (agent-repl-itest--await-log daemon "elisp.elisp-build.reload-complete" "info")
+                  ;; Assert.
+                  (should (equal (list (reverse loaded)
+                                       (agent-repl-itest--logged-p daemon "elisp.elisp-build" "error"))
+                                 '(("core" "status") nil))))))))
+      (delete-directory root t))))
+
 (provide 'test-integration-link)
 
 ;;; test-integration-link.el ends here
