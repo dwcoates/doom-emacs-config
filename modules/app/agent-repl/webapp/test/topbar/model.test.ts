@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   SetModelErrorSchema,
@@ -356,14 +356,6 @@ describe("the pick", () => {
     expect(openPanel(host)).toBeNull();
   });
 
-  // JSDOM HAS NO LAYOUT and so no `scrollIntoView`; the cold routing reveals
-  // the gate through the shared primitive, which needs the method to exist.
-  beforeEach(() => {
-    if (typeof Element.prototype.scrollIntoView !== "function") {
-      Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-    }
-  });
-
   const causes: Readonly<Record<string, unknown>> = {
     unknownWorkspace: {},
     workspaceRefMismatch: { registryDir: "/elsewhere" },
@@ -519,12 +511,6 @@ describe("the pick", () => {
 });
 
 describe("routeToColdGate", () => {
-  beforeEach(() => {
-    if (typeof Element.prototype.scrollIntoView !== "function") {
-      Element.prototype.scrollIntoView = function scrollIntoView(): void {};
-    }
-  });
-
   afterEach(() => {
     document.body.replaceChildren();
   });
@@ -543,7 +529,7 @@ describe("routeToColdGate", () => {
     expect(gate.getAttribute(COLD_ATTENTION_ATTRIBUTE)).toBe(COLD_ATTENTION_VALUE);
   });
 
-  it("brings the drawn gate card into view", () => {
+  it("does not scroll the feed to the drawn gate card (removed trigger)", () => {
     // Arrange
     const gate = document.createElement("div");
     gate.setAttribute("data-unit", "coldGate");
@@ -556,8 +542,8 @@ describe("routeToColdGate", () => {
     // Act
     routeToColdGate(document);
 
-    // Assert
-    expect(blocks).toEqual(["start"]);
+    // Assert -- the user owns the scroll; the mark is the whole routing.
+    expect(blocks).toEqual([]);
   });
 
   it("notices the gate on the footer when no gate card is drawn", () => {
