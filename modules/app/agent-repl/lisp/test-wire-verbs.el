@@ -1204,7 +1204,8 @@ here."
                         "SubmitPromptError")
                        #'string<)
                  '("bubbleRefused" "coldGate" "duplicateSubmission"
-                   "feedNotInWorkspace" "feedUndecodable" "merging" "noSession"
+                   "feedNotInWorkspace" "feedUndecodable" "merging"
+                   "modelNotInCatalog" "modelRefused" "noSession"
                    "notYetAdopted" "transferringAway" "unknownWorkspace"
                    "workspaceRefMismatch"))))
 
@@ -2068,6 +2069,23 @@ breach."
                      "{\"coldGate\":{\"detail\":\"context cold\"}}"))
                    '(:reason (:arm :cold-gate :value (:detail "context cold")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-error-model-not-in-catalog-arm ()
+  "SubmitPromptError's `model_not_in_catalog' arm decodes with the shim's sentence."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"modelNotInCatalog\":{\"detail\":\"opus is not in the catalog\"}}"))
+                   '(:reason (:arm :model-not-in-catalog
+                              :value (:detail "opus is not in the catalog")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-model-refused-arm ()
+  "SubmitPromptError's `model_refused' arm decodes with the vendor's sentence."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"modelRefused\":{\"detail\":\"refused\"}}"))
+                   '(:reason (:arm :model-refused :value (:detail "refused")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-cold-gate-detail-default ()
   "SubmitPromptColdGate's omitted detail is the empty string."
   (agent-repl-test-wire-verbs--with-common
@@ -2097,7 +2115,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()

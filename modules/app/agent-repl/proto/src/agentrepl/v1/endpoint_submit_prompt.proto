@@ -185,7 +185,28 @@ message SubmitPromptError {
     // gate answered `no_session` and every client said the wrong thing
     // about a session that was up (owner's report, 2026-09-14).
     SubmitPromptColdGate cold_gate = 12;
+    // A `/model` act named a model the session's own catalog does not hold.
+    // The act was NOT applied and the prompt was not submitted; the session
+    // runs on as before. Before this arm the refusal left the daemon as a
+    // bare failed_precondition, which every client read as a daemon it could
+    // not reach and HELD the prompt as an outage (owner's report, 2026-09-23).
+    SubmitPromptModelNotInCatalog model_not_in_catalog = 13;
+    // A `/model` act the vendor itself refused. Same disposition as above.
+    SubmitPromptModelRefused model_refused = 14;
   }
+}
+
+// The model a `/model` act named is not in this session's catalog.
+message SubmitPromptModelNotInCatalog {
+  // The shim's own account, verbatim, naming the model that was asked for.
+  // A client shows it; it never switches on it.
+  string detail = 1;
+}
+
+// The vendor refused the model change a `/model` act asked for.
+message SubmitPromptModelRefused {
+  // The vendor's own sentence, verbatim.
+  string detail = 1;
 }
 
 // The cold-gate refusal: the session is parked on the user's remediation

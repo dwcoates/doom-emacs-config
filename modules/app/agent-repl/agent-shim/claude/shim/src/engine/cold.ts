@@ -33,6 +33,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
+import { SYNTHETIC_MODEL } from "../model.js";
 import { conversationv1 } from "../proto.js";
 import {
   isClearEnvelope,
@@ -127,7 +128,24 @@ interface TranscriptLine {
   type?: string;
   timestamp?: string;
   permissionMode?: string;
+  isApiErrorMessage?: boolean;
   message?: { model?: string; usage?: TranscriptUsage };
+}
+
+/**
+ * Whether an assistant record is one the CLI WROTE ITSELF rather than one the
+ * API answered.
+ *
+ * A failed request, a session-limit notice, a user stop: the CLI records each
+ * as an assistant message whose `model` is the `<synthetic>` marker, flagged
+ * `isApiErrorMessage` when an API call failed, and carrying a ZEROED usage
+ * block. None of that is a fact about the conversation. Read as one, the
+ * marker became the model the next resume launched on — which the API then
+ * refused, which wrote another such record, forever — and the zeroed usage read
+ * a 500k-token conversation as empty, so the cold gate never fired.
+ */
+function isCliSynthesized(record: TranscriptLine): boolean {
+  return record.isApiErrorMessage === true || record.message?.model?.trim() === SYNTHETIC_MODEL;
 }
 
 /**
@@ -197,6 +215,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
       opening ??= prompt.slice(0, TRANSCRIPT_OPENING_MAX_CHARS);
     }
     if (record.type !== "assistant") continue;
+    if (isCliSynthesized(record)) continue;
     const usage = record.message?.usage;
     if (usage === undefined) continue;
     sawUsage = true;
