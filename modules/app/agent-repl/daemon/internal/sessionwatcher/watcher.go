@@ -290,6 +290,12 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	if sinks.Feed == nil || sinks.Footer == nil || sinks.Topbar == nil || sinks.Sidebar == nil || sinks.Lifecycle == nil {
 		return nil, errors.New("sessionwatcher: every sink but Holds is required")
 	}
+	if err := session.Opening.validate(); err != nil {
+		log.Error("daemon.sessionwatcher.start_refused", "a watcher was started without deciding whether it replays or resumes", dlog.Context{
+			"workspace_id": string(ws),
+		})
+		return nil, err
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	w := &watcher{
@@ -315,13 +321,14 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		unseenAsks:   map[string]struct{}{},
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
-	if session.MainKnownThrough != nil {
-		w.known[mainWatchKey] = session.MainKnownThrough
+	// A RESUME STARTS FROM ITS PREDECESSOR'S POINTERS, so every watch it opens
+	// is a catch-up; a replay starts from none, so every watch opens on its
+	// first page. Nothing else seeds the map: see opening.go.
+	if session.Opening.from.Main != nil {
+		w.known[mainWatchKey] = session.Opening.from.Main
 	}
-	for id, ptr := range session.KnownThrough {
-		if ptr != nil {
-			w.known[id] = ptr
-		}
+	for id, ptr := range session.Opening.from.Agents {
+		w.known[id] = ptr
 	}
 
 	w.mu.Lock()
@@ -333,6 +340,10 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		// (crash boot, handover) learns them from the shim's own
 		// re-announcement on the watch it is about to open (landing 7).
 		"attached": session.Started == nil,
+		// WHETHER THIS WATCHER REPLAYS HISTORY, and why: the one fact that
+		// says whether its opening pages are first pages or catch-ups.
+		"opening":          session.Opening.String(),
+		"resumed_pointers": len(w.known),
 	})
 
 	if session.Started != nil {
@@ -377,6 +388,30 @@ func (w *watcher) LiveWork() LiveWorkSet {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.liveWorkLocked()
+}
+
+// Pointers is the newest pointer this watcher was served on each watch. It
+// reads the same map a re-open reads, and it is answered after Close too: the
+// fleet asks a RETIRED watcher for it when opening that watcher's successor.
+func (w *watcher) Pointers() Pointers {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := Pointers{Agents: make(map[string]*conversationv1.HistoryPointer, len(w.known))}
+	for key, ptr := range w.known {
+		if key == mainWatchKey {
+			out.Main = ptr
+			continue
+		}
+		out.Agents[key] = ptr
+	}
+	return out
+}
+
+// MainKnownThrough is the newest pointer the main agent's watch was served.
+func (w *watcher) MainKnownThrough() *conversationv1.HistoryPointer {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.known[mainWatchKey]
 }
 
 // TurnInFlight reports the open turn, nil when none is.
