@@ -40,14 +40,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
-import {
-  captureFeedAnchor,
-  centerDelta,
-  restoreFeedAnchor,
-  type AnchorBox,
-  type FeedAnchor,
-  type TailFollow,
-} from "../scroll.js";
+import { centerDelta, type ScrollPosition, type TailFollow } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { clone, equals } from "@bufbuild/protobuf";
 import {
@@ -124,7 +117,7 @@ export interface FeedControllerOptions {
   /** The bubble's own composer slot, when this build mounts one (R7). */
   composerSlot?: HTMLElement;
   /** The page's scroll box and tail owner. Root feed only. */
-  scroll?: { box: AnchorBox; tail: TailFollow };
+  scroll?: { box: ScrollPosition; tail: TailFollow };
   /**
    * The overscan buffer, rooted on the page's scroll box. One instance is
    * shared across the root feed and every sub-feed nested inside the same box,
@@ -327,9 +320,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * Paint a page.
    *
    * REPLACE is the newest page (an open, or a re-open on re-expand): the feed's
-   * rows become this page's rows. PREPEND is the walk into the past: older rows
-   * land above what is already there, anchored so the reader stays on what they
-   * were reading.
+   * rows become this page's rows, and the feed then parks at its tail
+   * (`parkAfterReplace`). PREPEND is the walk into the past: older rows land
+   * above what is already there, and the view shifts by exactly the height that
+   * grew above it, so the reader stays on what they were reading
+   * (`keepPlaceAbovePrepend`).
    */
   function applyPage(page: FeedPage, placement: "replace" | "prepend"): void {
     const result = requireCase(page.result, "FeedPage.result");
@@ -344,7 +339,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         if (edge.case === "hasMore") opts.host.prepend(loadMore);
         else loadMore.remove();
         crumbs = requireMessage(result.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
-        const anchor = capture();
+        const above = placement === "prepend" ? sampleFirstRow() : null;
         if (placement === "replace") {
           // OWNER RULING (2026-09-18): A REDRAW NEVER UN-TOGGLES, WHATEVER ITS
           // SHAPE. A fold the reader opened survives a full page replace
@@ -365,7 +360,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         // than linger for a row that will never be drawn.
         if (placement === "replace") retainRows(carriedFolds, new Set(states.keys()));
         announce();
-        restore(anchor);
+        if (placement === "replace") parkAfterReplace();
+        else keepPlaceAbovePrepend(above);
         return;
       }
       case "error":
@@ -430,6 +426,90 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     adopt(row, known ? -1 : order.length);
     truncateAtSeparation(row, id);
     announce();
+    if (!known && isSentPrompt(row)) parkOnSentPrompt(id);
+  }
+
+  /**
+   * THE FEED LANDS AT ITS TAIL AFTER A REPLACE (owner ruling, 2026-09-23).
+   *
+   * Regression (fix/feed-scroll-anchor-and-prompt-park): a replace used to
+   * capture an anchor keyed by `data-feed-row` and restore it by `data-key`,
+   * an attribute no row carries, so every re-open (reconnect, stream recovery,
+   * daemon handover) left a reader who was not following at the TOP, where the
+   * teardown had dropped them. There is no saved spot any more: the rows are
+   * painted first, and the feed then parks at its tail and follows, so nothing
+   * about a replace can leave it at the top. Root feed only: a sub-feed has no
+   * scroll box of its own.
+   */
+  function parkAfterReplace(): void {
+    if (opts.scroll === undefined) return;
+    log.debug("a replaced page parked the feed at its tail", {
+      operation: "feed.replace-parked",
+      context: { feed: feedName(), rows: order.length },
+    });
+    opts.scroll.tail.park();
+  }
+
+  /**
+   * A PROMPT JUST SENT PUTS THE READER AT THE TAIL (owner ruling, 2026-09-23).
+   *
+   * Called only after the prompt's bubble has been painted, and only on its
+   * FIRST LIVE placement (see `isSentPrompt`), so a redraw of a held prompt, a
+   * replace and a history prepend never re-park. It parks at the feed's TAIL
+   * rather than on the prompt: whatever was drawn after the prompt is where
+   * the feed lands, and `park` latches the follow so the turn's output keeps
+   * autoscrolling. Root feed only, like every other move of the scroll box.
+   */
+  function parkOnSentPrompt(id: string): void {
+    if (opts.scroll === undefined) return;
+    log.debug(`a newly sent prompt ${id} parked the feed at its tail`, {
+      operation: "feed.sent-prompt-parked",
+      context: { feed: feedName(), row: id },
+    });
+    opts.scroll.tail.park();
+  }
+
+  /**
+   * Sample the first row already drawn and where its top sits, BEFORE a prepend
+   * lands rows above it. Null when the feed draws no row yet.
+   */
+  function sampleFirstRow(): { id: string; element: HTMLElement; top: number } | null {
+    const id = order[0];
+    if (id === undefined) return null;
+    const state = states.get(id);
+    if (state === undefined) return null;
+    return { id, element: state.element, top: state.element.getBoundingClientRect().top };
+  }
+
+  /**
+   * KEEP THE READER'S CONTENT IN PLACE WHEN OLDER ROWS LAND ABOVE IT.
+   *
+   * Everything a prepend adds sits above every row the reader could be looking
+   * at, so the height that grew above the viewport is exactly how far the row
+   * that USED to be first moved down; the view shifts by that, through the tail
+   * owner (`shift` moves the pixels and decides nothing). A reader who is
+   * following has already been re-parked by `announce`, so the growth is not
+   * applied on top of the tail.
+   *
+   * A first row the prepend DETACHED is an invariant violation (a prepend only
+   * ever adds rows above), and is recorded as one rather than guessed around.
+   */
+  function keepPlaceAbovePrepend(above: { id: string; element: HTMLElement; top: number } | null): void {
+    if (opts.scroll === undefined || above === null) return;
+    if (opts.scroll.tail.isFollowing()) return;
+    if (!above.element.isConnected) {
+      log.error("a prepend detached the row the reader's place was measured from", {
+        operation: "feed.prepend-anchor-detached",
+        context: { feed: feedName(), row: above.id },
+      });
+      return;
+    }
+    const grown = above.element.getBoundingClientRect().top - above.top;
+    log.debug(`a prepend grew ${grown}px above the reader; the view shifts by it`, {
+      operation: "feed.prepend-kept-place",
+      context: { feed: feedName(), row: above.id, grown },
+    });
+    if (grown !== 0) opts.scroll.tail.shift(grown);
   }
 
   /**
@@ -494,8 +574,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   /**
    * Scroll the box so the CENTER row sits in the middle of the viewport,
    * clamped at the feed's edges (see `centerDelta`). Read in the box's own
-   * scroll coordinates through `offsetTop`, the same units `restoreFeedAnchor`
-   * works in, so the delta is a scroll position with nothing to reconstruct;
+   * scroll coordinates through `offsetTop`, where a row's `offsetTop` and the
+   * box's `scrollTop` are the same units, so the delta is a scroll position
+   * with nothing to reconstruct;
    * the shift goes through the tail owner rather than a bare `scrollTop` write,
    * because a second writer of the scroll position is what `TailFollow` exists
    * to prevent.
@@ -918,22 +999,6 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     for (const stale of opts.host.querySelectorAll(":scope > .refusal")) stale.remove();
   }
 
-  /** Sample the reader's place before rows land above them. */
-  function capture(): FeedAnchor | null {
-    if (opts.scroll === undefined) return null;
-    const items = [...opts.host.querySelectorAll<HTMLElement>("[data-feed-row]")].map((el) => ({
-      key: el.getAttribute("data-feed-row") ?? "",
-      offsetTop: el.offsetTop,
-    }));
-    return captureFeedAnchor(opts.scroll.box, items, opts.scroll.tail.isFollowing());
-  }
-
-  /** Put the reader back where the capture found them. */
-  function restore(anchor: FeedAnchor | null): void {
-    if (opts.scroll === undefined || anchor === null) return;
-    restoreFeedAnchor(opts.scroll.box, anchor, opts.scroll.tail);
-  }
-
   /** Follow the tail while output streams, if the reader is following it. */
   function followTail(): void {
     if (opts.scroll === undefined) return;
@@ -1031,6 +1096,18 @@ function promptWorking(row: FeedRow): boolean | null {
     default:
       return null;
   }
+}
+
+/**
+ * Whether ROW, placed live for the FIRST time, is a prompt the person just
+ * sent. Read off the row alone: a user prompt the daemon marks `working`, which
+ * it sets from the prompt's first draw until its turn's terminal. The flag is
+ * what keeps a terminal re-push (published with `working` unset) of a prompt
+ * this feed never drew, one scrolled out of the newest page, from counting as
+ * a send.
+ */
+function isSentPrompt(row: FeedRow): boolean {
+  return row.row.case === "userPrompt" && row.row.value.working;
 }
 
 /** A copy of prompt row ROW with its `working` flag set to WORKING. */
