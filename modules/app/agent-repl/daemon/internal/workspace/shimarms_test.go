@@ -211,6 +211,29 @@ func TestBenignMarksOnlyTheDomainOutcomes(t *testing.T) {
 	}
 }
 
+func TestKillRefusedLiveMarksOnlyAKillTurnRefusedAsLive(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal ShimRefusal
+		want    bool
+	}{
+		{name: "a kill refused as live", refusal: ShimRefusal{Verb: "KillTurn", Arm: ArmShimTurnLive}, want: true},
+		{name: "a kill refused as not the open turn", refusal: ShimRefusal{Verb: "KillTurn", Arm: ArmShimNotTheOpenTurn}, want: false},
+		{name: "a kill refused with no session", refusal: ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoSession}, want: false},
+		{name: "a session kill refused as live", refusal: ShimRefusal{Verb: "KillSession", Arm: ArmShimTurnLive}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := tt.refusal.KillRefusedLive()
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("KillRefusedLive(%+v) = %v, want %v", tt.refusal, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShimRefusalCarriesTheShimsOwnWords(t *testing.T) {
 	// Arrange: the evidence is the point.
 	refusal := &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNotDeliverable, Detail: "the SDK has no route to a subagent"}
