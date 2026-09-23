@@ -1,10 +1,10 @@
 package main
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,16 +23,6 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Exit(m.Run())
-}
-
-// closeOrFail closes c and fails the test if the close fails. A subject's own
-// close is part of what it observes: a body or surface that will not close
-// cleanly is a fault the subject would otherwise hide.
-func closeOrFail(t testing.TB, c io.Closer) {
-	t.Helper()
-	if err := c.Close(); err != nil {
-		t.Errorf("closing %T: %v", c, err)
-	}
 }
 
 // storeRecords decodes the canonical JSONL a logger wrote.
@@ -243,7 +233,7 @@ func TestHoldPprofForDiagnosisReturnsWhenTheFailedBootIsProfiled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET the profiling index: %v", err)
 	}
-	closeOrFail(t, response.Body)
+	testclose.OrFail(t, response.Body)
 	holdPprofForDiagnosis(surface, log)
 
 	// Assert.

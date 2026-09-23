@@ -7,6 +7,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"testing"
 )
 
@@ -83,7 +84,7 @@ func TestAPromptIsStreamedToAStandingWatcher(t *testing.T) {
 	seedBook(ctx, t, shim, "main", "prompt-tail")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Act
 	shim.write(ctx, t, shim.agentEntry("w-p-tail", "turn-tail",

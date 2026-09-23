@@ -7,6 +7,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestSlowWatcherExceedingTheBufferIsEndedWithAnError(t *testing.T) {
 	seedBook(ctx, t, shim, "main", "overrun")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	mark := store.logMark()
 
 	// Act.
@@ -92,7 +93,7 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	streamCtx, cancelStream := callContextWithin(t, callTimeout+burstCallTimeout+burstStreamTimeout)
 	defer cancelStream()
 	stream := watchStream(streamCtx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	mark := store.logMark()
 
 	// Act. The burst is half DefaultWatchBuffer, so absorbing it is the
@@ -148,7 +149,7 @@ func TestOverrunWatcherRecoversByReopening(t *testing.T) {
 	// Act.
 	reopened := openSession(ctx, t, cli, "main", 1, nil)
 	recovered := watchStream(ctx, t, cli, reopened.GetWatch())
-	defer closeOrFail(t, recovered)
+	defer testclose.OrFail(t, recovered)
 	shim.write(ctx, t,
 		shim.agentEntry("w-after-overrun", "u-after-overrun",
 			frameLine(agentID("main"), responseFrame("main", "act-after", "after the overrun"))),
@@ -177,7 +178,7 @@ func TestASlowBashWatcherIsEndedWithResourceExhausted(t *testing.T) {
 	sidecar.write(ctx, t, sidecar.agentEntry("w-slow-start", "bash:run-slow:start",
 		bashRun(nil, "run-slow", bashStart("make test", 1000))))
 	stream := watchBashRun(ctx, t, cli, "run-slow")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	assertTexts(t, "the replay", receiveBashRows(t, stream, 1), []string{"start:make test"})
 	mark := store.logMark()
 
