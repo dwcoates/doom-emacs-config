@@ -196,6 +196,14 @@ type Deps struct {
 	// admission, so it is resubmitted EXACTLY ONCE at lease release even across
 	// a daemon bounce. It reports false when nothing was in flight.
 	CaptureDisplaced DisplacedCapture
+	// Freeness answers whether the workspace is free — no turn in flight and
+	// no live detached work — and waits for it to become so. An admitted merge
+	// waits on it before it drives the session: the displaced turn was ended
+	// UNFORCED, so its background agents, shells and monitors run on, and the
+	// merge neither races them for the conversation nor stops them. Detached
+	// work ends only by its own per-task stop or a forced kill the user asked
+	// for.
+	Freeness Freeness
 	// PauseAfterCapture is a TEST-ONLY seam: when set, a run blocks in it
 	// immediately after the displaced turn was captured, which is the one
 	// window a test cannot otherwise reach (the merge's own next submission,
@@ -272,6 +280,17 @@ type TurnWaiter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (
 type Displaced struct {
 	Turn ids.TurnID
 	Text string
+}
+
+// Freeness is the slice of the session fleet a merge waits on. It is the same
+// freeness the rollout's relaunch waits on, answered by the session watcher's
+// stream edges: nothing polls and nothing sleeps.
+type Freeness interface {
+	// Free reports whether the workspace is free right now. A workspace with no
+	// live session is free.
+	Free(ws ids.WorkspaceID) bool
+	// AwaitFree blocks until the workspace is free, or until ctx ends.
+	AwaitFree(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // AdmissionPause blocks a merge run at admission. It exists for the test seam
