@@ -405,6 +405,36 @@ describe("mountFeed: selectDetachedWork", () => {
     expect(revealed).toBe(true);
   });
 
+  it("opens only the containers selecting a nested head requires, never the head itself", async () => {
+    // Arrange: a subagent (inner) spawned by a subagent (b1); the probe of the
+    // inner HEAD answers its own feed's crumbs, the head itself last.
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const h = harness({
+      channels,
+      openFeed: (req) => {
+        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed.value === "b1") return openSuccess(page([subagentRow("inner")]), tokenFor(req));
+        return openSuccess(
+          page([], { crumbs: [crumb("b1", "lead"), crumb("inner", "worker")] }),
+          tokenFor(req),
+        );
+      },
+    });
+    const { feed } = mount(h);
+    await settle();
+
+    // Act
+    const revealed = await feed.selectDetachedWork(feedId("inner"));
+    await settle();
+
+    // Assert: b1 was opened to reach the head; the head was probed once and
+    // never expanded.
+    expect({
+      revealed,
+      opened: h.calls.openFeed.map((req) => req.feed?.value),
+    }).toEqual({ revealed: true, opened: [undefined, "inner", "b1"] });
+  });
+
   it("answers false when the target's feed cannot be opened (a shell bubble)", async () => {
     const h = harness({
       openFeed: (req) =>
