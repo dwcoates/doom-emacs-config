@@ -499,8 +499,9 @@ describe("the collapse/expand height model", () => {
 
 /**
  * THE "MORE BELOW" AFFORDANCE (owner ruling, 2026-09-15: "a signal that there's
- * more to reveal"). FIX2 draws a bottom fade + chevron on a collapsed
- * response/prompt bubble that overflows its cap, keyed entirely on `has-more`
+ * more to reveal"). FIX2 draws a bottom fade on a collapsed bubble that
+ * overflows its cap, keyed entirely on `has-more` — the fade ONLY, never a
+ * chevron (owner ruling, 2026-09-23)
  * (bubble-more.ts toggles the class). The signal is SCOPED to the two speaker
  * bubbles — never a tool-call section — and fades into each bubble's own bg.
  */
@@ -530,15 +531,22 @@ describe("the 'more below' affordance", () => {
     );
   });
 
-  it("centers a chevron on the bottom edge from has-more", () => {
-    // Arrange / Act
-    const chevron = declarationsOf(".bubble > .bubble-scroll.has-more::before");
+  it("draws no chevron from has-more: the fade is the whole signal", () => {
+    // Arrange / Act — every ::before a has-more rule draws, on any bubble or title.
+    const chevrons = rulesOf(stylesheet)
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => sel.includes(".has-more") && sel.endsWith("::before"));
 
-    // Assert — the ⌄ glyph (\2304), horizontally centered, click-through.
-    expect(chevron).toMatch(/content:\s*"\\2304"/);
-    expect(chevron).toMatch(/left:\s*50%/);
-    expect(chevron).toMatch(/transform:\s*translateX\(-50%\)/);
-    expect(chevron).toMatch(/pointer-events:\s*none/);
+    // Assert
+    expect(chevrons).toEqual([]);
+  });
+
+  it("draws no chevron glyph anywhere in the sheet", () => {
+    // Arrange / Act — the ⌄ glyph (\2304) the old chevron was.
+    const glyphs = rulesOf(stylesheet).filter((rule) => /\\2304/.test(rule.declarations));
+
+    // Assert
+    expect(glyphs.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
   it("draws the affordance only out of flow, so toggling has-more changes no layout", () => {
@@ -553,7 +561,7 @@ describe("the 'more below' affordance", () => {
       if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
       const positioned = /position:\s*absolute/.test(rule.declarations);
       // A rule that only repaints or re-places a pseudo-element the base rule
-      // already took out of flow (the zero-line cap's chevron at the strip's end).
+      // already took out of flow (the fade's per-kind gradient).
       const decorative = rule.declarations
         .split(";")
         .map((decl) => decl.split(":")[0]?.trim() ?? "")
@@ -1483,8 +1491,8 @@ describe("the card-level tool fold", () => {
  * THE TITLE FOLD (owner ruling, 2026-09-23). A tool card's TITLE — the shell
  * bubble's command, a tool call's input line, a skill's invocation, a hook's
  * headline, a subagent's description — is capped at two lines while the fold
- * that owns it is collapsed, and wears the response bubble's fade and chevron
- * when it overflows. It replaced the tool-call card's own input-line clamp
+ * that owns it is collapsed, and wears the response bubble's fade (never a
+ * chevron, owner ruling 2026-09-23) when it overflows. It replaced the tool-call card's own input-line clamp
  * (`.tool-fold:not(.expanded) > .bash-input` and its three siblings), which had
  * no fade; the input line is now one of the title fold's sites.
  */
@@ -1566,14 +1574,12 @@ describe("the title fold", () => {
     expect(fade?.selectors).toContain(".title-fold.has-more::after");
   });
 
-  it("draws the chevron from the response bubble's shared chevron rule", () => {
+  it("draws no chevron on a title", () => {
     // Arrange / Act
-    const chevron = rulesOf(stylesheet).find((r) =>
-      r.selectors.includes(".bubble > .bubble-scroll.has-more::before"),
-    );
+    const chevron = rulesOf(stylesheet).find((r) => r.selectors.includes(".title-fold.has-more::before"));
 
     // Assert
-    expect(chevron?.selectors).toContain(".title-fold.has-more::before");
+    expect(chevron).toBeUndefined();
   });
 
   it("fades a title into its own card's background", () => {
