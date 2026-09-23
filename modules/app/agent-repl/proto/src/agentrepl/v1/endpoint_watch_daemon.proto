@@ -4,7 +4,8 @@
 // carries facts about the DAEMON ITSELF, never any workspace's state (the
 // channel-separation ruling: workspace-dependent and workspace-independent
 // channels are distinct types). Its pushed facts: the graceful-rollout
-// shutdown announcement, and the standing drain schedule.
+// shutdown announcement, the standing drain schedule, and a deploy's elisp
+// reload.
 
 syntax = "proto3";
 
@@ -15,9 +16,24 @@ import "agentrepl/v1/workspace_mutation_progress.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// Empty on purpose: the stream is daemon-scoped, so there is nothing to
-// address.
-message WatchDaemonRequest {}
+// The stream is daemon-scoped, so there is nothing to address. What it carries
+// is the CONNECTING EMACS'S OWN BUILD, because every process reports its build
+// when it connects: it is what a deploy compares the checkout's elisp against.
+message WatchDaemonRequest {
+  // THE ELISP THIS EMACS HAS LOADED, as a content hash. REQUIRED — a watch
+  // without it is refused, because a deploy could not tell whether this Emacs
+  // runs the checkout's elisp.
+  //
+  // THE ALGORITHM IS THE CONTRACT, computed identically by Emacs (from the
+  // bytes it loaded) and by the daemon (from the checkout): the lowercase hex
+  // SHA-256 of the concatenated lines `<module>\t<sha256>\n`, one per module
+  // `config.el` loads through `agent-repl--load-module`, IN THAT LOAD ORDER,
+  // where <module> is the name the loader is given (`core`, not
+  // `lisp/core.el`) and <sha256> is the lowercase hex SHA-256 of that
+  // module's `lisp/<module>.el` bytes. A module the loader names but whose
+  // file is absent contributes no line.
+  string elisp_build = 1;
+}
 
 message WatchDaemonResponse {
   oneof push {
@@ -37,7 +53,34 @@ message WatchDaemonResponse {
     // event beside its session-identity state, so a late subscriber replaying
     // the state arms is never handed a stale progress event in their place.
     WorkspaceMutationProgress mutation_progress = 4;
+    // A DEPLOY FOUND THIS EMACS ON OLDER ELISP: hot-load the module set, in
+    // config.el's load order, from the named root. A transient EVENT, like
+    // mutation_progress: it is pushed to the streams open at the deploy and
+    // never replayed to a late subscriber, whose own elisp_build is compared
+    // when it connects.
+    DaemonReloadElisp reload_elisp = 5;
   }
+}
+
+// Hot-load the checkout's elisp. EMACS OWNS THE LOAD: the daemon has no route
+// into the editor's runtime beyond this push.
+//
+// The WHOLE module set is loaded, in config.el's `agent-repl--load-module`
+// order — never a partial set: core.el cancels every module timer at load and
+// only their owner files re-arm them, so a partial set once left a live Emacs
+// with a dead heartbeat. After the load Emacs asserts every required timer is
+// armed (`agent-repl--assert-heartbeat-armed`), re-arms anything stranded, and
+// reports a timer it could not re-arm loudly.
+message DaemonReloadElisp {
+  // The module root the elisp is loaded from — the checkout this daemon built.
+  // Emacs REFUSES, loudly, a reload naming any root but the one it runs: a
+  // reload from another checkout would leave the editor on one checkout's
+  // elisp and the daemon on another's. REQUIRED.
+  string module_root = 1;
+  // The content hash of the module set being loaded (the WatchDaemonRequest
+  // algorithm). What this Emacs reports as its elisp_build from then on.
+  // REQUIRED.
+  string build = 2;
 }
 
 message DaemonShutdownAnnounced {
@@ -64,10 +107,10 @@ message DaemonShutdownCause {
   }
 }
 
-// A new build is being rolled out blue-green. Two things start one, and a
-// client treats them alike: the doom self-merge (the arm's name), and the
-// deploy chain's RollOutBuild (endpoint_roll_out_build.proto). Either way the
-// announcement carries the successor's address and no turn is ended.
+// A new build is being rolled out blue-green. A deploy starts one
+// (endpoint_deploy.proto) — asked for, or run by the daemon after a self-merge
+// landed (the arm's name). Either way the announcement carries the
+// successor's address, and an unforced one ends no turn.
 message DaemonShutdownSelfMergeRollout {
 }
 
