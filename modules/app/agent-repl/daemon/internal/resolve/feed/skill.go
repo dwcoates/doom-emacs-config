@@ -24,6 +24,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 	switch state := skill.GetResult().(type) {
 	case *conversationv1.AgentSkillUse_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = composeInvocation(state.Start.GetSkill().GetName(), state.Start.GetArgs(), state.Start.Args != nil)
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
@@ -58,6 +59,20 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		card.Outcome = &frontendv1.FeedSkill_Loaded{Loaded: loaded}
 	case *conversationv1.AgentSkillUse_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSkill", "branch": "case *conversationv1.AgentSkillUse_Failure"})
+		// The failure restates the skill so a replayed failure names it. A
+		// start this process held stays the drawn line: it carries the
+		// invocation's arguments, which no settled arm restates.
+		var restated string
+		if name := state.Failure.GetSkill().GetName(); name != "" {
+			restated = composeInvocation(name, "", false)
+		}
+		input, err := r.restatedOrHeld(s, u, unitID, "skill_use", restated, u.input)
+		if err != nil {
+			return nil, err
+		}
+		if !u.startHeld {
+			u.input = input
+		}
 		card.Invocation = &frontendv1.FeedSkillInvocation{Text: u.input}
 		card.Outcome = &frontendv1.FeedSkill_Failed{Failed: &frontendv1.FeedSkillFailed{
 			Text: skillFailureText(state.Failure.GetError()),

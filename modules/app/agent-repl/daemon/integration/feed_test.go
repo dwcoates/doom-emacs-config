@@ -1071,7 +1071,11 @@ func TestAFailedToolCallDrawsReturnedFailed(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("bash-fail"),
 		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{
-			Failure: &conversationv1.AgentBashFailure{Error: &conversationv1.AgentToolFailure{SettledAt: settledAt(2)}},
+			// The settle restates its command so it stands alone (the contract).
+			Failure: &conversationv1.AgentBashFailure{
+				Command: &conversationv1.AgentBashCommand{Line: "false"},
+				Error:   &conversationv1.AgentToolFailure{SettledAt: settledAt(2)},
+			},
 		}}},
 	}))
 
@@ -1122,7 +1126,11 @@ func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID(unit),
 		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{
-			Failure: &conversationv1.AgentBashFailure{Error: &conversationv1.AgentToolFailure{SettledAt: settledAt(2)}},
+			// The settle restates its command so it stands alone (the contract).
+			Failure: &conversationv1.AgentBashFailure{
+				Command: &conversationv1.AgentBashCommand{Line: "rm -rf /"},
+				Error:   &conversationv1.AgentToolFailure{SettledAt: settledAt(2)},
+			},
 		}}},
 	}))
 

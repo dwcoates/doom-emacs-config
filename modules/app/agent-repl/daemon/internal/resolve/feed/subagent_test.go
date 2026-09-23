@@ -2470,3 +2470,19 @@ func TestAShellHeldBeforeItWasDrawnIsSettledLostWhenItLeavesAfterDrawing(t *test
 		t.Fatalf("state = %T, want the head settled lost", h.shellHead().GetState())
 	}
 }
+
+// A DETACHED SHELL'S FAILURE RESTATES ITS COMMAND, as the success does, so a
+// head drawn from the ending alone still names what ran.
+func TestADetachedShellsFailureNamesTheCommandItRestated(t *testing.T) {
+	// Arrange, Act: the ending alone, as a replay serves it.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashFailure{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Error:   &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000}},
+	})
+
+	// Assert.
+	if got := h.shellHead().GetCommand().GetText(); got != "npm run dev" {
+		t.Fatalf("command = %q, want the restated command", got)
+	}
+}
