@@ -265,6 +265,6 @@ func TestAnAnnouncedRunWithNoRowsIsARefusedWatchButAnOpenObligation(t *testing.T
 	}
 	// ...and the run's own stream is refused, because there is no row.
 	stream := watchBashRun(ctx, t, cli, itestBashRunID)
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 	assertBashRunRefused(t, stream)
 }

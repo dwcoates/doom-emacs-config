@@ -150,7 +150,7 @@ func TestOpenPprofSurfaceRefusesAnUnsafeAddress(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		surface.Close()
+		closeOrFail(t, surface)
 		t.Fatal("openPprofSurface on a wildcard bind = nil error, want a loud refusal")
 	}
 }

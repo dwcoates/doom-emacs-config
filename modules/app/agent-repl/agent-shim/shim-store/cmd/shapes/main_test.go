@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,7 +16,9 @@ func TestAnEmptyCatalogIsStatedRatherThanPrintedAsNothing(t *testing.T) {
 	var out strings.Builder
 
 	// Act.
-	render(&out, nil, false)
+	if err := render(&out, nil, false); err != nil {
+		t.Fatalf("render = %v, want nil", err)
+	}
 
 	// Assert.
 	if !strings.Contains(out.String(), "the residue shape catalog is empty") {
@@ -32,7 +35,9 @@ func TestARowShowsItsCountKindAndStructure(t *testing.T) {
 	}
 
 	// Act.
-	render(&out, []*storev1.ResidueShapeRow{row}, false)
+	if err := render(&out, []*storev1.ResidueShapeRow{row}, false); err != nil {
+		t.Fatalf("render = %v, want nil", err)
+	}
 
 	// Assert.
 	for _, want := range []string{"count=7", "kind=unparsed", "structure: {a:string}"} {
@@ -53,7 +58,9 @@ func TestTheExampleIsWithheldUnlessAskedFor(t *testing.T) {
 	}
 
 	// Act.
-	render(&out, []*storev1.ResidueShapeRow{row}, false)
+	if err := render(&out, []*storev1.ResidueShapeRow{row}, false); err != nil {
+		t.Fatalf("render = %v, want nil", err)
+	}
 
 	// Assert.
 	if strings.Contains(out.String(), "the raw line") {
@@ -70,7 +77,9 @@ func TestTheExampleIsShownWhenAskedFor(t *testing.T) {
 	}
 
 	// Act.
-	render(&out, []*storev1.ResidueShapeRow{row}, true)
+	if err := render(&out, []*storev1.ResidueShapeRow{row}, true); err != nil {
+		t.Fatalf("render = %v, want nil", err)
+	}
 
 	// Assert.
 	if !strings.Contains(out.String(), "the raw line") {
@@ -86,11 +95,32 @@ func TestAShortHashIsPrintedWhole(t *testing.T) {
 	row := &storev1.ResidueShapeRow{ShapeHash: "abc", Kind: "unparsed", KeyStructure: "{}"}
 
 	// Act.
-	render(&out, []*storev1.ResidueShapeRow{row}, false)
+	if err := render(&out, []*storev1.ResidueShapeRow{row}, false); err != nil {
+		t.Fatalf("render = %v, want nil", err)
+	}
 
 	// Assert.
 	if !strings.Contains(out.String(), "abc  count=") {
 		t.Fatalf("output = %q, want the short hash printed whole", out.String())
+	}
+}
+
+// failingWriter is a stdout that refuses every write, as a closed pipe does.
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+// A FAILED WRITE IS THE TOOL'S FAILURE, never a listing that silently stopped.
+func TestRenderReportsAWriteItCouldNotMake(t *testing.T) {
+	// Arrange.
+	writeErr := errors.New("broken pipe")
+
+	// Act.
+	err := render(failingWriter{err: writeErr}, nil, false)
+
+	// Assert.
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("render = %v, want the write failure", err)
 	}
 }
 

@@ -109,7 +109,7 @@ func TestJSONCodecServesTheAgentSessionWatchStream(t *testing.T) {
 	seedBook(ctx, t, shim, "main", "json-tail")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer stream.Close()
+	defer closeOrFail(t, stream)
 
 	// Act
 	shim.write(ctx, t, shim.agentEntry("w-json-tail", "u-json-tail",

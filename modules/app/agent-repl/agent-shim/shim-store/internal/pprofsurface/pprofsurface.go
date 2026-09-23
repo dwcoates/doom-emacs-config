@@ -98,10 +98,21 @@ func openUnix(path string) (*Surface, error) {
 		return nil, fmt.Errorf("pprofsurface: listen on unix socket %q: %w", absolute, err)
 	}
 	if err := os.Chmod(absolute, 0o600); err != nil {
-		listener.Close()
-		return nil, fmt.Errorf("pprofsurface: restrict socket %q to its owner: %w", absolute, err)
+		return nil, abandonListener(listener, absolute, fmt.Errorf("pprofsurface: restrict socket %q to its owner: %w", absolute, err))
 	}
 	return newSurface("unix", absolute, listener), nil
+}
+
+// abandonListener closes a listener whose setup failed after it was bound, and
+// returns the error Open reports. The setup failure is the cause; a failure to
+// close on top of it is a second fault — it can leave the socket bound or its
+// file on disk — so it is joined onto the cause for the caller, which owns this
+// package's logging, rather than dropped.
+func abandonListener(listener net.Listener, absolute string, cause error) error {
+	if closeErr := listener.Close(); closeErr != nil {
+		return errors.Join(cause, fmt.Errorf("pprofsurface: close abandoned listener on %q: %w", absolute, closeErr))
+	}
+	return cause
 }
 
 func openTCP(addr string) (*Surface, error) {

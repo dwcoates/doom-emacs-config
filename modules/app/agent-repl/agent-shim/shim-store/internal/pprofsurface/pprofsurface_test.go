@@ -3,6 +3,7 @@ package pprofsurface
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,16 @@ func shortSock(t *testing.T, name string) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return filepath.Join(dir, name)
+}
+
+// closeOrFail closes c and fails the test if the close fails. A subject's own
+// close is part of what it observes: a body or surface that will not close
+// cleanly is a fault the subject would otherwise hide.
+func closeOrFail(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("closing %T: %v", c, err)
+	}
 }
 
 // serve runs the surface and returns a client bound to whichever transport it
@@ -73,7 +84,7 @@ func TestOpenServesProfilesOnAnExplicitLoopbackPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", Path, err)
 	}
-	defer response.Body.Close()
+	defer closeOrFail(t, response.Body)
 
 	// Assert.
 	if response.StatusCode != http.StatusOK {
@@ -95,7 +106,7 @@ func TestOpenServesProfilesOnAUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET over unix socket: %v", err)
 	}
-	defer response.Body.Close()
+	defer closeOrFail(t, response.Body)
 
 	// Assert.
 	if response.StatusCode != http.StatusOK {
@@ -132,7 +143,7 @@ func TestServedClosesOnceTheSurfaceAnsweredARequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", Path, err)
 	}
-	response.Body.Close()
+	closeOrFail(t, response.Body)
 
 	// Assert. The response was fully read, so the handler has returned.
 	<-surface.Served()
@@ -197,7 +208,7 @@ func TestOpenRefusesUnsafeAddresses(t *testing.T) {
 
 			// Assert.
 			if err == nil {
-				surface.Close()
+				closeOrFail(t, surface)
 				t.Fatalf("Open(%q) = nil error, want a loud refusal", tc.addr)
 			}
 		})
@@ -216,7 +227,7 @@ func TestOpenRefusesToReplaceANonSocketPath(t *testing.T) {
 
 	// Assert. A profiling knob must never delete an operator's file.
 	if err == nil {
-		surface.Close()
+		closeOrFail(t, surface)
 		t.Fatal("Open over a regular file = nil error, want a refusal")
 	}
 	if _, statErr := os.Stat(path); statErr != nil {
@@ -283,5 +294,46 @@ func TestCloseRemovesTheSocketItCreated(t *testing.T) {
 	// conflict rather than a fresh bind.
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("socket after Close: %v, want it gone", statErr)
+	}
+}
+
+// failingCloseListener is a net.Listener whose Close fails, which is the one
+// input abandonListener's second fault needs and the kernel will not produce
+// on demand.
+type failingCloseListener struct {
+	net.Listener
+	closeErr error
+}
+
+func (l failingCloseListener) Close() error { return l.closeErr }
+
+func TestAbandonListenerReturnsTheCauseWhenTheCloseSucceeds(t *testing.T) {
+	// Arrange.
+	ln, err := net.Listen("unix", shortSock(t, "a.sock"))
+	if err != nil {
+		t.Fatalf("stage listener: %v", err)
+	}
+	cause := errors.New("the setup failed")
+
+	// Act.
+	got := abandonListener(ln, "/a.sock", cause)
+
+	// Assert.
+	if got != cause {
+		t.Fatalf("abandonListener = %v, want exactly the cause", got)
+	}
+}
+
+func TestAbandonListenerJoinsAFailedCloseOntoTheCause(t *testing.T) {
+	// Arrange.
+	cause := errors.New("the setup failed")
+	closeErr := errors.New("the close failed")
+
+	// Act.
+	got := abandonListener(failingCloseListener{closeErr: closeErr}, "/a.sock", cause)
+
+	// Assert.
+	if !errors.Is(got, cause) || !errors.Is(got, closeErr) {
+		t.Fatalf("abandonListener = %v, want both the cause and the close failure", got)
 	}
 }

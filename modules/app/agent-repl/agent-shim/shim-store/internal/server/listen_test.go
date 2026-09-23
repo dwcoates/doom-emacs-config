@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -40,7 +41,7 @@ func TestListenBindsTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
-	defer ln.Close()
+	defer closeOrFail(t, ln)
 	if _, statErr := os.Stat(path); statErr != nil {
 		t.Fatalf("stat %q = %v, want the socket to exist", path, statErr)
 	}
@@ -55,7 +56,7 @@ func TestListenRestrictsTheSocketToItsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
-	defer ln.Close()
+	defer closeOrFail(t, ln)
 
 	// Assert.
 	info, err := os.Stat(path)
@@ -75,7 +76,7 @@ func TestListenReclaimsAStaleSocket(t *testing.T) {
 		t.Fatalf("stage stale socket: %v", err)
 	}
 	stale.(*net.UnixListener).SetUnlinkOnClose(false)
-	stale.Close()
+	closeOrFail(t, stale)
 
 	// Act.
 	ln, err := Listen(path, testLogger())
@@ -84,7 +85,7 @@ func TestListenReclaimsAStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen over a stale socket = %v, want nil", err)
 	}
-	ln.Close()
+	closeOrFail(t, ln)
 }
 
 func TestListenRefusesToReplaceANonSocket(t *testing.T) {
@@ -100,7 +101,7 @@ func TestListenRefusesToReplaceANonSocket(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		ln.Close()
+		closeOrFail(t, ln)
 		t.Fatal("Listen over a regular file = nil error, want a loud refusal")
 	}
 }
@@ -114,14 +115,14 @@ func TestListenRefusesASocketALiveStoreIsServing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer live.Close()
+	defer closeOrFail(t, live)
 
 	// Act.
 	ln, err := Listen(path, testLogger())
 
 	// Assert.
 	if err == nil {
-		ln.Close()
+		closeOrFail(t, ln)
 		t.Fatal("Listen over a live socket = nil error, want a refusal to steal it")
 	}
 }
@@ -133,7 +134,7 @@ func TestListenLeavesALiveSocketOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer live.Close()
+	defer closeOrFail(t, live)
 
 	// Act.
 	if _, err := Listen(path, testLogger()); err == nil {
@@ -153,7 +154,7 @@ func TestListenRecordsTheOccupiedSocketOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer live.Close()
+	defer closeOrFail(t, live)
 	sink := &syncBuffer{}
 	log := logging.New(sink, io.Discard, true)
 
@@ -165,5 +166,71 @@ func TestListenRecordsTheOccupiedSocketOnce(t *testing.T) {
 	// Assert.
 	if _, ok := findRecord(t, sink, "store.listen.occupied", "error"); !ok {
 		t.Fatalf("no store.listen.occupied error record; log was:\n%s", sink.String())
+	}
+}
+
+// failingCloseListener is a net.Listener whose Close fails, which is the one
+// input abandonListener's second fault needs and the kernel will not produce
+// on demand.
+type failingCloseListener struct {
+	net.Listener
+	closeErr error
+}
+
+func (l failingCloseListener) Close() error { return l.closeErr }
+
+func TestAbandonListenerReturnsTheCauseWhenTheCloseSucceeds(t *testing.T) {
+	// Arrange.
+	ln, err := net.Listen("unix", shortSocketPath(t))
+	if err != nil {
+		t.Fatalf("stage listener: %v", err)
+	}
+	cause := errors.New("the setup failed")
+
+	// Act.
+	got := abandonListener(ln, "/a.sock", cause, testLogger())
+
+	// Assert.
+	if got != cause {
+		t.Fatalf("abandonListener = %v, want exactly the cause", got)
+	}
+}
+
+func TestAbandonListenerJoinsAFailedCloseOntoTheCause(t *testing.T) {
+	// Arrange.
+	cause := errors.New("the setup failed")
+	closeErr := errors.New("the close failed")
+	ln := failingCloseListener{closeErr: closeErr}
+
+	// Act.
+	got := abandonListener(ln, "/a.sock", cause, testLogger())
+
+	// Assert.
+	if !errors.Is(got, cause) || !errors.Is(got, closeErr) {
+		t.Fatalf("abandonListener = %v, want both the cause and the close failure", got)
+	}
+}
+
+func TestAbandonListenerRecordsAFailedCloseOnce(t *testing.T) {
+	// Arrange.
+	sink := &syncBuffer{}
+	log := logging.New(sink, io.Discard, true)
+	ln := failingCloseListener{closeErr: errors.New("the close failed")}
+
+	// Act.
+	_ = abandonListener(ln, "/a.sock", errors.New("the setup failed"), log)
+
+	// Assert.
+	var matches []logRecord
+	for _, rec := range records(t, sink) {
+		if rec.Operation == "store.listen.abandon" && rec.Level == "error" {
+			matches = append(matches, rec)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("store.listen.abandon error records = %d, want 1; log was:\n%s", len(matches), sink.String())
+	}
+	if got := matches[0].Context["socket"]; got != "/a.sock" {
+		t.Fatalf("record socket = %v, want %q", got, "/a.sock")
 	}
 }

@@ -174,9 +174,10 @@ For every `.proto` or `gen/` change, run:
 make coverage
 ```
 
-`make coverage` first runs `make validate`, which lints, regenerates, and
-rejects stale committed or untracked stubs. It then runs the downstream daemon,
-shim-store, shim-sidecar, wire, Claude shim, and webapp coverage suites. The
-command must pass. Generated `gen/go` and `gen/ts` files are contract artifacts,
+`make coverage` runs `bin/report-nonlisp-coverage.sh` with no arguments, so
+it covers exactly the script's default components and never restates them. The
+first of those is `proto`, which runs `make validate`: it lints, regenerates,
+and rejects stale committed or untracked stubs. Every downstream Go and
+TypeScript coverage suite follows. The command must pass. Generated `gen/go` and `gen/ts` files are contract artifacts,
 never coverage subjects or threshold inputs; coverage applies only to
 handwritten downstream Go and TypeScript source.

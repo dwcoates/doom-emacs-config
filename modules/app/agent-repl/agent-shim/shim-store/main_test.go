@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +23,16 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Exit(m.Run())
+}
+
+// closeOrFail closes c and fails the test if the close fails. A subject's own
+// close is part of what it observes: a body or surface that will not close
+// cleanly is a fault the subject would otherwise hide.
+func closeOrFail(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("closing %T: %v", c, err)
+	}
 }
 
 // storeRecords decodes the canonical JSONL a logger wrote.
@@ -232,7 +243,7 @@ func TestHoldPprofForDiagnosisReturnsWhenTheFailedBootIsProfiled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET the profiling index: %v", err)
 	}
-	response.Body.Close()
+	closeOrFail(t, response.Body)
 	holdPprofForDiagnosis(surface, log)
 
 	// Assert.
@@ -345,5 +356,47 @@ func TestLogProcessExitLogsThenRepanics(t *testing.T) {
 	record := decodeStoreRecords(t, &file)[0]
 	if record.Level != "error" || record.Message != "shim-store exiting: panic: invariant violated" {
 		t.Fatalf("record = %#v, want the panic narrated", record)
+	}
+}
+
+func TestJoinCloseLeavesACleanRunCleanWhenTheCloseSucceeds(t *testing.T) {
+	// Arrange.
+	var err error
+
+	// Act.
+	joinClose(&err, func() error { return nil })
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+}
+
+func TestJoinCloseFailsACleanRunWhoseCloseFailed(t *testing.T) {
+	// Arrange.
+	var err error
+	closeErr := errors.New("the close failed")
+
+	// Act.
+	joinClose(&err, func() error { return closeErr })
+
+	// Assert.
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("err = %v, want the close failure", err)
+	}
+}
+
+func TestJoinCloseKeepsTheRunsOwnFailureAlongsideAFailedClose(t *testing.T) {
+	// Arrange.
+	runErr := errors.New("the run failed")
+	err := runErr
+	closeErr := errors.New("the close failed")
+
+	// Act.
+	joinClose(&err, func() error { return closeErr })
+
+	// Assert.
+	if !errors.Is(err, runErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("err = %v, want both the run's failure and the close failure", err)
 	}
 }
