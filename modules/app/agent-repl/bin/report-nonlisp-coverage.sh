@@ -21,7 +21,11 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 REPORT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-coverage.XXXXXX")"
 trap 'rm -rf "$REPORT_ROOT"' EXIT
 
-ALL_COMPONENTS=(daemon sidecar store lock logging webapp shim proto)
+# THE ONE LIST OF DEFAULT COMPONENTS. proto/Makefile's `coverage` target runs
+# this script with no arguments rather than restating it. `proto` runs first:
+# it validates the contract every other component compiles against, so a stale
+# stub fails the sweep before the long suites start.
+ALL_COMPONENTS=(proto daemon sidecar store lock logging webapp shim)
 # OPT-IN ONLY. The cross-system e2e suite spawns four real systems per test
 # and is budgeted in tens of minutes, so it runs when it is NAMED and never as
 # part of the default sweep.

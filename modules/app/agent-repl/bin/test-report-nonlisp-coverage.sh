@@ -146,6 +146,39 @@ test_default_runs_every_component() {
     fi
 }
 
+# The contract is validated before the long suites compile against it, so a
+# stale stub fails the sweep first.
+test_default_validates_proto_before_any_suite() {
+    local tree="$TMP/proto-first"
+    make_tree "$tree"
+    make_stubs "$tree/stubs"
+    run_report "$tree"
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        head -n 1 "$tree/stub.log" | grep -q '|make -C .*proto validate'; then
+        pass "default run validates proto before any other component"
+    else
+        fail "default run validates proto before any other component"
+    fi
+}
+
+# THE COMPONENT LIST LIVES IN THE SCRIPT ALONE. proto/Makefile once restated
+# it and kept naming the deleted `wire` module, which the script refused, so
+# `make coverage` there could not run at all.
+test_proto_makefile_names_no_components() {
+    local makefile="$THIS_DIR/../proto/Makefile" recipe
+    recipe="$(sed -n '/^coverage:/,/^$/p' "$makefile" |
+        grep 'report-nonlisp-coverage.sh' || true)"
+
+    if [ -n "$recipe" ] &&
+        printf '%s\n' "$recipe" | grep -Eq 'report-nonlisp-coverage\.sh[[:space:]]*$'; then
+        pass "proto coverage defers to the script's own component list"
+    else
+        fail "proto coverage defers to the script's own component list"
+        printf '  recipe: %s\n' "$recipe" >&2
+    fi
+}
+
 test_selection_runs_only_requested_components() {
     local tree="$TMP/selection"
     make_tree "$tree"
@@ -399,6 +432,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-coverage-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 test_default_runs_every_component
+test_default_validates_proto_before_any_suite
+test_proto_makefile_names_no_components
 test_selection_runs_only_requested_components
 test_unknown_component_fails_before_running_tools
 test_go_failure_is_loud
