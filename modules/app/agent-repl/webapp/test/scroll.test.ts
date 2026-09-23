@@ -6,26 +6,23 @@
 // to THAT element is half of what the footer-occlusion cases assert.
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  PIN_PX,
+  SCROLL_CAUSES,
   armedWheelAction,
+  collapseClicked,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
-  isPinnedToBottom,
   isScrollBox,
-  parkAtTail,
   type ReanchorBox,
   sectionFor,
   sectionTakesWheel,
   wheelDeltaPx,
-  type RevealBlock,
-  type RevealTarget,
-  revealNode,
   revealDelta,
+  revealGeometry,
   centerDelta,
-  revealInBox,
   observeScrollBox,
 } from "../src/scroll.js";
+import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
 import { installClickExpand } from "../src/expand.js";
 
@@ -313,493 +310,565 @@ describe("sectionFor", () => {
   });
 });
 
-describe("isPinnedToBottom", () => {
-  it("pins a feed sitting exactly at its bottom", () => {
-    // Arrange + Act + Assert
-    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 600, clientHeight: 300 })).toBe(true);
-  });
-
-  it("pins a feed within the slack of its bottom", () => {
-    // Arrange — 20px of unread tail, inside the 40px slack.
-    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 580, clientHeight: 300 })).toBe(true);
-  });
-
-  it("unpins a feed the user scrolled up past the slack", () => {
-    // Arrange — 300px of unread tail, well beyond the slack.
-    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 300, clientHeight: 300 })).toBe(false);
-  });
-
-  it("pins a feed too short to scroll at all", () => {
-    // Arrange + Act + Assert
-    expect(isPinnedToBottom({ scrollHeight: 300, scrollTop: 0, clientHeight: 300 })).toBe(true);
-  });
-
-  it("honors a caller-supplied slack over PIN_PX", () => {
-    // Arrange — 20px of tail: pinned at the default slack, not at 10px.
-    expect(isPinnedToBottom({ scrollHeight: 900, scrollTop: 580, clientHeight: 300 }, 10)).toBe(
-      false,
-    );
-  });
-
-  it("defaults its slack to PIN_PX", () => {
-    // Arrange — one pixel short of PIN_PX of unread tail.
-    const pos = { scrollHeight: 900, scrollTop: 600 - (PIN_PX - 1), clientHeight: 300 };
-    // Act + Assert
-    expect(isPinnedToBottom(pos)).toBe(isPinnedToBottom(pos, PIN_PX));
-  });
-});
-
-describe("parkAtTail", () => {
-  it("jumps a scrolled-up box straight to its tail", () => {
-    // Arrange
-    const box = { scrollTop: 120, scrollHeight: 900 };
-    // Act
-    parkAtTail(box);
-    // Assert — one assignment, so the tail is there on the next frame.
-    expect(box.scrollTop).toBe(900);
-  });
-
-  it("leaves a box already at its tail untouched", () => {
-    // Arrange
-    const box = { scrollTop: 900, scrollHeight: 900 };
-    // Act
-    parkAtTail(box);
-    // Assert
-    expect(box.scrollTop).toBe(900);
-  });
-
-  it("parks a box too short to scroll at zero", () => {
-    // Arrange — an empty feed: scrollHeight is the viewport, scrollTop stays 0.
-    const box = { scrollTop: 0, scrollHeight: 0 };
-    // Act
-    parkAtTail(box);
-    // Assert
-    expect(box.scrollTop).toBe(0);
-  });
-});
-
+/** A box parked at its tail: 700 + 300 viewport = 1000. */
+const atTail = (): ReanchorBox => ({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
 
 /**
- * THE SINGLE OWNER of the feed's tail-follow decision. Every case drives the
- * events by hand, so the ordering the browser would decide is the thing each
- * test states rather than something the test hopes for.
+ * A follow owner plus the three triggers it subscribed to.
+ *
+ * `gesture` is the READER moving the box: their input reaches it first and
+ * the scroll event follows, which is the order the browser delivers them in
+ * and the order the owner's attribution rule depends on. `scroll` alone is
+ * therefore a movement with no reader behind it -- the box's own clamp.
  */
-describe("TailFollow", () => {
-  /**
-   * A follow owner plus the three triggers it subscribed to.
-   *
-   * `gesture` is the READER moving the box: their input reaches it first and
-   * the scroll event follows, which is the order the browser delivers them in
-   * and the order the owner's attribution rule depends on. `scroll` alone is
-   * therefore a movement with no reader behind it -- the box's own clamp.
-   */
-  const armed = (
-    box: ReanchorBox,
-    pinPx?: number,
-  ): {
-    tail: TailFollow;
-    scroll: () => void;
-    resize: () => void;
-    input: () => void;
-    gesture: () => void;
-  } => {
-    let onScroll = (): void => {};
-    let onResize = (): void => {};
-    let onInput = (): void => {};
-    const tail = new TailFollow(box, pinPx);
-    tail.observe(
-      (cb) => {
-        onScroll = cb;
-      },
-      (cb) => {
-        onResize = cb;
-      },
-      (cb) => {
-        onInput = cb;
-      },
-    );
-    return {
-      tail,
-      scroll: () => onScroll(),
-      resize: () => onResize(),
-      input: () => onInput(),
-      gesture: () => {
-        onInput();
-        onScroll();
-      },
-    };
+function armed(box: ReanchorBox): {
+  tail: TailFollow;
+  scroll: () => void;
+  resize: () => void;
+  input: () => void;
+  gesture: () => void;
+} {
+  let onScroll = (): void => {};
+  let onResize = (): void => {};
+  let onInput = (): void => {};
+  const tail = new TailFollow(box);
+  tail.observe(
+    (cb) => {
+      onScroll = cb;
+    },
+    (cb) => {
+      onResize = cb;
+    },
+    (cb) => {
+      onInput = cb;
+    },
+  );
+  return {
+    tail,
+    scroll: () => onScroll(),
+    resize: () => onResize(),
+    input: () => onInput(),
+    gesture: () => {
+      onInput();
+      onScroll();
+    },
   };
+}
 
-  /** A box the reader is following the tail of: 700 + 300 viewport = 1000. */
-  const atTail = (): ReanchorBox => ({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
+/** A box a sent prompt parked at its tail, so a follow stands. */
+function following(box: ReanchorBox = atTail()): ReturnType<typeof armed> & { box: ReanchorBox } {
+  const a = armed(box);
+  a.tail.promptSent();
+  return { ...a, box };
+}
 
-  it("follows the tail when built on a box parked at its bottom", () => {
+/** The `scroll.feed-moved` records a capture holds, in order. */
+async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>>> {
+  capture.logger.flush();
+  await Promise.resolve();
+  return capture.sent
+    .filter((record) => record.operation === "scroll.feed-moved")
+    .map((record) => {
+      const { cause, from, to, follow } = record.context as Record<string, unknown>;
+      return { cause, from, to, follow };
+    });
+}
+
+/**
+ * THE CLOSED SET OF IMPLICIT FEED-SCROLL CAUSES (owner rule, 2026-09-23: the
+ * user owns the scroll). Each cause moves the feed as specified; nothing else
+ * the owner offers can move it.
+ */
+describe("SCROLL_CAUSES", () => {
+  it("names exactly the six causes the owner rule allows", () => {
     // Arrange + Act + Assert
-    expect(new TailFollow(atTail()).isFollowing()).toBe(true);
+    expect([...SCROLL_CAUSES]).toEqual([
+      "promptSent",
+      "selectionMoved",
+      "detachedWorkSelected",
+      "initialPlacement",
+      "replaceRestore",
+      "prependCompensation",
+    ]);
   });
+});
 
-  it("does not follow when built on a box the reader left scrolled up", () => {
-    // Arrange + Act + Assert
-    expect(
-      new TailFollow({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 }).isFollowing(),
-    ).toBe(false);
-  });
+describe("TailFollow's parking causes", () => {
+  const parks: Array<[string, (tail: TailFollow) => void, string]> = [
+    ["a sent prompt", (tail) => tail.promptSent(), "promptSent"],
+    ["a first placement", (tail) => tail.initialPlacement(), "initialPlacement"],
+    ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
+    ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
+  ];
 
-  it("stops following on a scroll UP that stays inside the pin band", () => {
-    // Arrange — THE REPORTED BUG. A trackpad flick upward begins with a few
-    // px, well inside PIN_PX, and a geometry sample called that "still pinned"
-    // and parked the feed back down under the gesture.
-    const box = atTail();
+  it.each(parks)("%s lands a scrolled-up box at its tail", (_name, act) => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
-    // Act — 10px up, far short of the 40px slack band.
-    box.scrollTop = 690;
-    a.gesture();
-    // Assert
-    expect(a.tail.isFollowing()).toBe(false);
-  });
-
-  it("reports the reader's live position even before their scroll event lands", () => {
-    // Arrange — the browser dispatches scroll asynchronously, so a render can
-    // run between the gesture and its event. Reading the last-seen event there
-    // would answer about a position the reader has already left.
-    const box = atTail();
-    const a = armed(box);
-    // Act — the gesture happened; `a.scroll()` is deliberately NOT fired. The
-    // reader's INPUT has landed, because a wheel or a key precedes the movement
-    // it causes; only the browser's scroll event is still outstanding.
-    a.input();
-    box.scrollTop = 400;
-    // Assert
-    expect(a.tail.isFollowing()).toBe(false);
-  });
-
-  it("keeps a scrolled-away reader unfollowed across a burst of re-renders", () => {
-    // Arrange — the reader scrolls up once, then the feed streams on.
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 400;
-    a.gesture();
-    // Act — every render asks the owner before it would park.
-    const answers: boolean[] = [];
-    for (let i = 0; i < 20; i++) {
-      box.scrollHeight += 120;
-      answers.push(a.tail.isFollowing());
-    }
-    // Assert — not once re-enabled, across the whole burst.
-    expect(answers.some(Boolean)).toBe(false);
-  });
-
-  it("resumes following when the reader scrolls back down to the tail", () => {
-    // Arrange — away from the tail, then returning to it.
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 200;
-    a.gesture();
     // Act
-    box.scrollTop = 700;
-    a.gesture();
+    act(a.tail);
+    // Assert
+    expect(box.scrollTop).toBe(1000);
+  });
+
+  it.each(parks)("%s latches the follow", (_name, act) => {
+    // Arrange
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    act(a.tail);
     // Assert
     expect(a.tail.isFollowing()).toBe(true);
   });
 
-  it("does not resume following on a downward scroll short of the tail", () => {
-    // Arrange — the reader is paging down through history, not chasing it.
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 100;
-    a.gesture();
-    // Act
-    box.scrollTop = 400;
-    a.gesture();
-    // Assert
-    expect(a.tail.isFollowing()).toBe(false);
-  });
-
-  it("ignores the scroll event its own park emits", () => {
-    // Arrange — the browser dispatches scroll asynchronously after a write.
-    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-    const a = armed(box);
-    // Act
-    a.tail.park();
-    a.scroll();
-    // Assert — the park's own event must not be read as the reader moving.
-    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 1000]);
-  });
-
-  it("does not begin a follow when a shift lands the box on the tail", () => {
-    // Arrange — a backfill's growth compensation can add exactly enough to
-    // reach the bottom. That is arithmetic about content, not the reader
-    // asking to follow again.
-    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-    const a = armed(box);
-    // Act
-    a.tail.shift(600);
-    a.scroll();
-    // Assert
-    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([false, 700]);
-  });
-
-  it("shifts from where the reader now is, not from where it last wrote", () => {
-    // Arrange — the reader scrolled during the render whose growth this
-    // compensates for, and their gesture's event has not been dispatched yet.
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 500;
-    // Act
-    a.tail.shift(40);
-    // Assert
-    expect(box.scrollTop).toBe(540);
-  });
-
-  it("stops following when the reader opens a nested view to read it", () => {
-    // Arrange + Act
-    const a = armed(atTail());
-    a.tail.release();
-    // Assert
-    expect(a.tail.isFollowing()).toBe(false);
-  });
-
-  it("re-parks a following box when the resize lands after the snap", () => {
-    // Arrange — the switch snap landed first, then the webview was resized.
-    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-    const a = armed(box);
-    a.tail.park();
-    // Act — the relayout grows the scrollable height under a fixed scrollTop.
-    box.clientHeight = 200;
-    box.scrollHeight = 2600;
-    a.resize();
-    // Assert — RELIABLY at the bottom, not merely near where the snap left it.
-    expect(box.scrollTop).toBe(2600);
-  });
-
-  it("parks on the settled layout when the snap lands after the resize", () => {
-    // Arrange — the other order the switch can produce, which no side controls.
-    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
-    const a = armed(box);
-    // Act
-    box.clientHeight = 200;
-    box.scrollHeight = 2600;
-    a.resize();
-    a.tail.park();
-    // Assert
-    expect(box.scrollTop).toBe(2600);
-  });
-
-  it("leaves a scrolled-away box where it is when a resize arrives", () => {
+  it.each(parks)("%s is recorded at DEBUG with its cause", async (_name, act, cause) => {
     // Arrange
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 200;
-    a.gesture();
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
     // Act
+    act(a.tail);
+    // Assert
+    expect(await moves(capture)).toEqual([{ cause, from: 100, to: 1000, follow: false }]);
+  });
+});
+
+describe("TailFollow's follow", () => {
+  it("follows nothing until a cause parks it, even on a box at its bottom", () => {
+    // Arrange + Act — REMOVED TRIGGER: the owner used to START following any
+    // box it was built on that sat at its bottom, with no cause behind it.
+    const tail = new TailFollow(atTail());
+    // Assert
+    expect(tail.isFollowing()).toBe(false);
+  });
+
+  it("keeps the tail on screen as content arrives under a standing follow", () => {
+    // Arrange
+    const f = following();
+    f.box.scrollHeight = 1400;
+    // Act
+    f.tail.follow();
+    // Assert
+    expect(f.box.scrollTop).toBe(1400);
+  });
+
+  it("records a follow move under the cause that started the follow", async () => {
+    // Arrange
+    const f = following();
+    const capture = captureLogRecords("debug");
+    f.box.scrollHeight = 1400;
+    // Act
+    f.tail.follow();
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "promptSent", from: 1000, to: 1400, follow: true },
+    ]);
+  });
+
+  it("records nothing for a follow that found the box already at its tail", async () => {
+    // Arrange
+    const f = following();
+    const capture = captureLogRecords("debug");
+    // Act
+    f.tail.follow();
+    // Assert
+    expect(await moves(capture)).toEqual([]);
+  });
+
+  it("moves nothing when no cause started a follow", () => {
+    // Arrange — REMOVED TRIGGER: rows arriving under a feed nobody parked.
+    const box = { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
     box.scrollHeight = 1400;
-    a.resize();
+    // Act
+    a.tail.follow();
     // Assert
     expect(box.scrollTop).toBe(200);
   });
 
-  it("does not read a resize's own downward clamp as the reader scrolling up", () => {
-    // Arrange — a shrinking viewport clamps scrollTop by itself. Reconciling
-    // that would drop the follow the workspace switch just asked for.
+  it("stops following on a scroll UP of a few pixels", () => {
+    // Arrange — a trackpad flick upward begins with a few px; a geometry
+    // sample once called that "still pinned" and parked the feed back down.
+    const f = following();
+    // Act — the fake box does not clamp, so its reachable tail is 700.
+    f.box.scrollTop = 690;
+    f.gesture();
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("stops following on a scroll DOWN that stops short of the tail", () => {
+    // Arrange -- content grew under the follow before it was re-landed.
+    const f = following();
+    f.box.scrollHeight = 2000;
+    // Act -- the reader scrolls down, but not to the new tail at 1700.
+    f.box.scrollTop = 900;
+    f.gesture();
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("keeps following on a scroll DOWN that lands at the tail", () => {
+    // Arrange
+    const f = following();
+    f.box.scrollHeight = 2000;
+    // Act
+    f.box.scrollTop = 1700;
+    f.gesture();
+    // Assert
+    expect(f.tail.isFollowing()).toBe(true);
+  });
+
+  it("records the reader ending the follow", async () => {
+    // Arrange
+    const f = following();
+    const capture = captureLogRecords("debug");
+    // Act
+    f.box.scrollTop = 400;
+    f.gesture();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.follow-ended");
+    expect(record.context).toMatchObject({ cause: "promptSent", from: 700, to: 400 });
+  });
+
+  it("does not restart the follow when the reader scrolls back to the tail", () => {
+    // Arrange — REMOVED TRIGGER: arriving back at the tail used to resume the
+    // follow, an implicit scroll no named cause asked for.
+    const f = following();
+    f.box.scrollTop = 200;
+    f.gesture();
+    // Act
+    f.box.scrollTop = 1000;
+    f.gesture();
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("reports the reader's live position even before their scroll event lands", () => {
+    // Arrange — the browser dispatches scroll asynchronously, so a render can
+    // run between the gesture and its event.
+    const f = following();
+    // Act — the input landed and the box moved; no scroll event yet.
+    f.input();
+    f.box.scrollTop = 400;
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("keeps a scrolled-away reader where they are across a burst of re-renders", () => {
+    // Arrange
+    const f = following();
+    f.box.scrollTop = 400;
+    f.gesture();
+    // Act
+    for (let i = 0; i < 20; i++) {
+      f.box.scrollHeight += 120;
+      f.tail.follow();
+    }
+    // Assert
+    expect(f.box.scrollTop).toBe(400);
+  });
+
+  it("ignores the scroll event its own park emits", () => {
+    // Arrange
     const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
-    a.tail.park();
-    // Act — the relayout shrank the feed and the browser clamped scrollTop.
-    box.scrollHeight = 600;
-    box.clientHeight = 200;
-    box.scrollTop = 400;
-    a.resize();
-    // Assert
-    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([true, 600]);
-  });
-
-  it("honors a custom pin window when deciding a scroll reached the tail", () => {
-    // Arrange — a 10px window: 685 is 15px short of the 700 bottom.
-    const box = atTail();
-    const a = armed(box, 10);
-    box.scrollTop = 200;
-    a.gesture();
     // Act
-    box.scrollTop = 685;
-    a.gesture();
-    // Assert
-    expect(a.tail.isFollowing()).toBe(false);
-  });
-
-  it("baselines on the box's live position before any event arrives", () => {
-    // Arrange — a box already parked deep in a long feed, as the boot render
-    // leaves it. A baseline of 0 here would make the very first reconcile
-    // compute a huge upward delta out of nothing.
-    const box = { scrollTop: 9700, scrollHeight: 10000, clientHeight: 300 };
-    const a = armed(box);
-    // Act — the first read, with nothing having moved.
-    // Assert
-    expect(a.tail.isFollowing()).toBe(true);
-  });
-
-  it("keeps a first upward gesture when a resize lands before its scroll event", () => {
-    // Arrange — THE RESIDUAL. The browser dispatches scroll asynchronously, so
-    // a relayout still settling after a load can reach the owner before the
-    // gesture's own event does. It used to park on that stale decision, which
-    // is why the FIRST upward scroll after a load was yanked and no later one.
-    const box = atTail();
-    const a = armed(box);
-    // Act — the reader moves up; the resize, not the scroll event, arrives.
-    // Their input reached the box first, which is what makes the movement
-    // theirs rather than the box's own clamp.
-    a.input();
-    box.scrollTop = 660;
-    a.resize();
-    // Assert
-    expect([a.tail.isFollowing(), box.scrollTop]).toEqual([false, 660]);
-  });
-
-  it("does not read a hydration shrink's clamp as the reader scrolling up", () => {
-    // Arrange — deferred items settling to their real heights shortens the
-    // feed under a parked box, and the browser clamps scrollTop down with it.
-    const box = atTail();
-    const a = armed(box);
-    // Act — the feed shrank by 300; the box rode the clamp down, untouched.
-    box.scrollHeight = 700;
-    box.scrollTop = 400;
+    a.tail.promptSent();
     a.scroll();
     // Assert
     expect(a.tail.isFollowing()).toBe(true);
   });
 
-  it("leaves a reader who scrolled up unfollowed when hydration then grows", () => {
-    // Arrange — the reader left the tail during the load.
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 200;
-    a.gesture();
-    // Act — deferred content lands and grows the feed beneath them.
-    box.scrollHeight = 4000;
-    a.scroll();
+  it("does not read the box's own clamp as the reader scrolling up", () => {
+    // Arrange — content shrank and the browser clamped scrollTop down with it,
+    // with no input behind the movement.
+    const f = following();
+    // Act
+    f.box.scrollHeight = 700;
+    f.box.scrollTop = 400;
+    f.scroll();
     // Assert
-    expect(a.tail.isFollowing()).toBe(false);
+    expect(f.tail.isFollowing()).toBe(true);
   });
 
   it("keeps the follow when a clamp is only seen after the content regrew", () => {
-    // Arrange — THE MEASURED DEFECT (the hibernated tab's playbook under load,
-    // `scrollTop=52 scrollHeight=853 clientHeight=637`). 52 was the reachable
-    // extent one turn earlier: the feed shrank, the box rode its clamp down to
-    // 52, and by the time anything reconciled, the extent had already regrown.
-    // A baseline still standing at the old tail then read a gesture nobody
-    // made, and only arriving back at the tail resumes a follow -- so the tail
-    // stayed 400px below the fold while the rows kept coming.
-    const box = { scrollTop: 689, scrollHeight: 1326, clientHeight: 637 };
-    const a = armed(box);
-    a.tail.park();
-    // Act — shrink, clamp, and regrowth, with no reconcile in between.
-    box.scrollHeight = 853;
-    box.scrollTop = 52;
-    a.scroll();
-    // Assert — no input reached the box, so nothing there was the reader.
-    expect(a.tail.isFollowing()).toBe(true);
-  });
-
-  it("re-lands the tail on the next size change after such a clamp", () => {
-    // Arrange — the same clamp, then the footer or a row changes size.
-    const box = { scrollTop: 689, scrollHeight: 1326, clientHeight: 637 };
-    const a = armed(box);
-    a.tail.park();
-    box.scrollHeight = 853;
-    box.scrollTop = 52;
-    a.scroll();
+    // Arrange — THE MEASURED DEFECT (`scrollTop=52 scrollHeight=853
+    // clientHeight=637`): shrink, clamp and regrowth with no reconcile between.
+    const f = following({ scrollTop: 689, scrollHeight: 1326, clientHeight: 637 });
     // Act
-    box.scrollHeight = 1099;
-    a.resize();
-    // Assert — parked, rather than left 410px below the fold. The write is
-    // `scrollHeight` because this fake does not clamp, as a browser's box
-    // would; what is under test is that the re-park happened at all.
-    expect(box.scrollTop).toBe(1099);
+    f.box.scrollHeight = 853;
+    f.box.scrollTop = 52;
+    f.scroll();
+    // Assert
+    expect(f.tail.isFollowing()).toBe(true);
   });
 
   it("decides nothing on an input that moved the box nowhere", () => {
-    // Arrange — a wheel the box had no room to answer, a key that typed into a
-    // composer inside it. The input arms the attribution; it is not itself one.
-    const box = atTail();
-    const a = armed(box);
+    // Arrange
+    const f = following();
     // Act
-    a.input();
-    a.scroll();
+    f.input();
+    f.scroll();
     // Assert
-    expect(a.tail.isFollowing()).toBe(true);
+    expect(f.tail.isFollowing()).toBe(true);
   });
 
   it("stops reading the reader's earlier input once a park has re-landed", () => {
-    // Arrange — the reader scrolled up, then a "show me the newest" act parked
-    // the tail: their gesture spoke about a position that no longer exists.
-    const box = atTail();
-    const a = armed(box);
-    box.scrollTop = 200;
-    a.gesture();
-    a.tail.park();
+    // Arrange — the reader scrolled up, then a sent prompt parked the tail.
+    const f = following();
+    f.box.scrollTop = 200;
+    f.gesture();
+    f.tail.promptSent();
     // Act — the box's own clamp, after the park.
-    box.scrollHeight = 700;
-    box.scrollTop = 400;
-    a.scroll();
-    // Assert — the clamp is not the stale gesture's doing.
-    expect(a.tail.isFollowing()).toBe(true);
+    f.box.scrollHeight = 700;
+    f.box.scrollTop = 400;
+    f.scroll();
+    // Assert
+    expect(f.tail.isFollowing()).toBe(true);
   });
 
-  it("does not resume following when the feed ends exactly where the reader sits", () => {
-    // Arrange — the reader is scrolled up, 300 short of the bottom.
-    const box = { scrollTop: 400, scrollHeight: 1000, clientHeight: 300 };
+  it("clamps the reconcile baseline at zero on a box shorter than its viewport", () => {
+    // Arrange — scrollHeight minus clientHeight is NEGATIVE here.
+    const f = following({ scrollTop: 0, scrollHeight: 120, clientHeight: 300 });
+    f.box.scrollTop = 0;
+    // Act — content arrives, still short of the viewport; nothing moved.
+    f.box.scrollHeight = 200;
+    // Assert
+    expect(f.tail.isFollowing()).toBe(true);
+  });
+});
+
+describe("TailFollow's resize", () => {
+  it("re-lands a standing follow on the settled layout", () => {
+    // Arrange
+    const f = following({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    f.box.clientHeight = 200;
+    f.box.scrollHeight = 2600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(2600);
+  });
+
+  it("leaves a reader who scrolled away where they are", () => {
+    // Arrange
+    const f = following();
+    f.box.scrollTop = 200;
+    f.gesture();
+    // Act
+    f.box.scrollHeight = 1400;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(200);
+  });
+
+  it("leaves a feed no cause parked where it is", () => {
+    // Arrange — REMOVED TRIGGER: a resize used to park any box the owner had
+    // decided, from geometry alone, was at its bottom.
+    const box = atTail();
     const a = armed(box);
-    // Act — the feed SHRINKS to end exactly where the box already sits, so the
-    // box is at the tail without the reader having gone there.
-    box.scrollHeight = 700;
+    // Act
+    box.scrollHeight = 1400;
+    a.resize();
+    // Assert
+    expect(box.scrollTop).toBe(700);
+  });
+
+  it("keeps a first upward gesture when a resize lands before its scroll event", () => {
+    // Arrange
+    const f = following();
+    // Act — the reader moves up; the resize, not the scroll event, arrives.
+    f.input();
+    f.box.scrollTop = 660;
+    f.resize();
+    // Assert
+    expect([f.tail.isFollowing(), f.box.scrollTop]).toEqual([false, 660]);
+  });
+
+  it("re-lands the tail on the next size change after a clamp", () => {
+    // Arrange
+    const f = following({ scrollTop: 689, scrollHeight: 1326, clientHeight: 637 });
+    f.box.scrollHeight = 853;
+    f.box.scrollTop = 52;
+    f.scroll();
+    // Act
+    f.box.scrollHeight = 1099;
+    f.resize();
+    // Assert — the fake does not clamp, so the write reads as scrollHeight.
+    expect(f.box.scrollTop).toBe(1099);
+  });
+});
+
+describe("TailFollow.prependCompensation", () => {
+  it("shifts a reader who is not following by exactly the growth above them", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.prependCompensation(250);
+    // Assert
+    expect(box.scrollTop).toBe(350);
+  });
+
+  it("shifts from where the reader now is, not from where it last wrote", () => {
+    // Arrange — the reader moved during the render, event not yet dispatched.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    box.scrollTop = 500;
+    // Act
+    a.tail.prependCompensation(40);
+    // Assert
+    expect(box.scrollTop).toBe(540);
+  });
+
+  it("adds nothing on top of a standing follow", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.prependCompensation(250);
+    // Assert
+    expect(f.box.scrollTop).toBe(1000);
+  });
+
+  it("does not start a follow when the shift lands the box on the tail", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.prependCompensation(600);
     a.scroll();
     // Assert
     expect(a.tail.isFollowing()).toBe(false);
   });
-});
 
-/**
- * The shared "bring this into view" primitive. The roster's agent reveal,
- * the keyboard cycle, and any later match-stepping all move the feed
- * through here, so that they cannot drift into moving it differently.
- */
-describe("revealNode", () => {
-  /** A node recording how it was asked to scroll itself into view. */
-  const spy = (): { calls: RevealBlock[] } & RevealTarget => {
-    const calls: RevealBlock[] = [];
-    return { calls, scrollIntoView: (arg) => calls.push(arg.block) };
-  };
-
-  it("scrolls as little as it must by default, leaving a visible target where it is", () => {
-    const node = spy();
-    revealNode(node);
-    expect(node.calls).toEqual(["nearest"]);
-  });
-
-  it("puts a jumped-to node flush with the top when the caller asks for it", () => {
-    const node = spy();
-    revealNode(node, "start");
-    expect(node.calls).toEqual(["start"]);
+  it("is recorded at DEBUG as prependCompensation", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.prependCompensation(250);
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "prependCompensation", from: 100, to: 350, follow: false },
+    ]);
   });
 });
 
+describe("TailFollow.selectionMoved", () => {
+  /** A 300px viewport over 1000px, and a 100px row at 500. */
+  const centered = { clientHeight: 300, scrollHeight: 1000, nodeOffsetTop: 500, nodeHeight: 100 };
+
+  it("centers the selected row", () => {
+    // Arrange
+    const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.selectionMoved({ ...centered, scrollTop: 0 });
+    // Assert — (300 - 100) / 2 = 100 above the row: 400.
+    expect(box.scrollTop).toBe(400);
+  });
+
+  it("ends a standing follow, so streaming rows cannot pull the reader off it", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.selectionMoved({ ...centered, scrollTop: 1000 });
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("moves nothing when the feed has no row to center on", () => {
+    // Arrange
+    const box = { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.selectionMoved(null);
+    // Assert
+    expect(box.scrollTop).toBe(200);
+  });
+
+  it("is recorded at DEBUG as selectionMoved", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.selectionMoved({ ...centered, scrollTop: 0 });
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "selectionMoved", from: 0, to: 400, follow: false },
+    ]);
+  });
+});
+
+describe("TailFollow.detachedWorkSelected", () => {
+  it("brings a card below the fold up by exactly its overhang", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert
+    expect(box.scrollTop).toBe(250);
+  });
+
+  it("ends a standing follow", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("is recorded at DEBUG as detachedWorkSelected", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "detachedWorkSelected", from: 100, to: 250, follow: false },
+    ]);
+  });
+});
+
+describe("revealGeometry", () => {
+  it("reads the box and the node off their live rects", () => {
+    // Arrange — jsdom lays nothing out, so each rect is scripted.
+    const rect = (top: number, height: number): (() => DOMRect) => () =>
+      ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+    const box = document.createElement("div");
+    const node = document.createElement("div");
+    box.getBoundingClientRect = rect(40, 300);
+    node.getBoundingClientRect = rect(500, 120);
+    // Act + Assert
+    expect(revealGeometry(box, node)).toEqual({ boxTop: 40, boxHeight: 300, nodeTop: 500, nodeHeight: 120 });
+  });
+});
+
+describe("collapseClicked", () => {
+  it("shows a collapsed section's preview from its top", () => {
+    // Arrange — the reader left the expanded box scrolled.
+    const section = { scrollTop: 240 };
+    // Act
+    collapseClicked(section);
+    // Assert
+    expect(section.scrollTop).toBe(0);
+  });
+});
+
 /**
- * THE DRIFT GUARD ON THE OWNER.
+ * THE USER OWNS THE SCROLL, MECHANIZED (owner rule, 2026-09-23).
  *
- * The defect `TailFollow` exists to end was not a wrong formula —
- * `isPinnedToBottom` was right about the pixels every time it was asked. It was
- * that FOUR mechanisms asked it independently and acted on their own answers:
- * the render's per-render sample, a separate nested-view freeze flag, the
- * relayout re-anchor's latch, and the rebuild anchor's own pin test. Three of
- * them wrote scrollTop. A user scrolling up was arguing with all of them.
- *
- * So the primitives are the owner's alone. Any module that reaches past
- * `TailFollow` for the raw pin test or the raw park is re-opening the question,
- * and that is what this catches — at the import, before it can be believed.
+ * scroll.ts is the ONE module that writes a scroll position. Every other
+ * module is scanned for a scroll write -- a `scrollTop`/`scrollLeft`
+ * assignment, a `scrollIntoView`/`scrollTo`/`scrollBy` call, a park, place or
+ * shift -- and a hit fails here, so an implicit mover cannot come back quietly.
+ * Inside scroll.ts, the writes are held to the named list: the tail owner's
+ * two primitives, the reader's own wheel redirect, and the reader's own
+ * collapse click. A bubble's scroll box has no other writer.
  */
-describe("the tail-follow decision has exactly one owner", () => {
-  // `**` rather than `*`: the rebuilt webapp puts each component in its own
-  // `src/<component>/` directory, and a flat glob would stop scanning exactly
-  // the modules most likely to re-open the question.
+describe("no scroll write outside scroll.ts", () => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
   const sources = import.meta.glob("../src/**/*.ts", {
     query: "?raw",
@@ -809,29 +878,63 @@ describe("the tail-follow decision has exactly one owner", () => {
 
   /** Every src module's text except scroll.ts, which IS the owner. */
   const others = Object.entries(sources).filter(([path]) => !path.endsWith("/scroll.ts"));
+  const own = Object.entries(sources).find(([path]) => path.endsWith("/scroll.ts"))?.[1] ?? "";
+
+  /** The modules whose text matches PATTERN, by path. */
+  const offending = (pattern: RegExp): string[] =>
+    others.filter(([, src]) => pattern.test(src)).map(([path]) => path);
 
   it("scans a real set of sibling modules, so an empty glob cannot pass it", () => {
-    // Arrange + Act + Assert — the guard is worthless if it inspects nothing.
-    // The floor is well under the module count on purpose: it exists to catch a
-    // glob that resolved to nothing, and the strip to the chassis legitimately
-    // took src from ninety-odd modules to a handful, so a floor tracking the
-    // real count would have to be retuned by every agent that adds a component.
+    // Arrange + Act + Assert
     expect(others.length).toBeGreaterThan(5);
   });
 
-  it("lets no other module reach for the raw pin test", () => {
-    // Act — a module deriving "am I at the bottom" for itself is a second owner.
-    const offenders = others.filter(([, src]) => /\bisPinnedToBottom\b/.test(src));
+  it("finds no scrollTop or scrollLeft assignment in any other module", () => {
+    // Arrange + Act
+    const found = offending(/\.scroll(?:Top|Left)\s*(?:=(?!=)|\+=|-=)/);
     // Assert
-    expect(offenders.map(([p]) => p)).toEqual([]);
+    expect(found).toEqual([]);
   });
 
-  it("lets no other module reach for the raw tail park", () => {
-    // Act — every park must go through the owner, which latches the intent the
-    // park expresses; a bare one moves pixels and leaves the decision stale.
-    const offenders = others.filter(([, src]) => /\bparkAtTail\b/.test(src));
+  it("finds no scrollIntoView, scrollTo or scrollBy call in any other module", () => {
+    // Arrange + Act
+    const found = offending(/\b(?:scrollIntoView|scrollTo|scrollBy)\s*\(/);
     // Assert
-    expect(offenders.map(([p]) => p)).toEqual([]);
+    expect(found).toEqual([]);
+  });
+
+  it("finds no park or place call in any other module", () => {
+    // Arrange + Act
+    const found = offending(/\.(?:park|place)\s*\(/);
+    // Assert
+    expect(found).toEqual([]);
+  });
+
+  it("finds no shift-by-an-amount call in any other module", () => {
+    // Arrange + Act — an argument-less `shift()` is Array.prototype.shift.
+    const found = offending(/\.shift\s*\(\s*[^)\s]/);
+    // Assert
+    expect(found).toEqual([]);
+  });
+
+  it("holds scroll.ts's own writes to the named list", () => {
+    // Arrange + Act
+    const writes = own
+      .split("\n")
+      .filter((line) => /\.scroll(?:Top|Left)\s*(?:=(?!=)|\+=|-=)/.test(line))
+      .map((line) => line.trim());
+    // Assert
+    expect(writes).toEqual([
+      "this.box.scrollTop = this.box.scrollHeight;",
+      "if (delta !== 0) this.box.scrollTop += delta;",
+      "feed.scrollTop += delta;",
+      "section.scrollTop = 0;",
+    ]);
+  });
+
+  it("holds scroll.ts to no scrollIntoView, scrollTo or scrollBy call", () => {
+    // Arrange + Act + Assert
+    expect(/\b(?:scrollIntoView|scrollTo|scrollBy)\s*\(/.test(own)).toBe(false);
   });
 });
 
@@ -844,20 +947,6 @@ describe("sectionFor detached box", () => {
     const output = node("bare-output", { parentElement: orphanRoot });
     // Act + Assert — no card was found and the walk still terminated.
     expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
-  });
-});
-
-describe("TailFollow on a box shorter than its viewport", () => {
-  it("clamps the reconcile baseline at zero rather than a negative reach", () => {
-    // Arrange — a feed with less content than viewport: scrollHeight minus
-    // clientHeight is NEGATIVE, so only the Math.max floor keeps the baseline
-    // inside the box's real range.
-    const box: ReanchorBox = { scrollTop: 0, scrollHeight: 120, clientHeight: 300 };
-    const tail = new TailFollow(box);
-    // Act — content arrives, still short of the viewport; nothing moved.
-    box.scrollHeight = 200;
-    // Assert — the follow survives, unclamped arithmetic would have ended it.
-    expect(tail.isFollowing()).toBe(true);
   });
 });
 
@@ -887,7 +976,7 @@ describe("observeScrollBox", () => {
   /**
    * A real element that answers scroll geometry, since jsdom lays nothing out.
    * `scrollTop` clamps into the scrollable range on write, as a browser's does
-   * — which is what turns `parkAtTail`'s "assign scrollHeight" into the bottom.
+   * — which is what turns the tail owner's "assign scrollHeight" into the bottom.
    */
   function scrollBox(init: { scrollHeight: number; clientHeight: number; scrollTop: number }) {
     const element = document.createElement("div");
@@ -929,6 +1018,7 @@ describe("observeScrollBox", () => {
     // Arrange — a reader parked at the tail: 700 + 300 viewport = 1000.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act — the footer settles after the render and eats 48px of the box.
     box.loseHeight(48);
@@ -942,6 +1032,7 @@ describe("observeScrollBox", () => {
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const before = box.top();
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act
     box.loseHeight(48);
@@ -954,6 +1045,7 @@ describe("observeScrollBox", () => {
     // Arrange — the reader left the tail, so nothing may pull them back.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     box.element.dispatchEvent(new Event("wheel"));
     box.element.scrollTop = 200;
@@ -969,6 +1061,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act — the reader wheels up and the browser dispatches the scroll event.
     box.element.dispatchEvent(new Event("wheel"));
@@ -982,6 +1075,7 @@ describe("observeScrollBox", () => {
     // Arrange — parked at the tail, and nothing else will touch this feed.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act — a bubble the wire pushed unfolded finishes fetching its page and
     // paints 120px of rows into its panel: growth no render performed.
@@ -995,6 +1089,7 @@ describe("observeScrollBox", () => {
     // Arrange — the reader left the tail, so growth below them is not theirs.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     box.element.dispatchEvent(new Event("wheel"));
     box.element.scrollTop = 200;
@@ -1011,6 +1106,7 @@ describe("observeScrollBox", () => {
     // creates the scroll zone first and fills it after would leave it.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     const late = document.createElement("section");
     // Act
@@ -1024,6 +1120,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act
     box.content.remove();
@@ -1036,6 +1133,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act
     box.element.dispatchEvent(new Event("wheel"));
@@ -1049,6 +1147,7 @@ describe("observeScrollBox", () => {
     // Arrange — a scrollbar drag issues no wheel and no key.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act
     box.element.dispatchEvent(new Event("pointerdown"));
@@ -1062,6 +1161,7 @@ describe("observeScrollBox", () => {
     // Arrange — PageUp and the arrows scroll the box that holds the focus.
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act — dispatched on a descendant, so the bubbling is under test too.
     box.content.dispatchEvent(new Event("keydown", { bubbles: true }));
@@ -1075,6 +1175,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     observeScrollBox(box.element, tail);
     // Act
     box.element.dispatchEvent(new Event("touchstart"));
@@ -1088,6 +1189,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     const unobserve = observeScrollBox(box.element, tail);
     // Act
     unobserve();
@@ -1101,6 +1203,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     const unobserve = observeScrollBox(box.element, tail);
     // Act
     unobserve();
@@ -1112,6 +1215,7 @@ describe("observeScrollBox", () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
     const tail = new TailFollow(box.element);
+    tail.initialPlacement();
     const unobserve = observeScrollBox(box.element, tail);
     // Act
     unobserve();
@@ -1121,13 +1225,8 @@ describe("observeScrollBox", () => {
 });
 
 /**
- * THE EXPANSION'S OWN REVEAL.
- *
- * A caret opens a sub-feed BELOW the fold and growth moves nothing on its own,
- * so the reader was left looking at the head of something they could not see
- * (measured at a click: `below=208 scrollTop=40`). The arithmetic below is the
- * whole of the answer; the caret's two cases (pinned, not pinned) live in
- * test/feed/bubble.test.ts, where the caret is.
+ * THE DETACHED-WORK SELECTION'S ARITHMETIC: how far the feed moves to bring
+ * the card the reader picked in the footer into view.
  */
 describe("revealDelta", () => {
   /** A 300px viewport starting at the top of the screen. */
@@ -1189,44 +1288,6 @@ describe("centerDelta", () => {
     expect(
       centerDelta({ clientHeight: 300, scrollHeight: 1000, scrollTop: 400, nodeOffsetTop: 500, nodeHeight: 100 }),
     ).toBe(0);
-  });
-});
-
-describe("revealInBox", () => {
-  /** An element answering a scripted rect, jsdom laying nothing out. */
-  const at = (top: number, height: number): HTMLElement => {
-    const el = document.createElement("div");
-    el.getBoundingClientRect = () => ({
-      top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top,
-      toJSON: () => ({}),
-    });
-    return el;
-  };
-
-  /** The two writes a reveal is allowed to make, recorded. */
-  const writer = () => {
-    const shifts: number[] = [];
-    let released = 0;
-    return { shifts, released: () => released, shift: (d: number) => shifts.push(d),
-      release: () => { released += 1; } };
-  };
-
-  it("shifts the box by the delta the geometry asks for", () => {
-    const w = writer();
-    revealInBox(at(0, 300), at(250, 200), w);
-    expect(w.shifts).toEqual([150]);
-  });
-
-  it("writes nothing when the node is already on screen", () => {
-    const w = writer();
-    revealInBox(at(0, 300), at(100, 100), w);
-    expect(w.shifts).toEqual([]);
-  });
-
-  it("ends the follow even when it moves nothing, the reader having opened content to read", () => {
-    const w = writer();
-    revealInBox(at(0, 300), at(100, 100), w);
-    expect(w.released()).toBe(1);
   });
 });
 

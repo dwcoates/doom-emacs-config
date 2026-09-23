@@ -53,7 +53,6 @@ import type {
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
 import { refreshTitleFolds } from "./title-fold.js";
-import type { FeedReveal } from "../scroll.js";
 import type { Overscan } from "./overscan.js";
 
 export interface BubbleOptions {
@@ -74,11 +73,6 @@ export interface BubbleOptions {
   composerFactory?: ComposerFactory;
   /** The fold this bubble takes on its FIRST draw only. */
   initialFolded: boolean;
-  /**
-   * The view rule the CARET obeys, absent only where the feed has no scroll
-   * box (a fixture rendering the feed on its own). See `FeedReveal`.
-   */
-  scroll?: FeedReveal;
   /**
    * The overscan buffer rooted on the page's scroll box, threaded down so the
    * rows this bubble's sub-feed holds are pre-rendered by the same instance
@@ -172,25 +166,6 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     dispose,
   };
 
-  /**
-   * WHERE THE READER IS LEFT once the caret's expansion has painted.
-   *
-   * Only the CARET calls this. A bubble the wire opened for itself
-   * (`initialFolded` false) and a bubble the reveal walk opened on its way to a
-   * row are renders rather than reader acts, and a render moving the view is
-   * the class of defect `TailFollow` exists to end -- the walk's own landing
-   * scrolls to the row it was after, which is the position that must win.
-   */
-  function settleView(wasFollowing: boolean): void {
-    const scroll = opts.scroll;
-    if (scroll === undefined) return;
-    if (wasFollowing) {
-      scroll.park();
-      return;
-    }
-    scroll.reveal(panel);
-  }
-
   /** The collapsed head, redrawn whole from the row's latest push. */
   function drawHead(): void {
     const previous = headSlot.firstElementChild;
@@ -229,20 +204,16 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    */
   function toggleFold(): void {
     clearRefusal();
+    // NEITHER DIRECTION MOVES THE FEED (owner rule, 2026-09-23: the user owns
+    // the scroll). A collapse removes content below the reader's eyes, and an
+    // expansion unrolls the sub-feed beneath the head it was opened from; the
+    // reader scrolls to it themselves. The caret used to park the feed or
+    // scroll the opened panel into view, and both were implicit moves.
     if (expanded) {
-      // A COLLAPSE NEVER MOVES THE VIEW. It removes content from below the
-      // reader's eyes; nothing they are looking at changed place, and moving
-      // them anyway would be the yank in the other direction.
       collapse();
       return;
     }
-    // SAMPLED BEFORE THE OPEN, not after: the open paints a page of rows into
-    // the panel, and asking afterwards would ask about a feed the expansion
-    // itself has already grown.
-    const following = opts.scroll?.isFollowing() ?? false;
-    void expand().then((opened) => {
-      if (opened) settleView(following);
-    });
+    void expand();
   }
 
   /**

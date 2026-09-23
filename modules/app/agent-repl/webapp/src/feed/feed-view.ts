@@ -40,7 +40,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { TOPBAR_TONES, toneClass, type Color } from "../vocab.js";
-import { centerDelta, type ScrollPosition, type TailFollow } from "../scroll.js";
+import type { ScrollPosition, TailFollow } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { clone, equals } from "@bufbuild/protobuf";
 import {
@@ -67,6 +67,7 @@ import type {
   SubfeedView,
 } from "./renderers.js";
 import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
+import { keepScrolled } from "./keep-scroll.js";
 import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
@@ -191,6 +192,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   // per-row-id snapshot taken just before the teardown and spent on each row's
   // first draw after it (see `applyPage` and `carryForRow`).
   let carriedFolds = new Map<string, string[]>();
+  // WHETHER THIS FEED HAS PAINTED A PAGE YET. Its first replace is the feed's
+  // initial PLACEMENT; every later one is a re-open (`replaceRestore`).
+  let placed = false;
+  // THE READER'S REPLY SELECTION, as last applied: whether one stood and which
+  // row it centered, so a re-push of the same state moves nothing.
+  let selectionActive = false;
+  let centeredOn: string | null = null;
 
   opts.host.setAttribute("data-feed", opts.feed === "root" ? "root" : opts.feed.value);
 
@@ -323,7 +331,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    *
    * REPLACE is the newest page (an open, or a re-open on re-expand): the feed's
    * rows become this page's rows, and the feed then parks at its tail
-   * (`parkAfterReplace`). PREPEND is the walk into the past: older rows land
+   * (`placeAfterReplace`). PREPEND is the walk into the past: older rows land
    * above what is already there, and the view shifts by exactly the height that
    * grew above it, so the reader stays on what they were reading
    * (`keepPlaceAbovePrepend`).
@@ -362,7 +370,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
         // than linger for a row that will never be drawn.
         if (placement === "replace") retainRows(carriedFolds, new Set(states.keys()));
         announce();
-        if (placement === "replace") parkAfterReplace();
+        if (placement === "replace") placeAfterReplace();
         else keepPlaceAbovePrepend(above);
         return;
       }
@@ -420,7 +428,20 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       announce();
       return;
     }
-    const known = states.has(id);
+    const held = states.get(id);
+    // A RE-PUSH OF THE ROW EXACTLY AS DRAWN CHANGES NOTHING, so it draws
+    // nothing. The daemon repaints its opening page on every turn open (up to
+    // 200 rows re-pushed unchanged); redrawing each one rebuilt its element and
+    // could move the content under a reader (owner rule, 2026-09-23: the user
+    // owns the scroll).
+    if (held !== undefined && equals(FeedRowSchema, held.row, row)) {
+      log.debug(`feed row ${id} was re-pushed unchanged; nothing is redrawn`, {
+        operation: "feed.row-unchanged",
+        context: { feed: feedName(), row: id },
+      });
+      return;
+    }
+    const known = held !== undefined;
     log.debug(`${known ? "replacing" : "appending"} feed row ${id}`, {
       operation: known ? "feed.row-replaced" : "feed.row-appended",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
@@ -432,24 +453,25 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   }
 
   /**
-   * THE FEED LANDS AT ITS TAIL AFTER A REPLACE (owner ruling, 2026-09-23).
+   * THE FEED LANDS AT ITS TAIL AFTER A REPLACE.
    *
+   * A feed's FIRST page is its initial placement (`initialPlacement`); a later
+   * replace -- a re-open after reconnect, stream recovery or daemon handover --
+   * lands at the tail too (`replaceRestore`, owner ruling 2026-09-23).
    * Regression (fix/feed-scroll-anchor-and-prompt-park): a replace used to
-   * capture an anchor keyed by `data-feed-row` and restore it by `data-key`,
-   * an attribute no row carries, so every re-open (reconnect, stream recovery,
-   * daemon handover) left a reader who was not following at the TOP, where the
-   * teardown had dropped them. There is no saved spot any more: the rows are
-   * painted first, and the feed then parks at its tail and follows, so nothing
-   * about a replace can leave it at the top. Root feed only: a sub-feed has no
-   * scroll box of its own.
+   * restore an anchor by an attribute no row carries, leaving the reader at the
+   * TOP. Root feed only: a sub-feed has no scroll box of its own.
    */
-  function parkAfterReplace(): void {
+  function placeAfterReplace(): void {
+    const first = !placed;
+    placed = true;
     if (opts.scroll === undefined) return;
-    log.debug("a replaced page parked the feed at its tail", {
+    log.debug(`a ${first ? "first" : "replaced"} page landed the feed at its tail`, {
       operation: "feed.replace-parked",
-      context: { feed: feedName(), rows: order.length },
+      context: { feed: feedName(), rows: order.length, first },
     });
-    opts.scroll.tail.park();
+    if (first) opts.scroll.tail.initialPlacement();
+    else opts.scroll.tail.replaceRestore();
   }
 
   /**
@@ -468,7 +490,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       operation: "feed.sent-prompt-parked",
       context: { feed: feedName(), row: id },
     });
-    opts.scroll.tail.park();
+    opts.scroll.tail.promptSent();
   }
 
   /**
@@ -489,16 +511,14 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * Everything a prepend adds sits above every row the reader could be looking
    * at, so the height that grew above the viewport is exactly how far the row
    * that USED to be first moved down; the view shifts by that, through the tail
-   * owner (`shift` moves the pixels and decides nothing). A reader who is
-   * following has already been re-parked by `announce`, so the growth is not
-   * applied on top of the tail.
+   * owner (`prependCompensation`). A reader who is following has already been
+   * kept at the tail by `announce`, so the growth is not applied on top of it.
    *
    * A first row the prepend DETACHED is an invariant violation (a prepend only
    * ever adds rows above), and is recorded as one rather than guessed around.
    */
   function keepPlaceAbovePrepend(above: { id: string; element: HTMLElement; top: number } | null): void {
     if (opts.scroll === undefined || above === null) return;
-    if (opts.scroll.tail.isFollowing()) return;
     if (!above.element.isConnected) {
       log.error("a prepend detached the row the reader's place was measured from", {
         operation: "feed.prepend-anchor-detached",
@@ -511,7 +531,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       operation: "feed.prepend-kept-place",
       context: { feed: feedName(), row: above.id, grown },
     });
-    if (grown !== 0) opts.scroll.tail.shift(grown);
+    opts.scroll.tail.prependCompensation(grown);
   }
 
   /**
@@ -519,31 +539,45 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    *
    * THREE EFFECTS, in the order the reader experiences them:
    *  - the BLUE border moves to the selected final-response bubble and off
-   *    every other row's — a re-push (C-p/C-n) recolors one row and clears the
+   *    every other row's -- a re-push (C-p/C-n) recolors one row and clears the
    *    rest, and a cleared selection (`selected` unset) clears them all;
-   *  - while a selection is ACTIVE the tail is released, so `followTail` below
-   *    becomes a no-op and new rows append without pulling the viewport off the
-   *    centered selection (the daemon still sends them; the feed still draws
-   *    them). When the selection clears, the tail is re-parked, which is what
-   *    returns the reader to the bottom;
+   *  - while a selection is ACTIVE the follow is released, so new rows append
+   *    without pulling the viewport off the centered selection. When the
+   *    selection CLEARS the feed returns to its tail (`selectionCleared`);
    *  - the `center` row is scrolled to the middle of the viewport, clamped at
-   *    the feed edges.
+   *    the feed edges (`selectionMoved`).
+   *
+   * ONLY A CHANGE MOVES THE FEED (owner rule, 2026-09-23: the user owns the
+   * scroll). The selection is the reader's keybinding act, so a push that
+   * restates the state already applied -- an inactive selection re-sent on a
+   * re-open, the same center pushed again -- recolors and moves nothing.
    */
   function applySelection(selection: FeedSelection): void {
     markSelectedResponse(selection.selected);
+    const wasActive = selectionActive;
+    selectionActive = selection.active;
     if (!selection.active) {
-      // Cleared: return to the bottom and resume following the tail.
-      opts.scroll?.tail.park();
+      centeredOn = null;
+      if (!wasActive) {
+        log.debug("an inactive selection was restated; the feed stays", {
+          operation: "feed.selection-unchanged",
+          context: { feed: feedName(), active: false },
+        });
+        return;
+      }
+      opts.scroll?.tail.selectionCleared();
       return;
     }
-    // A selection is pending. Release the tail so streaming rows do not yank
-    // the reader off the centered bubble. OVERSCAN IS UNAFFECTED: it watches
-    // rows by intersection with the scroll box, independent of the follow
-    // decision, so rows around wherever the centered selection lands still
-    // pre-render — the release only stops the auto-scroll-to-bottom, not the
-    // pre-render band.
-    opts.scroll?.tail.release();
-    if (selection.center !== undefined) centerOnRow(selection.center);
+    const center = selection.center?.value ?? null;
+    if (wasActive && center === centeredOn) {
+      log.debug("the selection restated its center; the feed stays", {
+        operation: "feed.selection-unchanged",
+        context: { feed: feedName(), active: true, center: center ?? "none" },
+      });
+      return;
+    }
+    centeredOn = center;
+    centerOnRow(selection.center);
   }
 
   /**
@@ -575,33 +609,31 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
 
   /**
    * Scroll the box so the CENTER row sits in the middle of the viewport,
-   * clamped at the feed's edges (see `centerDelta`). Read in the box's own
-   * scroll coordinates through `offsetTop`, where a row's `offsetTop` and the
-   * box's `scrollTop` are the same units, so the delta is a scroll position
-   * with nothing to reconstruct;
-   * the shift goes through the tail owner rather than a bare `scrollTop` write,
-   * because a second writer of the scroll position is what `TailFollow` exists
-   * to prevent.
+   * clamped at the feed's edges (`centerDelta`), read in the box's own scroll
+   * coordinates through `offsetTop`. A row this feed has not drawn (or no
+   * center at all) centers nothing, but the follow is still released.
    */
-  function centerOnRow(center: FeedId): void {
+  function centerOnRow(center: FeedId | undefined): void {
     if (opts.scroll === undefined) return;
-    const node = findRowElement(center);
-    if (node === null) {
+    const node = center === undefined ? null : findRowElement(center);
+    if (center !== undefined && node === null) {
       log.debug("the selection centers a row this feed has not drawn", {
         operation: "feed.selection-center-absent",
         context: { feed: feedName(), row: center.value },
       });
-      return;
     }
     const box = opts.scroll.box;
-    const delta = centerDelta({
-      nodeOffsetTop: node.offsetTop,
-      nodeHeight: node.offsetHeight,
-      clientHeight: box.clientHeight,
-      scrollHeight: box.scrollHeight,
-      scrollTop: box.scrollTop,
-    });
-    if (delta !== 0) opts.scroll.tail.shift(delta);
+    opts.scroll.tail.selectionMoved(
+      node === null
+        ? null
+        : {
+            nodeOffsetTop: node.offsetTop,
+            nodeHeight: node.offsetHeight,
+            clientHeight: box.clientHeight,
+            scrollHeight: box.scrollHeight,
+            scrollTop: box.scrollTop,
+          },
+    );
   }
 
   /**
@@ -771,6 +803,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     if (previous === undefined) {
       carryForRow(requireMessage(state.row.id, "FeedRow.id").value, body);
     }
+    if (body === previous) {
+      // THE RENDERER UPDATED ITS OWN ELEMENT IN PLACE (the response bubble
+      // does): nothing is replaced, so the reader's folds, the scroll position
+      // inside the bubble and the content under it all stay where they are.
+      mirrorState(state);
+      return;
+    }
     if (previous !== undefined) {
       // R2: THE WIRE'S FOLD IS THE INITIAL FOLD. A push says how a section
       // STARTS; after that the reader's own toggle wins, so a re-push of the
@@ -779,6 +818,14 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       // (`.tool-fold` and its siblings — a whole skill or tool-call card is
       // one) are keyed by class, and this is the one seam that carries them.
       carryExpanded(previous, body);
+      // A CARD THE READER IS SCROLLED INSIDE IS MORPHED, NOT REPLACED
+      // (keep-scroll.ts): the box they scrolled never leaves the document, so
+      // a push cannot throw them back to its top. It runs after the fold
+      // carry, so the morph brings `.expanded` along.
+      if (keepScrolled(previous, body)) {
+        mirrorState(state);
+        return;
+      }
       stopTicking(previous);
       previous.remove();
     }
@@ -1001,10 +1048,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     for (const stale of opts.host.querySelectorAll(":scope > .refusal")) stale.remove();
   }
 
-  /** Follow the tail while output streams, if the reader is following it. */
+  /** Keep the tail on screen while a named cause's follow stands. */
   function followTail(): void {
-    if (opts.scroll === undefined) return;
-    if (opts.scroll.tail.isFollowing()) opts.scroll.tail.park();
+    opts.scroll?.tail.follow();
   }
 
   // ---- presentation the client owns -------------------------------------

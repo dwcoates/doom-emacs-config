@@ -49,12 +49,12 @@
  * "we were not told what it cost" and "it cost nothing" are different claims.
  *
  * THE TYPE-OUT IS THE CLIENT'S PACING, and it RESUMES ACROSS PUSHES. The daemon
- * accumulates the fragments and re-pushes the whole prose; the feed core redraws
- * the row whole on each push. If the reveal restarted there, a steadily growing
+ * accumulates the fragments and re-pushes the whole prose, and each push is
+ * drawn IN PLACE over the bubble the previous draw returned (see
+ * `drawFeedResponse`). If the reveal restarted there, a steadily growing
  * response would re-type itself from the top several times a second. So the
- * shown length is carried on the element the previous draw returned
- * (`data-revealed`) and the new draw resumes from it — the one channel a
- * renderer has for state that must outlive a redraw.
+ * shown length is carried on that element (`data-revealed`) and the new draw
+ * resumes from it.
  */
 import type {
   FeedResponse,
@@ -62,17 +62,16 @@ import type {
   FeedResponseNotice,
   FeedResponseProse,
   FeedResponseSuccess,
-  FeedResponseUpdate,
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { bubbleScroll } from "../bubble-scroll.js";
+import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../bubble-scroll.js";
 import { formatAge } from "../../duration.js";
 import { hasFencedTree, inline, renderMarkdown, type TreeCols } from "../../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../../metaprompt-tree.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
-import { onDiscard, tick } from "../ticking.js";
+import { onDiscard, stopTicking, tick } from "../ticking.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 
@@ -103,92 +102,46 @@ export const THINKING_BUBBLE_CLASS = "thinking-bubble";
  */
 const RESPONSE_PROSE_BLOCKS = 1;
 
-/** The prose bubble. */
+/** The parts of a response bubble a redraw updates IN PLACE. */
+interface ResponseParts {
+  bubble: HTMLElement;
+  scroll: HTMLElement;
+  body: ResponseBody;
+}
+
+/**
+ * The prose bubble.
+ *
+ * A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user owns
+ * the scroll). The daemon re-pushes the whole row on every fragment of an
+ * arriving response and again when it settles; building a fresh bubble for
+ * each push replaced the scroll box, so a reader scrolled inside an expanded
+ * response was thrown back to its top on every fragment. When the previous
+ * draw of this row is a response bubble, it is updated and returned instead:
+ * the scroll box keeps its identity (and so its position), the prose is
+ * reconciled node by node (`reconcileChildren`), and the corner and the
+ * notice are replaced only when what they say changed.
+ *
+ * Everything the wire can refuse is read BEFORE the bubble is touched, so a
+ * malformed push leaves the bubble on screen exactly as it was.
+ */
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const path = "FeedResponse";
   const result = requireCase(u.result, `${path}.result`);
-
-  const bubble = document.createElement("div");
-  bubble.className = "bubble assistant md";
-  bubble.setAttribute("data-state", result.case);
-
-  // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
-  // the prose is intermediate reasoning is orthogonal to whether it is still
-  // arriving. The class draws the bubble purple and non-bordered and keeps the
-  // green final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
-  if (u.thinking) {
-    bubble.classList.add(THINKING_BUBBLE_CLASS);
-    bubble.setAttribute("data-thinking", "");
-  }
-
-  // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When
-  // the daemon has stamped this response as the turn's concluded answer, the
-  // flag rides the row data — so the green is (re)applied here on every push,
-  // redraw, tool-group re-arrange, and history replay, and no rebuild of this
-  // bubble can lose it. This replaces the former one-shot mark the turn-ended
-  // row applied in reaction to a live event, which the daemon no longer needs
-  // to deliver for the border to appear (turn-ended.ts). A THINKING BUBBLE IS
-  // EXCLUDED: it is never the answer, so it never greens — the guard here
-  // matches the stylesheet's own `.final-response:not(.thinking-bubble)` rule.
-  // The BLUE selected-response border still wins over the green: the controller
-  // toggles `.response-selected` on this same bubble and the stylesheet's
-  // `.final-response.response-selected` rule paints blue over the green.
-  if (u.finalAnswer && !u.thinking) {
-    bubble.classList.add(FINAL_RESPONSE_CLASS);
-  }
-
-  // BEFORE the body, and outside it: the body is rewritten whole by the prose
-  // painters (and by every frame of the type-out), so a heading placed inside it
-  // would be wiped by the first repaint of an arriving response.
-  if (u.notice !== undefined) {
-    bubble.classList.add("response-notice");
-    bubble.setAttribute("data-notice", "");
-    bubble.appendChild(drawFeedResponseNotice(u.notice, `${path}.notice`));
-  }
-
-  // The body is the CONTENT WRAPPER; the element appended to the bubble is the
-  // scroll box that holds it (see bubble-scroll.ts).
-  const body = createResponseBody();
-  const scroll = bubbleScroll(body);
-
-  // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
-  // The cost corner is inserted INTO the scroll box, BEFORE the body, and floats
-  // top-right (`float: right`, styles.css). The body is a plain block sibling in
-  // the same block-formatting context (the scroll box, which clips its overflow),
-  // so the prose's FIRST line flows to the corner's LEFT and wraps around it;
-  // once the text drops past the corner's height — one line, since the corner is
-  // a single row of token + duration — every SUBSEQUENT line runs the full width.
-  // The corner keeps a CONSTANT reserved width across the hover reveal (the
-  // duration slot is reserved even while collapsed — see `.usage-ago`), so
-  // exposing the duration animates opacity/translate only and never reflows the
-  // first line. It lives here rather than above the box so the wrap can reach it:
-  // a strip above the body could not shorten a line inside the body.
-  if (u.usage !== undefined) {
-    scroll.insertBefore(drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`), body);
-  }
-  bubble.appendChild(scroll);
-
-  let characters: number;
+  let markdown: string;
   switch (result.case) {
     case "update":
-      characters = drawFeedResponseUpdate(result.value, rc, `${path}.update`, bubble, body);
+      markdown = drawFeedResponseProse(
+        requireMessage(result.value.prose, `${path}.update.prose`),
+        `${path}.update.prose`,
+      );
       break;
-    case "success": {
-      const markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
-      paintWhole(body, markdown);
-      markRevealed(bubble, markdown.length);
-      characters = markdown.length;
+    case "success":
+      markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
       break;
-    }
-    case "error": {
-      const markdown = drawFeedResponseError(result.value, `${path}.error`);
-      bubble.classList.add("response-cut-short");
-      paintWhole(body, markdown);
-      markRevealed(bubble, markdown.length);
-      bubble.appendChild(cutShortMarker());
-      characters = markdown.length;
+    case "error":
+      markdown = drawFeedResponseError(result.value, `${path}.error`);
       break;
-    }
     default: {
       // The narrowed value is `never` here, which is the compile-time half of
       // the guarantee; the run-time half still needs the arm's NAME, and an arm
@@ -197,8 +150,128 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       return unreachableArm(`${path}.result`, other.case);
     }
   }
-  recordDraw(u, rc, result.case, characters);
+  const notice = u.notice === undefined ? null : drawFeedResponseNotice(u.notice, `${path}.notice`);
+  const corner =
+    u.usage === undefined ? null : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`);
+
+  const reused = reusableParts(rc.previous);
+  const { bubble, scroll, body } = reused ?? freshParts();
+  bubble.setAttribute("data-state", result.case);
+
+  // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
+  // the prose is intermediate reasoning is orthogonal to whether it is still
+  // arriving. The class draws the bubble purple and non-bordered and keeps the
+  // green final-answer treatment structurally off it (see THINKING_BUBBLE_CLASS).
+  bubble.classList.toggle(THINKING_BUBBLE_CLASS, u.thinking);
+  bubble.toggleAttribute("data-thinking", u.thinking);
+
+  // THE GREEN FINAL-ANSWER BORDER IS DATA-DRIVEN, APPLIED ON EVERY DRAW. When
+  // the daemon has stamped this response as the turn's concluded answer, the
+  // flag rides the row data -- so the green is (re)applied on every push,
+  // redraw, tool-group re-arrange and history replay. A THINKING BUBBLE IS
+  // EXCLUDED: it is never the answer, so it never greens. The BLUE
+  // selected-response class is the controller's, and an in-place update leaves
+  // it alone.
+  bubble.classList.toggle(FINAL_RESPONSE_CLASS, u.finalAnswer && !u.thinking);
+
+  // BEFORE the scroll box, and outside it: the body is rewritten by the prose
+  // painters, so a heading placed inside it would be wiped by a repaint.
+  bubble.classList.toggle("response-notice", notice !== null);
+  bubble.toggleAttribute("data-notice", notice !== null);
+  placeNotice(bubble, scroll, notice);
+
+  // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
+  // The cost corner is INSIDE the scroll box, BEFORE the body, and floats
+  // top-right, so the prose's FIRST line flows to its left and every later line
+  // runs the full width. Its reserved width is fixed (styles.css), so neither
+  // the hover reveal, the live clock nor a growing figure reflows that line.
+  placeCorner(scroll, body, corner);
+
+  const broken = result.case === "error";
+  bubble.classList.toggle("response-cut-short", broken);
+  placeCutShortMarker(bubble, broken);
+
+  if (result.case === "update") {
+    const resumed = revealedSoFar(rc.previous, markdown.length);
+    log.debug("drawing an arriving response", {
+      operation: "feed.cards.response.update",
+      context: { path: `${path}.update`, length: markdown.length, resumed, in_place: reused !== null },
+    });
+    animate(bubble, body, markdown, resumed, rc);
+  } else {
+    paintWhole(body, markdown);
+    markRevealed(bubble, markdown.length);
+  }
+  recordDraw(u, rc, result.case, markdown.length);
   return bubble;
+}
+
+/** A new bubble: the chrome, its scroll box and the body inside it. */
+function freshParts(): ResponseParts {
+  const bubble = document.createElement("div");
+  bubble.className = "bubble assistant md";
+  // The body is the CONTENT WRAPPER; the element appended to the bubble is the
+  // scroll box that holds it (see bubble-scroll.ts).
+  const body = createResponseBody();
+  const scroll = bubbleScroll(body);
+  bubble.appendChild(scroll);
+  return { bubble, scroll, body };
+}
+
+/**
+ * The parts of PREVIOUS when it is a response bubble this renderer drew, to be
+ * updated in place; null for anything else (a first draw, a row whose arm
+ * changed), which then gets a fresh bubble.
+ */
+function reusableParts(previous: HTMLElement | undefined): ResponseParts | null {
+  if (previous === undefined) return null;
+  if (!previous.classList.contains("bubble") || !previous.classList.contains("assistant")) return null;
+  const scroll = previous.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
+  const body = scroll?.querySelector<ResponseBody>(`:scope > ${RESPONSE_BODY_TAG}`) ?? null;
+  if (scroll === null || body === null) return null;
+  return { bubble: previous, scroll, body };
+}
+
+/** The attribute a notice heading and a usage corner carry what they say on. */
+const SAYS_ATTRIBUTE = "data-says";
+
+/**
+ * Put the notice heading NEXT above the scroll box, keeping the one already
+ * there when it says the same thing.
+ */
+function placeNotice(bubble: HTMLElement, scroll: HTMLElement, next: HTMLElement | null): void {
+  const current = bubble.querySelector<HTMLElement>(":scope > .response-notice-heading");
+  if (next !== null) next.setAttribute(SAYS_ATTRIBUTE, next.textContent ?? "");
+  if (current !== null && next !== null && current.getAttribute(SAYS_ATTRIBUTE) === next.getAttribute(SAYS_ATTRIBUTE)) {
+    return;
+  }
+  current?.remove();
+  if (next !== null) bubble.insertBefore(next, scroll);
+}
+
+/**
+ * Put the usage corner first in the scroll box, keeping the one already there
+ * when it says the same thing -- a replaced corner would restart its clock and
+ * drop a hover reveal for nothing. A discarded corner's clock is stopped.
+ */
+function placeCorner(scroll: HTMLElement, body: HTMLElement, next: HTMLElement | null): void {
+  const current = scroll.querySelector<HTMLElement>(":scope > .usage-corner");
+  if (current !== null && next !== null && current.getAttribute(SAYS_ATTRIBUTE) === next.getAttribute(SAYS_ATTRIBUTE)) {
+    stopTicking(next);
+    return;
+  }
+  if (current !== null) {
+    stopTicking(current);
+    current.remove();
+  }
+  if (next !== null) scroll.insertBefore(next, body);
+}
+
+/** Add or drop the cut-short marker after the scroll box. */
+function placeCutShortMarker(bubble: HTMLElement, broken: boolean): void {
+  const current = bubble.querySelector(":scope > .response-cut-short-marker");
+  if (broken && current === null) bubble.appendChild(cutShortMarker());
+  if (!broken) current?.remove();
 }
 
 /**
@@ -254,33 +327,6 @@ function recordDraw(
   });
 }
 
-/**
- * The arriving state: the markdown so far, paced.
- *
- * The reveal resumes from the previous draw's shown length and stops the moment
- * it reaches the frontier; a redraw whose prose did not grow therefore does no
- * animation at all.
- *
- * It answers the prose's length — what ARRIVED, not what is shown yet — so the
- * draw record states the same figure in every arm.
- */
-export function drawFeedResponseUpdate(
-  u: FeedResponseUpdate,
-  rc: RowContext,
-  path: string,
-  bubble: HTMLElement,
-  body: ResponseBody,
-): number {
-  const markdown = drawFeedResponseProse(requireMessage(u.prose, `${path}.prose`), `${path}.prose`);
-  const resumed = revealedSoFar(rc.previous, markdown.length);
-  log.debug("drawing an arriving response", {
-    operation: "feed.cards.response.update",
-    context: { path, length: markdown.length, resumed },
-  });
-  animate(bubble, body, markdown, resumed, rc);
-  return markdown.length;
-}
-
 /** The settled state: the whole markdown. */
 export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): string {
   log.debug("drawing a settled response", {
@@ -333,34 +379,38 @@ export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
  * The cost corner: the token figure, drawn verbatim, and — once the response
  * has SETTLED — the relative timestamp it reveals when hovered or focused.
  *
- * THE MARKUP IS BUILT SO THE REVEAL'S SLIDE IS THE DURATION'S WIDTH BY
- * CONSTRUCTION (the stylesheet's `.usage-corner` comment has the mechanism):
+ * THE MARKUP (the stylesheet's `.usage-corner` comment has the mechanism):
  *
  *   span.usage-corner[data-tokens=<token text>]   ::before is a hidden copy of
- *     span.usage-slider                           the token, reserving its width
+ *     span.usage-slider                           the token, in a fixed-width slot
  *       span.usage-stamp  <token text>            out of flow, at the slider's left
  *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content
  *
- * The slider's own width is the duration (plus its gap), and it is translated
- * by a percentage of that width, so the collapsed token sits exactly at the
- * right edge and the revealed token slides left exactly as far as the duration
- * needs. The corner's floated width is spacer + slider in both states, so the
- * first prose line that wraps around it never reflows on the reveal. The
+ * The slider is the duration's fixed-width slot (plus its gap), translated by
+ * a percentage of that width, so the collapsed token sits exactly at the right
+ * edge and the revealed token slides left by the slot. The corner's floated
+ * width is spacer + slider in every state, so the first prose line that wraps
+ * around it never reflows on the reveal, the tick or the settle. The
  * stylesheet owns the 0.5s transition; `prefers-reduced-motion` drops it. A
  * state class is toggled here too, so a keyboard focus reveals the same
  * timestamp a hover does.
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.
- * As it grows the slider grows with it, and the collapsed token stays put.
+ * The slot does not grow with it, so nothing around the corner moves.
  * The subscription is taken through `tick`, which marks the element, so the
  * feed's teardown of the bubble — a re-push replacing the row, or the turn-end
  * backstop that stops every clock in a settled turn — unsubscribes it with no
  * disposer to remember here.
  *
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
- * a corner with no settled instant has an empty slider, so the token sits at
- * the right edge and nothing slides.
+ * a corner with no settled instant has an empty slider, marked
+ * `data-arriving`, so the token sits at the right edge and nothing slides.
+ *
+ * NOTHING HERE CHANGES THE CORNER'S WIDTH (owner rule, 2026-09-23: the user
+ * owns the scroll). The token spacer and the duration slot are fixed widths in
+ * the stylesheet, so a growing figure, the clock's tick and the settle itself
+ * leave the float -- and the first prose line wrapped around it -- in place.
  */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
@@ -376,6 +426,7 @@ export function drawFeedResponseUsageStamp(
   const corner = document.createElement("span");
   corner.className = "usage-corner";
   corner.dataset.tokens = u.text;
+  corner.setAttribute("data-says", `${u.text}|${String(atMs)}`);
 
   const slider = document.createElement("span");
   slider.className = "usage-slider";
@@ -386,6 +437,9 @@ export function drawFeedResponseUsageStamp(
   stamp.textContent = u.text;
   slider.appendChild(stamp);
 
+  // The duration slot is reserved at a fixed width either way (styles.css);
+  // an arriving corner marks itself so its empty slot never slides out.
+  corner.toggleAttribute("data-arriving", atMs === 0);
   if (atMs > 0) {
     const ago = document.createElement("span");
     ago.className = "usage-ago";
@@ -716,16 +770,55 @@ function requireBubble(body: HTMLElement): HTMLElement {
   return bubble;
 }
 
+/** Each body's ONE tree wrap: a body updated in place keeps the wrap it has. */
+const wraps = new WeakMap<ResponseBody, TreeWrap>();
+
+/** The tree wrap BODY paints through, created on its first paint. */
+function wrapFor(body: ResponseBody): TreeWrap {
+  let wrap = wraps.get(body);
+  if (wrap === undefined) {
+    wrap = createTreeWrap(body);
+    wraps.set(body, wrap);
+  }
+  return wrap;
+}
+
 /**
- * Write the whole settled prose into the body, wrapped to the cap (see
+ * Each body's paint GENERATION. Every paint of a body takes the next one, and a
+ * type-out loop stops the moment its generation is no longer the body's: an
+ * in-place update never leaves the previous push's loop painting over it.
+ */
+const generations = new WeakMap<ResponseBody, number>();
+
+/** Claim the next paint generation of BODY. */
+function nextGeneration(body: ResponseBody): number {
+  const next = (generations.get(body) ?? 0) + 1;
+  generations.set(body, next);
+  return next;
+}
+
+/**
+ * Bring BODY's prose to MARKDOWN, wrapped to COLS, by RECONCILING it node by
+ * node rather than rewriting it: a node that did not change keeps its identity
+ * and never re-lays out, so a settle, a re-wrap or an in-place update moves
+ * nothing the reader did not see change (owner rule, 2026-09-23: the user owns
+ * the scroll). The result is byte-identical to `proseHtml(markdown, cols)`.
+ */
+function reconcileProse(body: ResponseBody, markdown: string, cols: TreeCols): void {
+  const target = document.createElement("div");
+  target.innerHTML = proseHtml(markdown, cols);
+  reconcileChildren(body, target, null);
+}
+
+/**
+ * Bring the whole settled prose into the body, wrapped to the cap (see
  * `createTreeWrap`). Plain prose reflows on its own (CSS), so it takes no
- * observer and no measurement.
+ * observer and no measurement. A type-out still running on this body stops.
  */
 function paintWhole(body: ResponseBody, markdown: string): void {
-  const wrap = createTreeWrap(body);
-  wrap.paint(markdown, () => {
-    body.innerHTML = proseHtml(markdown, wrap.cols);
-  });
+  const wrap = wrapFor(body);
+  nextGeneration(body);
+  wrap.paint(markdown, () => reconcileProse(body, markdown, wrap.cols));
 }
 
 /** Record the shown length, so the next draw of this row resumes from it. */
@@ -875,7 +968,8 @@ function animate(
   // The arriving prose wraps through the SAME path as the settled whole, at the
   // same measured width, so nothing shrinks or re-wraps when the final lands. A
   // width change re-runs the latest paint, re-wrapping the slice already shown.
-  const wrap = createTreeWrap(body);
+  const wrap = wrapFor(body);
+  const generation = nextGeneration(body);
   const paint = (shown: number): void => {
     const slice = markdown.slice(0, shown);
     // REGRESSION WATCH (per-frame reveal flicker, 2026-09-15): this once did
@@ -892,11 +986,7 @@ function animate(
     // the same whole render `paintWhole` writes at settle, so the reveal never
     // diverges from the oracle. Do NOT reintroduce a whole-subtree rebuild per
     // frame. This is a watch flag, not a lock.
-    wrap.paint(slice, () => {
-      const target = document.createElement("div");
-      target.innerHTML = proseHtml(slice, wrap.cols);
-      reconcileChildren(body, target, null);
-    });
+    wrap.paint(slice, () => reconcileProse(body, slice, wrap.cols));
     markRevealed(bubble, shown);
   };
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
@@ -923,6 +1013,8 @@ function animate(
   // not the same fact as removal from one.
   let mounted = bubble.isConnected;
   const step = (): void => {
+    // A later paint of this same body (an in-place update) owns it now.
+    if (generations.get(body) !== generation) return;
     if (bubble.isConnected) mounted = true;
     else if (mounted) return;
     const shown = reveal.reveal({

@@ -547,6 +547,40 @@ describe("the 'more below' affordance", () => {
     expect(chevron).toMatch(/pointer-events:\s*none/);
   });
 
+  it("draws the affordance only out of flow, so toggling has-more changes no layout", () => {
+    // Arrange / Act — every rule keyed on has-more. THE USER OWNS THE SCROLL
+    // (owner rule, 2026-09-23): the measurer toggles the class under a reader,
+    // so it may add nothing but out-of-flow pseudo-elements and a cursor.
+    const withHasMore = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => sel.includes(".has-more")),
+    );
+    const inFlow = withHasMore.filter((rule) => {
+      const pseudo = rule.selectors.every((sel) => /::(?:before|after)$/.test(sel));
+      if (!pseudo) return !/^\s*cursor:[^;]*;?\s*$/.test(rule.declarations);
+      const positioned = /position:\s*absolute/.test(rule.declarations);
+      const decorative = /^\s*background:[^;]*;?\s*$/.test(rule.declarations);
+      return !positioned && !decorative;
+    });
+
+    // Assert
+    expect(inFlow.map((rule) => rule.selectors.join(", "))).toEqual([]);
+  });
+
+  it("makes the box the affordance's containing block whether or not it wears has-more", () => {
+    // Arrange
+    const boxes = [".bubble.assistant > .bubble-scroll", ".bubble.user > .bubble-scroll", ".title-fold"];
+
+    // Act — whether any rule on the bare box (no has-more) makes it relative.
+    const relative = boxes.map((box) =>
+      rulesOf(stylesheet).some(
+        (rule) => rule.selectors.includes(box) && /position:\s*relative/.test(rule.declarations),
+      ),
+    );
+
+    // Assert
+    expect(relative).toEqual([true, true, true]);
+  });
+
   it("never puts the affordance on a tool-call section", () => {
     // Arrange / Act — every rule that keys on has-more.
     const withHasMore = rulesOf(stylesheet).filter((rule) =>
@@ -1026,10 +1060,10 @@ describe("the cost corner's hover hit area", () => {
     expect(ago).toMatch(/transition:\s*opacity 0\.5s ease/);
   });
 
-  it("never sizes the slider or the token, so the reserved footprint stays constant", () => {
-    // Arrange / Act — the base rules and the revealed-state rules.
+  it("never re-sizes the slider when revealed, nor the token, so the reserved footprint stays constant", () => {
+    // Arrange / Act — the revealed-state rule and the token's rule. (The base
+    // slider rule now FIXES the slot's width, below: owner rule 2026-09-23.)
     const decls = [
-      declarationsOf(".usage-slider") ?? "",
       declarationsOf(".usage-corner.usage-corner--revealed .usage-slider") ?? "",
       declarationsOf(".usage-stamp") ?? "",
     ];
@@ -1041,6 +1075,39 @@ describe("the cost corner's hover hit area", () => {
       expect(one).not.toMatch(/(?:^|[\s;])max-width\s*:/);
       expect(one).not.toMatch(/(?:^|[\s;])margin/);
     }
+  });
+
+  it("fixes the duration slot's width, so the live clock never moves the float", () => {
+    // Arrange / Act — THE USER OWNS THE SCROLL (owner rule, 2026-09-23): a
+    // slot as wide as its text reflowed the first prose line on every tick.
+    const slider = declarationsOf(".usage-slider") ?? "";
+
+    // Assert
+    expect(slider).toMatch(/(?:^|[\s;])width:\s*calc\(0\.35rem \+ 11ch \* 0\.85\)/);
+  });
+
+  it("fixes the token spacer's width, so a growing figure never moves the float", () => {
+    // Arrange / Act
+    const spacer = declarationsOf(".usage-corner::before") ?? "";
+
+    // Assert
+    expect(spacer).toMatch(/(?:^|[\s;])width:\s*6ch/);
+  });
+
+  it("draws the duration in fixed-width figures", () => {
+    // Arrange / Act
+    const ago = declarationsOf(".usage-ago") ?? "";
+
+    // Assert
+    expect(ago).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it("never slides an arriving corner's empty slot out, whatever reveals it", () => {
+    // Arrange / Act
+    const arriving = declarationsOf(".bubble.assistant .usage-corner[data-arriving] .usage-slider") ?? "";
+
+    // Assert
+    expect(arriving).toMatch(/transform:\s*translateX\(100%\)/);
   });
 
   it("disables the slide and the fade under reduced motion", () => {
@@ -1914,5 +1981,36 @@ describe("the response body custom element", () => {
     const rule = declarationsOf("response-body.bubble-body") ?? "";
     // Assert
     expect(rule).toMatch(/display:\s*block/);
+  });
+});
+
+/**
+ * THE SHELL HEAD'S CLOCKS NEVER RE-WRAP IT (owner rule, 2026-09-23: the user
+ * owns the scroll). The head is a wrapping flex row, and a clock repainted
+ * every second must hold a fixed footprint so its growth cannot push a
+ * neighbor onto a new line under the reader.
+ */
+describe("the shell head's clocks hold a fixed footprint", () => {
+  const clocks = [".shell-clock", ".shell-quiet"];
+
+  it.each(clocks)("%s is one unbreakable run", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it.each(clocks)("%s draws tabular figures", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  });
+
+  it.each(clocks)("%s reserves a minimum width", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).toMatch(/min-width:\s*\d+ch/);
   });
 });

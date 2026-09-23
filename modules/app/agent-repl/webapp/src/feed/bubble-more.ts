@@ -160,7 +160,24 @@ export function installHasMore(
   if (view === null || view === undefined || typeof view.ResizeObserver !== "function") return;
   const observer = new view.ResizeObserver(() => refresh(scroll));
   observer.observe(scroll);
-  const body = scroll.firstElementChild;
+  // THE BODY IS FOLLOWED, NOT CAPTURED: a redraw that keeps the box a reader
+  // is scrolled inside hands it a new body (keep-scroll.ts), and the observer
+  // must measure the body the box now holds rather than the one it was built
+  // with.
+  let body = scroll.firstElementChild;
   if (body !== null) observer.observe(body);
-  onDiscard(scroll, () => observer.disconnect());
+  const retarget = (): void => {
+    const next = scroll.firstElementChild;
+    if (next === body) return;
+    if (body !== null) observer.unobserve(body);
+    body = next;
+    if (body !== null) observer.observe(body);
+    refresh(scroll);
+  };
+  const children = typeof view.MutationObserver === "function" ? new view.MutationObserver(retarget) : null;
+  children?.observe(scroll, { childList: true });
+  onDiscard(scroll, () => {
+    observer.disconnect();
+    children?.disconnect();
+  });
 }
