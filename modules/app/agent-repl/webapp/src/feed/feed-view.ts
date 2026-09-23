@@ -183,6 +183,8 @@ export interface FeedController extends Handle {
    * while a selection is active — returning to the bottom when it clears.
    */
   applySelection(selection: FeedSelection): void;
+  /** Whether the daemon's last pushed reply selection is active. */
+  selectionActive(): boolean;
   rows(): readonly FeedRow[];
   breadcrumbs(): readonly FeedBreadcrumb[];
   onChange(fn: () => void): () => void;
@@ -256,6 +258,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     applyPage,
     upsert,
     applySelection,
+    selectionActive: () => selectionActive,
     rows,
     breadcrumbs: () => crumbs,
     onChange,
