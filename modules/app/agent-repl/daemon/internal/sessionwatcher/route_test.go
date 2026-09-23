@@ -629,6 +629,25 @@ func TestRouteDetachedWorkAnnouncement(t *testing.T) {
 	})
 }
 
+// TestAFreshAnnouncementReachesTheFooterWithItsAnnouncer is the other half of
+// the footer's launch premise: work that has just started reaches the footer
+// named by the agent that announced it, which is what separates it from an
+// adoption.
+func TestAFreshAnnouncementReachesTheFooterWithItsAnnouncer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+
+	// Assert.
+	e := requireEvent(t, got, "footer.OnDetachedWork")
+	if e.agent != "main-1" {
+		t.Fatalf("the footer heard the announcement from %q, want main-1", e.agent)
+	}
+}
+
 // TestRouteSessionUpdateArms covers the per-arm split of the session's
 // standing stream. One case per arm family, because each names a different set
 // of views and a wrong one is silent.
