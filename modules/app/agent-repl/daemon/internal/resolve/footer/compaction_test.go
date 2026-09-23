@@ -2,9 +2,13 @@ package footer
 
 import (
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 )
 
 // progress is one compaction phase frame.
@@ -259,5 +263,397 @@ func TestClearingTheAnswerRetiresItsProgressLine(t *testing.T) {
 	var empty *frontendv1.FooterStatusActivityCompaction
 	if got := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction(); got != empty {
 		t.Fatalf("activity = %+v, want no compaction line", got)
+	}
+}
+
+// ---- the line's lifetime ----------------------------------------------------
+
+// outlivedTurn is the operation of the invariant-violation record.
+const outlivedTurn = "daemon.footer.compaction_line_outlived_turn"
+
+// compactionText is the compaction line the published view draws, empty when
+// none stands.
+func compactionText(t *testing.T, h *harness) string {
+	t.Helper()
+	return h.view(t).GetStrip().GetStatus().GetThinking().GetActivity().GetCompaction().GetText()
+}
+
+// endTurn delivers the main thread's ordinary terminal for turn.
+func endTurn(h *harness, turn ids.TurnID) {
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+}
+
+// compactedCut is the context cut that ends a successful compaction.
+func compactedCut() *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
+	}
+}
+
+// recordsOf answers every record of one operation.
+func recordsOf(records []dlog.Record, operation string) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range records {
+		if rec.Operation == operation {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestTheTurnsTerminalEndsACompactionLineItsCutNeverEnded(t *testing.T) {
+	// Arrange: the vendor compacts inside an ordinary turn and the cut is lost.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+	h.clock.Advance(90 * time.Second)
+
+	// Act
+	endTurn(h, "turn-1")
+
+	// Assert: the next turn draws no compaction line.
+	h.r.SetTurn(testWS, &TurnStarted{At: h.clock.Now(), Act: ActPrompt})
+	if got := compactionText(t, h); got != "" {
+		t.Fatalf("activity = %q, want no compaction line on the next turn", got)
+	}
+}
+
+func TestATerminalEndingACompactionLineRecordsTheViolation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+	h.clock.Advance(90 * time.Second)
+
+	// Act
+	endTurn(h, "turn-1")
+
+	// Assert
+	errs := recordsOf(h.log.Records(), outlivedTurn)
+	if len(errs) != 1 || errs[0].Level != dlog.LevelError {
+		t.Fatalf("records = %+v, want exactly one ERROR", errs)
+	}
+	want := map[string]any{
+		"workspace_id": string(testWS),
+		"turn_id":      "turn-1",
+		"text":         "compacting the context…",
+		"age_ms":       int64(90_000),
+	}
+	for key, value := range want {
+		if got := errs[0].Context[key]; got != value {
+			t.Fatalf("%s = %v (%T), want %v (record %+v)", key, got, got, value, errs[0].Context)
+		}
+	}
+}
+
+func TestTheCutEndsTheCompactionLineWithNoViolation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+	// Act
+	h.r.OnContextCut(testWS, mainAgent, compactedCut())
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	endTurn(h, "turn-1")
+
+	// Assert
+	if got := compactionText(t, h); got != "" {
+		t.Fatalf("activity = %q, want the line gone with the cut", got)
+	}
+	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
+		t.Fatalf("records = %+v, want no violation: the cut ended the act", errs)
+	}
+}
+
+func TestACompactTurnsTerminalEndsItsLine(t *testing.T) {
+	// Arrange: a `/compact` is its own turn.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+	// Act
+	endTurn(h, "turn-compact")
+
+	// Assert
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	if got := compactionText(t, h); got != "" {
+		t.Fatalf("activity = %q, want the compact turn's line ended with it", got)
+	}
+}
+
+func TestATurnOpeningWithACompactionLineStandingIsNoViolation(t *testing.T) {
+	// Arrange: the vendor's start signal lands before its turn's open edge.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+	// Act
+	h.r.OnTurnOpened(testWS, "turn-1")
+
+	// Assert
+	if got := compactionText(t, h); got != vendorCompactionLine {
+		t.Fatalf("activity = %q, want the turn's own compaction line", got)
+	}
+	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
+		t.Fatalf("records = %+v, want no violation at an opening", errs)
+	}
+}
+
+func TestAConcludedPhaseEndsTheCompactingStep(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase conversationv1.SessionCompactionPhase
+	}{
+		{"started", conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED},
+		{"failed", conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: an ordinary turn, so only the flag can hold the step.
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+			// Act
+			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(progress(tt.phase, 101_600, 12_400, "")))
+
+			// Assert: the step is over at once.
+			if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() != nil {
+				t.Fatalf("substatus = compacting, want the compaction over")
+			}
+		})
+	}
+}
+
+func TestAConcludedPhasesLineStandsOneDwell(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase conversationv1.SessionCompactionPhase
+		line  string
+	}{
+		{"started", conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, "compacted and resumed (101.6k → 12.4k)"},
+		{"failed", conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED, "compaction failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+			// Act
+			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(progress(tt.phase, 101_600, 12_400, "")))
+
+			// Assert: readable now.
+			if got := compactionText(t, h); got != tt.line {
+				t.Fatalf("activity = %q, want %q to read for the dwell", got, tt.line)
+			}
+		})
+	}
+}
+
+func TestAConcludedPhasesLineIsRetiredAfterTheDwell(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase conversationv1.SessionCompactionPhase
+	}{
+		{"started", conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED},
+		{"failed", conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_FAILED},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(progress(tt.phase, 101_600, 12_400, "")))
+
+			// Act
+			h.clock.Advance(DefaultMomentaryDwell)
+
+			// Assert
+			if got := compactionText(t, h); got != "" {
+				t.Fatalf("activity = %q, want the concluded line retired", got)
+			}
+		})
+	}
+}
+
+func TestATerminalAfterAConcludedPhaseIsNoViolation(t *testing.T) {
+	// Arrange: the act concluded; its dwell has not elapsed yet.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
+		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 0, 0, "")))
+
+	// Act
+	endTurn(h, "turn-1")
+
+	// Assert
+	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
+		t.Fatalf("records = %+v, want no violation: the phase ended the act", errs)
+	}
+}
+
+func TestANewLineIsNotRetiredByAnEarlierConcludedPhasesDwell(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
+		progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 0, 0, "")))
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+	// Act
+	h.clock.Advance(DefaultMomentaryDwell)
+
+	// Assert
+	if got := compactionText(t, h); got != vendorCompactionLine {
+		t.Fatalf("activity = %q, want the compaction still in flight to keep its line", got)
+	}
+}
+
+func TestTheRepeatedVendorSignal(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  func(h *harness)
+		wantText string
+		wantAt   time.Time
+	}{
+		{
+			name: "a repeat while standing keeps the instant the line began",
+			arrange: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, vendorCompacting())
+				h.clock.Advance(30 * time.Second)
+			},
+			wantText: vendorCompactionLine,
+			wantAt:   instant,
+		},
+		{
+			name: "a repeat after the line ended stands it anew",
+			arrange: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, vendorCompacting())
+				h.r.OnContextCut(testWS, mainAgent, compactedCut())
+				h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+				h.clock.Advance(30 * time.Second)
+			},
+			wantText: vendorCompactionLine,
+			wantAt:   instant.Add(30 * time.Second),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+			tt.arrange(h)
+
+			// Act
+			h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+			// Assert
+			activity := h.view(t).GetStrip().GetStatus().GetThinking().GetActivity()
+			if got := activity.GetCompaction().GetText(); got != tt.wantText {
+				t.Fatalf("activity = %q, want %q", got, tt.wantText)
+			}
+			if got := activity.GetAt().GetAtMs(); got != epochMs(tt.wantAt) {
+				t.Fatalf("at = %d, want %d", got, epochMs(tt.wantAt))
+			}
+		})
+	}
+}
+
+func TestADeadQueryEndsTheCompaction(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+	// Act
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	})
+
+	// Assert: the restarting turn draws neither the step nor the line.
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	thinking := h.view(t).GetStrip().GetStatus().GetThinking()
+	if thinking.GetCompacting() != nil || thinking.GetActivity().GetCompaction() != nil {
+		t.Fatalf("thinking = %+v, want no compaction on the restarting turn", thinking)
+	}
+}
+
+func TestTheCompactionLinesEndIsRecordedWithItsCause(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnSessionUpdate(testWS, vendorCompacting())
+
+	// Act
+	h.r.OnContextCut(testWS, mainAgent, compactedCut())
+
+	// Assert
+	ended := recordsOf(h.log.Records(), "daemon.footer.compaction_line_ended")
+	if len(ended) != 1 || ended[0].Context["cause"] != "daemon.footer.on_context_cut" {
+		t.Fatalf("records = %+v, want one end caused by the cut", ended)
+	}
+}
+
+func TestTheColdGateAnswersLine(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		want string
+	}{
+		{
+			name: "a turn's terminal leaves the answer's line to the answer",
+			act: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+				endTurn(h, "turn-1")
+			},
+			want: "compacted and resumed",
+		},
+		{
+			name: "a relayed concluded phase's dwell leaves the answer's line to the answer",
+			act: func(h *harness) {
+				h.r.OnSessionUpdate(testWS, sessionCompactionProgress(
+					progress(conversationv1.SessionCompactionPhase_SESSION_COMPACTION_PHASE_STARTED, 0, 0, "")))
+				h.clock.Advance(DefaultMomentaryDwell)
+			},
+			want: "compacted and resumed",
+		},
+		{
+			name: "clearing the answer ends the line",
+			act:  func(h *harness) { h.r.SetColdGateAnswer(testWS, nil) },
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the gate's verb relayed its concluded phase.
+			h := newHarness(t)
+			connected(h)
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Detail: "the conversation is cold"})
+			h.r.SetColdGateAnswer(testWS, &ColdGateAnswer{Choice: ChoiceCompact, Text: "compacted and resumed"})
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			if got := compactionText(t, h); got != tt.want {
+				t.Fatalf("activity = %q, want %q", got, tt.want)
+			}
+			if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
+				t.Fatalf("records = %+v, want no violation on the cold path", errs)
+			}
+		})
 	}
 }

@@ -419,7 +419,10 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			s.tok.settled = true
 			s.hook = nil
 			s.interrupting = false
+			// THE TURN'S END IS THE COMPACTION'S END: the flag and the line
+			// go together (compaction.go, "the line's lifetime").
 			s.compacting = false
+			r.endCompactionAtTerminal(ws, s, *turn)
 			if FailureBlocks(failure) {
 				s.blocked = r.blockFor(failure)
 				return
