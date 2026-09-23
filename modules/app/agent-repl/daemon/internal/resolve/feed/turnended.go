@@ -104,6 +104,10 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		r.upsert(s, at, row, true)
 	}
 
+	// THE TURN'S PROMPTS STOP WORKING ON THIS EDGE, whether or not the terminal
+	// row itself was drawn (a confirmed /clear suppresses it, and still ended).
+	r.settleTurnPrompts(s, *turn)
+
 	// A SPAWN WHOSE START NEVER ARRIVED is the same class of producer fault,
 	// and the turn ending is the last moment its start could still have named
 	// the created agent.
@@ -536,6 +540,7 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 		"the query died out from under the turn; the turn's terminal row was drawn",
 		dlog.Context{"turn": turn, "cause": queryDeathWord(died)})
 	r.upsert(s, at, row, true)
+	r.settleTurnPrompts(s, ids.TurnID(turn))
 	r.breakPlanEpisodes(s, "the query died while plan mode was still open")
 	s.turnInFlight = nil
 }

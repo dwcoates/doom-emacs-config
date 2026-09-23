@@ -272,8 +272,13 @@ export function feedId(value: string): FeedId {
   return create(FeedIdSchema, { value });
 }
 
-/** A user-prompt row. */
-export function userPromptRow(id: string, text: string, turn?: string): FeedRow {
+/** A user-prompt row; WORKING is the daemon's flag for its turn. */
+export function userPromptRow(
+  id: string,
+  text: string,
+  turn?: string,
+  working = false,
+): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
     turn: turn === undefined ? undefined : create(TurnIdSchema, { value: turn }),
@@ -285,17 +290,19 @@ export function userPromptRow(id: string, text: string, turn?: string): FeedRow 
           case: "success",
           value: { body: { blocks: [{ block: { case: "text", value: { text } } }] } },
         },
+        working,
       }),
     },
   });
 }
 
-/** An agent-prompt row. */
+/** An agent-prompt row; WORKING is the daemon's flag for its turn. */
 export function agentPromptRow(
   id: string,
   address: string,
   text: string,
   turn?: string,
+  working = false,
 ): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
@@ -305,6 +312,7 @@ export function agentPromptRow(
       value: create(FeedAgentPromptSchema, {
         address: { text: address },
         body: { blocks: [{ block: { case: "text", value: { text } } }] },
+        working,
       }),
     },
   });
