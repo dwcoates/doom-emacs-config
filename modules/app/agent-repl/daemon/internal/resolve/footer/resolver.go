@@ -700,9 +700,16 @@ func (r *resolver) logUnreadableSample(ws ids.WorkspaceID, s *wsState, usage *co
 		// report and nothing was read.
 		return
 	}
+	fields := dlog.Context{"reason": unavailableReason(unavailable.Unavailable)}
+	// THE SHIM'S OWN CAUSE RIDES THE RECORD. Since the strip stopped drawing an
+	// unread caveat (owner ruling, fc4917be4) this breadcrumb is the ONLY place
+	// a sampling failure stays visible, and the reason arm alone says only
+	// "something failed" — the cause is the shim's account of what.
+	if failure := unavailable.Unavailable.GetSamplingFailure(); failure != nil {
+		fields["cause"] = failure.GetCause()
+	}
 	r.logOf(ws, s).Debug("daemon.footer.usage_sample_unreadable",
-		"an account-usage sample read no figure; the figures on hand stand",
-		dlog.Context{"reason": unavailableReason(unavailable.Unavailable)})
+		"an account-usage sample read no figure; the figures on hand stand", fields)
 }
 
 // unavailableReason names an unavailable sample's reason arm for the logs. An
