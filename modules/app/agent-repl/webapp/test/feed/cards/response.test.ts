@@ -20,15 +20,17 @@ import {
   REVEALED_ATTRIBUTE,
   THINKING_BUBBLE_CLASS,
   USAGE_REVEALED_CLASS,
+  drawFeedResponse,
+  revealedSoFar,
+} from "../../../src/feed/cards/response.js";
+import {
   RESPONSE_BODY_TAG,
   TREE_WIDTH_UNMEASURABLE,
   createResponseBody,
-  drawFeedResponse,
   measureTreeCols,
   proseHtml,
   proseNeedsWidth,
-  revealedSoFar,
-} from "../../../src/feed/cards/response.js";
+} from "../../../src/bubble/body.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
 import { TICKING_ATTRIBUTE, stopTicking } from "../../../src/feed/ticking.js";
