@@ -475,6 +475,32 @@ describe("installClickExpand", () => {
     expect(box.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 
+  it("expands a standalone title fold, a card title with no card fold, on its own click", () => {
+    // Arrange — a hook card's headline: its own fold (title-fold.ts).
+    const el = document.createElement("div");
+    el.innerHTML = `<div class="tool-card tool-hook"><span class="tool-name title-fold title-fold-standalone">h</span></div>`;
+    document.body.appendChild(el);
+    feed = el;
+    const title = el.querySelector(".title-fold") as HTMLElement;
+    installClickExpand(el, () => "");
+    // Act
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(title.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("opens the whole card, not the title, on a click on a card-owned title", () => {
+    // Arrange — a tool call's input line, which defers to its `.tool-fold` card.
+    const { feed: el, box } = mountFeed(`<pre class="bash-input title-fold">$ ls</pre>`);
+    installClickExpand(el, () => "");
+    // Act
+    (el.querySelector(".title-fold") as HTMLElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
   it("restores the capped preview on the second click", () => {
     // Arrange — an already-expanded section, the state a first click leaves.
     const { feed: el, box } = mountFeed("body text");
