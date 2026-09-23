@@ -1470,6 +1470,18 @@ func (s *sidecar) pollAll() {
 			Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
 		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
+		if result.More && s.pass != nil {
+			// THE BATCH STOPPED AT ITS BOUND, NOT AT THE FILE'S END. The file goes
+			// back to the head of the pass, so it is read again on this tick in
+			// the next bounded write rather than one poll interval later — each
+			// write stays small enough not to hold the store, and the slice
+			// deadline above still yields the tick to discovery.
+			s.pass.pending = append([]string{path}, s.pass.pending...)
+			s.log.With(logging.Context{
+				Operation: "tail-bounded", Path: path, TaskID: w.target.TaskID,
+				Offset: logging.Off(result.Next.GetOffset()),
+			}).LogVerbose("the batch stopped at its bound with bytes unread past it; the file is read again at once")
+		}
 	}
 	if s.pass == nil {
 		// PRODUCTION WAS SUSPENDED FROM INSIDE THE LOOP — a cancelled terminal's
