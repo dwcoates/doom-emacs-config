@@ -10,9 +10,11 @@ import {
   MARKDOWN_SLOT_ATTRIBUTE,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
+  isBubbleBody,
   markdownSlot,
   measureTreeCols,
   paintBody,
+  paintGeneration,
   proseNeedsWidth,
   repaintSlot,
   type BubbleBody,
@@ -471,5 +473,81 @@ describe("paintBody", () => {
     expect(() => paintBody(bare, [])).toThrow(/bubble body invariant/);
     const record = await forwardedRecord(capture, BODY_INVARIANT);
     expect(record.context).toMatchObject({ reason: "a bubble body was painted that has no painter" });
+  });
+});
+
+describe("paintBody: a repaint is in place", () => {
+  it("keeps a slot of the same class and repaints it with the new source", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const [slot] = paintBody(body, [markdownSlot("prose", "one")]);
+    // Act
+    const [again] = paintBody(body, [markdownSlot("prose", "**two**")]);
+    // Assert
+    expect([again, slot.textContent?.trim()]).toEqual([slot, "two"]);
+  });
+
+  it("keeps an unchanged paragraph's node across the repaint", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const [slot] = paintBody(body, [markdownSlot("prose", "first\n\nsec")]);
+    const first = (slot as HTMLElement).firstElementChild;
+    // Act
+    paintBody(body, [markdownSlot("prose", "first\n\nsecond")]);
+    // Assert
+    expect((slot as HTMLElement).firstElementChild).toBe(first);
+  });
+
+  it("takes a slot of another class as the new content's own", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const [slot] = paintBody(body, [markdownSlot("prose", "one")]);
+    // Act
+    const [again] = paintBody(body, [markdownSlot("plan-prose", "one")]);
+    // Assert
+    expect(again).not.toBe(slot);
+  });
+
+  it("never keeps a stale non-slot node, whose listeners belong to the old push", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const badge = document.createElement("span");
+    paintBody(body, [badge]);
+    const fresh = document.createElement("span");
+    // Act
+    const [drawn] = paintBody(body, [fresh]);
+    // Assert
+    expect(drawn).toBe(fresh);
+  });
+
+  it("takes the body's next paint generation", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const before = paintGeneration(body);
+    // Act
+    paintBody(body, []);
+    // Assert
+    expect(paintGeneration(body)).toBe(before + 1);
+  });
+
+  it("leaves the generation alone on a slot repaint", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const [slot] = paintBody(body, [markdownSlot("prose", "one")]);
+    const before = paintGeneration(body);
+    // Act
+    repaintSlot(body, slot as HTMLElement, "two");
+    // Assert
+    expect(paintGeneration(body)).toBe(before);
+  });
+});
+
+describe("isBubbleBody", () => {
+  it("knows a body this pipeline made", () => {
+    expect(isBubbleBody(createBubbleBody())).toBe(true);
+  });
+
+  it("refuses any other element", () => {
+    expect(isBubbleBody(document.createElement("div"))).toBe(false);
   });
 });
