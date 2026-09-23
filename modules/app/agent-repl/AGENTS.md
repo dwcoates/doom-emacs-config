@@ -681,6 +681,17 @@ the daemon is what failed, no daemon can push that fact, so the webapp says it
 itself. It is written down in `webapp/AGENTS.md`, it is the only one, and a
 second exception is an owner ruling rather than a judgement call.
 
+## The topbar's warning chip is the webapp's one error surface
+
+Owner ruling, standing (2026-09-23). The topbar's warning chip and its
+dropdown are the ONE canonical place the webapp makes an error visible to the
+user: no overlays, banners, toasts or corner cards. The daemon's pushed
+warnings are drawn there verbatim, and the page's own client-local failures
+(the ones no daemon can push, because it may be what is unreachable) are
+listed there too, with or without a topbar push. The chip is red (`--err`).
+Every error is also always logged; the chip never stands in for the record.
+The details live in `webapp/AGENTS.md`.
+
 ## An invisible action is a logging defect, not a test problem
 
 When a test, an investigation, or a person cannot tell from the logs what the

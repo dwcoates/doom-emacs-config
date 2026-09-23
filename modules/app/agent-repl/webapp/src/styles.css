@@ -1681,7 +1681,7 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    column; at the cap that lands its left edge exactly on the response's left
    rail and its right edge on the prompt's right rail. Cards still shrink to
    fit short content wherever their own rule says `width: fit-content` (the
-   result chip, failure card, system note, queued card) — only the CEILING is
+   result chip, system note, queued card) — only the CEILING is
    normalized here. Scoped to direct `.feed-item` children, so a tool card or
    permission prompt NESTED inside a bubble's activity panel keeps its full
    width. The narrower 0.985 inset the tool cards used to carry, and the token
@@ -2481,7 +2481,6 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
    is deliberately NOT here — like the clear-context boundary rule it spans the
    column as a separator rather than reading as a badge. */
 .result,
-.failure-card,
 .system-note {
   width: fit-content;
   max-width: var(--agent-bubble-cap);
@@ -2628,79 +2627,6 @@ html[data-page-hidden] .bubble.user[data-wave="working"] {
   font-family: ui-monospace, monospace;
   font-size: calc(0.72rem * var(--feed-text-scale));
   line-height: 1.5;
-}
-
-/* --- the system-failure card (F4) -----------------------------------------
-   Where a user whose workspace changed color finds out WHY. It replaces both
-   the grey one-line retry badge and the red error banner, and absorbs the
-   amber #degraded-banner that used to sit above the feed as chrome.
-
-   The border color is the failure's CLASS, taken from the SAME five-color
-   assignment the workspace dot takes (proto/vocab/render-colors.json), so a
-   card can never explain a workspace in a color the workspace is not. There
-   is deliberately no third hue here: a failure is either our machinery
-   (--init blue) or the vendor's (--blocked purple), and inventing a red for
-   "error in general" is what put three answers about one API line in the
-   tree to begin with. */
-.failure-card {
-  border: 1px solid var(--err);
-  border-left-width: 3px;
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  font-size: calc(0.85rem * var(--feed-text-scale));
-}
-
-/* INTERNAL — agent-repl's own machinery: shim down, store outage, a refused
-   command. The same blue the workspace resolves to, because nothing about the
-   account is implicated. */
-.failure-card.failure-internal {
-  border-color: var(--init);
-  color: var(--init);
-}
-
-/* API — the vendor or the account stopped the work. The same purple
-   vendor-blocked resolves to: releasing it needs a human, never a retry. */
-.failure-card.failure-api {
-  border-color: var(--blocked);
-  color: var(--blocked);
-}
-
-.failure-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-}
-
-.failure-mark {
-  flex: none;
-  font-weight: 700;
-}
-
-/* The raw account the source gave, beside the prose rather than replacing it.
-   Muted and monospaced: it is evidence for whoever debugs this, not the
-   sentence the reader is meant to take away. */
-.failure-detail {
-  margin-top: 0.25rem;
-  color: var(--muted);
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: calc(0.75rem * var(--feed-text-scale));
-  overflow-wrap: anywhere;
-}
-
-/* A RESOLVED window: the failure ended, so the card settles. The border drops
-   to the ordinary card rule and the text to the ordinary foreground — a card
-   that went on shouting would be lying about the present to be accurate about
-   the past. The check and the closing time say it happened and it is over. */
-.failure-card.resolved {
-  border-color: var(--border);
-  border-left-color: var(--border);
-  color: var(--muted);
-}
-
-.failure-resolved {
-  margin-top: 0.25rem;
-  font-size: calc(0.7rem * var(--feed-text-scale));
-  color: var(--muted);
 }
 
 /* --- §2.13 in-flight message queue ----------------------------------------
@@ -4155,19 +4081,6 @@ body.draining #composer-input::placeholder {
 }
 #hold-tray:empty { display: none; }
 
-/* The client-local failure overlay. Positioned above the page but BELOW the
-   login overlay (z-index 50), which is modal and must cover everything. Empty
-   -- the healthy case -- it takes no space and swallows no clicks. */
-#failure-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  pointer-events: none;
-}
-#failure-overlay:empty { display: none; }
-/* The overlay is a positioning frame; its content takes the pointer back. */
-#failure-overlay > * { pointer-events: auto; }
-
 /* The composer ships hidden: production runs composer-less, since the root
    composer is host-native (Emacs), and only the dev-mode boot reveals it. */
 #composer[hidden] { display: none; }
@@ -4207,89 +4120,6 @@ body.draining #composer-input::placeholder {
 .tone-red { color: var(--err); }
 .tone-yellow { color: var(--async); }
 .tone-green { color: var(--ok); }
-
-/* ---- client-local failure overlay (src/failure/overlay.ts) ------------- */
-
-/* The page-wide region for the six failures a FRONTEND mints. It is the
-   residue the pushed surfaces cannot carry, because when it fires the footer
-   and the topbar may be exactly what is broken -- so it is fixed to the
-   viewport rather than placed in the document flow, and it does not move when
-   the feed scrolls.
-
-   Bottom-right, above everything, and NOT modal: a page whose link dropped is
-   still readable, and stealing the pointer would stop the user re-reading the
-   conversation the card is about. `pointer-events` is therefore off on the
-   region and back on for the cards themselves. */
-#failure-overlay {
-  position: fixed;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: min(28rem, calc(100vw - 2rem));
-  pointer-events: none;
-}
-
-/* Empty while healthy, and the overlay costs nothing until a card is filed. */
-#failure-overlay[data-empty] {
-  display: none;
-}
-
-#failure-overlay > .failure-card {
-  pointer-events: auto;
-  background: var(--bg);
-  box-shadow: var(--sidebar-shadow);
-}
-
-/* The card's own outline is the ported system-failure look: a rounded rule
-   with a thick LEFT edge in the failure's color. The color comes from
-   `.tone-*` above, resolved through render-colors.json's `failure_sides`, so
-   the border and the text take it from `currentColor` and the card can never
-   explain a workspace in a color the workspace is not. */
-.failure-card {
-  border: 1px solid currentColor;
-  border-left-width: 3px;
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-}
-
-.failure-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-}
-
-/* A GLYPH, never an emoji: it inherits the card's color, which an emoji
-   cannot, so the mark and the border always agree. */
-.failure-mark {
-  flex: none;
-  font-weight: 700;
-}
-
-/* The headline is the sentence the reader is meant to take away, so it takes
-   the page foreground rather than the alarm color -- the border and the mark
-   already carry the alarm, and coloring the prose too reads as shouting. */
-.failure-message {
-  color: var(--fg);
-}
-
-/* The evidence: the producer's own account, for whoever debugs this. Muted
-   and monospaced so it plainly is not the sentence above it. */
-.failure-detail {
-  margin-top: 0.25rem;
-  color: var(--muted);
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-}
-
-.failure-detail-label {
-  margin-right: 0.3rem;
-  opacity: 0.8;
-}
 
 /* ---- link components (src/link.ts) ------------------------------------- */
 
@@ -6171,7 +6001,7 @@ body.draining #composer-input::placeholder {
    already uses for coordinated daemon work, OUTLINED rather than filled.
 
    Deliberately not an alarm. A pending bounce is an announcement, and painting
-   it in the failure overlay's register would spend the reader's attention on a
+   it in the warning chip's alarm red would spend the reader's attention on a
    routine restart. */
 #drain-banner:empty { display: none; }
 
@@ -6438,8 +6268,10 @@ body.draining #composer-input::placeholder {
      shifted one. */
   min-width: 3.2rem;
 }
+/* RED, the alarm `--err` (owner ruling, 2026-09-23): the chip is the ONE place
+   the webapp shows an error, the page's own client-local failures included. */
 .topbar-warning-chip {
-  color: var(--thinking);
+  color: var(--err);
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;

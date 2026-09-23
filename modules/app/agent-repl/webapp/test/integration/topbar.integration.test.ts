@@ -25,7 +25,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
-import { startHarness, type Harness } from "./harness";
+import { chipFailureText, startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
 import {
@@ -1053,9 +1053,7 @@ describe("the login terminal's transport death", () => {
     // Arrange / Act
     await killTerminal();
     // Assert
-    expect(harness.$('[data-component="failure-overlay"]')?.textContent).toContain(
-      "login terminal",
-    );
+    expect(await chipFailureText(harness, "controlPlaneFailed")).toContain("login terminal");
   });
 
   it("does not re-probe the pty", async () => {

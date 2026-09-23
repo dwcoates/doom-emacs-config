@@ -39,7 +39,7 @@ import {
   setLogger,
   type ClientLogLevel,
 } from "../../src/log";
-import { mountFailureOverlay } from "../../src/failure/overlay";
+import { createLocalFailures } from "../../src/failure/local";
 import { bootFailed } from "../../src/failure/sink";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
 import { createRowRenderers } from "../../src/feed/renderers";
@@ -220,7 +220,7 @@ export interface MountedApp {
   click(selector: string): Promise<void>;
   /** Click an element directly (for elements found by a richer query). */
   clickElement(element: HTMLElement): Promise<void>;
-  /** The failure overlay's currently drawn arms. */
+  /** The client-local failure arms the topbar's warning chip currently lists. */
   failureArms(): string[];
   /** The refusal arms currently drawn anywhere, with their host selectors. */
   refusalArms(): string[];
@@ -350,6 +350,31 @@ interface Endpoint {
 }
 
 /**
+ * The client-local failure arms the topbar's warning chip lists, read off the
+ * document: the chip's `data-local-arms` hook, so no reveal has to be opened
+ * to say which failures the page is showing.
+ */
+export function chipFailureArms(): string[] {
+  const chip = document.querySelector<HTMLElement>("#topbar .topbar-warnings");
+  return (chip?.dataset.localArms ?? "").split(" ").filter((arm) => arm !== "");
+}
+
+/**
+ * Everything the warning chip shows for the client-local failure ARM: its row
+ * in the chip's list and, when the row opens one, the detail behind it — the
+ * headline and the evidence, as the reader would see them.
+ */
+export async function chipFailureText(app: MountedApp, arm: string): Promise<string> {
+  await app.click("#topbar .topbar-warning-chip");
+  const row = app.$(`#topbar [data-reveal] [data-local][data-arm="${arm}"]`);
+  if (row === null) throw new Error(`the warning chip lists no ${arm} failure`);
+  const listed = row.textContent ?? "";
+  if (row.tagName !== "BUTTON") return listed;
+  await app.clickElement(row);
+  return `${listed}\n${app.$("#topbar [data-reveal]")?.textContent ?? ""}`;
+}
+
+/**
  * Mount the app against a daemon SOMEONE ELSE started.
  *
  * The Go e2e world owns the real quartet's lifecycle and hands its daemon's
@@ -443,7 +468,10 @@ async function mountApp(
   });
   const client = createAgentReplClient(transport);
   const ticker = createTicker();
-  const failures = mountFailureOverlay(shell.failureOverlay);
+  // MAIN.TS'S OWN ORDER: the topbar is mounted before any stream, so its
+  // warning chip can list a failure that stops one from ever opening.
+  const failures = createLocalFailures();
+  const topbar = mountTopbar(shell.topbar, { failures });
   const composerEnabled = options.composer === true;
 
   // THE REAL PAGE MUX, on purpose. This harness drives a REAL daemon, so its
@@ -485,7 +513,7 @@ async function mountApp(
 
   const panels: SubmitPromptCommandPanel[] = [];
   const gate = createComposerGate();
-  const handles: Handle[] = [failures];
+  const handles: Handle[] = [failures, topbar];
 
   /**
    * PRODUCTION'S OWN PANEL SINK (main.ts): the answer to a slash command is
@@ -506,15 +534,15 @@ async function mountApp(
   // the first view mounts, so the `transferring_away` move hook is registered
   // before any refusal can carry that arm back.
   // MAIN.TS'S OWN BOOT PATH. A terminal adoption refusal throws
-  // `AdoptionFailed`, main mints `boot_failed` from it, and NOTHING is mounted
-  // over a workspace this page could not adopt. The harness mirrors that: it
-  // mints the same card, stops the daemon it started (no Harness is returned to
+  // `AdoptionFailed`, main mints `boot_failed` from it, and NOTHING more is
+  // mounted over a workspace this page could not adopt. The harness mirrors
+  // that: it files the same failure, stops the daemon it started (no Harness is returned to
   // stop it later), and lets the throw reach the test.
   try {
     await adoptAtBoot(ctx);
   } catch (err) {
-    // The overlay is LEFT MOUNTED on purpose: its cards are the only account
-    // of the failed boot a test can read.
+    // The topbar is LEFT MOUNTED on purpose: its warning chip is the only
+    // account of the failed boot a test can read.
     failures.report(bootFailed(err instanceof Error ? err.message : String(err)));
     await fake?.stop();
     await closeDispatcher();
@@ -545,7 +573,7 @@ async function mountApp(
     terminalFactory: jsdomTerminalFactory,
   });
   handles.push(login);
-  handles.push(mountTopbar(shell.topbar, ctx, { openLogin: (control) => login.open(control) }));
+  topbar.watch(ctx, { openLogin: (control) => login.open(control) });
   handles.push(mountSidebar(shell.sidebar, ctx));
   handles.push(mountHoldTray(shell.holdTray, ctx));
 
@@ -667,8 +695,7 @@ async function mountApp(
     );
   };
 
-  const harnessFailureArms = (): string[] =>
-    $$('[data-component="failure-overlay"] [data-arm]').map((el) => el.dataset.arm ?? "");
+  const harnessFailureArms = (): string[] => chipFailureArms();
 
   const harness: MountedApp = {
     ctx,
@@ -748,8 +775,7 @@ async function mountApp(
       element.click();
       await settle();
     },
-    failureArms: () =>
-      $$('[data-component="failure-overlay"] [data-arm]').map((el) => el.dataset.arm ?? ""),
+    failureArms: () => chipFailureArms(),
     refusalArms: () => $$(".refusal[data-arm]").map((el) => el.dataset.arm ?? ""),
   };
 
