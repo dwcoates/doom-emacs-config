@@ -259,7 +259,10 @@ unmarked is DISCRETIONARY by default.
        sessionless; the displaced user turn is captured durably, then
        ENDED (KillTurn) once the capture is durable, then resubmitted
        exactly once at lease release, across a daemon bounce (ruled
-       2026-09-02; confirmed against the daemon's implementation).
+       2026-09-02; confirmed against the daemon's implementation). The
+       kill is UNFORCED (ruled 2026-09-23): it ends the synchronous turn
+       only, its detached work runs on, and the admitted merge waits on
+       the fleet's freeness before it drives the session.
    - RULED (merge-variants investigation):
      - TWO INGRESSES, ONE ENGINE: Emacs merges arrive via the
        MergeWorkspace rpc, non-Emacs merges via the workspace
