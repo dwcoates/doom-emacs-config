@@ -491,7 +491,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return "", orchestrator.RouteParked(ctx, ws, said)
 		},
 		DrainRefusals: refusalNoter{ref: &drainController},
-		Log:           p.Surfaces,
+		// A held-prompt edit is state on the host view; the server exists only
+		// later, so the publish reads it out of the relay forwarder.
+		PublishHost: relay.PublishHostWorkspace,
+		Log:         p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the prompt queue: %w", err)
