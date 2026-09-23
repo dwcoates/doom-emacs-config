@@ -802,6 +802,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     if (previous === undefined) {
       carryForRow(requireMessage(state.row.id, "FeedRow.id").value, body);
     }
+    if (body === previous) {
+      // THE RENDERER UPDATED ITS OWN ELEMENT IN PLACE (the response bubble
+      // does): nothing is replaced, so the reader's folds, the scroll position
+      // inside the bubble and the content under it all stay where they are.
+      mirrorState(state);
+      return;
+    }
     if (previous !== undefined) {
       // R2: THE WIRE'S FOLD IS THE INITIAL FOLD. A push says how a section
       // STARTS; after that the reader's own toggle wins, so a re-push of the
