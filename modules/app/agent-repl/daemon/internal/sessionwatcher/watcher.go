@@ -143,6 +143,18 @@ type watcher struct {
 	closedTurns     map[ids.TurnID]TurnClose
 	closedTurnOrder []ids.TurnID
 
+	// seenTerminals is every terminal row this watcher has been served, keyed
+	// by the watch that carried it and the row's pointer (terminalKey). A
+	// terminal is a row of its own in the book — one per turn, one per agent
+	// run — so its pointer IS its identity, and a second sighting of it is a
+	// REPLAY: the shim re-serving rows it already served after the store ended
+	// a standing watch. A replay is dropped whole; it never reaches a view and
+	// is never charged to the turn now open. See routeAgentFrameLocked.
+	//
+	// UNBOUNDED BY DESIGN: it grows by one per terminal row, and a bounded
+	// memory would re-open exactly the hole it closes for the oldest rows.
+	seenTerminals map[string]struct{}
+
 	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
 	// started records that the session facts have been taken up, from
 	// StartSession's answer or the shim's re-announcement. It is what makes a
@@ -271,7 +283,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
 		closedTurns: map[ids.TurnID]TurnClose{},
 		facts:       map[string]*activityFact{},
-		unseenAsks:  map[string]struct{}{},
+
+		seenTerminals: map[string]struct{}{},
+		unseenAsks:    map[string]struct{}{},
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	if session.MainKnownThrough != nil {
