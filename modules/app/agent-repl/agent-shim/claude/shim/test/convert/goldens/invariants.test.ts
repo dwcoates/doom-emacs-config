@@ -7,7 +7,8 @@
  * converter defect anywhere, a built-in landing as `AgentUnmodeled`, usage
  * double-counted across a response's units, an exempt tool leaking a frame.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import {
   EXEMPT_TOOLS,
   ENGINE_OWNED_TOOLS,
@@ -43,6 +44,20 @@ describe("the fold never degrades on a real capture", () => {
   it.each(SCENARIOS)("%s writes no unknown-discriminator residue", (scenario) => {
     const unknown = residueKeys(foldScenario(scenario)).filter((key) => key.startsWith("unknown/"));
     expect(unknown).toEqual([]);
+  });
+
+  it.each(SCENARIOS)("%s leaves no streamed unit started and unsettled", (scenario) => {
+    const before = vi.mocked(writeSync).mock.calls.length;
+    foldScenario(scenario);
+    const calls = vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<
+      [number, Buffer, number, number]
+    >;
+    const unsettled = calls
+      .map(([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { message: string },
+      )
+      .filter((record) => record.message.startsWith("invariant violated: a streamed unit"));
+    expect(unsettled).toEqual([]);
   });
 
   it.each(SCENARIOS)("%s was itself a clean capture", (scenario) => {

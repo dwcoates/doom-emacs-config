@@ -1752,3 +1752,121 @@ describe("remembering the vendor's API failure class", () => {
     expect(held?.context.vendor_error).toBe("rate_limit");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Where the fold ends each stream's block state.
+// ---------------------------------------------------------------------------
+
+describe("where the fold ends a stream", () => {
+  const SPAWN = "toolu_spawn";
+  const UNSETTLED =
+    "invariant violated: a streamed unit was started and never settled; its row stays unsettled";
+
+  /** A stream event on the stream `parent` names. */
+  function streamOn(parent: string | null, event: Record<string, unknown>): SdkMessage {
+    return {
+      type: "stream_event",
+      uuid: `uuid-${String(event.type)}`,
+      session_id: "session-1",
+      parent_tool_use_id: parent,
+      event,
+    } as unknown as SdkMessage;
+  }
+
+  /** A response on the stream `parent` names that opens a text block and never settles it. */
+  function strandedBlock(parent: string | null, messageId: string): SdkMessage[] {
+    return [
+      streamOn(parent, { type: "message_start", message: { id: messageId } }),
+      streamOn(parent, { type: "content_block_start", index: 0, content_block: { type: "text" } }),
+    ];
+  }
+
+  /** The `detected_at` of every unsettled-unit report folding `messages` wrote. */
+  function unsettledDetectedAt(messages: readonly SdkMessage[]): unknown[] {
+    const fold = createFold();
+    mockedWriteSync.mockClear();
+    for (const message of messages) fold.onSdkMessage(message, foldContext());
+    return persistedRecords()
+      .filter((record) => record.message === UNSETTLED)
+      .map((record) => record.context.detected_at);
+  }
+
+  it("ends a subagent's stream at the spawn's CONCLUDING tool_result", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      toolResult(SPAWN, { status: "completed", content: [] }),
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["agent_end"]);
+  });
+
+  it("does NOT end a subagent's stream at a LAUNCH RECEIPT", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      toolResult(SPAWN, { status: "async_launched", isAsync: true }),
+    ]);
+
+    // Assert.
+    expect(detected).toEqual([]);
+  });
+
+  it("ends a backgrounded subagent's stream at the task_notification naming its call", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "a0000000000000001",
+        tool_use_id: SPAWN,
+        status: "completed",
+        output_file: "/tmp/out",
+        summary: "done",
+        uuid: "uuid-notification",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["agent_end"]);
+  });
+
+  it("ends the main stream at the turn's result", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(null, "msg_main"),
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "done",
+        uuid: "uuid-result",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["turn_end"]);
+  });
+
+  it("does NOT end a subagent's stream at the turn's result", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(SPAWN, "msg_sub"),
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "done",
+        uuid: "uuid-result",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual([]);
+  });
+});

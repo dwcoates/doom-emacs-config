@@ -14,8 +14,29 @@
  * The identity is `<message.id>:<block_index>`, 0-based. THE INDEX IS PER
  * MESSAGE, not per line: the vendor splits one assistant message into several
  * lines that each hold one block and share a `message.id`, so the counter runs
- * across those lines and resets at `message_stop`. That is the whole of the
- * fold's block state.
+ * across those lines and is dropped at `message_stop`.
+ *
+ * # One block state PER STREAM, never one per fold
+ *
+ * The main agent and every subagent stream at once, and their events
+ * INTERLEAVE on the one SDK iterator: a background subagent's `message_start`
+ * can land between two deltas of the main agent's open block. Block state is
+ * therefore keyed by the stream a message rides — the main stream, or the
+ * spawning call a subagent's messages name, resolved by the SAME rule as the
+ * book ({@link spawningCallOf}) — and held in {@link StreamBlocks}. A stream's
+ * state exists from its `message_start` (or the first line of an un-streamed
+ * response) until its `message_stop`, the next response on the same stream,
+ * the turn's end (the main stream) or its agent's end (a subagent's). Every
+ * converter resolves it from the message's OWN parent. There is no shared
+ * cursor any agent's message could overwrite for another: when one fold held a
+ * single message id, a subagent's `message_start` re-keyed the main agent's
+ * next deltas onto the subagent's message id, and the main book grew a second,
+ * never-settled bubble.
+ *
+ * A streamed unit that its stream STARTED and never SETTLED is an invariant
+ * violation: it is logged at error level, once, with the stream, the message
+ * id and the unit id, at whichever of those ends comes first — or at the
+ * assistant line that moves past it. Nothing patches the row up.
  *
  * # Usage rides ONE unit
  *
@@ -35,7 +56,7 @@ import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, prose, settledAt, type FrameOrigin } from "./entries.js";
-import { bookFor, type FoldContext } from "./fold-context.js";
+import { bookFor, spawningCallOf, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
@@ -43,20 +64,19 @@ import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter
 const LOGGER = bindLog({ component: "shim-convert-stream", operation: "shim.convert.stream" });
 
 // ---------------------------------------------------------------------------
-// The fold's block state — the whole of it
+// The fold's block state — one per stream
 // ---------------------------------------------------------------------------
 
 /**
- * The per-message block bookkeeping, and nothing else.
+ * One OPEN response's block bookkeeping, and nothing else.
  *
- * BOUNDED AND CLEARED AT `message_stop`. It holds the message id the counter
- * belongs to, the next index to hand out, and the currently-open thinking block
- * (so the vendor's separate thinking-token estimate can reach the unit it is
- * about). None of it survives a message.
+ * Exists only while its stream has a response open, which is why the message
+ * id is not optional: "no response open" is the ABSENCE of a state, never a
+ * state with no message.
  */
 export interface BlockState {
   /** The API message id the counter belongs to. */
-  messageId?: string;
+  readonly messageId: string;
   /** The next 0-based index to hand an assistant line's block. */
   nextIndex: number;
   /** The thinking block currently streaming, for the token-estimate relay. */
@@ -80,24 +100,164 @@ export interface BlockState {
   openBlockIndex?: number;
   /** Whether this response's usage has already been attached to a unit. */
   usageAttached: boolean;
+  /**
+   * The units this response's STREAM started (`content_block_start` of prose
+   * or reasoning) that no assistant line has settled yet, by block index.
+   * Whatever is still here when the stream moves past it is a stuck bubble.
+   */
+  readonly unsettled: Map<number, conversationv1.AgentActivityId>;
 }
 
-export function createBlockState(): BlockState {
-  return { nextIndex: 0, usageAttached: false };
+/** The key of the MAIN stream; a spawning call's id is never empty. */
+const MAIN_STREAM = "";
+
+/** The stream key a message's `parent_tool_use_id` names — the book's own rule. */
+function streamKeyOf(parentToolUseId: unknown): string {
+  return spawningCallOf(parentToolUseId) ?? MAIN_STREAM;
 }
 
-/** Start a new API response's block numbering. */
-function beginMessage(state: BlockState, messageId: string): void {
-  state.messageId = messageId;
-  state.nextIndex = 0;
-  state.openThinking = undefined;
-  state.openBlockIndex = undefined;
-  state.usageAttached = false;
+/** The stream key as a log field: `main`, or the spawning call's id. */
+function streamLabel(key: string): string {
+  return key === MAIN_STREAM ? "main" : key;
 }
 
-/** The next index for a block of `messageId`, continuing across split lines. */
-function nextIndexFor(state: BlockState, messageId: string): number {
-  if (state.messageId !== messageId) beginMessage(state, messageId);
+/** Where a started-but-never-settled unit was caught. */
+type UnsettledAt = "message_start" | "assistant" | "message_stop" | "turn_end" | "agent_end";
+
+/**
+ * Report every unit `state` started and never settled whose index passes
+ * `stillOpen`'s test as FAILED to — an invariant violation, logged once each
+ * and then forgotten so a later checkpoint does not report it twice.
+ */
+function reportUnsettled(
+  key: string,
+  state: BlockState,
+  at: UnsettledAt,
+  stillOpen: (index: number) => boolean = () => false,
+): void {
+  for (const [index, activityId] of state.unsettled) {
+    if (stillOpen(index)) continue;
+    state.unsettled.delete(index);
+    LOGGER.error(
+      {
+        stream: streamLabel(key),
+        message_id: state.messageId,
+        activity_id: activityId.value,
+        block_index: index,
+        detected_at: at,
+        detail: `the stream reached ${at} with unit ${activityId.value} started and never settled`,
+      },
+      "invariant violated: a streamed unit was started and never settled; its row stays unsettled",
+    );
+  }
+}
+
+/**
+ * The block state of every stream with a response open, KEYED BY STREAM.
+ *
+ * Every method takes the vendor message's OWN `parent_tool_use_id` and resolves
+ * the stream from it through {@link streamKeyOf} — the book's rule — so a
+ * converter can only ever read or write the state of the stream the message it
+ * is converting rides; there is no method that takes a state to act on.
+ * Bounded by the number of agents streaming at once, and self-emptying: a
+ * stream's entry is dropped at its `message_stop`, at the turn's end (the main
+ * stream) and at its agent's end (a subagent's).
+ */
+export class StreamBlocks {
+  readonly #open = new Map<string, BlockState>();
+
+  /** How many streams have a response open. */
+  get openStreams(): number {
+    return this.#open.size;
+  }
+
+  /** The open response on the stream `parentToolUseId` names, if any. */
+  openResponse(parentToolUseId: unknown): BlockState | undefined {
+    return this.#open.get(streamKeyOf(parentToolUseId));
+  }
+
+  /**
+   * Start a new API response's block numbering on that stream. A response the
+   * stream still held is over: whatever it started and never settled is
+   * reported.
+   */
+  beginResponse(parentToolUseId: unknown, messageId: string): BlockState {
+    const key = streamKeyOf(parentToolUseId);
+    const held = this.#open.get(key);
+    if (held !== undefined) reportUnsettled(key, held, "message_start");
+    const state: BlockState = { messageId, nextIndex: 0, usageAttached: false, unsettled: new Map() };
+    this.#open.set(key, state);
+    return state;
+  }
+
+  /**
+   * The response a line of `messageId` on that stream belongs to, beginning it
+   * when the stream holds none or holds a DIFFERENT message — whose started,
+   * unsettled units are then reported, because the stream moved past them.
+   */
+  responseFor(parentToolUseId: unknown, messageId: string): BlockState {
+    const key = streamKeyOf(parentToolUseId);
+    const held = this.#open.get(key);
+    if (held?.messageId === messageId) return held;
+    if (held !== undefined) reportUnsettled(key, held, "assistant");
+    const state: BlockState = { messageId, nextIndex: 0, usageAttached: false, unsettled: new Map() };
+    this.#open.set(key, state);
+    return state;
+  }
+
+  /**
+   * Assert every unit the stream's response started BELOW `index` settled,
+   * reporting those that did not: an assistant line for block `index` means
+   * the stream has moved past them.
+   */
+  settledBelow(parentToolUseId: unknown, index: number): void {
+    const key = streamKeyOf(parentToolUseId);
+    const state = this.#open.get(key);
+    if (state !== undefined) reportUnsettled(key, state, "assistant", (open) => open >= index);
+  }
+
+  /** Close the stream's response at its `message_stop`, reporting what never settled. */
+  endResponse(parentToolUseId: unknown): void {
+    this.#drop(streamKeyOf(parentToolUseId), "message_stop");
+  }
+
+  /**
+   * Drop the MAIN stream's response because the turn ended, reporting what
+   * never settled. A stop or a failure can end the turn with no `message_stop`;
+   * a subagent's stream is not the turn's and outlives it when backgrounded.
+   */
+  endTurn(): void {
+    this.#drop(MAIN_STREAM, "turn_end");
+  }
+
+  /**
+   * Drop a subagent's stream because the AGENT ended, reporting what never
+   * settled. A call that spawned no streaming agent holds no stream; that is
+   * the ordinary case and changes nothing.
+   */
+  endAgent(spawningToolUseId: string): void {
+    const key = streamKeyOf(spawningToolUseId);
+    if (key === MAIN_STREAM) return;
+    this.#drop(key, "agent_end");
+  }
+
+  #drop(key: string, at: UnsettledAt): void {
+    const state = this.#open.get(key);
+    if (state === undefined) {
+      LOGGER.logVerbose({ stream: streamLabel(key), at }, "no response open on this stream; nothing to drop");
+      return;
+    }
+    reportUnsettled(key, state, at);
+    this.#open.delete(key);
+    LOGGER.logVerbose(
+      { stream: streamLabel(key), message_id: state.messageId, at },
+      "a stream's response is over; its block state is dropped",
+    );
+  }
+}
+
+/** The next index for a block of the stream's open response, continuing across split lines. */
+function nextIndexFor(state: BlockState): number {
   const index = state.nextIndex;
   state.nextIndex += 1;
   return index;
@@ -196,10 +356,11 @@ interface RawStreamEvent {
 export function convertStreamEvent(
   message: Extract<SdkMessage, { type: "stream_event" }>,
   context: FoldContext,
-  state: BlockState,
+  streams: StreamBlocks,
 ): readonly PersistEntry[] {
   const event = message.event as unknown as RawStreamEvent;
-  const agentId = bookFor(context, message.parent_tool_use_id);
+  const stream = message.parent_tool_use_id;
+  const agentId = bookFor(context, stream);
   const origin = (discriminator: string, blockIndex?: number): FrameOrigin => ({
     agentId,
     vendorUuid: message.uuid,
@@ -212,22 +373,32 @@ export function convertStreamEvent(
       const id = event.message?.id;
       if (typeof id !== "string" || id === "") {
         // warn: a defect because a stream message without identity cannot key any block.
-        LOGGER.warn({}, "a message_start named no message id; no block can be identified");
+        LOGGER.warn(
+          { stream: streamLabel(streamKeyOf(stream)) },
+          "a message_start named no message id; no block can be identified",
+        );
         return [];
       }
-      beginMessage(state, id);
-      LOGGER.logVerbose({ message_id: id }, "a new API response opened; block numbering reset");
+      streams.beginResponse(stream, id);
+      LOGGER.logVerbose(
+        { stream: streamLabel(streamKeyOf(stream)), message_id: id },
+        "a new API response opened on this stream; its block numbering starts at 0",
+      );
       return [];
     }
 
     case "content_block_start": {
       const index = event.index ?? 0;
-      const messageId = state.messageId;
-      if (messageId === undefined) {
+      const state = streams.openResponse(stream);
+      if (state === undefined) {
         // warn: a defect because an orphaned content block is omitted from the conversation.
-        LOGGER.warn({}, "a content block opened with no message_start seen; skipped");
+        LOGGER.warn(
+          { stream: streamLabel(streamKeyOf(stream)), index },
+          "a content block opened with no message_start seen on its stream; skipped",
+        );
         return [];
       }
+      const messageId = state.messageId;
       // Keep the counter ahead of the stream's own numbering, so an assistant
       // line for a block the stream never opened continues rather than repeats.
       state.nextIndex = Math.max(state.nextIndex, index + 1);
@@ -236,6 +407,7 @@ export function convertStreamEvent(
       const activityId = blockActivityId(messageId, index);
       const kind = event.content_block?.type;
       if (kind === "text") {
+        state.unsettled.set(index, activityId);
         LOGGER.logVerbose({ message_id: messageId, index }, "a prose block opened");
         return [
           activityEntry(
@@ -255,6 +427,7 @@ export function convertStreamEvent(
       }
       if (kind === "thinking" || kind === "redacted_thinking") {
         state.openThinking = activityId;
+        state.unsettled.set(index, activityId);
         LOGGER.logVerbose({ message_id: messageId, index, kind }, "a reasoning block opened");
         return [
           activityEntry(
@@ -281,9 +454,15 @@ export function convertStreamEvent(
 
     case "content_block_delta": {
       const index = event.index ?? 0;
-      const messageId = state.messageId;
-      if (messageId === undefined) return [];
-      const activityId = blockActivityId(messageId, index);
+      const state = streams.openResponse(stream);
+      if (state === undefined) {
+        LOGGER.debug(
+          { stream: streamLabel(streamKeyOf(stream)), index },
+          "a delta arrived with no message_start seen on its stream; its block was already skipped",
+        );
+        return [];
+      }
+      const activityId = blockActivityId(state.messageId, index);
       const delta = event.delta;
       if (delta?.type === "text_delta" && typeof delta.text === "string") {
         return [
@@ -337,26 +516,23 @@ export function convertStreamEvent(
       return [];
     }
 
-    case "content_block_stop":
+    case "content_block_stop": {
       // The assistant message settles every block with the whole text and the
       // stop reason; a terminal built here would be a second, thinner copy.
       // The block is no longer open, so a later assistant line for this message
       // is about a block the stream did not announce and takes a fresh index.
-      state.openBlockIndex = undefined;
+      const state = streams.openResponse(stream);
+      if (state !== undefined) state.openBlockIndex = undefined;
       LOGGER.logVerbose({ event_type: event.type }, "consumed; the assistant message settles blocks");
       return [];
+    }
 
     case "message_delta":
       LOGGER.logVerbose({ event_type: event.type }, "consumed; the assistant message settles blocks");
       return [];
 
     case "message_stop":
-      LOGGER.logVerbose({ message_id: state.messageId }, "API response closed; block state cleared");
-      state.messageId = undefined;
-      state.nextIndex = 0;
-      state.openThinking = undefined;
-      state.openBlockIndex = undefined;
-      state.usageAttached = false;
+      streams.endResponse(stream);
       return [];
 
     default:
@@ -516,7 +692,7 @@ function recordSettledAt(
 export function convertAssistantMessage(
   message: Extract<SdkMessage, { type: "assistant" }>,
   context: FoldContext,
-  state: BlockState,
+  streams: StreamBlocks,
   registry: CallRegistry,
   converters: ReadonlyMap<string, ToolConverter>,
 ): readonly PersistEntry[] {
@@ -531,21 +707,27 @@ export function convertAssistantMessage(
     return [residueEntry(context, message, residueForMessage(message, "assistant message has no id"), "residue.unparsed")];
   }
   const blocks = Array.isArray(api.content) ? (api.content as Record<string, unknown>[]) : [];
-  const agentId = bookFor(context, message.parent_tool_use_id);
+  const stream = message.parent_tool_use_id;
+  const agentId = bookFor(context, stream);
   const aborted = (message as unknown as Record<string, unknown>).aborted === true;
   const failure = responseFailureReason(api.stop_reason, aborted);
   const notice = synthesizedSubject(message);
   const usage = tokenUsage(api.usage);
   const entries: PersistEntry[] = [];
 
+  // THIS STREAM'S response, and no other agent's: resolved from the line's own
+  // parent, so an interleaved subagent can never renumber the main agent's
+  // blocks or claim its usage.
+  const state = streams.responseFor(stream, messageId);
   // A LINE THAT RESTATES AN OPEN STREAMED BLOCK IS THAT BLOCK, not a new one.
-  const streamed = state.messageId === messageId ? state.openBlockIndex : undefined;
+  const streamed = state.openBlockIndex;
   let offset = 0;
+  let firstIndex: number | undefined;
 
   for (const block of blocks) {
-    const index =
-      streamed === undefined ? nextIndexFor(state, messageId) : streamed + offset;
+    const index = streamed === undefined ? nextIndexFor(state) : streamed + offset;
     offset += 1;
+    firstIndex ??= index;
     // USAGE RIDES THE FIRST BLOCK'S UNIT AND NO OTHER.
     const envelope =
       index === 0 && !state.usageAttached && usage !== undefined ? { usage } : {};
@@ -605,6 +787,7 @@ export function convertAssistantMessage(
           agentActivity(activityId, item, envelope),
         ),
       );
+      state.unsettled.delete(index);
       continue;
     }
 
@@ -634,6 +817,7 @@ export function convertAssistantMessage(
       entries.push(
         activityEntry(context, origin("activity.thinking.success"), agentActivity(activityId, item, envelope)),
       );
+      state.unsettled.delete(index);
       continue;
     }
 
@@ -680,6 +864,9 @@ export function convertAssistantMessage(
     entries.push(residueEntry(context, block, residueForMessage(block), `unknown.content_block.${String(kind)}`));
   }
 
+  // THE STREAM HAS MOVED PAST every block below this line's first: a unit it
+  // started there and no line settled is a bubble that will never settle.
+  if (firstIndex !== undefined) streams.settledBelow(stream, firstIndex);
   return entries;
 }
 
@@ -759,9 +946,11 @@ export function convertModelRefusal(
 export function convertThinkingTokens(
   message: Extract<SdkMessage, { type: "system"; subtype: "thinking_tokens" }>,
   context: FoldContext,
-  state: BlockState,
+  streams: StreamBlocks,
 ): readonly PersistEntry[] {
-  const activityId = state.openThinking;
+  // THE MAIN STREAM'S open block: the record names no parent, and the row it
+  // produces is written to the main agent's book.
+  const activityId = streams.openResponse(null)?.openThinking;
   if (activityId === undefined) {
     LOGGER.debug(
       {},
