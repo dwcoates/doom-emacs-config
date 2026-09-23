@@ -1632,6 +1632,36 @@ describe("createFeedController: the response selection", () => {
     expect(record.context).toMatchObject({ feed: "root", row: "gone" });
   });
 
+  it("reports no active selection before the daemon pushes one", () => {
+    // Arrange
+    const { controller } = selecting();
+    // Act
+    const active = controller.selectionActive();
+    // Assert
+    expect(active).toBe(false);
+  });
+
+  it("reports the selection active once an active selection is pushed", () => {
+    // Arrange
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Assert
+    expect(controller.selectionActive()).toBe(true);
+  });
+
+  it("reports the selection inactive once the daemon pushes it cleared", () => {
+    // Arrange
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Act
+    controller.applySelection(sel({ active: false }));
+    // Assert
+    expect(controller.selectionActive()).toBe(false);
+  });
+
   it("applies the border even with no scroll box", () => {
     // Arrange — a sub-feed fixture has no scroll box; the border must still land.
     const { controller, host } = selecting(undefined, false);
