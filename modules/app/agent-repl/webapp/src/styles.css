@@ -177,8 +177,9 @@
   --selected-response: #2563eb;
   /* The prompt bubble's own in-flight border: light purple, worn ONLY while
      `data-wave="working"` is on the bubble (see `.bubble.user[data-wave=
-     "working"]` below and `startPromptWave` / `markPromptWave` in
-     breathing.ts / feed-view.ts) — the SAME attribute that drives the
+     "working"]` below and `armPromptWave` / `setPromptWave` in
+     breathing.ts, drawn from the prompt row's daemon-stated `working`
+     flag) — the SAME attribute that drives the
      thinking-wave shadow band, so the border can never start or end a frame
      out of step with the glimmer: one attribute, one lifecycle. Reads clearly
      against the blue --user fill in this theme; the dark theme lifts it the
@@ -1463,11 +1464,10 @@ pre {
    is still running, and leaving the page with no resting state at all — a
    screenshot of it can never be still, and a reader has no way to tell the
    live turn from the thirty dead ones above it. `data-wave="working"` is
-   stamped on a prompt bubble AT ITS DRAW (`startPromptWave` in breathing.ts)
-   and cleared when that turn settles — its final answer marked, or its
-   `turn_ended` row arrived, whichever the feed sees first
-   (`markWorkingPrompts` in feed-view.ts). So a prompt waves from the moment it
-   is on screen until its answer lands, and the scrollback above it rests.
+   worn by a prompt bubble exactly while its row's `working` flag is set
+   (`armPromptWave` / `setPromptWave` in breathing.ts) — the daemon's fact,
+   set from the prompt's draw until its turn's terminal. So a prompt waves
+   while its turn runs, and the scrollback above it rests.
 
    THE GRADIENT LIVES HERE WITH THE ANIMATION, not on the base rule, for the
    same reason the reduced-motion block below drops both together: a gradient

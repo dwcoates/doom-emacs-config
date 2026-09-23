@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -396,5 +397,264 @@ func TestAClearThenANormalPromptDrawsOnlyTheNormalBubble(t *testing.T) {
 	}
 	if rows[0].GetId().GetValue() != h.promptRowID("turn-3") {
 		t.Fatalf("prompt row = %q, want the normal prompt turn-3", rows[0].GetId().GetValue())
+	}
+}
+
+// promptWorking answers the working flag on the turn's user-prompt row.
+func (h *harness) promptWorking(turn string) bool {
+	h.t.Helper()
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == h.promptRowID(turn) {
+			return row.GetUserPrompt().GetWorking()
+		}
+	}
+	h.t.Fatalf("no user-prompt row for turn %q", turn)
+	return false
+}
+
+// completed is a concluded terminal naming UNIT as the answer ("" names none).
+func completed(unit string) *conversationv1.AgentSuccess {
+	done := &conversationv1.AgentCompleted{}
+	if unit != "" {
+		done.Answer = &conversationv1.AgentActivityId{Value: unit}
+	}
+	return &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: done},
+	}
+}
+
+// THE PROMPT WORKS FROM ITS DRAW UNTIL ITS TURN'S TERMINAL, and nothing else
+// moves it: an interim response and a final answer drawn before the terminal
+// names it leave it working; every way the turn can end settles it.
+func TestAPromptRowWorksUntilItsTurnsTerminal(t *testing.T) {
+	interim := func(h *harness) {
+		h.resolver.OnActivity(testWorkspace, mainAgent(),
+			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), noAddress())
+	}
+	answer := func(h *harness) {
+		h.resolver.OnActivity(testWorkspace, mainAgent(),
+			responseSuccessActivity("unit-2", "the answer"), noAddress())
+	}
+	cases := []struct {
+		name        string
+		act         func(h *harness)
+		wantWorking bool
+	}{
+		{name: "the prompt alone", act: func(*harness) {}, wantWorking: true},
+		{name: "an interim response", act: interim, wantWorking: true},
+		{name: "a final answer drawn before the terminal", act: func(h *harness) {
+			interim(h)
+			answer(h)
+		}, wantWorking: true},
+		{name: "a concluded terminal", act: func(h *harness) {
+			answer(h)
+			h.terminal("turn-1", completed("unit-2"), nil)
+		}, wantWorking: false},
+		{name: "an errored terminal", act: func(h *harness) {
+			h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+				Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}},
+			})
+		}, wantWorking: false},
+		{name: "an interrupt", act: func(h *harness) {
+			h.terminal("turn-1", interruptedByUser(), nil)
+		}, wantWorking: false},
+		{name: "a query death", act: func(h *harness) {
+			h.queryDied(&conversationv1.SessionQueryDied{})
+		}, wantWorking: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the turn's prompt, working from its draw.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "do the thing")
+			if !h.promptWorking("turn-1") {
+				t.Fatal("precondition: the prompt of an open turn is not working")
+			}
+
+			// Act.
+			tc.act(h)
+
+			// Assert.
+			if got := h.promptWorking("turn-1"); got != tc.wantWorking {
+				t.Fatalf("working = %v, want %v", got, tc.wantWorking)
+			}
+		})
+	}
+}
+
+// THE SETTLE IS A PUBLICATION on the terminal's edge, not only a stored fact: a
+// reader already following the feed is pushed the prompt row, no longer working.
+func TestATurnsTerminalRepublishesItsPromptSettled(t *testing.T) {
+	// Arrange: a reader follows the feed while the turn works.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	if !h.promptWorking("turn-1") {
+		t.Fatal("precondition: the prompt of an open turn is not working")
+	}
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+
+	// Act: the terminal, then a marker row that bounds the read.
+	h.terminal("turn-1", interruptedByUser(), nil)
+	h.deliverPrompt("turn-2", "marker")
+
+	// Assert: the prompt row was pushed again, settled, before the marker.
+	for row := range rows {
+		switch row.GetId().GetValue() {
+		case h.promptRowID("turn-1"):
+			if row.GetUserPrompt().GetWorking() {
+				t.Fatal("the republished prompt row is still working")
+			}
+			return
+		case h.promptRowID("turn-2"):
+			t.Fatal("the terminal did not republish the prompt row")
+		}
+	}
+	t.Fatal("the tail closed before the marker row")
+}
+
+// A PROMPT OF A TURN THE RESOLVER HAS SEEN END ARRIVES SETTLED: a later replay
+// of it never stands it back up, not even for one publication.
+func TestAReplayedPromptOfAnEndedTurnArrivesSettled(t *testing.T) {
+	// Arrange: the turn was watched to its end, and a reader follows the feed.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.terminal("turn-1", completed(""), nil)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+
+	// Act: the opening page replays the prompt (with an edited text, so the
+	// replay is a publication rather than churn), then a marker row behind it.
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-1", "do the thing, replayed"),
+	))
+	h.deliverPrompt("turn-2", "marker")
+
+	// Assert: the replayed prompt was published settled.
+	for row := range rows {
+		switch row.GetId().GetValue() {
+		case h.promptRowID("turn-1"):
+			if row.GetUserPrompt().GetWorking() {
+				t.Fatal("the replayed prompt of an ended turn was published working")
+			}
+		case h.promptRowID("turn-2"):
+			return
+		}
+	}
+	t.Fatal("the tail closed before the marker row")
+}
+
+// A FRESH RESOLVER REPLAYING A WHOLE TURN — prompt, then terminal — leaves the
+// prompt settled, as a reload or reconnect draws it.
+func TestAReplayedEndedTurnLeavesItsPromptSettled(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completed("")),
+		promptEntry("turn-1", "do the thing"),
+	))
+
+	// Assert.
+	if h.promptWorking("turn-1") {
+		t.Fatal("a replayed ended turn's prompt is still working")
+	}
+}
+
+// THE QUEUE'S MIRROR IS STAMPED ON THE SAME PATH as the resolver's own draw: a
+// mirrored prompt of an open turn works.
+func TestAMirroredPromptOfAnOpenTurnWorks(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	row := &frontendv1.FeedRow{
+		Turn: &conversationv1.TurnId{Value: "turn-1"},
+		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+			Author: &frontendv1.FeedUserPromptAuthor{Label: "You"},
+		}},
+	}
+
+	// Act.
+	h.resolver.UpsertAtOutputAddress(testWorkspace, feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}, row)
+
+	// Assert.
+	if !h.promptWorking("turn-1") {
+		t.Fatal("the mirrored prompt of an open turn is not working")
+	}
+}
+
+// A PROMPT NAMING NO TURN has no turn to wait on, so it is not working.
+func TestAPromptNamingNoTurnIsNotWorking(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	row := &frontendv1.FeedRow{
+		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+			Author: &frontendv1.FeedUserPromptAuthor{Label: "You"},
+		}},
+	}
+
+	// Act.
+	h.resolver.UpsertAtOutputAddress(testWorkspace, feedid.RowKey{Kind: feedid.KindPrompt, ID: "unturned"}, row)
+
+	// Assert.
+	if h.only(rootFeed()).GetUserPrompt().GetWorking() {
+		t.Fatal("a prompt naming no turn is working")
+	}
+}
+
+// AN AGENT PROMPT FOLLOWS THE TURN IT IS STAMPED WITH: a spawn's commission,
+// drawn on the subagent's feed during the main turn, settles at that turn's
+// terminal like the user's own prompt.
+func TestAnAgentPromptSettlesAtItsTurnsTerminal(t *testing.T) {
+	cases := []struct {
+		name        string
+		end         bool
+		wantWorking bool
+	}{
+		{name: "while the turn works", end: false, wantWorking: true},
+		{name: "after the turn's terminal", end: true, wantWorking: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "spawn an explorer")
+			created := &conversationv1.AgentId{Value: "agent-explore"}
+			h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+			commission := func() *frontendv1.FeedAgentPrompt {
+				for _, row := range h.rows(feedid.Feed{Agent: created}) {
+					if prompt := row.GetAgentPrompt(); prompt != nil {
+						return prompt
+					}
+				}
+				t.Fatal("no commission row on the subagent's feed")
+				return nil
+			}
+			if !commission().GetWorking() {
+				t.Fatal("precondition: the commission of an open turn is not working")
+			}
+
+			// Act.
+			if tc.end {
+				h.terminal("turn-1", completed(""), nil)
+			}
+
+			// Assert.
+			if got := commission().GetWorking(); got != tc.wantWorking {
+				t.Fatalf("working = %v, want %v", got, tc.wantWorking)
+			}
+		})
 	}
 }

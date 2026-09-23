@@ -58,13 +58,12 @@ export const FINAL_RESPONSE_CLASS = "final-response";
 /**
  * THE MARK THE ANSWERING ROW WEARS, on its chrome.
  *
- * Spelled once and read back by the feed: the prompt bubble's wave ends when
- * its turn's FINAL ANSWER lands (owner ruling, 2026-09-14), and this attribute
- * is the feed's own record that it has — so `markWorkingPrompts` asks for it
- * by this name rather than by a second string that could drift from the one
- * written here.
+ * The feed's record, on the answering row's chrome, that its turn concluded on
+ * it. It no longer drives the prompt's wave: whether a turn is working is the
+ * prompt row's own daemon-stated `working` flag, which the client draws
+ * verbatim.
  */
-export const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
+const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
 
 /**
  * The error arms that CARRY A WAIT, which is the only per-arm knowledge left in
@@ -137,12 +136,10 @@ export function drawFeedTurnEndedConcluded(
  * live turn-ended event, redraw, re-arrange, or history replay can lose it —
  * which the one-shot green marking this function used to do repeatedly did lose.
  *
- * WHAT SURVIVES HERE is the `data-final-answer` marker, which is LOAD-BEARING
- * for something else: the prompt bubble's working wave ends when its turn's
- * final answer lands (owner ruling, 2026-09-14), and the feed's settlement scan
- * reads this marker by name (feed-view's `settledTurns`). So the concluded arm
- * still records the marker on the answering row's chrome, it just no longer
- * carries the green look.
+ * WHAT SURVIVES HERE is the `data-final-answer` marker on the answering row's
+ * chrome. It carries neither the green look nor the prompt's wave (the prompt
+ * row's own `working` flag does); it stays as the feed's record of which row
+ * the conclusion named, and the absent-row report below.
  *
  * The lookup is THIS FEED's, because a `FeedId` on a turn_ended row names a row
  * of the same feed; a row that is not there (a page that has not been walked
@@ -160,8 +157,9 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   }
   // The marker rides the row CHROME, which the controller reuses across redraws,
   // so a response redraw (drawFeedResponse mints a fresh `.bubble.assistant` on
-  // every push) cannot drop it. It is the settlement scan's signal only; the
-  // green look is drawn from the row's own `final_answer` data.
+  // every push) cannot drop it. It is a record only: the green look is drawn
+  // from the row's own `final_answer` data, and the prompt's wave from the
+  // prompt row's own `working` flag.
   row.setAttribute(FINAL_ANSWER_ATTRIBUTE, "true");
   log.info("recorded the final-answer marker on the answering row", {
     operation: "feed.final-answer-marked",

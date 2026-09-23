@@ -13,7 +13,7 @@
  * oneof, so an unset one is a malformed view here rather than a bubble drawn
  * with no body.
  */
-import { startPromptWave } from "../../breathing.js";
+import { armPromptWave } from "../../breathing.js";
 import { log } from "../../log.js";
 import { bubbleScroll } from "../bubble-scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -30,16 +30,12 @@ const PATH = "FeedUserPrompt";
 /**
  * The prompt bubble.
  *
- * IT WAVES FROM THE MOMENT IT IS DRAWN. `startPromptWave` stamps both halves of
- * the signal: the mark the `bubble-wave` rule keys on, and the wave's PHASE as
- * a negative inline `animation-delay` — the feed rebuilds a row's body
- * wholesale and a fresh node restarts a CSS animation at 0%, so without the
- * delay every redraw would jump the band back to the left edge.
- *
- * WHEN IT STOPS IS NOT DECIDED HERE. A renderer is handed one message and draws
- * it; whether this prompt's turn has settled is a fact about the FEED's rows,
- * not about this message, so the feed clears the mark (`markWorkingPrompts` in
- * feed-view.ts) on the same pass that drew the bubble.
+ * IT WAVES EXACTLY WHILE ITS ROW SAYS ITS TURN IS WORKING (`msg.working`, the
+ * daemon's fact). `armPromptWave` stamps both halves of the signal: the mark
+ * the `bubble-wave` rule keys on, drawn from that flag verbatim, and the
+ * wave's PHASE as a negative inline `animation-delay` — the feed rebuilds a
+ * row's body wholesale and a fresh node restarts a CSS animation at 0%, so
+ * without the delay every redraw would jump the band back to the left edge.
  */
 export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   log.info("drawing a user prompt row", {
@@ -48,7 +44,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   });
   const bubble = document.createElement("div");
   bubble.className = "bubble user";
-  startPromptWave(bubble);
+  armPromptWave(bubble, msg.working);
   // The author is still a required field on the wire (a message with none is
   // malformed, not merely unattributed) — validated but no longer drawn: the
   // bubble carries no "You" label or other attribution (owner ruling,
