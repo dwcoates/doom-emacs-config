@@ -10,6 +10,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
@@ -22,22 +23,6 @@ const FaultAdoptionExpired = "adoption_window_expired"
 // having moved. It only ever shortens the adoption window.
 const adoptionPoll = 25 * time.Millisecond
 
-// Handover is the outgoing daemon's whole blue-green flow.
-//
-// SPAWN, then ANNOUNCE, then a PER-WORKSPACE TRANSFER at freeness, then EXIT.
-// The order is the product spec's and is load-bearing at every step: the
-// address must exist before it is announced; the participant snapshot must be
-// taken at the announcement, because that is what "the holders at announcement"
-// means; and a workspace is quiesced BEFORE it is detached, so nothing this
-// daemon is still doing races the successor's adoption.
-func (c *controller) Handover(ctx context.Context) error {
-	plan, err := c.beginHandover(ctx)
-	if err != nil {
-		return err
-	}
-	return c.completeHandover(ctx, plan)
-}
-
 // handoverPlan is what the announcement settled and the transfers run on: the
 // successor's address, the two lists `served` split, and the participants each
 // workspace had AT THE ANNOUNCEMENT.
@@ -46,6 +31,7 @@ type handoverPlan struct {
 	workspaces     []wsm.Workspace
 	untransferable []wsm.Workspace
 	snapshot       map[ids.WorkspaceID]Participants
+	forced         bool
 	fields         dlog.Context
 }
 
@@ -97,7 +83,7 @@ func (c *controller) releaseHandover() {
 // intent manifest: SPAWN, list what is served, ANNOUNCE, snapshot, record.
 // It is bounded — nothing in it waits on a workspace — which is what lets a
 // caller answer "the rollout was accepted" before the unbounded part starts.
-func (c *controller) beginHandover(ctx context.Context) (*handoverPlan, error) {
+func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPlan, error) {
 	if err := c.claimHandover(); err != nil {
 		// INFO, NOT WARN: the refusal is the contract's own answer to a caller
 		// that asked twice, and nothing about it is wrong with this daemon.
@@ -112,7 +98,7 @@ func (c *controller) beginHandover(ctx context.Context) (*handoverPlan, error) {
 			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
 		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
-	fields := dlog.Context{"successor": successor, "self_address": c.deps.SelfAddress}
+	fields := dlog.Context{"successor": successor, "self_address": c.deps.SelfAddress, "forced": force}
 	c.log.Info(opHandover, "the successor is up in joining mode", fields)
 
 	workspaces, untransferable, err := c.served(ctx)
@@ -153,7 +139,9 @@ func (c *controller) beginHandover(ctx context.Context) (*handoverPlan, error) {
 	c.log.Info(opHandover, "announced the stand-down and snapshotted the expected participants",
 		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 
-	if err := c.writeManifest(ctx, c.manifest(ctx, successor, workspaces, snapshot)); err != nil {
+	manifest := c.manifest(ctx, successor, workspaces, snapshot)
+	manifest.Forced = force
+	if err := c.writeManifest(ctx, manifest); err != nil {
 		return nil, err
 	}
 	return &handoverPlan{
@@ -161,27 +149,117 @@ func (c *controller) beginHandover(ctx context.Context) (*handoverPlan, error) {
 		workspaces:     workspaces,
 		untransferable: untransferable,
 		snapshot:       snapshot,
+		forced:         force,
 		fields:         fields,
 	}, nil
 }
 
-// completeHandover is the UNBOUNDED half: a per-workspace transfer at each
-// workspace's freeness, then the exit. It waits for as long as freeness takes.
-func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) error {
-	successor, fields := plan.successor, plan.fields
+// completeHandover is the UNBOUNDED half: every workspace's transfer is
+// asked of the prompt queue's bounce registry AT ONCE, and each happens at its
+// own workspace's freeness — independently, so a busy workspace never delays
+// a free one queued behind it. A forced handover transfers them all now.
+//
+// ONE goroutine follows the handover to its end — the transfers, the adoption
+// windows, the stand-down of what cannot be transferred, the exit — and it
+// names the workspaces still being waited on every HoldoutWarnEvery. Nothing
+// waits per workspace.
+func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
+	fields := plan.fields
 	var windows sync.WaitGroup
+	outcomes := make(chan transferOutcome, len(plan.workspaces))
+	requested := 0
 	for _, ws := range plan.workspaces {
-		if err := c.transfer(ctx, ws, successor, plan.snapshot[ws.ID], &windows); err != nil {
-			return err
+		ws := ws
+		req := bounce.Request{
+			Reason:       string(ReasonHandoverTransfer),
+			Force:        plan.forced,
+			KeepDraining: true,
+			Run: func(runCtx context.Context, id ids.WorkspaceID) error {
+				return c.transfer(runCtx, ws, plan.successor, plan.snapshot[id], &windows)
+			},
+			Done: func(err error) { outcomes <- transferOutcome{ws: ws.ID, err: err} },
+		}
+		decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, req)
+		if err != nil {
+			c.log.Error(opTransfer, "the bounce registry refused the workspace's transfer; the handover cannot finish while this daemon still serves it",
+				withCause(merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
+			continue
+		}
+		requested++
+		c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace", merge(fields, dlog.Context{
+			"workspace":      string(ws.ID),
+			"now":            decision.Now,
+			"forced":         decision.Forced,
+			"turn_in_flight": decision.TurnInFlight,
+			"detached_work":  decision.DetachedWork,
+		}))
+	}
+	refused := len(plan.workspaces) - requested
+	c.handoverDone.Add(1)
+	go func() {
+		defer c.handoverDone.Done()
+		c.followHandover(ctx, plan, outcomes, requested, refused, &windows)
+	}()
+}
+
+// transferOutcome is one transfer's end.
+type transferOutcome struct {
+	ws  ids.WorkspaceID
+	err error
+}
+
+// followHandover waits for every requested transfer to finish, names the
+// holdouts on the cadence, and exits once every workspace has moved.
+func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, outcomes <-chan transferOutcome, requested, refused int, windows *sync.WaitGroup) {
+	fields := plan.fields
+	pending := make(map[ids.WorkspaceID]bool, requested)
+	for _, ws := range plan.workspaces {
+		pending[ws.ID] = true
+	}
+	failed := refused
+	for warnings := 0; requested > 0; {
+		select {
+		case <-ctx.Done():
+			c.log.Debug(opHandover, "the daemon's lifetime ended while transfers were still pending",
+				merge(fields, dlog.Context{"pending": len(pending)}))
+			return
+		case out := <-outcomes:
+			requested--
+			delete(pending, out.ws)
+			if out.err != nil {
+				failed++
+				c.log.Error(opTransfer, "a workspace's transfer failed; it stays served by this daemon",
+					withCause(merge(fields, dlog.Context{"workspace": string(out.ws)}), out.err))
+			}
+		case <-c.deps.Clock.After(c.deps.HoldoutWarnEvery):
+			warnings++
+			holdouts := make([]string, 0, len(pending))
+			for ws := range pending {
+				holdouts = append(holdouts, string(ws))
+			}
+			sort.Strings(holdouts)
+			c.log.Warn(opHandover, "still waiting for workspaces to fall free; nothing will be interrupted to hurry them",
+				merge(fields, dlog.Context{
+					"holdouts": holdouts,
+					"warnings": warnings,
+					"cadence":  c.deps.HoldoutWarnEvery.String(),
+				}))
 		}
 	}
 
 	// THE OUTGOING DAEMON TIMES THE WINDOW, so it must still be alive when the
 	// window closes: letting the windows settle before the exit is what makes
-	// the accountability record get written at all. The exit is therefore
-	// delayed by at most one AdoptionWindow past the last transfer — a bounded
-	// stand-down, paid while the successor is already serving every workspace.
+	// the accountability record get written at all.
 	windows.Wait()
+
+	if failed > 0 {
+		// A WORKSPACE THIS DAEMON STILL SERVES IS NOT ABANDONED. Exiting would
+		// leave it with no daemon at all; staying leaves the two-daemon steady
+		// state the ruling accepts, loudly.
+		c.log.Error(opHandover, "the handover cannot finish: workspaces that did not transfer are still served here; not exiting",
+			merge(fields, dlog.Context{"untransferred": failed}))
+		return
+	}
 
 	// NOTHING IS LEFT STANDING. Every workspace this daemon served has either
 	// moved to the successor above or is stood down here; the exit below owns
@@ -191,18 +269,14 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) e
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
 	if err := c.deps.Exit(ctx); err != nil {
 		c.log.Error(opHandover, "the orderly exit could not be started", withCause(fields, err))
-		return fmt.Errorf("rollout: handover: %w", err)
 	}
-	return nil
 }
 
-// transfer moves one workspace to the successor.
+// transfer moves one workspace to the successor. It is the bounce registry's
+// action for a handover: the registry has already decided the workspace is
+// free (or the handover is forced) and drained its dispatch.
 func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor string, expected Participants, windows *sync.WaitGroup) error {
 	fields := dlog.Context{"workspace": string(ws.ID), "successor": successor}
-
-	if err := c.awaitFreeForever(ctx, ws.ID, opTransfer, fields); err != nil {
-		return err
-	}
 
 	// QUIESCE FIRST. From here on this daemon does NO work for the workspace:
 	// every arrival is held rather than served, so nothing the successor is
@@ -357,40 +431,6 @@ func (c *controller) adopted(ctx context.Context, ws ids.WorkspaceID, fields dlo
 	c.log.Debug(opAdoption, "the successor owns the workspace",
 		merge(fields, dlog.Context{"owner": string(*owner)}))
 	return true
-}
-
-// awaitFreeForever waits for a workspace to fall free, FOREVER, naming the
-// holdout every HoldoutWarnEvery. A never-free workspace leaves the rollout in
-// a two-daemon steady state, which is the ruled outcome: the wait never gives
-// up and nothing is ever interrupted to end it.
-func (c *controller) awaitFreeForever(ctx context.Context, ws ids.WorkspaceID, operation string, fields dlog.Context) error {
-	if c.deps.Freeness.Free(ws) {
-		c.log.Debug(operation, "the workspace was already free", fields)
-		return nil
-	}
-	done := make(chan error, 1)
-	waitCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go func() { done <- c.deps.Freeness.AwaitFree(waitCtx, ws) }()
-
-	for waited := 0; ; waited++ {
-		select {
-		case err := <-done:
-			if err != nil {
-				c.log.Error(operation, "the freeness wait ended before the workspace fell free",
-					withCause(fields, err))
-				return fmt.Errorf("rollout: wait for %q: %w", ws, err)
-			}
-			c.log.Debug(operation, "the workspace fell free", fields)
-			return nil
-		case <-c.deps.Clock.After(c.deps.HoldoutWarnEvery):
-			c.log.Warn(operation, "still waiting for a workspace to fall free; nothing will be interrupted to hurry it",
-				merge(fields, dlog.Context{
-					"warnings": waited + 1,
-					"cadence":  c.deps.HoldoutWarnEvery.String(),
-				}))
-		}
-	}
 }
 
 // served lists the workspaces this daemon currently serves, SPLIT IN TWO:
