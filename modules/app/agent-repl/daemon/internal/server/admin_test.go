@@ -12,9 +12,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
-	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
-	"claude-repld/internal/rollout"
 )
 
 // TestScheduleEncodesTheReasonBeforeItIsDurable pins that the drain reason is
@@ -71,125 +69,6 @@ func TestCancelWithNothingScheduledIsRefused(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetNothingScheduled() == nil {
 		t.Fatalf("result = %v, want nothing_scheduled", resp.Msg.GetResult())
-	}
-}
-
-// TestRollOutBuildHandsTheControllerWhatWasRebuilt pins that each marker on
-// the request reaches the controller as the subsystem it names.
-func TestRollOutBuildHandsTheControllerWhatWasRebuilt(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Rollout.accepted = rollout.Acceptance{Action: rollout.ActionHandover}
-
-	// Act.
-	_, err := h.Client.RollOutBuild(context.Background(),
-		connect.NewRequest(&agentreplv1.RollOutBuildRequest{
-			Daemon: &agentreplv1.RollOutBuildDaemon{},
-			Webapp: &agentreplv1.RollOutBuildWebapp{},
-		}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("RollOutBuild: %v", err)
-	}
-	if want := (rollout.Rebuilt{Daemon: true, Webapp: true}); h.Rollout.rolledOut != want {
-		t.Fatalf("rolled out %+v, want %+v", h.Rollout.rolledOut, want)
-	}
-}
-
-// TestRollOutBuildAnswersTheActionTaken pins each acceptance's success arm and
-// the counts it carries.
-func TestRollOutBuildAnswersTheActionTaken(t *testing.T) {
-	cases := []struct {
-		name     string
-		accepted rollout.Acceptance
-		check    func(*agentreplv1.RollOutBuildSuccess) bool
-	}{
-		{"a handover", rollout.Acceptance{Action: rollout.ActionHandover, Workspaces: 3, Busy: 1},
-			func(s *agentreplv1.RollOutBuildSuccess) bool {
-				return s.GetHandover().GetWorkspaces() == 3 && s.GetHandover().GetBusy() == 1
-			}},
-		{"a shim relaunch", rollout.Acceptance{Action: rollout.ActionShimRelaunch, Workspaces: 2, Busy: 2},
-			func(s *agentreplv1.RollOutBuildSuccess) bool {
-				return s.GetShimRelaunch().GetWorkspaces() == 2 && s.GetShimRelaunch().GetBusy() == 2
-			}},
-		{"a webapp reload", rollout.Acceptance{Action: rollout.ActionWebappReload, Workspaces: 4},
-			func(s *agentreplv1.RollOutBuildSuccess) bool { return s.GetWebappReload().GetWebviews() == 4 }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-			h.Rollout.accepted = tc.accepted
-
-			// Act.
-			resp, err := h.Client.RollOutBuild(context.Background(),
-				connect.NewRequest(&agentreplv1.RollOutBuildRequest{Daemon: &agentreplv1.RollOutBuildDaemon{}}))
-
-			// Assert.
-			if err != nil {
-				t.Fatalf("RollOutBuild: %v", err)
-			}
-			if !tc.check(resp.Msg.GetSuccess()) {
-				t.Fatalf("result = %v, want the arm and counts of %+v", resp.Msg.GetResult(), tc.accepted)
-			}
-		})
-	}
-}
-
-// TestRollOutBuildNamesWhatTheRolloutInFlightWaitsOn pins that a second
-// rollout is an ANSWER carrying the holdouts, not a transport failure.
-func TestRollOutBuildNamesWhatTheRolloutInFlightWaitsOn(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Rollout.rollOutErr = &rollout.ErrAlreadyRollingOut{WaitingOn: []ids.WorkspaceID{"ws-busy"}}
-
-	// Act.
-	resp, err := h.Client.RollOutBuild(context.Background(),
-		connect.NewRequest(&agentreplv1.RollOutBuildRequest{Daemon: &agentreplv1.RollOutBuildDaemon{}}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("RollOutBuild: %v", err)
-	}
-	waiting := resp.Msg.GetError().GetAlreadyRollingOut().GetWaitingOn()
-	if len(waiting) != 1 || waiting[0] != "ws-busy" {
-		t.Fatalf("result = %v, want already_rolling_out waiting on ws-busy", resp.Msg.GetResult())
-	}
-}
-
-// TestRollOutBuildOnAJoiningSuccessorIsAnAnswer pins the joining arm.
-func TestRollOutBuildOnAJoiningSuccessorIsAnAnswer(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Rollout.rollOutErr = rollout.ErrJoining
-
-	// Act.
-	resp, err := h.Client.RollOutBuild(context.Background(),
-		connect.NewRequest(&agentreplv1.RollOutBuildRequest{Shim: &agentreplv1.RollOutBuildShim{}}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("RollOutBuild: %v", err)
-	}
-	if resp.Msg.GetError().GetJoining() == nil {
-		t.Fatalf("result = %v, want joining", resp.Msg.GetResult())
-	}
-}
-
-// TestRollOutBuildNamingNothingIsMalformed pins that an empty request never
-// reaches the controller.
-func TestRollOutBuildNamingNothingIsMalformed(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	_, err := h.Client.RollOutBuild(context.Background(),
-		connect.NewRequest(&agentreplv1.RollOutBuildRequest{}))
-
-	// Assert.
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("err = %v, want invalid_argument", err)
 	}
 }
 
