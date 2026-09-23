@@ -26,6 +26,7 @@
  */
 import { armPromptWave, setPromptWave } from "../breathing.js";
 import { placeChildren } from "../dom.js";
+import { BUBBLE_STRIP_CLASS } from "../expand.js";
 import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../feed/bubble-scroll.js";
 import { stopTicking } from "../feed/ticking.js";
 import {
@@ -75,7 +76,7 @@ export const BUBBLE_CAP_ATTRIBUTE = "data-cap-lines";
 
 /** The class every bubble wears, and the class every header strip element wears. */
 export const BUBBLE_CLASS = "bubble";
-export const BUBBLE_STRIP_CLASS = "bubble-strip";
+export { BUBBLE_STRIP_CLASS };
 
 /** What every bubble spec states, whatever its role. */
 interface BubbleSpecBase {
