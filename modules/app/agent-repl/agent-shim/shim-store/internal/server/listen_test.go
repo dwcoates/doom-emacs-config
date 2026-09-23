@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -41,7 +42,7 @@ func TestListenBindsTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
-	defer closeOrFail(t, ln)
+	defer testclose.OrFail(t, ln)
 	if _, statErr := os.Stat(path); statErr != nil {
 		t.Fatalf("stat %q = %v, want the socket to exist", path, statErr)
 	}
@@ -56,7 +57,7 @@ func TestListenRestrictsTheSocketToItsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
-	defer closeOrFail(t, ln)
+	defer testclose.OrFail(t, ln)
 
 	// Assert.
 	info, err := os.Stat(path)
@@ -76,7 +77,7 @@ func TestListenReclaimsAStaleSocket(t *testing.T) {
 		t.Fatalf("stage stale socket: %v", err)
 	}
 	stale.(*net.UnixListener).SetUnlinkOnClose(false)
-	closeOrFail(t, stale)
+	testclose.OrFail(t, stale)
 
 	// Act.
 	ln, err := Listen(path, testLogger())
@@ -85,7 +86,7 @@ func TestListenReclaimsAStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen over a stale socket = %v, want nil", err)
 	}
-	closeOrFail(t, ln)
+	testclose.OrFail(t, ln)
 }
 
 func TestListenRefusesToReplaceANonSocket(t *testing.T) {
@@ -101,7 +102,7 @@ func TestListenRefusesToReplaceANonSocket(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		closeOrFail(t, ln)
+		testclose.OrFail(t, ln)
 		t.Fatal("Listen over a regular file = nil error, want a loud refusal")
 	}
 }
@@ -115,14 +116,14 @@ func TestListenRefusesASocketALiveStoreIsServing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer closeOrFail(t, live)
+	defer testclose.OrFail(t, live)
 
 	// Act.
 	ln, err := Listen(path, testLogger())
 
 	// Assert.
 	if err == nil {
-		closeOrFail(t, ln)
+		testclose.OrFail(t, ln)
 		t.Fatal("Listen over a live socket = nil error, want a refusal to steal it")
 	}
 }
@@ -134,7 +135,7 @@ func TestListenLeavesALiveSocketOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer closeOrFail(t, live)
+	defer testclose.OrFail(t, live)
 
 	// Act.
 	if _, err := Listen(path, testLogger()); err == nil {
@@ -154,7 +155,7 @@ func TestListenRecordsTheOccupiedSocketOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage live socket: %v", err)
 	}
-	defer closeOrFail(t, live)
+	defer testclose.OrFail(t, live)
 	sink := &syncBuffer{}
 	log := logging.New(sink, io.Discard, true)
 

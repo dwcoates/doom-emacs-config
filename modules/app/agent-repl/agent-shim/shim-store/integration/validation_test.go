@@ -8,6 +8,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -352,7 +353,7 @@ func TestWatchAgentSessionRefusesAnUnsetToken(t *testing.T) {
 
 			// Act.
 			stream := watchStream(ctx, t, store.client(), tc.token)
-			defer closeOrFail(t, stream)
+			defer testclose.OrFail(t, stream)
 
 			// Assert.
 			assertWatchRefused(t, stream)
@@ -392,7 +393,7 @@ func TestWatchBashRunRefusesAnEmptyRunAtTheTransport(t *testing.T) {
 
 	// Act.
 	stream := watchBashRun(ctx, t, store.client(), "")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert.
 	err := awaitBashRunEnd(t, stream)

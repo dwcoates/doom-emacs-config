@@ -10,6 +10,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"context"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestReplayingASupersededWriteDeliversNothingToAWatcher(t *testing.T) {
 	replayed := supersededPair(ctx, t, shim)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Act
 	shim.write(ctx, t, replayed)

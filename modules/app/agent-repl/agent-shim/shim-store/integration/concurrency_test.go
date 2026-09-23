@@ -9,6 +9,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"fmt"
 	"sync"
 	"testing"
@@ -130,7 +131,7 @@ func TestAWatcherReceivesEveryConcurrentlyWrittenLine(t *testing.T) {
 	seedBook(ctx, t, streamProducer(cli), "main", "concurrent")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Act
 	writeConcurrently(t, store, "main", concurrentWriters, linesPerWriter)
@@ -188,7 +189,7 @@ func TestReplayingBothPlanesWritesDeliversNothingToAWatcher(t *testing.T) {
 	sidecar.write(ctx, t, final)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Act
 	shim.write(ctx, t, draft)

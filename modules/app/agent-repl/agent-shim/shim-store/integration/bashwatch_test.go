@@ -11,6 +11,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"context"
 	"fmt"
 	"testing"
@@ -47,7 +48,7 @@ func TestWatchBashRunReplaysAStoredRunAndEndsAtItsTerminal(t *testing.T) {
 
 	// Act
 	stream := watchBashRun(ctx, t, cli, "run-1")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert
 	assertTexts(t, "the replayed run", drainBashRun(t, stream),
@@ -64,7 +65,7 @@ func TestWatchBashRunFollowsALiveRunAndEndsWhenItConcludes(t *testing.T) {
 	sidecar := fileProducer(cli)
 	writeBashRun(ctx, t, sidecar, "run-2", 1)
 	stream := watchBashRun(ctx, t, cli, "run-2")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	assertTexts(t, "the replay", receiveBashRows(t, stream, 2), []string{"start:make test", "delta:chunk-0"})
 
 	// Act: more spool, then the terminal.
@@ -86,7 +87,7 @@ func TestWatchBashRunRefusesARunTheStoreNeverSaw(t *testing.T) {
 
 	// Act
 	stream := watchBashRun(ctx, t, store.client(), "never-ran")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert
 	assertBashRunRefused(t, stream)
@@ -111,7 +112,7 @@ func TestWatchBashRunReplaysByFirstInsertOrderNotWriteOrder(t *testing.T) {
 
 	// Act
 	stream := watchBashRun(ctx, t, cli, "run-3")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert: four rows, the redelivery having replaced one in place.
 	assertTexts(t, "the replayed run", drainBashRun(t, stream),
@@ -129,7 +130,7 @@ func TestWatchBashRunStreamsARedeliveredDeltaExactlyOnce(t *testing.T) {
 	sidecar := fileProducer(cli)
 	writeBashRun(ctx, t, sidecar, "run-4", 1)
 	stream := watchBashRun(ctx, t, cli, "run-4")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	assertTexts(t, "the replay", receiveBashRows(t, stream, 2), []string{"start:make test", "delta:chunk-0"})
 
 	// Act
@@ -155,7 +156,7 @@ func TestWatchBashRunServesTheJSONCodec(t *testing.T) {
 
 	// Act
 	stream := watchBashRun(ctx, t, store.jsonClient(), "run-5")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert
 	assertTexts(t, "the run over JSON", drainBashRun(t, stream),
@@ -181,7 +182,7 @@ func TestWatchBashRunReplaysADeltaStoredAfterTheTerminal(t *testing.T) {
 	sidecar.write(ctx, t, sidecar.agentEntry("w-run-late-d9", "bash:run-late:9",
 		bashRun(nil, "run-late", bashDelta("chunk-late", 9))))
 	stream := watchBashRun(ctx, t, cli, "run-late")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert: every stored row in first-insert order, and the natural end after
 	// the LAST of them rather than at the terminal.
@@ -203,7 +204,7 @@ func TestATerminalReUpsertAgainstAnEndedStreamIsAbsorbedSilently(t *testing.T) {
 	sidecar.write(ctx, t, sidecar.agentEntry("w-run-reterm-term", "bash:run-reterm:terminal",
 		bashRun(nil, "run-reterm", bashSuccess("make test", 0))))
 	ended := watchBashRun(ctx, t, cli, "run-reterm")
-	defer closeOrFail(t, ended)
+	defer testclose.OrFail(t, ended)
 	assertTexts(t, "the first watcher", drainBashRun(t, ended),
 		[]string{"start:make test", "delta:chunk-0", "success"})
 
@@ -232,7 +233,7 @@ func TestATerminalReUpsertIsServedExactlyOnceInAFreshReplay(t *testing.T) {
 	sidecar.write(ctx, t, sidecar.agentEntry("w-rt2-term-again", "bash:run-reterm-2:terminal",
 		bashRun(nil, "run-reterm-2", bashSuccess("make test", 0))))
 	stream := watchBashRun(ctx, t, cli, "run-reterm-2")
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert
 	assertTexts(t, "the fresh replay after a terminal re-upsert", drainBashRun(t, stream),
@@ -266,7 +267,7 @@ func TestInterleavedPlanesReplayInFirstInsertOrder(t *testing.T) {
 	sidecar.write(ctx, t, sidecar.agentEntry("w-il-term", "bash:"+run+":terminal",
 		bashRun(nil, run, bashSuccess("make test", 0))))
 	stream := watchBashRun(ctx, t, cli, run)
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Assert
 	assertTexts(t, "the interleaved run", drainBashRun(t, stream),
@@ -298,7 +299,7 @@ func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
 
 			// Act.
 			stream := watchBashRun(ctx, t, store.client(), tc.run)
-			defer closeOrFail(t, stream)
+			defer testclose.OrFail(t, stream)
 			_ = awaitBashRunEnd(t, stream)
 
 			// Assert.

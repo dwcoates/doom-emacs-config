@@ -8,6 +8,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"context"
 	"net"
 	"net/http"
@@ -32,7 +33,7 @@ func TestSigtermEndsAnOpenWatchCleanly(t *testing.T) {
 	)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	// Prove the stream is really live before taking the store down.
 	shim.write(ctx, t,
 		shim.agentEntry("w-term-2", "u-term-2", frameLine(agentID("main"), responseFrame("main", "act-2", "L2"))),
@@ -134,7 +135,7 @@ func assertPprofServed(t *testing.T, socket string) {
 		resp, err := client.Do(req)
 		if err == nil {
 			status := resp.StatusCode
-			closeOrFail(t, resp.Body)
+			testclose.OrFail(t, resp.Body)
 			if status == http.StatusOK {
 				return
 			}

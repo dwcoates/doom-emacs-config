@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -150,7 +151,7 @@ func TestOpenPprofSurfaceRefusesAnUnsafeAddress(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		closeOrFail(t, surface)
+		testclose.OrFail(t, surface)
 		t.Fatal("openPprofSurface on a wildcard bind = nil error, want a loud refusal")
 	}
 }

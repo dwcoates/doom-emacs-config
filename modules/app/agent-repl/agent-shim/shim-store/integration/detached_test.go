@@ -10,6 +10,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -265,6 +266,6 @@ func TestAnAnnouncedRunWithNoRowsIsARefusedWatchButAnOpenObligation(t *testing.T
 	}
 	// ...and the run's own stream is refused, because there is no row.
 	stream := watchBashRun(ctx, t, cli, itestBashRunID)
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 	assertBashRunRefused(t, stream)
 }

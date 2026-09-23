@@ -8,6 +8,7 @@
 package integration
 
 import (
+	"agentrepl/shim-store/internal/testclose"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -89,7 +90,7 @@ func TestRotationDoesNotSplitTheWatchedTail(t *testing.T) {
 	)
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
-	defer closeOrFail(t, stream)
+	defer testclose.OrFail(t, stream)
 
 	// Act.
 	shim.write(ctx, t,
