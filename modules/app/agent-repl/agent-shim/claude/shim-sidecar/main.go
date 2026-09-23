@@ -388,6 +388,7 @@ func run(options Options, logPath string) (err error) {
 	}
 	defer closeLog()
 	defer logProcessExit(logf, &err)
+	reportBuild(logf, defaultBuildReportDeps())
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)

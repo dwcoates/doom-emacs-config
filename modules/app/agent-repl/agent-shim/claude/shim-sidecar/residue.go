@@ -90,7 +90,7 @@ func (h *residueHandler) Handle(frames []tail.Frame, ctx *tail.Context) []*store
 // the call. Everything else settles, because a run left open is the one outcome
 // a stop must never produce.
 func (h *residueHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
-	return h.RunOutput.Cancelled(taskID, run, ownerAgentID, settledAtMs)
+	return h.Cancelled(taskID, run, ownerAgentID, settledAtMs)
 }
 
 // declaredResidueHandler ingests a file whose kind IS recognized but whose
@@ -165,7 +165,7 @@ func (h *declaredResidueHandler) Handle(frames []tail.Frame, ctx *tail.Context) 
 //
 // IT REFUSES ONLY WHAT RunOutput REFUSES — a stop naming no spawning call.
 func (h *declaredResidueHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
-	return h.RunOutput.Cancelled(taskID, run, ownerAgentID, settledAtMs)
+	return h.Cancelled(taskID, run, ownerAgentID, settledAtMs)
 }
 
 // residueEntry mints one unparsed record.

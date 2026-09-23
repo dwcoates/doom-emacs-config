@@ -48,6 +48,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
 // ---------------------------------------------------------------------------
@@ -185,7 +186,11 @@ func runSuite(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "integration: temp bin dir: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(binDir)
+	defer func() {
+		if err := os.RemoveAll(binDir); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: removing temp bin dir %s: %v\n", binDir, err)
+		}
+	}()
 
 	binPath := filepath.Join(binDir, "shim-claude-sidecar")
 	if err := goBuild(repo.sidecarDir, binPath); err != nil {
@@ -198,7 +203,10 @@ func runSuite(m *testing.M) int {
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
-	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		fmt.Fprintf(os.Stderr, "integration: %v\n", err)
+		return 1
+	}
 	// The mocked vendor's shared throwaway store outlives every subject, so
 	// nothing else can stand it down. It is a no-op when nothing started it.
 	defer stopSharedVendorStore()
@@ -228,7 +236,7 @@ func shortSocketPath(t *testing.T, tag string) string {
 		t.Fatalf("random socket suffix: %v", err)
 	}
 	p := filepath.Join(os.TempDir(), fmt.Sprintf("ar-%s-%s.sock", tag, hex.EncodeToString(buf)))
-	t.Cleanup(func() { os.Remove(p) })
+	t.Cleanup(func() { testclose.RemoveOrFail(t, p) })
 	return p
 }
 
@@ -247,7 +255,7 @@ func shimListenSocketPath(t *testing.T) string {
 	sum := sha256.Sum256([]byte(t.Name()))
 	id := hex.EncodeToString(sum[:])[:16]
 	p := filepath.Join(os.TempDir(), id+".sock")
-	t.Cleanup(func() { os.Remove(p) })
+	t.Cleanup(func() { testclose.RemoveOrFail(t, p) })
 	return p
 }
 
@@ -393,7 +401,14 @@ func newGrowingFile(t *testing.T, path string) *growingFile {
 		t.Fatalf("stat %s: %v", path, err)
 	}
 	g := &growingFile{t: t, path: path, f: f, n: info.Size()}
-	t.Cleanup(func() { f.Close() })
+	// ErrClosed is not a teardown fault: Remove (below) already closed f as
+	// part of deleting the file out from under the reader, and this Cleanup
+	// still runs after it.
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			t.Errorf("closing %s: %v", path, err)
+		}
+	})
 	return g
 }
 
@@ -429,7 +444,9 @@ func (g *growingFile) Path() string  { return g.path }
 // Remove deletes the file under the reader — the file_vanished LOST evidence.
 func (g *growingFile) Remove() {
 	g.t.Helper()
-	g.f.Close()
+	if err := g.f.Close(); err != nil {
+		g.t.Fatalf("close %s before removing it: %v", g.path, err)
+	}
 	if err := os.Remove(g.path); err != nil {
 		g.t.Fatalf("remove %s: %v", g.path, err)
 	}
@@ -528,7 +545,7 @@ func readLines(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer testclose.OrFail(t, f)
 	var out []string
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<24)
@@ -765,6 +782,10 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	cmd.Env = append(cmd.Env,
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+filepath.Join(opts.StateDir, "lock"),
 	)
 	hasLogLevel := false
 	for _, value := range opts.ExtraEnv {
@@ -932,6 +953,10 @@ func startRealStoreAt(t *testing.T, socket, dbPath string) *realStore {
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// A private lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run.
+		"AGENT_REPL_LOCK_DIR="+filepath.Join(t.TempDir(), "lock"),
 	)
 	captured := captureChild(t, "the real store (log: "+logPath+")")
 	cmd.Stdout = captured
@@ -992,7 +1017,7 @@ func (s *realStore) Stop() {
 		}
 		<-s.done
 	}
-	os.Remove(s.Socket)
+	testclose.RemoveOrFail(s.t, s.Socket)
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,7 +1190,14 @@ func watchBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClie
 	out := make(chan *storev1.StoreLineAt, 256)
 	go func() {
 		defer close(out)
-		defer stream.Close()
+		// NOT testclose.OrFail: this goroutine is not joined by its caller
+		// (watchBook returns before it finishes, and several subjects return
+		// from their own test function without draining out to closure), so a
+		// t.Errorf here could fire after the test has already completed and
+		// panic ("Fail in goroutine after Test has completed") instead of
+		// reporting anything. A stream Close failure on this best-effort
+		// teardown path is discarded rather than risk that.
+		defer func() { _ = stream.Close() }()
 		for stream.Receive() {
 			select {
 			case out <- stream.Msg().GetLine():
@@ -1351,7 +1383,7 @@ func (f *fakeStore) Stop() {
 	defer cancel()
 	_ = f.srv.Shutdown(ctx)
 	<-f.done
-	os.Remove(f.Socket)
+	testclose.RemoveOrFail(f.t, f.Socket)
 }
 
 // FailWrites makes the next n WriteBatch calls answer the failure arm. Nothing
@@ -1965,7 +1997,7 @@ func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreC
 func awaitBashRunTerminal(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) []*conversationv1.AgentBash {
 	t.Helper()
 	stream, first := awaitBashRunStream(ctx, t, c, run)
-	defer stream.Close()
+	defer testclose.OrFail(t, stream)
 
 	// The first row was consumed to PROVE the run exists (a refusal is reported
 	// lazily, on the first Receive), so it is folded in here rather than lost.
@@ -2017,7 +2049,7 @@ func awaitBashRunStream(ctx context.Context, t *testing.T, c storev1connect.Shim
 				return stream, stream.Msg().GetRow()
 			}
 			receiveErr := stream.Err()
-			stream.Close()
+			testclose.OrFail(t, stream)
 			if connect.CodeOf(receiveErr) != connect.CodeNotFound && receiveErr != nil {
 				t.Fatalf("run %s: opening its stream failed: %v", run, receiveErr)
 			}
