@@ -110,6 +110,49 @@ export function readEntry(
   };
 }
 
+/**
+ * A subagent spawn in `spawner`'s book whose start CREATES `created` — the row
+ * the store records `agent.spawned_by_agent` from, and so what puts `created`
+ * in `spawner`'s session lineage.
+ */
+export function spawnEntry(spawner: conversationv1.AgentId, created: string): PersistEntry {
+  const activityId = unit(`spawn-${created}`);
+  return {
+    agentId: spawner,
+    upsertKey: activityUpsertKey(activityId),
+    source: { vendorUuid: `uuid-spawn-${created}`, discriminator: "activity.subagent.start" },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: spawner,
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentUpdateSchema, {
+            update: {
+              case: "activity",
+              value: create(conversationv1.AgentActivitySchema, {
+                activityId,
+                item: {
+                  case: "subagent",
+                  value: create(conversationv1.AgentSubagentSchema, {
+                    result: {
+                      case: "start",
+                      value: create(conversationv1.AgentSubagentStartSchema, {
+                        createdAgentId: agent(created),
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    },
+  };
+}
+
 /** One detached shell run's lifecycle frame. */
 export function bashRunEntry(
   book: conversationv1.AgentId,

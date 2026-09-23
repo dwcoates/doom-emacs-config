@@ -3334,11 +3334,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * CLOSING TERMINAL for what did not survive. The invariant it protects: every
    * started thing eventually gets a terminal row, by observation or by
    * reconciliation.
+   *
+   * SCOPED TO THIS SESSION. The store is shared by every session on the host,
+   * and everything answered here that this vendor does not hold is CLOSED, so
+   * the read names this conversation's main agent and gets only its lineage.
+   * Unscoped, a session start wrote closing terminals into other sessions'
+   * books for work still running there.
    */
   async function reconcile(): Promise<conversationv1.AgentDetachedWork[]> {
+    const agentId = requireIdentity().agentId;
     let open;
     try {
-      open = await deps.persistence.liveWork();
+      open = await deps.persistence.liveWork(agentId);
       pushes.resolveComponent(LIVE_WORK_COMPONENT, 0);
     } catch (err) {
       pushes.fault(
@@ -3351,7 +3358,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return [];
     }
     const closing: PersistEntry[] = [];
-    const agentId = requireIdentity().agentId;
 
     // THE RECORD IS THE ONLY PLACE the work's own start survives a bounce, so
     // the book is read ONCE and every description below comes out of it. This
@@ -3788,7 +3794,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function announceLiveWorkNow(): Promise<conversationv1.AgentDetachedWork[]> {
     try {
-      const handles = (await deps.persistence.liveWork()).liveDetached;
+      // SCOPED, like every live-work read: this session's lineage only.
+      const agentId = requireIdentity().agentId;
+      const handles = (await deps.persistence.liveWork(agentId)).liveDetached;
       // THE READ ANSWERING IS THE RECOVERY, whatever it answered. An empty set
       // is as much proof the store is reading again as a full one, and
       // resolving only on the non-empty path is why the owner's fault outlived
@@ -3797,7 +3805,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
-      const agentId = requireIdentity().agentId;
       const page = await deps.persistence.readFirstPage(
         agentId,
         RECONCILE_PAGE_SIZE,
@@ -3862,19 +3869,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * Say WHICH STATE an undescribable live handle is in, and never guess.
    *
-   * THE OBLIGATION SET IS GLOBAL BY CONTRACT. `GetLiveWork` takes an empty
-   * request and answers "every started thing the record holds no terminal for",
-   * across every conversation the store holds -- so a handle with no start in
-   * THIS session's book is the ordinary state of a shared set, not a defect,
-   * and reporting every one of them as a record-plane loss is what made a
-   * healthy shim look broken on every new watch.
+   * THE OBLIGATION SET IS THIS SESSION'S LINEAGE. `GetLiveWork` names this
+   * conversation's main agent and answers every started thing the record holds
+   * no terminal for among it and the agents it spawned -- so a handle with no
+   * start in THIS main book is either work a subagent of this session
+   * announced (its start lives in that subagent's book) or work whose start the
+   * record lost.
    *
    * The vendor is the authority that separates the two, exactly as it is at
-   * StartSession: if this vendor process still holds the handle then the work
-   * is this conversation's and its missing start is a real loss; if it does not,
-   * the handle is another conversation's and another shim's to terminalize.
-   * A vendor that cannot answer is not a vendor that said "not mine", so an
-   * unanswerable probe is reported as the defect it might be.
+   * StartSession: if this vendor process still holds the handle then its
+   * missing start is a real loss; if it does not, the work is not this
+   * process's to announce, and the StartSession reconciliation owns its
+   * terminal. A vendor that cannot answer is not a vendor that said "not
+   * held", so an unanswerable probe is reported as the defect it might be.
    */
   async function recordUndescribedHandle(
     handle: conversationv1.DetachedWorkId,
@@ -3895,7 +3902,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (!held) {
       LOGGER.debug(
         { work_id: handle.value },
-        "this live work belongs to another conversation; the open-obligation set spans them all and this session has no start for it",
+        "this session's live work is not held by this vendor process and has no start in the main book; it is not announced to the new watch",
       );
       return;
     }

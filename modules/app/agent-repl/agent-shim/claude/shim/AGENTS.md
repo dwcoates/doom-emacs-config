@@ -760,6 +760,15 @@ it absent and reads the compaction's own records instead.
     not a reason to close anybody's run, so the two share only the pure
     description step (`announceLiveWork`). A record plane the shim cannot reach
     goes out as a session fault, never as a quietly empty membership.
+  - **EVERY LIVE-WORK READ IS SCOPED TO THIS SESSION.** One store serves every
+    session on the host, and the `StartSession` reconciliation closes whatever
+    the read answers that this vendor does not hold — so on 2026-09-23 an
+    unscoped read let one workspace's start reap five running subagents of
+    another. `Persistence.liveWork(session)` takes this conversation's main
+    agent id and the store answers only its lineage; an empty session is
+    refused as `invalid_request` before the store is asked, and a store's
+    `invalid_request` is surfaced as that kind — never read as "no book yet",
+    which would serve an empty set in silence.
 - **`StartSessionFresh.model` is optional.** UNSET = pass no model to the SDK
   and let its own default take effect; `SessionStarted.effective_model` states
   what did. A model that IS set still has to name something — saying nothing

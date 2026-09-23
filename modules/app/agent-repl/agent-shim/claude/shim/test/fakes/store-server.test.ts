@@ -674,31 +674,84 @@ describe("ReadAgentPage", () => {
   });
 });
 
+/** A GetLiveWork request scoped to `session`, the only form the store answers. */
+function liveWorkFor(session: string): storev1.GetLiveWorkRequest {
+  return create(storev1.GetLiveWorkRequestSchema, { session: agentId(session) });
+}
+
 describe("GetLiveWork", () => {
-  it("reports an agent that started and never concluded", async () => {
+  it("reports a spawned agent that never concluded", async () => {
     // Arrange.
     const { client } = await store();
-    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+    await write(client, spawnEntry("main", "activity:spawn-1", "sub-1"));
 
     // Act.
-    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    const response = await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(
       response.result.case === "success"
         ? response.result.value.liveAgents.map((id) => id.value)
         : [],
-    ).toEqual(["a"]);
+    ).toEqual(["sub-1"]);
+  });
+
+  it("never reports the session's own main agent", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "run1"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveAgents : [],
+    ).toEqual([]);
+  });
+
+  it("reports a nested subagent of the session", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, spawnEntry("main", "activity:spawn-1", "sub-1"));
+    await write(client, spawnEntry("sub-1", "activity:spawn-2", "sub-2"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success"
+        ? response.result.value.liveAgents.map((id) => id.value)
+        : [],
+    ).toEqual(["sub-1", "sub-2"]);
+  });
+
+  it("never reports another session's spawned agent", async () => {
+    // Arrange: ONE store serves every session on the host.
+    const { client } = await store();
+    await write(client, spawnEntry("main-a", "activity:spawn-a", "sub-a"));
+    await write(client, spawnEntry("main-b", "activity:spawn-b", "sub-b"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main-b"));
+
+    // Assert.
+    expect(
+      response.result.case === "success"
+        ? response.result.value.liveAgents.map((id) => id.value)
+        : [],
+    ).toEqual(["sub-b"]);
   });
 
   it("stops reporting an agent once a terminal frame lands", async () => {
     // Arrange.
     const { client } = await store();
-    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
-    await write(client, terminalEntry("a", "terminal:a:u1"));
+    await write(client, spawnEntry("main", "activity:spawn-1", "sub-1"));
+    await write(client, terminalEntry("sub-1", "terminal:sub-1:u1"));
 
     // Act.
-    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    const response = await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(
@@ -709,10 +762,10 @@ describe("GetLiveWork", () => {
   it("reports announced detached work with no terminal bash row", async () => {
     // Arrange.
     const { client } = await store();
-    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "run1"));
 
     // Act.
-    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    const response = await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(
@@ -722,14 +775,28 @@ describe("GetLiveWork", () => {
     ).toEqual(["task-1"]);
   });
 
+  it("never reports detached work another session announced", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("main-a", "activity:run-a", "task-a", "run-a"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main-b"));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveDetached : [],
+    ).toEqual([]);
+  });
+
   it("stops reporting detached work once its run terminates", async () => {
     // Arrange.
     const { client } = await store();
-    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "run1"));
     await write(client, bashTerminalEntry("run1"));
 
     // Act.
-    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    const response = await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(
@@ -740,15 +807,30 @@ describe("GetLiveWork", () => {
   it("reports no live workflows, because nothing writes one this wave", async () => {
     // Arrange.
     const { client } = await store();
-    await write(client, detachedEntry("a", "activity:run1", "task-1", "run1"));
+    await write(client, detachedEntry("main", "activity:run1", "task-1", "run1"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success" ? response.result.value.liveWorkflows : [],
+    ).toEqual([]);
+  });
+
+  it("refuses a request naming no session with invalid_request on `session`", async () => {
+    // Arrange.
+    const { client } = await store();
 
     // Act.
     const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
 
     // Assert.
     expect(
-      response.result.case === "success" ? response.result.value.liveWorkflows : [],
-    ).toEqual([]);
+      response.result.case === "failure" && response.result.value.kind.case === "invalidRequest"
+        ? response.result.value.kind.value.field
+        : undefined,
+    ).toBe("session");
   });
 });
 
@@ -802,7 +884,7 @@ describe("the read ledger", () => {
     const { store: fake, client } = await store();
 
     // Act.
-    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(fake.reads().map((read) => read.rpc)).toEqual(["GetLiveWork"]);
@@ -853,9 +935,9 @@ describe("the read ledger", () => {
     const { store: fake, client } = await store();
 
     // Act.
-    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    await client.getLiveWork(liveWorkFor("main"));
     await client.getSidecarCursors(create(storev1.GetSidecarCursorsRequestSchema, {}));
-    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(fake.reads().map((read) => read.rpc)).toEqual([
@@ -941,13 +1023,13 @@ describe("typed read refusals", () => {
     ).toBe("storageFailure");
   });
 
-  it("refuses GetLiveWork under storage_failure, its only declared arm", async () => {
+  it("refuses GetLiveWork under storage_failure", async () => {
     // Arrange.
     const { store: fake, client } = await store();
     fake.failReads("GetLiveWork", "storage_failure", "sqlite: no such table");
 
     // Act.
-    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    const response = await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
     expect(
@@ -1010,8 +1092,22 @@ describe("typed read refusals", () => {
 
     // Act, Assert.
     expect(() => fake.failReads("GetLiveWork", "stale_pointer")).toThrow(
-      /declares only storage_failure/,
+      /declares invalid_request and storage_failure/,
     );
+  });
+
+  it("refuses GetLiveWork under invalid_request", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("GetLiveWork", "invalid_request", "session: refused");
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("invalidRequest");
   });
 
   it("serves the verb again once its arm is cleared", async () => {
