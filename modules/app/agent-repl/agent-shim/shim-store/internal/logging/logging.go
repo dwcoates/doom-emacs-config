@@ -41,6 +41,9 @@ type Fields struct {
 
 	// Producer is the WriteBatch caller's self-declared name.
 	Producer string
+	// WriteClass is the queue a write took into the one writer —
+	// "interactive" or "bulk" — as the caller stated it.
+	WriteClass string
 	// AgentID is a conversation.v1.AgentId.value.
 	AgentID  string
 	AgentIDs []string
@@ -123,7 +126,12 @@ type Fields struct {
 	// and an operator reading it went looking for a missing index that was
 	// never missing. Split out, the same record says which of the two it was.
 	// (Reads have their own pool and queue on nothing, so they report zero.)
-	LockWait  time.Duration
+	LockWait time.Duration
+	// Exec is the part of Duration spent EXECUTING a write once it held the
+	// writer — Duration minus LockWait. Emitted (as exec_ms) only on a
+	// record that names a WriteClass, since only a write has a queue to
+	// subtract.
+	Exec      time.Duration
 	Rows      int64
 	Threshold time.Duration
 	// OverBudget and BudgetWindow are how many of this statement family's last
@@ -270,6 +278,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		"socket":            merged.Socket,
 		"transaction":       merged.Transaction,
 		"producer":          merged.Producer,
+		"write_class":       merged.WriteClass,
 		"agent_id":          merged.AgentID,
 		"vendor_session_id": merged.VendorSessionID,
 		"book_agent_id":     merged.BookAgentID,
@@ -312,6 +321,9 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		context["lock_wait_ms"] = merged.LockWait.Milliseconds()
 		context["rows"] = merged.Rows
 		context["threshold_ms"] = merged.Threshold.Milliseconds()
+		if merged.WriteClass != "" {
+			context["exec_ms"] = merged.Exec.Milliseconds()
+		}
 		if merged.BudgetWindow != 0 {
 			context["over_budget_recent"] = merged.OverBudget
 			context["over_budget_window"] = merged.BudgetWindow
@@ -407,6 +419,7 @@ func merge(base, extra Fields) Fields {
 		{&base.AgentReplSessionID, &extra.AgentReplSessionID},
 		{&base.RequestID, &extra.RequestID},
 		{&base.Producer, &extra.Producer},
+		{&base.WriteClass, &extra.WriteClass},
 		{&base.AgentID, &extra.AgentID},
 		{&base.VendorSessionID, &extra.VendorSessionID},
 		{&base.BookAgentID, &extra.BookAgentID},
@@ -452,6 +465,9 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.LockWait != 0 {
 		base.LockWait = extra.LockWait
+	}
+	if extra.Exec != 0 {
+		base.Exec = extra.Exec
 	}
 	if extra.Rows != 0 {
 		base.Rows = extra.Rows

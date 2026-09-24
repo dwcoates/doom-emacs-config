@@ -230,7 +230,7 @@ func TestAWriteBatchRefusalNamesTheOffendingEntrysField(t *testing.T) {
 	bad := &storev1.StoreEntry{Plane: streamPlane(), WriteId: "w2"}
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(good, bad), nil)
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(good, bad), nil)
 
 	// Assert
 	if RefusalField(err) != "entries[1].upsert_key" {
