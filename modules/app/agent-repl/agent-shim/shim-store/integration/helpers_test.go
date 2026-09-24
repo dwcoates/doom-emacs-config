@@ -1203,17 +1203,12 @@ func bashStart(line string, at int64) *conversationv1.AgentBash {
 	}
 }
 
-// bashDelta is one appended chunk of a detached run's spool — what the sidecar
-// writes as it copies the file, and the reason a run's rows are individual
-// entry rows rather than one overwritten lifecycle blob.
-func bashDelta(newOutput string, fromOffset uint64) *conversationv1.AgentBash {
+// bashTail is a detached run's rendered tail — what the sidecar writes as it
+// copies the spool, one row the run's every write supersedes (owner ruling
+// 2026-09-23: output beyond what is rendered is not stored).
+func bashTail(text string) *conversationv1.AgentBash {
 	return &conversationv1.AgentBash{
-		Result: &conversationv1.AgentBash_Update{
-			Update: &conversationv1.AgentBashUpdate{
-				NewOutput:  newOutput,
-				FromOffset: fromOffset,
-			},
-		},
+		Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{Text: text}},
 	}
 }
 
@@ -1719,8 +1714,8 @@ func bashRowLabel(row *storev1.StoreAgentBash) string {
 	switch {
 	case frame.GetStart() != nil:
 		return "start:" + frame.GetStart().GetCommand().GetLine()
-	case frame.GetUpdate() != nil:
-		return "delta:" + frame.GetUpdate().GetNewOutput()
+	case frame.GetTail() != nil:
+		return "tail:" + frame.GetTail().GetText()
 	case frame.GetProgress() != nil:
 		return "progress"
 	case frame.GetSuccess() != nil:

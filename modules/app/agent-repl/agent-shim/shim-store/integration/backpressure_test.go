@@ -182,13 +182,14 @@ func TestASlowBashWatcherIsEndedWithResourceExhausted(t *testing.T) {
 	assertTexts(t, "the replay", receiveBashRows(t, stream, 1), []string{"start:make test"})
 	mark := store.logMark()
 
-	// Act: far more deltas than the subscriber buffers.
+	// Act: far more tail writes than the subscriber buffers — each supersedes
+	// the run's one tail row, and each is a row the watcher is owed.
 	overrun := smallWatchBuffer * 40
 	entries := make([]*storev1.StoreEntry, 0, overrun)
 	for i := 0; i < overrun; i++ {
 		entries = append(entries, sidecar.agentEntry(
-			fmt.Sprintf("w-slow-d%d", i), fmt.Sprintf("bash:run-slow:%d", i),
-			bashRun(nil, "run-slow", bashDelta(fmt.Sprintf("chunk-%d", i), uint64(i))),
+			fmt.Sprintf("w-slow-t%d", i), "bash:run-slow:tail",
+			bashRun(nil, "run-slow", bashTail(fmt.Sprintf("chunk-%d", i))),
 		))
 	}
 	sidecar.write(ctx, t, entries...)

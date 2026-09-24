@@ -460,12 +460,18 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   the handoff a reader must see; a feed that drew the spawning call without it
   keeps claiming work that is no longer in the turn.
 - **A BASH FRAME IS ITS OWN ENTRY ROW** (`kind = bash`, book NULL,
-  `run_id = StoreAgentBash.run.value`) as well as a `detached_work` update. A
-  detached run's output arrives as deltas, so the run's history lives in the
-  spine under its own indexed key the way a book's does. Producers key the rows
-  (`bash:<run>:start`, `bash:<run>:<from_offset>`, `bash:<run>:terminal`); **the
-  store never parses a key.** It is still not a page line: a run has no book, and
-  its reader is `WatchBashRun`.
+  `run_id = StoreAgentBash.run.value`) as well as a `detached_work` update, so
+  the run's rows live in the spine under their own indexed key the way a book's
+  do. Producers key the rows (`bash:<run>:start`, `bash:<run>:tail`,
+  `bash:<run>:terminal`); **the store never parses a key.** It is still not a
+  page line: a run has no book, and its reader is `WatchBashRun`.
+- **ONLY WHAT IS RENDERED IS STORED** (owner ruling 2026-09-23). A run's output
+  is ONE rendered-tail row (`AgentBash.tail`) every write supersedes, and a
+  tail longer than conversation.v1 `AGENT_BASH_TAIL_CAP_BYTES` — the one
+  constant the sidecar cuts by and the daemon draws by — is refused
+  (`bash_tail_over_cap`, on `…bash.frame.tail.text`). Every supersession still
+  reaches a live `WatchBashRun` watcher as a row of its own; a replay serves
+  the newest window at the tail's first-insert position.
 - **ONE `detached_work` ROW PER RUN, LOCATED BY ORIGIN UNIT FIRST.** The
   announcement addresses a run by its `DetachedWorkId`; the run's own frames
   address it by its `AgentActivityId`. Both writers resolve the row the same way
@@ -854,7 +860,7 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
   `TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId`, which fails the
   moment the store stops leaving the mark the scan looks for.
 - Store-side fixture keys reproduce the producers' real spellings exactly:
-  `bash:<run>:start` / `bash:<run>:<from_offset>` / `bash:<run>:terminal`,
+  `bash:<run>:start` / `bash:<run>:tail` / `bash:<run>:terminal`,
   `detached:<work id>` for an announcement,
   `session:context_budget_warning:<uuid>`, and
   `residue:<vendor record uuid>` with the `residue:file:<path>:<offset>`
