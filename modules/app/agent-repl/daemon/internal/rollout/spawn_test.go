@@ -140,8 +140,8 @@ func TestSpawnAnswersTheAddressTheSuccessorReports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if got != "127.0.0.1:7788" {
-		t.Fatalf("address = %q, want the successor's report", got)
+	if got.Address() != "127.0.0.1:7788" {
+		t.Fatalf("address = %q, want the successor's report", got.Address())
 	}
 }
 
@@ -376,6 +376,95 @@ func TestTheSuccessorInheritsTheIncumbentsArgv(t *testing.T) {
 				if got[i] != tc.want[i] {
 					t.Fatalf("argv = %v, want %v", got, tc.want)
 				}
+			}
+		})
+	}
+}
+
+func TestSpawnAnswersTheHandleWhenTheSuccessorNeverReports(t *testing.T) {
+	// Arrange: a process that starts and exits without reporting.
+	state := t.TempDir()
+	spawner := NewProcessSpawner("/usr/bin/true", state)
+	spawner.Poll = time.Millisecond
+	spawner.Timeout = 20 * time.Millisecond
+
+	// Act
+	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Spawn succeeded with no address reported")
+	}
+	if successor == nil {
+		t.Fatalf("Spawn answered no handle for a process it started; nothing would stop it")
+	}
+	if err := successor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+}
+
+func TestSpawnAnswersNoHandleWhenNothingStarted(t *testing.T) {
+	// Arrange
+	spawner := NewProcessSpawner(filepath.Join(t.TempDir(), "absent"), t.TempDir())
+
+	// Act
+	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Spawn started a binary that does not exist")
+	}
+	if successor != nil {
+		t.Fatalf("Spawn answered a handle for a process it never started")
+	}
+}
+
+// TestStopReapsTheSuccessor covers the one proof Stop answers on: the reap.
+// Each row is a stand-in successor that reports its address and keeps
+// running, and the assertion is that its pid is gone once Stop returns --
+// no wait follows, because Stop itself is the wait.
+func TestStopReapsTheSuccessor(t *testing.T) {
+	tests := []struct {
+		name string
+		// prelude runs before the stand-in reports and execs its sleep.
+		prelude string
+	}{
+		{name: "a successor that exits on SIGTERM", prelude: ""},
+		// SIG_IGN is inherited across exec, so the sleep itself ignores the
+		// TERM and only the escalation's SIGKILL ends it.
+		{name: "a successor that ignores SIGTERM is killed", prelude: "trap '' TERM\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			state := t.TempDir()
+			script := filepath.Join(state, "successor.sh")
+			body := "#!/bin/sh\n" + tc.prelude +
+				"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
+				"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" +
+				"exec sleep 60\n"
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatalf("write the stand-in: %v", err)
+			}
+			spawner := NewProcessSpawner(script, state)
+			spawner.Poll = time.Millisecond
+			spawner.Timeout = 10 * time.Second
+			spawner.StopGrace = 50 * time.Millisecond
+			successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+			if err != nil {
+				t.Fatalf("Spawn: %v", err)
+			}
+			pid := successor.(*processSuccessor).process.Pid
+
+			// Act
+			stopErr := successor.Stop(context.Background())
+
+			// Assert
+			if stopErr != nil {
+				t.Fatalf("Stop: %v", stopErr)
+			}
+			if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
+				t.Fatalf("kill(%d, 0) = %v after Stop, want ESRCH: the successor is still there", pid, err)
 			}
 		})
 	}

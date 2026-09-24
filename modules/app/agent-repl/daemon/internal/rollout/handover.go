@@ -55,7 +55,7 @@ func (e *ErrAlreadyRollingOut) Error() string {
 func (c *controller) RollingOut() ([]ids.WorkspaceID, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.handingOver {
+	if c.handover == nil {
 		return nil, false
 	}
 	return c.waitingLocked(), true
@@ -74,58 +74,105 @@ func (c *controller) waitingLocked() []ids.WorkspaceID {
 	return waiting
 }
 
-// claimHandover raises the in-flight latch, or refuses naming what the
-// handover in flight is still waiting on. The latch is never lowered on
-// success: a handover that completes ends in this process's exit.
-func (c *controller) claimHandover() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.handingOver {
-		c.handingOver = true
-		return nil
-	}
-	return &ErrAlreadyRollingOut{WaitingOn: c.waitingLocked()}
+// handoverSlot is the one handover in flight and the successor it spawned.
+type handoverSlot struct {
+	// successor is nil until the spawn answers a process; from then on the
+	// slot owns it.
+	successor Successor
+	// armed is the rendezvous entries this handover's announcement armed, so
+	// an abandoned handover disarms exactly what it armed.
+	armed []ids.WorkspaceID
 }
 
-// releaseHandover lowers the latch for a handover that FAILED BEFORE IT
-// ANNOUNCED ANYTHING, so the next attempt is not refused by one that never
-// began. Past the announcement the latch stands: clients have been told.
-func (c *controller) releaseHandover() {
+// claimHandover claims the successor slot, or refuses naming what the
+// handover in flight is still waiting on. The slot is never emptied on
+// success: a handover that completes ends in this process's exit.
+func (c *controller) claimHandover() (*handoverSlot, error) {
 	c.mu.Lock()
-	c.handingOver = false
+	defer c.mu.Unlock()
+	if c.handover == nil {
+		c.handover = &handoverSlot{}
+		return c.handover, nil
+	}
+	return nil, &ErrAlreadyRollingOut{WaitingOn: c.waitingLocked()}
+}
+
+// abandonHandover ends a handover that FAILED before it was accepted: it stops
+// the successor the slot holds, disarms the rendezvous the announcement armed,
+// and only then empties the slot, so the next attempt is not refused by one
+// that will never finish.
+//
+// THE SLOT IS EMPTIED ONLY ON THE SUCCESSOR'S CONFIRMED DEATH. A successor
+// that would not stop is still a joining daemon polling the manifest path;
+// emptying the slot then would let the next deploy spawn a second one beside
+// it, and the two would race for every workspace. So the slot stays claimed,
+// every later handover is refused as already in flight, and the record below
+// names the pid-bearing cause for the operator.
+func (c *controller) abandonHandover(ctx context.Context, slot *handoverSlot, fields dlog.Context, cause error) {
+	if slot.successor != nil {
+		if err := slot.successor.Stop(ctx); err != nil {
+			c.log.Error(opHandover, "the abandoned handover's successor could not be stopped; the handover stays in flight so no second successor is spawned beside it",
+				withCause(merge(fields, dlog.Context{"abandoned_because": cause.Error()}), err))
+			return
+		}
+		c.log.Info(opHandover, "stopped the abandoned handover's successor", fields)
+	}
+	c.mu.Lock()
+	for _, ws := range slot.armed {
+		delete(c.rendezvous, ws)
+	}
+	if c.handover == slot {
+		c.handover = nil
+	}
 	c.mu.Unlock()
+	for _, ws := range slot.armed {
+		c.logTransition(opHandover, ws, "rendezvous", "armed", "unarmed", dlog.Context{"abandoned": true})
+	}
+	c.log.Info(opHandover, "the abandoned handover released its slot; the next handover may begin", fields)
 }
 
 // beginHandover is everything up to and including the announcement and the
 // intent manifest: SPAWN, list what is served, ANNOUNCE, snapshot, record.
 // It is bounded — nothing in it waits on a workspace — which is what lets a
 // caller answer "the rollout was accepted" before the unbounded part starts.
+//
+// EVERY FAILURE PAST THE CLAIM ABANDONS THE HANDOVER through one door
+// (abandonHandover), which stops whatever successor the spawn started before
+// it lets the slot go.
 func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPlan, error) {
-	if err := c.claimHandover(); err != nil {
+	slot, err := c.claimHandover()
+	if err != nil {
 		// INFO, NOT WARN: the refusal is the contract's own answer to a caller
 		// that asked twice, and nothing about it is wrong with this daemon.
 		c.log.Info(opHandover, "refused a handover while one is already in flight",
 			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
 		return nil, err
 	}
+	fields := dlog.Context{"self_address": c.deps.SelfAddress, "forced": force}
 	successor, err := c.deps.Spawner.Spawn(ctx, c.deps.SelfAddress)
+	if successor != nil {
+		slot.successor = successor
+	}
 	if err != nil {
-		c.releaseHandover()
 		c.log.Error(opHandover, "the successor did not come up; nothing was announced",
-			withCause(dlog.Context{"self_address": c.deps.SelfAddress}, err))
+			withCause(merge(fields, dlog.Context{"successor_started": successor != nil}), err))
+		c.abandonHandover(ctx, slot, fields, err)
 		return nil, fmt.Errorf("rollout: handover: spawn the successor: %w", err)
 	}
-	fields := dlog.Context{"successor": successor, "self_address": c.deps.SelfAddress, "forced": force}
+	address := successor.Address()
+	fields = merge(fields, dlog.Context{"successor": address})
 	c.log.Info(opHandover, "the successor is up in joining mode", fields)
 
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
-		c.releaseHandover()
+		c.log.Error(opHandover, "could not list what this daemon serves; the handover is abandoned before anything was announced",
+			withCause(fields, err))
+		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
 
 	c.deps.Announcer.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{
-		Address: &successor,
+		Address: &address,
 		Cause: &agentreplv1.DaemonShutdownCause{
 			Kind: &agentreplv1.DaemonShutdownCause_SelfMergeRollout{
 				SelfMergeRollout: &agentreplv1.DaemonShutdownSelfMergeRollout{},
@@ -144,6 +191,7 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		p := c.deps.Participants.Participants(ws.ID)
 		snapshot[ws.ID] = p
 		c.rendezvous[ws.ID] = &entry{expected: p, done: make(chan struct{})}
+		slot.armed = append(slot.armed, ws.ID)
 	}
 	c.mu.Unlock()
 	for _, ws := range workspaces {
@@ -156,13 +204,20 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 	c.log.Info(opHandover, "announced the stand-down and snapshotted the expected participants",
 		merge(fields, dlog.Context{"workspaces": len(workspaces)}))
 
-	manifest := c.manifest(ctx, successor, workspaces, snapshot)
+	manifest := c.manifest(ctx, address, workspaces, snapshot)
 	manifest.Forced = force
 	if err := c.writeManifest(ctx, manifest); err != nil {
+		// THE ANNOUNCEMENT HAS GONE OUT, and there is no arm that retracts it:
+		// a client that dialed the successor sees it stop, and goes on being
+		// served here, where nothing was quiesced or released. What must not
+		// happen is the successor waiting forever for this manifest.
+		c.log.Error(opHandover, "the intent manifest could not be written after the announcement; the handover is abandoned and its successor stopped",
+			withCause(merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))
+		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
 	return &handoverPlan{
-		successor:      successor,
+		successor:      address,
 		workspaces:     workspaces,
 		untransferable: untransferable,
 		snapshot:       snapshot,
