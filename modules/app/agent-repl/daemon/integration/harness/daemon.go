@@ -901,13 +901,12 @@ func (d *Daemon) WaitCtx() (context.Context, context.CancelFunc) { return d.wait
 // PID is the daemon process's id.
 func (d *Daemon) PID() int { return d.cmd.Process.Pid }
 
-// reapGrace bounds the wait for the kernel to reap a process group that has
-// already been sent SIGKILL. SIGKILL cannot be caught, blocked or ignored, so
-// this is not a shutdown budget: it covers only the scheduling of an already
-// doomed process, which every observed run completes in single-digit
-// milliseconds. A process still unreaped after this is a fault to REPORT, not
-// something to keep waiting on — an unbounded teardown wait costs the whole
-// suite its remaining budget, not just its own test.
+// reapGrace is how long the scheduling of an already-decided signal ordinarily
+// takes, which every observed run completes in single-digit milliseconds. It
+// bounds the waits whose outcome is NOT yet decided (the freeze confirmation,
+// the reap after a refused signal) and is the threshold above which Kill notes
+// a slow reap. Kill's own wait after an accepted SIGKILL is not bounded by it:
+// that exit is decided, and only its scheduling is left.
 const reapGrace = 2 * time.Second
 
 // Stop sends SIGTERM and waits, BOUNDED, for the process to leave. A daemon
@@ -1016,8 +1015,19 @@ func (d *Daemon) Kill() {
 	if !d.signalGroup(pgid, syscall.SIGKILL) {
 		return
 	}
-	if !d.awaitReapWithin(reapGrace) {
-		d.t.Errorf("harness: the daemon was still unreaped %s after SIGKILL", reapGrace)
+	// THE REAP IS AWAITED ON THE REAP ITSELF, NOT RACED AGAINST A CLOCK.
+	// SIGKILL cannot be caught, blocked or ignored, and kill(2) has accepted
+	// it, so the process WILL exit; what a wall-clock bound measured here was
+	// only how soon a nice-19 process, just released from SIGSTOP, got a CPU
+	// to run its own exit on — and on a saturated host that is seconds.
+	// TestReselectingAWorkspaceProducesNoDuplicatePush failed on "still
+	// unreaped 2s after SIGKILL" for a kill that had done exactly its job. A
+	// process that never exits after an accepted SIGKILL is a kernel fault,
+	// and the test binary's own -timeout reports it with every stack.
+	began := time.Now()
+	d.waitOnce.Do(d.wait)
+	if took := time.Since(began); took > reapGrace {
+		d.t.Logf("harness: the SIGKILLed daemon group took %s to be reaped; the host was starving its exit", took)
 	}
 }
 
