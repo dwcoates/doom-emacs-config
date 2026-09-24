@@ -29,7 +29,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// directive draws nothing. Marked per unit so the OTHER store plane's later
 	// re-delivery of the same response, after the terminal cleared the in-flight
 	// turn, is dropped too.
-	if s.directiveUnits[unit] || (s.turnStamp != nil && s.directiveTurns[*s.turnStamp]) {
+	if s.directiveUnits[unit] || (s.rowTurn() != nil && s.directiveTurns[*s.rowTurn()]) {
 		s.directiveUnits[unit] = true
 		log.Debug("daemon.feed.directive_response_suppressed",
 			"a context-cut directive's response frame drew no bubble",
@@ -41,8 +41,8 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// scopes the CROSS-PLANE reconciliation below: a response block that reaches
 	// the resolver under two divergent activity ids only ever collapses against a
 	// sibling of the same turn.
-	if fold.turn == "" && s.turnStamp != nil {
-		fold.turn = string(*s.turnStamp)
+	if turn := s.rowTurn(); fold.turn == "" && turn != nil {
+		fold.turn = string(*turn)
 	}
 
 	// A FRAME ARRIVED, so this fold is not silent. The stall window is dropped
@@ -176,11 +176,12 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// producer ends the run with (AgentModelError) is an empty message, so
 		// this is the only frame that says the vendor refused rather than
 		// errored, and feed.proto's `refusal` arm is drawn from it.
-		if _, refused := state.Failure.GetReason().GetReason().(*conversationv1.AgentResponseFailureReason_Refused); refused && s.turnInFlight != nil {
-			s.turnRefusals[string(*s.turnInFlight)] = true
+		if _, refused := state.Failure.GetReason().GetReason().(*conversationv1.AgentResponseFailureReason_Refused); refused && s.evidenceTurn() != nil {
+			turn := string(*s.evidenceTurn())
+			s.turnRefusals[turn] = true
 			log.Debug("daemon.feed.response_refused",
 				"a response ended on the vendor's refusal; the turn's terminal draws the refusal arm",
-				dlog.Context{"unit": unit, "turn": string(*s.turnInFlight)})
+				dlog.Context{"unit": unit, "turn": turn})
 		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true

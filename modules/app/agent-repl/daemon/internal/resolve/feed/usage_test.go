@@ -96,11 +96,11 @@ func TestSingleResponseTurnStampsFreshInputPlusOutput(t *testing.T) {
 
 	// Act: one API response — fresh input 240 + output 500, no cached context.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(240, 0, 0, 500)), noAddress())
+		thinkingFrame("unit-thinking", turnUsage(240, 0, 0, 500)), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: the bubble stamps input_tokens + output_tokens (740), not
 	// cache_creation and not a per-response context-window sum.
@@ -116,17 +116,17 @@ func TestMultiResponseTurnSumsTokensAcrossTheTurn(t *testing.T) {
 
 	// Act: a tool-use loop yields TWO API responses in the one turn.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-think-1", turnUsage(200, 0, 0, 300)), noAddress())
+		thinkingFrame("unit-think-1", turnUsage(200, 0, 0, 300)), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-prose-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "first"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-think-2", turnUsage(100, 0, 0, 400)), noAddress())
+		thinkingFrame("unit-think-2", turnUsage(100, 0, 0, 400)), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-prose-2", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "second"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: every bubble in the turn shows the TURN TOTAL (200+300+100+400 =
 	// 1000), summed across both API responses.
@@ -149,11 +149,11 @@ func TestCacheReadAndCreationAreExcludedFromTheTurnStamp(t *testing.T) {
 	// Act: one API response over a HUGE cached context — 99k cache_read and
 	// 18k cache_creation — but only 240 fresh input and 260 output.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(240, 18_000, 99_000, 260)), noAddress())
+		thinkingFrame("unit-thinking", turnUsage(240, 18_000, 99_000, 260)), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: the bubble shows the SMALL turn figure (240+260 = 500), not the
 	// ~117k context window that cache_read + cache_creation would sum to.
@@ -167,21 +167,21 @@ func TestANewTurnResetsTheTurnTokenSum(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "first")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-t1", turnUsage(4_000, 0, 0, 5_000)), noAddress())
+		thinkingFrame("unit-t1", turnUsage(4_000, 0, 0, 5_000)), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-p1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "first answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	h.terminal("turn-1", &conversationv1.AgentSuccess{}, nil)
 
 	// Act: a SECOND turn with a small bill of its own.
 	h.deliverPrompt("turn-2", "second")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-t2", turnUsage(100, 0, 0, 200)), noAddress())
+		thinkingFrame("unit-t2", turnUsage(100, 0, 0, 200)), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-p2", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "second answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: turn 2's bubble stamps only turn 2 (100+200 = 300); it does not
 	// carry turn 1's 9k.
@@ -201,13 +201,13 @@ func TestUsageRidesTheThinkingUnitAndTheProseBubbleReadsTheTurnTotal(t *testing.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(240, 0, 0, 260)), noAddress())
+		thinkingFrame("unit-thinking", turnUsage(240, 0, 0, 260)), nil, noAddress())
 
 	// Act: the prose unit of that same API response carries no usage at all.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: the prose bubble reads the sibling thinking unit's usage as the
 	// turn total (240+260 = 500).
@@ -221,11 +221,11 @@ func TestAturnWithNoStatedUsageDrawsNoStamp(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", nil), noAddress())
+		thinkingFrame("unit-thinking", nil), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-prose", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: absence draws no stamp, never an invented zero.
 	if usage := h.soleProse().GetUsage(); usage != nil {
@@ -239,12 +239,12 @@ func TestEveryProseUnitOfOneApiResponseStampsTheTurnTotalOnce(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingFrame("unit-thinking", turnUsage(4_000, 0, 0, 100)), noAddress())
+		thinkingFrame("unit-thinking", turnUsage(4_000, 0, 0, 100)), nil, noAddress())
 	for _, unit := range []string{"unit-prose-1", "unit-prose-2"} {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
 			responseFrame(unit, &conversationv1.AgentResponseSuccess{
 				Prose: &conversationv1.AgentResponseProse{Markdown: unit},
-			}, nil), noAddress())
+			}, nil), nil, noAddress())
 	}
 
 	// Assert: each bubble states the turn total once (4000+100 = 4.1k); a

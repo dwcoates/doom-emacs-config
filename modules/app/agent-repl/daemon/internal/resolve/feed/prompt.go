@@ -45,9 +45,12 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			running := ids.TurnID(turn.GetValue())
 			s.turnInFlight = &running
 			s.turnStamp = &running
-			// A replayed prompt is also the turn its page's next terminal ends.
+			s.knowTurn(running)
+			// A replayed prompt is also the turn its page's next UNSTAMPED
+			// terminal ends, and the page has now drawn a prompt.
 			if s.plane == planeHistory {
 				s.replayTurn = &running
+				s.replayPromptDrawn = true
 			}
 			// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and
 			// the next turn beginning is what retires it. Both turn-start sites
@@ -214,6 +217,7 @@ func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
 	// terminal for it will ever reach this workspace to end it here.
 	if prompt.Turn != "" {
 		s.endedTurns[ids.TurnID(prompt.Turn)] = true
+		s.knowTurn(ids.TurnID(prompt.Turn))
 	}
 	at := r.outputPlacement(s)
 	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())

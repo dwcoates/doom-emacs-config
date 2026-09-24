@@ -39,11 +39,15 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	s.plane = planeHistory
 	// THE PAGE STANDS IN NO TURN UNTIL IT DRAWS A PROMPT: see wsState.replayTurn.
 	s.replayTurn = nil
+	s.replayPromptDrawn = false
+	s.replayAtFloor = page.GetFloor() != nil
+	s.replayUnstamped = 0
 	for i := len(entries) - 1; i >= 0; i-- {
-		r.replayEntry(s, agent, entries[i].GetEntry(), entries[i].GetAt())
+		r.replayStamped(s, agent, entries[i])
 	}
 	s.replayTurn = nil
 	s.plane = planeLive
+	r.reportUnstampedReplay(s, agent, len(entries))
 
 	// A REPLAY CARRIES NO START — "what history replays is SETTLED frames" —
 	// so a spawn's settled frame waits for a start this page will never
@@ -134,6 +138,34 @@ func (r *resolver) replayPorted(s *wsState, ported []PortedPrompt) {
 		dlog.Context{"rows": len(ported)})
 }
 
+// replayStamped replays one entry under its own turn stamp (entryturn.go).
+// A stamped entry is judged against the turns this feed has seen opened; an
+// unstamped one that is not a prompt (a prompt names its own turn) is counted
+// as attributed by position.
+func (r *resolver) replayStamped(s *wsState, agent *conversationv1.AgentId, at *conversationv1.HistoryEntryAt) {
+	entry := at.GetEntry()
+	if turn := at.GetTurn().GetValue(); turn != "" {
+		r.replayStampKnown(s, agent, ids.TurnID(turn))
+	} else if entry.GetUserPrompt() == nil {
+		s.replayUnstamped++
+	}
+	defer s.drawingEntry(at.GetTurn())()
+	r.replayEntry(s, agent, entry, at.GetAt())
+}
+
+// reportUnstampedReplay says ONCE per replay that the page leaned on the
+// positional fallback, at INFO: old data is expected, and the record is what
+// tells a reader which attributions on screen are inferred rather than stated.
+func (r *resolver) reportUnstampedReplay(s *wsState, agent *conversationv1.AgentId, entries int) {
+	if s.replayUnstamped == 0 {
+		return
+	}
+	r.logger(s.id).Info("daemon.feed.replay_unstamped",
+		"replayed entries carried no turn id (pre-contract, or a turn no producer could name); they were attributed by position",
+		dlog.Context{"agent": agent.GetValue(), "unstamped": s.replayUnstamped, "entries": entries})
+	s.replayUnstamped = 0
+}
+
 // replayEntry routes one replayed entry to the family that draws it.
 func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry *conversationv1.HistoryEntry, at *conversationv1.HistoryPointer) {
 	switch arm := entry.GetEntry().(type) {
@@ -222,6 +254,10 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 // has just opened is certainly not it. It is recorded and draws nothing, the
 // same as a live terminal with no turn.
 func (r *resolver) replayTerminal(s *wsState, agent *conversationv1.AgentId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+	if s.entryTurn != nil {
+		r.replayStampedTerminal(s, agent, success, failure)
+		return
+	}
 	turn := s.replayTurn
 	if turn == nil {
 		live := ""
@@ -235,6 +271,40 @@ func (r *resolver) replayTerminal(s *wsState, agent *conversationv1.AgentId, suc
 	}
 	s.replayTurn = nil
 	r.drawTerminal(s, agent, turn, success, failure)
+}
+
+// replayStampedTerminal replays a terminal that NAMES its turn.
+//
+// ONLY THE MAIN AGENT'S TERMINAL ENDS A TURN. Every agent's entries carry the
+// turn they were produced within, a subagent's included, and a subagent's
+// stream ending is its bubble's business (drawTerminal with no turn).
+//
+// A TERMINAL AT THE PAGE'S HEAD, OF A TURN OLDER THAN THE PAGE, IS NOT DRAWN —
+// the same as the unstamped path: its prompt is not on screen, and a stop
+// notice above everything the page drew would stand for nothing the reader can
+// see. Every other stamped terminal ends exactly the turn it names, and its
+// prompt is the one it settles.
+func (r *resolver) replayStampedTerminal(s *wsState, agent *conversationv1.AgentId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+	turn := *s.entryTurn
+	// An unnamed main agent can only be the main watch's own unnamed page:
+	// a child's book is watched only once its agent is known.
+	if s.mainAgent != "" && agent.GetValue() != s.mainAgent {
+		r.drawTerminal(s, agent, nil, success, failure)
+		return
+	}
+	if s.predatesPage[turn] && !s.knownTurns[turn] {
+		r.logger(s.id).Debug("daemon.feed.replayed_terminal_predates_page",
+			"a replayed terminal ends a turn whose prompt is older than the page; it is charged to that turn and draws nothing",
+			dlog.Context{"agent": agent.GetValue(), "turn": string(turn)})
+		return
+	}
+	// THE POSITIONAL STANDING IS SPENT whenever a terminal lands, so an
+	// unstamped terminal after this one is never charged to a turn that
+	// already ended.
+	if s.replayTurn != nil && *s.replayTurn == turn {
+		s.replayTurn = nil
+	}
+	r.drawTerminal(s, agent, &turn, success, failure)
 }
 
 // boundaryName names a page's boundary arm for a record.

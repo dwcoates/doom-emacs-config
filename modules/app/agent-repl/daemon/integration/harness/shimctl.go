@@ -178,6 +178,7 @@ type controlCommand struct {
 	RPC       string `json:"rpc,omitempty"`
 	Agent     string `json:"agent,omitempty"`
 	Pointer   string `json:"pointer,omitempty"`
+	Turn      string `json:"turn,omitempty"`
 	Work      string `json:"work,omitempty"`
 	Stream    string `json:"stream,omitempty"`
 	Code      int    `json:"code,omitempty"`
@@ -409,6 +410,13 @@ func (s *ShimControl) PushAgentFrame(agent string, f *conversationv1.AgentFrame)
 func (s *ShimControl) PushAgentFrameAt(agent, pointer string, f *conversationv1.AgentFrame) {
 	s.t.Helper()
 	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Pointer: pointer, Payload: encode(s.t, f)})
+}
+
+// PushAgentFrameIn delivers one agent frame STAMPED with the turn it was
+// produced within, as the real shim stamps every row of an open turn.
+func (s *ShimControl) PushAgentFrameIn(agent, turn string, f *conversationv1.AgentFrame) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Turn: turn, Payload: encode(s.t, f)})
 }
 
 // PushUserPrompt delivers one DELIVERED PROMPT on the matching WatchAgent

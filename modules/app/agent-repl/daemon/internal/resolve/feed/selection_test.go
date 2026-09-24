@@ -26,7 +26,7 @@ func (h *harness) concludeAnswer(turn, unit, markdown string) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame(unit, &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	id := ids.TurnID(turn)
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, completedWith(unit), nil, noAddress())
 }
@@ -136,7 +136,7 @@ func TestABackgroundedConclusionStampsNoAnswerRow(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "some prose"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	id := ids.TurnID("turn-1")
 
 	// Act: conclude with backgrounded (no answer unit).
