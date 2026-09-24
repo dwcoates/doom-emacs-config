@@ -1356,6 +1356,112 @@ t_out_creates_an_absent_dir() {
     rm -rf "$root"
 }
 
+# ---------------------------------------------------------------------------
+# ensure-deps.sh — never installs through a shared-store symlink.
+#
+# The npm stub models what real `npm ci` did to the store on 2026-09-23: it
+# empties whatever node_modules NAMES before installing, so installing
+# through a link wipes the store entry. `npm ls` passes only when the tree
+# carries its `.ok` marker.
+ENSURE_DEPS="$THIS_DIR/ensure-deps.sh"
+
+ed_fixture() {
+    local root; root="$(mktemp -d)"
+    mkdir -p "$root/bin" "$root/pkg" "$root/store/node_modules"
+    echo ok > "$root/store/node_modules/.ok"
+    cat > "$root/bin/npm" <<'EOF'
+#!/usr/bin/env bash
+echo "npm $*" >> "$ED_LOG"
+case "${1:-}" in
+    ls) [ -f node_modules/.ok ] ;;
+    ci)
+        if [ -L node_modules ]; then
+            find "$(readlink node_modules)" -mindepth 1 -delete
+        else
+            rm -rf node_modules
+        fi
+        mkdir -p node_modules && echo ok > node_modules/.ok ;;
+esac
+EOF
+    chmod +x "$root/bin/npm"
+    echo "$root"
+}
+
+ed_run() {
+    local root="$1"
+    ED_LOG="$root/npm.log" PATH="$root/bin:$PATH" bash "$ENSURE_DEPS" "$root/pkg" 2>"$root/stderr"
+}
+
+t_ensure_deps_leaves_a_satisfied_link_alone() {
+    local root; root="$(ed_fixture)"
+    ln -s "$root/store/node_modules" "$root/pkg/node_modules"
+    ed_run "$root"
+    if [ -L "$root/pkg/node_modules" ] && ! grep -q '^npm ci' "$root/npm.log"; then
+        pass "ensure-deps: a link whose tree satisfies the package is left alone"
+    else
+        fail "ensure-deps: a link whose tree satisfies the package is left alone" "$(cat "$root/npm.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_never_empties_the_store_through_a_link() {
+    local root; root="$(ed_fixture)"
+    rm "$root/store/node_modules/.ok"
+    echo other > "$root/store/node_modules/other-worktrees-dep"
+    ln -s "$root/store/node_modules" "$root/pkg/node_modules"
+    ed_run "$root"
+    if [ -f "$root/store/node_modules/other-worktrees-dep" ]; then
+        pass "ensure-deps: an unsatisfied link never has its store entry emptied"
+    else
+        fail "ensure-deps: an unsatisfied link never has its store entry emptied" "the store entry was wiped"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link() {
+    local root; root="$(ed_fixture)"
+    rm "$root/store/node_modules/.ok"
+    ln -s "$root/store/node_modules" "$root/pkg/node_modules"
+    ed_run "$root"
+    if [ -d "$root/pkg/node_modules" ] && [ ! -L "$root/pkg/node_modules" ] &&
+        [ -f "$root/pkg/node_modules/.ok" ] && grep -q 'removing the LINK only' "$root/stderr"; then
+        pass "ensure-deps: an unsatisfied link is replaced by a private install, loudly"
+    else
+        fail "ensure-deps: an unsatisfied link is replaced by a private install, loudly" "$(cat "$root/stderr")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_installs_an_absent_tree() {
+    local root; root="$(ed_fixture)"
+    ed_run "$root"
+    if [ -f "$root/pkg/node_modules/.ok" ] && grep -q '^npm ci' "$root/npm.log"; then
+        pass "ensure-deps: an absent node_modules is installed"
+    else
+        fail "ensure-deps: an absent node_modules is installed" "$(cat "$root/npm.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_fails_when_the_install_fails() {
+    local root; root="$(ed_fixture)"
+    printf '#!/usr/bin/env bash\necho "npm $*" >> "$ED_LOG"\n[ "${1:-}" = ci ] && exit 7\nexit 1\n' > "$root/bin/npm"
+    local rc=0
+    ed_run "$root" || rc=$?
+    if [ "$rc" -eq 7 ]; then
+        pass "ensure-deps: a failed install fails with npm's own status"
+    else
+        fail "ensure-deps: a failed install fails with npm's own status" "rc=$rc"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_leaves_a_satisfied_link_alone
+t_ensure_deps_never_empties_the_store_through_a_link
+t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link
+t_ensure_deps_installs_an_absent_tree
+t_ensure_deps_fails_when_the_install_fails
+
 t_out_stages_the_shim
 t_out_stages_the_webapp
 t_out_stages_the_daemon
