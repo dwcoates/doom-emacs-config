@@ -61,7 +61,8 @@ type sink struct {
 	// workspaceDir and workspaceID attribute every failure this sink reports.
 	workspaceDir string
 	workspaceID  string
-	// link is the canonical symlink path inside the workspace.
+	// link is the canonical symlink path inside the workspace, or empty for a
+	// sink of a retired workspace directory, which touches nothing inside it.
 	link string
 	// target is the daemon-owned file the link names.
 	target string
@@ -105,18 +106,33 @@ type sink struct {
 // (logging-contract.md), so a bounce loop cannot evict history merely by
 // restarting, and that rule now holds for the workspace sinks as well.
 func openSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
-	return openSinkSized(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups)
+	return openSinkLinked(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups, true)
+}
+
+// openLinklessSink opens a sink for a RETIRED workspace directory (see
+// surfaces.Retire): its target under the logs directory, and nothing at all
+// inside the workspace directory, which the daemon is removing or has removed.
+func openLinklessSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
+	return openSinkLinked(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups, false)
 }
 
 // openSinkSized is the test seam for the generation cap. Production always
 // supplies the contract's 64 MiB cap and shared generation count through
 // openSink.
 func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capBytes int64, backups int) (*sink, error) {
+	return openSinkLinked(logsDir, workspaceDir, workspaceID, name, target, capBytes, backups, true)
+}
+
+// openSinkLinked opens one sink, creating and pointing its canonical link
+// inside the workspace directory only when linked.
+func openSinkLinked(logsDir, workspaceDir, workspaceID, name, target string, capBytes int64, backups int, linked bool) (*sink, error) {
 	linkDir := filepath.Join(workspaceDir, linkDirRel)
-	if err := os.MkdirAll(linkDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
+	if linked {
+		if err := os.MkdirAll(linkDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
+		}
 	}
-	if target == "" {
+	if target == "" && linked {
 		standing, err := standingTarget(logsDir, linkDir, name, capBytes)
 		if err != nil {
 			return nil, err
@@ -145,18 +161,29 @@ func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capB
 		name:         name,
 		workspaceDir: workspaceDir,
 		workspaceID:  workspaceID,
-		link:         filepath.Join(linkDir, name+".log"),
 		target:       target,
 		mintedTarget: mintedTarget,
 		file:         file,
 		cap:          capBytes,
 		size:         info.Size(),
 	}
+	if !linked {
+		return s, nil
+	}
+	s.link = filepath.Join(linkDir, name+".log")
 	if err := replaceLink(s.link, target); err != nil {
 		file.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// unlink stops this sink touching its workspace directory: from its return
+// on, a rotation re-points no canonical link. The target stays open.
+func (s *sink) unlink() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.link = ""
 }
 
 // standingTarget answers the daemon-owned target the workspace's canonical
@@ -425,6 +452,9 @@ func (s *sink) repointAfterRollLocked() error {
 		s.poisonLocked(fmt.Errorf("set fresh log target %q permissions after rotation: %w", s.target, err))
 		return s.poison
 	}
+	if s.link == "" {
+		return nil
+	}
 	if err := replaceLink(s.link, s.target); err != nil {
 		s.poisonLocked(fmt.Errorf("re-point canonical link after rotating %q: %w", s.target, err))
 		return s.poison
@@ -433,6 +463,10 @@ func (s *sink) repointAfterRollLocked() error {
 }
 
 func (s *sink) verifyLinkLocked(operation string) error {
+	// A retired workspace's sink has no link to verify: see unlink.
+	if s.link == "" {
+		return nil
+	}
 	dest, err := os.Readlink(s.link)
 	if err != nil {
 		s.poisonLocked(fmt.Errorf("read canonical link %q during %s: %w", s.link, operation, err))

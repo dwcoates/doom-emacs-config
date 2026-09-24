@@ -140,6 +140,8 @@ type TestSurfaces struct {
 	clientRecords []ClientLogCall
 	// evicted records every workspace directory Evict was called with.
 	evicted []string
+	// retired records every workspace directory Retire was called with.
+	retired []string
 }
 
 // ClientLogCall is one captured ClientLog call.
@@ -228,6 +230,23 @@ func (s *TestSurfaces) Evict(dir string) error {
 	defer s.mu.Unlock()
 	s.evicted = append(s.evicted, dir)
 	return nil
+}
+
+// Retire implements Surfaces by capturing the call.
+func (s *TestSurfaces) Retire(dir string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retired = append(s.retired, dir)
+	return nil
+}
+
+// Retired returns every directory Retire was called with, in order.
+func (s *TestSurfaces) Retired() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.retired))
+	copy(out, s.retired)
+	return out
 }
 
 // Close implements Surfaces.

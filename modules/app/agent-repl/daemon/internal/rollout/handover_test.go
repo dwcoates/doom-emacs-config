@@ -14,23 +14,30 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// runHandover starts Handover, waits for every workspace's transfer push, then
-// expires the adoption windows so the flow can reach its exit. The clock is
-// driven rather than waited out: nothing in this package sleeps.
+// runHandover starts an unforced HandOver, waits for every workspace's
+// transfer push, expires the adoption windows, and waits for the flow's exit.
+// The clock is driven rather than waited out: nothing in this package sleeps.
 func runHandover(t *testing.T, h *harness, workspaces int) error {
 	t.Helper()
-	done := make(chan error, 1)
-	go func() { done <- h.c.Handover(context.Background()) }()
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		return err
+	}
 	for range workspaces {
 		h.clock.awaitArmed(t, adoptionWindow)
 	}
 	h.clock.Fire(adoptionWindow)
+	awaitExit(t, h)
+	h.registry.wait()
+	return nil
+}
+
+// awaitExit blocks until the handover reaches its orderly exit.
+func awaitExit(t *testing.T, h *harness) {
+	t.Helper()
 	select {
-	case err := <-done:
-		return err
+	case <-h.exits:
 	case <-time.After(10 * time.Second):
-		t.Fatalf("Handover never returned")
-		return nil
+		t.Fatalf("the handover never exited; steps %v", h.order.Taken())
 	}
 }
 
@@ -107,11 +114,11 @@ func TestHandoverNeverAnnouncesWhenTheSuccessorDoesNotComeUp(t *testing.T) {
 	h.spawner.err = errFake
 
 	// Act
-	err := h.c.Handover(context.Background())
+	_, err := h.c.HandOver(context.Background(), false)
 
 	// Assert
 	if err == nil {
-		t.Fatalf("Handover succeeded with no successor")
+		t.Fatalf("HandOver succeeded with no successor")
 	}
 	if len(h.announcer.Sent()) != 0 {
 		t.Fatalf("a stand-down was announced with no successor to dial")
@@ -334,16 +341,15 @@ func TestAnAdoptionThatLandedRecordsNoFault(t *testing.T) {
 	successor := ids.InstanceID("daemon-successor")
 
 	// Act
-	done := make(chan error, 1)
-	go func() { done <- h.c.Handover(context.Background()) }()
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
 	h.clock.awaitArmed(t, adoptionWindow)
 	if err := h.db.ClaimServing(context.Background(), ws, successor); err != nil {
 		t.Fatalf("ClaimServing: %v", err)
 	}
 	h.clock.Fire(adoptionWindow)
-	if err := <-done; err != nil {
-		t.Fatalf("Handover: %v", err)
-	}
+	awaitExit(t, h)
 	faults, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultAdoptionExpired})
 
 	// Assert
@@ -394,26 +400,21 @@ func TestANeverFreeWorkspaceIsWaitedOnForeverAndNamedOnACadence(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	gate := h.freeness.Gate(ws)
-	done := make(chan error, 1)
 
-	// Act
-	go func() { done <- h.c.Handover(context.Background()) }()
-	<-h.freeness.calls
-	// Two holdout cadences pass with the workspace still busy; the wait must
-	// still be standing after each.
+	// Act: two holdout cadences pass with the workspace still busy.
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
 	h.clock.awaitArmed(t, holdoutCadence)
 	h.clock.Fire(holdoutCadence)
 	h.clock.awaitArmed(t, holdoutCadence)
 	h.clock.Fire(holdoutCadence)
 	h.clock.awaitArmed(t, holdoutCadence)
-	warns := levelRecords(records(h.log, opTransfer), "warn")
-	close(gate)
+	warns := levelRecords(records(h.log, opHandover), "warn")
+	h.registry.free(ws)
 	h.clock.awaitArmed(t, adoptionWindow)
 	h.clock.Fire(adoptionWindow)
-	if err := <-done; err != nil {
-		t.Fatalf("Handover: %v", err)
-	}
+	awaitExit(t, h)
 
 	// Assert
 	if len(warns) < 2 {
@@ -422,6 +423,10 @@ func TestANeverFreeWorkspaceIsWaitedOnForeverAndNamedOnACadence(t *testing.T) {
 	for _, warn := range warns {
 		if warn.Context["cadence"] != holdoutCadence.String() {
 			t.Fatalf("holdout warning cadence = %v, want the ten-minute ruling", warn.Context["cadence"])
+		}
+		holdouts, _ := warn.Context["holdouts"].([]string)
+		if len(holdouts) != 1 || holdouts[0] != string(ws) {
+			t.Fatalf("holdouts = %v, want the busy workspace named", warn.Context["holdouts"])
 		}
 	}
 }
@@ -432,24 +437,125 @@ func TestANeverFreeWorkspaceIsNeverInterruptedToHurryIt(t *testing.T) {
 	ws, _ := h.workspace(t)
 	shim := h.fleet.live[ws]
 	h.freeness.SetFree(ws, false)
-	gate := h.freeness.Gate(ws)
-	done := make(chan error, 1)
 
 	// Act
-	go func() { done <- h.c.Handover(context.Background()) }()
-	<-h.freeness.calls
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
 	h.clock.awaitArmed(t, holdoutCadence)
 	h.clock.Fire(holdoutCadence)
 	h.clock.awaitArmed(t, holdoutCadence)
 	killed := len(shim.KillRequests()) + len(shim.ForceKills())
-	close(gate)
+	detached := shim.Detached()
+	h.registry.free(ws)
 	h.clock.awaitArmed(t, adoptionWindow)
 	h.clock.Fire(adoptionWindow)
-	<-done
+	awaitExit(t, h)
 
 	// Assert
-	if killed != 0 {
-		t.Fatalf("kill calls while waiting = %d, want none: nothing is interrupted to hurry a holdout", killed)
+	if killed != 0 || detached {
+		t.Fatalf("kills %d, detached %v while waiting; want nothing touched until the workspace fell free", killed, detached)
+	}
+}
+
+func TestABusyWorkspaceDoesNotDelayAFreeOneBehindIt(t *testing.T) {
+	// Arrange: two workspaces, the first busy.
+	h := newHarness(t)
+	busy, _ := h.workspace(t)
+	free, _ := h.workspace(t)
+	h.freeness.SetFree(busy, false)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+	h.registry.wait()
+
+	// Assert: the free workspace moved while the busy one is still registered.
+	calls := h.pusher.Calls()
+	if len(calls) != 1 || calls[0].WS != free {
+		t.Fatalf("pushes = %+v, want only the free workspace transferred", calls)
+	}
+	if !h.registry.Pending(busy) {
+		t.Fatalf("the busy workspace's transfer is not registered")
+	}
+}
+
+func TestAForcedHandoverTransfersEveryWorkspaceNow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+
+	// Act
+	accepted, err := h.c.HandOver(context.Background(), true)
+	if err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+	h.clock.Fire(adoptionWindow)
+	awaitExit(t, h)
+
+	// Assert
+	if !accepted.Forced || accepted.Busy != 1 {
+		t.Fatalf("acceptance = %+v, want forced with the one busy workspace counted", accepted)
+	}
+	requests := h.registry.Requests()
+	if len(requests) != 1 || !requests[0].Req.Force || !requests[0].Req.KeepDraining {
+		t.Fatalf("requests = %+v, want one forced, kept-draining transfer", requests)
+	}
+	m, found, err := ReadManifest(h.c.deps.IntentManifest)
+	if err != nil || !found || !m.Forced {
+		t.Fatalf("manifest forced = %v (found %v, err %v), want the successor told the handover was forced", m.Forced, found, err)
+	}
+}
+
+func TestAHandoverWithATransferTheRegistryRefusedDoesNotExit(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.registry.err = errFake
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+
+	// Assert
+	select {
+	case <-h.exits:
+		t.Fatalf("the daemon exited with a workspace it still serves")
+	default:
+	}
+	if !loggedError(h.log, opTransfer, "the bounce registry refused the workspace's transfer") {
+		t.Fatalf("records = %+v, want the refusal at ERROR", h.log.Records())
+	}
+}
+
+func TestAHandoverWithAFailedTransferDoesNotExit(t *testing.T) {
+	// Arrange: the quiesce fails, so the transfer does.
+	h := newHarness(t, func(d *Deps) {
+		d.Quiesce = func(context.Context, ids.WorkspaceID) error { return errFake }
+	})
+	h.workspace(t)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+
+	// Assert
+	select {
+	case <-h.exits:
+		t.Fatalf("the daemon exited with a workspace whose transfer failed")
+	default:
+	}
+	if !loggedError(h.log, opHandover, "the handover cannot finish") {
+		t.Fatalf("records = %+v, want the unfinished handover at ERROR", h.log.Records())
 	}
 }
 

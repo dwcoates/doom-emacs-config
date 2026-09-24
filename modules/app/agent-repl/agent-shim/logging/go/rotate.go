@@ -14,6 +14,7 @@ package logging
 // crash, or ordinary process restart never consumes a history generation.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,8 +87,11 @@ func OpenRotating(path string, capBytes int64, backups int) (*RotatingFile, erro
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
-		return nil, fmt.Errorf("stat rotating log %q: %w", path, err)
+		statErr := fmt.Errorf("stat rotating log %q: %w", path, err)
+		if closeErr := f.Close(); closeErr != nil {
+			return nil, errors.Join(statErr, fmt.Errorf("close rotating log %q: %w", path, closeErr))
+		}
+		return nil, statErr
 	}
 	return &RotatingFile{path: path, cap: capBytes, backups: backups, f: f, size: info.Size()}, nil
 }

@@ -1,7 +1,6 @@
 package rollout
 
 import (
-	"os"
 	"sync"
 	"time"
 
@@ -13,9 +12,6 @@ import (
 // them, per the logging contract.
 const (
 	opNew         = "daemon.rollout.new"
-	opTrigger     = "daemon.rollout.trigger"
-	opClassify    = "daemon.rollout.classify"
-	opDeploy      = "daemon.rollout.deploy"
 	opHandover    = "daemon.rollout.handover"
 	opTransfer    = "daemon.rollout.transfer"
 	opAdoption    = "daemon.rollout.adoption_window"
@@ -26,17 +22,10 @@ const (
 	opManifest    = "daemon.rollout.manifest"
 	opReconcile   = "daemon.rollout.reconcile"
 	opRelaunch    = "daemon.rollout.relaunch"
+	opBounce      = "daemon.rollout.bounce"
 	opStaleness   = "daemon.rollout.staleness"
 	opReloadWebap = "daemon.rollout.reload_webapp"
 )
-
-// DeployScriptEnv overrides bin/deploy-all.sh for the self-reload trigger. It
-// is how a test asserts the trigger reached the deploy chain without running
-// the real one.
-const DeployScriptEnv = "AGENT_REPL_DEPLOY_SCRIPT"
-
-// DefaultDeployScript is the ONE deploy chain, relative to the module root.
-const DefaultDeployScript = "bin/deploy-all.sh"
 
 // The rollout's default windows.
 const (
@@ -44,25 +33,14 @@ const (
 	DefaultExpectedOutage = 5 * time.Second
 	// DefaultAdoptionWindow is how long the outgoing daemon gives an adoption.
 	DefaultAdoptionWindow = 30 * time.Second
-	// DefaultHoldoutWarnEvery is the never-free warning cadence, per the
-	// ruling: wait forever, name the holdout every ten minutes.
+	// DefaultHoldoutWarnEvery is the cadence a handover waiting on busy
+	// workspaces names them at, per the ruling: wait forever, name the holdout
+	// every ten minutes.
 	DefaultHoldoutWarnEvery = 10 * time.Minute
 	// DefaultStandDownWindow is how long a gracefully killed shim has before
 	// the force-kill.
 	DefaultStandDownWindow = 30 * time.Second
 )
-
-// ResolveDeployScript answers the deploy script in force: DeployScriptEnv when
-// it is set, else the wired value, else DefaultDeployScript.
-func ResolveDeployScript(wired string) string {
-	if fromEnv := os.Getenv(DeployScriptEnv); fromEnv != "" {
-		return fromEnv
-	}
-	if wired != "" {
-		return wired
-	}
-	return DefaultDeployScript
-}
 
 // controller is the Controller implementation.
 type controller struct {
@@ -110,11 +88,20 @@ type controller struct {
 	// raised before the successor is spawned and lowered only by a handover
 	// that failed before announcing anything.
 	handingOver bool
-	// staleBounces counts the per-workspace stale-shim relaunches a successor
-	// started when it became the incumbent. Each waits for its own
-	// workspace's freeness; the group is what lets a caller (a test) know the
-	// checks have all run to their end rather than guessing with a delay.
-	staleBounces sync.WaitGroup
+	// staleChecks counts the staleness judgements ShimReported dispatched off
+	// its caller's lock, so a caller (a test, the orderly exit) joins them
+	// rather than guessing with a delay. None of them WAITS on a workspace:
+	// the bounce registry does the waiting.
+	staleChecks sync.WaitGroup
+	// handoverDone joins the one goroutine that follows a handover to its end
+	// (the transfers, the adoption windows, the exit).
+	handoverDone sync.WaitGroup
+	// reported is the last build each live shim reported, "" for a shim that
+	// reported none.
+	reported map[ids.WorkspaceID]string
+	// forcedTakeover is the handover the successor joined was FORCED, so the
+	// stale shims it adopts are bounced at once too.
+	forcedTakeover bool
 	// stragglerAdoptions counts the adoptions becomeIncumbent started for
 	// workspaces whose handover never finished, for the same reason.
 	stragglerAdoptions sync.WaitGroup
@@ -125,9 +112,10 @@ type controller struct {
 	adopting map[ids.WorkspaceID]bool
 	// bouncedStamp is the reported shim build each workspace was LAST bounced
 	// for. It is what makes the build-staleness bounce fire ONCE per observed
-	// stamp: a relaunched shim that comes back reporting the same sha as the
-	// one just stood down is not stale again, and without this the bounce
-	// re-triggers on every mount forever, spawning a shim each round.
+	// build: a relaunched shim that comes back reporting the same build as the
+	// one just stood down cannot be fixed by bouncing it again, and without
+	// this the bounce re-triggers on every report forever, spawning a shim
+	// each round.
 	bouncedStamp map[ids.WorkspaceID]string
 }
 

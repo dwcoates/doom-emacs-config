@@ -197,6 +197,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
                  (agent-repl-test-verbs--stub :merge-queue))
+                ((symbol-function 'agent-repl-rpc-deploy)
+                 (agent-repl-test-verbs--stub :deploy))
                 ((symbol-function 'agent-repl-rpc-daemon-health)
                  (agent-repl-test-verbs--stub :daemon-health))
                 ((symbol-function 'agent-repl-rpc-session-health)
@@ -477,19 +479,6 @@ never signalled as an error."
       '((:interrupt . (:response (:arm :success :value (:arm :nothing-running :value nil)))))
     (agent-repl-verb-interrupt "ws-one")
     (should (agent-repl-test-verbs--messaged-p "nothing to interrupt"))))
-
-(ert-deftest agent-repl-verbs-interrupt-keepalive-collision-is-graceful-not-a-transport-failure ()
-  "A keep-alive collision is answered by a graceful SUCCESS arm, never a
-transport failure.  The daemon maps the shim's `not_the_open_turn' -- the
-turn was queued behind an in-flight keep-alive, which Emacs used to see as
-a raw \"daemon cannot answer\" transport failure -- onto the `nothing_running'
-success arm, so the footer stop draws the calm message and NEVER the loud
-transport-failure path."
-  (agent-repl-test-verbs--with
-      '((:interrupt . (:response (:arm :success :value (:arm :nothing-running :value nil)))))
-    (agent-repl-verb-interrupt "ws-one")
-    (should (agent-repl-test-verbs--messaged-p "nothing to interrupt"))
-    (should-not (agent-repl-test-verbs--messaged-p "interrupt failed"))))
 
 (ert-deftest agent-repl-verbs-interrupt-detached-count-is-stated ()
   "A confirmed stop that also ended agents states the count."
@@ -1640,6 +1629,173 @@ this test needs the genuinely sectionless roster."
       (let* ((action (plist-get (agent-repl-test-verbs--request :shutdown-schedule) :action))
              (reason (plist-get (plist-get action :value) :reason)))
         (should (equal (plist-get (plist-get reason :value) :note) "rolling the daemon"))))))
+
+;;;; ---- Deploy ----
+
+(defconst agent-repl-test-verbs--deploy-success
+  '(:arm :success
+    :value (:components
+            ((:component :daemon :build "d1"
+              :outcome (:arm :handing-over :value (:workspaces 3 :busy 1 :forced nil)))
+             (:component :shim :build "s1"
+              :outcome (:arm :shims
+                        :value (:bounces ((:workspace "ws-a" :when (:arm :bounced-now :value (:forced nil)))
+                                          (:workspace "ws-b" :when (:arm :registered
+                                                                    :value (:turn-in-flight t :detached-work 0)))))))
+             (:component :webapp :build "w1" :outcome (:arm :reload-pushed :value (:recipients 2)))
+             (:component :store :build "st1" :outcome (:arm :restarted :value nil))
+             (:component :sidecar :build "sc1" :outcome (:arm :up-to-date :value nil))
+             (:component :elisp :build "e1" :outcome (:arm :deferred-to-successor :value nil)))))
+  "A DeploySuccess naming one outcome of every arm.")
+
+(defconst agent-repl-test-verbs--deploy-errors
+  '(((:arm :build-failed :value (:step "webapp" :detail "tsc: 2 errors" :log "/tmp/b.log"))
+     "agent-repl: deploy refused: the webapp build failed, so nothing was deployed: tsc: 2 errors (log: /tmp/b.log)")
+    ((:arm :already-deploying :value nil)
+     "agent-repl: deploy refused: a deploy is already running; ask again when it ends")
+    ((:arm :already-rolling-out :value (:waiting-on ("ws-a" "ws-b")))
+     "agent-repl: deploy refused: a handover is already in flight, waiting on ws-a, ws-b")
+    ((:arm :joining :value nil)
+     "agent-repl: deploy refused: this daemon is a successor still joining a handover")
+    ((:arm :service-restart-failed :value (:component :store :detail "exit 78"))
+     "agent-repl: deploy refused: store did not come back onto the fresh build: exit 78")
+    ((:arm :install-failed :value (:component :daemon :detail "EACCES"))
+     "agent-repl: deploy refused: the daemon artifact could not be installed, so nothing was restarted: EACCES"))
+  "Every DeployError cause arm and the echo-area line it is reported by.")
+
+(ert-deftest agent-repl-verbs-deploy-unforced-sends-no-force ()
+  "Without a prefix the deploy is unforced and asks nothing."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) (setq asked t) t)))
+        ;; Act
+        (agent-repl-deploy nil))
+      ;; Assert
+      (should (equal (list (agent-repl-test-verbs--request :deploy) asked)
+                     '((:force nil) nil))))))
+
+(ert-deftest agent-repl-verbs-deploy-prefix-sends-force-once-confirmed ()
+  "With a prefix and a yes, the deploy is sent FORCED."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+      ;; Act
+      (agent-repl-deploy '(4)))
+    ;; Assert
+    (should (equal (agent-repl-test-verbs--request :deploy) '(:force t)))))
+
+(ert-deftest agent-repl-verbs-deploy-forced-confirmation-names-running-turns ()
+  "The forced deploy's question says it ends running turns."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange
+    (let ((prompt nil))
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (p) (setq prompt p) t)))
+        ;; Act
+        (agent-repl-deploy '(4)))
+      ;; Assert
+      (should (string-search "ends every running turn" prompt)))))
+
+(ert-deftest agent-repl-verbs-deploy-forced-declined-sends-nothing ()
+  "A declined forced deploy sends nothing and says so."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should-error (agent-repl-deploy '(4)) :type 'user-error))
+    (should-not (agent-repl-test-verbs--request :deploy))))
+
+(ert-deftest agent-repl-verbs-deploy-waits-the-deploy-timeout ()
+  "The deploy waits its own long deadline, not an ordinary verb's."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange
+    (let ((timeout nil)
+          (agent-repl-deploy-timeout-seconds 1234))
+      (cl-letf (((symbol-function 'agent-repl-rpc-deploy)
+                 (lambda (_conn _request &rest keys) (setq timeout (plist-get keys :timeout)))))
+        ;; Act
+        (agent-repl-deploy nil))
+      ;; Assert
+      (should (equal timeout 1234)))))
+
+(ert-deftest agent-repl-verbs-deploy-success-is-one-line-naming-every-decision ()
+  "A deploy's answer is one echo-area line naming each component's decision."
+  (agent-repl-test-verbs--with
+      `((:deploy . (:response ,agent-repl-test-verbs--deploy-success)))
+    ;; Act
+    (agent-repl-deploy nil)
+    ;; Assert
+    (should (equal (car agent-repl-test-verbs--messages)
+                   "agent-repl: deploy: daemon handing over 3 workspaces (1 busy); shim 1 bounced now, 1 registered; webapp reload pushed to 2; store restarted; sidecar up to date; elisp deferred to the successor"))))
+
+(ert-deftest agent-repl-verbs-deploy-forced-success-says-forced ()
+  "A forced deploy's answer says it was forced."
+  (agent-repl-test-verbs--with
+      '((:deploy . (:response (:arm :success
+                               :value (:components ((:component :daemon :build "d"
+                                                     :outcome (:arm :up-to-date :value nil))))))))
+    ;; Arrange
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+      ;; Act
+      (agent-repl-deploy '(4)))
+    ;; Assert
+    (should (equal (car agent-repl-test-verbs--messages)
+                   "agent-repl: deploy (forced): daemon up to date"))))
+
+(ert-deftest agent-repl-verbs-deploy-success-logs-every-component ()
+  "Each component's outcome is its own log record, with its build."
+  (agent-repl-test-verbs--with
+      `((:deploy . (:response ,agent-repl-test-verbs--deploy-success)))
+    ;; Arrange
+    (let ((records nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args)
+                   (when (string-prefix-p "elisp.verbs.deploy-component" fmt)
+                     (push (apply #'format fmt args) records)))))
+        ;; Act
+        (agent-repl-deploy nil))
+      ;; Assert
+      (should (equal (mapcar (lambda (r) (and (string-match "component=\\([a-z]+\\) build=\\([a-z0-9]+\\)" r)
+                                              (list (match-string 1 r) (match-string 2 r))))
+                             (reverse records))
+                     '(("daemon" "d1") ("shim" "s1") ("webapp" "w1") ("store" "st1")
+                       ("sidecar" "sc1") ("elisp" "e1")))))))
+
+(ert-deftest agent-repl-verbs-deploy-every-refusal-is-echoed-with-its-detail ()
+  "Every DeployError arm reaches the echo area with its detail."
+  (dolist (case agent-repl-test-verbs--deploy-errors)
+    (agent-repl-test-verbs--with
+        `((:deploy . (:response (:arm :error :value (:cause ,(car case))))))
+      ;; Act
+      (agent-repl-deploy nil)
+      ;; Assert
+      (should (equal (car agent-repl-test-verbs--messages) (cadr case))))))
+
+(ert-deftest agent-repl-verbs-deploy-every-refusal-is-an-error-record ()
+  "Every DeployError arm is recorded at ERROR with its arm and fields."
+  (dolist (case agent-repl-test-verbs--deploy-errors)
+    (agent-repl-test-verbs--with
+        `((:deploy . (:response (:arm :error :value (:cause ,(car case))))))
+      ;; Arrange
+      (let ((errors nil))
+        (cl-letf (((symbol-function 'agent-repl--error)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+          ;; Act
+          (agent-repl-deploy nil))
+        ;; Assert
+        (should (equal errors
+                       (list (format "elisp.verbs.deploy-refused arm=%S fields=%S"
+                                     (plist-get (car case) :arm)
+                                     (plist-get (car case) :value)))))))))
+
+(ert-deftest agent-repl-verbs-deploy-unanswered-is-a-transport-failure ()
+  "A daemon that does not answer the deploy is reported as a failure."
+  (agent-repl-test-verbs--with
+      '((:deploy . (:failure (:kind :transport :message "refused"))))
+    ;; Act
+    (agent-repl-deploy nil)
+    ;; Assert
+    (should (agent-repl-test-verbs--messaged-p "deploy failed -- the daemon did not answer"))))
 
 ;;;; ---- Merge queue ----
 

@@ -1432,3 +1432,139 @@ func TestARetainedWorkspaceLoggerLandsCentrallyWhenTheDirectoryIsGone(t *testing
 		t.Fatalf("central_fallback notices = %d, want 1", fallbacks)
 	}
 }
+
+// retiredAndRemoved opens a workspace's daemon sink, retires the directory,
+// and removes it, the way a landed merge's teardown does.
+func retiredAndRemoved(t *testing.T, s *surfaces) string {
+	t.Helper()
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	log.Info("daemon.workspace.opened", "opened", nil)
+	if err := s.Retire(dir); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the retired directory: %v", err)
+	}
+	return dir
+}
+
+func TestARetiredWorkspacesNewSinkCreatesNothingInItsDirectory(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := retiredAndRemoved(t, s)
+
+	// Act: a forwarded record opens the workspace's sidecar sink for the first
+	// time, after its directory is gone.
+	err := s.ClientLog(dir, ClientRecord{ClientKind: RuntimeSidecar, Level: LevelInfo, Operation: "sidecar.test.op", Message: "late"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog on a retired workspace: %v", err)
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the retired directory exists again (stat = %v): a sink recreated it", statErr)
+	}
+}
+
+func TestARetiredWorkspacesRecordStillLandsInItsTarget(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := retiredAndRemoved(t, s)
+
+	// Act.
+	if err := s.ClientLog(dir, ClientRecord{ClientKind: RuntimeSidecar, Level: LevelInfo, Operation: "sidecar.test.op", Message: "late"}); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	s.mu.Lock()
+	target := s.targets[mintedTestID(dir)+"/sidecar"]
+	s.mu.Unlock()
+	if !hasOperation(readRecords(t, target), "sidecar.test.op") {
+		t.Fatalf("the retired workspace's record is not in its target %q", target)
+	}
+}
+
+func TestADirectoryRetiredBeforeAnySinkResolvesWithoutIt(t *testing.T) {
+	// Arrange: retired, then removed, with no sink ever opened for it.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	if err := s.Retire(dir); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act.
+	_, err := s.Workspace(dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Workspace on a directory retired before any sink = %v, want its sinks resolved", err)
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the retired directory exists again (stat = %v)", statErr)
+	}
+}
+
+func TestARetiredWorkspacesShimRollRepointsNoLink(t *testing.T) {
+	// Arrange: an open shim sink marked for its roll, then the directory
+	// retired and removed.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	if _, err := s.ShimSink(dir); err != nil {
+		t.Fatalf("ShimSink: %v", err)
+	}
+	_, shim, err := s.resolve(dir, "shim")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if err := shim.file.File().Truncate(CapBytes); err != nil {
+		t.Fatalf("grow: %v", err)
+	}
+	s.scanOnce()
+	if err := s.Retire(dir); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act.
+	_, err = s.ShimSink(dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ShimSink roll on a retired workspace = %v, want the target rolled with no link", err)
+	}
+	if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the retired directory exists again (stat = %v)", statErr)
+	}
+}
+
+func TestEvictEndsARetirement(t *testing.T) {
+	// Arrange: a directory retired, then released, and still present.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	if err := s.Retire(dir); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if err := s.Evict(dir); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Act.
+	if err := s.ClientLog(dir, ClientRecord{ClientKind: RuntimeSidecar, Level: LevelInfo, Operation: "sidecar.test.op", Message: "again"}); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert: the record is reachable through the canonical link again.
+	if !hasOperation(workspaceRecords(t, dir, "sidecar"), "sidecar.test.op") {
+		t.Fatal("a released directory's record is not reachable through its canonical link")
+	}
+}

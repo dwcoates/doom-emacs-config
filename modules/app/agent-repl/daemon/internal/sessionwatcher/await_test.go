@@ -290,3 +290,89 @@ func TestAwaitFreeIsReleasedByADetachedSubagentSettling(t *testing.T) {
 		t.Fatalf("the freeness waiter = %v, want nil once the detached run settled", err)
 	}
 }
+
+// TestTheFreenessEdgeReachesTheLifecycleSink covers OnFree, the edge the
+// bounce registry is driven by: told once, off the lock, the moment the last
+// piece of work in flight ends — a turn, or the last detached item.
+func TestTheFreenessEdgeReachesTheLifecycleSink(t *testing.T) {
+	tests := []struct {
+		name    string
+		session Session
+		edge    func(h *harness)
+	}{
+		{
+			name:    "the turn ends",
+			session: Session{Started: sessionStarted("turn-1")},
+			edge: func(h *harness) {
+				h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+			},
+		},
+		{
+			name:    "the last monitor ends",
+			session: Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))},
+			edge: func(h *harness) {
+				h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorActivity("act-1", true)))))
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, tc.session)
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			tc.edge(h)
+			h.w.dispatching.Wait()
+
+			// Assert.
+			select {
+			case ws := <-h.rec.frees:
+				if ws != h.w.ws {
+					t.Fatalf("OnFree named %q, want %q", ws, h.w.ws)
+				}
+			default:
+				t.Fatalf("the workspace fell free and OnFree was never told")
+			}
+		})
+	}
+}
+
+// TestNoFreenessEdgeWhileDetachedWorkIsLive covers the half that is not
+// freeness: a turn ending over a live detached item tells the sink nothing.
+func TestNoFreenessEdgeWhileDetachedWorkIsLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1", createdWork("w-1", bashWork()))})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+	h.w.dispatching.Wait()
+
+	// Assert.
+	select {
+	case ws := <-h.rec.frees:
+		t.Fatalf("OnFree(%q) was told while a detached shell is still live", ws)
+	default:
+	}
+}
+
+// TestNoFreenessEdgeForAWatcherThatWasNeverBusy covers the edge's shape: it is
+// a TRANSITION, so a session that opens idle raises none.
+func TestNoFreenessEdgeForAWatcherThatWasNeverBusy(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+
+	// Act.
+	h.quiet()
+	h.w.dispatching.Wait()
+
+	// Assert.
+	select {
+	case ws := <-h.rec.frees:
+		t.Fatalf("OnFree(%q) was told for a session that was never busy", ws)
+	default:
+	}
+}

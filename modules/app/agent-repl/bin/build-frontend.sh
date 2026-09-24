@@ -16,6 +16,16 @@
 # build-frontend.sh — build the claude-repl frontend artifacts, but only
 # when they are out of date ("build-if-stale").
 #
+# WHY THIS SCRIPT IS KEPT. The daemon owns deploys now (daemon/internal/deploy),
+# but this stays the ONE build step, with two callers:
+#   - Emacs's cold start runs it IN PLACE, because it must build the daemon
+#     before any daemon exists to build anything;
+#   - the daemon's deploy runs it in STAGING mode (`--out DIR`, below), after
+#     `make -C proto all`, then hashes the staged artifacts and installs them
+#     into their live locations only when every build succeeded.
+# One script for both means the cold start and the deploy can never build an
+# artifact two different ways.
+#
 # Five artifacts are managed, each independently:
 #   1. shim    — TypeScript, built with `npm run build` ->
 #               agent-shim/claude/shim/dist/main.js
@@ -49,8 +59,28 @@
 # recording the source revision it was compiled from, which is what
 # readiness-report.sh reads to say how far behind master a deployed artifact
 # is. A skipped ("fresh") build leaves the stamp untouched. See
-# lib-deploy-stamp.sh — and note these are NOT the `.<name>.deployed`
-# fingerprint stamps deploy-all.sh uses for bounce detection.
+# lib-deploy-stamp.sh — and note that bounce detection is a different question
+# entirely, answered by each launchd service's own build report (family 2
+# there), never by these stamps.
+#
+# STAGING MODE (`--out DIR`). THIS LAYOUT IS A CONTRACT the daemon's deploy
+# (daemon/internal/deploy) depends on; change it only together with that code.
+# Every selected target is BUILT unconditionally (the staging dir is fresh, so
+# the staleness stamps are not consulted), and nothing in the live artifact
+# locations is written. node_modules linking into the shared node store and
+# the store gc behave exactly as in place. DIR must be absolute; it is created
+# if absent. Layout, per target:
+#   shim    -> DIR/agent-shim/claude/shim/dist/main.js
+#              (+ .built-sha, .source-tree in that dist dir)
+#   webapp  -> DIR/webapp/dist/  (the whole Vite dist)
+#              (+ .built-sha, .source-tree, .build-id in it)
+#   daemon  -> DIR/daemon/bin/claude-repld  (+ .built-sha, .source-tree beside it)
+#   store   -> DIR/cache-bin/shim-store
+#   sidecar -> DIR/cache-bin/shim-claude-sidecar
+#   lock    -> DIR/cache-bin/shim-lock
+#              (each + .<name>.built-sha, .<name>.source-tree in DIR/cache-bin/)
+#
+# Every `go build` passes -buildvcs=false; see GO_BUILD_FLAGS below.
 #
 # Exit codes:
 #   0  every artifact is fresh or was rebuilt successfully
@@ -86,9 +116,11 @@
 # collection is opportunistic and must never delay a build.
 #
 # Usage:
-#   build-frontend.sh [--force] [--dry-run] [-v]
+#   build-frontend.sh [--force] [--dry-run] [-v] [--out DIR]
 #                     [shim|webapp|daemon|store|sidecar|lock|deps|gc ...]
 #     --force            rebuild the selected artifacts unconditionally
+#     --out DIR          staging mode: build every selected target into the
+#                        layout above under the ABSOLUTE DIR, never in place
 #     --dry-run          gc only: report what WOULD be collected, delete nothing
 #     -v, --verbose      gc only: also report each entry KEPT and why
 #     deps               only link node_modules at the shared store (no build)
@@ -139,56 +171,13 @@ REL_WEBAPP="${REL_ROOT:+$REL_ROOT/}webapp"
 
 NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
 
-# The shim artifact is the esbuild SINGLE-FILE bundle (`npm run build` ->
-# build.mjs). It stays at dist/main.js — the exact entry the daemon and the e2e
-# harness spawn — so the bundle IS the spawned shim without a path change on
-# the daemon side. The bundle inlines @bufbuild/protobuf,
-# which the committed out-of-package proto stubs cannot resolve at runtime; a
-# plain tsc emit both breaks that resolution and lands under a deep rootDir path.
-SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
-WEBAPP_ARTIFACT="$WEBAPP_DIR/dist/index.html"
-DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
-CACHE_BIN="$HOME/.cache/agent-repl/bin"
-STORE_ARTIFACT="$CACHE_BIN/shim-store"
-SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
-LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
-
-# Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
-# readiness-report.sh can say which source revision the deployed artifact is
-# compiled from. A skipped ("fresh") build leaves the existing stamp alone —
-# the artifact did not change, so neither did the revision it came from.
-#
-# The two service stamps sit next to the pre-existing `.<name>.deployed`
-# fingerprint stamps but are a different family entirely; see
-# lib-deploy-stamp.sh. Never write one from the other's code path.
-SHIM_SHA_STAMP="$SHIM_DIR/dist/.built-sha"
-WEBAPP_SHA_STAMP="$WEBAPP_DIR/dist/.built-sha"
-# The webapp ARTIFACT's own identity, which is a different question from the
-# source revision beside it: two builds of a dirty tree share one revision, and
-# the cache key that identifies a build must not.
-WEBAPP_BUILD_ID_STAMP="$WEBAPP_DIR/dist/.build-id"
-DAEMON_SHA_STAMP="$DAEMON_DIR/bin/.built-sha"
-STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
-SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
-LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
-
-# Source-tree stamps, beside each artifact and shaped exactly like the built-sha
-# stamps. These are the staleness authority: what the artifact standing here was
-# built from, compared against what the checkout says now. readiness-report.sh
-# reads these same files, so the build and the gate cannot reach opposite
-# answers about the same artifact.
-SHIM_TREE_STAMP="$SHIM_DIR/dist/.source-tree"
-WEBAPP_TREE_STAMP="$WEBAPP_DIR/dist/.source-tree"
-DAEMON_TREE_STAMP="$DAEMON_DIR/bin/.source-tree"
-STORE_TREE_STAMP="$CACHE_BIN/.shim-store.source-tree"
-SIDECAR_TREE_STAMP="$CACHE_BIN/.shim-claude-sidecar.source-tree"
-LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
-
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
 FORCE=0
 DRY_RUN=0
 VERBOSE=0
+# Staging mode's root; empty means build in place. See STAGING MODE above.
+OUT_DIR=""
 # Set by link_node_modules when it populates an entry: the store just grew, so
 # a sweep is warranted. A run that mints nothing skips the sweep entirely.
 MINTED_ENTRY=0
@@ -199,9 +188,18 @@ while [ $# -gt 0 ]; do
         --force) FORCE=1 ;;
         --dry-run) DRY_RUN=1 ;;
         -v|--verbose) VERBOSE=1 ;;
+        --out)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "build-frontend.sh: --out needs a directory" >&2
+                exit 1
+            fi
+            OUT_DIR="$2"
+            shift
+            ;;
         shim|webapp|daemon|store|sidecar|lock|deps|gc) TARGETS+=("$1") ;;
         -h|--help)
-            sed -n '2,60p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            # The whole header comment, however long it grows.
+            sed -n '2,/^set -euo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -211,6 +209,86 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+# A relative staging dir would resolve against whatever cwd the caller had,
+# and the daemon's deploy then reads the artifacts from a path it did not
+# mean. Refuse it rather than guess.
+if [ -n "$OUT_DIR" ]; then
+    case "$OUT_DIR" in
+        /*) ;;
+        *)
+            echo "build-frontend.sh: --out must be an absolute directory, got: $OUT_DIR" >&2
+            exit 1
+            ;;
+    esac
+    mkdir -p "$OUT_DIR"
+fi
+
+# The shim artifact is the esbuild SINGLE-FILE bundle (`npm run build` ->
+# build.mjs). It stays at dist/main.js — the exact entry the daemon and the e2e
+# harness spawn — so the bundle IS the spawned shim without a path change on
+# the daemon side. The bundle inlines @bufbuild/protobuf,
+# which the committed out-of-package proto stubs cannot resolve at runtime; a
+# plain tsc emit both breaks that resolution and lands under a deep rootDir path.
+#
+# Where each artifact lands: its live location in place, or its slot in the
+# staging layout under --out (the contract spelled out in the header).
+if [ -n "$OUT_DIR" ]; then
+    SHIM_DIST="$OUT_DIR/agent-shim/claude/shim/dist"
+    WEBAPP_DIST="$OUT_DIR/webapp/dist"
+    DAEMON_BIN="$OUT_DIR/daemon/bin"
+    CACHE_BIN="$OUT_DIR/cache-bin"
+else
+    SHIM_DIST="$SHIM_DIR/dist"
+    WEBAPP_DIST="$WEBAPP_DIR/dist"
+    DAEMON_BIN="$DAEMON_DIR/bin"
+    CACHE_BIN="$HOME/.cache/agent-repl/bin"
+fi
+SHIM_ARTIFACT="$SHIM_DIST/main.js"
+WEBAPP_ARTIFACT="$WEBAPP_DIST/index.html"
+DAEMON_ARTIFACT="$DAEMON_BIN/claude-repld"
+STORE_ARTIFACT="$CACHE_BIN/shim-store"
+SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
+LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
+
+# Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
+# readiness-report.sh can say which source revision the deployed artifact is
+# compiled from. A skipped ("fresh") build leaves the existing stamp alone —
+# the artifact did not change, so neither did the revision it came from.
+#
+# Whether a launchd service RUNS the installed binary is a different question,
+# answered by the service's own build report; see family 2 in
+# lib-deploy-stamp.sh. These stamps never stand in for it.
+SHIM_SHA_STAMP="$SHIM_DIST/.built-sha"
+WEBAPP_SHA_STAMP="$WEBAPP_DIST/.built-sha"
+# The webapp ARTIFACT's own identity, which is a different question from the
+# source revision beside it: two builds of a dirty tree share one revision, and
+# the cache key that identifies a build must not.
+WEBAPP_BUILD_ID_STAMP="$WEBAPP_DIST/.build-id"
+DAEMON_SHA_STAMP="$DAEMON_BIN/.built-sha"
+STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
+SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
+LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
+
+# Source-tree stamps, beside each artifact and shaped exactly like the built-sha
+# stamps. These are the staleness authority: what the artifact standing here was
+# built from, compared against what the checkout says now. readiness-report.sh
+# reads these same files, so the build and the gate cannot reach opposite
+# answers about the same artifact.
+SHIM_TREE_STAMP="$SHIM_DIST/.source-tree"
+WEBAPP_TREE_STAMP="$WEBAPP_DIST/.source-tree"
+DAEMON_TREE_STAMP="$DAEMON_BIN/.source-tree"
+STORE_TREE_STAMP="$CACHE_BIN/.shim-store.source-tree"
+SIDECAR_TREE_STAMP="$CACHE_BIN/.shim-claude-sidecar.source-tree"
+LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
+
+# Flags every `go build` here passes, in place and staged alike.
+#
+# -buildvcs=false: the deploy decides staleness by the CONTENT HASH of each
+# binary, and Go's default VCS stamping embeds the commit and the dirty flag
+# into the binary, so every commit would change every binary's hash and bounce
+# every service for nothing. Nothing in this repo reads the VCS build info.
+GO_BUILD_FLAGS=(-buildvcs=false)
 
 # Default set, in dependency-agnostic order. `gc` is never implicit: it is
 # either asked for, or triggered by a run that minted an entry.
@@ -252,6 +330,8 @@ system_source_id() {
 # Stale when any of these holds, and every one of them is a case where calling
 # the artifact fresh would be a guess:
 #   - --force was asked for;
+#   - this is a staging run (--out): the staging dir is fresh, so every
+#     selected target is built and no stamp is consulted;
 #   - the artifact is missing;
 #   - the source revision cannot be determined at all;
 #   - the working tree is dirty under the system's pathspec;
@@ -260,6 +340,7 @@ system_source_id() {
 source_is_stale() {
     local name="$1" artifact="$2" stamp="$3" current recorded
     [ "$FORCE" -eq 1 ] && return 0
+    [ -n "$OUT_DIR" ] && return 0
     [ -e "$artifact" ] || return 0
     current="$(system_source_id "$name")" || return 0
     if source_tree_is_dirty "$current"; then return 0; fi
@@ -468,7 +549,9 @@ build_shim() {
     # and the stamp. Computing it once removes the question.
     local shim_sha=""
     shim_sha="$(source_revision "$ROOT" || true)"
-    ( cd "$SHIM_DIR" && SHIM_BUILD_SHA="$shim_sha" npm run build )
+    # SHIM_BUILD_OUTFILE is build.mjs's own output override: dist/main.js in
+    # place, the staging slot under --out.
+    ( cd "$SHIM_DIR" && SHIM_BUILD_SHA="$shim_sha" SHIM_BUILD_OUTFILE="$SHIM_ARTIFACT" npm run build )
     write_built_sha_value "$SHIM_SHA_STAMP" "$shim_sha"
     stamp_source_tree shim "$SHIM_TREE_STAMP"
     echo "[build-frontend] shim: done"
@@ -489,7 +572,7 @@ build_shim() {
 # a dirty tree report one revision, and this must differ whenever the output
 # does.
 write_webapp_build_id() {
-    local index="$WEBAPP_DIR/dist/index.html" entry
+    local index="$WEBAPP_ARTIFACT" entry
     entry="$(sed -n 's|.*src="/assets/index-\([A-Za-z0-9_-]*\)\.js".*|\1|p' "$index" | head -1)"
     if [ -z "$entry" ]; then
         echo "[build-frontend] webapp: FAILED to read the entry bundle hash from $index" >&2
@@ -510,7 +593,13 @@ build_webapp() {
     fi
     require_bin npm "install Node.js"
     echo "[build-frontend] webapp: building..."
-    ( cd "$WEBAPP_DIR" && npm run build )
+    if [ -n "$OUT_DIR" ]; then
+        # The whole dist goes to the staging slot. --emptyOutDir because Vite
+        # refuses to empty an outDir outside the project root without it.
+        ( cd "$WEBAPP_DIR" && npm run build -- --outDir "$WEBAPP_DIST" --emptyOutDir )
+    else
+        ( cd "$WEBAPP_DIR" && npm run build )
+    fi
     write_built_sha "$WEBAPP_SHA_STAMP" "$ROOT"
     stamp_source_tree webapp "$WEBAPP_TREE_STAMP"
     write_webapp_build_id
@@ -525,8 +614,8 @@ build_daemon() {
     fi
     require_bin go "install the Go toolchain"
     echo "[build-frontend] daemon: building..."
-    mkdir -p "$DAEMON_DIR/bin"
-    ( cd "$DAEMON_DIR" && go build -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
+    mkdir -p "$DAEMON_BIN"
+    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"
@@ -563,7 +652,7 @@ build_service() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] $name: building..."
     mkdir -p "$CACHE_BIN"
-    ( cd "$dir" && go build -o "$artifact" . )
+    ( cd "$dir" && go build "${GO_BUILD_FLAGS[@]}" -o "$artifact" . )
     write_built_sha "$sha_stamp" "$ROOT"
     stamp_source_tree "$name" "$tree_stamp"
     echo "[build-frontend] $name: done"

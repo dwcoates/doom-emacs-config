@@ -48,8 +48,8 @@
 # normal priority. Only this script sets it.
 #
 # THE LIVE RUNTIME IS NEVER ROUTED THROUGH HERE. The daemon, shim, store and
-# sidecar, and the build steps bin/deploy-all.sh and bin/build-frontend.sh
-# run, stay at normal priority. Only tests are demoted.
+# sidecar, and the bin/build-frontend.sh steps the daemon's deploy runs, stay
+# at normal priority. Only tests are demoted.
 #
 # Usage:
 #   bin/background.sh <command> [args...]

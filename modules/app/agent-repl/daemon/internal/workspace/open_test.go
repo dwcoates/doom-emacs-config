@@ -104,7 +104,7 @@ func TestOpenSurvivesAFailedBuildStalenessCheck(t *testing.T) {
 	// that will not run is a warning rather than a failed mount.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	f.rollout.relaunchErr = errors.New("the shim is busy")
+	f.rollout.checkErr = errors.New("the installed shim build is unreadable")
 
 	// Act.
 	err := f.verbs.Open(context.Background(), "w1", nil)

@@ -3421,7 +3421,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--shim-service-read-stamp
     agent-repl--shim-service-write-stamp
     agent-repl--shim-store-socket-present-p
-    agent-repl--runtime-pump-events
+    agent-repl--elisp-reload-load-file
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script-1

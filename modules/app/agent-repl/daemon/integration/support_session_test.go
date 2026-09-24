@@ -35,10 +35,10 @@ func prelaunchControlSocket(d *harness.Daemon, ws *workspacev1.WorkspaceRef, gen
 }
 
 // restartGracefulInFlight opens a workspace, starts a long-running turn, and
-// issues a graceful RestartWorkspace, answering the fixture and the
-// prelaunched second shim's control client. The turn is left running: the
-// caller ends it (or not) to drive the rest of the relaunch mechanics.
-func restartGracefulInFlight(t *testing.T, key string) (*fixture, *harness.ShimControl) {
+// issues a graceful RestartWorkspace, answering the fixture once the bounce
+// registry has REGISTERED the bounce behind the running turn. The turn is left
+// running: the caller ends it (or not) to drive the bounce.
+func restartGracefulInFlight(t *testing.T, key string) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{})
 	f.shim.ExpectStartSession()
@@ -52,9 +52,31 @@ func restartGracefulInFlight(t *testing.T, key string) (*fixture, *harness.ShimC
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
 	}
+	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the bounce registered behind the running turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.bounce" && r.Message == "the workspace has work in flight; registered the bounce for when it ends"
+	})
+	return f
+}
 
-	second := f.d.ShimAt(prelaunchControlSocket(f.d, f.ws, 1))
-	return f, second
+// expectNoFile asserts a path does not appear within the probe window. It is
+// a negative assertion, so it necessarily waits out a bound rather than
+// synchronizing on an event, mirroring expectNoRPC.
+func expectNoFile(t *testing.T, path string, probe time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(probe)
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("%s appeared inside the %s probe window, want it absent", path, probe)
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			return
+		}
+	}
 }
 
 // expectNoRPC asserts a shim received no request for `rpc` within the probe

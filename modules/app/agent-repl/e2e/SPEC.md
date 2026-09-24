@@ -219,14 +219,12 @@ value.
 The shim bundle is built from source on every run, never from a
 gitignored, hand-rebuilt `dist/`, for the same reason the deleted suite's
 `buildShim` gave: a stale checked-out bundle would let the suite silently
-stop covering the source it exists to cover. `SHIM_BUILD_SHA` is baked into
-the bundle at build time (`build.mjs`'s `SHIM_BUILD_SHA` env, as the deleted
-harness did) and the SAME value is passed to the daemon via
-`Opts.ExtraEnv = []string{"SHIM_BUILD_SHA=" + sha}` (already-supported,
-already-documented override point — no new seam needed for this) so the
-daemon's stale-shim rollout check does not bounce every session against a
-build-time value the fake shim would otherwise claim by default
-(`FakeShimDefaultBuildSHA`).
+stop covering the source it exists to cover. The shim's build identity is
+NOT baked into the bundle: the daemon hashes the bundle it spawns
+(`--shim-main`) and hands that content hash to each shim as
+`SHIM_BUILD_SHA` in its spawn environment, so the freshly built bundle is its
+own identity and nothing has to be pinned or passed for it (section B, "A
+deploy judges what really runs").
 
 **Layout invariant — the staged bundle keeps production's siblings.** The
 shim build deliberately leaves `@anthropic-ai/claude-agent-sdk` EXTERNAL
@@ -269,8 +267,7 @@ the daemon, never directly by the test):
   and `AGENT_REPL_FORBID_VENDOR_CALLS=1` in its environment (mirrors
   `startSidecar` in `shim-sidecar/integration/helpers_test.go` verbatim).
 - `daemon` — `harness.StartDaemon(t, harness.Opts{ShimNode: node, ShimMain:
-  shimBundle, StoreSocket: store.Socket, ExtraEnv: []string{"SHIM_BUILD_SHA="
-  + sha}, ...})`. `d.DefaultConfigDir` / `d.MultiRepoConfigDir` — ALREADY
+  shimBundle, StoreSocket: store.Socket, ...})`. `d.DefaultConfigDir` / `d.MultiRepoConfigDir` — ALREADY
   produced by the existing harness's `NewConfigRoot` — ARE the per-account
   `CLAUDE_CONFIG_DIR` roots: `main.ts` requires `CLAUDE_CONFIG_DIR` in the
   spawned shim's environment (`shim.md` process-level obligations; `main.ts`:
@@ -601,23 +598,35 @@ Both are silent when broken — neither fails as itself, both fail as a whole
 suite of timeouts — so each is checked or resolved ONCE, up front, in one
 place.
 
-- **One build identity, in both roles.** The daemon stamps every shim spawn
-  with `SHIM_BUILD_SHA` and compares what the shim reports against its
-  DEPLOYED build (`AGENT_REPL_DEPLOY_STAMP`, else `daemon/bin/.built-sha`).
-  Those are two independently written real git shas, and the shim's own
-  identity is whatever the checkout's `agent-shim/claude/shim/dist/.built-sha`
-  says whenever that file exists — so the harness's fixed
-  `e2e-fixed-build-sha` is only a fallback, never the answer. `main_test.go`
-  therefore resolves the identity the daemon's own way
-  (`resolveBuildIdentity`), pins the checkout the daemon resolves it from
-  (`AGENT_REPL_CHECKOUT`), and hands the SAME string back as both
-  `SHIM_BUILD_SHA` and `AGENT_REPL_DEPLOY_STAMP` through `buildIdentityEnv()`
-  — the one place any daemon in this suite gets its build-identity
-  environment. `checkBuildIdentityAgrees` fails the run, naming both values,
-  before `m.Run()`. Disagreement looks like: `daemon.rollout.staleness`, a
-  stale-shim bounce on every OpenWorkspace, a resume that fails with "no
-  transcript exists for vendor session", and every prompt answered
-  `no_session`.
+- **A deploy judges what really runs, and installs nowhere real.** The
+  daemon owns deploys (the `Deploy` rpc, and the one deploy every landing on
+  its own checkout runs): it builds into staging, judges each running
+  process's build against the fresh one BY CONTENT HASH, and installs into
+  its checkout (`AGENT_REPL_CHECKOUT`). A shim's build is the content hash of
+  the bundle it was spawned from (`--shim-main`), so the real bundle the
+  suite builds is its own identity and nothing has to be pinned for it. Three
+  things keep every deploy a world runs honest:
+  - **The checkout is the harness's.** A Go world names no checkout, so
+    `harness.StartDaemon`'s own throwaway one stands (`checkoutEnv` in
+    `main_test.go`): a deploy's install lands there, never over this
+    worktree's `daemon/bin`, and its fresh elisp build is the one every
+    harness `WatchDaemon` stream reports. Only the Emacs layer names the
+    module root, because its real Emacs loads that elisp and the sandbox's
+    working copy is a throwaway.
+  - **The build is fake and stages what runs.** `AGENT_REPL_DEPLOY_BUILDER`
+    names the harness's `DeployBuilder`, which stages the running bundle, the
+    served dist and the harness daemon binary (`harness.DeployCurrent`), so a
+    deploy decides everything up to date unless a test stages another build
+    (`StageDeployBuild(harness.DeployStaleDaemon)` for a handover).
+    `AGENT_REPL_LAUNCHCTL` is a recording fake, so no deploy reaches launchd.
+  - **The real services report where the deploy reads.** The store and the
+    sidecar write their own build reports into the daemon's lock dir
+    (`harness.LockDirFor`), and the fake build stages copies of those very
+    binaries (`Opts.ServiceBinaries`, `World.ServiceBinaries` for a daemon
+    started by hand over the same state root), so a deploy that should touch
+    no service restarts none. A mismatch looks like: a deploy answering
+    `restarted` for the store, a fake launchctl invocation, and a store
+    restart that waits out its window on `store.sock`.
 - **One string per config root.** The sidecar records cursors under the path
   it walked, which is symlink-resolved (`/tmp/... -> /private/tmp/...` on
   macOS), while every cursor poll here prefix-matches a project directory

@@ -1,7 +1,7 @@
 /**
  * THE REAL DAEMON, AS THIS CHILD PROCESS RECEIVES IT.
  *
- * The Go e2e world brings up the quartet and passes four values in the
+ * The Go e2e world brings up the quartet and passes five values in the
  * environment (`e2e/WEBAPP-LAYER-SPEC.md` section A). This module is the only
  * place that reads them, so a missing prerequisite is reported once, loudly,
  * naming the invocation that supplies it — never as a mysterious transport
@@ -18,6 +18,8 @@ const DAEMON_URL = "AGENT_REPL_E2E_DAEMON_URL";
 /** The workspace `RegisterWorkspace` minted for this run. */
 const WORKSPACE_ID = "AGENT_REPL_E2E_WORKSPACE_ID";
 const WORKSPACE_DIR = "AGENT_REPL_E2E_WORKSPACE_DIR";
+/** The webapp build the daemon serves, which the page states as its own. */
+const WEBAPP_BUILD = "AGENT_REPL_E2E_WEBAPP_BUILD";
 
 const HOW_TO_RUN =
   "the webapp e2e layer is driven by the Go cross-system world, which owns the real " +
@@ -29,6 +31,7 @@ export interface RealDaemon {
   readonly baseUrl: string;
   readonly workspaceId: string;
   readonly workspaceDir: string;
+  readonly webappBuild: string;
 }
 
 function required(name: string): string {
@@ -54,6 +57,7 @@ export function realDaemon(): RealDaemon {
     baseUrl: required(DAEMON_URL),
     workspaceId: required(WORKSPACE_ID),
     workspaceDir: required(WORKSPACE_DIR),
+    webappBuild: required(WEBAPP_BUILD),
   };
 }
 
@@ -64,13 +68,14 @@ export function realDaemon(): RealDaemon {
  * wire; the wire's far end is a live `claude-repld`.
  */
 export async function startAgainstRealDaemon(
-  options: Omit<HarnessOptions, "workspaceId" | "workspaceDir" | "arrange"> = {},
+  options: Omit<HarnessOptions, "workspaceId" | "workspaceDir" | "webappBuild" | "arrange"> = {},
 ): Promise<MountedApp> {
   const daemon = realDaemon();
   return startAppAgainst(daemon.baseUrl, {
     ...options,
     workspaceId: daemon.workspaceId,
     workspaceDir: daemon.workspaceDir,
+    webappBuild: daemon.webappBuild,
   });
 }
 

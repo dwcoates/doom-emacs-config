@@ -82,6 +82,11 @@ type Surfaces interface {
 	// canonical links and their targets stay on disk; only the descriptors go.
 	// Evicting a workspace with no open sinks is success.
 	Evict(dir string) error
+	// Retire marks a workspace directory the daemon is about to remove: from
+	// its return on, no sink creates, links or re-points anything inside it,
+	// and records for it go on landing in their daemon-owned targets. Evict
+	// ends the retirement.
+	Retire(dir string) error
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
 }
