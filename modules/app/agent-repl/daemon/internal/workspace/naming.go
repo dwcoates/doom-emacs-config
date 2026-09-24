@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"claude-repld/internal/dirpath"
 )
 
 // The naming rule's constants. The rule itself — lowercase, hyphenated, at
@@ -140,19 +142,16 @@ func IsWorktree(dir string) bool {
 	return err == nil
 }
 
-// normalizeDir is the one spelling of "the same directory": absolute, cleaned,
-// and with symlinks resolved when the path exists. Registration is idempotent
-// by this, and a WorkspaceRef's dir is compared against it.
+// normalizeDir is the one spelling of "the same directory": dirpath.Canonical's
+// (absolute, cleaned, symlinks resolved, on-disk case). Registration is
+// idempotent by this, and a WorkspaceRef's dir is compared against it.
 func normalizeDir(dir string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("a workspace directory is required")
 	}
-	abs, err := filepath.Abs(dir)
+	normalized, err := dirpath.Canonical(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve %q: %w", dir, err)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return filepath.Clean(resolved), nil
-	}
-	return filepath.Clean(abs), nil
+	return normalized, nil
 }

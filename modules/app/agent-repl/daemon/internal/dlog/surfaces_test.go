@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"claude-repld/internal/dirpath"
 )
 
 // mintedIDWidth is wsm.IDLength. It is spelled out rather than imported: wsm
@@ -62,9 +64,15 @@ func hasOperation(records []map[string]any, operation string) bool {
 
 // mintedTestID stands in for the daemon-minted ids.WorkspaceID of one
 // directory: 16 hex characters, as wsm mints, derived from the directory only
-// so a test can predict it. Production resolves the real roster.
+// so a test can predict it. Production resolves the real roster. It keys on
+// the directory's ON-DISK spelling, as the lookup the surfaces call is handed,
+// so every spelling a test holds predicts the same id.
 func mintedTestID(dir string) string {
-	sum := md5.Sum([]byte("minted:" + filepath.Clean(dir)))
+	key, err := dirpath.Canonical(dir)
+	if err != nil {
+		key = "uncanonicalizable:" + filepath.Clean(dir)
+	}
+	sum := md5.Sum([]byte("minted:" + key))
 	return hex.EncodeToString(sum[:])[:mintedIDWidth]
 }
 
@@ -72,6 +80,17 @@ func mintedTestID(dir string) string {
 // record needs. Unbound surfaces REFUSE, which is its own test.
 func bindTestWorkspaceIDs(s *surfaces) {
 	s.BindWorkspaceIDs(func(dir string) (string, error) { return mintedTestID(dir), nil })
+}
+
+// sinkKey is the key the surfaces hold dir's sinks under: its on-disk
+// spelling, which for a temporary directory on macOS is the /private one.
+func sinkKey(t *testing.T, dir string) string {
+	t.Helper()
+	key, err := dirpath.Canonical(dir)
+	if err != nil {
+		t.Fatalf("Canonical(%q): %v", dir, err)
+	}
+	return key
 }
 
 // testSurfaces opens real surfaces over temp paths with a discarded terminal.
@@ -158,7 +177,7 @@ func TestWorkspaceRecordNeverLandsInTheGlobalSink(t *testing.T) {
 func TestWorkspaceStampsTheIdentityFields(t *testing.T) {
 	// Arrange.
 	s, _ := testSurfaces(t)
-	dir := t.TempDir()
+	dir := sinkKey(t, t.TempDir()) // the registry hands the on-disk spelling
 	want := mintedTestID(dir)
 	log, err := s.Workspace(dir)
 	if err != nil {
@@ -737,7 +756,7 @@ func TestEvictReleasesTheWorkspacesSinks(t *testing.T) {
 	// Assert: the evicted logger refuses further records rather than writing
 	// through a closed descriptor.
 	s.mu.Lock()
-	_, still := s.workspaces[filepath.Clean(dir)]
+	_, still := s.workspaces[sinkKey(t, dir)]
 	s.mu.Unlock()
 	if still {
 		t.Fatalf("the workspace is still in the sink map after eviction")
@@ -830,7 +849,7 @@ func TestShimSinkRotatesAMarkedTargetAtTheNextProcessRoll(t *testing.T) {
 func TestShimHardCeilingReportsOnceAndRequestsAForcedRoll(t *testing.T) {
 	// Arrange: fd 3 has carried the shim target through the hard ceiling.
 	s, _ := testSurfaces(t)
-	dir := t.TempDir()
+	dir := sinkKey(t, t.TempDir()) // the registry hands the on-disk spelling
 	if _, err := s.ShimSink(dir); err != nil {
 		t.Fatalf("ShimSink: %v", err)
 	}
@@ -1190,7 +1209,7 @@ func TestWorkspaceAfterCloseStillRejectsAnUnusableDirectory(t *testing.T) {
 func TestWorkspaceRecordCarriesTheMintedIDAndTheDirectoryHashSeparately(t *testing.T) {
 	// Arrange.
 	s, _ := testSurfaces(t)
-	dir := t.TempDir()
+	dir := sinkKey(t, t.TempDir()) // the registry hands the on-disk spelling
 	wantID := mintedTestID(dir)
 	wantHash, err := WorkspaceDirHash(dir)
 	if err != nil {
@@ -1599,7 +1618,7 @@ func TestAttachingADirectoryNeverDetachedChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachDir = %v, want success", err)
 	}
-	if _, open := s.workspaces[dir]; !open {
+	if _, open := s.workspaces[sinkKey(t, dir)]; !open {
 		t.Fatal("attaching a never-detached directory dropped its open sinks")
 	}
 }
@@ -1698,5 +1717,101 @@ func TestADetachmentSurvivesTheWorkspacesEviction(t *testing.T) {
 	}
 	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
 		t.Fatalf("an evicted, detached worktree %s exists again (stat = %v)", dir, statErr)
+	}
+}
+
+// foldingCanonical models a case-insensitive volume that stores dir under the
+// spelling given: every case-folded spelling of it canonicalizes to dir.
+func foldingCanonical(dir string) func(string) (string, error) {
+	return func(spelled string) (string, error) {
+		if strings.EqualFold(spelled, dir) {
+			return dir, nil
+		}
+		return spelled, nil
+	}
+}
+
+// TestTwoSpellingsOfOneDirectoryShareOneSink: on a case-folding volume the two
+// spellings name one directory with one canonical link, so they must resolve to
+// one sink entry. Two entries each re-pointed or appended to the other's link
+// target, which is the attribution-conflict of realtest 7 (2026-09-24).
+func TestTwoSpellingsOfOneDirectoryShareOneSink(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := sinkKey(t, t.TempDir())
+	s.canonical = foldingCanonical(dir)
+	upper := strings.ToUpper(dir)
+
+	// Act.
+	_, stored, errStored := s.resolve(dir, "daemon")
+	_, folded, errFolded := s.resolve(upper, "daemon")
+
+	// Assert.
+	if errStored != nil || errFolded != nil {
+		t.Fatalf("resolve: %v / %v", errStored, errFolded)
+	}
+	if stored != folded {
+		t.Fatalf("the two spellings resolved to two sinks (%s, %s), want one", stored.target, folded.target)
+	}
+}
+
+// TestAWorkspaceLoggerCarriesTheOnDiskSpelling: the record's workspace_dir is
+// the sink's key, not whichever spelling the caller handed in.
+func TestAWorkspaceLoggerCarriesTheOnDiskSpelling(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := sinkKey(t, t.TempDir())
+	s.canonical = foldingCanonical(dir)
+
+	// Act.
+	log, err := s.Workspace(strings.ToUpper(dir))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got := log.(*logger).base[KeyWorkspaceDir]; got != dir {
+		t.Fatalf("workspace_dir = %v, want the on-disk %q", got, dir)
+	}
+}
+
+// TestASpellingThatCannotBeCanonicalizedIsRefused: keyed as given, it would be
+// exactly the second entry over one directory the key exists to prevent.
+func TestASpellingThatCannotBeCanonicalizedIsRefused(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	s.canonical = func(string) (string, error) { return "", errors.New("permission denied") }
+
+	// Act.
+	_, err := s.Workspace(t.TempDir())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "sink key") {
+		t.Fatalf("Workspace = %v, want the sink key refusal", err)
+	}
+}
+
+// TestEachSpellingIsCanonicalizedOnce: the canonicalization reads the volume,
+// and every record resolves its sink, so the answer is remembered per spelling.
+func TestEachSpellingIsCanonicalizedOnce(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := sinkKey(t, t.TempDir())
+	calls := 0
+	s.canonical = func(spelled string) (string, error) {
+		calls++
+		return spelled, nil
+	}
+
+	// Act.
+	for range 3 {
+		if _, _, err := s.resolve(dir, "daemon"); err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+	}
+
+	// Assert.
+	if calls != 1 {
+		t.Fatalf("canonicalizations = %d, want 1", calls)
 	}
 }

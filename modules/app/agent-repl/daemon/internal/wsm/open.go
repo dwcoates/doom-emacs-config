@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
 )
 
@@ -50,6 +51,10 @@ type store struct {
 	path     string
 	readOnly bool
 	log      dlog.Logger
+	// canonicalDir is dirpath.Canonical, the spelling the open's directory
+	// reconciliation compares each row against (dirspelling.go). Injectable
+	// so a test can model a case-folding volume on any host.
+	canonicalDir func(string) (string, error)
 }
 
 // Open opens the workspace-state-manager database at path, creating the file
@@ -86,6 +91,12 @@ func Open(ctx context.Context, path string, opts ...Option) (DB, error) {
 	// WRITE; this reports one that was already there, which only a handle
 	// opened without the pragma can have left. See repoinvariant.go.
 	if err := s.checkRepositoryInvariant(ctx); err != nil {
+		s.handle.Close()
+		return nil, err
+	}
+	// THE BOOT-TIME DIRECTORY RECONCILIATION: every row keyed by its
+	// directory's on-disk spelling, or said loudly why not. See dirspelling.go.
+	if err := s.reconcileDirSpellings(ctx); err != nil {
 		s.handle.Close()
 		return nil, err
 	}
@@ -139,7 +150,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 		handle.Close()
 		return nil, fmt.Errorf("wsm: open %q: %w", path, err)
 	}
-	s := &store{handle: handle, path: path, readOnly: readOnly, log: discardLogger{}}
+	s := &store{handle: handle, path: path, readOnly: readOnly, log: discardLogger{}, canonicalDir: dirpath.Canonical}
 	for _, opt := range opts {
 		opt(s)
 	}
