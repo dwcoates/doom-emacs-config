@@ -671,7 +671,7 @@ func TestRouteBashFrame(t *testing.T) {
 	// Act.
 	got := h.routeNow(func(w *watcher) {
 		w.routeBashLocked(entry, &conversationv1.AgentBash{
-			Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{}},
+			Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{}},
 		})
 	})
 
@@ -1011,7 +1011,7 @@ func TestBashStreamReachesRouting(t *testing.T) {
 
 	// Act.
 	open.stream.send(t, &conversationv1.AgentBash{
-		Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{}},
+		Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{}},
 	})
 
 	// Assert.
