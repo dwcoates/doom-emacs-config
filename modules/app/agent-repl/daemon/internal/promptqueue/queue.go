@@ -110,6 +110,11 @@ type queue struct {
 	// departing tracks the departure decisions (OnDeparted) running on their
 	// own goroutines, so Drain joins them too.
 	departing sync.WaitGroup
+	// exiting is set by Drain, under mu, before it joins: a departure told
+	// after it (the exit's own watcher closes run after the drain) decides
+	// nothing, because the state client it would read is about to close and
+	// every registered bounce ends with the process anyway.
+	exiting bool
 
 	// editSeq mints each edit's identity; guarded by mu.
 	editSeq uint64
@@ -226,6 +231,9 @@ func (q *queue) waitForClassifications() { q.classifying.Wait() }
 // than this package guessing — and it is bounded because an unbounded wait is
 // a daemon that does not exit.
 func (q *queue) Drain(bound time.Duration) bool {
+	q.mu.Lock()
+	q.exiting = true
+	q.mu.Unlock()
 	left := make(chan struct{})
 	go func() {
 		q.classifying.Wait()

@@ -153,7 +153,19 @@ func (q *queue) OnFree(ws ids.WorkspaceID) {
 // replaces), so the decision runs on a goroutine of its own and Drain joins
 // it.
 func (q *queue) OnDeparted(ws ids.WorkspaceID, departed Watcher, departure sessionwatcher.Departure) {
+	// THE ADD HAPPENS UNDER mu, AGAINST DRAIN'S FLAG, so it can never race
+	// the join: a WaitGroup Add from zero concurrent with its Wait is a misuse,
+	// and a decision started behind the join would read a closed state client.
+	q.mu.Lock()
+	if q.exiting {
+		q.mu.Unlock()
+		q.deps.Log.Global().Debug(opBounce, "the daemon is exiting; a shim departure at the exit decides nothing", dlog.Context{
+			"workspace": string(ws), "ordered": departure.Ordered, "cause": string(departure.Cause),
+		})
+		return
+	}
 	q.departing.Add(1)
+	q.mu.Unlock()
 	go func() {
 		defer q.departing.Done()
 		q.decideDeparture(ws, departed, departure)
