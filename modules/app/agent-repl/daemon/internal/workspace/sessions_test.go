@@ -302,6 +302,8 @@ type fakeWatcher struct {
 	// onClose, when set, runs as Close begins, so a test observes what the
 	// close met.
 	onClose func()
+	// closeErr is what Close answers.
+	closeErr error
 }
 
 // Pointers answers the pointers the fixture states; a fixture that states none
@@ -320,6 +322,9 @@ func (w *fakeWatcher) SessionEnding(string) {
 func (w *fakeWatcher) Close() error {
 	if w.onClose != nil {
 		w.onClose()
+	}
+	if w.closeErr != nil {
+		return w.closeErr
 	}
 	w.closed = true
 	return nil

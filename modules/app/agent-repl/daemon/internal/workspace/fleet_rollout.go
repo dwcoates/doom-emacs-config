@@ -748,6 +748,46 @@ func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, forc
 		dlog.Context{"workspace": string(ws), "force": force})
 }
 
+// HandOver ends this daemon's supervision of a workspace's shim for a handover:
+// its watches are closed, then the client is detached, leaving the process
+// running for the successor. It answers false when the workspace has no
+// session here.
+//
+// THE WATCHES CLOSE WITH THE DETACH. A detach alone left the watch fleet
+// standing on a shim that was now the successor's, so when the successor
+// bounced that shim, every stream ended against a watcher nobody had told and
+// the exiting incumbent recorded ERROR severings, a `link_severed` WARN and a
+// health fault for a shim it no longer owned (live handover 2026-09-24T18:06).
+// A closed watcher reads any later stream end as a torn-down stream, at DEBUG.
+//
+// A FAILED CLOSE IS RETURNED AND NOTHING IS DETACHED, so the transfer fails
+// loudly rather than handing over a shim this daemon is still watching.
+func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	session, ok := f.sessions[ws]
+	var watcher sessionwatcher.Watcher
+	if ok {
+		watcher = session.watcher
+		session.watcher = nil
+	}
+	f.mu.Unlock()
+	if !ok {
+		return false, nil
+	}
+	// The close runs OFF the lock: it joins the watcher's in-flight sink
+	// dispatch, and those sinks read the fleet.
+	if watcher != nil {
+		if err := watcher.Close(); err != nil {
+			return true, fmt.Errorf("workspace: hand over %q: close the watches: %w", ws, err)
+		}
+	}
+	session.client.Detach()
+	f.deps.Log.Global().Info(opFleetRollout, "handed the workspace's shim over; its watches are closed and the process keeps running", dlog.Context{
+		"workspace": string(ws), "shim_pid": session.client.PID(), "watched": watcher != nil,
+	})
+	return true, nil
+}
+
 // StandDown is the rollout's stand-down: end the session, then stop the
 // process, forced. It is KillSession under the name the rollout's contract
 // gives it, so a handover that must stop a workspace it cannot transfer takes
