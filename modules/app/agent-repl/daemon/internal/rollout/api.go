@@ -28,6 +28,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/bounce"
+	"claude-repld/internal/clock"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -418,23 +419,11 @@ type Resumed struct {
 	Cold *conversationv1.SessionCold
 }
 
-// Clock is the controller's view of time, injected so every window in this
-// package is driven by the test rather than the wall clock.
-type Clock interface {
-	// Now is the current instant.
-	Now() time.Time
-	// After yields one value after d has passed.
-	After(d time.Duration) <-chan time.Time
-}
+// Clock is the controller's view of time; see internal/clock.
+type Clock = clock.Clock
 
 // SystemClock is the production Clock.
-type SystemClock struct{}
-
-// Now is the wall clock's instant.
-func (SystemClock) Now() time.Time { return time.Now() }
-
-// After is time.After.
-func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+type SystemClock = clock.System
 
 // The rendezvous refusals. Each is one arm of AdoptHostWorkspaceError and
 // AdoptWebWorkspaceError; the server maps them onto the typed arm.
