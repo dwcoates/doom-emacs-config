@@ -2,8 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -59,6 +61,13 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) err
 // bounce, or the bounce's failure. Nobody is waiting on it, so its failures
 // are RECORDED rather than returned.
 func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, err error) {
+	if errors.Is(err, bounce.ErrUnregistered) {
+		// AN OUTCOME, NOT A FAILURE: the shim the restart would replace
+		// departed first, and nothing is left to replace -- the session was
+		// ended, the workspace closed, or a fresh shim already serves it.
+		log.Info(opRestart, "the restart was unregistered: the shim it would replace departed and nothing is left to replace", dlog.Context{"force": force})
+		return
+	}
 	if err != nil {
 		log.Error(opRestart, "the shim relaunch failed", dlog.Context{"force": force, "cause": err.Error()})
 		return

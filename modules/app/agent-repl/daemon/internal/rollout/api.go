@@ -265,10 +265,34 @@ type ShimBuildFunc func() (string, error)
 // its address.
 type SuccessorSpawner interface {
 	// Spawn starts `<self exe> --joining <incumbent address>` with THIS
-	// process's environment and returns the successor's own address once it has
-	// reported it. The report travels through <state>/joining.addr, which the
+	// process's environment and returns the successor once it has reported its
+	// address. The report travels through <state>/joining.addr, which the
 	// successor writes atomically the moment its listener is bound.
-	Spawn(ctx context.Context, incumbentAddress string) (successorAddress string, err error)
+	//
+	// WHOEVER HOLDS A NON-NIL SUCCESSOR OWNS ITS LIFETIME. Spawn answers one
+	// whenever it started a process -- alongside an error too, when the process
+	// started and never reported -- so no path out of a spawn leaves a joining
+	// daemon running with nothing holding it. A nil Successor means no process
+	// was started.
+	Spawn(ctx context.Context, incumbentAddress string) (Successor, error)
+}
+
+// Successor is one spawned successor daemon: the address it reported, and the
+// handle that stops it.
+//
+// A HANDOVER THAT FAILS AFTER THE SPAWN STOPS ITS SUCCESSOR. Left running, the
+// successor waits in joining for a manifest that never comes, the next deploy
+// spawns a second one beside it, and the two poll the same manifest path and
+// race for every workspace. One that SUCCEEDS is never stopped: the successor
+// outlives this process by design.
+type Successor interface {
+	// Address is the successor's own `127.0.0.1:<port>`, as it reported it;
+	// empty when it never reported one.
+	Address() string
+	// Stop ends the successor and returns nil ONLY once the process is
+	// confirmed gone (reaped). An error means it may still be running, and the
+	// caller must go on treating it as alive.
+	Stop(ctx context.Context) error
 }
 
 // Announcer publishes this daemon's WatchDaemon shutdown announcement.

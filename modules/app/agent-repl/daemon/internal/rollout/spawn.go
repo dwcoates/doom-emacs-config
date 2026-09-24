@@ -124,11 +124,34 @@ type ProcessSpawner struct {
 	// Timeout bounds the wait. A successor that never reports is a failed
 	// handover, and nothing is announced.
 	Timeout time.Duration
+	// StopGrace is how long a successor being stopped has to exit on SIGTERM
+	// before it is SIGKILLed. A joining successor owns nothing yet, so its
+	// orderly exit is short.
+	StopGrace time.Duration
+	// ReapBound bounds the wait for the reap after the SIGKILL. A process the
+	// kernel was told to kill that is still not reaped past it is reported as
+	// possibly alive, never assumed gone.
+	ReapBound time.Duration
 }
+
+// The production spawner's stop windows.
+const (
+	// DefaultSuccessorStopGrace is a joining successor's SIGTERM grace.
+	DefaultSuccessorStopGrace = 5 * time.Second
+	// DefaultSuccessorReapBound bounds the reap after the SIGKILL.
+	DefaultSuccessorReapBound = 5 * time.Second
+)
 
 // NewProcessSpawner builds the production spawner.
 func NewProcessSpawner(exe, stateDir string) *ProcessSpawner {
-	return &ProcessSpawner{Exe: exe, StateDir: stateDir, Poll: 50 * time.Millisecond, Timeout: 30 * time.Second}
+	return &ProcessSpawner{
+		Exe:       exe,
+		StateDir:  stateDir,
+		Poll:      50 * time.Millisecond,
+		Timeout:   30 * time.Second,
+		StopGrace: DefaultSuccessorStopGrace,
+		ReapBound: DefaultSuccessorReapBound,
+	}
 }
 
 // Spawn starts the successor and waits for its address.
@@ -137,16 +160,20 @@ func NewProcessSpawner(exe, stateDir string) *ProcessSpawner {
 // store socket, the vendor guard, everything — because a successor assembled
 // from a curated allowlist would differ from its incumbent in exactly the ways
 // nobody thought to list.
-func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (string, error) {
+//
+// EVERY RETURN PAST THE START CARRIES THE HANDLE, the failures included: a
+// successor that never reported is still a running process, and the caller is
+// the one that stops it (see SuccessorSpawner).
+func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Successor, error) {
 	if strings.TrimSpace(s.Exe) == "" {
-		return "", fmt.Errorf("rollout: no daemon binary to spawn the successor from")
+		return nil, fmt.Errorf("rollout: no daemon binary to spawn the successor from")
 	}
 	if strings.TrimSpace(incumbentAddress) == "" {
-		return "", fmt.Errorf("rollout: the successor is told the incumbent's address, never left to infer it")
+		return nil, fmt.Errorf("rollout: the successor is told the incumbent's address, never left to infer it")
 	}
 	// A report left by an earlier handover would be read as this one's answer.
 	if err := os.Remove(JoiningAddrPath(s.StateDir)); err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("rollout: clear the stale joining address report: %w", err)
+		return nil, fmt.Errorf("rollout: clear the stale joining address report: %w", err)
 	}
 
 	// NOT exec.CommandContext, AND THAT IS THE WHOLE POINT. CommandContext
@@ -180,11 +207,25 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (st
 	// is not a matter of the incumbent exiting politely enough.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("rollout: start the successor %s: %w", s.Exe, err)
+		return nil, fmt.Errorf("rollout: start the successor %s: %w", s.Exe, err)
 	}
-	// The successor OUTLIVES this process by design, so its exit is never
-	// waited on: releasing the handle is all that is owed.
-	go func() { _ = cmd.Wait() }()
+	child := &processSuccessor{
+		process:   cmd.Process,
+		exited:    make(chan struct{}),
+		stopGrace: s.StopGrace,
+		reapBound: s.ReapBound,
+	}
+	// The successor OUTLIVES this process by design, so nothing blocks on its
+	// exit; this goroutine only reaps it and marks the reap, which is what a
+	// Stop waits on as its proof that the process is gone.
+	//
+	// Wait's error is the child's exit status, which says nothing to act on
+	// here: a successor that exits on its own is reported by what it no longer
+	// answers, and one this daemon stopped was expected to exit on a signal.
+	go func() {
+		_ = cmd.Wait()
+		close(child.exited)
+	}()
 
 	deadline := time.NewTimer(s.Timeout)
 	defer deadline.Stop()
@@ -193,17 +234,72 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (st
 	for {
 		address, reported, err := ReadJoiningAddr(s.StateDir)
 		if err != nil {
-			return "", err
+			return child, err
 		}
 		if reported {
-			return address, nil
+			child.address = address
+			return child, nil
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return child, ctx.Err()
 		case <-deadline.C:
-			return "", fmt.Errorf("rollout: the successor did not report an address within %s", s.Timeout)
+			return child, fmt.Errorf("rollout: the successor did not report an address within %s", s.Timeout)
 		case <-poll.C:
 		}
+	}
+}
+
+// processSuccessor is the production Successor: a child process this daemon
+// started and reaps.
+type processSuccessor struct {
+	address string
+	process *os.Process
+	// exited closes once the child is REAPED.
+	exited chan struct{}
+
+	stopGrace time.Duration
+	reapBound time.Duration
+}
+
+// Address implements Successor.
+func (p *processSuccessor) Address() string { return p.address }
+
+// Stop implements Successor: SIGTERM, the grace, SIGKILL, and the reap.
+//
+// THE REAP IS THE ONLY PROOF. A signal delivered is not a process gone, and
+// the caller lowers the one-successor latch on this answer, so nil is
+// answered only once this daemon's own Wait has collected the child. The
+// signals go through os.Process rather than a raw kill(2) because os.Process
+// refuses to signal a pid it has already reaped, which a recycled pid would
+// otherwise make somebody else's.
+func (p *processSuccessor) Stop(ctx context.Context) error {
+	select {
+	case <-p.exited:
+		return nil
+	default:
+	}
+	if err := p.process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("rollout: signal the successor %d to stop: %w", p.process.Pid, err)
+	}
+	grace := time.NewTimer(p.stopGrace)
+	defer grace.Stop()
+	select {
+	case <-p.exited:
+		return nil
+	case <-grace.C:
+	case <-ctx.Done():
+	}
+	if err := p.process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("rollout: kill the successor %d: %w", p.process.Pid, err)
+	}
+	bound := time.NewTimer(p.reapBound)
+	defer bound.Stop()
+	select {
+	case <-p.exited:
+		return nil
+	case <-bound.C:
+		return fmt.Errorf("rollout: the successor %d was killed but not reaped within %s; it may still be running",
+			p.process.Pid, p.reapBound)
 	}
 }

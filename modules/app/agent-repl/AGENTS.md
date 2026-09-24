@@ -467,6 +467,10 @@ How the daemon puts each component into service:
    - each stale SHIM goes to the prompt queue's BOUNCE REGISTRY: bounced now
      when it has no turn and no detached work, otherwise registered and
      bounced on its freeness edge (a turn or the last detached item ending).
+     A shim that DIES under a registered bounce is itself that edge: its work
+     ended with it, so the bounce relaunches it at once, or is unregistered
+     when this daemon ended the session, the workspace is closed, or a newer
+     shim already serves it — never waiting for a revival.
      Queued prompts never block a bounce; the workspace drains and they are
      delivered to the new shim. Monitors, background shells and background
      subagents DO block it, because they die with the shim's vendor child;
@@ -482,7 +486,10 @@ deploy calls it.
 
 A DEPLOY IN FLIGHT IS NEVER STARTED AGAIN (`already_deploying`), a handover
 in flight refuses a second (`already_rolling_out`, naming the holdouts), and
-a successor still joining refuses (`joining`). Every deploy decision is
+a successor still joining refuses (`joining`). A handover owns ONE successor
+slot: one that fails after its spawn stops that successor (confirmed by the
+reap) before it frees the slot, and one whose successor will not stop stays in
+flight, so two successors never coexist. Every deploy decision is
 recorded through the daemon's logger under `daemon.deploy.*`.
 
 A running shim rides a store restart out on its retry buffer, which holds every

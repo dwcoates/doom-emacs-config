@@ -83,11 +83,14 @@ type controller struct {
 	// successor is the address of the daemon taking over, empty while no
 	// handover is in flight.
 	successor string
-	// handingOver latches while a handover is in flight, so a second one is
-	// REFUSED rather than started beside it (see ErrAlreadyRollingOut). It is
-	// raised before the successor is spawned and lowered only by a handover
-	// that failed before announcing anything.
-	handingOver bool
+	// handover is THE ONE SUCCESSOR SLOT: non-nil while a handover is in
+	// flight, so a second one is REFUSED rather than started beside it (see
+	// ErrAlreadyRollingOut). It is claimed before the successor is spawned, the
+	// spawned successor lives in it, and it is emptied only by a handover that
+	// failed AND whose successor was confirmed gone (abandonHandover). A
+	// successor that would not stop keeps the slot claimed, which is what makes
+	// two successors unrepresentable: nothing spawns while the slot is held.
+	handover *handoverSlot
 	// staleChecks counts the staleness judgements ShimReported dispatched off
 	// its caller's lock, so a caller (a test, the orderly exit) joins them
 	// rather than guessing with a delay. None of them WAITS on a workspace:

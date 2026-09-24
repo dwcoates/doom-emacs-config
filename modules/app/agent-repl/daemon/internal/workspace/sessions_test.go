@@ -296,6 +296,9 @@ type fakeWatcher struct {
 	standDown *[]string
 	// pointers is what Pointers answers.
 	pointers sessionwatcher.Pointers
+	// onClose, when set, runs as Close begins, so a test observes what the
+	// close met.
+	onClose func()
 }
 
 // Pointers answers the pointers the fixture states; a fixture that states none
@@ -311,7 +314,13 @@ func (w *fakeWatcher) SessionEnding(string) {
 	}
 }
 
-func (w *fakeWatcher) Close() error { w.closed = true; return nil }
+func (w *fakeWatcher) Close() error {
+	if w.onClose != nil {
+		w.onClose()
+	}
+	w.closed = true
+	return nil
+}
 
 func (w *fakeWatcher) Connected() bool { return true }
 
@@ -1624,6 +1633,28 @@ func TestStopClosesTheWatcher(t *testing.T) {
 	// Assert.
 	if !f.watcher.closed {
 		t.Fatal("Stop() left the watcher open")
+	}
+}
+
+func TestStopArmsTheStandDownBeforeItClosesTheWatcher(t *testing.T) {
+	// Arrange: the close reads the latch to tell the bounce registry the
+	// shim's departure was ordered.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	armedAtClose := false
+	f.watcher.onClose = func() { armedAtClose = f.client.stoodDown }
+
+	// Act.
+	if err := f.fleet.Stop(context.Background(), ws.ID, false); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert.
+	if !armedAtClose {
+		t.Fatal("the watcher closed before the stop armed the stand-down; its departure reads as unordered")
 	}
 }
 

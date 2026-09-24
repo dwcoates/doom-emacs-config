@@ -22,6 +22,7 @@ package bounce
 
 import (
 	"context"
+	"errors"
 
 	"claude-repld/internal/ids"
 )
@@ -47,10 +48,28 @@ type Request struct {
 	// workspace no longer belongs to this daemon (a handover transfer), and its
 	// queued intake is the successor's to deliver.
 	KeepDraining bool
+	// ReplacesShim marks a bounce whose Run replaces the workspace's SHIM
+	// with a fresh one (a stale build, the restart verb, a log at its
+	// ceiling), as opposed to moving the workspace elsewhere (a handover
+	// transfer). It decides what the shim DEPARTING under a registered bounce
+	// means: the work the bounce waited on has ended either way, but a
+	// replacement is only wanted while the workspace is open and the shim
+	// died on its own. One whose session this daemon ended itself, or whose
+	// workspace is closed, is UNREGISTERED instead (ErrUnregistered): the
+	// next bring-up, if any, spawns the installed build anyway, and a relaunch
+	// would revive a workspace nobody asked to be running.
+	ReplacesShim bool
 	// Done, when set, is told how the bounce ended. It is called once, after
-	// the workspace has left draining (or, with KeepDraining, after Run).
+	// the workspace has left draining (or, with KeepDraining, after Run), or
+	// with ErrUnregistered when the registry dropped the bounce unrun.
 	Done func(error)
 }
+
+// ErrUnregistered is what Done is told for a registered bounce the registry
+// DROPPED UNRUN: the shim it would have replaced departed, and nothing is
+// left for it to replace (see Request.ReplacesShim). It is an outcome, not a
+// failure.
+var ErrUnregistered = errors.New("bounce: unregistered; the shim it would replace departed and nothing is left to replace")
 
 // Decision is what the registry did with a request.
 type Decision struct {
