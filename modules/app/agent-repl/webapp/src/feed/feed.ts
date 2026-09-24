@@ -69,15 +69,11 @@ import { FEED_GROUP_CLASS, activateGroupedMember } from "./tool-group.js";
 import { HELD_ENTRY_SELECTOR } from "../tray/tray.js";
 import { tick, stopTicking } from "./ticking.js";
 import { createOverscan } from "./overscan.js";
+import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1500;
 
-/** The class a revealed row wears while the reader's eye lands on it. */
-export const REVEAL_CLASS = "row-revealed";
-
-/** The attribute a row wears while it is the one a jump landed on. */
-export const REVEAL_ATTRIBUTE = "data-revealed";
 
 export interface FeedDeps {
   renderers: RowRenderers;
@@ -539,17 +535,18 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     if (scroll && scrollBox !== null && tail !== null) {
       tail.detachedWorkSelected(revealGeometry(scrollBox, element));
     }
-    element.classList.add(REVEAL_CLASS);
-    // STATED, not only styled: "this is the row you asked for" is a fact about
-    // the row while it stands, and a jump's caller has no other way to see that
-    // the landing happened.
+    // STATED on the row, not only styled: "this is the row you asked for" is
+    // a fact about the row while it stands, and a jump's caller has no other
+    // way to see that the landing happened. The MARK is drawn on the row's
+    // card (selected-entry.ts), derived from this fact.
     element.setAttribute(REVEAL_ATTRIBUTE, "true");
+    syncSelectedEntry(element);
     const deadline = ctx.ticker.now() + REVEAL_HIGHLIGHT_MS;
     tick(element, ctx.ticker, (nowMs) => {
       if (nowMs < deadline) return;
       stopTicking(element);
-      element.classList.remove(REVEAL_CLASS);
       element.removeAttribute(REVEAL_ATTRIBUTE);
+      syncSelectedEntry(element);
     });
   }
 
