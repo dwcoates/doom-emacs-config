@@ -843,6 +843,9 @@ export function convertAssistantMessage(
         // restates it: the vendor's elapsed figures are consumed, not forwarded.
         startedAtMs: context.nowMs(),
         agentId,
+        // THE STREAM IT RODE, by the book's own rule: what the registry holds
+        // it under, so its agent's end or handoff releases exactly its calls.
+        spawningCall: spawningCallOf(stream),
       };
       entries.push(
         ...convertToolUse(
