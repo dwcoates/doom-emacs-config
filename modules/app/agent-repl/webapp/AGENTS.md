@@ -100,6 +100,8 @@ and are contract on the same terms:
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
 | `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId) and `data-jump-unresolved` (`notDrawn` \| `noFeedEntry`) | footer-rows-and-work-ids, 2026-09-23 |
+| `.bubble-expand-only` class | every element of a bubble's expand-only region (`expandOnly` in src/bubble/draw.ts), after the scroll box | — (hidden while the sibling `.bubble-scroll` is not `.expanded`; a held prompt's one `.queued-details` element — queued age, rationale or failure detail, actions — wears it) | held-prompt-compact-badges, 2026-09-23 |
+| `data-held-status` + `.held-badge` class | every status badge in a held prompt's header strip (a `.badge`) | the status: a `classification` arm, a `hold` arm, or `accepted`; its tone class comes from `HELD_STATUS_BADGES` (src/tray/held-prompt.ts), the one table | held-prompt-compact-badges, 2026-09-23 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 
 ## Commands
@@ -203,6 +205,15 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   side and `--bubble-bg`, a variant or state only the border, `[data-cap-lines]`
   the collapsed limit; one scroll box, one has-more measurer (bubble-more.ts)
   and one toggle (expand.ts, which also opens a bubble from its header strip).
+  A kind's chrome the reader should see only once the bubble is open goes in
+  the spec's `expandOnly`, which the same toggle reveals; there is no second
+  fold. A HELD prompt (owner spec, 2026-09-23) is HALF the one width
+  (`calc(var(--bubble-max-width) / 2)`, so its trees wrap at the half), shows
+  collapsed only its first two lines and its status badges, and keeps the rest
+  expand-only; each status badge's color comes from ONE table,
+  `HELD_STATUS_BADGES`, and its words are the ones the card already said for
+  that arm (the proto carries no status text), a hold's standing sentence
+  included.
   `test/bubble/consolidation.test.ts` fails any bubble, box, body, wrap, paint,
   has-more or toggle logic built anywhere else. Three rulings of 2026-09-23 ride
   it: "more below" is the FADE ONLY, never a chevron, and `has-more` means the
