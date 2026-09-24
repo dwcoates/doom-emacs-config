@@ -140,6 +140,13 @@ type entry struct {
 	// adopted records that the workspace is owned, so a later call succeeds
 	// immediately rather than re-adopting.
 	adopted bool
+	// adopting records that one caller is RUNNING the adoption. A caller that
+	// arrives after the rendezvous was satisfied -- a reloaded page's own
+	// AdoptWebWorkspace behind the one that completed it -- waits on done
+	// rather than running a second adoption: two ran at once, both drained
+	// the handover hold, and the second's release met "lease not found"
+	// (e2e TestWebappLayerRestartHandover, 2026-09-24).
+	adopting bool
 	// done closes when the adoption completes. Every Adopt* call WAITS on it:
 	// the participants call concurrently and "all calls succeed together" is
 	// the rendezvous's whole meaning, so the caller that arrives first is not
