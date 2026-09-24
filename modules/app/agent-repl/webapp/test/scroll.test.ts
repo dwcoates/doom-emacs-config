@@ -383,10 +383,11 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the eight causes the owner rules allow", () => {
+  it("names exactly the nine causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
+      "promptHeld",
       "selectionMoved",
       "detachedWorkSelected",
       "initialPlacement",
@@ -401,6 +402,7 @@ describe("SCROLL_CAUSES", () => {
 describe("TailFollow's parking causes", () => {
   const parks: Array<[string, (tail: TailFollow) => void, string]> = [
     ["a sent prompt", (tail) => tail.promptSent(), "promptSent"],
+    ["a newly held prompt", (tail) => tail.promptHeld(), "promptHeld"],
     ["a first placement", (tail) => tail.initialPlacement(), "initialPlacement"],
     ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
     ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
@@ -433,6 +435,33 @@ describe("TailFollow's parking causes", () => {
     act(a.tail);
     // Assert
     expect(await moves(capture)).toEqual([{ cause, from: 100, to: 1000, follow: false }]);
+  });
+});
+
+describe("TailFollow.promptHeld", () => {
+  it("keeps later content in view after parking a scrolled-up reader", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    a.tail.promptHeld();
+    box.scrollHeight = 1400;
+    // Act
+    a.tail.follow();
+    // Assert
+    expect(box.scrollTop).toBe(1400);
+  });
+
+  it("records the later follow move under promptHeld", async () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    a.tail.promptHeld();
+    const capture = captureLogRecords("debug");
+    box.scrollHeight = 1400;
+    // Act
+    a.tail.follow();
+    // Assert
+    expect(await moves(capture)).toEqual([{ cause: "promptHeld", from: 1000, to: 1400, follow: true }]);
   });
 });
 
