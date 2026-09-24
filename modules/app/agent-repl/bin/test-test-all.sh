@@ -217,7 +217,7 @@ test_record_appends_every_suite() {
     run_test_all "$tree" --record
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 24 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 25 ] &&
         grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,logging,' "$tree/modules/app/agent-repl/test_time.csv" &&
