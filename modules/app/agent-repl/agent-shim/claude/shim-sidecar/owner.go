@@ -14,9 +14,12 @@
 package main
 
 import (
+	"fmt"
+
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
 // Observer is the callback interface the converter uses to report what it
@@ -237,7 +240,13 @@ type ownerIndex struct {
 	// task resolves to nothing: guessing between two claims is how one run's
 	// output lands in another run's card.
 	conflicts map[string]bool
-	log       *logging.Bound
+	// refused remembers, by spool path, the refusal already stated for it.
+	//
+	// A REFUSAL IS A CONDITION, NOT AN EVENT. A refused spool is never read, so
+	// every rescan resolves it again; without this each pass restated the same
+	// ERROR for as long as the file existed.
+	refused map[string]string
+	log     *logging.Bound
 }
 
 func newOwnerIndex(log *logging.Bound) *ownerIndex {
@@ -246,6 +255,7 @@ func newOwnerIndex(log *logging.Bound) *ownerIndex {
 		byOutput:          map[string]string{},
 		backgroundedCalls: map[string]bool{},
 		conflicts:         map[string]bool{},
+		refused:           map[string]string{},
 		log:               log,
 	}
 }
@@ -295,15 +305,15 @@ func (o *ownerIndex) observe(obs observation) {
 func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	bound := o.log.With(logging.Context{Operation: "resolve-spool-owner", Path: target.Path, TaskID: target.TaskID})
 	if o.conflicts[target.TaskID] {
-		bound.With(logging.Context{Operation: "resolve-spool-owner-conflicted", Level: "error"}).Log("owner resolution refused: two calls claim this task")
+		o.refuse(bound, target.Path, "resolve-spool-owner-conflicted", "owner resolution refused: two calls claim this task")
 		return observation{}, false
 	}
 	// An exact output path is the strongest evidence: the vendor named this
 	// file, so no id comparison is needed at all.
 	if taskID, ok := o.byOutput[target.Path]; ok {
 		if taskID != target.TaskID {
-			bound.With(logging.Context{Operation: "resolve-spool-owner-path-mismatch", Level: "error"}).Log(
-				"owner resolution refused: this exact output path is recorded for task %s", taskID)
+			o.refuse(bound, target.Path, "resolve-spool-owner-path-mismatch",
+				fmt.Sprintf("owner resolution refused: this exact output path is recorded for task %s", taskID))
 			return observation{}, false
 		}
 		bound.LogVerbose("owner resolved by exact output path")
@@ -311,8 +321,8 @@ func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	}
 	if obs, ok := o.byTask[target.TaskID]; ok {
 		if obs.outputPath != "" && obs.outputPath != target.Path {
-			bound.With(logging.Context{Operation: "resolve-spool-owner-path-mismatch", Level: "error"}).Log(
-				"owner resolution refused: the task's authoritative output path is %s", obs.outputPath)
+			o.refuse(bound, target.Path, "resolve-spool-owner-path-mismatch",
+				fmt.Sprintf("owner resolution refused: the task's authoritative output path is %s", obs.outputPath))
 			return observation{}, false
 		}
 		bound.LogVerbose("owner resolved by task id")
@@ -320,6 +330,64 @@ func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	}
 	bound.LogVerbose("owner unknown: no spawn has been observed for this task yet")
 	return observation{}, false
+}
+
+// refuse states a refusal at ERROR the first time it is true of a path, and
+// verbosely on every rescan that finds it true again.
+func (o *ownerIndex) refuse(bound *logging.Bound, path, operation, message string) {
+	if o.refused[path] == operation {
+		bound.With(logging.Context{Operation: operation}).LogVerbose("%s; already stated for this spool", message)
+		return
+	}
+	o.refused[path] = operation
+	bound.With(logging.Context{Operation: operation, Level: "error"}).Log("%s", message)
+}
+
+// repoint moves a task's authoritative output path to where its file now is.
+func (o *ownerIndex) repoint(taskID, path string) {
+	obs, ok := o.byTask[taskID]
+	if !ok {
+		panic("sidecar: repoint of a task no spawn was observed for")
+	}
+	delete(o.byOutput, obs.outputPath)
+	delete(o.refused, path)
+	obs.outputPath = path
+	o.byTask[taskID] = obs
+	o.byOutput[path] = taskID
+}
+
+// followRename re-points a claimed run at its spool's new path when the file
+// found there IS the file the run's reader has been reading.
+//
+// A RENAMED SPOOL IS THE SAME RUN IN A NEW PLACE. The vendor may move a task's
+// output under a new runtime-session segment; the owner index still names the
+// old path, so resolution refuses the new one as a mismatch — and a refused
+// spool is never read, which would strand the rest of a rendered run's output.
+// The file's own dev:inode identity is the evidence, exactly as it is for the
+// cursor: the same identity as the watched old path is the same file, never a
+// guess from its name.
+func (s *sidecar) followRename(target discover.Target) {
+	obs, ok := s.owners.byTask[target.TaskID]
+	if !ok || s.owners.conflicts[target.TaskID] || obs.outputPath == "" || obs.outputPath == target.Path {
+		return
+	}
+	old, watched := s.watchers[obs.outputPath]
+	if !watched || old.tailer.FileID() == "" {
+		return
+	}
+	identity, err := tail.Identity(target.Path)
+	if err != nil {
+		s.log.With(logging.Context{Operation: "spool-rename", Path: target.Path, TaskID: target.TaskID}).
+			LogVerbose("whether this spool is the claimed run's renamed file could not be read: %v", err)
+		return
+	}
+	if identity != old.tailer.FileID() {
+		return
+	}
+	s.owners.repoint(target.TaskID, target.Path)
+	s.log.With(logging.Context{
+		Operation: "spool-rename", Path: target.Path, TaskID: target.TaskID, FileID: identity, ActivityID: obs.activityID,
+	}).Log("the claimed run's spool was renamed from %s; it is the same file, so the run is read at its new path", obs.outputPath)
 }
 
 // agentFor returns the agent whose book a task's spawn happened in, when it is

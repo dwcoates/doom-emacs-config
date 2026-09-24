@@ -16,6 +16,9 @@
 #
 # Run with:   bash bin/test-agent_repl_workspace.sh
 
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -euo pipefail
 
 # A pre-commit hook exports its live index to children. This harness owns only
