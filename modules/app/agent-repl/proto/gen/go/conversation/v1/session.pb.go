@@ -5633,6 +5633,413 @@ func (x *SessionContextApiUsage) GetCacheReadInputTokens() int64 {
 	return 0
 }
 
+// HOW THE SHIM'S OWN KERNEL-LOCK HOLDER FAILED, so a claim that was never
+// completed says what happened instead of naming an owner.
+//
+// A session start takes two kernel locks through a child holder
+// (`shim-lock <path>`), which answers one `locked` line once it holds the
+// flock, or exits 3 when another process already holds it. Exit 3 is a GENUINE
+// OWNER and is `conversation_owned`, never this. Every other outcome is this
+// helper failing, and then NOBODY IS KNOWN TO OWN THE CONVERSATION: naming it as
+// ownership sends the reader hunting for a second process that does not exist.
+//
+// Declared here rather than beside either refusal arm because two surfaces
+// carry it whole: the shim's StartSession refusal and the daemon's relay of it
+// on OpenWorkspace, which a client decodes.
+type LockHolderFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The lock-holder binary the shim ran.
+	Binary string `protobuf:"bytes,1,opt,name=binary,proto3" json:"binary,omitempty"`
+	// HOW IT FAILED. THE ARM IS THE ACCOUNT, and each carries what that
+	// account needs: the operating system's error, the exit code, the signal,
+	// or the line. Always set.
+	//
+	// Types that are valid to be assigned to How:
+	//
+	//	*LockHolderFailure_SpawnFailed
+	//	*LockHolderFailure_Exited
+	//	*LockHolderFailure_Signaled
+	//	*LockHolderFailure_Misanswered
+	//	*LockHolderFailure_Silent
+	How           isLockHolderFailure_How `protobuf_oneof:"how"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockHolderFailure) Reset() {
+	*x = LockHolderFailure{}
+	mi := &file_conversation_v1_session_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockHolderFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockHolderFailure) ProtoMessage() {}
+
+func (x *LockHolderFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockHolderFailure.ProtoReflect.Descriptor instead.
+func (*LockHolderFailure) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *LockHolderFailure) GetBinary() string {
+	if x != nil {
+		return x.Binary
+	}
+	return ""
+}
+
+func (x *LockHolderFailure) GetHow() isLockHolderFailure_How {
+	if x != nil {
+		return x.How
+	}
+	return nil
+}
+
+func (x *LockHolderFailure) GetSpawnFailed() *LockHolderSpawnFailed {
+	if x != nil {
+		if x, ok := x.How.(*LockHolderFailure_SpawnFailed); ok {
+			return x.SpawnFailed
+		}
+	}
+	return nil
+}
+
+func (x *LockHolderFailure) GetExited() *LockHolderExited {
+	if x != nil {
+		if x, ok := x.How.(*LockHolderFailure_Exited); ok {
+			return x.Exited
+		}
+	}
+	return nil
+}
+
+func (x *LockHolderFailure) GetSignaled() *LockHolderSignaled {
+	if x != nil {
+		if x, ok := x.How.(*LockHolderFailure_Signaled); ok {
+			return x.Signaled
+		}
+	}
+	return nil
+}
+
+func (x *LockHolderFailure) GetMisanswered() *LockHolderMisanswered {
+	if x != nil {
+		if x, ok := x.How.(*LockHolderFailure_Misanswered); ok {
+			return x.Misanswered
+		}
+	}
+	return nil
+}
+
+func (x *LockHolderFailure) GetSilent() *LockHolderSilent {
+	if x != nil {
+		if x, ok := x.How.(*LockHolderFailure_Silent); ok {
+			return x.Silent
+		}
+	}
+	return nil
+}
+
+type isLockHolderFailure_How interface {
+	isLockHolderFailure_How()
+}
+
+type LockHolderFailure_SpawnFailed struct {
+	// The holder could not be spawned at all (a missing or unexecutable
+	// binary), so no claim was attempted.
+	SpawnFailed *LockHolderSpawnFailed `protobuf:"bytes,2,opt,name=spawn_failed,json=spawnFailed,proto3,oneof"`
+}
+
+type LockHolderFailure_Exited struct {
+	// The holder exited before it held the lock, with a code other than the
+	// one reserved for "already held".
+	Exited *LockHolderExited `protobuf:"bytes,3,opt,name=exited,proto3,oneof"`
+}
+
+type LockHolderFailure_Signaled struct {
+	// The holder was killed by a signal before it held the lock.
+	Signaled *LockHolderSignaled `protobuf:"bytes,4,opt,name=signaled,proto3,oneof"`
+}
+
+type LockHolderFailure_Misanswered struct {
+	// The holder answered a first line other than `locked`; the shim killed it.
+	Misanswered *LockHolderMisanswered `protobuf:"bytes,5,opt,name=misanswered,proto3,oneof"`
+}
+
+type LockHolderFailure_Silent struct {
+	// The holder neither answered nor exited inside the shim's bound; the shim
+	// killed it.
+	Silent *LockHolderSilent `protobuf:"bytes,6,opt,name=silent,proto3,oneof"`
+}
+
+func (*LockHolderFailure_SpawnFailed) isLockHolderFailure_How() {}
+
+func (*LockHolderFailure_Exited) isLockHolderFailure_How() {}
+
+func (*LockHolderFailure_Signaled) isLockHolderFailure_How() {}
+
+func (*LockHolderFailure_Misanswered) isLockHolderFailure_How() {}
+
+func (*LockHolderFailure_Silent) isLockHolderFailure_How() {}
+
+type LockHolderSpawnFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The operating system's account (e.g. `spawn /path/shim-lock ENOENT`).
+	OsError       string `protobuf:"bytes,1,opt,name=os_error,json=osError,proto3" json:"os_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockHolderSpawnFailed) Reset() {
+	*x = LockHolderSpawnFailed{}
+	mi := &file_conversation_v1_session_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockHolderSpawnFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockHolderSpawnFailed) ProtoMessage() {}
+
+func (x *LockHolderSpawnFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockHolderSpawnFailed.ProtoReflect.Descriptor instead.
+func (*LockHolderSpawnFailed) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *LockHolderSpawnFailed) GetOsError() string {
+	if x != nil {
+		return x.OsError
+	}
+	return ""
+}
+
+type LockHolderExited struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The exit code. Never 3, which is a genuine owner.
+	Code int32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	// What the holder wrote to stderr, trimmed. Empty when it wrote nothing.
+	Stderr        string `protobuf:"bytes,2,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockHolderExited) Reset() {
+	*x = LockHolderExited{}
+	mi := &file_conversation_v1_session_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockHolderExited) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockHolderExited) ProtoMessage() {}
+
+func (x *LockHolderExited) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockHolderExited.ProtoReflect.Descriptor instead.
+func (*LockHolderExited) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *LockHolderExited) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *LockHolderExited) GetStderr() string {
+	if x != nil {
+		return x.Stderr
+	}
+	return ""
+}
+
+type LockHolderSignaled struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The signal's name, as the operating system reports it (e.g. `SIGSEGV`).
+	Signal string `protobuf:"bytes,1,opt,name=signal,proto3" json:"signal,omitempty"`
+	// What the holder wrote to stderr, trimmed. Empty when it wrote nothing.
+	Stderr        string `protobuf:"bytes,2,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockHolderSignaled) Reset() {
+	*x = LockHolderSignaled{}
+	mi := &file_conversation_v1_session_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockHolderSignaled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockHolderSignaled) ProtoMessage() {}
+
+func (x *LockHolderSignaled) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockHolderSignaled.ProtoReflect.Descriptor instead.
+func (*LockHolderSignaled) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{84}
+}
+
+func (x *LockHolderSignaled) GetSignal() string {
+	if x != nil {
+		return x.Signal
+	}
+	return ""
+}
+
+func (x *LockHolderSignaled) GetStderr() string {
+	if x != nil {
+		return x.Stderr
+	}
+	return ""
+}
+
+type LockHolderMisanswered struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The first line the holder wrote, trimmed.
+	Line          string `protobuf:"bytes,1,opt,name=line,proto3" json:"line,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockHolderMisanswered) Reset() {
+	*x = LockHolderMisanswered{}
+	mi := &file_conversation_v1_session_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockHolderMisanswered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockHolderMisanswered) ProtoMessage() {}
+
+func (x *LockHolderMisanswered) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockHolderMisanswered.ProtoReflect.Descriptor instead.
+func (*LockHolderMisanswered) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{85}
+}
+
+func (x *LockHolderMisanswered) GetLine() string {
+	if x != nil {
+		return x.Line
+	}
+	return ""
+}
+
+type LockHolderSilent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How long the shim waited for an answer, in milliseconds.
+	TimeoutMs     uint32 `protobuf:"varint,1,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockHolderSilent) Reset() {
+	*x = LockHolderSilent{}
+	mi := &file_conversation_v1_session_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockHolderSilent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockHolderSilent) ProtoMessage() {}
+
+func (x *LockHolderSilent) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_session_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockHolderSilent.ProtoReflect.Descriptor instead.
+func (*LockHolderSilent) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_session_proto_rawDescGZIP(), []int{86}
+}
+
+func (x *LockHolderSilent) GetTimeoutMs() uint32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
 var File_conversation_v1_session_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_session_proto_rawDesc = "" +
@@ -5980,7 +6387,28 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12=\n" +
 	"\x1bcache_creation_input_tokens\x18\x03 \x01(\x03R\x18cacheCreationInputTokens\x125\n" +
-	"\x17cache_read_input_tokens\x18\x04 \x01(\x03R\x14cacheReadInputTokens*\xa3\x01\n" +
+	"\x17cache_read_input_tokens\x18\x04 \x01(\x03R\x14cacheReadInputTokens\"\x88\x03\n" +
+	"\x11LockHolderFailure\x12\x16\n" +
+	"\x06binary\x18\x01 \x01(\tR\x06binary\x12K\n" +
+	"\fspawn_failed\x18\x02 \x01(\v2&.conversation.v1.LockHolderSpawnFailedH\x00R\vspawnFailed\x12;\n" +
+	"\x06exited\x18\x03 \x01(\v2!.conversation.v1.LockHolderExitedH\x00R\x06exited\x12A\n" +
+	"\bsignaled\x18\x04 \x01(\v2#.conversation.v1.LockHolderSignaledH\x00R\bsignaled\x12J\n" +
+	"\vmisanswered\x18\x05 \x01(\v2&.conversation.v1.LockHolderMisansweredH\x00R\vmisanswered\x12;\n" +
+	"\x06silent\x18\x06 \x01(\v2!.conversation.v1.LockHolderSilentH\x00R\x06silentB\x05\n" +
+	"\x03how\"2\n" +
+	"\x15LockHolderSpawnFailed\x12\x19\n" +
+	"\bos_error\x18\x01 \x01(\tR\aosError\">\n" +
+	"\x10LockHolderExited\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x16\n" +
+	"\x06stderr\x18\x02 \x01(\tR\x06stderr\"D\n" +
+	"\x12LockHolderSignaled\x12\x16\n" +
+	"\x06signal\x18\x01 \x01(\tR\x06signal\x12\x16\n" +
+	"\x06stderr\x18\x02 \x01(\tR\x06stderr\"+\n" +
+	"\x15LockHolderMisanswered\x12\x12\n" +
+	"\x04line\x18\x01 \x01(\tR\x04line\"1\n" +
+	"\x10LockHolderSilent\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x01 \x01(\rR\ttimeoutMs*\xa3\x01\n" +
 	"\x13SessionCompactScope\x12%\n" +
 	"!SESSION_COMPACT_SCOPE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19SESSION_COMPACT_SCOPE_ALL\x10\x01\x12!\n" +
@@ -6007,7 +6435,7 @@ func file_conversation_v1_session_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_session_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 81)
+var file_conversation_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 87)
 var file_conversation_v1_session_proto_goTypes = []any{
 	(SessionCompactScope)(0),                              // 0: conversation.v1.SessionCompactScope
 	(SessionCompactionPhase)(0),                           // 1: conversation.v1.SessionCompactionPhase
@@ -6092,118 +6520,129 @@ var file_conversation_v1_session_proto_goTypes = []any{
 	(*SessionContextToolCallsByType)(nil),                 // 80: conversation.v1.SessionContextToolCallsByType
 	(*SessionContextAttachmentsByType)(nil),               // 81: conversation.v1.SessionContextAttachmentsByType
 	(*SessionContextApiUsage)(nil),                        // 82: conversation.v1.SessionContextApiUsage
-	(*AgentModel)(nil),                                    // 83: conversation.v1.AgentModel
-	(*AgentPermissionMode)(nil),                           // 84: conversation.v1.AgentPermissionMode
-	(*ModelOption)(nil),                                   // 85: conversation.v1.ModelOption
-	(*TurnId)(nil),                                        // 86: conversation.v1.TurnId
-	(*AgentDetachedWork)(nil),                             // 87: conversation.v1.AgentDetachedWork
-	(*DetachedWorkId)(nil),                                // 88: conversation.v1.DetachedWorkId
+	(*LockHolderFailure)(nil),                             // 83: conversation.v1.LockHolderFailure
+	(*LockHolderSpawnFailed)(nil),                         // 84: conversation.v1.LockHolderSpawnFailed
+	(*LockHolderExited)(nil),                              // 85: conversation.v1.LockHolderExited
+	(*LockHolderSignaled)(nil),                            // 86: conversation.v1.LockHolderSignaled
+	(*LockHolderMisanswered)(nil),                         // 87: conversation.v1.LockHolderMisanswered
+	(*LockHolderSilent)(nil),                              // 88: conversation.v1.LockHolderSilent
+	(*AgentModel)(nil),                                    // 89: conversation.v1.AgentModel
+	(*AgentPermissionMode)(nil),                           // 90: conversation.v1.AgentPermissionMode
+	(*ModelOption)(nil),                                   // 91: conversation.v1.ModelOption
+	(*TurnId)(nil),                                        // 92: conversation.v1.TurnId
+	(*AgentDetachedWork)(nil),                             // 93: conversation.v1.AgentDetachedWork
+	(*DetachedWorkId)(nil),                                // 94: conversation.v1.DetachedWorkId
 }
 var file_conversation_v1_session_proto_depIdxs = []int32{
-	3,  // 0: conversation.v1.SessionStarted.runtime:type_name -> conversation.v1.SessionRuntime
-	83, // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
-	84, // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	85, // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
-	86, // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
-	87, // 5: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
-	83, // 6: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
-	5,  // 7: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
-	6,  // 8: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
-	8,  // 9: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
-	9,  // 10: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
-	10, // 11: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
-	83, // 12: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
-	0,  // 13: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
-	27, // 14: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
-	28, // 15: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
-	32, // 16: conversation.v1.SessionUpdate.model_changed:type_name -> conversation.v1.SessionModelChanged
-	33, // 17: conversation.v1.SessionUpdate.fast_mode:type_name -> conversation.v1.SessionFastMode
-	37, // 18: conversation.v1.SessionUpdate.mcp_server:type_name -> conversation.v1.SessionMcpServer
-	43, // 19: conversation.v1.SessionUpdate.account_usage:type_name -> conversation.v1.SessionAccountUsage
-	31, // 20: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
-	15, // 21: conversation.v1.SessionUpdate.rate_limit_status:type_name -> conversation.v1.SessionRateLimitStatus
-	52, // 22: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
-	68, // 23: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
-	14, // 24: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
-	13, // 25: conversation.v1.SessionUpdate.title:type_name -> conversation.v1.SessionTitle
-	12, // 26: conversation.v1.SessionUpdate.compaction_progress:type_name -> conversation.v1.SessionCompactionProgress
-	1,  // 27: conversation.v1.SessionCompactionProgress.phase:type_name -> conversation.v1.SessionCompactionPhase
-	16, // 28: conversation.v1.SessionRateLimitStatus.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
-	17, // 29: conversation.v1.SessionRateLimitStatus.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
-	18, // 30: conversation.v1.SessionRateLimitStatus.rejected:type_name -> conversation.v1.SessionRateLimitRejected
-	19, // 31: conversation.v1.SessionRateLimitStatus.rate_limit_type:type_name -> conversation.v1.SessionRateLimitType
-	26, // 32: conversation.v1.SessionRateLimitStatus.overage:type_name -> conversation.v1.SessionRateLimitOverage
-	20, // 33: conversation.v1.SessionRateLimitType.five_hour:type_name -> conversation.v1.SessionRateLimitWindowFiveHour
-	21, // 34: conversation.v1.SessionRateLimitType.seven_day:type_name -> conversation.v1.SessionRateLimitWindowSevenDay
-	22, // 35: conversation.v1.SessionRateLimitType.seven_day_opus:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOpus
-	23, // 36: conversation.v1.SessionRateLimitType.seven_day_sonnet:type_name -> conversation.v1.SessionRateLimitWindowSevenDaySonnet
-	24, // 37: conversation.v1.SessionRateLimitType.seven_day_overage_included:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOverageIncluded
-	25, // 38: conversation.v1.SessionRateLimitType.overage:type_name -> conversation.v1.SessionRateLimitWindowOverage
-	16, // 39: conversation.v1.SessionRateLimitOverage.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
-	17, // 40: conversation.v1.SessionRateLimitOverage.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
-	18, // 41: conversation.v1.SessionRateLimitOverage.rejected:type_name -> conversation.v1.SessionRateLimitRejected
-	29, // 42: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
-	30, // 43: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
-	84, // 44: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	83, // 45: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
-	35, // 46: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
-	36, // 47: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
-	34, // 48: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
-	41, // 49: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
-	42, // 50: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
-	38, // 51: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
-	39, // 52: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
-	40, // 53: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
-	44, // 54: conversation.v1.SessionAccountUsage.available:type_name -> conversation.v1.SessionAccountUsageAvailable
-	47, // 55: conversation.v1.SessionAccountUsage.unavailable:type_name -> conversation.v1.SessionAccountUsageUnavailable
-	46, // 56: conversation.v1.SessionAccountUsageAvailable.five_hour:type_name -> conversation.v1.SessionUsageWindow
-	46, // 57: conversation.v1.SessionAccountUsageAvailable.seven_day:type_name -> conversation.v1.SessionUsageWindow
-	46, // 58: conversation.v1.SessionAccountUsageAvailable.seven_day_oauth_apps:type_name -> conversation.v1.SessionUsageWindow
-	46, // 59: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
-	46, // 60: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
-	45, // 61: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
-	83, // 62: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
-	46, // 63: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
-	48, // 64: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
-	49, // 65: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
-	50, // 66: conversation.v1.SessionAccountUsageUnavailable.utilization_unavailable:type_name -> conversation.v1.SessionUsageUtilizationUnavailable
-	51, // 67: conversation.v1.SessionAccountUsageUnavailable.sampling_failure:type_name -> conversation.v1.SessionUsageSamplingFailure
-	53, // 68: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
-	54, // 69: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
-	61, // 70: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
-	55, // 71: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
-	56, // 72: conversation.v1.SessionFault.store_unreachable:type_name -> conversation.v1.SessionFaultStoreUnreachable
-	57, // 73: conversation.v1.SessionFault.converter_defect:type_name -> conversation.v1.SessionFaultConverterDefect
-	58, // 74: conversation.v1.SessionFault.log_sink_poisoned:type_name -> conversation.v1.SessionFaultLogSinkPoisoned
-	59, // 75: conversation.v1.SessionFault.keepalive_failed:type_name -> conversation.v1.SessionFaultKeepaliveFailed
-	60, // 76: conversation.v1.SessionFault.vendor_query_failed:type_name -> conversation.v1.SessionFaultVendorQueryFailed
-	62, // 77: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
-	63, // 78: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
-	65, // 79: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
-	66, // 80: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
-	86, // 81: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
-	88, // 82: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	86, // 83: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
-	88, // 84: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
-	69, // 85: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
-	70, // 86: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
-	71, // 87: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
-	72, // 88: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
-	73, // 89: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
-	74, // 90: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
-	75, // 91: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
-	76, // 92: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
-	77, // 93: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
-	79, // 94: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
-	82, // 95: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
-	78, // 96: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
-	80, // 97: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
-	81, // 98: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
-	99, // [99:99] is the sub-list for method output_type
-	99, // [99:99] is the sub-list for method input_type
-	99, // [99:99] is the sub-list for extension type_name
-	99, // [99:99] is the sub-list for extension extendee
-	0,  // [0:99] is the sub-list for field type_name
+	3,   // 0: conversation.v1.SessionStarted.runtime:type_name -> conversation.v1.SessionRuntime
+	89,  // 1: conversation.v1.SessionStarted.effective_model:type_name -> conversation.v1.AgentModel
+	90,  // 2: conversation.v1.SessionStarted.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	91,  // 3: conversation.v1.SessionStarted.model_catalog:type_name -> conversation.v1.ModelOption
+	92,  // 4: conversation.v1.SessionStarted.turn_in_flight:type_name -> conversation.v1.TurnId
+	93,  // 5: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
+	89,  // 6: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
+	5,   // 7: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
+	6,   // 8: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
+	8,   // 9: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
+	9,   // 10: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
+	10,  // 11: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
+	89,  // 12: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
+	0,   // 13: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
+	27,  // 14: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
+	28,  // 15: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
+	32,  // 16: conversation.v1.SessionUpdate.model_changed:type_name -> conversation.v1.SessionModelChanged
+	33,  // 17: conversation.v1.SessionUpdate.fast_mode:type_name -> conversation.v1.SessionFastMode
+	37,  // 18: conversation.v1.SessionUpdate.mcp_server:type_name -> conversation.v1.SessionMcpServer
+	43,  // 19: conversation.v1.SessionUpdate.account_usage:type_name -> conversation.v1.SessionAccountUsage
+	31,  // 20: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
+	15,  // 21: conversation.v1.SessionUpdate.rate_limit_status:type_name -> conversation.v1.SessionRateLimitStatus
+	52,  // 22: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
+	68,  // 23: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
+	14,  // 24: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
+	13,  // 25: conversation.v1.SessionUpdate.title:type_name -> conversation.v1.SessionTitle
+	12,  // 26: conversation.v1.SessionUpdate.compaction_progress:type_name -> conversation.v1.SessionCompactionProgress
+	1,   // 27: conversation.v1.SessionCompactionProgress.phase:type_name -> conversation.v1.SessionCompactionPhase
+	16,  // 28: conversation.v1.SessionRateLimitStatus.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
+	17,  // 29: conversation.v1.SessionRateLimitStatus.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
+	18,  // 30: conversation.v1.SessionRateLimitStatus.rejected:type_name -> conversation.v1.SessionRateLimitRejected
+	19,  // 31: conversation.v1.SessionRateLimitStatus.rate_limit_type:type_name -> conversation.v1.SessionRateLimitType
+	26,  // 32: conversation.v1.SessionRateLimitStatus.overage:type_name -> conversation.v1.SessionRateLimitOverage
+	20,  // 33: conversation.v1.SessionRateLimitType.five_hour:type_name -> conversation.v1.SessionRateLimitWindowFiveHour
+	21,  // 34: conversation.v1.SessionRateLimitType.seven_day:type_name -> conversation.v1.SessionRateLimitWindowSevenDay
+	22,  // 35: conversation.v1.SessionRateLimitType.seven_day_opus:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOpus
+	23,  // 36: conversation.v1.SessionRateLimitType.seven_day_sonnet:type_name -> conversation.v1.SessionRateLimitWindowSevenDaySonnet
+	24,  // 37: conversation.v1.SessionRateLimitType.seven_day_overage_included:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOverageIncluded
+	25,  // 38: conversation.v1.SessionRateLimitType.overage:type_name -> conversation.v1.SessionRateLimitWindowOverage
+	16,  // 39: conversation.v1.SessionRateLimitOverage.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
+	17,  // 40: conversation.v1.SessionRateLimitOverage.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
+	18,  // 41: conversation.v1.SessionRateLimitOverage.rejected:type_name -> conversation.v1.SessionRateLimitRejected
+	29,  // 42: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
+	30,  // 43: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
+	90,  // 44: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	89,  // 45: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
+	35,  // 46: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
+	36,  // 47: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
+	34,  // 48: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
+	41,  // 49: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
+	42,  // 50: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
+	38,  // 51: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
+	39,  // 52: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
+	40,  // 53: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
+	44,  // 54: conversation.v1.SessionAccountUsage.available:type_name -> conversation.v1.SessionAccountUsageAvailable
+	47,  // 55: conversation.v1.SessionAccountUsage.unavailable:type_name -> conversation.v1.SessionAccountUsageUnavailable
+	46,  // 56: conversation.v1.SessionAccountUsageAvailable.five_hour:type_name -> conversation.v1.SessionUsageWindow
+	46,  // 57: conversation.v1.SessionAccountUsageAvailable.seven_day:type_name -> conversation.v1.SessionUsageWindow
+	46,  // 58: conversation.v1.SessionAccountUsageAvailable.seven_day_oauth_apps:type_name -> conversation.v1.SessionUsageWindow
+	46,  // 59: conversation.v1.SessionAccountUsageAvailable.seven_day_opus:type_name -> conversation.v1.SessionUsageWindow
+	46,  // 60: conversation.v1.SessionAccountUsageAvailable.seven_day_sonnet:type_name -> conversation.v1.SessionUsageWindow
+	45,  // 61: conversation.v1.SessionAccountUsageAvailable.model_scoped:type_name -> conversation.v1.SessionModelUsageWindow
+	89,  // 62: conversation.v1.SessionModelUsageWindow.model:type_name -> conversation.v1.AgentModel
+	46,  // 63: conversation.v1.SessionModelUsageWindow.window:type_name -> conversation.v1.SessionUsageWindow
+	48,  // 64: conversation.v1.SessionAccountUsageUnavailable.service_unavailable:type_name -> conversation.v1.SessionUsageServiceUnavailable
+	49,  // 65: conversation.v1.SessionAccountUsageUnavailable.window_unavailable:type_name -> conversation.v1.SessionUsageWindowUnavailable
+	50,  // 66: conversation.v1.SessionAccountUsageUnavailable.utilization_unavailable:type_name -> conversation.v1.SessionUsageUtilizationUnavailable
+	51,  // 67: conversation.v1.SessionAccountUsageUnavailable.sampling_failure:type_name -> conversation.v1.SessionUsageSamplingFailure
+	53,  // 68: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
+	54,  // 69: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
+	61,  // 70: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
+	55,  // 71: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
+	56,  // 72: conversation.v1.SessionFault.store_unreachable:type_name -> conversation.v1.SessionFaultStoreUnreachable
+	57,  // 73: conversation.v1.SessionFault.converter_defect:type_name -> conversation.v1.SessionFaultConverterDefect
+	58,  // 74: conversation.v1.SessionFault.log_sink_poisoned:type_name -> conversation.v1.SessionFaultLogSinkPoisoned
+	59,  // 75: conversation.v1.SessionFault.keepalive_failed:type_name -> conversation.v1.SessionFaultKeepaliveFailed
+	60,  // 76: conversation.v1.SessionFault.vendor_query_failed:type_name -> conversation.v1.SessionFaultVendorQueryFailed
+	62,  // 77: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
+	63,  // 78: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
+	65,  // 79: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
+	66,  // 80: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
+	92,  // 81: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
+	94,  // 82: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	92,  // 83: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
+	94,  // 84: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	69,  // 85: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
+	70,  // 86: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
+	71,  // 87: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
+	72,  // 88: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
+	73,  // 89: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
+	74,  // 90: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
+	75,  // 91: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
+	76,  // 92: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
+	77,  // 93: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
+	79,  // 94: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
+	82,  // 95: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
+	78,  // 96: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
+	80,  // 97: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
+	81,  // 98: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
+	84,  // 99: conversation.v1.LockHolderFailure.spawn_failed:type_name -> conversation.v1.LockHolderSpawnFailed
+	85,  // 100: conversation.v1.LockHolderFailure.exited:type_name -> conversation.v1.LockHolderExited
+	86,  // 101: conversation.v1.LockHolderFailure.signaled:type_name -> conversation.v1.LockHolderSignaled
+	87,  // 102: conversation.v1.LockHolderFailure.misanswered:type_name -> conversation.v1.LockHolderMisanswered
+	88,  // 103: conversation.v1.LockHolderFailure.silent:type_name -> conversation.v1.LockHolderSilent
+	104, // [104:104] is the sub-list for method output_type
+	104, // [104:104] is the sub-list for method input_type
+	104, // [104:104] is the sub-list for extension type_name
+	104, // [104:104] is the sub-list for extension extendee
+	0,   // [0:104] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_session_proto_init() }
@@ -6309,13 +6748,20 @@ func file_conversation_v1_session_proto_init() {
 	file_conversation_v1_session_proto_msgTypes[66].OneofWrappers = []any{}
 	file_conversation_v1_session_proto_msgTypes[67].OneofWrappers = []any{}
 	file_conversation_v1_session_proto_msgTypes[69].OneofWrappers = []any{}
+	file_conversation_v1_session_proto_msgTypes[81].OneofWrappers = []any{
+		(*LockHolderFailure_SpawnFailed)(nil),
+		(*LockHolderFailure_Exited)(nil),
+		(*LockHolderFailure_Signaled)(nil),
+		(*LockHolderFailure_Misanswered)(nil),
+		(*LockHolderFailure_Silent)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_session_proto_rawDesc), len(file_conversation_v1_session_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   81,
+			NumMessages:   87,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

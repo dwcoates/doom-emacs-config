@@ -7,6 +7,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { LockHolderFailure } from "../../conversation/v1/session_pb";
+import { file_conversation_v1_session } from "../../conversation/v1/session_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -15,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_open_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJUChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBW9wX2lkGAIgASgJIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyK9BQoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAEksKE3ZlbmRvcl9zdGFydF9mYWlsZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkSAASUwoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYCSABKAsyMC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAQgcKBWNhdXNlIkYKIk9wZW5Xb3Jrc3BhY2VMb2NrSG9sZGVyVW5hdmFpbGFibGUSDgoGYmluYXJ5GAEgASgJEhAKCG9zX2Vycm9yGAIgASgJIjAKHk9wZW5Xb3Jrc3BhY2VWZW5kb3JTdGFydEZhaWxlZBIOCgZkZXRhaWwYASABKAkiHwodT3BlbldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOQohT3BlbldvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGk9wZW5Xb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIh0KG09wZW5Xb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZCJTCh5PcGVuV29ya3NwYWNlVHJhbnNjcmlwdE1pc3NpbmcSGQoRdmVuZG9yX3Nlc3Npb25faWQYASABKAkSFgoOc2VhcmNoZWRfcGF0aHMYAiADKAkiKgoYT3BlbldvcmtzcGFjZVNwYXduRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJUChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBW9wX2lkGAIgASgJIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyK9BQoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAEksKE3ZlbmRvcl9zdGFydF9mYWlsZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkSAASUwoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYCSABKAsyMC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAQgcKBWNhdXNlIncKIk9wZW5Xb3Jrc3BhY2VMb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvciIwCh5PcGVuV29ya3NwYWNlVmVuZG9yU3RhcnRGYWlsZWQSDgoGZGV0YWlsGAEgASgJIh8KHU9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIU9wZW5Xb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodT3BlbldvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpPcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtPcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWQiUwoeT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhYKDnNlYXJjaGVkX3BhdGhzGAIgAygJIioKGE9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_session, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceRequest
@@ -172,11 +174,11 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
     case: "vendorStartFailed";
   } | {
     /**
-     * The session's shim came up but could not spawn its own kernel-lock
-     * holder (shim.v1 StartSessionFailure.lock_holder_unavailable relayed by
-     * name), so it refused to start a session it could not prove it alone
-     * owns. NOBODY ELSE OWNS THE CONVERSATION: this is a broken lock helper
-     * (`binary`, `os_error`), not an ownership conflict.
+     * The session's shim came up but its own kernel-lock holder failed
+     * (shim.v1 StartSessionFailure.lock_holder_unavailable relayed by name),
+     * so it refused to start a session it could not prove it alone owns.
+     * NOBODY ELSE OWNS THE CONVERSATION: this is a broken lock helper, and
+     * `failure` says how it broke, not an ownership conflict.
      *
      * @generated from field: agentrepl.v1.OpenWorkspaceLockHolderUnavailable lock_holder_unavailable = 9;
      */
@@ -197,18 +199,12 @@ export const OpenWorkspaceErrorSchema: GenMessage<OpenWorkspaceError> = /*@__PUR
  */
 export type OpenWorkspaceLockHolderUnavailable = Message<"agentrepl.v1.OpenWorkspaceLockHolderUnavailable"> & {
   /**
-   * The lock-holder binary the shim tried to spawn.
+   * Which holder failed, and how: the shim's account, relayed whole. Always
+   * set.
    *
-   * @generated from field: string binary = 1;
+   * @generated from field: conversation.v1.LockHolderFailure failure = 3;
    */
-  binary: string;
-
-  /**
-   * The operating system's account of why the spawn failed.
-   *
-   * @generated from field: string os_error = 2;
-   */
-  osError: string;
+  failure?: LockHolderFailure | undefined;
 };
 
 /**
