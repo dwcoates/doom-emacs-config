@@ -143,6 +143,8 @@ type fakeStore struct {
 	shapesRequests int
 	// shapesWritten is every observation list the server handed WriteBatch.
 	shapesWritten [][]*storev1.ShapeObservation
+	// classes is every write class the server handed WriteBatch, in order.
+	classes []WriteClass
 
 	closed bool
 }
@@ -163,10 +165,11 @@ func newFakeStore() *fakeStore {
 	}
 }
 
-func (f *fakeStore) WriteBatch(_ context.Context, producer string, _ *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error) {
+func (f *fakeStore) WriteBatch(_ context.Context, producer string, class WriteClass, _ *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error) {
 	f.mu.Lock()
 	f.writes = append(f.writes, producer)
 	f.shapesWritten = append(f.shapesWritten, shapes)
+	f.classes = append(f.classes, class)
 	result, err := f.writeResult, f.writeErr
 	f.mu.Unlock()
 	return result, err
@@ -328,8 +331,9 @@ func attributedEntry(writeID, upsertKey, topLevel, book string) *storev1.StoreEn
 func writeOne(t *testing.T, h *harness) {
 	t.Helper()
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "claude-shim:test",
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:test",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 	if err != nil {
 		t.Fatalf("WriteBatch: %v", err)
@@ -422,8 +426,9 @@ func TestWriteBatchSuccessArmOnACommittedBatch(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "claude-shim:s1",
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 
 	// Assert.
@@ -432,6 +437,43 @@ func TestWriteBatchSuccessArmOnACommittedBatch(t *testing.T) {
 	}
 	if res.Msg.GetSuccess() == nil {
 		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+// TestWriteBatchHandsTheStatedClassToTheStore pins that the class the caller
+// stated is the class the writer queues the write in — never inferred.
+func TestWriteBatchHandsTheStatedClassToTheStore(t *testing.T) {
+	tests := []struct {
+		name  string
+		class *storev1.WriteClass
+		want  WriteClass
+	}{
+		{name: "interactive", class: interactiveClass(), want: WriteInteractive},
+		{name: "bulk", class: bulkClass(), want: WriteBulk},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+				WriteClass: tc.class,
+				Producer:   "claude-shim:s1",
+				Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+			}))
+
+			// Assert.
+			if err != nil || res.Msg.GetSuccess() == nil {
+				t.Fatalf("WriteBatch = %v, %v; want the success arm", res, err)
+			}
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			if len(store.classes) != 1 || store.classes[0] != tc.want {
+				t.Fatalf("classes handed to the store = %v, want [%v]", store.classes, tc.want)
+			}
+		})
 	}
 }
 
@@ -446,8 +488,9 @@ func TestWriteBatchSuccessArmCarriesLegacyBookConflictSkips(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "shim-claude-sidecar",
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Producer:   "shim-claude-sidecar",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 
 	// Assert.
@@ -474,8 +517,9 @@ func TestWriteBatchAnswersAnAbsorbedReplayWithTheSameSuccessArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "claude-shim:s1",
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 
 	// Assert.
@@ -495,8 +539,9 @@ func TestWriteBatchMapsAStorageFailureToTheFailureArm(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "claude-shim:s1",
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 
 	// Assert. A refusal is an HTTP 200 with the typed arm, never a Connect error.
@@ -530,7 +575,8 @@ func TestWriteBatchRefusesARequestNamingNoProducer(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 
 	// Assert. The store must not be touched by a refused request.
@@ -551,8 +597,9 @@ func TestWriteBatchRefusalIsLoggedAtItsSite(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "claude-shim:s1",
-		Batch:    &storev1.EntryBatch{},
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:s1",
+		Batch:      &storev1.EntryBatch{},
 	})); err != nil {
 		t.Fatalf("WriteBatch = %v, want nil", err)
 	}
@@ -561,6 +608,48 @@ func TestWriteBatchRefusalIsLoggedAtItsSite(t *testing.T) {
 	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "warn")
 	if !ok || rec.Context["refusal_site"] != SiteBatchEmpty {
 		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteBatchEmpty)
+	}
+}
+
+// TestAnUnclassifiedWriteIsRefusedAndLogged: a write that states no class is
+// answered with invalid_request naming write_class, never reaches the store,
+// and leaves one warn record at its site.
+func TestAnUnclassifiedWriteIsRefusedAndLogged(t *testing.T) {
+	tests := []struct {
+		name  string
+		class *storev1.WriteClass
+	}{
+		{name: "no class message", class: nil},
+		{name: "a class message with no arm", class: &storev1.WriteClass{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+				WriteClass: tc.class,
+				Producer:   "claude-shim:s1",
+				Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+			}))
+
+			// Assert.
+			if err != nil || res.Msg.GetFailure().GetInvalidRequest().GetField() != "write_class" {
+				t.Fatalf("WriteBatch = %v, %v; want invalid_request naming write_class", res, err)
+			}
+			store.mu.Lock()
+			writes := len(store.classes)
+			store.mu.Unlock()
+			if writes != 0 {
+				t.Fatalf("store writes = %d, want 0", writes)
+			}
+			rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "warn")
+			if !ok || rec.Context["refusal_site"] != SiteWriteClassUnset {
+				t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteWriteClassUnset)
+			}
+		})
 	}
 }
 
@@ -753,8 +842,9 @@ func TestWriteBatchRecordsAStorageRefusalAgainstItsProcedure(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "claude-shim:test",
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+		WriteClass: interactiveClass(),
+		Producer:   "claude-shim:test",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
 	}))
 
 	// Assert.
@@ -959,6 +1049,44 @@ func (w *watcher) refusal(t *testing.T) error {
 		for stream.Receive() {
 		}
 		return stream.Err()
+	}
+}
+
+// TestWatchDeliversTheLinesABulkBatchCommittedBeforeItFailed pins the one
+// moment a split bulk batch's leading lines can reach a live watcher. Its
+// leading transactions made them durable; the retry will absorb them by
+// write_id and publish nothing, so the failed call must publish them itself.
+func TestWatchDeliversTheLinesABulkBatchCommittedBeforeItFailed(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p7", 7)}}
+	store.writeErr = fmt.Errorf("%w: disk is gone", ErrStorage)
+	store.mu.Unlock()
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		WriteClass: bulkClass(),
+		Producer:   "shim-claude-sidecar",
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil || res.Msg.GetFailure() == nil {
+		t.Fatalf("WriteBatch = %v, %v; want the failure arm", res, err)
+	}
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the committed line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p7" {
+		t.Fatalf("pointer = %q, want %q", got, "p7")
 	}
 }
 
@@ -1531,9 +1659,10 @@ func TestWriteBatchHandsTheShapeObservationsToTheStore(t *testing.T) {
 
 	// Act.
 	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "sidecar",
-		Batch:    &storev1.EntryBatch{},
-		Shapes:   []*storev1.ShapeObservation{shape},
+		WriteClass: interactiveClass(),
+		Producer:   "sidecar",
+		Batch:      &storev1.EntryBatch{},
+		Shapes:     []*storev1.ShapeObservation{shape},
 	})); err != nil {
 		t.Fatalf("WriteBatch = %v, want nil", err)
 	}
@@ -1552,9 +1681,10 @@ func TestWriteBatchRefusesAShapeObservationWithNoHash(t *testing.T) {
 
 	// Act.
 	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: "sidecar",
-		Batch:    &storev1.EntryBatch{},
-		Shapes:   []*storev1.ShapeObservation{{Kind: "unparsed", KeyStructure: "{a:string}", SeenMs: 1000}},
+		WriteClass: interactiveClass(),
+		Producer:   "sidecar",
+		Batch:      &storev1.EntryBatch{},
+		Shapes:     []*storev1.ShapeObservation{{Kind: "unparsed", KeyStructure: "{a:string}", SeenMs: 1000}},
 	}))
 
 	// Assert.
@@ -1831,8 +1961,9 @@ func TestARefusalRecordNamesBothTheSiteAndTheWireArm(t *testing.T) {
 			wantKind:  "invalid_request",
 			call: func(h *harness) {
 				h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{ //nolint:errcheck // the refusal is the subject
-					Producer: "claude-shim:s1",
-					Batch:    &storev1.EntryBatch{},
+					WriteClass: interactiveClass(),
+					Producer:   "claude-shim:s1",
+					Batch:      &storev1.EntryBatch{},
 				}))
 			},
 		},
@@ -1870,4 +2001,12 @@ func TestARefusalRecordNamesBothTheSiteAndTheWireArm(t *testing.T) {
 			}
 		})
 	}
+}
+
+func interactiveClass() *storev1.WriteClass {
+	return &storev1.WriteClass{WriteClass: &storev1.WriteClass_Interactive{Interactive: &storev1.WriteClassInteractive{}}}
+}
+
+func bulkClass() *storev1.WriteClass {
+	return &storev1.WriteClass{WriteClass: &storev1.WriteClass_Bulk{Bulk: &storev1.WriteClassBulk{}}}
 }

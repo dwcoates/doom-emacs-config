@@ -90,16 +90,31 @@ type DB struct {
 	// and a timestamp are different questions. Injectable for the same reason:
 	// a test asserts an exact wait by advancing it, never by waiting one out.
 	clock func() time.Time
-	// writeGate is the process-wide write slot: exactly one write transaction
-	// at a time, so a batch never meets a sibling's BEGIN IMMEDIATE. It is a
-	// one-slot channel rather than a mutex so a queued caller can be canceled.
-	// See writer.go.
-	writeGate chan struct{}
+	// writes is the process-wide write slot and its two-tier queue: exactly
+	// one write transaction at a time, so a batch never meets a sibling's
+	// BEGIN IMMEDIATE, and an interactive writer is always handed the slot
+	// before a queued bulk one. Its zero value is a free slot. See writer.go.
+	writes writeScheduler
 	// queuedForWrite, when set, is called by acquireWrite the moment a writer
-	// finds the slot taken and is about to block on it. It is the seam a test
-	// uses to observe a QUEUED writer — the state the gate exists to create —
-	// without sleeping for one. Nil in production; nothing reads it there.
-	queuedForWrite func()
+	// finds the slot taken and has joined its class's queue. It is the seam a
+	// test uses to observe a QUEUED writer — the state the gate exists to
+	// create — without sleeping for one. Nil in production; nothing reads it
+	// there.
+	queuedForWrite func(WriteClass)
+	// bulk bounds one bulk transaction: a bulk batch larger than this is
+	// committed as several, yielding the writer between them. See write.go.
+	bulk bulkBounds
+	// bulkEntryApplied, when set, is called after each entry of a BULK
+	// transaction is applied, still holding the slot. It is the seam a test
+	// uses to advance the monotonic clock across the chunk's time bound, or
+	// to queue an interactive writer mid-chunk, without sleeping. Nil in
+	// production.
+	bulkEntryApplied func()
+	// transactionCommitted, when set, is called after each write transaction
+	// of a WriteBatch commits, still holding the slot. It is the seam a test
+	// uses to observe the order the writer took transactions in. Nil in
+	// production.
+	transactionCommitted func(WriteClass)
 	// ledgerRetention is how far behind a file's committed cursor a write_ledger
 	// row must fall before the sweep may remove it. Non-positive keeps
 	// everything. See prune.go.
@@ -132,6 +147,12 @@ type Options struct {
 	// the slow-query elapsed time and the write gate's queue wait. Zero value
 	// means time.Now.
 	Clock func() time.Time
+	// BulkChunkRows, BulkChunkBytes and BulkChunkTime bound one bulk
+	// transaction (see bulkBounds in write.go). Zero falls back to the shipped
+	// default; only a test sets them.
+	BulkChunkRows  int
+	BulkChunkBytes int
+	BulkChunkTime  time.Duration
 	// LedgerRetentionBytes is how far behind a file's committed cursor a
 	// write_ledger row must fall before the sweep removes it. Zero falls back
 	// to DefaultLedgerRetentionBytes; NEGATIVE disables the sweep, which is how
@@ -387,7 +408,7 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 		bulkPerRow: bulkPerRow,
 		now:        clock,
 		clock:      monotonic,
-		writeGate:  make(chan struct{}, 1),
+		bulk:       resolveBulkBounds(opts),
 
 		ledgerRetention: ledgerRetention,
 	}
@@ -739,7 +760,7 @@ func (d *DB) createSchema(ctx context.Context) error {
 	// open, so this never queues; it goes through beginWrite anyway so that
 	// "every write transaction in this package is opened by beginWrite" is a
 	// property anyone can check by grepping for BeginTx rather than a habit.
-	tx, release, err := d.beginWrite(ctx)
+	tx, release, err := d.beginWrite(ctx, WriteBulk)
 	if err != nil {
 		return storagef(err, "begin schema creation")
 	}

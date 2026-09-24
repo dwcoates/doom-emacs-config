@@ -33,7 +33,48 @@ message WriteBatchRequest {
   // store folds each into the catalog (count += 1, last_seen = max, the first
   // example kept from the first insert).
   repeated ShapeObservation shapes = 3;
+  // WHICH QUEUE THIS WRITE TAKES INTO THE STORE'S ONE WRITER. REQUIRED: a
+  // request with this unset, or with its arm unset, is refused as an invalid
+  // request (field "write_class") and never defaulted, because a guessed class
+  // is how a bulk copy ends up ahead of a live turn.
+  //
+  // THE CALLER STATES IT; THE STORE NEVER INFERS IT FROM CONTENT. The shim
+  // writes INTERACTIVE for everything it observes live; the sidecar writes BULK
+  // for everything it copies from disk.
+  WriteClass write_class = 4;
 }
+
+// The owner's rule (2026-09-23): an interactive write never queues behind a
+// bulk one. The store serializes every SQLite write through ONE writer, and
+// this is how the writer knows which queue a write belongs in.
+//
+// INTERACTIVE is always taken before any queued BULK write. Bulk still makes
+// progress: once a bulk write is waiting, the writer takes it after a fixed
+// number of consecutive interactive writes, or at once when no interactive
+// write is waiting, so the longest an interactive write can wait on bulk is one
+// bounded bulk transaction.
+message WriteClass {
+  oneof write_class {
+    WriteClassInteractive interactive = 1;
+    WriteClassBulk bulk = 2;
+  }
+}
+
+// Live content a person is waiting to see: turn content, prompts, terminals,
+// session updates. Written as ONE transaction exactly as the request carries
+// it, so a failure commits nothing.
+message WriteClassInteractive {}
+
+// Background copying: transcript and spool ingestion, backfills, recoveries.
+//
+// THE STORE SPLITS A BULK BATCH. It commits the entries in bounded
+// transactions (bounded in rows, frame bytes and time; the store's bound is
+// authoritative whatever size the producer sends) and yields the writer between
+// them. The cursor advance and the shape observations ride the LAST
+// transaction. So a bulk failure may leave LEADING entries committed, but never
+// the cursor advance or the shapes: the producer re-reads from the unadvanced
+// cursor and the write ledger absorbs the entries that already landed.
+message WriteClassBulk {}
 
 // One distinct key structure a producer observed on a line it did not store.
 //
@@ -69,8 +110,9 @@ message WriteBatchResponse {
   }
 }
 
-// The batch is DURABLE — records and cursor advance committed as one
-// transaction. A replayed batch whose write_ids all landed before is this
+// The batch is DURABLE — records and cursor advance committed (as one
+// transaction for an interactive write; as bounded transactions with the
+// cursor advance in the last for a bulk one, see WriteClassBulk). A replayed batch whose write_ids all landed before is this
 // same arm: absorption is success, and the producer can retire the batch
 // from its retry buffer either way.
 message WriteBatchSuccess {
@@ -100,7 +142,10 @@ message WriteBatchSkippedEntry {
 }
 
 // Nothing was committed: the transaction failed whole, so the producer
-// holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it.
+// holds the batch in its BOUNDED IN-MEMORY retry buffer and replays it. (A
+// BULK batch's leading transactions may have committed entries, never its
+// cursor advance or shapes; the re-read replays them and the ledger absorbs
+// what landed. See WriteClassBulk.)
 // There is deliberately NO durable producer-side spill: exhausted retries
 // are a LOUD failure (dropped frames logged with what was lost), because a
 // persistent inability to reach the store indicates a lifetime-sequencing

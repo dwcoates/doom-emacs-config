@@ -748,7 +748,7 @@ func TestAReadCompletesWhileAWriteTransactionIsHeld(t *testing.T) {
 			// Arrange: a book to read, then a write transaction held open.
 			d, _ := newStore(t)
 			seedBook(t, d, "agent-1", 1)
-			tx, release, err := d.beginWrite(ctx())
+			tx, release, err := d.beginWrite(ctx(), WriteInteractive)
 			if err != nil {
 				t.Fatalf("beginWrite: %v", err)
 			}

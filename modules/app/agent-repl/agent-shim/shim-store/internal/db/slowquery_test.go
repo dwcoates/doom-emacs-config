@@ -2,6 +2,8 @@ package db
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -418,4 +420,158 @@ func TestObserveQueryForgetsAFamilyThatRecovered(t *testing.T) {
 	// Assert
 	s.assertLogged(t, "info", "isolated sample")
 	s.assertContext(t, "over_budget_recent", float64(1))
+}
+
+// ---- per-class write timing ----
+
+// queuedWrite holds the slot, queues one single-entry batch of `class` behind
+// it, moves the clock by `wait` while it is queued and by `exec` once it has
+// committed, and returns when it is done. The numbers are therefore exact.
+func queuedWrite(t *testing.T, d *DB, clock *fakeClock, class WriteClass, id string, wait, exec time.Duration) {
+	t.Helper()
+	queued := make(chan struct{})
+	d.queuedForWrite = func(WriteClass) {
+		clock.advance(wait)
+		close(queued)
+	}
+	d.transactionCommitted = func(WriteClass) { clock.advance(exec) }
+	release, err := d.acquireWrite(ctx(), WriteInteractive)
+	if err != nil {
+		t.Fatalf("acquireWrite: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.WriteBatch(ctx(), "test-producer", class,
+			batch(pageEntry("w-"+id, "u-"+id, "agent-1", frameItem(activityFrame("agent-1", "act-"+id, prose())))), nil)
+		done <- err
+	}()
+	<-queued
+	release()
+	if err := <-done; err != nil {
+		t.Fatalf("WriteBatch: %v", err)
+	}
+	d.queuedForWrite = nil
+	d.transactionCommitted = nil
+}
+
+// recordFor returns the context of the first record with this operation and
+// statement.
+func recordFor(t *testing.T, s *sink, operation, statement string) (map[string]any, string) {
+	t.Helper()
+	for _, record := range s.records(t) {
+		context, _ := record["context"].(map[string]any)
+		if record["operation"] == operation && context["statement"] == statement {
+			message, _ := record["message"].(string)
+			return context, message
+		}
+	}
+	t.Fatalf("no %s record for %s; log was:\n%s", operation, statement, s.file.String())
+	return nil, ""
+}
+
+// TestEveryWriteIsTimedByClass pins the per-write timing record: every write,
+// healthy or not, reports its class, its queue wait and its execution time
+// apart.
+func TestEveryWriteIsTimedByClass(t *testing.T) {
+	tests := []struct {
+		name  string
+		class WriteClass
+		want  string
+	}{
+		{name: "interactive", class: WriteInteractive, want: "interactive"},
+		{name: "bulk", class: WriteBulk, want: "bulk"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, s := newBoundedStore(t, clock, 0, 0, 0)
+
+			// Act
+			queuedWrite(t, d, clock, test.class, "a", 40*time.Millisecond, 7*time.Millisecond)
+
+			// Assert
+			context, _ := recordFor(t, s, WriteTimingOperation, StatementWriteBatch)
+			if context["write_class"] != test.want || context["lock_wait_ms"] != float64(40) || context["exec_ms"] != float64(7) {
+				t.Fatalf("timing record write_class=%v lock_wait_ms=%v exec_ms=%v, want %s, 40, 7",
+					context["write_class"], context["lock_wait_ms"], context["exec_ms"], test.want)
+			}
+		})
+	}
+}
+
+// TestASlowWriteRecordNamesItsClass pins that the slow-query record of a write
+// says which queue it took and splits its wait from its execution.
+func TestASlowWriteRecordNamesItsClass(t *testing.T) {
+	tests := []struct {
+		name  string
+		class WriteClass
+		want  string
+	}{
+		{name: "interactive", class: WriteInteractive, want: "interactive"},
+		{name: "bulk", class: WriteBulk, want: "bulk"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, s := newReportingStore(t, clock)
+
+			// Act
+			queuedWrite(t, d, clock, test.class, "a", 40*time.Millisecond, 7*time.Millisecond)
+
+			// Assert
+			context, message := recordFor(t, s, SlowQueryOperation, StatementWriteBatch)
+			if context["write_class"] != test.want || context["exec_ms"] != float64(7) || context["lock_wait_ms"] != float64(40) {
+				t.Fatalf("slow record write_class=%v lock_wait_ms=%v exec_ms=%v, want %s, 40, 7",
+					context["write_class"], context["lock_wait_ms"], context["exec_ms"], test.want)
+			}
+			if !strings.Contains(message, "write_class="+test.want) {
+				t.Fatalf("slow record message %q does not name write_class=%s", message, test.want)
+			}
+		})
+	}
+}
+
+// TestTheBudgetWindowIsKeptPerClass: a backlog of slow bulk writes does not
+// make an interactive write's first slow sample read as a persistent defect.
+func TestTheBudgetWindowIsKeptPerClass(t *testing.T) {
+	tests := []struct {
+		name      string
+		slowBulk  int
+		wantLevel string
+	}{
+		{name: "bulk persistently over budget leaves interactive isolated", slowBulk: BudgetWarnAt + 2, wantLevel: "info"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, s := newReportingStore(t, clock)
+			for i := 0; i < test.slowBulk; i++ {
+				queuedWrite(t, d, clock, WriteBulk, fmt.Sprintf("b%d", i), time.Millisecond, time.Millisecond)
+			}
+
+			// Act
+			queuedWrite(t, d, clock, WriteInteractive, "live", time.Millisecond, time.Millisecond)
+
+			// Assert
+			var last, lastBulk map[string]any
+			for _, record := range s.records(t) {
+				context, _ := record["context"].(map[string]any)
+				if record["operation"] == SlowQueryOperation && context["write_class"] == "interactive" {
+					last = record
+				}
+				if record["operation"] == SlowQueryOperation && context["write_class"] == "bulk" {
+					lastBulk = record
+				}
+			}
+			if lastBulk == nil || lastBulk["level"] != "warn" {
+				t.Fatalf("the arranged bulk backlog did not reach the persistent warning: %v", lastBulk)
+			}
+			if last == nil || last["level"] != test.wantLevel {
+				t.Fatalf("interactive slow record = %v, want level %s", last, test.wantLevel)
+			}
+		})
+	}
 }
