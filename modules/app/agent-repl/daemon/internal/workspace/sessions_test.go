@@ -412,6 +412,8 @@ type fleetFixture struct {
 	shimAlive func(pid int) bool
 	// openings is every Opening a watcher was started with, in order.
 	openings []sessionwatcher.Opening
+	// openAtAttach is every watcher start's Session.OpenAtAttach, in order.
+	openAtAttach [][]ids.TurnID
 	// watchErr, when set, is what starting a watcher answers.
 	watchErr error
 }
@@ -531,6 +533,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		},
 		StartWatcher: func(_ context.Context, _ ids.WorkspaceID, _ shimclient.Client, session sessionwatcher.Session, _ sessionwatcher.Sinks, _ dlog.Logger) (sessionwatcher.Watcher, error) {
 			f.openings = append(f.openings, session.Opening)
+			f.openAtAttach = append(f.openAtAttach, session.OpenAtAttach)
 			if f.watchErr != nil {
 				return nil, f.watchErr
 			}
