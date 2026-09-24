@@ -1694,6 +1694,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    `:not([data-variant="thinking"])` keeps it off reasoning — the structural
    half is that the daemon never names a thinking row as the answer. */
 .bubble.final-response:not([data-variant="thinking"]) { border-color: var(--final-response); }
+/* A TURN THAT ENDED any way but a normal completed answer (owner ruling,
+   2026-09-24): its bubble keeps the response's purple fill and wears red. */
+.bubble[data-variant="turn-ended"] { border-color: var(--err); }
 /* THE SELECTED ENTRY (src/feed/selected-entry.ts): the one mark a feed entry
    wears while a footer detached-work jump has landed on it or the reader's
    reply-to-a-past-response selection names it — ON THE CARD ITSELF, so a

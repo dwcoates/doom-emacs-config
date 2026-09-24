@@ -101,12 +101,20 @@ func (s *fakeSupervisor) calls() []ids.WorkspaceID {
 	return append([]ids.WorkspaceID(nil), s.adopted...)
 }
 
-// fakeQueue is the prompt queue's restore half. Every other verb is absent:
-// the boot sequence calls exactly one of them.
+// fakeQueue is the prompt queue's restore half and its orphan door. Every
+// other verb is absent: the boot sequence calls exactly these two.
 type fakeQueue struct {
 	promptqueue.Queue
 	mu  sync.Mutex
 	err error
+	// db answers the state client the boot was built with, so the door closes
+	// orphans on the very store (or failing store) the test arranged.
+	db func() wsm.DB
+}
+
+// CloseOrphans is the queue's door, closing on the boot's own state client.
+func (q *fakeQueue) CloseOrphans(ctx context.Context, ws wsm.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
+	return q.db().CloseOrphans(ctx, ws, at)
 }
 
 func (q *fakeQueue) RestoreHolds(context.Context) error {
@@ -267,6 +275,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		startErrs:       map[ids.WorkspaceID]error{},
 	}
 	h.rollout.boundNow = func() bool { return h.binds.Load() > 0 }
+	h.queue.db = func() wsm.DB { return h.deps.DB }
 	h.deps = Deps{
 		BindViews: func(context.Context) error {
 			h.binds.Add(1)

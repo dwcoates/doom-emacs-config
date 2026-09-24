@@ -234,7 +234,7 @@ func (a ClassificationArm) String() string {
 var ErrAcceptNotOffered = errors.New("wsm: accept is legal only on a hold_for_turn_end verdict")
 
 // valid reports whether the turn close is one of the declared arms.
-func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseOrphaned }
+func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseAgentDied }
 
 // String names a merge queue state, for logs and refusals.
 func (s MergeQueueState) String() string {

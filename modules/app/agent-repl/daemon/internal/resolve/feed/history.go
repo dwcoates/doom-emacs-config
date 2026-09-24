@@ -23,6 +23,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// from the daemon's durable record, and no read of a database belongs
 	// inside the resolver's mutex.
 	ported := r.portedPrompts(ws)
+	closes := r.recordedCloses(ws, page)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -42,9 +43,14 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	s.replayPromptDrawn = false
 	s.replayAtFloor = page.GetFloor() != nil
 	s.replayUnstamped = 0
+	s.replayCloses = closes
 	for i := len(entries) - 1; i >= 0; i-- {
 		r.replayStamped(s, agent, entries[i])
 	}
+	// The page's last turn, when its terminal is not on the page and its
+	// durable row is closed, ends here, still in the history plane.
+	r.endReplayedTurn(s, "")
+	s.replayCloses = nil
 	s.replayTurn = nil
 	s.plane = planeLive
 	r.reportUnstampedReplay(s, agent, len(entries))

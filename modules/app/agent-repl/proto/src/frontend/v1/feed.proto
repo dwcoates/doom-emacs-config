@@ -1095,8 +1095,17 @@ message FeedTurnEndedErrored {
     // AgentFailure.stop_hook_prevented — a configured Stop hook forbade the
     // agent from continuing: deliberate, not a fault, but not completion.
     FeedTurnErrorStopHookPrevented stop_hook_prevented = 23;
+
+    // THE AGENT PROCESS DIED ON ITS OWN under the turn: the shim that ran the
+    // vendor query is gone, nobody ordered it, and no terminal will ever
+    // arrive. The daemon ends the turn itself, so this arm is composed by the
+    // daemon and never respelled from a producer's terminal. DISTINCT from
+    // query_died: that is the query dying inside a live agent process.
+    FeedTurnErrorAgentProcessDied agent_process_died = 24;
   }
 }
+// The agent-process-death class. Empty: the arm is the cause.
+message FeedTurnErrorAgentProcessDied {}
 // The Stop-hook class. Empty: the arm is the cause; the envelope's message
 // carries the hook's wording when the vendor recorded one.
 message FeedTurnErrorStopHookPrevented {}

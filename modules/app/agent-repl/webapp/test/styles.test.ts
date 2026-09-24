@@ -2109,6 +2109,13 @@ describe("the response border ladder", () => {
     // Assert
     expect(rule).toMatch(/border-color:\s*var\(--final-response\)/);
   });
+
+  it("borders a turn that ended abnormally in the error red (owner ruling 2026-09-24)", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="turn-ended"]');
+    // Assert
+    expect(rule).toMatch(/border-color:\s*var\(--err\)/);
+  });
 });
 
 /**

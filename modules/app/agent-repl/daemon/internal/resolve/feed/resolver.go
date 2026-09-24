@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/wsm"
 )
 
 // errNotARow is what a family function answers for a frame that DRAWS NOTHING
@@ -167,6 +168,11 @@ type wsState struct {
 	// to turnInFlight drew a turn_ended row for a turn that had only begun
 	// (every turn open repaints the opening page) and settled its prompt.
 	replayTurn *ids.TurnID
+	// replayCloses is the durable close of every turn the page being replayed
+	// opens, read before the replay (recordedCloses). A replayed turn left with
+	// no terminal of its own is ended from it (turnclosed.go). Nil outside a
+	// replay.
+	replayCloses map[ids.TurnID]wsm.RecordedClose
 	// entryTurn is the STAMP of the entry being drawn (HistoryEntryAt.turn),
 	// in force only while that entry is drawn (drawingEntry). Nil for an
 	// unstamped entry, which is what selects the positional fallback.
