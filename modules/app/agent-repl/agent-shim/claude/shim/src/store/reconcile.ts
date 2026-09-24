@@ -435,6 +435,9 @@ function describeDetachable(
  * consumer to continue something it never saw leaves the work undrawn and
  * unreachable, which is the whole reason the two arms are different situations.
  *
+ * `owner` is the agent whose book `entries` is. A unit found there is that
+ * agent's own call, so the announcement names it as the owner.
+ *
  * The description comes FROM THE STORE, by unit id: the shim remembers nothing
  * across a bounce, and the record is the only place the work's own start
  * survives. Work the record cannot describe is OMITTED and logged rather than
@@ -443,6 +446,7 @@ function describeDetachable(
 export function announceLiveWork(
   entries: readonly conversationv1.HistoryEntryAt[],
   work: readonly conversationv1.DetachedWorkId[],
+  owner: conversationv1.AgentId,
   onUndescribed?: (handle: conversationv1.DetachedWorkId) => void,
 ): conversationv1.AgentDetachedWork[] {
   const announcements: conversationv1.AgentDetachedWork[] = [];
@@ -471,6 +475,9 @@ export function announceLiveWork(
     announcements.push(
       create(conversationv1.AgentDetachedWorkSchema, {
         work: handle,
+        // THE BOOK THE START WAS FOUND IN IS THE OWNER'S: `entries` is one
+        // agent's book, and a unit described from it is that agent's call.
+        owner,
         origin: {
           case: "created",
           value: create(conversationv1.DetachedWorkCreatedSchema, { workCreated: described }),

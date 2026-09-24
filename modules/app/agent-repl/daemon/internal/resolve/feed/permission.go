@@ -32,7 +32,10 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 	state, known := s.permissionRows[askID]
 	if !known {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!known"})
-		at := r.place(s, agent)
+		at, ok := r.place(s, agent)
+		if !ok {
+			return
+		}
 		state = &permissionState{
 			feed: at,
 			row:  r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPermission, ID: askID}),

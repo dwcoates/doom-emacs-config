@@ -1,6 +1,13 @@
 package convert
 
-import "testing"
+import (
+	"bytes"
+	"io"
+	"strings"
+	"testing"
+
+	"agentrepl/shim-claude-sidecar/internal/logging"
+)
 
 // launch_test.go — WHAT A LAUNCH REPORTS TO OWNER RESOLUTION.
 //
@@ -85,5 +92,111 @@ func TestALaunchReportsWhetherTheSpawnWasBackgrounded(t *testing.T) {
 					got, tc.wantBackground)
 			}
 		})
+	}
+}
+
+// backgroundSentenceText is the vendor's backgrounding sentence, verbatim from
+// the 2026-09-23 subagent transcript whose toolUseResult was absent.
+const backgroundSentenceText = `Command running in background with ID: bmo77o6cu. Output is being written to: /private/tmp/claude-501/p/s/tasks/bmo77o6cu.output. You will be notified when it completes.`
+
+// TestAShellLaunchIsReportedFromItsSentenceWhenTheStructuredResultIsAbsent
+// pins the file-plane half of a subagent's background shell: a subagent's
+// transcript can omit `toolUseResult` outright, and the sentence is then the
+// only statement that the call launched a task. Unreported, the spool was held
+// until it expired into residue and the store never held the run's rows.
+func TestAShellLaunchIsReportedFromItsSentenceWhenTheStructuredResultIsAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// content is the tool_result block's content, as JSON.
+		content string
+		// toolUseResult is the structured result, "" when the record has none.
+		toolUseResult string
+		wantSpawns    []spawnReport
+	}{
+		{
+			name:          "the sentence names the launched task when no structured result exists",
+			content:       `[{"type":"text","text":"` + backgroundSentenceText + `"}]`,
+			toolUseResult: "",
+			wantSpawns:    []spawnReport{{TaskID: "bmo77o6cu", ToolUseID: "toolu_bg", OwnerAgentID: "session-uuid"}},
+		},
+		{
+			name:          "a plain string content carries the same sentence",
+			content:       `"` + backgroundSentenceText + `"`,
+			toolUseResult: "",
+			wantSpawns:    []spawnReport{{TaskID: "bmo77o6cu", ToolUseID: "toolu_bg", OwnerAgentID: "session-uuid"}},
+		},
+		{
+			name:          "a result that states no launch reports nothing",
+			content:       `[{"type":"text","text":"ok"}]`,
+			toolUseResult: "",
+			wantSpawns:    nil,
+		},
+		{
+			name:          "a structured result is read rather than the sentence",
+			content:       `[{"type":"text","text":"` + backgroundSentenceText + `"}]`,
+			toolUseResult: `{"stdout":"","backgroundTaskId":"bstructured"}`,
+			wantSpawns:    []spawnReport{{TaskID: "bstructured", ToolUseID: "toolu_bg", OwnerAgentID: "session-uuid"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			var spawns []spawnReport
+			c.SetObserver(spawnObserver{spawns: &spawns})
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_bg", "Bash", `{"command":"npm test","run_in_background":true}`))
+			result := toolResultLine("u1", "toolu_bg", ts2, tc.content, tc.toolUseResult)
+
+			// Act.
+			convertLines(t, c, call, result)
+
+			// Assert.
+			if len(spawns) != len(tc.wantSpawns) {
+				t.Fatalf("the result reported %d spawn observations, want %d: %v", len(spawns), len(tc.wantSpawns), spawns)
+			}
+			for i, want := range tc.wantSpawns {
+				if spawns[i] != want {
+					t.Errorf("spawn %d = %+v, want %+v", i, spawns[i], want)
+				}
+			}
+		})
+	}
+}
+
+// TestASentenceOnlyLaunchDoesNotSettleTheCallAsAFinishedCommand pins the other
+// half: the call's work LEFT, so its unit settles later — never as a command
+// that succeeded with the sentence as its output.
+func TestASentenceOnlyLaunchDoesNotSettleTheCallAsAFinishedCommand(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_bg", "Bash", `{"command":"npm test","run_in_background":true}`))
+	result := toolResultLine("u1", "toolu_bg", ts2, `[{"type":"text","text":"`+backgroundSentenceText+`"}]`, "")
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	for _, entry := range entries {
+		if bash := activityOf(entry).GetBash(); bash.GetSuccess() != nil {
+			t.Fatalf("the backgrounded call settled as a finished command: %v", bash.GetSuccess())
+		}
+	}
+}
+
+// TestASentenceOnlyLaunchIsLogged pins the record: reading the launch off the
+// sentence is an action a reader must be able to see.
+func TestASentenceOnlyLaunchIsLogged(t *testing.T) {
+	// Arrange.
+	var file bytes.Buffer
+	c := New(logging.New(io.Discard, &file).With(logging.Context{Component: "test"}))
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_bg", "Bash", `{"command":"npm test","run_in_background":true}`))
+	result := toolResultLine("u1", "toolu_bg", ts2, `[{"type":"text","text":"`+backgroundSentenceText+`"}]`, "")
+
+	// Act.
+	convertLines(t, c, call, result)
+
+	// Assert.
+	if !strings.Contains(file.String(), "its backgrounding sentence names the launched task") ||
+		!strings.Contains(file.String(), "bmo77o6cu") {
+		t.Fatalf("no record of the sentence-read launch naming its task; log:\n%s", file.String())
 	}
 }

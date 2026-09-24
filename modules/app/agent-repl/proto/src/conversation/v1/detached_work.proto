@@ -35,6 +35,24 @@ message AgentDetachedWork {
   // it was following, since the handle above addresses live work only.
   optional DetachedWorkOutput output = 4;
 
+  // WHOSE WORK THIS IS: the agent that made the spawning call. Detached work
+  // is drawn ONLY in its owner's feed — the main agent's work on the root
+  // feed, a subagent's in that subagent's own feed — at the spawning call's
+  // own row.
+  //
+  // THE OWNER IS NOT THE ANNOUNCER. The book this announcement rides is the
+  // agent that happened to state it, which is frequently the main agent even
+  // for a subagent's work: the vendor's task stream is session-wide and names
+  // no agent at all. Reading the announcer as the owner drew a subagent's
+  // background shell on the root feed.
+  //
+  // UNSET when the producer never observed the spawning call — a backgrounded
+  // subagent's own calls never reach the stream plane. A consumer then takes
+  // the owner from the agent whose stream carried the spawning call, and when
+  // neither states one the work is unplaceable: it is reported, never
+  // defaulted to the main agent.
+  AgentId owner = 5;
+
   // HOW it came to be detached. The two are genuinely different situations for
   // a consumer: one continues an element it is already drawing, the other has
   // no element yet and must be told what the work IS.

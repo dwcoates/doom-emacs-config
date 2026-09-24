@@ -575,6 +575,21 @@ func (r *resolver) SetDetachedUnmodeled(ws ids.WorkspaceID, items []DetachedUnmo
 		})
 }
 
+// RaiseWarning puts a condition the daemon raised about its own resolution on
+// the warning strip. A key already raised keeps its place in the list and
+// takes the new sentence.
+func (r *resolver) RaiseWarning(ws ids.WorkspaceID, key, line string) {
+	r.mutate(ws, "daemon.topbar.raise_warning",
+		"the topbar took a warning the daemon raised",
+		dlog.Context{"key": key, "line": line}, func(s *wsState) {
+			if held, ok := s.raised[key]; ok {
+				held.line = line
+				return
+			}
+			s.raised[key] = &raisedRecord{line: line, seq: s.nextSeq()}
+		})
+}
+
 // ---- TopbarSink -----------------------------------------------------------
 
 // OnSessionStarted carries the session's identity and spawn facts. It is the

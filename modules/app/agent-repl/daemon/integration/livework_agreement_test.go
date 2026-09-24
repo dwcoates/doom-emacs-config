@@ -44,7 +44,7 @@ func TestRosterAndFooterAgreeOnBackgroundWork(t *testing.T) {
 	})
 
 	// Act: a detached shell is announced with no turn in flight.
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-agree-1", "sleep 100")))
+	pushDetachedShell(f.shim, "work-agree-1", "sleep 100")
 
 	// Assert: the roster says idle_async and the footer says background.
 	awaitRoster(t, f.d, roster, "the roster's idle_async arm",

@@ -350,12 +350,12 @@ function convertSystemMessage(
     case "task_notification":
       // A BACKGROUNDED AGENT'S END: its spawning call's stream is over.
       if (typeof message.tool_use_id === "string") state.streams.endAgent(message.tool_use_id);
-      return convertDetached(message, context, state.taskKinds);
+      return convertDetached(message, context, state.taskKinds, state.calls);
     case "task_started":
     case "task_updated":
     case "task_progress":
     case "background_tasks_changed":
-      return convertDetached(message, context, state.taskKinds);
+      return convertDetached(message, context, state.taskKinds, state.calls);
     case "hook_started":
       return convertHookStarted(message, context, state.hooks);
     case "hook_response":
