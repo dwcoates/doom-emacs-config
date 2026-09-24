@@ -2527,6 +2527,21 @@ message AgentSubagentFailure {
     // silent; not known to have failed. Draws as "lost".
     DetachedLost lost = 3;
   }
+
+  // What it was asked to do, restated so the settled frame stands alone,
+  // exactly as the success arm restates it: a spawn's start and its settle
+  // upsert ONE unit, so once the spawn settles its start is gone from any
+  // store that keeps the latest frame, and a replay drawing this frame alone
+  // must still draw the spawn's label, description and commission. UNSET only
+  // on a row written before AgentActivityContract SETTLES_STAND_ALONE.
+  AgentSubagentPrompt prompt = 4;
+
+  // THE AGENT THIS SPAWN CREATED, restated on the failure for the reason the
+  // success arm restates it: a replay hands a consumer this frame and no
+  // start, and without the created agent the bubble it draws addresses no
+  // sub-feed. The SAME identity the start states, never a derivation; UNSET
+  // only on a row written before AgentActivityContract SETTLES_STAND_ALONE.
+  AgentId created_agent_id = 5;
 }
 
 // A person stopped the subagent by hand.
