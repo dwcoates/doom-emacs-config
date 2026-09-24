@@ -263,6 +263,8 @@ export function promptEntry(
     // coordinate, and it is unique by construction.
     source: { vendorUuid: turn.value, discriminator: "agent_prompt" },
     keepalive,
+    // The prompt OPENS its turn, so it is that turn's first row.
+    turn,
     item: { kind: "prompt", prompt },
   };
 }

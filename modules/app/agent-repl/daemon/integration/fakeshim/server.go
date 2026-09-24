@@ -82,6 +82,16 @@ type agentFrame struct {
 	// pointer, when set, is the HistoryPointer this frame is delivered at
 	// instead of the stream's next minted one — see Command.Pointer.
 	pointer string
+	// turn, when set, stamps the delivered entry — see Command.Turn.
+	turn string
+}
+
+// stamp is the entry's turn stamp, or nil for an unstamped entry.
+func (f agentFrame) stamp() *conversationv1.TurnId {
+	if f.turn == "" {
+		return nil
+	}
+	return &conversationv1.TurnId{Value: f.turn}
 }
 
 // entry renders the pushed arm as the history entry WatchAgent delivers.
@@ -624,6 +634,7 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 				Frame: &shimv1.WatchAgentResponse_Entry{Entry: &conversationv1.HistoryEntryAt{
 					At:    &conversationv1.HistoryPointer{Value: at},
 					Entry: f.entry(),
+					Turn:  f.stamp(),
 				}},
 			}); err != nil {
 				return err

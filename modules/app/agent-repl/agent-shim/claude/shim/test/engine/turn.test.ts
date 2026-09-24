@@ -93,6 +93,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     agentFor: () => undefined,
     persist: (entries) => persistence.write(entries),
     keepalive: () => false,
+    turn: () => undefined,
     nowMs: () => 1,
     onPermissionModeSet: () => undefined,
   });
@@ -580,6 +581,13 @@ describe("the prompt row", () => {
     const prompt = buildPrompt(TURN, agent, textSaid("x"), conversationv1.PromptOrigin.USER_SENT);
 
     expect(promptEntry(prompt, agent, false).upsertKey).toBe("prompt:turn-1");
+  });
+
+  it("is stamped with the turn it opens", () => {
+    const agent = create(conversationv1.AgentIdSchema, { value: "agent-1" });
+    const prompt = buildPrompt(TURN, agent, textSaid("x"), conversationv1.PromptOrigin.USER_SENT);
+
+    expect(promptEntry(prompt, agent, false).turn?.value).toBe("turn-1");
   });
 
   it("is flagged keep-alive for the shim's own turns", () => {

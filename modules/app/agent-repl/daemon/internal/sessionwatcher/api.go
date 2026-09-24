@@ -109,13 +109,18 @@ type FeedSink interface {
 	// conversation — an inter-session peer message or a subagent hand-back. It
 	// is never a person's prompt and never this agent's own work; the feed draws
 	// it as the abbreviated, right-aligned, purple, expandable peer bubble.
-	OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, addr OutputAddress)
+	OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnActivity is one unit of a turn's synchronous progress.
-	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, addr OutputAddress)
+	//
+	// EVERY ENTRY-DRIVEN METHOD CARRIES `turn`: the entry's own stamp
+	// (conversation.v1 HistoryEntryAt.turn), which the feed attributes the row
+	// to. Unset for an entry no producer stamped; the feed then falls back to
+	// the turn it has in flight.
+	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnQuestion is the agent blocking on a choice.
-	OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, addr OutputAddress)
+	OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnPermission is the agent blocking on consent.
-	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, addr OutputAddress)
+	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnContextCut is the AgentUpdate.context_cut page line — /clear, a
 	// compaction, or a compaction that failed. The feed draws the separation
 	// divider from it. Instantaneous: one frame, no lifecycle.
@@ -124,13 +129,15 @@ type FeedSink interface {
 	// the shim's stream and the sidecar's file both write the same store entry
 	// — so the feed keys its divider on the entry's own stable position rather
 	// than on a count of arrivals. See feed.drawContextCut.
-	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, addr OutputAddress)
+	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnApiError is the AgentUpdate.api_error page line: a vendor request that
 	// failed MID-TURN and the turn went on. EVIDENCE, never a terminal — the
 	// turn's end is the frame-level failure arm and nothing else.
-	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, addr OutputAddress)
+	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnAgentTerminal is how one agent's stream ended: exactly one of success
-	// and failure is set, and turn is set when the agent belonged to a turn.
+	// and failure is set, and turn is set when the terminal ENDS a turn — the
+	// main agent's, the turn its own stamp names (or, unstamped, the turn in
+	// flight).
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, addr OutputAddress)
 	// OnMainAgent names the session's MAIN agent: the one whose work is drawn
 	// on the root feed. It is stated before any frame that agent's watch
@@ -140,7 +147,7 @@ type FeedSink interface {
 	OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId)
 	// OnDetachedWork is work leaving the stream, which is what makes a bubble
 	// outlive its turn.
-	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, addr OutputAddress)
+	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, addr OutputAddress)
 	// OnBash is one detached shell's progress.
 	OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash, addr OutputAddress)
 	// OnLiveWorkChanged republishes the AUTHORITATIVE live-work set. A

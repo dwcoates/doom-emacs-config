@@ -165,6 +165,14 @@ type watcher struct {
 	// eviction order.
 	closedTurns     map[ids.TurnID]TurnClose
 	closedTurnOrder []ids.TurnID
+	// knownTurns is every turn this watcher has had in hand — stood in flight,
+	// or carried by a routed prompt or a page's stamps — so a terminal naming
+	// a turn is judged against what the daemon actually knows
+	// (terminalTurnLocked). One id per turn, never evicted.
+	knownTurns map[ids.TurnID]struct{}
+	// unstampedTerminalSeen records that the once-per-watcher INFO for a turn
+	// terminal with no stamp has been written.
+	unstampedTerminalSeen bool
 
 	// seenClosings is every row that CLOSES AN ACT — an agent's terminal, or
 	// a context cut — this watcher has been served, keyed by the watch that
@@ -327,6 +335,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
 		closedTurns: map[ids.TurnID]TurnClose{},
+		knownTurns:  map[ids.TurnID]struct{}{},
 		facts:       map[string]*activityFact{},
 
 		seenClosings: map[string]struct{}{},
@@ -588,6 +597,7 @@ func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bo
 	}
 	before := turnIDValue(w.turn)
 	w.turn = &turn
+	w.knownTurns[turn] = struct{}{}
 	w.log.Debug(operation, message, dlog.Context{
 		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": string(turn),
 	})
@@ -1351,7 +1361,7 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 // the watches are opened in is the order a reader sees them.
 func (w *watcher) adoptLiveWorkLocked(started *conversationv1.SessionStarted) {
 	for _, item := range started.GetLiveWork() {
-		w.routeDetachedWorkLocked(nil, item)
+		w.routeDetachedWorkLocked(nil, item, nil)
 	}
 }
 

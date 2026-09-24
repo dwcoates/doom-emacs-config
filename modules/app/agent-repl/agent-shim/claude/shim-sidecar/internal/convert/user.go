@@ -147,6 +147,8 @@ func (c *Converter) humanPrompt(record, message map[string]any, at Attribution, 
 // agent-repl send site" and renders identically to a human prompt.
 func (c *Converter) externalPrompt(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	turn := env.uuid
+	// THIS RECORD OPENS THE TURN, and every record of it is stamped with it.
+	c.openedTurn = turn
 	prompt := &conversationv1.AgentPrompt{
 		Id:     &conversationv1.TurnId{Value: turn},
 		Agent:  agentID(agent),

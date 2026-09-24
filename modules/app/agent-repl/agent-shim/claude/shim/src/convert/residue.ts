@@ -203,6 +203,7 @@ export function residueEntry(
     // under the keepalive arm and lose which of the four reasons it is unserved
     // for, which is the whole information the arm carries.
     keepalive: false,
+    turn: context.turnId,
     item: { kind: "residue", residue },
   };
 }

@@ -436,6 +436,11 @@ interface PermissionGateDeps {
    * question.
    */
   keepalive(agentId: conversationv1.AgentId): boolean;
+  /**
+   * The turn an ask raised on `agentId`'s book belongs to, under the same
+   * attribution as {@link keepalive}; undefined when it belongs to none.
+   */
+  turn(agentId: conversationv1.AgentId): conversationv1.TurnId | undefined;
   readonly nowMs: () => number;
   /** A standing grant carried a mode change; the session restates it authoritatively. */
   onPermissionModeSet(mode: conversationv1.AgentPermissionMode): void;
@@ -923,6 +928,7 @@ export class PermissionGate {
       // coordinate for these rows, and it is unique per call by construction.
       source: { vendorUuid: toolUseId, discriminator },
       keepalive: this.deps.keepalive(agentId),
+      turn: this.deps.turn(agentId),
       item: {
         kind: "frame",
         frame: create(conversationv1.AgentFrameSchema, {

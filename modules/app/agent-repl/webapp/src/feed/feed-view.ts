@@ -1044,7 +1044,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       // minted here and echoed back on the row — never guessed from the text.
       if (isOwnTurn(row.turn)) el.setAttribute("data-mine", "true");
       else el.removeAttribute("data-mine");
+      return;
     }
+    // A RE-PUSH THAT NAMES NO TURN CLEARS THE OLD CLAIM: the element is reused
+    // across upserts, so a turn left on it would attribute the row by a stamp
+    // the daemon no longer states.
+    el.removeAttribute("data-turn");
+    el.removeAttribute("data-mine");
   }
 
   /** The compact stand-in for a row this build could not draw. */

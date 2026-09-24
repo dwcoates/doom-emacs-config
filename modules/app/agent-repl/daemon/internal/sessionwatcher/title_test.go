@@ -72,7 +72,7 @@ func TestAClearResetsTheSynthesizer(t *testing.T) {
 
 	// Act.
 	h.routeNow(func(w *watcher) {
-		w.routeUpdateLocked(&conversationv1.AgentId{Value: "agent-1"}, clearedCutUpdate(), nil)
+		w.routeUpdateLocked(&conversationv1.AgentId{Value: "agent-1"}, clearedCutUpdate(), nil, nil)
 	})
 
 	// Assert.

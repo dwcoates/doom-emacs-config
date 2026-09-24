@@ -1,9 +1,10 @@
 // turn.proto — THE IDENTITY OF A TURN, shared vocabulary.
 //
-// Not a record fact — no MessageEntry carries it — but a vocabulary every
-// surface reads: an agentrepl.v1 submission is answered with one, the daemon
-// holds a prompt under one, the shim's turn bookkeeping names one, and the
-// daemon stamps the feed rows a turn produced with one. A vocabulary every
+// A vocabulary every surface reads: an agentrepl.v1 submission is answered
+// with one, the daemon holds a prompt under one, the shim's turn bookkeeping
+// names one, EVERY history entry produced within a turn carries it
+// (HistoryEntryAt.turn), and the daemon stamps the feed rows a turn produced
+// with one. A vocabulary every
 // surface reads lives in the leaf every surface may import (the same argument
 // that put SessionCommand here).
 

@@ -8,6 +8,7 @@ import (
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
+	"google.golang.org/protobuf/proto"
 )
 
 // BashRowWritten is one detached-run row this write produced, ready for the
@@ -341,7 +342,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return nil
 	}
 
-	skip, retiredFrom, err := d.applyIdentityPolicy(ctx, tx, r)
+	skip, retiredFrom, err := d.applyIdentityPolicy(ctx, tx, fields, &r)
 	if err != nil {
 		return d.refuse(fields, err)
 	}
@@ -397,7 +398,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 	case kindPageLine:
 		result.Lines = append(result.Lines, LineWritten{
 			AgentID:  r.book.String,
-			Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine},
+			Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine, Turn: r.entry.GetTurn()},
 			WriteSeq: seq,
 		})
 	case kindBash:
@@ -562,11 +563,12 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *st
 // record parked its producer's whole file. No keep-alive row is ever served or
 // written again, so the retired row names nothing a pointer could hold, and
 // the real record takes the key. The caller is told through `retiredFrom`.
-func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (skip *SkippedEntry, retiredFrom string, err error) {
+func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging.Fields, r *routed) (skip *SkippedEntry, retiredFrom string, err error) {
 	var book sql.NullString
 	var kind string
+	var stored []byte
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind); {
+		`SELECT book_agent_id, kind, frame FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind, &stored); {
 	case errors.Is(err, sql.ErrNoRows):
 		// A first insert has no identity to change.
 		return nil, "", nil
@@ -589,7 +591,49 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (ski
 			ToBook:    nullableBook(r.book),
 		}, "", nil
 	}
-	return nil, "", nil
+	return nil, "", d.carryStoredTurn(fields, r, stored)
+}
+
+// carryStoredTurn keeps a row's FIRST turn stamp across every later write of
+// it, which is what StoreEntry.turn promises: a fact never moves between turns,
+// whichever plane wrote it last.
+//
+// THE PLANES DO NOT KNOW THE SAME THINGS. The shim stamps the turn it had open;
+// the sidecar stamps only a turn the vendor's records name, and an agent-repl
+// turn's id is in none of them — so the file plane's copy of a unit the stream
+// plane already stamped arrives unstamped, and superseding the row whole would
+// erase the stamp. An unstamped write therefore inherits the stored turn, and a
+// write naming a DIFFERENT turn (the stream plane settling a detached unit
+// while a later turn is open) keeps the stored one. A stored row with no stamp
+// takes whatever the write carries, which is how a row the file plane wrote
+// first is stamped when the stream plane's copy lands.
+//
+// The write's envelope is rewritten in place and re-serialized, because the
+// stored blob is the one home of the turn (decodeLineAt serves it from there).
+func (d *DB) carryStoredTurn(fields logging.Fields, r *routed, stored []byte) error {
+	prior := &storev1.StoreEntry{}
+	if err := proto.Unmarshal(stored, prior); err != nil {
+		return storagef(err, "the stored frame of row %q cannot be decoded to read its turn", r.upsertKey)
+	}
+	kept := prior.GetTurn()
+	if kept == nil {
+		return nil
+	}
+	incoming := r.entry.GetTurn()
+	if incoming.GetValue() == kept.GetValue() {
+		return nil
+	}
+	if incoming != nil {
+		d.log.LogVerbose(fields, "row keeps its first turn: stored_turn=%q write_turn=%q entries_index=%d",
+			kept.GetValue(), incoming.GetValue(), r.index)
+	}
+	r.entry.Turn = kept
+	frame, err := proto.Marshal(r.entry)
+	if err != nil {
+		return storagef(err, "re-serializing row %q with its stored turn", r.upsertKey)
+	}
+	r.frame = frame
+	return nil
 }
 
 // nullableBook renders a book column for a human, distinguishing the never-served

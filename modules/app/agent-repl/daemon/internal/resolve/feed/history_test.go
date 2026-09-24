@@ -589,3 +589,165 @@ func TestAReplayedQueryDeathDrawsQueryDied(t *testing.T) {
 		t.Fatalf("arm = %q (%v), want query_died.iterator_failure", erroredArmWord(errored), errored)
 	}
 }
+
+// stampedPage stamps a page's entries with their turns, indexed NEWEST FIRST as
+// historyPage lists them; an empty turn leaves the entry unstamped.
+func stampedPage(page *conversationv1.HistoryPage, turns ...string) *conversationv1.HistoryPage {
+	for i, turn := range turns {
+		if turn != "" {
+			page.Entries[i].Turn = &conversationv1.TurnId{Value: turn}
+		}
+	}
+	return page
+}
+
+// A STAMPED TERMINAL ENDS THE TURN IT NAMES, whatever prompt it follows. Each
+// case is one arrangement of prompts and terminals on a replayed page; the
+// assertion is which turns got a terminal row.
+func TestAStampedReplayedTerminalEndsTheTurnItNames(t *testing.T) {
+	cases := []struct {
+		name    string
+		page    *conversationv1.HistoryPage
+		ended   string
+		unended string
+	}{
+		{
+			name: "a terminal that arrives after the next turn's prompt ends its own turn",
+			page: stampedPage(historyPage(&conversationv1.HistoryFloor{},
+				frameEntry(mainAgent(), completed("")),
+				promptEntry("turn-2", "second"),
+				promptEntry("turn-1", "first"),
+			), "turn-1", "turn-2", "turn-1"),
+			ended: "turn-1", unended: "turn-2",
+		},
+		{
+			name: "a terminal whose turn's prompt is missing is not charged to the last prompt",
+			page: stampedPage(historyPage(&conversationv1.HistoryFloor{},
+				frameEntry(mainAgent(), completed("")),
+				promptEntry("turn-1", "first"),
+			), "turn-lost", "turn-1"),
+			ended: "turn-lost", unended: "turn-1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			h.replay(tc.page)
+
+			// Assert
+			if !h.hasTerminalRow(tc.ended) {
+				t.Fatalf("no terminal row for %q", tc.ended)
+			}
+			if h.hasTerminalRow(tc.unended) {
+				t.Fatalf("the terminal was charged to %q", tc.unended)
+			}
+		})
+	}
+}
+
+func TestAStampedEntryNamingATurnItsBookNeverOpenedIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: the prompt of turn-lost is missing from a page that reaches the floor.
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completed("")),
+		promptEntry("turn-1", "first"),
+	), "turn-lost", "turn-1"))
+
+	// Assert
+	if !h.hasRecord("error", "daemon.feed.replayed_turn_unknown") {
+		t.Fatalf("no error for the unknown turn; records: %+v", h.records())
+	}
+}
+
+func TestAStampedTerminalOlderThanThePageIsNeitherDrawnNorAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: the page opens mid-conversation; its head ends a turn whose prompt
+	// is below the page.
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryMore{},
+		promptEntry("turn-2", "now"),
+		frameEntry(mainAgent(), completed("")),
+	), "turn-2", "turn-1"))
+
+	// Assert
+	if h.hasTerminalRow("turn-1") || h.hasTerminalRow("turn-2") {
+		t.Fatal("the head terminal of an older turn was drawn")
+	}
+	if h.hasRecord("error", "daemon.feed.replayed_turn_unknown") {
+		t.Fatal("a turn older than the page was reported as unknown")
+	}
+}
+
+func TestAStampedSubagentTerminalEndsNoTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+
+	// Act: a subagent's frames carry the turn they were produced within.
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(sub, completed("")),
+		promptEntry("turn-1", "first"),
+	), "turn-1", "turn-1"))
+
+	// Assert
+	if !h.promptWorking("turn-1") {
+		t.Fatal("a subagent's stream ending settled the turn's prompt")
+	}
+}
+
+func TestAnUnstampedReplayFallsBackToPositionAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: pre-contract data carries no stamps at all.
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completed("")),
+		promptEntry("turn-1", "first"),
+	))
+
+	// Assert
+	if !h.hasTerminalRow("turn-1") {
+		t.Fatal("the unstamped terminal was not charged to the page's last prompt")
+	}
+	if !h.hasRecord("info", "daemon.feed.replay_unstamped") {
+		t.Fatalf("no info record for the positional fallback; records: %+v", h.records())
+	}
+}
+
+func TestAFullyStampedReplayWritesNoPositionalRecord(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completed("")),
+		promptEntry("turn-1", "first"),
+	), "turn-1", "turn-1"))
+
+	// Assert
+	if h.hasRecord("info", "daemon.feed.replay_unstamped") {
+		t.Fatal("a stamped replay reported a positional fallback")
+	}
+}
+
+func TestAStampedPromptIsNeverJudgedAnUnknownTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: the prompt carries its own turn's stamp, as the producer writes it.
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completed("")),
+		promptEntry("turn-1", "first"),
+	), "turn-1", "turn-1"))
+
+	// Assert
+	if h.hasRecord("error", "daemon.feed.replayed_turn_unknown") {
+		t.Fatal("a stamped prompt was reported as naming an unknown turn")
+	}
+}

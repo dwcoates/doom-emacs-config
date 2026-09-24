@@ -146,6 +146,13 @@ func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 		return routed{}, invalidFieldf(entryField(index, "upsert_key"), "entries[%d].upsert_key is empty (write_id=%q)", index, r.writeID)
 	}
 
+	// A TURN IS NAMED OR ABSENT, never present and empty: an empty identifier
+	// would read as a turn nobody opened, and the store keeps the first stamp a
+	// row is written with (carryStoredTurn), so a blank one would stick.
+	if entry.Turn != nil && entry.GetTurn().GetValue() == "" {
+		return routed{}, invalidFieldf(entryField(index, "turn"), "entries[%d].turn is present with an empty value (write_id=%q) — absence is expressed by absence, never by an empty identifier", index, r.writeID)
+	}
+
 	frame, err := proto.Marshal(entry)
 	if err != nil {
 		return routed{}, invalidFieldf(entryField(index, ""), "entries[%d] (write_id=%q) cannot be re-serialized: %v", index, r.writeID, err)

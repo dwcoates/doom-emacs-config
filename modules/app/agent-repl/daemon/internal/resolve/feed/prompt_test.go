@@ -429,11 +429,11 @@ func completed(unit string) *conversationv1.AgentSuccess {
 func TestAPromptRowWorksUntilItsTurnsTerminal(t *testing.T) {
 	interim := func(h *harness) {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), noAddress())
+			responseFrame("unit-1", &conversationv1.AgentResponseUpdate{}, nil), nil, noAddress())
 	}
 	answer := func(h *harness) {
 		h.resolver.OnActivity(testWorkspace, mainAgent(),
-			responseSuccessActivity("unit-2", "the answer"), noAddress())
+			responseSuccessActivity("unit-2", "the answer"), nil, noAddress())
 	}
 	cases := []struct {
 		name        string

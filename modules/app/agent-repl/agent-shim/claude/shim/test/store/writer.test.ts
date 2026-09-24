@@ -113,12 +113,25 @@ describe("PersistEntry → StoreEntry routing", () => {
     expect((update.agentInfo.value as storev1.StorePageLine).pageAgentId?.value).toBe("book-1");
   });
 
+  it("stamps the envelope with the turn the row was produced within", () => {
+    const entry = toStoreEntry(PRODUCER, promptEntry(BOOK, "turn-1", "hello"));
+
+    expect(entry.turn?.value).toBe("turn-1");
+  });
+
+  it("leaves the envelope unstamped for a row produced outside any turn", () => {
+    const entry = toStoreEntry(PRODUCER, readEntry(BOOK, "unit-1", "/tmp/a"));
+
+    expect(entry.turn).toBeUndefined();
+  });
+
   it("routes a peer message to a servable page line of the recipient's book", () => {
     const entry = toStoreEntry(PRODUCER, {
       agentId: BOOK,
       upsertKey: "peer:u1",
       source: { vendorUuid: "u1", discriminator: "peer_message" },
       keepalive: false,
+      turn: undefined,
       item: {
         kind: "peer",
         peer: create(conversationv1.PeerMessageSchema, { agent: BOOK, sender: "Explore", body: "hi", id: "u1" }),
@@ -648,6 +661,7 @@ describe("the session-update arm", () => {
         upsertKey: "session:compacting:uuid-1",
         source: { vendorUuid: "uuid-1", discriminator: "session_update.compacting" },
         keepalive: false,
+        turn: undefined,
         item: {
           kind: "session_update",
           update: create(conversationv1.SessionUpdateSchema, {
@@ -852,6 +866,7 @@ function residueEntry(): PersistEntry {
     upsertKey: "residue:1",
     source: { vendorUuid: "uuid-residue", discriminator: "residue.unknown" },
     keepalive: false,
+    turn: undefined,
     item: {
       kind: "residue",
       residue: create(storev1.StoreUnservedItemSchema, {
@@ -1207,6 +1222,7 @@ describe("which writes end a minted book's absence", () => {
       upsertKey: "session-update-1",
       source: { vendorUuid: "uuid-session-1", discriminator: "session_update" },
       keepalive: false,
+      turn: undefined,
       item: {
         kind: "session_update",
         update: create(conversationv1.SessionUpdateSchema, {
@@ -1660,6 +1676,7 @@ describe("turn edges, and the order the store receives", () => {
         upsertKey: "session:compacting:uuid-1",
         source: { vendorUuid: "uuid-1", discriminator: "session_update.compacting" },
         keepalive: false,
+        turn: undefined,
         item: {
           kind: "session_update",
           update: create(conversationv1.SessionUpdateSchema, {
@@ -1822,6 +1839,7 @@ describe("payload sizing for the byte bound", () => {
       upsertKey: `peer:${id}`,
       source: { vendorUuid: id, discriminator: "peer_message" },
       keepalive: false,
+      turn: undefined,
       item: {
         kind: "peer",
         peer: create(conversationv1.PeerMessageSchema, { agent: MAIN, sender: "Explore", body: "hi", id }),

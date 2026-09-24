@@ -509,27 +509,27 @@ func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, pr
 	s.rec.emit(event{sink: "feed", method: "OnPrompt", agent: agent.GetValue(), detail: prompt.GetId().GetValue()})
 }
 
-func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ OutputAddress) {
+func (s *feedSink) OnPeerMessage(_ ids.WorkspaceID, peer *conversationv1.PeerMessage, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnPeerMessage", agent: peer.GetAgent().GetValue(), detail: peer.GetId()})
 }
 
-func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ OutputAddress) {
+func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
 }
 
-func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ OutputAddress) {
+func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnQuestion", agent: agent.GetValue(), detail: q.GetId().GetValue()})
 }
 
-func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ OutputAddress) {
+func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnPermission", agent: agent.GetValue(), detail: p.GetId().GetValue()})
 }
 
-func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ OutputAddress) {
+func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnContextCut", agent: agent.GetValue()})
 }
 
-func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ OutputAddress) {
+func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnApiError", agent: agent.GetValue(), detail: failed.GetMessage()})
 }
 
@@ -544,7 +544,7 @@ func (s *feedSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId)
 	s.rec.nameMain("feed", agent.GetValue())
 }
 
-func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ OutputAddress) {
+func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ *conversationv1.TurnId, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue()})
 }
 
