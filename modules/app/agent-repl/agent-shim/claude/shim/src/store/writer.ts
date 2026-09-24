@@ -634,15 +634,20 @@ export function createPersistence(options: PersistenceOptions): Persistence {
    * book, so a stream-plane row the file plane had already booked elsewhere
    * never reaches the book this shim writes and the daemon watches: the turn's
    * answer and its cleared cut went missing that way, with nothing on this side
-   * saying so. The contract (`WriteBatchSuccess.skipped`) has the producer warn
-   * on a steady-state skip; this writer has no catch-up window, so every skip
-   * is one.
+   * saying so. The contract (`WriteBatchSuccess.skipped`) has the producer
+   * speak up on a steady-state skip; this writer has no catch-up window, so
+   * every skip is one, and it is a row lost from the book the daemon reads --
+   * an ERROR, not a caution.
    */
-  const warnSkipped = (skipped: readonly storev1.WriteBatchSkippedEntry[]): void => {
+  const reportSkipped = (skipped: readonly storev1.WriteBatchSkippedEntry[]): void => {
     for (const skip of skipped) {
-      // warn: a defect because a row this shim wrote was left out of the book it named.
-      LOGGER.warn(
-        { upsert_key: skip.upsertKey, from_book: skip.fromBook, to_book: skip.toBook },
+      LOGGER.error(
+        {
+          upsert_key: skip.upsertKey,
+          from_book: skip.fromBook,
+          to_book: skip.toBook,
+          detail: `the store kept ${skip.upsertKey} in book ${skip.fromBook}; this write named ${skip.toBook}`,
+        },
         "the store skipped a row this shim wrote: its upsert key already names a row in another book, so the book this shim writes does not carry it",
       );
     }
@@ -687,7 +692,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     }
     const result = response.result;
     if (result.case === "success") {
-      warnSkipped(result.value.skipped);
+      reportSkipped(result.value.skipped);
       return null;
     }
     if (result.case === "failure") {
