@@ -9,6 +9,7 @@ import {
   acquireWorkspaceLock,
   lockBinaryPath,
   lockPath,
+  LockHolderUnavailableError,
   workspaceLockPath,
   LOCK_BIN_ENV,
   LOCK_DIR_ENV,
@@ -143,7 +144,33 @@ describe("session lock", () => {
 
     // Act / Assert: never a silent no-op, which would hand the daemon a false
     // "free" and let it spawn the duplicate this exists to prevent.
-    await expect(acquireSessionLock("s_nobin")).rejects.toThrow(/could not run/);
+    await expect(acquireSessionLock("s_nobin")).rejects.toThrow(/cannot spawn the lock holder/);
+  });
+
+  it("refuses a missing holder binary as LockHolderUnavailableError naming that binary", async () => {
+    // Arrange
+    isolateHome();
+    const missing = path.join(os.tmpdir(), "no-such-shim-lock-binary");
+    process.env[LOCK_BIN_ENV] = missing;
+
+    // Act
+    const refusal = await acquireSessionLock("s_nobin_typed").catch((err: unknown) => err);
+
+    // Assert: nobody owns the session, so the refusal must not read as one.
+    expect(refusal).toBeInstanceOf(LockHolderUnavailableError);
+    expect((refusal as LockHolderUnavailableError).binary).toBe(missing);
+  });
+
+  it("never refuses a held lock as an unavailable holder", async () => {
+    // Arrange: exit 3 is a real ownership conflict.
+    isolateHome();
+    installHolder(REFUSES);
+
+    // Act
+    const refusal = await acquireSessionLock("s_held_untyped").catch((err: unknown) => err);
+
+    // Assert
+    expect(refusal).not.toBeInstanceOf(LockHolderUnavailableError);
   });
 
   it("refuses a holder that announces something other than the ready line", async () => {
@@ -341,6 +368,80 @@ describe("the claim protocol over a synthetic holder", () => {
     await expect(locks.acquireSessionLock("s_unspawnable")).rejects.toThrow(
       /cannot spawn the lock holder .*EINVAL: invalid argument/,
     );
+  });
+
+  it("carries the OS error of an asynchronous spawn failure on the typed refusal", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_enoent").catch((err: unknown) => err);
+
+    // Act: Node reports an unspawnable binary as an 'error' event.
+    child.emitter.emit("error", new Error("spawn /x/shim-lock ENOENT"));
+
+    // Assert.
+    const refusal = await claim;
+    expect(refusal).toBeInstanceOf(locks.LockHolderUnavailableError);
+    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError).toBe(
+      "spawn /x/shim-lock ENOENT",
+    );
+  });
+
+  it("carries the OS error of a synchronous spawn failure on the typed refusal", async () => {
+    // Arrange.
+    const locks = await withSpawn(() => {
+      throw new Error("EINVAL: invalid argument");
+    });
+
+    // Act.
+    const refusal = await locks.acquireWorkspaceLock("/ws").catch((err: unknown) => err);
+
+    // Assert.
+    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError).toBe(
+      "EINVAL: invalid argument",
+    );
+  });
+
+  it("records an unspawnable holder at ERROR, because it is a defect", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_enoent_logged").catch(() => undefined);
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- read .mock.calls only
+    const mirror = vi.mocked(process.stderr.write);
+    const before = mirror.mock.calls.length;
+
+    // Act.
+    child.emitter.emit("error", new Error("spawn /x/shim-lock EACCES"));
+    await claim;
+
+    // Assert.
+    const recorded = mirror.mock.calls
+      .slice(before)
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(recorded).toContainEqual(
+      expect.objectContaining({ level: "error", message: textContaining("could not be spawned") }),
+    );
+  });
+
+  it("records an error raised after the claim is held at WARN, never as a spawn failure", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_late_error");
+    child.stdout.emit("data", "locked\n");
+    await claim;
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- read .mock.calls only
+    const mirror = vi.mocked(process.stderr.write);
+    const before = mirror.mock.calls.length;
+
+    // Act: a failed kill of a live holder.
+    child.emitter.emit("error", new Error("kill ESRCH"));
+
+    // Assert.
+    const recorded = mirror.mock.calls
+      .slice(before)
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(recorded).toEqual([
+      expect.objectContaining({ level: "warn", message: textContaining("after its claim settled") }),
+    ]);
   });
 
   it("reports the signal when the holder was killed before taking the lock", async () => {

@@ -149,6 +149,14 @@ means the daemon and this build disagree about the contract.
   shim refuse every session on Linux. `shim-lock` exit 3 is the distinct
   "another process holds it" answer, and anything else is a hard failure —
   never `conversation_owned`.
+- **A holder that cannot even be SPAWNED is its own refusal.** A missing or
+  unexecutable `shim-lock` (the synchronous `spawn` throw, or Node's
+  asynchronous `'error'` event before the claim settles) raises
+  `LockHolderUnavailableError`, recorded at ERROR because it is a defect, and
+  `StartSession` answers `lock_holder_unavailable {binary, os_error}`. Nobody
+  owns the conversation in that case, so it must never read as
+  `conversation_owned`; the daemon relays it as
+  `OpenWorkspaceError.lock_holder_unavailable`.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
   query is created, and SIX things settle it: the PROVEN-LIVE SIGNAL (below);
   `init`, for a vendor that still announces one first; a hook that comes back
