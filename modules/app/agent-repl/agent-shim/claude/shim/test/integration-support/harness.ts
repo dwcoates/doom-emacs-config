@@ -240,16 +240,17 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     // assert is the ORDERING — the tail's terminal reaches the consumer before
     // the process goes — which 500ms establishes exactly as well as 5,000ms.
     AGENT_REPL_FAKE_WATCHER_CONCLUSION_BUDGET_MS: "500",
-    // The retry schedule keeps its SHAPE — four rising delays, five attempts,
-    // a 256-deep buffer — and only shrinks the waiting, 10x down from the
-    // production [50, 200, 800, 3000]. What the outage scenarios assert is the
-    // attempt count, the bounded buffer, the loud exhaustion and the preserved
+    // The retry schedule keeps its SHAPE — four rising delays, five attempts
+    // before the failure is declared persistent, then the last step repeated —
+    // and only shrinks the waiting, 10x down from the production
+    // [50, 200, 800, 3000]. What the outage scenarios assert is the attempt
+    // count, the loud exhaustion, that nothing is dropped and the preserved
     // order, none of which is a function of the idle time between attempts;
-    // `maxAttempts` and `bufferCapacity` are not reachable from the environment
-    // at all, precisely so this cannot become a way to weaken them. The
-    // 405ms total still leaves the transient-outage test, which restores the
-    // store within one event-loop turn of an awaited rpc, orders of magnitude
-    // of margin before a batch could exhaust.
+    // `maxAttempts` and the batch/backlog bounds are not reachable from the
+    // environment at all, precisely so this cannot become a way to weaken
+    // them. The 405ms total still leaves the transient-outage test, which
+    // restores the store within one event-loop turn of an awaited rpc, orders
+    // of magnitude of margin before a batch could exhaust.
     AGENT_REPL_FAKE_STORE_BACKOFF_MS: "5,20,80,300",
   };
   for (const [key, value] of Object.entries(options.env ?? {})) {

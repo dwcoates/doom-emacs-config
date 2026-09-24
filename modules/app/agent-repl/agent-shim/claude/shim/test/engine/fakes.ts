@@ -367,6 +367,14 @@ export class RecordingPersistence implements Persistence {
   }
   /** Every pointer a reading session was asked to conclude through. */
   readonly concludedThrough: string[] = [];
+  /** How many times the vendor loop waited on the writer's backpressure. */
+  writableWaits = 0;
+  /** Set to hold `whenWritable` until the test releases it, the way a backlog does. */
+  backlog: Promise<void> | undefined;
+  whenWritable(): Promise<void> {
+    this.writableWaits++;
+    return this.backlog ?? Promise.resolve();
+  }
   /** Rows this fake reports as lost, so a stand-down's exit code is testable. */
   lostRows = 0;
   flush(): Promise<FlushOutcome> {
