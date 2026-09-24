@@ -705,6 +705,13 @@ type fakeQueue struct {
 	submitErr   error
 	acts        map[ids.WorkspaceID][]promptqueue.Act
 	actErr      error
+	// db is the fixture's store, which the door closes orphans on.
+	db *fakeDB
+}
+
+// CloseOrphans is the queue's door, closing on the fixture's own store.
+func (q *fakeQueue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
+	return q.db.CloseOrphans(ctx, ws, at)
 }
 
 func newFakeQueue() *fakeQueue {
@@ -1623,6 +1630,7 @@ func newFixture(t *testing.T) *fixture {
 		headless: &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
 		briefs:   map[string]prompts.Prompt{},
 	}
+	f.queue.db = f.db
 	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
 	// of the arrangement every create test starts from, exactly as the corpus
 	// ships it.
