@@ -2791,3 +2791,54 @@ func TestASpentSliceYieldsABoundedFileToTheNextTick(t *testing.T) {
 		t.Fatalf("cursor = %d, want the first batch's bound %d", got, tail.MaxBatchBytes)
 	}
 }
+
+// TestARescanInsideTheClearIntervalKeepsTheRememberedMisses pins the rescan's
+// cost: an unconditional refresh dropped every miss, and the rekey after it
+// re-globbed every shim directory once per watcher (~5 s of CPU per 30 s rescan
+// on the owner's machine, 2026-09-24).
+func TestARescanInsideTheClearIntervalKeepsTheRememberedMisses(t *testing.T) {
+	// Arrange: a first pass over watched transcripts nothing links, so each id
+	// is a remembered miss.
+	h := newHarness(t, &fakeStore{})
+	for _, session := range []string{"sess-1", "sess-2", "sess-3"} {
+		h.transcript(t, session, promptLine)
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(DefaultRescanInterval)
+	before := h.sc.identity.Globs()
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert: a constant — the refresh's three record reads plus the rekey's
+	// one fingerprint — and no per-watcher glob.
+	if got := h.sc.identity.Globs() - before; got > 4 {
+		t.Errorf("a rescan inside the clear interval ran %d glob(s), want at most the constant 4", got)
+	}
+}
+
+// TestARescanPastTheClearIntervalDropsTheRememberedMisses keeps the net: at
+// most every missClearInterval the rescan clears the misses outright, so a
+// link write the directory fingerprint missed is found.
+func TestARescanPastTheClearIntervalDropsTheRememberedMisses(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	for _, session := range []string{"sess-1", "sess-2", "sess-3"} {
+		h.transcript(t, session, promptLine)
+	}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(missClearInterval)
+	before := h.sc.identity.Globs()
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert: each of the three watchers' ids was asked of the disk again.
+	if got := h.sc.identity.Globs() - before; got < 3+3 {
+		t.Errorf("a rescan past the clear interval ran %d glob(s), want the refresh's 3 plus one per watcher", got)
+	}
+}

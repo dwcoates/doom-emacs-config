@@ -347,6 +347,10 @@ func (i *Index) readLink(path string) (vendorLinkRecord, bool) {
 // glob enumerates one shape under the state root. A glob error is a malformed
 // PATTERN, which is this package's own bug, so it is stated at error rather
 // than passed off as "no records".
+// Globs is how many filepath.Glob calls the index has made, for the suites
+// that pin the poll and rescan paths' cost.
+func (i *Index) Globs() int { return i.globs }
+
 func (i *Index) glob(pattern string) []string {
 	i.globs++
 	matches, err := filepath.Glob(pattern)
