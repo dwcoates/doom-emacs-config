@@ -238,3 +238,28 @@ func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
 		t.Fatalf("the leader recorded its member's death (stat %v), want it frozen before the member died", err)
 	}
 }
+
+func TestNamesPath(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{name: "the directory ending the line", line: "123 /bin/daemon --state-dir /tmp/r/ar12", want: true},
+		{name: "the directory followed by an argument", line: "123 /bin/daemon --state-dir /tmp/r/ar12 --fake", want: true},
+		{name: "a path beneath the directory", line: "123 /bin/shim --listen /tmp/r/ar12/sock/s", want: true},
+		{name: "a sibling the directory is a textual prefix of", line: "123 /bin/shim --listen /tmp/r/ar123/sock/s", want: false},
+		{name: "a sibling first, then the directory itself", line: "123 /bin/x /tmp/r/ar123/a /tmp/r/ar12/b", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := namesPath(tc.line, "/tmp/r/ar12")
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("namesPath(%q) = %v, want %v", tc.line, got, tc.want)
+			}
+		})
+	}
+}
