@@ -23,7 +23,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 - `rollout/handover.go` `beginHandover`: if `served()` fails after the spawn, the successor is leaked and the next deploy spawns a second one, which races for the manifest. If `writeManifest` fails, the latch never releases. `SuccessorSpawner` needs a stop handle.
 - A shim that dies with work recorded in flight produces no freeness edge, so its registered bounce waits until the workspace is revived.
-| `feat/held-badge-short-labels` | `~/.config/doom-worktrees/held-badge-short-labels` | The daemon supplies short held-badge labels plus a detail sentence (`HeldPromptBadge`), and the webapp draws them verbatim. The tone table is unchanged. | `afa700f3cc7c79cf2` | 21:40 |
 
 ## Still waiting on the owner
 
@@ -42,6 +41,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Held-prompt badges carry daemon-written short labels plus an expand-only detail (`HeldPrompt.badges`), drawn verbatim; an "editing" badge too (`feat/held-badge-short-labels`, 5672 webapp tests).
 - Detached work is drawn only in its owner's feed, at its spawning call's row (the announcement names the owner). Unplaceable work draws nothing and raises an ERROR plus a topbar warning; the root fallbacks are gone. Also: the sidecar reads a shell launch from the vendor's sentence when `toolUseResult` is missing, and a caller-cancelled open-faults read is DEBUG (`fix/detached-work-in-owning-feed`, daemon suite green on master).
 - The footer token cell is the in-flight turn's growth of the main context (the topbar's `SessionContextUsage`), refreshed after each main API response. Subagents are per agent in the panel, idle shows `--`, a mid-turn cut rebases, and the alarm stays on whole-turn uncached input (`fix/footer-turn-context-delta`, all suites green).
 - Editing a held prompt: Edit claims it under the delivery lock (it and everything after it stay held); Emacs takes it into the input (existing text saved to history); a send replaces and reclassifies; the claim ends with the editor's host stream; cancel is `C-c C-c` (`feat/edit-held-prompt`, daemon/webapp/ERT green on master).
