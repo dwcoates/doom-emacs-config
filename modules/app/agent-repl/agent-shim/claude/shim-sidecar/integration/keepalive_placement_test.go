@@ -15,7 +15,7 @@ import (
 
 // TestAKeepAliveMarkerOpeningThePromptWithholdsTheWholeTurn asserts the marker
 // at position 0 of the first text block classifies the turn, so none of its
-// records reaches a page.
+// records is stored.
 func TestAKeepAliveMarkerOpeningThePromptWithholdsTheWholeTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -31,22 +31,12 @@ func TestAKeepAliveMarkerOpeningThePromptWithholdsTheWholeTurn(t *testing.T) {
 	// Act: the captured prompt, with the marker put in FRONT of its text.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	g.AppendLine(encodeRecord(t, markedPrompt(t, captured, session, cwd, keepaliveMarker+" hold the session open")))
-	for _, i := range []int{7, 8} {
-		g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[i]), session, cwd)))
-	}
+	appendRecords(t, g, markedTurn(t, captured, session, cwd, keepaliveMarker+" hold the session open")...)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
-	entries := fake.Entries()
-	if len(keepalivesOf(entries)) == 0 {
-		t.Fatalf("a marker-opened prompt produced no unserved_item.keepalive entries at all")
-	}
-	for _, line := range pageLinesOf(entries) {
-		if a := activityOf(line); a != nil {
-			t.Errorf("a keep-alive turn produced a page line for unit %q; keep-alive work is never served",
-				a.GetActivityId().GetValue())
-		}
+	if entries := fake.Entries(); len(entries) != 0 {
+		t.Fatalf("a keep-alive turn stored %d entrie(s) (keys %v), want none", len(entries), upsertKeysOf(entries))
 	}
 }
 
@@ -72,29 +62,27 @@ func TestAKeepAliveMarkerQuotedMidPromptIsServedNormally(t *testing.T) {
 	// Act: the marker QUOTED inside the prompt rather than opening it.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	g.AppendLine(encodeRecord(t, markedPrompt(t, captured, session, cwd,
-		"what does the "+keepaliveMarker+" marker actually do?")))
-	for _, i := range []int{7, 8} {
-		g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[i]), session, cwd)))
-	}
+	appendRecords(t, g, markedTurn(t, captured, session, cwd,
+		"what does the "+keepaliveMarker+" marker actually do?")...)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert: the turn's units reached the main agent's book.
 	entries := fake.Entries()
-	if len(keepalivesOf(entries)) != 0 {
-		t.Errorf("a quoted marker withheld %d record(s) as keep-alive; the rule is a PREFIX and this prompt is ordinary prose",
-			len(keepalivesOf(entries)))
-	}
 	if len(linesForBook(entries, session)) == 0 {
 		t.Fatalf("a turn whose prompt merely QUOTES the marker produced no page line at all; its records were %v",
 			upsertKeysOf(entries))
 	}
 }
 
-// markedPrompt re-points the captured session's REAL user prompt at this test's
-// session and replaces its first text block, so the placement is the only thing
-// that differs between the two subjects above.
-func markedPrompt(t *testing.T, captured capturedSession, session, cwd, text string) map[string]any {
+// markedTurn re-points the captured session's REAL user prompt at this test's
+// session, replaces its first text block, and chains the captured response's
+// thinking line and Bash call after it, so the placement is the only thing that
+// differs between the two subjects above.
+func markedTurn(t *testing.T, captured capturedSession, session, cwd, text string) []map[string]any {
 	t.Helper()
-	return setUserText(t, retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd), text)
+	return chained(t,
+		setUserText(t, retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd), text),
+		retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd),
+		retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd),
+	)
 }

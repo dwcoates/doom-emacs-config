@@ -6,6 +6,7 @@ package convert
 import (
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 )
 
@@ -45,9 +46,15 @@ func TestIsResidueNamesEveryArmNobodyReads(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "keepalive — a well-formed fact with no book, not residue",
-			entry: Keepalive(at, "keepalive", "turn:1", at.AgentID, &storev1.StoreAgentItem{}),
-			want:  false,
+			// NO PRODUCER MINTS THIS ARM ANY LONGER (keepalive.go), but the arm
+			// is still in the contract and rows written before stand in the store.
+			name: "keepalive — a well-formed fact with no book, not residue",
+			entry: &storev1.StoreEntry{Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
+				AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: &storev1.StoreUnservedItem{
+					UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: &storev1.StoreAgentItem{}},
+				}},
+			}}},
+			want: false,
 		},
 	}
 	for _, tc := range cases {
@@ -87,7 +94,7 @@ func TestResidueLabelNamesTheArmAndItsDiscriminator(t *testing.T) {
 		},
 		{
 			name:  "a typed entry is not labelled at all",
-			entry: Keepalive(at, "keepalive", "turn:1", at.AgentID, &storev1.StoreAgentItem{}),
+			entry: PageLine(at, "block:0", "unit:typed", at.AgentID, &conversationv1.AgentFrame{}),
 			want:  "",
 		},
 	}
