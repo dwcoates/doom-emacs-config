@@ -153,34 +153,28 @@ export function terminalUpsertKey(
  * The run is the bash tool call itself, so its lifecycle rows and its page line
  * are about the same unit — different key prefixes, one identity.
  *
- * ONE ROW NEVER SUPERSEDES ANOTHER (project lead amendment, binding). A shell
- * run's rows are a SEQUENCE, not a single upserted state: the start, then one
- * row per output delta, then the terminal. They shared one key while the
- * output was one whole, and under that spelling every delta overwrote the last
- * and the terminal erased the output entirely — so `WatchBashRun`, which
- * replays a run's whole history in write order, had nothing to replay.
+ * ONE KEY PER KIND OF FACT (project lead amendment, binding). A shell run's rows
+ * are the start, its one rendered tail, and the terminal. They shared one key
+ * once, and under that spelling the terminal erased the output entirely — so
+ * `WatchBashRun`, which replays a run's rows in first-insert order, had nothing
+ * to replay.
  */
 export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
   return `bash:${requireValue(run.value, "the bash run's activity id")}`;
 }
 
 /**
- * ONE output delta of a detached shell run, keyed by WHERE IT STARTS.
+ * A detached shell run's RENDERED TAIL row: one row, superseded whole by every
+ * write.
  *
- * The offset is the delta's own identity: a re-read of the spool from the same
- * offset is the same delta and upserts in place, while the next stretch of
- * output is a new row. That is what makes a tailer restartable without either
- * losing output or showing it twice.
+ * Owner ruling 2026-09-23: output beyond what is rendered is not stored. The
+ * run's output is therefore ONE snapshot — the most recent bytes, bounded by
+ * `AgentBashTailCap`, and what was omitted before them — never one row per
+ * delta. The retired `bash:<run>:<from_offset>` rows are left in the store as
+ * outmoded and nothing mints that spelling any more.
  */
-export function bashDeltaUpsertKey(
-  run: conversationv1.AgentActivityId,
-  fromOffset: bigint | number,
-): string {
-  const offset = typeof fromOffset === "bigint" ? fromOffset : BigInt(fromOffset);
-  if (offset < 0n) {
-    throw new Error("shim store keys: an output delta's from_offset cannot be negative");
-  }
-  return `${bashUpsertKey(run)}:${offset.toString()}`;
+export function bashTailUpsertKey(run: conversationv1.AgentActivityId): string {
+  return `${bashUpsertKey(run)}:tail`;
 }
 
 /**

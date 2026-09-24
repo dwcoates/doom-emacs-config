@@ -50,8 +50,11 @@ export function isRetryableRead(error: unknown): boolean {
 
 /** What a retried read needs beyond the read itself. */
 export interface ReadRetryOptions {
-  /** The schedule. Defaults to {@link DEFAULT_RETRY_POLICY}. */
-  readonly retry?: PersistenceRetryPolicy;
+  /**
+   * The schedule. Defaults to {@link DEFAULT_RETRY_POLICY}. A read GIVES UP at
+   * `maxAttempts`, so the write half's held-batch cadence is no part of it.
+   */
+  readonly retry?: Pick<PersistenceRetryPolicy, "backoffMs" | "maxAttempts">;
   /** How a backoff is taken, injected so a suite does not wait in real time. */
   readonly sleep?: (ms: number) => Promise<void>;
 }

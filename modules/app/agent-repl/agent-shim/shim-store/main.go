@@ -161,6 +161,22 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 		<-sweepDone
 	}()
 
+	// THE CHECKPOINT JOB RUNS BESIDE THE SWEEP, AND STOPS BEFORE THE DATABASE
+	// CLOSES for the same reason. The write connection has no autocheckpoint,
+	// so this job is the only thing that folds the WAL back into the database;
+	// it takes the writer through the bulk tier, like the sweep, so no
+	// interactive commit ever pays for it.
+	checkpointCtx, stopCheckpoints := context.WithCancel(context.Background())
+	checkpointsDone := make(chan struct{})
+	go func() {
+		defer close(checkpointsDone)
+		database.RunCheckpoints(checkpointCtx, db.CheckpointPolicy{})
+	}()
+	defer func() {
+		stopCheckpoints()
+		<-checkpointsDone
+	}()
+
 	ln, err := server.Listen(socketPath, log.With(logging.Fields{Component: "server"}))
 	if err != nil {
 		return err

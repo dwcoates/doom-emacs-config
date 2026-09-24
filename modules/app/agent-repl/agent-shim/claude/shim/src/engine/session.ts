@@ -2179,6 +2179,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       try {
         for await (const message of active) {
           await onSdkMessage(message);
+          // THE BACKPRESSURE. The vendor stream is the one producer of rows
+          // with no bound of its own, so while the store writer's backlog is
+          // past its high-water mark the next message is not read. The writer
+          // never evicts a row; this wait is what keeps its buffer bounded.
+          await deps.persistence.whenWritable();
         }
         if (isStaleLoop(active)) return;
         if (!standingDown) {

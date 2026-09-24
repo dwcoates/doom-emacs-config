@@ -44,6 +44,16 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   every defer and `t.Cleanup`, and before this a day of such runs filled the
   disk and left daemons spinning. The root is under `/tmp` and short, so the
   103-byte socket path budget holds without a `TMPDIR=/tmp` override.
+- **A daemon's teardown FREEZES its process group before killing it**
+  (`harness.Daemon.Kill`): SIGSTOP to the group, the kernel's own report that
+  the leader is stopped, then SIGKILL. A bare `kill(-pgid, SIGKILL)` is walked
+  member by member and can be preempted between them, so under load the
+  daemon outlived its in-flight git (or a shim still in its group between fork
+  and setpgid) and logged that death at ERROR, failing the warning sweep on a
+  record the teardown itself caused. Never add a signal path to the harness
+  that lets a member of the daemon's group die while the daemon can run.
+  Reclaim tests make their dead roots in a private `runRootSpace`, never in
+  `hostRunRoots`, which every other run on the host reclaims.
 - **The suite bounds its own load**: `harness.DefaultDaemonSlots` (8,
   `AGENT_REPL_ITEST_DAEMON_SLOTS`) top-level tests hold a live daemon at once,
   whatever `-p`/`-parallel` the run was invoked with, because

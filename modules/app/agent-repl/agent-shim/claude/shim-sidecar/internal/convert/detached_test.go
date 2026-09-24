@@ -1,6 +1,6 @@
 package convert
 
-// detached_test.go — spool deltas, the exit marker, and the LOST verdict's
+// detached_test.go — the spool's rendered tail, the exit marker, and the LOST verdict's
 // stability.
 
 import (
@@ -11,94 +11,111 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 )
 
-func TestBashDeltaFromOffsetIsAGapDetector(t *testing.T) {
-	// Arrange. from_offset MUST equal the bytes the consumer already holds;
-	// anything else means bytes were lost and the consumer REFUSES the frame
-	// rather than concatenating across a hole and drawing output that never
-	// existed.
-	c := newTestConverter(t)
-	at := testAttribution(0)
-	at.TaskID = "b1"
-
-	// Act.
-	entry := c.BashDelta(at, "toolu_run", "more bytes", 4096)
-
-	// Assert.
-	update := entry.GetAgentUpdate().GetBash().GetFrame().GetUpdate()
-	if got := update.GetFromOffset(); got != 4096 {
-		t.Fatalf("from_offset = %d, want 4096", got)
+func TestBashTailCarriesTheRenderedWindowAndItsOmittedCounts(t *testing.T) {
+	// Arrange. The tail is a SNAPSHOT of what is drawn: the text verbatim and
+	// the bytes and lines before it, never an offset a consumer must join on.
+	cases := []struct {
+		name         string
+		text         string
+		bytesOmitted uint64
+		linesOmitted uint64
+	}{
+		{name: "the whole output so far", text: "compiling\n", bytesOmitted: 0, linesOmitted: 0},
+		{name: "a window past the cap", text: "the latest line\n", bytesOmitted: 20480, linesOmitted: 312},
 	}
-	if got := update.GetNewOutput(); got != "more bytes" {
-		t.Fatalf("new_output = %q, want the delta verbatim, unparsed and not line-split", got)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestConverter(t)
+			at := testAttribution(4096)
+			at.TaskID = "b1"
 
-func TestEverySpoolDerivedWriteIsItsOwnRow(t *testing.T) {
-	// Arrange. THE STORE SUPERSEDES A ROW WHOLE, so one key for the whole run
-	// would leave it holding only its most recent delta — every earlier chunk of
-	// output erased by the next. store.v1 WatchBashRun replays a run's rows in
-	// write order, which is only possible if each write IS a row.
-	c := newTestConverter(t)
-	at := testAttribution(0)
-	at.TaskID = "b1"
+			// Act.
+			entry := c.BashTail(at, "toolu_run", tc.text, tc.bytesOmitted, tc.linesOmitted)
 
-	// Act.
-	first := c.BashDelta(at, "toolu_run", "out", 0)
-	second := c.BashDelta(at, "toolu_run", "more", 3)
-	terminal := c.BashExited(at, "toolu_run", "outmore", 0, 0)
-
-	// Assert.
-	keys := []string{first.GetUpsertKey(), second.GetUpsertKey(), terminal.GetUpsertKey()}
-	seen := map[string]bool{}
-	for _, key := range keys {
-		if seen[key] {
-			t.Fatalf("two spool-derived writes share the key %q; the later would erase the earlier", key)
-		}
-		seen[key] = true
-	}
-	if got := terminal.GetUpsertKey(); got != BashTerminalKey("toolu_run") {
-		t.Fatalf("terminal key = %q, want the run's single terminal key", got)
+			// Assert.
+			got := entry.GetAgentUpdate().GetBash().GetFrame().GetTail()
+			if got == nil {
+				t.Fatal("spool output must land on the bash tail arm")
+			}
+			if got.GetText() != tc.text || got.GetBytesOmitted() != tc.bytesOmitted || got.GetLinesOmitted() != tc.linesOmitted {
+				t.Fatalf("tail = {%q, %d, %d}, want {%q, %d, %d}", got.GetText(), got.GetBytesOmitted(), got.GetLinesOmitted(),
+					tc.text, tc.bytesOmitted, tc.linesOmitted)
+			}
+		})
 	}
 }
 
-func TestARereadDeltaSupersedesItsOwnRowRatherThanAppendingACopy(t *testing.T) {
-	// Arrange. The delta's key is its from_offset, which IS the delta's identity:
-	// the same bytes re-read after a restart must land on the row they already
-	// own, or a replay grows a second copy of the run's output.
+func TestARunsTailSupersedesItsOneRow(t *testing.T) {
+	// Arrange. Output beyond what is rendered is not stored, so every batch
+	// upserts the run's ONE tail row rather than adding a row per chunk.
 	c := newTestConverter(t)
-	at := testAttribution(0)
+	first, second := testAttribution(3), testAttribution(7)
+	first.TaskID, second.TaskID = "b1", "b1"
+
+	// Act.
+	earlier := c.BashTail(first, "toolu_run", "out", 0, 0)
+	later := c.BashTail(second, "toolu_run", "outmore", 0, 0)
+
+	// Assert.
+	if earlier.GetUpsertKey() != later.GetUpsertKey() || later.GetUpsertKey() != BashTailKey("toolu_run") {
+		t.Fatalf("tail keys = %q, %q, want both the run's single tail key %q",
+			earlier.GetUpsertKey(), later.GetUpsertKey(), BashTailKey("toolu_run"))
+	}
+}
+
+func TestATailThroughANewPositionIsANewWrite(t *testing.T) {
+	// Arrange. The tail through a file position is identified by that
+	// position: a later window must not be absorbed as a replay of an earlier.
+	c := newTestConverter(t)
+	first, second := testAttribution(3), testAttribution(7)
+	first.TaskID, second.TaskID = "b1", "b1"
+
+	// Act.
+	earlier := c.BashTail(first, "toolu_run", "out", 0, 0)
+	later := c.BashTail(second, "toolu_run", "outmore", 0, 0)
+
+	// Assert.
+	if earlier.GetWriteId() == later.GetWriteId() {
+		t.Fatalf("two windows through different positions share write_id %q; the store would absorb the later", later.GetWriteId())
+	}
+}
+
+func TestATailReReadThroughTheSamePositionIsTheSameWrite(t *testing.T) {
+	// Arrange. A batch re-read after an unacknowledged write rebuilds the same
+	// window through the same position, so it must mint the same identity and
+	// be absorbed rather than written twice.
+	c := newTestConverter(t)
+	at := testAttribution(512)
 	at.TaskID = "b1"
 
 	// Act.
-	first := c.BashDelta(at, "toolu_run", "out", 512)
-	replayed := c.BashDelta(at, "toolu_run", "out", 512)
+	first := c.BashTail(at, "toolu_run", "out", 0, 0)
+	replayed := c.BashTail(at, "toolu_run", "out", 0, 0)
 
 	// Assert.
-	if first.GetUpsertKey() != replayed.GetUpsertKey() {
-		t.Fatalf("a re-read delta keyed %q vs %q; it must supersede its own row",
-			first.GetUpsertKey(), replayed.GetUpsertKey())
-	}
 	if first.GetWriteId() != replayed.GetWriteId() {
-		t.Fatalf("a re-read delta minted write_ids %q and %q; the digest is of file coordinates and must be identical",
+		t.Fatalf("a re-read tail minted write_ids %q and %q; the digest is of file coordinates and must be identical",
 			first.GetWriteId(), replayed.GetWriteId())
 	}
 }
 
-func TestATerminalAndADeltaAtTheSameOffsetDoNotCollide(t *testing.T) {
-	// Arrange. A command that produced no output at all settles from offset 0,
-	// where its only delta also lives — so the terminal's key must not be
-	// derivable from an offset at all.
+func TestATerminalAndTheTailDoNotCollide(t *testing.T) {
+	// Arrange. A command that produced no output settles in the same batch as
+	// its only tail, so the terminal's key must be its own.
 	c := newTestConverter(t)
 	at := testAttribution(0)
 	at.TaskID = "b1"
 
 	// Act.
-	delta := c.BashDelta(at, "toolu_run", "EXIT=0\n", 0)
+	tailEntry := c.BashTail(at, "toolu_run", "EXIT=0\n", 0, 0)
 	terminal := c.BashExited(at, "toolu_run", "EXIT=0\n", 0, 0)
 
 	// Assert.
-	if delta.GetUpsertKey() == terminal.GetUpsertKey() {
-		t.Fatalf("the terminal and the offset-0 delta share the key %q", delta.GetUpsertKey())
+	if tailEntry.GetUpsertKey() == terminal.GetUpsertKey() {
+		t.Fatalf("the terminal and the tail share the key %q", terminal.GetUpsertKey())
+	}
+	if got := terminal.GetUpsertKey(); got != BashTerminalKey("toolu_run") {
+		t.Fatalf("terminal key = %q, want the run's single terminal key", got)
 	}
 }
 

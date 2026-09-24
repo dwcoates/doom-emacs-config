@@ -352,7 +352,7 @@ caused by a sibling.
   `WriteBatchRequest` carries `write_class` — INTERACTIVE from the shim, BULK
   from the sidecar — and an unset class (message or arm) is REFUSED at
   `write_class_unset`, never defaulted. The store's own writes state theirs in
-  code: the ledger sweep and schema creation are BULK. `DB.writes`
+  code: the ledger sweep, the WAL checkpoint and schema creation are BULK. `DB.writes`
   (`writeScheduler`, `internal/db/writer.go`) hands a released slot DIRECTLY to
   the next waiter under its lock: the oldest interactive waiter, else the
   oldest bulk one.
@@ -431,6 +431,100 @@ its FIRST statement and holds it to the end, so the pin and the page it
 accompanies still come from one view of the database. Any NEW pure read opens
 through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
 
+### Checkpoints are the store's own BULK job, never part of a commit
+
+The write DSN carries `wal_autocheckpoint(0)`. Under SQLite's default, the
+commit that took the WAL past 1000 pages checkpointed EVERY page anyone had
+appended before its COMMIT returned. On a copy of the owner's 1.1 GB events.db
+under concurrent sidecar ingestion, about 4% of interactive commits ran that
+checkpoint inline (p50 28ms, p99 ~90ms), paying for bulk pages.
+
+- **`DB.RunCheckpoints` (`internal/db/checkpoint.go`) is the only thing that
+  folds the WAL back.** `main.go` runs it beside the ledger sweep and stops it
+  BEFORE the database closes. Each checkpoint takes the one writer through the
+  BULK tier, so a queued interactive write is always handed the writer first,
+  and interactive waits on at most the one checkpoint already running.
+- **GROWTH TRIGGER.** Every writer's release (`releaseWrite`, `writer.go`)
+  reads the WAL-index header from `-shm` while it still holds the writer. That
+  is SQLite's documented WAL-index format: `mxFrame` and `nBackfill`, with both
+  header copies compared. The job runs once `DefaultCheckpointPages` (1000)
+  frames have been appended since the last checkpoint. The mark is the frame
+  count at the last successful checkpoint, so a pass that a reader cut short
+  is not re-run on every commit.
+- **IDLE TRIGGER.** The job also runs once no writer has released for
+  `DefaultCheckpointIdle` (2s) with frames still waiting. It is re-armed by
+  every release and armed once at start for a WAL left from a previous run.
+  Neither trigger is a bare timer.
+- **PASSIVE, always.** FULL, RESTART and TRUNCATE run the busy handler until
+  every reader leaves the WAL, and they would do that while holding the
+  writer. PASSIVE never waits, so the time a checkpoint holds the writer is
+  the copy alone, and the growth trigger bounds that copy.
+- **NO DEADLINE, on purpose.** SQLite advances `nBackfill` only after a whole
+  pass has been copied and synced. An interrupted checkpoint therefore keeps
+  none of its progress, and a deadline would retry it forever against a WAL
+  that only grows.
+- **`journal_size_limit` (16 MiB) is what shrinks the `-wal` file.** SQLite
+  cuts the file back to the limit at the first commit after a complete
+  checkpoint restarts the log, so a high-water mark like the owner's 119 MB no
+  longer stays on disk. This was verified with the sqlite3 CLI: a 5.2 MB WAL
+  stayed 5.2 MB after PASSIVE and dropped to the limit on the next insert.
+- **LOGGING.** Each checkpoint that copied pages is one `info` record at
+  `store.db.wal-checkpoint`. It carries `statement=wal_checkpoint`,
+  `write_class=bulk`, `rows` (pages copied), `duration_ms`, `lock_wait_ms` and
+  `exec_ms`, and its message names the trigger and the mode. A pass that
+  copied nothing because a reader pinned the frames, and a trigger that found
+  nothing waiting, are both verbose. A failed checkpoint is one `error` record
+  and is retried at the next trigger: its mark does not move, so the next
+  release re-runs it, and the idle trigger is re-armed. A failed WAL-index read
+  is also one `error` record, and the idle trigger retries it.
+- **THE `-shm` DESCRIPTOR IS NEVER CLOSED WHILE SQLITE HOLDS THE FILE.**
+  SQLite locks `-shm` with POSIX fcntl locks, and closing any descriptor a
+  process holds on a file drops every fcntl lock that process holds on it. The
+  store opens the descriptor once, on first use after the database is fully
+  open, and `Close` closes it only after both pools have closed.
+- Test seams: `runCheckpoint` makes a checkpoint fail and then succeed,
+  `checkpointDone` is what a test waits on, and `newCheckpointTimer` fires the
+  idle trigger by hand. None of them sleeps.
+
+### The page cache and the map are sized, and this is what they cost
+
+| pragma | connection | value | heap cost |
+| --- | --- | --- | --- |
+| `cache_size` | writer (one, lives as long as the store) | -65536 (64 MiB) | up to 64 MiB, filled lazily |
+| `cache_size` | each reader | -16384 (16 MiB) | up to 16 MiB per open reader; 32 MiB for database/sql's two idle readers |
+| `mmap_size` | every connection | 256 MiB | none: this is the kernel's file cache, shared and reclaimable |
+
+- **WHY 64 MiB FOR THE WRITER.** An upsert seeks four indexes by a hashed key
+  (`entry.upsert_key`, `entry.write_id`, the ledger's primary key and
+  `write_ledger_upsert_key`), which total about 140 MB on the owner's box
+  (`dbstat`) and are hit at random. The `write_seq` and position indexes are
+  only appended at their right edge. 64 MiB holds every interior page and about
+  half of those leaves.
+- **WHY READERS KEEP A SMALL CACHE AND USE THE MAP.** The read pool is not
+  capped, and a reader's private cache dies with its connection, while the map
+  is shared by all of them. Writes still go through the WAL. The file only
+  grows (no VACUUM, and a nuke unlinks after closing), so nothing truncates a
+  mapped region.
+- `TestEveryConnectionCarriesTheCacheAndMapSizes` reads each pragma back on
+  the writer and on two readers that are open at the same time.
+
+**MEASURED on a read-only `.backup` copy of the live events.db (2026-09-23,
+1.1 GB, schema 7).** The host was shared and at load averages of 60-370, and
+test runs are niced, so the tails are noisy. The medians repeated.
+
+| measurement | before | after |
+| --- | --- | --- |
+| upsert hashed-key probe pair, warm pass, p50 / p90 / p99 | 28.6us / 40us / 213-253us | 23.7us / 27-31us / 58-117us |
+| interactive upsert, paced 1/ms, no bulk: p50 / p90 / p99 | 247us / 343us / 6.5ms | 206us / 292us / 5.8ms |
+| interactive upsert, paced 1/5ms, concurrent bulk: p50 / p90 / p99 | 9.4ms / 33ms / 87ms | 6.7ms / 23ms / 51ms |
+| interactive commits that ran a checkpoint inline (under bulk) | 163-167 of 4000 (p50 28ms, p99 86-90ms) | 0 by construction |
+| one checkpoint, quiet (~1000 pages) | 6.7ms inline in the commit | exec p50 6-10ms, as bulk |
+| one checkpoint, under bulk ingestion | inline in a bulk or interactive commit | exec p50 23-39ms, queue p50 0-5ms |
+
+In the mixed run, interactive latency is dominated by queueing behind bulk
+transactions of up to 100ms, which is the two-tier writer's documented bound
+and not something this change touches.
+
 ## Routing, orderings, pointers, tokens
 
 - **Pageability is the PRODUCER's decision**, read from exactly one place:
@@ -463,12 +557,25 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   the handoff a reader must see; a feed that drew the spawning call without it
   keeps claiming work that is no longer in the turn.
 - **A BASH FRAME IS ITS OWN ENTRY ROW** (`kind = bash`, book NULL,
-  `run_id = StoreAgentBash.run.value`) as well as a `detached_work` update. A
-  detached run's output arrives as deltas, so the run's history lives in the
-  spine under its own indexed key the way a book's does. Producers key the rows
-  (`bash:<run>:start`, `bash:<run>:<from_offset>`, `bash:<run>:terminal`); **the
-  store never parses a key.** It is still not a page line: a run has no book, and
-  its reader is `WatchBashRun`.
+  `run_id = StoreAgentBash.run.value`) as well as a `detached_work` update, so
+  the run's rows live in the spine under their own indexed key the way a book's
+  do. Producers key the rows (`bash:<run>:start`, `bash:<run>:tail`,
+  `bash:<run>:terminal`); **the store never parses a key.** It is still not a
+  page line: a run has no book, and its reader is `WatchBashRun`.
+- **ONLY WHAT IS RENDERED IS STORED** (owner ruling 2026-09-23). A run's output
+  is ONE rendered-tail row (`AgentBash.tail`) every write supersedes, and a
+  tail longer than conversation.v1 `AGENT_BASH_TAIL_CAP_BYTES` — the one
+  constant the sidecar cuts by and the daemon draws by — is refused
+  (`bash_tail_over_cap`, on `…bash.frame.tail.text`). Every supersession still
+  reaches a live `WatchBashRun` watcher as a row of its own; a replay serves
+  the newest window at the tail's first-insert position.
+- **A RETIRED-ARM ROW IS OUTMODED, NOT DAMAGE.** Rows written under the retired
+  contiguous-delta arm (`AgentBash.update`, reserved 2; keys
+  `bash:<run>:<from_offset>`) are left in place untouched. They decode to NO
+  result arm — which no write can produce, since an armless frame is refused —
+  so `BashRun` skips them and states the count ONCE PER REPLAY at INFO, never
+  one record per row and never at ERROR. A run holding only such rows replays
+  nothing and is the ordinary unknown-run refused open.
 - **ONE `detached_work` ROW PER RUN, LOCATED BY ORIGIN UNIT FIRST.** The
   announcement addresses a run by its `DetachedWorkId`; the run's own frames
   address it by its `AgentActivityId`. Both writers resolve the row the same way
@@ -857,7 +964,7 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
   `TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId`, which fails the
   moment the store stops leaving the mark the scan looks for.
 - Store-side fixture keys reproduce the producers' real spellings exactly:
-  `bash:<run>:start` / `bash:<run>:<from_offset>` / `bash:<run>:terminal`,
+  `bash:<run>:start` / `bash:<run>:tail` / `bash:<run>:terminal`,
   `detached:<work id>` for an announcement,
   `session:context_budget_warning:<uuid>`, and
   `residue:<vendor record uuid>` with the `residue:file:<path>:<offset>`

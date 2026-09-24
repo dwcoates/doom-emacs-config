@@ -37,8 +37,10 @@
  *   - AN UNKNOWN WATCH TOKEN IS A CONNECT `NotFound`. A refused stream open has
  *     no failure message to live in — the response type is the frame it
  *     streams — so the refusal closes the stream at the transport.
- *   - `WatchBashRun` REPLAYS EVERY STORED ROW of a run in write order, then
- *     follows, and ENDS after the terminal row. A run with no stored row is a
+ *   - `WatchBashRun` REPLAYS EVERY STORED ROW of a run in FIRST-INSERT order —
+ *     one row per upsert key, holding its newest write, as the real store's
+ *     `ON CONFLICT(upsert_key)` does — then follows every write, and ENDS
+ *     after the terminal row. A run with no stored row is a
  *     refused open — closed at the transport, like every other watch here.
  *   - WRITES CAN BE MADE TO FAIL ON DEMAND ({@link FakeStore.failWrites}), which
  *     is how the writer's retry buffer is testable at all.
@@ -243,13 +245,15 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const detachedOwner = new Map<string, string>();
   const spawnedBy = new Map<string, string>();
   /**
-   * Every bash lifecycle row per run, in write order.
-   *
-   * A LIST, NOT THE NEWEST ROW: `WatchBashRun` replays the run's whole history
-   * before it follows, because a detached shell's output arrives as DELTAS and a
-   * watcher handed only the newest one would have a hole where the output was.
+   * Every bash row per run, ONE PER UPSERT KEY, in first-insert order, each
+   * holding its newest write — the real store's row model. A run's output is
+   * one rendered-tail row every write supersedes (owner ruling 2026-09-23:
+   * output beyond what is rendered is not stored), so a replay serves the
+   * newest window, never every window the run passed through.
    */
-  const bashRowsByRun = new Map<string, storev1.StoreAgentBash[]>();
+  const bashRowsByRun = new Map<string, Array<{ readonly key: string; row: storev1.StoreAgentBash }>>();
+  /** The newest bash write per run, whatever its key: what `GetLiveWork` reads. */
+  const bashNewestByRun = new Map<string, storev1.StoreAgentBash>();
   /** Tails following one run's rows. */
   const bashWatchers = new Set<{
     readonly run: string;
@@ -421,8 +425,11 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         const run = info.value.run?.value;
         if (run === undefined || run === "" || info.value.frame === undefined) return;
         const rows = bashRowsByRun.get(run) ?? [];
-        rows.push(info.value);
+        const held = rows.find((stored) => stored.key === entry.upsertKey);
+        if (held !== undefined) held.row = info.value;
+        else rows.push({ key: entry.upsertKey, row: info.value });
         bashRowsByRun.set(run, rows);
+        bashNewestByRun.set(run, info.value);
         for (const watcher of bashWatchers) {
           if (watcher.run !== run || watcher.closed) continue;
           const waiter = watcher.waiters.shift();
@@ -605,7 +612,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           run,
           // REPLAY FIRST, in write order: a snapshot taken now, so a row written
           // while the replay is being consumed lands in `pending` behind it.
-          pending: [...stored],
+          pending: stored.map((stored) => stored.row),
           waiters: [] as Array<(row: storev1.StoreAgentBash | null) => void>,
           closed: false,
         };
@@ -768,8 +775,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         for (const [workId, runId] of detachedAnnounced) {
           const owner = detachedOwner.get(workId);
           if (owner === undefined || !lineage.has(owner)) continue;
-          const rows = runId === undefined ? undefined : bashRowsByRun.get(runId);
-          const newest = rows?.[rows.length - 1]?.frame;
+          const newest = runId === undefined ? undefined : bashNewestByRun.get(runId)?.frame;
           const ended = newest?.result.case === "success" || newest?.result.case === "failure";
           if (!ended) {
             liveDetached.push(create(conversationv1.DetachedWorkIdSchema, { value: workId }));

@@ -90,7 +90,7 @@ func TestTheMidOutputCorpusSpoolIsNeverSettled(t *testing.T) {
 		t.Errorf("the mid-output spool wrote %d terminal row(s); a spool that states no terminator settles nothing", n)
 	}
 	// ...and every byte of it reached the consumer as deltas, in order.
-	joined := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(entries, fx.CallID))
+	joined := requireLatestTail(t, fx.CallID, bashFramesForRun(entries, fx.CallID))
 	if joined != string(payload) {
 		t.Errorf("the spool's deltas joined to %d bytes, wanted the capture's %d verbatim", len(joined), len(payload))
 	}

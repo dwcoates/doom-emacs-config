@@ -811,7 +811,7 @@ func (r *resolver) republishSubagent(s *wsState, unitID string, state *subagentS
 }
 
 // drawDetachedShell draws one detached shell's bubble: the command head and
-// the spool's TAIL, capped by the daemon and replaced whole on every push.
+// the spool's TAIL, as the producer cut it, replaced whole on every push.
 func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash) {
 	log := r.logger(s.id)
 	workID := work.GetValue()
@@ -826,49 +826,49 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.startedAtMs == 0"})
 			sh.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		}
-	case *conversationv1.AgentBash_Update:
-		// The offset is a GAP DETECTOR: bytes must arrive contiguously, and a
-		// frame that does not continue the spool is REFUSED rather than
-		// concatenated across a hole.
-		//
-		// A RE-DELIVERY IS NOT A HOLE. Two producers write this run's frames
-		// under one upsert key — the shim from the live stream, the sidecar
-		// from the spool file — so the consumer legitimately sees bytes it has
-		// already accumulated a second time. Those are dropped as a replay
-		// once they are shown to AGREE with what is held; a frame that starts
-		// past the spool's end, or that restates already-held bytes
-		// DIFFERENTLY, is real loss and stays an error.
-		from, out := frame.Update.GetFromOffset(), frame.Update.GetNewOutput()
-		if from > sh.nextOffset {
-			log.Error("daemon.feed.spool_gap",
-				"a detached shell's output frame did not continue the spool; the frame was refused",
-				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
+	case *conversationv1.AgentBash_Tail:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Tail"})
+		// THE TAIL IS A SNAPSHOT, DRAWN VERBATIM. The producer holds the run's
+		// window and cuts it exactly as it is drawn, so each frame supersedes
+		// the last whole and nothing here concatenates, joins or re-cuts.
+		// There is no offset and no gap to detect (owner ruling 2026-09-23:
+		// output beyond what is rendered is not stored).
+		tail := frame.Tail
+		if n := len(tail.GetText()); n > spoolCap {
+			// A PRODUCER DEFECT, refused rather than cut here: the cap is the
+			// contract's one number, and a tail past it means the writer and
+			// the renderer no longer agree on it.
+			log.Error("daemon.feed.spool_over_cap",
+				"a detached shell's tail is longer than the contract's cap; the frame was refused",
+				dlog.Context{"work": workID, "tail_bytes": n, "cap": spoolCap})
 			return
 		}
-		if from < sh.nextOffset {
-			overlap := sh.nextOffset - from
-			if overlap > uint64(len(out)) {
-				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "overlap > uint64(len(out))"})
-				overlap = uint64(len(out))
-			}
-			if sh.spool[from:from+overlap] != out[:overlap] {
-				log.Error("daemon.feed.spool_gap",
-					"a detached shell's output frame restated held bytes differently; the frame was refused",
-					dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
-				return
-			}
+		written := tail.GetBytesOmitted() + uint64(len(tail.GetText()))
+		switch {
+		case written == sh.written && tail.GetText() == sh.spool:
+			// A RE-DELIVERY IS NOT GROWTH: a re-opened watch replays the tail
+			// it already drew, and the run has said nothing new.
 			log.Debug("daemon.feed.spool_replay",
-				"a detached shell's output frame re-delivered bytes the spool already holds",
-				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from, "replayed": overlap})
-			out = out[overlap:]
+				"a detached shell's tail re-delivered the window already drawn",
+				dlog.Context{"work": workID, "written": written})
+		case written < sh.written:
+			// THE SPOOL STARTED OVER (a truncated or rotated file): the
+			// producer's window restarted with it, and the newest window is
+			// what the run now says.
+			log.Info("daemon.feed.spool_restarted",
+				"a detached shell's tail accounts for fewer bytes than the one drawn; the spool started over",
+				dlog.Context{"work": workID, "written": written, "held_written": sh.written})
+			sh.lastProgressMs = r.deps.Now().UnixMilli()
+		default:
+			// SPOOL GROWTH IS THE BEAT, and the daemon stamps it on the growth
+			// it just observed. FeedShellLive says so in the contract: the
+			// drawn instant is "the last output the daemon observed", so this
+			// ONE observer at this ONE point is the whole of it.
+			sh.lastProgressMs = r.deps.Now().UnixMilli()
 		}
-		sh.spool += out
-		sh.nextOffset += uint64(len(out))
-		// SPOOL GROWTH IS THE BEAT, and the daemon stamps it on the append it
-		// just observed. FeedShellLive says so in the contract: the drawn
-		// instant is "the last output the daemon observed", so this ONE
-		// observer at this ONE point is the whole of it.
-		sh.lastProgressMs = r.deps.Now().UnixMilli()
+		sh.spool = tail.GetText()
+		sh.linesOmitted = tail.GetLinesOmitted()
+		sh.written = written
 	case *conversationv1.AgentBash_Progress:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedShell", "branch": "case *conversationv1.AgentBash_Progress"})
 		// A BEAT MOVES NOTHING HERE, deliberately.
@@ -1004,10 +1004,12 @@ func (r *resolver) subagentStart(state *subagentState) int64 {
 	return state.firstObservedMs
 }
 
-// spoolCap is how much of a spool's tail the daemon carries. The body is a
-// SNAPSHOT replaced whole on every push, so a cap here is what keeps watching
-// a long command from costing more than running it.
-const spoolCap = 16 * 1024
+// spoolCap is how much of a spool's tail the daemon draws: the contract's
+// AgentBashTailCap, the ONE number the sidecar bounds the stored tail by too
+// (owner ruling 2026-09-23: output beyond what is rendered is not stored). The
+// body is a SNAPSHOT replaced whole on every push, so the cap is what keeps
+// watching a long command from costing more than running it.
+const spoolCap = int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
 
 // shellSubFeed is the sub-feed a detached shell's spool BODY rides — the feed
 // the head's FeedId resolves to, keyed by the run's own work id.
@@ -1088,18 +1090,17 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 	// THE BODY: the spool tail, on the shell's own sub-feed, present from the
 	// first output. Snapshot semantics — capped and replaced whole on every
 	// push. Nothing is pushed to a tail that has not opened this sub-feed.
-	if sh.spool == "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.spool == \"\""})
+	if sh.written == 0 {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.written == 0"})
 		r.logger(s.id).Debug("daemon.feed.detached_shell_row",
 			"a detached shell's head was upserted with no spool body yet",
 			dlog.Context{"work": workID, "settled": sh.settled != nil})
 		return
 	}
-	tail, omittedLines := capSpool(sh.spool)
-	spool := &frontendv1.FeedShellSpool{Text: tail}
-	if omittedLines > 0 {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "omittedLines > 0"})
-		spool.Omitted = &frontendv1.FeedShellOmitted{Text: formatEarlierLines(omittedLines)}
+	spool := &frontendv1.FeedShellSpool{Text: sh.spool}
+	if sh.linesOmitted > 0 {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.linesOmitted > 0"})
+		spool.Omitted = &frontendv1.FeedShellOmitted{Text: formatEarlierLines(sh.linesOmitted)}
 	}
 	// THE BODY IS SPOOL-ONLY. The command, clock and state live on the head;
 	// carrying them here too would duplicate them, so the body FeedShell sets
@@ -1114,25 +1115,7 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 	r.upsert(s, placement{feed: sub}, bodyRow, true)
 	r.logger(s.id).Debug("daemon.feed.detached_shell_row",
 		"a detached shell's head and spool body were upserted",
-		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": sh.settled != nil})
-}
-
-// capSpool keeps the spool's TAIL and reports how many earlier lines it drops.
-func capSpool(spool string) (string, uint64) {
-	if len(spool) <= spoolCap {
-		return spool, 0
-	}
-	dropped := spool[:len(spool)-spoolCap]
-	tail := spool[len(spool)-spoolCap:]
-	// Cut on a line boundary so the tail never begins mid-line.
-	for i := 0; i < len(tail); i++ {
-		if tail[i] == '\n' {
-			dropped = spool[:len(spool)-spoolCap+i+1]
-			tail = tail[i+1:]
-			break
-		}
-	}
-	return tail, countLines(dropped)
+		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "written": sh.written, "settled": sh.settled != nil})
 }
 
 // shellEnding renders how a shell ended from its terminal frame, and nil for

@@ -281,7 +281,7 @@ describe("StartTurn", () => {
     expect(order).toEqual(["durable", "submit"]);
   });
 
-  it("re-queues the prompt row behind the retry buffer when the store cannot take it", async () => {
+  it("still opens the turn when the store cannot ack the prompt row", async () => {
     // A STORE OUTAGE IS NOT A REFUSED TURN: the vendor can still do the work,
     // and letting the PersistenceError escape answered Code.Internal, which
     // the daemon cannot tell from a shim defect.
@@ -292,7 +292,68 @@ describe("StartTurn", () => {
     const response = await h.turns.startTurn(startTurn());
 
     expect(response.result.case).toBe("success");
-    expect(h.persistence.buffered.map((entry) => entry.upsertKey)).toContain("prompt:turn-1");
+  });
+
+  it("does NOT re-queue a prompt row the writer already holds", async () => {
+    // The writer keeps a durable row it could not ack on its own ordered
+    // buffer; a second copy queued here would be written twice.
+    const h = await harness();
+    h.persistence.writeDurable = () =>
+      Promise.reject(new PersistenceError("store_unavailable", "the store is down"));
+
+    await h.turns.startTurn(startTurn());
+
+    expect(h.persistence.buffered.map((entry) => entry.upsertKey)).not.toContain("prompt:turn-1");
+  });
+
+  it("still opens the turn when the store refuses the prompt row as malformed", async () => {
+    // The writer has named the row at ERROR and raised the converter defect;
+    // the turn is the vendor's work and still runs.
+    const h = await harness();
+    h.persistence.writeDurable = () =>
+      Promise.reject(new PersistenceError("invalid_request", "the store refused a durable row as malformed"));
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(response.result.case).toBe("success");
+  });
+
+  it("states at ERROR that the unacked prompt row is held by the retry buffer", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.writeDurable = () =>
+      Promise.reject(new PersistenceError("store_unavailable", "the store is down"));
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await h.turns.startTurn(startTurn());
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "the prompt row could not be acked before the turn; the retry buffer holds it in order",
+      }),
+    );
+  });
+
+  it("states at ERROR that the store refused the prompt row as malformed", async () => {
+    // Arrange.
+    const h = await harness();
+    h.persistence.writeDurable = () =>
+      Promise.reject(new PersistenceError("invalid_request", "the store refused a durable row as malformed"));
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    await h.turns.startTurn(startTurn());
+
+    // Assert.
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "the store refused the prompt row as malformed; the turn runs without it",
+      }),
+    );
   });
 
   it("does NOT swallow a non-persistence failure of the prompt write", async () => {
