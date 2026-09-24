@@ -475,6 +475,42 @@ func TestAGitKilledByASignalIsRecordedWithTheSignal(t *testing.T) {
 	}
 }
 
+func TestAGitKilledByASignalIsRecordedWithItsPid(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	fake := newFakeGit(t, killedBy(syscall.SIGKILL))
+
+	// Act.
+	_, _ = git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert: the pid is the one the killed child really had.
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no error record for a killed git in %+v", surfaces.records())
+	}
+	if got, want := record.Context["pid"], fake.only().Pid; got != want {
+		t.Fatalf("the record's pid = %v, want the killed child's %d", got, want)
+	}
+}
+
+func TestAGitThatExitedNonzeroIsRecordedWithItsPid(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	fake := newFakeGit(t, fails(1, "boom\n"))
+
+	// Act.
+	_, _ = git.ResolveRef(context.Background(), "/repo", "nope")
+
+	// Assert.
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.resolve_ref")
+	if !ok {
+		t.Fatalf("no error record for resolve_ref in %+v", surfaces.records())
+	}
+	if got, want := record.Context["pid"], fake.only().Pid; got != want {
+		t.Fatalf("the record's pid = %v, want the child's %d", got, want)
+	}
+}
+
 // --- a git that never ran ------------------------------------------------
 
 func TestUnrunnableGitReportsNoExitStatus(t *testing.T) {
@@ -525,6 +561,24 @@ func TestUnrunnableGitIsLoggedAtError(t *testing.T) {
 	// Assert.
 	if _, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch"); !ok {
 		t.Fatalf("a git that could not be run must be logged at ERROR")
+	}
+}
+
+func TestUnrunnableGitIsRecordedWithoutAPid(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty"))
+
+	// Act.
+	_, _ = git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert: no process ever existed, so none is named.
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no error record for an unrunnable git in %+v", surfaces.records())
+	}
+	if pid, named := record.Context["pid"]; named {
+		t.Fatalf("the record names pid %v for a git that never started", pid)
 	}
 }
 
@@ -730,5 +784,53 @@ func TestAGitKilledMidFlightIsACancellation(t *testing.T) {
 		if record.Level == "error" {
 			t.Fatalf("a killed git was recorded at ERROR: %+v", record)
 		}
+	}
+}
+
+func TestAGitCancelledMidFlightIsRecordedWithItsPid(t *testing.T) {
+	// Arrange: a git that is live, proven by the pipe rendezvous, when the
+	// context ends.
+	git, surfaces := newTestClient(t)
+	fifo := newFifo(t)
+	fake := newFakeGit(t, blocks(fifo))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := git.CurrentBranch(ctx, "/repo")
+		done <- err
+	}()
+	awaitOpen(t, fifo)
+
+	// Act.
+	cancel()
+	<-done
+
+	// Assert.
+	record, ok := recordFor(surfaces.records(), "info", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no info record for a cancelled git in %+v", surfaces.records())
+	}
+	if got, want := record.Context["pid"], fake.only().Pid; got != want {
+		t.Fatalf("the cancellation record's pid = %v, want the stopped child's %d", got, want)
+	}
+}
+
+func TestAGitCancelledBeforeItsSpawnIsRecordedWithoutAPid(t *testing.T) {
+	// Arrange: the context ends before the client ever spawns.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("main\n"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, _ = git.CurrentBranch(ctx, "/repo")
+
+	// Assert.
+	record, ok := recordFor(surfaces.records(), "info", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no info record for a cancelled git in %+v", surfaces.records())
+	}
+	if pid, named := record.Context["pid"]; named {
+		t.Fatalf("the cancellation record names pid %v for a git that never started", pid)
 	}
 }
