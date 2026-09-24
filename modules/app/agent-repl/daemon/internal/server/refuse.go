@@ -435,12 +435,7 @@ func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspa
 	// two, and the read met "sql: database is closed" at ERROR — the webapp
 	// layer's roster area lost a run to a ClientLog landing in it during the
 	// drain's exit. readRegistry holds Close off for the read's duration.
-	var record wsm.Workspace
-	ended, err := s.readRegistry(func() error {
-		var readErr error
-		record, readErr = s.deps.DB.Workspace(ctx, id)
-		return readErr
-	})
+	record, ended, err := s.registryWorkspace(ctx, id)
 	if ended {
 		s.log.Info(rpc, "refused a request that arrived while the daemon was shutting down",
 			dlog.Context{"workspace": string(id)})
@@ -503,6 +498,19 @@ func (s *server) readRegistry(read func() error) (ended bool, err error) {
 		return true, nil
 	}
 	return false, read()
+}
+
+// registryWorkspace is the ONE registry read a request's resolution makes --
+// the boundary's and resolveRegistered's alike -- run under readRegistry, so
+// neither can read a state client the exit has closed.
+func (s *server) registryWorkspace(ctx context.Context, id ids.WorkspaceID) (wsm.Workspace, bool, error) {
+	var record wsm.Workspace
+	ended, err := s.readRegistry(func() error {
+		var readErr error
+		record, readErr = s.deps.DB.Workspace(ctx, id)
+		return readErr
+	})
+	return record, ended, err
 }
 
 // failResolution renders a failed workspace RESOLUTION. The two endings that

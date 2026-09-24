@@ -63,12 +63,7 @@ func (s *server) beginRequest(
 			// left the state client free to close in between, and a ClientLog
 			// arriving during a drain's exit met "sql: database is closed" at
 			// ERROR here.
-			var record wsm.Workspace
-			ended, err := s.readRegistry(func() error {
-				var readErr error
-				record, readErr = s.deps.DB.Workspace(ctx, workspaceID)
-				return readErr
-			})
+			record, ended, err := s.registryWorkspace(ctx, workspaceID)
 			switch {
 			case ended:
 				log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_owned": false})

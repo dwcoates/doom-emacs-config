@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -670,5 +675,61 @@ func TestFailResolutionRecordsAGenuineFailureAtError(t *testing.T) {
 	}
 	if len(log.at("ERROR")) != 1 {
 		t.Fatalf("a genuine failure was recorded %d time(s) at ERROR, want once", len(log.at("ERROR")))
+	}
+}
+
+// TestRegistryWorkspaceAnswersTheRecord pins the shared read's ordinary answer.
+func TestRegistryWorkspaceAnswersTheRecord(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+
+	// Act.
+	record, ended, err := s.registryWorkspace(context.Background(), testWorkspaceID)
+
+	// Assert.
+	if ended || err != nil || record.Dir != testWorkspaceDir {
+		t.Fatalf("registryWorkspace = (%+v, ended %v, %v), want the registered record", record, ended, err)
+	}
+}
+
+// TestEveryResolutionReadGoesThroughRegistryWorkspace fails a resolution that
+// reads the registry on its own, outside the gate Close takes.
+func TestEveryResolutionReadGoesThroughRegistryWorkspace(t *testing.T) {
+	cases := []struct{ file, function string }{
+		{"refuse.go", "resolveRegistered"},
+		{"requestlog.go", "beginRequest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.function, func(t *testing.T) {
+			// Arrange.
+			fset := token.NewFileSet()
+			parsed, err := parser.ParseFile(fset, tc.file, nil, 0)
+			if err != nil {
+				t.Fatalf("parse %s: %v", tc.file, err)
+			}
+			var body string
+			for _, decl := range parsed.Decls {
+				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == tc.function {
+					raw, readErr := os.ReadFile(tc.file)
+					if readErr != nil {
+						t.Fatalf("read %s: %v", tc.file, readErr)
+					}
+					body = string(raw[fset.Position(fn.Body.Pos()).Offset:fset.Position(fn.Body.End()).Offset])
+				}
+			}
+			if body == "" {
+				t.Fatalf("%s declares no %s", tc.file, tc.function)
+			}
+
+			// Act.
+			direct := strings.Contains(body, "s.deps.DB.Workspace(")
+			shared := strings.Contains(body, "s.registryWorkspace(")
+
+			// Assert.
+			if direct || !shared {
+				t.Fatalf("%s: direct registry read %v, shared helper %v; its registry read must go through registryWorkspace", tc.function, direct, shared)
+			}
+		})
 	}
 }
