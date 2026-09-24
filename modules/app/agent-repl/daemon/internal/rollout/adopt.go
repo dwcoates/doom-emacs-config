@@ -882,9 +882,32 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	}
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+	// THE HANDLE BECOMES A WRITING ONE AT THE TAKEOVER, whatever was handed
+	// over. It used to be promoted only inside a per-workspace adoption, so a
+	// successor handed NOTHING -- an incumbent whose handover listed no
+	// workspace -- took over on the joining-mode read-only handle and kept it
+	// for its whole life: every write it then made was refused, the first of
+	// them the takeover's own orphan claims (live deploy 2026-09-24 15:07,
+	// successor pid 80861, `wsm: handle is read-only` x3). The takeover is
+	// the proof the outgoing daemon has stopped writing (it released its boot
+	// claim by exiting), so this is the moment the one-writer invariant moves.
+	promoted := c.promoteAtTakeover(fields)
 	c.adoptStragglers(fields)
-	c.recoverOrphans(fields)
+	if promoted {
+		c.recoverOrphans(fields)
+	}
 	c.bounceStaleAdopted(fields)
+}
+
+// promoteAtTakeover promotes the state handle to writing, reporting whether it
+// writes. A refusal is ERROR and the orphan recovery is not attempted: it would
+// adopt shims whose serving claims could not be written.
+func (c *controller) promoteAtTakeover(fields dlog.Context) bool {
+	if err := c.deps.DB.Promote(c.lifetime(context.Background())); err != nil {
+		c.log.Error(opAdopt, "the state handle could not be promoted to writing at the takeover; the shims nothing adopted are not recovered", withCause(fields, err))
+		return false
+	}
+	return true
 }
 
 // tookOverSignalLocked answers the channel that closes when this daemon takes
