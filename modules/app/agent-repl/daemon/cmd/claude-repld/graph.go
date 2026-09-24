@@ -1229,10 +1229,7 @@ const envStartSessionBound = "AGENT_REPL_START_SESSION_BOUND"
 // workspace.DefaultStartSessionBound; a malformed or non-positive value is a
 // REFUSAL, on the same reasoning resolveAdoptBound states.
 func resolveStartBound(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return workspace.DefaultStartSessionBound, nil
-	}
-	return parsePositiveDuration(envStartSessionBound, value)
+	return resolveDurationKnob(envStartSessionBound, value, workspace.DefaultStartSessionBound)
 }
 
 // envBootAdoptBound overrides boot.DefaultAdoptBound. It exists for the
@@ -1244,10 +1241,7 @@ const envBootAdoptBound = "AGENT_REPL_BOOT_ADOPT_BOUND"
 // because a knob that silently did nothing would make the run it was set for
 // report a bound it never used.
 func resolveAdoptBound(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return boot.DefaultAdoptBound, nil
-	}
-	return parsePositiveDuration(envBootAdoptBound, value)
+	return resolveDurationKnob(envBootAdoptBound, value, boot.DefaultAdoptBound)
 }
 
 // footerFaults is the health package's fault sink, drawn on the footer. It

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -23,4 +24,14 @@ func parsePositiveDuration(name, value string) (time.Duration, error) {
 		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", name, value)
 	}
 	return d, nil
+}
+
+// resolveDurationKnob is a positive-duration knob whose UNSET value is a
+// default: blank answers fallback, anything else goes through
+// parsePositiveDuration.
+func resolveDurationKnob(name, value string, fallback time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return fallback, nil
+	}
+	return parsePositiveDuration(name, value)
 }
