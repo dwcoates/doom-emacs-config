@@ -472,6 +472,13 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   (`bash_tail_over_cap`, on `…bash.frame.tail.text`). Every supersession still
   reaches a live `WatchBashRun` watcher as a row of its own; a replay serves
   the newest window at the tail's first-insert position.
+- **A RETIRED-ARM ROW IS OUTMODED, NOT DAMAGE.** Rows written under the retired
+  contiguous-delta arm (`AgentBash.update`, reserved 2; keys
+  `bash:<run>:<from_offset>`) are left in place untouched. They decode to NO
+  result arm — which no write can produce, since an armless frame is refused —
+  so `BashRun` skips them and states the count ONCE PER REPLAY at INFO, never
+  one record per row and never at ERROR. A run holding only such rows replays
+  nothing and is the ordinary unknown-run refused open.
 - **ONE `detached_work` ROW PER RUN, LOCATED BY ORIGIN UNIT FIRST.** The
   announcement addresses a run by its `DetachedWorkId`; the run's own frames
   address it by its `AgentActivityId`. Both writers resolve the row the same way

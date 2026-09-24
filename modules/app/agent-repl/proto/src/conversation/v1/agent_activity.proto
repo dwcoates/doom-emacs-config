@@ -1754,10 +1754,6 @@ message AgentBash {
     // and AGAIN on the work's own stream if the command detaches, because a
     // stream's first frame can never presume a frame delivered on another one.
     AgentBashStart start = 1;
-    // RETIRING: the contiguous-delta model this arm carried is replaced by
-    // `tail` below and no producer writes it. It is reserved once every
-    // consumer reads `tail`.
-    AgentBashUpdate update = 2;
     // The run's RENDERED OUTPUT so far: the most recent bytes, bounded by
     // AgentBashTailCap, and how much came before them. A SNAPSHOT that
     // supersedes the previous one whole, never a delta.
@@ -1771,6 +1767,13 @@ message AgentBash {
     // The call could not be performed at all.
     AgentBashFailure failure = 4;
   }
+  // RETIRED 2026-09-23 (owner ruling: output beyond what is rendered is not
+  // stored): `update` carried the contiguous-delta model, one AgentBashUpdate
+  // per chunk with a `from_offset` gap detector, which stored a spool's whole
+  // file. `tail` replaces it. A row stored under it decodes to NO arm and is
+  // outmoded; the number and name are never reused.
+  reserved 2;
+  reserved "update";
 }
 
 // The command the agent ran.
@@ -1818,33 +1821,6 @@ message AgentBashStart {
   // When the shell was handed the command, so a consumer can draw how long it
   // has been running.
   AgentActivityStartedAt started_at = 2;
-}
-
-// Output that accumulated since the last frame on this stream.
-//
-// RETIRING, superseded by AgentBashTail: no producer writes this arm.
-//
-// EXPECT THIS ARM ONLY ONCE THE COMMAND HAS DETACHED. A foreground command's
-// output is observable NOWHERE while it runs — no producer writes it anywhere a
-// reader can reach until the call returns — so an in-turn shell item goes
-// straight from `start` to a terminal arm. Incremental output exists only for a
-// command that became background work, whose accumulating output is read from
-// the file written for it.
-message AgentBashUpdate {
-  // The bytes added since the previous frame. A DELTA, not the whole spool: the
-  // whole spool re-sent per frame is how watching a long command costs more than
-  // running it. Deliberately UNPARSED and NOT line-split — a delta can begin and
-  // end mid-line, so imposing lines here would impose a structure the output
-  // does not have.
-  string new_output = 1;
-
-  // The offset these bytes START at, as a GAP DETECTOR rather than addressing.
-  //
-  // It MUST equal the number of bytes the consumer has already accumulated for
-  // this unit. Anything else means bytes were lost, and the consumer REFUSES the
-  // frame rather than concatenating across a hole and drawing output that never
-  // existed. Never seeked to: this is an append-only sequence.
-  uint64 from_offset = 2;
 }
 
 // How much of a detached run's output is ever stored or carried: THE
