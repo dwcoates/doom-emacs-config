@@ -20,7 +20,7 @@ func (h *harness) peerMessage(id, sender, body string) {
 		Sender: sender,
 		Body:   body,
 		Id:     id,
-	}, noAddress())
+	}, nil, noAddress())
 }
 
 func TestPeerMessageDrawsAPeerRow(t *testing.T) {

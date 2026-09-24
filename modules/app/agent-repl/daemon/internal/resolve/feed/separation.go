@@ -40,8 +40,8 @@ func (r *resolver) clearTurnFor(s *wsState, pointer *conversationv1.HistoryPoint
 			return turn, true
 		}
 	}
-	if s.turnInFlight != nil && s.directiveTurns[*s.turnInFlight] {
-		return *s.turnInFlight, true
+	if turn := s.evidenceTurn(); turn != nil && s.directiveTurns[*turn] {
+		return *turn, true
 	}
 	return "", false
 }

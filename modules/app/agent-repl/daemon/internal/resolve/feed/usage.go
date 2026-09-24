@@ -62,8 +62,8 @@ func (s *wsState) fileAPIResponse(unit string, usage *conversationv1.TokenUsage)
 	// opened the turn both live and on replay. Recorded on the FIRST filing so
 	// the response's turn is known even before its usage frame arrives, and
 	// never re-attributed afterward: a response keeps the turn it opened under.
-	if _, attributed := s.apiResponseTurn[response]; !attributed && s.turnStamp != nil {
-		s.apiResponseTurn[response] = string(*s.turnStamp)
+	if _, attributed := s.apiResponseTurn[response]; !attributed && s.rowTurn() != nil {
+		s.apiResponseTurn[response] = string(*s.rowTurn())
 	}
 	if usage == nil {
 		return "", false

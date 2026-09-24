@@ -51,6 +51,11 @@ type Command struct {
 	// fresh pointer could not express that, so a test for it would be testing a
 	// shape production never produces.
 	Pointer string `json:"pointer,omitempty"`
+	// Turn stamps push_agent_frame's entry with the turn it was produced
+	// within (HistoryEntryAt.turn), as the real shim stamps every row of an
+	// open turn. Empty delivers it unstamped, which is how pre-contract data
+	// reaches the daemon.
+	Turn string `json:"turn,omitempty"`
 	// Work addresses push_bash (a DetachedWorkId value).
 	Work string `json:"work,omitempty"`
 	// Stream names the stream family drop_stream severs.
