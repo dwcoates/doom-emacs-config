@@ -1766,6 +1766,22 @@ export function createFakeQuery(
         );
         return liveTasks.size > 0;
       }
+      // ALREADY IN THE BACKGROUND IS AN ANSWER, NOT A TRANSITION. The real
+      // vendor patches `is_backgrounded` exactly once, on the Ctrl-B that moves
+      // foreground work out of the turn (the `ctrl-b-detach-of-foreground-work`
+      // and `turn-stop-max-turns` captures, each after its own `task_started`);
+      // a `run_in_background` task is never patched (`bash-detached`). Asking
+      // about work that is already backgrounded — a revived shim's
+      // reconciliation does exactly that — must not re-announce it: the
+      // replayed patch reached a shim that never saw the task start and so
+      // could name no originating call for it.
+      if (live.backgrounded) {
+        LOGGER.debug(
+          { claude_session_id: sessionUuid, task_id: live.taskId, tool_use_id: toolUseId },
+          "fake vendor background_tasks named a task already in the background; answered without a patch",
+        );
+        return true;
+      }
       // STATE FIRST, THEN THE ANNOUNCEMENTS. Every emit below must describe a
       // world that is already true: a consumer that read the level while the
       // flag was still unset would see the task listed as foreground in the
