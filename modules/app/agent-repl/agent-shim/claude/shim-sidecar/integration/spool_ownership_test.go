@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -395,7 +396,7 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 	spool.AppendRaw([]byte("only written once\nEXIT=0\n"))
 	awaitCursorInBatches(ctx, t, fake, linkedSpool, spool.Offset())
 
-	// Assert: one file identity, one contiguous delta sequence.
+	// Assert: one file identity, one tail whose accounting never runs backwards.
 	ids := map[string]bool{}
 	for _, b := range fake.Batches() {
 		cs := b.GetBatch().GetCursorAdvance()
@@ -409,17 +410,10 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 	if len(ids) > 1 {
 		t.Errorf("one spool reached by two spellings produced %d file identities: %v", len(ids), sortedStrings(keysOf(ids)))
 	}
-	var accumulated uint64
-	for _, frame := range bashFramesForRun(fake.Entries(), capturedBashCall1) {
-		up := frame.GetUpdate()
-		if up == nil {
-			continue
-		}
-		if up.GetFromOffset() != accumulated {
-			t.Fatalf("the two spellings were read as two files: an update states from_offset %d where %d was accumulated",
-				up.GetFromOffset(), accumulated)
-		}
-		accumulated += uint64(len(up.GetNewOutput()))
+	// Read as two files, two windows would supersede one tail row in turn and
+	// the accounting would run backwards; read as one, it never does.
+	if got := requireLatestTail(t, capturedBashCall1, bashFramesForRun(fake.Entries(), capturedBashCall1)); !strings.HasSuffix(got, "only written once\nEXIT=0\n") {
+		t.Errorf("the run's tail is %q, want it to end on the bytes written once", got)
 	}
 }
 

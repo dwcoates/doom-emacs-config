@@ -478,8 +478,19 @@ func validateStoreAgentBash(bash *storev1.StoreAgentBash, index int) error {
 	if bash.GetFrame().GetResult() == nil {
 		return invalidFieldf(entryField(index, "agent_update.bash.frame"), "entries[%d].agent_update.bash.frame sets no `result` arm", index)
 	}
+	// ONLY WHAT IS RENDERED IS STORED (owner ruling 2026-09-23). The tail's
+	// bound is the contract's one constant, the same the producer cuts by and
+	// the renderer draws by, so a longer tail is a producer that no longer
+	// agrees with either — refused rather than stored past the cap.
+	if n := len(bash.GetFrame().GetTail().GetText()); n > bashTailCap {
+		return invalidSitef(SiteBashTailOverCap, entryField(index, "agent_update.bash.frame.tail.text"),
+			"entries[%d].agent_update.bash.frame.tail.text is %d bytes, past the %d-byte AGENT_BASH_TAIL_CAP_BYTES", index, n, bashTailCap)
+	}
 	return nil
 }
+
+// bashTailCap is the contract's bound on a detached run's stored tail.
+const bashTailCap = int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
 
 // validateStoreAgentWorkflow is the base function for
 // store.v1.StoreAgentWorkflow.

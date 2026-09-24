@@ -85,11 +85,7 @@ func TestASpoolMarkerCutMidTokenIsNotMatched(t *testing.T) {
 	if n := countUpsertKey(entries, "bash:"+fx.CallID+":terminal"); n != 0 {
 		t.Errorf("a marker cut mid-token ended the run (%d terminal rows); a split marker is not evidence of completion", n)
 	}
-	var joined strings.Builder
-	for _, row := range bashFramesForRun(entries, fx.CallID) {
-		joined.WriteString(row.GetUpdate().GetNewOutput())
-	}
-	if got := joined.String(); !strings.Contains(got, "some output\nEXIT=0\n") {
+	if got := requireLatestTail(t, fx.CallID, bashFramesForRun(entries, fx.CallID)); !strings.Contains(got, "some output\nEXIT=0\n") {
 		t.Errorf("the split bytes reached the consumer as %q; nothing may be dropped just because it was not a marker", got)
 	}
 }
