@@ -1903,6 +1903,16 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	// leaves the map: the host view's session arm changes here, whatever the
 	// teardown below then does.
 	defer f.publishHost(ws)
+	// THE STAND-DOWN IS ARMED BEFORE THE WATCHER CLOSES. A stop is a teardown
+	// this daemon orders, and the watcher's close reads the latch to tell the
+	// bounce registry HOW the shim departed: an ordered departure unregisters
+	// a registered shim bounce, while an unasked one relaunches the shim. Left
+	// to the kill below, the latch arrived after the close, so a stop that no
+	// KillSession preceded (a transcript bind's swap) read as a close on a
+	// running shim, the registry heard no departure at all, and a bounce
+	// registered behind the stopped session's work waited for the next
+	// session's edges instead of being decided.
+	session.client.StandDown()
 	if session.watcher != nil {
 		if err := session.watcher.Close(); err != nil {
 			return fmt.Errorf("stop session for %q: close the watcher: %w", ws, err)
