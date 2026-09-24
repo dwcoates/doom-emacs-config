@@ -293,8 +293,19 @@ restart.
 
 An unordered departure with no bounce registered revives the session at once
 (`promptqueue.reviveAfterDeath`, the prompt's own revival): same vendor session,
-a prompt sent meanwhile joins it. The cut turn ends as `query_died`. One
-unattended revival until a turn ends; a second death is WARN and left down.
+a prompt sent meanwhile joins it. The cut turn ends as `agent_process_died`
+(`wsm.CloseAgentDied`). One unattended revival until a turn ends; a second
+death is WARN and left down.
+
+### A turn row closes through ONE door
+
+Every close of a `turns` row goes through `promptqueue/turnclose.go`
+(`closeTurn`, `Queue.CloseOrphans`, `Queue.ClaimDisplacedTurn`), which also
+tells the feed (`OnTurnClosed`): a turn with no terminal of its own gets its
+ending drawn from the close, and a replay draws it from the durable close.
+`PutTurn` never writes a close. `promptqueue/doorguard_test.go` fails any
+other production close; `door_test.go` holds every close path to exactly one
+ending row, live and on replay.
 
 ## Environment (process contracts and test knobs)
 
