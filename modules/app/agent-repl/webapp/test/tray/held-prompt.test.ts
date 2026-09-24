@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -23,20 +23,35 @@ import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
+  HELD_STATUS_BADGES,
   drawHeldPrompt,
   drawUnsupportedBlock,
+  heldBadgeClasses,
   sessionCommandLiteral,
   type HeldPromptDroppedDetail,
+  type HeldStatus,
 } from "../../src/tray/held-prompt.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_EXPAND_ONLY_CLASS,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../src/bubble/draw.js";
 import { PROMPT_WAVE_ATTRIBUTE } from "../../src/breathing.js";
-import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
+import {
+  FITTING_TREE,
+  WIDE_TREE,
+  installTreeLayout,
+  stagedCols,
+  treeLineWidths,
+  useTreeLayout,
+} from "../tree-layout.js";
+import { installClickExpand } from "../../src/expand.js";
+import { resetLoggingForTests } from "../../src/log.js";
+import stylesheet from "../../src/styles.css?raw";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -212,7 +227,7 @@ describe("drawHeldPrompt classification arms", () => {
     it(`badges the ${testCase.name} arm distinctly`, () => {
       const { tc } = trayContext();
       const card = drawHeldPrompt(testCase.prompt, tc);
-      expect(card.querySelector(".queued-badge")?.textContent).toBe(testCase.badge);
+      expect(card.querySelector(".queued-head > .held-badge")?.textContent).toBe(testCase.badge);
     });
   }
 
@@ -341,10 +356,10 @@ describe("drawHeldPrompt hold arms", () => {
       expect(card.getAttribute("data-hold")).toBe(hold.arm);
     });
 
-    it(`explains the ${hold.name} hold`, () => {
+    it(`badges the ${hold.name} hold in its own words`, () => {
       const { tc } = trayContext();
       const card = drawHeldPrompt(hold.prompt, tc);
-      expect(card.querySelector(".lease-reason")?.textContent).toBe(hold.line);
+      expect(card.querySelector(`.queued-head > [data-held-status="${hold.arm}"]`)?.textContent).toBe(hold.line);
     });
   }
 
@@ -354,7 +369,13 @@ describe("drawHeldPrompt hold arms", () => {
       heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
       tc,
     );
-    expect(card.querySelector(".lease-reason")?.getAttribute("data-schedule-id")).toBe("sched-9");
+    expect(card.querySelector('[data-held-status="shutdown"]')?.getAttribute("data-schedule-id")).toBe("sched-9");
+  });
+
+  it("titles a keep-alive hold's badge with the turn it waits on", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka-1" } } } }), tc);
+    expect(card.querySelector<HTMLElement>('[data-held-status="keepAlive"]')?.title).toBe("waiting on turn ka-1");
   });
 
   it("refuses a keep-alive hold whose turn is unset", () => {
@@ -709,10 +730,10 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     expect(drawHeldPrompt(heldPrompt(), tc).hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
   });
 
-  it("puts its badges and queued age in the header strip", () => {
+  it("puts its badges in the header strip", () => {
     const { tc } = trayContext();
     const head = drawHeldPrompt(heldPrompt(), tc).querySelector(".queued-head");
-    expect([head?.classList.contains(BUBBLE_STRIP_CLASS), head?.querySelector("[data-queued]") !== null]).toEqual([
+    expect([head?.classList.contains(BUBBLE_STRIP_CLASS), head?.querySelector(".held-badge") !== null]).toEqual([
       true,
       true,
     ]);
@@ -727,7 +748,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
   it("keeps its actions after the scroll box, outside the cap", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    expect(card.lastElementChild?.classList.contains("queued-actions")).toBe(true);
+    expect(card.lastElementChild?.querySelector(":scope > .queued-actions")).not.toBeNull();
   });
 
   it("carries no private fold of its own", () => {
@@ -739,7 +760,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     ["no hold", null, []],
     ["a lease hold", { case: "shutdown", value: { scheduleId: "s" } }, ["lease-card"]],
     ["a keep-alive hold", { case: "keepAlive", value: { turn: { value: "ka-1" } } }, ["keep-alive-card"]],
-  ] as const)("names %s's frame with its hook, which selects only the border", (_name, hold, frames) => {
+  ] as const)("names %s by its hook, which selects no border", (_name, hold, frames) => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(hold === null ? {} : { hold: hold as never }), tc);
     expect(["lease-card", "keep-alive-card"].filter((frame) => card.classList.contains(frame))).toEqual(frames);
@@ -866,5 +887,262 @@ describe("the tray's own logging", () => {
     drawHeldPrompt(heldPrompt(), tc);
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+/**
+ * THE STATUS BADGES (owner spec, 2026-09-23): every status a held card can show
+ * is a `.badge` whose color class comes from ONE table. The owner's anchors are
+ * WAITING red and INTERRUPTING green; the rest are listed here for the owner to
+ * confirm, and the table in src/tray/held-prompt.ts must match them row for row.
+ */
+const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
+  classifying: "run",
+  interject: "ok",
+  holdForTurnEnd: "err",
+  uninterruptibleTurn: "err",
+  classificationError: "err",
+  accepted: "muted",
+  shutdown: "amber",
+  buildRefresh: "amber",
+  keepAlive: "teal",
+  sessionStarting: "teal",
+};
+
+describe("the held status badge table", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  it.each(Object.entries(EXPECTED_BADGES))("badges %s in the %s tone", (status, tone) => {
+    // Arrange / Act
+    const classes = heldBadgeClasses(status);
+    // Assert
+    expect(classes).toBe(`badge held-badge ${tone}`);
+  });
+
+  it("names every status the owner's table names, and no other", () => {
+    // Arrange / Act
+    const named = Object.keys(HELD_STATUS_BADGES).sort();
+    // Assert
+    expect(named).toEqual(Object.keys(EXPECTED_BADGES).sort());
+  });
+
+  it("names every classification arm the schema can send", () => {
+    // Arrange / Act
+    const arms = oneofArms(HeldPromptSchema, "classification");
+    // Assert
+    expect(arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm))).toEqual([]);
+  });
+
+  it("names every hold arm the schema can send", () => {
+    // Arrange / Act
+    const arms = oneofArms(HeldPromptSchema, "hold");
+    // Assert
+    expect(arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm))).toEqual([]);
+  });
+
+  it("refuses a status the table does not name", () => {
+    // Arrange / Act / Assert
+    expect(() => heldBadgeClasses("someNewArm")).toThrow(MalformedView);
+  });
+
+  it("refuses a name the table only inherits", () => {
+    // Arrange / Act / Assert
+    expect(() => heldBadgeClasses("toString")).toThrow(MalformedView);
+  });
+
+  it("logs the refused status as an error through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    expect(() => heldBadgeClasses("someNewArm")).toThrow(MalformedView);
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt.badge-unknown-status");
+    expect([record.level.case, (record.context as Record<string, unknown>).status]).toEqual(["error", "someNewArm"]);
+  });
+});
+
+describe("every status a held card shows is a badge in the table's tone", () => {
+  const cards: Array<[HeldStatus, () => HeldPrompt]> = [
+    ["classifying", () => heldPrompt({ classification: { case: "classifying", value: {} } })],
+    ["interject", () => heldPrompt({ classification: { case: "interject", value: { rationale: "now" } } })],
+    ["holdForTurnEnd", () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } })],
+    [
+      "uninterruptibleTurn",
+      () => heldPrompt({ classification: { case: "uninterruptibleTurn", value: { command: SessionCommand.CLEAR } } }),
+    ],
+    [
+      "classificationError",
+      () => heldPrompt({ classification: { case: "classificationError", value: { detail: "d" } } }),
+    ],
+    [
+      "accepted",
+      () =>
+        heldPrompt({
+          classification: { case: "holdForTurnEnd", value: { rationale: "r", accepted: { accepted: true } } },
+        }),
+    ],
+    ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
+    ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
+    ["keepAlive", () => heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } })],
+    ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
+  ];
+
+  it.each(cards)("draws the %s status as a badge in the header strip", (status, prompt) => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(prompt(), tc);
+    // Assert
+    expect(card.querySelector(`.queued-head > [data-held-status="${status}"]`)?.className).toBe(
+      `badge held-badge ${EXPECTED_BADGES[status]}`,
+    );
+  });
+
+  it("draws no acceptance badge on a hold the user has not confirmed", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "r" } } }),
+      tc,
+    );
+    // Assert
+    expect(card.querySelector('[data-held-status="accepted"]')).toBeNull();
+  });
+});
+
+/** The stylesheet's selector for an expand-only element the toggle has not opened. */
+const HIDDEN_WHILE_COLLAPSED = (() => {
+  const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+  const found = /([^{}]*\.bubble-expand-only)\s*\{\s*display:\s*none;\s*\}/.exec(css)?.[1]?.trim();
+  if (found === undefined) throw new Error("the stylesheet hides no expand-only region");
+  return found;
+})();
+
+describe("a held prompt collapsed and expanded", () => {
+  /** A held prompt carrying every expand-only part, mounted under the one toggle. */
+  function mountedFull(): HTMLElement {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({
+        classification: { case: "holdForTurnEnd", value: { rationale: "it can wait" } },
+        hold: { case: "shutdown", value: { scheduleId: "sched-9" } },
+      }),
+      tc,
+    );
+    const host = document.createElement("div");
+    installClickExpand(host, () => "");
+    host.append(card);
+    document.body.append(host);
+    return card;
+  }
+
+  const EXPAND_ONLY: Array<[string, string]> = [
+    ["the queued age", "[data-queued]"],
+    ["the rationale", ".queued-reason"],
+    ["the Release button", '[data-held-action="release"]'],
+    ["the Cancel button", '[data-held-action="drop"]'],
+    ["the Accept button", '[data-held-action="accept"]'],
+  ];
+
+  it("holds nothing but badges in its collapsed strip", () => {
+    // Arrange / Act
+    const head = mountedFull().querySelector(".queued-head");
+    // Assert
+    expect([...(head?.children ?? [])].map((child) => child.classList.contains("held-badge"))).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("keeps its badges visible while collapsed", () => {
+    // Arrange / Act
+    const badges = [...mountedFull().querySelectorAll(".held-badge")];
+    // Assert
+    expect(badges.map((badge) => badge.closest(HIDDEN_WHILE_COLLAPSED))).toEqual([null, null]);
+  });
+
+  it("puts the details in the bubble's one expand-only region", () => {
+    // Arrange / Act
+    const card = mountedFull();
+    // Assert
+    expect(card.querySelector(`:scope > .${BUBBLE_EXPAND_ONLY_CLASS}`)?.classList.contains("queued-details")).toBe(
+      true,
+    );
+  });
+
+  it.each(EXPAND_ONLY)("hides %s while collapsed", (_name, selector) => {
+    // Arrange / Act
+    const part = mountedFull().querySelector(selector);
+    // Assert
+    expect(part?.closest(HIDDEN_WHILE_COLLAPSED)).not.toBeNull();
+  });
+
+  it.each(EXPAND_ONLY)("shows %s once the bubble is expanded", (_name, selector) => {
+    // Arrange
+    const card = mountedFull();
+    // Act
+    card.querySelector<HTMLElement>(".queued-head")?.click();
+    // Assert
+    expect(card.querySelector(selector)?.closest(HIDDEN_WHILE_COLLAPSED)).toBeNull();
+  });
+
+  it("hides the details again once the bubble is collapsed", () => {
+    // Arrange
+    const card = mountedFull();
+    const head = card.querySelector<HTMLElement>(".queued-head");
+    head?.click();
+    // Act
+    head?.click();
+    // Assert
+    expect(card.querySelector(".queued-details")?.closest(HIDDEN_WHILE_COLLAPSED)).not.toBeNull();
+  });
+
+  it("draws a refused action's sentence inside the expand-only region", async () => {
+    // Arrange
+    const { tc } = trayContext(errorResponse);
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="release"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")?.parentElement?.classList.contains("queued-details")).toBe(true);
+  });
+});
+
+describe("a tree the held prompt carries, at the held bubble's halved width", () => {
+  let uninstall: (() => void) | null = null;
+  afterEach(() => {
+    uninstall?.();
+    uninstall = null;
+    document.body.replaceChildren();
+  });
+
+  /** A held prompt of TEXT under a column, its max-width the browser's half of 77%. */
+  function mountedHalved(text: string): { card: HTMLElement; cols: number } {
+    const installed = installTreeLayout({ maxWidth: "calc(38.5%)" });
+    uninstall = installed.uninstall;
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(saying(text), tc);
+    const column = document.createElement("div");
+    column.append(card);
+    document.body.append(column);
+    return { card, cols: stagedCols({ ...installed.layout, maxWidth: "38.5%" }) };
+  }
+
+  it("wraps at half the bubble cap", () => {
+    // Arrange / Act
+    const { card, cols } = mountedHalved(WIDE_TREE);
+    // Assert
+    expect(Math.max(...treeLineWidths(card))).toBeLessThanOrEqual(cols);
+  });
+
+  it("wraps a tree that would fit a full-width bubble", () => {
+    // Arrange / Act
+    const { card } = mountedHalved(FITTING_TREE);
+    // Assert
+    expect(treeLineWidths(card).length).toBeGreaterThan(3);
   });
 });

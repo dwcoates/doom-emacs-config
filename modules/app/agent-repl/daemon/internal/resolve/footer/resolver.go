@@ -8,7 +8,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
@@ -47,7 +46,6 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		dwell:         DefaultMomentaryDwell,
 		alarmTokens:   DefaultTokenAlarmThreshold,
 		rateNewsworth: DefaultRateLimitNewsworthyThreshold,
-		encodeFeedID:  feedid.Encode,
 	}
 	for _, apply := range opts {
 		apply(&o)
@@ -159,6 +157,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	view := r.render(ws, s)
 	arm, armChanged, previousArm := s.observeArm(view)
 	line, lineChanged, previousLine := s.observeLine(view)
+	jumps := s.drainJumpNotes()
 	topic := r.topicLocked(ws)
 	log := r.logOf(ws, s)
 	r.mu.Unlock()
@@ -169,6 +168,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	log.Debug(operation, message, ctx)
 	logArmChange(log, operation, arm, armChanged, previousArm)
 	logLineChange(log, operation, arm, line, lineChanged, previousLine)
+	logJumpNotes(log, jumps)
 	topic.Publish(view)
 }
 
@@ -219,6 +219,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		line         activityLine
 		lineChanged  bool
 		previousLine activityLine
+		jumps        []dlog.Context
 	}
 	r.mu.Lock()
 	global()
@@ -235,6 +236,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 			topic: r.topicLocked(ws), view: view, log: r.logOf(ws, s),
 			arm: arm, armChanged: armChanged, previousArm: previousArm,
 			line: line, lineChanged: lineChanged, previousLine: previousLine,
+			jumps: s.drainJumpNotes(),
 		})
 	}
 	r.mu.Unlock()
@@ -247,6 +249,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		p.log.Debug(operation, message, ctx)
 		logArmChange(p.log, operation, p.arm, p.armChanged, p.previousArm)
 		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
+		logJumpNotes(p.log, p.jumps)
 		p.topic.Publish(p.view)
 	}
 }
@@ -697,9 +700,16 @@ func (r *resolver) logUnreadableSample(ws ids.WorkspaceID, s *wsState, usage *co
 		// report and nothing was read.
 		return
 	}
+	fields := dlog.Context{"reason": unavailableReason(unavailable.Unavailable)}
+	// THE SHIM'S OWN CAUSE RIDES THE RECORD. Since the strip stopped drawing an
+	// unread caveat (owner ruling, fc4917be4) this breadcrumb is the ONLY place
+	// a sampling failure stays visible, and the reason arm alone says only
+	// "something failed" — the cause is the shim's account of what.
+	if failure := unavailable.Unavailable.GetSamplingFailure(); failure != nil {
+		fields["cause"] = failure.GetCause()
+	}
 	r.logOf(ws, s).Debug("daemon.footer.usage_sample_unreadable",
-		"an account-usage sample read no figure; the figures on hand stand",
-		dlog.Context{"reason": unavailableReason(unavailable.Unavailable)})
+		"an account-usage sample read no figure; the figures on hand stand", fields)
 }
 
 // unavailableReason names an unavailable sample's reason arm for the logs. An

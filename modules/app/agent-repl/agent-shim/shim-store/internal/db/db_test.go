@@ -307,7 +307,7 @@ func batch(entries ...*storev1.StoreEntry) *storev1.EntryBatch {
 // writeOK writes a batch that must succeed.
 func writeOK(t *testing.T, d *DB, entries ...*storev1.StoreEntry) WriteResult {
 	t.Helper()
-	result, err := d.WriteBatch(ctx(), "test-producer", batch(entries...), nil)
+	result, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(entries...), nil)
 	if err != nil {
 		t.Fatalf("WriteBatch: %v", err)
 	}

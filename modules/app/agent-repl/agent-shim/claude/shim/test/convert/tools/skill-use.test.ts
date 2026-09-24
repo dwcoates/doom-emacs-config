@@ -96,6 +96,19 @@ describe("skillUseConverter.settle", () => {
     // Assert.
     expect(arm.case).toBe("failure");
   });
+
+  it("restates the skill on the failure arm, so the settled frame stands alone", () => {
+    // Arrange, Act.
+    const arm = armOf(skillUseConverter.settle(call({ skill: "nope" }), outcome(undefined, true)));
+
+    // Assert.
+    expect((arm.value as conversationv1.AgentSkillUseFailure).skill?.name).toBe("nope");
+  });
+
+  it("produces NO failure frame for an invocation that named no skill, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(skillUseConverter.settle(call({}), outcome(undefined, true))).toBeUndefined();
+  });
 });
 
 describe("skillDocumentSettle", () => {

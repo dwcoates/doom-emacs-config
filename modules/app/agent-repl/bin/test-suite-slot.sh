@@ -21,6 +21,9 @@
 #
 # Run with:   bash bin/test-suite-slot.sh
 
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -euo pipefail
 
 # This harness models independent callers in private slot directories.  When

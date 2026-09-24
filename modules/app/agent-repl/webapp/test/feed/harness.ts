@@ -30,6 +30,11 @@ import {
   type InterruptRequest,
   type InterruptResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
+import {
+  SelectResponseResponseSchema,
+  type SelectResponseRequest,
+  type SelectResponseResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_response_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
@@ -160,6 +165,8 @@ export interface FeedScript {
   channels?: Map<string, Channel<WatchFeedResponse>>;
   getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse;
   interrupt?: (req: InterruptRequest) => InterruptResponse;
+  /** Answers SelectResponse; a success selecting nothing when unscripted. */
+  selectResponse?: (req: SelectResponseRequest) => SelectResponseResponse;
   /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
   ticker?: Ticker;
 }
@@ -170,6 +177,7 @@ export interface FeedCalls {
   watchFeed: WatchFeedRequest[];
   getFeedPage: GetFeedPageRequest[];
   interrupt: InterruptRequest[];
+  selectResponse: SelectResponseRequest[];
 }
 
 export interface Harness {
@@ -181,7 +189,7 @@ export interface Harness {
 
 /** A context whose client speaks to the scripted daemon. */
 export function harness(script: FeedScript = {}): Harness {
-  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [] };
+  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], selectResponse: [] };
   const channels = script.channels ?? new Map<string, Channel<WatchFeedResponse>>();
   const sink = new RecordingSink();
   const transport = createRouterTransport(({ service }) => {
@@ -218,6 +226,13 @@ export function harness(script: FeedScript = {}): Harness {
               value: { outcome: { case: "interruptedDetached", value: { count: 1n } } },
             },
           })
+        );
+      },
+      selectResponse: (req) => {
+        calls.selectResponse.push(req);
+        return (
+          script.selectResponse?.(req) ??
+          create(SelectResponseResponseSchema, { result: { case: "success", value: {} } })
         );
       },
     });
@@ -460,10 +475,12 @@ export function subagentRow(
     };
     description?: string;
     tokens?: string;
+    workId?: string;
   } = {},
 ): FeedRow {
   const subagent = create(FeedSubagentSchema, {
     label: { text: "Explore" },
+    workId: opts.workId === undefined ? undefined : { text: opts.workId },
     description: opts.description === undefined ? undefined : { text: opts.description },
     tokens: opts.tokens === undefined ? undefined : { text: opts.tokens },
     runtime: { startedAtMs: opts.startedAtMs ?? 0n },

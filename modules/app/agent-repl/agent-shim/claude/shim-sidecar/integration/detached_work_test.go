@@ -23,6 +23,7 @@ import (
 // command, and answers the spool the vendor would be writing for it.
 type detachedFixture struct {
 	Tree      *vendorTree
+	Cwd       string
 	Slug      string
 	Session   string
 	CallID    string
@@ -62,9 +63,28 @@ func seedDetachedShell(t *testing.T, tree *vendorTree, cwd, session string) deta
 	g.AppendLine(encodeRecord(t, call))
 	g.AppendLine(encodeRecord(t, result))
 	return detachedFixture{
-		Tree: tree, Slug: slug, Session: session,
+		Tree: tree, Cwd: cwd, Slug: slug, Session: session,
 		CallID: capturedBashCall1, TaskID: taskID, SpoolPath: spool, Parent: g,
 	}
+}
+
+// appendDetachedLaunch writes a SECOND background-launch pair into a fixture's
+// session — the same captured pair, re-pointed at another call id and another
+// task — and answers the second run's spool path. It is what gives a subject a
+// claimed FENCE run: only a claimed spool is ever read, so only a claimed spool
+// can go silent and be concluded under the same window as the subject's own.
+func appendDetachedLaunch(t *testing.T, fx detachedFixture, taskID, callID string) string {
+	t.Helper()
+	captured := loadCapturedSession(t)
+	spool := fx.Tree.spoolPath(fx.Slug, fx.Session, taskID)
+	cwd := fx.Cwd
+	call := setToolUseID(t, retargetSession(t, decodeRecord(t, captured.Lines[8]), fx.Session, cwd), callID)
+	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), fx.Session, cwd)
+	result = setToolUseID(t, setToolResultText(t, result, backgroundLaunchText(taskID, spool)), callID)
+	result = setNested(t, result, "toolUseResult", "backgroundTaskId", taskID)
+	fx.Parent.AppendLine(encodeRecord(t, call))
+	fx.Parent.AppendLine(encodeRecord(t, result))
+	return spool
 }
 
 // requireCapturedBackgroundLaunchPair guards the provenance every detached

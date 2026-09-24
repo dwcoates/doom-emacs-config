@@ -21,12 +21,15 @@
  *   - an element holding a `.bubble` child reports `CONTAININGPX` as its
  *     `clientWidth` (the bubble's containing block);
  *   - `getComputedStyle` answers the bubble's `max-width` as MAXWIDTH, the
- *     body's horizontal padding as BODYPADDINGPX a side, and every other
- *     horizontal padding, border and margin as `0px`.
+ *     body's horizontal padding as BODYPADDINGPX a side, every other
+ *     horizontal padding, border and margin as `0px`, and the
+ *     `--scrollbar-gutter-width` token as SCROLLBARPX (in px), or as
+ *     SCROLLBARTOKEN verbatim when a test stages an unreadable one.
  * Every other read passes through to jsdom untouched.
  */
 import { afterEach, beforeEach } from "vitest";
 import { visibleWidth } from "../src/metaprompt-tree.js";
+import { SCROLLBAR_GUTTER_TOKEN } from "../src/bubble/body.js";
 
 /** The geometry a staged tree measurement reads. */
 export interface TreeLayout {
@@ -38,6 +41,10 @@ export interface TreeLayout {
   maxWidth: string;
   /** The bubble body's padding on each side, in px. */
   bodyPaddingPx: number;
+  /** The scrollbar gutter token's width, in px (the stylesheet's 8px). */
+  scrollbarPx: number;
+  /** The gutter token's raw value, when a test stages one that is not px. */
+  scrollbarToken?: string;
 }
 
 /** A layout with the stylesheet's real 77% cap and round numbers. */
@@ -46,6 +53,7 @@ export const DEFAULT_TEST_LAYOUT: TreeLayout = {
   containingPx: 1000,
   maxWidth: "77%",
   bodyPaddingPx: 10,
+  scrollbarPx: 8,
 };
 
 /** The horizontal lengths the measure reads off computed styles. */
@@ -109,6 +117,13 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
         if (property === "maxWidth" && el.classList.contains("bubble")) {
           return el.isConnected ? layout.maxWidth : "";
         }
+        if (property === "getPropertyValue") {
+          return (name: string): string => {
+            if (name !== SCROLLBAR_GUTTER_TOKEN) return real.getPropertyValue(name);
+            if (!el.isConnected) return "";
+            return layout.scrollbarToken ?? `${String(layout.scrollbarPx)}px`;
+          };
+        }
         if (typeof property === "string" && LENGTHS.has(property)) {
           if (!el.isConnected) return "";
           const padded = el.classList.contains("bubble-body") && property.startsWith("padding");
@@ -133,13 +148,14 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
 
 /**
  * The column budget a staged LAYOUT yields, computed the way the measure is
- * specified to: the cap less the body's padding, in whole columns.
+ * specified to: the cap less the body's padding and the expanded scrollbar's
+ * gutter, in whole columns.
  */
 export function stagedCols(layout: TreeLayout): number {
   const pct = /^([\d.]+)%$/.exec(layout.maxWidth);
   const capPx =
     pct === null ? Number.parseFloat(layout.maxWidth) : (Number.parseFloat(pct[1]) / 100) * layout.containingPx;
-  return Math.floor((capPx - 2 * layout.bodyPaddingPx) / layout.charPx);
+  return Math.floor((capPx - 2 * layout.bodyPaddingPx - layout.scrollbarPx) / layout.charPx);
 }
 
 /**
@@ -166,7 +182,7 @@ export function useTreeLayout(): { readonly layout: TreeLayout } {
 
 /**
  * A metaprompt tree with branches far wider than the default layout's
- * 93-column budget, so a bubble at its cap must wrap them.
+ * 92-column budget, so a bubble at its cap must wrap them.
  */
 export const WIDE_TREE = [
   "1 🌳 A tree drawn in a bubble of any kind, wrapped at that bubble's own cap",

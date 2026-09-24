@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_CAP_LINES,
+  BUBBLE_EXPAND_ONLY_CLASS,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANTS,
@@ -179,6 +180,38 @@ describe("drawBubble: the structure every kind shares", () => {
     expect(bubble.lastElementChild).toBe(footer);
   });
 
+  it("puts the expand-only chrome after the scroll box, before the footer", () => {
+    // Arrange
+    const details = el("details");
+    const footer = el("response-cut-short-marker");
+    // Act
+    const { bubble } = drawBubble(spec("held", { expandOnly: [details], footer: [footer] }));
+    // Assert
+    expect([...bubble.children].map((c) => c.classList[0])).toEqual([
+      BUBBLE_SCROLL_CLASS,
+      "details",
+      "response-cut-short-marker",
+    ]);
+  });
+
+  it("marks every expand-only element as expand-only", () => {
+    // Arrange
+    const expandOnly = [el("details"), el("actions")];
+    // Act
+    drawBubble(spec("held", { expandOnly }));
+    // Assert
+    expect(expandOnly.map((node) => node.classList.contains(BUBBLE_EXPAND_ONLY_CLASS))).toEqual([true, true]);
+  });
+
+  it("leaves the always-shown footer unmarked", () => {
+    // Arrange
+    const footer = el("response-cut-short-marker");
+    // Act
+    drawBubble(spec("response", { footer: [footer] }));
+    // Assert
+    expect(footer.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)).toBe(false);
+  });
+
   it("draws no strip element when the kind has none", () => {
     // Arrange / Act
     const { bubble } = drawBubble(spec("user"));
@@ -323,6 +356,24 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
     drawBubble(spec("response"), first);
     // Assert
     expect(first.querySelector(".response-cut-short-marker")).toBeNull();
+  });
+
+  it("takes the expand-only mark off a kept element that moved to the footer", () => {
+    // Arrange
+    const said = (): HTMLElement => {
+      const node = el("marker", "same");
+      node.setAttribute(SAYS_ATTRIBUTE, "same");
+      return node;
+    };
+    const first = drawBubble(spec("held", { expandOnly: [said()] })).bubble;
+    const kept = first.querySelector(".marker");
+    // Act
+    drawBubble(spec("held", { footer: [said()] }), first);
+    // Assert
+    expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)]).toEqual([
+      true,
+      false,
+    ]);
   });
 
   it("keeps the strip above the box and the footer below it", () => {
