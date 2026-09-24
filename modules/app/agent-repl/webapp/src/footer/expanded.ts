@@ -49,6 +49,8 @@ import type {
   FooterExpandedTasks,
   FooterExpandedTokens,
   FooterJump,
+  FooterTokensAgent,
+  FooterTokensLineContextGrowth,
   FooterMonitorRow,
   FooterMonitorRowDescription,
   FooterMonitorRowRuntime,
@@ -277,8 +279,10 @@ function drawSection(
 
 // ---- the tokens panel -----------------------------------------------------
 
-/** The six lines' labels, in the order the panel draws them. */
+/** The figure lines' labels. */
 const TOKEN_LINE_LABELS: Readonly<Record<string, string>> = {
+  contextGrowth: "context growth",
+  contextGrowthSinceCut: "context growth (since cut)",
   input: "input (uncached)",
   cacheRead: "input (cache read)",
   cacheWrite: "input (cache write)",
@@ -290,17 +294,25 @@ const TOKEN_LINE_LABELS: Readonly<Record<string, string>> = {
 /**
  * The turn's token accounting: one line per figure, name dim, value bright.
  *
- * NOT A LIST — these are heterogeneous facts, each its own field — so the six
+ * NOT A LIST — these are heterogeneous facts, each its own field — so the
  * lines are drawn by name rather than iterated, and every line message is
  * ALWAYS SET so the panel's shape stays stable while the turn runs. A line with
  * no value yet draws its name and an EMPTY SLOT rather than vanishing, which is
  * what keeps the rows from jumping as figures land.
+ *
+ * THREE FACTS, IN THIS ORDER: the main agent's context growth (the strip
+ * cell's figure), the spend summed across every agent under an "all agents"
+ * header, and then — after the turn's alarm and verdict — each agent's own
+ * spend under its daemon-composed name. The per-agent entries are the one TRUE
+ * LIST here, drawn in the daemon's order.
  */
 export function drawFooterExpandedTokens(
   u: FooterExpandedTokens,
   path: string,
 ): HTMLElement[] {
   const rows: HTMLElement[] = [
+    drawFooterTokensLineContextGrowth(requireMessage(u.contextGrowth, `${path}.context_growth`)),
+    tokenHeader("all agents"),
     tokenLine("input", requireMessage(u.input, `${path}.input`).value),
     tokenLine("cacheRead", requireMessage(u.cacheRead, `${path}.cache_read`).value),
     tokenLine("cacheWrite", requireMessage(u.cacheWrite, `${path}.cache_write`).value),
@@ -312,7 +324,49 @@ export function drawFooterExpandedTokens(
   if (u.verdict !== undefined) {
     rows.push(drawFooterTokensLineVerdict(u.verdict, `${path}.verdict`));
   }
+  u.agents.forEach((agent, index) => {
+    rows.push(...drawFooterTokensAgent(agent, `${path}.agents[${index}]`));
+  });
   return rows;
+}
+
+/**
+ * The context-growth line. The since-cut marker only renames the line: the
+ * figure is the daemon's either way.
+ */
+export function drawFooterTokensLineContextGrowth(u: FooterTokensLineContextGrowth): HTMLElement {
+  const sinceCut = u.sinceCut !== undefined;
+  const row = tokenLine(sinceCut ? "contextGrowthSinceCut" : "contextGrowth", u.value);
+  if (sinceCut) row.setAttribute("data-since-cut", "");
+  return row;
+}
+
+/** One agent's share: its name as a header, then its four figure lines. */
+export function drawFooterTokensAgent(u: FooterTokensAgent, path: string): HTMLElement[] {
+  const header = tokenHeader(u.label);
+  header.setAttribute("data-token-agent", u.label);
+  return [
+    header,
+    tokenLine("input", requireMessage(u.input, `${path}.input`).value),
+    tokenLine("cacheRead", requireMessage(u.cacheRead, `${path}.cache_read`).value),
+    tokenLine("cacheWrite", requireMessage(u.cacheWrite, `${path}.cache_write`).value),
+    tokenLine("output", requireMessage(u.output, `${path}.output`).value),
+  ].map((row) => {
+    row.setAttribute("data-token-agent-row", u.label);
+    return row;
+  });
+}
+
+/** A header naming the figure lines beneath it, so a sum is not read as one agent's. */
+function tokenHeader(text: string): HTMLElement {
+  const header = document.createElement("div");
+  header.className = "footer-panel-header footer-token-header";
+  header.setAttribute("data-row", "");
+  const title = document.createElement("span");
+  title.className = "footer-panel-title";
+  title.textContent = text;
+  header.appendChild(title);
+  return header;
 }
 
 /**

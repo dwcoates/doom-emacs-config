@@ -44,8 +44,18 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		// about one fact.
 		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
 
-	case *conversationv1.SessionUpdate_ContextUsage,
-		*conversationv1.SessionUpdate_FastMode,
+	case *conversationv1.SessionUpdate_ContextUsage:
+		// ONE READING, TWO DRAWINGS. The topbar's context chip states the
+		// context held; the footer's tokens cell states how much the turn in
+		// flight has grown it. Both take THIS update, so the two can never
+		// read the window differently.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and the footer", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
+
+	case *conversationv1.SessionUpdate_FastMode,
 		*conversationv1.SessionUpdate_McpServer,
 		*conversationv1.SessionUpdate_IdentityRotated,
 		*conversationv1.SessionUpdate_Title:
