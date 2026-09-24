@@ -159,7 +159,9 @@ type StaleCheck struct {
 	// Bounce is the registry's decision when Stale; zero otherwise.
 	Bounce bounce.Decision
 	// Skipped names why a stale shim was not bounced again: its bounce for this
-	// very build already ran and the relaunched shim still reports it.
+	// very build already ran and the relaunched shim still reports it
+	// (SkippedAlreadyBounced), or that bounce is still registered or running
+	// (SkippedBounceInFlight).
 	Skipped string
 }
 
@@ -474,11 +476,12 @@ func New(deps Deps) (Controller, error) {
 		deps.StandDownWindow = DefaultStandDownWindow
 	}
 	c := &controller{
-		deps:         deps,
-		log:          deps.Log.Global(),
-		rendezvous:   make(map[ids.WorkspaceID]*entry),
-		bouncedStamp: make(map[ids.WorkspaceID]string),
-		reported:     make(map[ids.WorkspaceID]string),
+		deps:          deps,
+		log:           deps.Log.Global(),
+		rendezvous:    make(map[ids.WorkspaceID]*entry),
+		bouncedStamp:  make(map[ids.WorkspaceID]string),
+		staleInFlight: make(map[ids.WorkspaceID]bool),
+		reported:      make(map[ids.WorkspaceID]string),
 	}
 	c.log.Debug(opNew, "the rollout controller is up", dlog.Context{
 		"adoption_window":    deps.AdoptionWindow.String(),
