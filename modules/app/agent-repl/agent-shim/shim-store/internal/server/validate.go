@@ -88,6 +88,10 @@ const (
 	// It is neither a request to fix nor a race to repaint: the target does not
 	// exist, and the shim maps it to NotFound.
 	classUnknownAgent
+	// classUnknownRun is a well-formed run id naming no row of this store yet.
+	// WatchBashRun answers it with a transport NotFound (it has no failure
+	// arm), and the caller that announced the run re-asks until the rows land.
+	classUnknownRun
 )
 
 // armName is the WIRE ARM this class becomes, spelled as the proto spells it.
@@ -109,6 +113,10 @@ func (c refusalClass) armName() string {
 		return "not_implemented"
 	case classUnknownAgent:
 		return "unknown_agent"
+	case classUnknownRun:
+		// NO PROTO ARM: WatchBashRun refuses at the transport, so the kind
+		// is the Connect code the caller receives.
+		return "not_found"
 	default:
 		panic(fmt.Sprintf("shim-store server: refusal class %d has no wire arm", int(c)))
 	}
@@ -144,6 +152,12 @@ func (c refusalClass) armName() string {
 //     asserted "something is wrong" on every cold bring-up, which is a severity
 //     the store is not in a position to claim.
 //
+// classUnknownRun is the same answer to the same question about a SHELL RUN:
+// WatchBashRun for a run whose first row the sidecar has not written yet. The
+// shim that announced the run re-asks on its recheck cadence until the rows
+// land, so every detached shell made a WARN of every ask -- eighteen in one
+// e2e test -- for a race the caller already waits out by design.
+//
 // It is `info` and not verbose: the record is still written at the default
 // threshold, carrying `refusal_site` and `refusal_kind` like every other, so an
 // operator counting refusals loses nothing. Only the severity claim changes.
@@ -153,7 +167,7 @@ func (c refusalClass) armName() string {
 // unreachable rather than an empty string quietly filled in.
 func (c refusalClass) logLevel() string {
 	switch c {
-	case classUnknownAgent:
+	case classUnknownAgent, classUnknownRun:
 		return "info"
 	case classInvalid, classStalePointer, classStorage, classNotImplemented:
 		return "warn"
