@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"sync"
 	"testing"
 	"time"
@@ -64,6 +65,8 @@ type fakeDB struct {
 	allHeldErr error
 	// openTurnsErr fails the open-turns read the judge compares against.
 	openTurnsErr error
+	// closeTurnErrs fails one turn's close each.
+	closeTurnErrs map[ids.TurnID]error
 	// byTurnErr fails the one-hold read an edit resolves its prompt through,
 	// and replaceErr fails an edit's content replacement.
 	byTurnErr  error
@@ -271,6 +274,9 @@ func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
 func (d *fakeDB) CloseTurn(_ context.Context, turn ids.TurnID, _ time.Time, how wsm.TurnClose) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := d.closeTurnErrs[turn]; err != nil {
+		return err
+	}
 	d.closedTurns[turn] = how
 	if t, ok := d.turns[turn]; ok {
 		t.Close = &how
@@ -844,6 +850,8 @@ func (n *noteRecorder) count() int {
 
 // harness is one wired queue and every fake behind it.
 type harness struct {
+	// statErr is what reading any workspace directory answers.
+	statErr error
 	q       *queue
 	db      *fakeDB
 	sender  *fakeSender
@@ -936,7 +944,9 @@ func newHarness(t *testing.T) *harness {
 			h.hostPublishes++
 		},
 		Now: func() time.Time { return instant },
-		Log: h.log,
+		// Every workspace directory exists unless a test says otherwise.
+		Stat: func(string) (fs.FileInfo, error) { return nil, h.statErr },
+		Log:  h.log,
 	})
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)

@@ -33,6 +33,9 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	if state, ok := q.states[ws]; ok {
 		state.interrupting = false
 		state.uninterruptible = 0
+		// A TURN ENDED, so whatever serves the workspace held a session long
+		// enough to finish one: a later death is not a crash loop.
+		state.unattendedRevival = false
 	}
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(ws, false)
@@ -67,6 +70,31 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		// record at all, and "the queue was never told" could not be told apart
 		// from "the queue was told and had nothing to do".
 		log.Info(opTurnEnded, "the turn ended; nothing is waiting to be delivered", nil)
+	}
+}
+
+// OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation: the
+// turns an adoption found open that the adopted shim no longer runs ended while
+// no daemon was watching, so each durable row is closed as orphaned -- the
+// close written for a turn that had no terminal when the daemon reconciled.
+//
+// IT TAKES NO DELIVERY LOCK AND DELIVERS NOTHING. None of these turns was the
+// adopted session's turn in flight, so nothing waits behind them, and the
+// watcher may tell this from inside a bring-up the lock's holder is running.
+// A close that fails is recorded at ERROR and the others are still closed.
+func (q *queue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
+	ctx := context.Background()
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return
+	}
+	for _, turn := range turns {
+		fields := dlog.Context{"turn": string(turn), "close": closeName(wsm.CloseOrphaned)}
+		if err := q.deps.DB.CloseTurn(ctx, turn, q.deps.Now(), wsm.CloseOrphaned); err != nil {
+			log.Error(opTurnEnded, "could not close a turn that ended while no daemon was watching", merged(fields, dlog.Context{"cause": err.Error()}))
+			continue
+		}
+		log.Info(opTurnEnded, "closed a turn that ended while no daemon was watching", fields)
 	}
 }
 

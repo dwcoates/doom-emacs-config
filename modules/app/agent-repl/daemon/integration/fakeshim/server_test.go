@@ -384,3 +384,132 @@ func TestAScriptedHibernateAnswerWinsOverTheProfile(t *testing.T) {
 		t.Fatalf("Hibernate = (%v, %v), want the scripted success", resp.Msg, err)
 	}
 }
+
+// TestTheReannouncementStatesTheTurnInFlightNow covers the re-announcement's
+// turn_in_flight: it is the shim's LIVE answer, as the real shim's
+// reannounceStart gives it, never the value StartSession answered with.
+func TestTheReannouncementStatesTheTurnInFlightNow(t *testing.T) {
+	turn := &conversationv1.TurnId{Value: "turn-1"}
+	tests := []struct {
+		name string
+		// act drives the fake after its session has started.
+		act  func(srv *server)
+		want string
+	}{
+		{
+			name: "a started turn is in flight",
+			act:  func(srv *server) { srv.openTurn(turn) },
+			want: "turn-1",
+		},
+		{
+			name: "the main agent's success ends it",
+			act: func(srv *server) {
+				srv.openTurn(turn)
+				srv.settleTurn(MainAgentID, &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}})
+			},
+			want: "",
+		},
+		{
+			name: "the main agent's failure ends it",
+			act: func(srv *server) {
+				srv.openTurn(turn)
+				srv.settleTurn(MainAgentID, &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{}}})
+			},
+			want: "",
+		},
+		{
+			name: "a subagent's terminal leaves it standing",
+			act: func(srv *server) {
+				srv.openTurn(turn)
+				srv.settleTurn("sub-1", &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{}}})
+			},
+			want: "turn-1",
+		},
+		{
+			name: "a main-agent frame that is no terminal leaves it standing",
+			act: func(srv *server) {
+				srv.openTurn(turn)
+				srv.settleTurn(MainAgentID, &conversationv1.AgentFrame{Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{}}})
+			},
+			want: "turn-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			srv := newServer(NewRecorder(), Profile{}, nil)
+			srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+				Session: &conversationv1.SessionStarted{VendorSessionId: "vendor-1"},
+			}}})
+
+			// Act
+			tt.act(srv)
+
+			// Assert
+			got := srv.startedSession()
+			if got.GetVendorSessionId() != "vendor-1" {
+				t.Fatalf("re-announced vendor session = %q, want the started vendor-1", got.GetVendorSessionId())
+			}
+			if got.GetTurnInFlight().GetValue() != tt.want {
+				t.Fatalf("re-announced turn_in_flight = %q, want %q", got.GetTurnInFlight().GetValue(), tt.want)
+			}
+		})
+	}
+}
+
+// TestTheReannouncementLeavesTheAnsweredSessionUntouched covers the clone: the
+// re-announcement's live turn is stated on a copy, so the SessionStarted
+// StartSession answered with is never rewritten under a reader of it.
+func TestTheReannouncementLeavesTheAnsweredSessionUntouched(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	answered := &conversationv1.SessionStarted{VendorSessionId: "vendor-1"}
+	srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{Session: answered}}})
+	srv.openTurn(&conversationv1.TurnId{Value: "turn-1"})
+
+	// Act
+	srv.startedSession()
+
+	// Assert
+	if answered.GetTurnInFlight() != nil {
+		t.Fatalf("the answered SessionStarted's turn_in_flight = %v, want it untouched", answered.GetTurnInFlight())
+	}
+}
+
+// TestTheReannouncementIsNothingBeforeASessionStarted covers the one state
+// with nothing to re-state.
+func TestTheReannouncementIsNothingBeforeASessionStarted(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.openTurn(&conversationv1.TurnId{Value: "turn-1"})
+
+	// Act
+	got := srv.startedSession()
+
+	// Assert
+	if got != nil {
+		t.Fatalf("re-announcement before StartSession = %v, want none", got)
+	}
+}
+
+// TestAKilledTurnIsNoLongerReannouncedInFlight covers the kill's own terminal:
+// the fake ends a killed turn on the stream, so no later watch re-announces it
+// as still running.
+func TestAKilledTurnIsNoLongerReannouncedInFlight(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.noteVendorSession(&shimv1.StartSessionResponse{Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+		Session: &conversationv1.SessionStarted{VendorSessionId: "vendor-1"},
+	}}})
+	srv.openTurn(&conversationv1.TurnId{Value: "turn-1"})
+
+	// Act
+	if _, err := srv.KillTurn(context.Background(), connect.NewRequest(&shimv1.KillTurnRequest{})); err != nil {
+		t.Fatalf("KillTurn = %v, want the kill accepted", err)
+	}
+
+	// Assert
+	if got := srv.startedSession().GetTurnInFlight(); got != nil {
+		t.Fatalf("re-announced turn_in_flight after the kill = %v, want none", got)
+	}
+}

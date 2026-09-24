@@ -354,6 +354,11 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault", "daemon.health.session")
 
+	// The daemon brings a shim that died on its own straight back; the
+	// revived shim HOLDS its StartSession, so the dead state this test is
+	// about stands for as long as the test looks at it.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{HangStartSession: true})
+
 	// Act: the fake shim process exits outright, mid-session.
 	f.shim.Exit(1, "simulated crash")
 	awaitFooter(t, f, footer, "disconnected.dead once the shim exits", func(v *frontendv1.FooterView) bool {

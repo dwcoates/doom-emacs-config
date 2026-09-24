@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ const (
 	opTurnEnded   = "daemon.promptqueue.turn_ended"
 	opLeaseChange = "daemon.promptqueue.lease_changed"
 	opRestore     = "daemon.promptqueue.restore_holds"
+	opRevive      = "daemon.promptqueue.revive"
 	opTray        = "daemon.promptqueue.tray"
 )
 
@@ -60,6 +62,13 @@ type wsState struct {
 	// delivery takes. A release that lands while one is running is answered
 	// "the session is still coming up", never "there is no session".
 	bringUps int
+
+	// unattendedRevival reports that this queue already brought the session
+	// back after a shim died on its own and no turn has ended since. A second
+	// death in that state is a shim that cannot hold a session, and it is
+	// left down for the next prompt rather than respawned in a loop. Guarded
+	// by q.mu; reset by every turn end (OnTurnEnded).
+	unattendedRevival bool
 
 	// bounce is the workspace's standing bounce: registered while work is in
 	// flight, DRAINING once decided (bounce.go). nil when none stands. Guarded
@@ -148,6 +157,9 @@ func newQueue(deps Deps) (*queue, error) {
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	if deps.Stat == nil {
+		deps.Stat = os.Stat
 	}
 	if deps.StripSentinels == nil {
 		deps.StripSentinels = func(s string) string { return s }
