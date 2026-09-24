@@ -210,7 +210,7 @@ describe("an unspawnable lock holder", () => {
 
     // Assert.
     const cause = refused.result.case === "failure" ? refused.result.value.cause : undefined;
-    expect(cause?.case === "lockHolderUnavailable" ? cause.value.binary : undefined).toBe(missing);
+    expect(cause?.case === "lockHolderUnavailable" ? cause.value.failure?.binary : undefined).toBe(missing);
   });
 });
 
