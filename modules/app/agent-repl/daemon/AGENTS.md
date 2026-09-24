@@ -6,6 +6,10 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
 ## Build and test
 
+- Every target below runs under `$(BACKGROUND)` (`../bin/background.sh`), at
+  background priority; see the module AGENTS.md. The integration harness
+  refuses a run without that helper's marker, so a raw
+  `go test -tags integration` must be prefixed with `../bin/background.sh`.
 - `make test` — `go build ./... && go vet ./... && test -z "$(gofmt -l .)" && go test ./... -count=1`
   from this directory. Measured 2.2s wall; slowest package 1.21s
   (`internal/gitclient`), slowest test 0.19s (`TestConfigDirForRouting`).

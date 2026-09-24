@@ -79,7 +79,9 @@ Nothing on the stream would ever retire it.
 
 ## Verification
 
-Run from `modules/app/agent-repl/`, always through the host suite slot:
+Run from `modules/app/agent-repl/`, always through the host suite slot, which
+also puts the run at background priority (`bin/background.sh`; a bare
+`emacs -batch` load of `test-helpers.el` refuses to start):
 
 ```bash
 bin/suite-slot.sh emacs -batch -Q -l ert -l lisp/test-<source>.el -f ert-run-tests-batch-and-exit

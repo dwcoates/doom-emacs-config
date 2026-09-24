@@ -126,9 +126,8 @@ func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 // arbitrate: picking either one puts a run's output in another run's card, and
 // there is no evidence that favors the first claim over the second. So the task
 // is permanently unresolvable, the conflict is its own ERROR operation, and the
-// spool's bytes fall to residue rather than being attributed to a guess —
-// classified as residue and, because residue is never persisted, stored
-// nowhere at all.
+// spool is never read rather than attributed to a guess: no run claims it, so
+// nothing renders it.
 func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -141,7 +140,7 @@ func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "21212121-2121-4121-8121-212121212121"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
-	// The falling-to-residue half is stated per record at DEBUG.
+	// The re-resolution the never-read half waits on is stated at DEBUG.
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 	opts.UnownedSpoolWindow = 200 * time.Millisecond
 
@@ -175,13 +174,18 @@ func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 		t.Errorf("the conflict record names task %q, wanted the contested task %q; without it the conflict is not investigable", got, capturedSpoolTask1)
 	}
 
-	// ...and the spool's bytes are read and classified attributed to NEITHER
-	// call: residue, which names no run and reaches no store.
+	// ...and the spool is attributed to NEITHER call: it is held, its window
+	// lapses, and it is never read.
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("output nobody can be sure owns it\n"))
-	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
-	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
-	requireNoResidueStored(t, fake.Entries())
+	awaitLog(ctx, t, opts.LogPath, "the contested spool's hold expiring", func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
+	})
+	lapsedAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
+	})
+	awaitRestatedAfter(ctx, t, opts.LogPath, spoolPath, "hold-spool", lapsedAt)
+	requireNeverRead(t, fake, opts.LogPath, spoolPath)
 	for _, run := range []string{capturedBashCall1, capturedBashCall2} {
 		if frames := bashFramesForRun(fake.Entries(), run); len(frames) != 0 {
 			t.Errorf("the contested spool was attributed to run %q anyway (%d frames); a conflicted task resolves to nothing, never to a guess",

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -124,6 +125,48 @@ func TestAMismatchedOutputPathRefusesResolution(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatal("a spool resolved against a task whose authoritative output is a different file")
+	}
+}
+
+func TestAnOwnerRefusalIsStatedOncePerSpool(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(index *ownerIndex)
+		operation string
+	}{
+		{
+			name: "a task two calls claim",
+			arrange: func(index *ownerIndex) {
+				index.observe(observation{taskID: "b1", activityID: "call-1"})
+				index.observe(observation{taskID: "b1", activityID: "call-2"})
+			},
+			operation: "resolve-spool-owner-conflicted",
+		},
+		{
+			name: "a task whose authoritative output is another file",
+			arrange: func(index *ownerIndex) {
+				index.observe(observation{taskID: "b1", activityID: "call-1", outputPath: "/private/tmp/elsewhere.output"})
+			},
+			operation: "resolve-spool-owner-path-mismatch",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a refused spool is never read, so every rescan resolves it
+			// again.
+			index, logs := ownerIndexFor(t)
+			tc.arrange(index)
+
+			// Act.
+			index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+			index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+			// Assert: one ERROR naming the spool, not one per pass.
+			rec := requireOnceIn(t, parseLogLines(t, *logs), tc.operation, "error")
+			if got := ctxString(t, rec, "path"); got != "/private/tmp/b1.output" {
+				t.Fatalf("path = %q, want the refused spool", got)
+			}
+		})
 	}
 }
 
@@ -268,76 +311,75 @@ func TestAStopForAnUnclaimedSpoolIsHeldAndAppliedOnClaim(t *testing.T) {
 	}
 }
 
-// residueSpoolWithAStoppedRun arranges the shape realtest 3 produced: a spool
-// whose hold expired before the transcript backlog delivered the launch line,
-// so it is being read as residue, and whose spawning call and stop are only
-// then read off that transcript. It answers the harness and the run's id.
-func residueSpoolWithAStoppedRun(t *testing.T, store *fakeStore, task, run, output string) *harness {
+// lapsedSpoolWithAStoppedRun arranges the shape realtest 3 produced: a spool
+// whose hold lapsed before the transcript backlog delivered the launch line, and
+// whose spawning call and stop are only then read off that transcript. A lapsed
+// spool is not read, so the launch CLAIMS it: the next rescan reads it as the
+// shell run it is, and its first durable batch applies the waiting stop. It
+// answers the harness.
+func lapsedSpoolWithAStoppedRun(t *testing.T, store *fakeStore, task, run, output string) *harness {
 	t.Helper()
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, task, output)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
-	// The hold lapses with no owner in sight: the spool is demoted and tailed as
-	// residue, and its bytes are read under that handler.
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
-	if got := h.sc.watchers[spool].target.Kind; got != tail.KindResidueSpool {
-		t.Fatalf("kind = %s, want the spool demoted to residue before the stop arrives", got)
+	if _, watched := h.sc.watchers[spool]; watched {
+		t.Fatal("a lapsed unclaimed spool was read before anything claimed it")
 	}
-	h.sc.pollAll()
 	// Only now does the transcript catch up and state who owned it and that a
 	// person stopped it.
 	h.sc.TaskSpawned(task, run, "", spool, false, "/workspace", "workspace-id", "session-1")
 	h.sc.TaskStopped(task)
+	h.sc.rescan()
+	h.sc.pollAll()
 	return h
 }
 
-func TestAStopMintsTheCancelledTerminalForASpoolBeingReadAsResidue(t *testing.T) {
-	// Arrange. Ingesting a spool as residue says what could be made of its
-	// BYTES; it never says the run is unknown. The launch line naming the run
-	// arrives after the hold lapsed, which is the ordinary shape of a restart
+func TestAStopMintsTheCancelledTerminalForASpoolClaimedAfterItsHoldLapsed(t *testing.T) {
+	// Arrange. A lapsed hold says nothing about the run. The launch line naming
+	// it arrives after the hold lapsed, which is the ordinary shape of a restart
 	// with a transcript backlog, and the stop that follows must still settle it.
 	store := &fakeStore{}
 
 	// Act.
-	residueSpoolWithAStoppedRun(t, store, "b1residuestop", "toolu_residue_run", "partial work\n")
+	lapsedSpoolWithAStoppedRun(t, store, "b1lapsedstop", "toolu_lapsed_run", "partial work\n")
 
 	// Assert.
-	cut := interruptedFor(store.writes, "toolu_residue_run")
+	cut := interruptedFor(store.writes, "toolu_lapsed_run")
 	if cut == nil {
-		t.Fatal("no cancelled terminal was written for a run stopped while its spool was residue")
+		t.Fatal("no cancelled terminal was written for a run stopped after its spool's hold lapsed")
 	}
 	if cut.GetByUser() == nil {
 		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
 	}
 }
 
-func TestTheResidueSpoolsCancelledTerminalCarriesTheOutputItRead(t *testing.T) {
-	// Arrange. A terminal owes the run's output, and a residue handler IS the
-	// spool's sole reader — so it must carry what it read rather than settling
+func TestTheLapsedSpoolsCancelledTerminalCarriesTheOutputItRead(t *testing.T) {
+	// Arrange. A terminal owes the run's output, and the claimed spool's handler
+	// is its sole reader — so it must carry what it read rather than settling
 	// the run as though nothing had been observed.
 	store := &fakeStore{}
 
 	// Act.
-	residueSpoolWithAStoppedRun(t, store, "b1residuebytes", "toolu_residue_bytes", "partial work\n")
+	lapsedSpoolWithAStoppedRun(t, store, "b1lapsedbytes", "toolu_lapsed_bytes", "partial work\n")
 
 	// Assert.
-	got := interruptedFor(store.writes, "toolu_residue_bytes").GetOutput().GetText().GetStdout()
+	got := interruptedFor(store.writes, "toolu_lapsed_bytes").GetOutput().GetText().GetStdout()
 	if got != "partial work\n" {
-		t.Fatalf("cancelled stdout = %q, want the output the residue spool held", got)
+		t.Fatalf("cancelled stdout = %q, want the output the claimed spool held", got)
 	}
 }
 
-func TestAStopForASpoolBeingReadAsResidueStatesNoConverterGap(t *testing.T) {
+func TestAStopForASpoolClaimedAfterItsHoldLapsedStatesNoConverterGap(t *testing.T) {
 	// Arrange. The reader states a converter that could not be asked for a
-	// terminal at error level. A residue spool CAN be asked for one, so that
-	// record is now a false alarm and must not be written.
+	// terminal at error level; a claimed shell spool CAN be asked for one.
 	store := &fakeStore{}
 
 	// Act.
-	h := residueSpoolWithAStoppedRun(t, store, "b1residuequiet", "toolu_residue_quiet", "partial work\n")
+	h := lapsedSpoolWithAStoppedRun(t, store, "b1lapsedquiet", "toolu_lapsed_quiet", "partial work\n")
 
 	// Assert.
 	h.requireNone(t, "cancel-terminal", "error")
@@ -429,68 +471,25 @@ func TestAForegroundSpawnIsNeverReportedAsBackgrounded(t *testing.T) {
 	}
 }
 
-// unownedResidueSpool arranges the shape that wrote 31 cancel-terminal ERRORs
-// on the owner's machine: a spool whose hold lapsed with nothing naming its
-// spawning call, so it is demoted to residue and TAILED — watched, readable,
-// and still owned by nobody. The launch line naming its call is tens of
-// megabytes back in a transcript the restarted reader is still catching up on.
-func unownedResidueSpool(t *testing.T, store *fakeStore, task, output string) (*harness, string) {
-	t.Helper()
-	h := newHarness(t, store)
-	spool := h.spoolFile(t, task, output)
+// TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored pins the LEVEL. The spool
+// lapsed with nothing naming its spawning call, so it is not read; the launch
+// line is tens of megabytes back in a transcript the restarted reader is still
+// catching up on. There is nothing to settle YET — a wait, not a failure.
+func TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.spoolFile(t, "b1unknown", "work with no launch in sight\n")
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
-	if got := h.sc.watchers[spool].target.Kind; got != tail.KindResidueSpool {
-		t.Fatalf("kind = %s, want the spool demoted to residue and tailed", got)
-	}
-	h.sc.pollAll()
-	return h, spool
-}
-
-// TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored pins the LEVEL. The spool
-// is being read, but the terminal is keyed on the spawning call and nothing has
-// named it yet, so there is nothing to settle YET — a wait, not a failure.
-func TestAStopWhoseSpawningCallIsUnknownIsHeldNotErrored(t *testing.T) {
-	// Arrange.
-	store := &fakeStore{}
-	h, _ := unownedResidueSpool(t, store, "b1unknown", "work with no launch in sight\n")
 
 	// Act.
 	h.sc.TaskStopped("b1unknown")
 
 	// Assert.
 	h.requireNone(t, "cancel-terminal", "error")
-}
-
-// TestALaunchAppliesAStopThatWasWaitingForIt is the retry edge the seam was
-// missing. applyStop was reached only after a batch of the run's spool
-// committed — and a run a person stopped has stopped writing, so a stop learned
-// before its launch was never retried at all and the run stayed open forever.
-// The launch itself must close it, with no further poll.
-func TestALaunchAppliesAStopThatWasWaitingForIt(t *testing.T) {
-	// Arrange: the spool is read and stopped while nothing names its call.
-	store := &fakeStore{}
-	h, spool := unownedResidueSpool(t, store, "b1waiting", "everything this run ever said\n")
-	h.sc.TaskStopped("b1waiting")
-	if cut := interruptedFor(store.writes, "toolu_waiting_run"); cut != nil {
-		t.Fatal("a terminal was minted before anything named the run's spawning call")
-	}
-
-	// Act: the transcript catches up and states who spawned it. Nothing polls
-	// afterwards — a stopped run writes no more bytes, so no poll would come.
-	h.sc.TaskSpawned("b1waiting", "toolu_waiting_run", "", spool, false, "/workspace", "workspace-id", "session-1")
-
-	// Assert.
-	cut := interruptedFor(store.writes, "toolu_waiting_run")
-	if cut == nil {
-		t.Fatalf("the launch did not apply the stop that was waiting for it: %s", h.logText())
-	}
-	if cut.GetByUser() == nil {
-		t.Fatalf("the applied stop must state by_user: %v", cut.GetCause())
-	}
 }
 
 // claimedWorkflowSpoolWithAStoppedRun arranges the remaining converter-gap case:
@@ -569,8 +568,13 @@ func TestAStopForAClaimedWorkflowSpoolStatesNoConverterGap(t *testing.T) {
 func TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure(t *testing.T) {
 	// Arrange: a stop ready to settle, against a store that never answers.
 	store := &fakeStore{}
-	h, spool := unownedResidueSpool(t, store, "b1withdrawn", "work\n")
-	h.sc.TaskStopped("b1withdrawn")
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1withdrawn", "work\n")
+	h.sc.TaskSpawned("b1withdrawn", "toolu_withdrawn", "", spool, false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
 	shutdown, cancel := context.WithCancel(context.Background())
 	h.sc.shutdown = shutdown
 	// Wedged only NOW: the setup's own reads must commit normally.
@@ -582,7 +586,7 @@ func TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure(t *testing.T) {
 	// Act: the terminal write wedges, then the shutdown withdraws it.
 	go func() {
 		defer close(applied)
-		h.sc.TaskSpawned("b1withdrawn", "toolu_withdrawn", "", spool, false, "/workspace", "workspace-id", "session-1")
+		h.sc.TaskStopped("b1withdrawn")
 	}()
 	select {
 	case <-entered:
@@ -598,4 +602,88 @@ func TestAShutdownWithdrawingTheTerminalWriteIsNotAStoreFailure(t *testing.T) {
 
 	// Assert.
 	h.requireNone(t, "cancel-terminal", "error")
+}
+
+// renamedSpoolHarness claims and reads a spool at its launch-named path, then
+// lays down a file for the same task at a new runtime-session path — the SAME
+// file moved there when rename is true, a different one otherwise.
+func renamedSpoolHarness(t *testing.T, rename bool) (*harness, string) {
+	t.Helper()
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1moved", "before the move\n")
+	h.sc.TaskSpawned("b1moved", "toolu_moved", "agent-1", spool, false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	moved := filepath.Join(h.spool, "claude-501", "proj", "resumed-sess", "tasks", "b1moved.output")
+	if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+		t.Fatalf("creating %s: %v", filepath.Dir(moved), err)
+	}
+	if rename {
+		if err := os.Rename(spool, moved); err != nil {
+			t.Fatalf("renaming the spool: %v", err)
+		}
+	} else {
+		h.write(t, moved, "a different file for the same task\n")
+	}
+	return h, normalized(moved)
+}
+
+func TestARenamedClaimedSpoolIsReadAtItsNewPath(t *testing.T) {
+	// Arrange.
+	h, moved := renamedSpoolHarness(t, true)
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert: the same file is the same run, so its reader follows it.
+	if _, watched := h.sc.watchers[moved]; !watched {
+		t.Fatalf("the renamed spool of a claimed run is not read at its new path: %s", h.logText())
+	}
+	h.requireOnce(t, "spool-rename", "info")
+}
+
+func TestADifferentFileAtANewPathIsNotTakenForARename(t *testing.T) {
+	// Arrange.
+	h, moved := renamedSpoolHarness(t, false)
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert: a name is never evidence, so another file stays refused.
+	if _, watched := h.sc.watchers[moved]; watched {
+		t.Fatal("a different file was read as the claimed run's renamed spool")
+	}
+	h.requireOnce(t, "resolve-spool-owner-path-mismatch", "error")
+}
+
+func TestAClaimAppliesAStopThatWasWaitingForIt(t *testing.T) {
+	// Arrange: the run is stopped while nothing names its call, so its spool is
+	// held and unread and the stop waits as one pending value for the task.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1waiting", "everything this run ever said\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.TaskStopped("b1waiting")
+	if cut := interruptedFor(store.writes, "toolu_waiting_run"); cut != nil {
+		t.Fatal("a terminal was minted before anything named the run's spawning call")
+	}
+
+	// Act: the transcript catches up and states who spawned it; the claim reads
+	// the spool and its first durable batch applies the waiting stop.
+	h.sc.TaskSpawned("b1waiting", "toolu_waiting_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.rescan()
+	h.sc.pollAll()
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_waiting_run")
+	if cut == nil {
+		t.Fatalf("the claim did not apply the stop that was waiting for it: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("the applied stop must state by_user: %v", cut.GetCause())
+	}
 }

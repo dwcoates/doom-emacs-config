@@ -778,10 +778,11 @@ full path, rotation, attribution, and level-switch table is in
 
 ```bash
 cd modules/app/agent-repl/agent-shim/shim-store
-go build ./... && go vet ./... && go test -race ./...
-go test -race ./internal/server/      # the Connect service, with a fake Store
-go test -race ./internal/db/          # the schema, routing and reads
-go test ./integration/                # the whole module end to end over a socket
+# every test run goes through ../../bin/background.sh (background priority)
+go build ./... && go vet ./... && ../../bin/background.sh go test -race ./...
+../../bin/background.sh go test -race ./internal/server/   # the Connect service, with a fake Store
+../../bin/background.sh go test -race ./internal/db/       # the schema, routing and reads
+../../bin/background.sh go test ./integration/             # the whole module end to end over a socket
 make coverage                         # ../../bin/report-nonlisp-coverage.sh store
 ```
 
