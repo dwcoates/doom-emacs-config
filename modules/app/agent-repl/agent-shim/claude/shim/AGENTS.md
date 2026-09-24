@@ -147,16 +147,16 @@ means the daemon and this build disagree about the contract.
   stdin; the holder takes the real `flock(2)` the daemon probes. The
   predecessor used `open(2)`'s `O_EXLOCK`, which is macOS/BSD only and made the
   shim refuse every session on Linux. `shim-lock` exit 3 is the distinct
-  "another process holds it" answer, and anything else is a hard failure —
-  never `conversation_owned`.
-- **A holder that cannot even be SPAWNED is its own refusal.** A missing or
-  unexecutable `shim-lock` (the synchronous `spawn` throw, or Node's
-  asynchronous `'error'` event before the claim settles) raises
-  `LockHolderUnavailableError`, recorded at ERROR because it is a defect, and
-  `StartSession` answers `lock_holder_unavailable {binary, os_error}`. Nobody
-  owns the conversation in that case, so it must never read as
-  `conversation_owned`; the daemon relays it as
-  `OpenWorkspaceError.lock_holder_unavailable`.
+  "another process holds it" answer (`LockHeldError`), the ONLY path to
+  `conversation_owned`.
+- **Every other holder failure is `lock_holder_unavailable`, saying how.**
+  `LockHolderUnavailableError` carries `conversation.v1.LockHolderFailure`'s
+  `how`: `spawnFailed` (os error), `exited` (code, stderr), `signaled`
+  (signal, stderr), `misanswered` (line) or `silent` (the bound), recorded
+  once at ERROR by `holderFailed`. Nobody owns the conversation then; the
+  daemon relays it as `OpenWorkspaceError.lock_holder_unavailable`. Anything
+  else a claim throws is raised from `StartSession`, never answered as an
+  owner.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
   query is created, and SIX things settle it: the PROVEN-LIVE SIGNAL (below);
   `init`, for a vendor that still announces one first; a hook that comes back
