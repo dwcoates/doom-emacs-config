@@ -191,10 +191,13 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
 
       // ---- Agent ----
 
-      async startTurn(request) {
+      async startTurn(request, context) {
         entered("StartTurn");
         validateStartTurnRequest(request);
-        return answering("StartTurn", () => engine.startTurn(request));
+        // THE CALLER'S SIGNAL RIDES IN: a StartTurn that waits behind the
+        // shim's own keep-alive must stop waiting, undelivered, the moment
+        // the daemon gives up on it (engine/turn.ts).
+        return answering("StartTurn", () => engine.startTurn(request, context.signal));
       },
 
       async *watchAgent(request) {

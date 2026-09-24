@@ -1131,31 +1131,47 @@ func TestTheTakeoverDoesNotWaitForEveryRendezvous(t *testing.T) {
 }
 
 func TestTheSuccessorBouncesAnAdoptedShimOnAnOlderBuild(t *testing.T) {
-	// Arrange: two live shims, one on an older build and one on the deployed build.
+	// Arrange: two live shims report their builds as they are attached — one
+	// an older build, one the installed build — before either is adopted.
 	h := newHarness(t)
 	stale, current := joinedWithOneOfTwo(t, h)
-	h.mu.Lock()
-	h.sessionSHA[stale] = "0ldbu1ld"
-	h.sessionSHA[current] = "deadbeef" // the deploy stamp's own sha
-	h.mu.Unlock()
 	h.fleet.live[current] = newFakeShim(4343, h.order)
 	h.fleet.live[stale].Reap() // the old process exits when it is stood down
+	h.c.ShimReported(stale, "0ldbu1ld")
+	h.c.ShimReported(current, "installed-build")
+	h.c.staleChecks.Wait()
 
-	// Act: adopting the handed-over workspace advertises, ending the join.
+	// Act: adopting the handed-over workspace makes it this daemon's to bounce.
 	if err := h.c.AdoptHost(context.Background(), stale); err != nil {
 		t.Fatalf("AdoptHost: %v", err)
 	}
-	h.c.staleBounces.Wait()
+	h.registry.wait()
 
 	// Assert
 	if indexOf(h.order.Taken(), "resume") < 0 {
-		t.Fatalf("steps = %v, want the stale shim relaunched onto the deployed build", h.order.Taken())
+		t.Fatalf("steps = %v, want the stale shim relaunched onto the installed build", h.order.Taken())
 	}
 	h.fleet.mu.Lock()
 	_, touched := h.fleet.prelaunched[current]
 	h.fleet.mu.Unlock()
 	if touched {
-		t.Fatalf("the shim already on the deployed build was prelaunched; it must be left alone")
+		t.Fatalf("the shim already on the installed build was prelaunched; it must be left alone")
+	}
+}
+
+func TestAReportBeforeTheAdoptionIsNotActedOn(t *testing.T) {
+	// Arrange: a joining successor hears a stale build from a shim it has not
+	// adopted yet.
+	h := newHarness(t)
+	stale, _ := joinedWithOneOfTwo(t, h)
+
+	// Act
+	h.c.ShimReported(stale, "0ldbu1ld")
+	h.c.staleChecks.Wait()
+
+	// Assert
+	if got := h.registry.Requests(); len(got) != 0 {
+		t.Fatalf("requests = %+v, want no bounce before the adoption", got)
 	}
 }
 
@@ -1169,12 +1185,12 @@ func TestTheSuccessorChecksEveryLiveShimOnlyOnce(t *testing.T) {
 		t.Fatalf("AdoptHost: %v", err)
 	}
 	h.c.becomeIncumbent(nil)
-	h.c.staleBounces.Wait()
+	h.registry.wait()
 
 	// Assert
 	checks := 0
 	for _, r := range records(h.log, opStaleness) {
-		if r.Message == "checking every adopted shim against the deployed build" {
+		if r.Message == "judged every adopted shim against the installed build" {
 			checks++
 		}
 	}

@@ -287,7 +287,7 @@ restart.
 | (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
 | `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
 | `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
-| `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; the self-reload trigger stays ON (test safety comes from `AGENT_REPL_DEPLOY_SCRIPT` naming a fake deploy script, so landed range → rollout trigger → deploy is assertable end to end) |
+| `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; a landing still runs its ONE deploy (test safety comes from `AGENT_REPL_DEPLOY_BUILDER` naming the harness's fake build, so landing → deploy is assertable end to end) |
 | `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON. It is NOT needed merely to get fake shims under the vendor guard -- the guard implies them |
 | `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
 | `AGENT_REPL_FEED_TAIL_RETENTION` | test only | compresses the feed's tail retention (a whole number of rows). It BEATS `--feed-tail-retention`. A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
@@ -295,10 +295,12 @@ restart.
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
 | `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary every one of the daemon's OWN calls execs: the login pty, and `internal/headless`'s runs (the classifier's routing question and the workspace naming call). A fake script in tests. Naming it EXPLICITLY is also what makes those spawns legal under `AGENT_REPL_FORBID_VENDOR_CALLS`: the guard refuses only the bare default `claude`, since an explicit path is by definition not a call to the real CLI |
-| `AGENT_REPL_DEPLOY_SCRIPT` | test only | overrides `bin/deploy-all.sh` for the self-reload trigger |
+| `AGENT_REPL_DEPLOY_BUILDER` | test only | ONE executable a deploy runs as `<exe> --out <staging>` in place of the real build (`make -C proto all`, then `bin/build-frontend.sh --out <staging> <target>` per target). The integration harness's fake stages what runs, a stale component, or a failure (`integration/harness/deploybuild.go`) |
+| `AGENT_REPL_LAUNCHCTL` | operator/test | the launchctl a deploy's store/sidecar restart drives (default: `launchctl` on PATH); the harness points it at a recorder so no test reaches launchd |
+| `AGENT_REPL_LAUNCH_AGENTS_DIR` | operator/test | where the services' plists are installed (default `~/Library/LaunchAgents`); a store restart bootstraps the sidecar back from it |
 | `AGENT_REPL_TEST_ALL_SCRIPT` | test only | overrides `bin/test-all.sh` for the merge test gate (invoked as `bash <script> --suites <a,b>` in the merge TARGET worktree; exit 0 = pass; per-suite state parsed from the script's own `<suite>: passed in <N>s` / `<suite> failed after <N>s with exit code <rc>` lines; output archived under `<state>/merge-logs/`) |
 | `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory (the `--prompts-dir` flag beats it) |
-| `SHIM_BUILD_SHA` | operator/test | the bundle sha every shim spawn is stamped with. In production it is read from the shim's own build stamp, `agent-shim/claude/shim/dist/.built-sha` beneath the resolved checkout; this variable answers only when that stamp does NOT exist (a checkout that has not built the shim, and every test harness, whose fake shim has no bundle). A present-but-blank stamp is a refusal, never a fall-through. With neither source the daemon REFUSES TO BOOT, naming both — an unstamped spawn cannot be checked for staleness. It has no flag |
+| `SHIM_BUILD_SHA` | operator/test | the shim build stated for a checkout with NO bundle on disk. In production every spawn is stamped with the CONTENT HASH (sha256) of the installed bundle it runs, held from the hash to the shim's answer so an install cannot swap the bytes between them (`buildid.ShimBundle`); this variable answers only while no bundle exists at `--shim-main`. With neither, the SPAWN refuses (`spawn_failed`), naming both — an unstamped shim cannot be judged for staleness. It has no flag |
 | `AGENT_REPL_CHECKOUT` | operator | the agent-repl module root (`modules/app/agent-repl`) the binary was deployed from. It is resolved without this: the executable's own ancestors are walked first, and the path this daemon's source was COMPILED from answers when the binary was built outside the tree (`go build -o <tmp>`, which every test harness does). `--shim-main`, `--webapp-dist` and `--prompts-dir` default beneath it; `proto/vocab/` (the render colors and paint classes) and `daemon/bin/.built-sha` are read from it and have NO flag |
 
 ## The `-fake` classifier (deterministic)
@@ -473,16 +475,40 @@ restated start costs a card only its runtime chip, so the card still draws. A
 subagent hold of nothing but pre-contract frames retires at INFO; one holding a
 stamped frame keeps the WARN `daemon.feed.subagent_without_start`.
 
-## Deploy chain
+## Deploy (`internal/deploy`, `internal/buildid`)
 
-`bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →
-webapp → daemon → store/sidecar; its step 5 evaluates
-`(agent-repl-runtime-restart-await)` in `lisp/services.el` via emacsclient (the
-old `agent-repl-frontend-daemon-restart-await` is dead), and
-`bin/build-frontend.sh` builds `daemon/bin/claude-repld` from
-`./cmd/claude-repld`. The rollout invokes the same chain with `--no-bounce` and
-never a second build path. `agent-shim/wire` is DELETED: nothing in the rebuilt
-daemon imports it, and its `bin/test-all.sh` roster entry is gone.
+THE DAEMON OWNS DEPLOYS; there is no deploy script. `Deploy{force}` (and the
+`claude-repld deploy [-force]` verb and Emacs's `agent-repl-deploy`, both thin
+callers of it) and a self-merge landing (`merge.Trigger.Landed`, ONCE per
+landing however many commits it carries) run `deploy.Deployer.Deploy`:
+
+1. build into `<state>/deploy/staging/<nonce>` (`ScriptBuilder`: `make -C
+   proto all`, then `bin/build-frontend.sh --out <staging> <target>` for
+   shim, webapp, daemon, store, sidecar, lock). A failure is `build_failed`
+   with the step, the tail of its output and the archived log; NOTHING is
+   installed or restarted.
+2. hash every staged artifact (`buildid`: binaries and the shim bundle by
+   sha256, the webapp by its entry bundle's hash, elisp by the module-set hash
+   held to `proto/vocab/elisp-build.json`);
+3. install atomically (copy beside, rename over; the shim bundle only while no
+   spawn holds it);
+4. decide, component by component, against each RUNNING process's reported
+   build: store/sidecar by their build report (`agentrepl/logging/buildreport`)
+   and restart them in the recorded safe order (`Restarter`); Emacs streams by
+   `WatchDaemon.elisp_build` and push `reload_elisp` to the stale ones; a stale
+   daemon (its own boot-time binary hash) hands over and DEFERS shim and webapp
+   to its successor; otherwise each live shim is judged by its last
+   `SessionDiagnostics.shim_build` and a stale one goes to the prompt queue's
+   bounce registry (`rollout.CheckStaleness`), and each workspace whose webview
+   reported an older `webapp_build` gets `reload_webapp`.
+
+One deploy runs at a time (`already_deploying`); a landing that arrives while
+one runs is covered by ONE follow-up deploy. Every decision is a record under
+`daemon.deploy.run` / `daemon.deploy.decide` / `daemon.deploy.install` /
+`daemon.deploy.services` / `daemon.deploy.build` / `daemon.deploy.landing`.
+`bin/build-frontend.sh` without `--out` stays Emacs's cold-start build (a
+daemon must exist before it can deploy anything). `agent-shim/wire` is
+DELETED: nothing in the rebuilt daemon imports it.
 
 ## Logging
 
@@ -679,10 +705,12 @@ logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 An interrupt ends only the synchronous turn: `KillTurn(..., false)`. Detached
 work (background agents, shells, monitors, workflows) ends only by its own
 per-task stop, or by a forced kill the user explicitly asked for. The daemon
-never forces a kill on the user's behalf for a merge, a rollout, a redrive or
-any other act of its own; a holder that needs the session quiet waits on the
-fleet's watcher-driven freeness (`Fleet.AwaitFree`), as the rollout's relaunch
-and an admitted merge do.
+never forces a kill on the user's behalf for a merge, a rollout or any
+other act of its own; a holder that needs the session quiet waits on the
+fleet's watcher-driven freeness — an admitted merge through `Fleet.AwaitFree`,
+and every shim bounce and handover transfer through the prompt queue's bounce
+registry, which takes it on the freeness edge. A FORCED deploy or restart is
+the user's explicit ask, and only it bounces over work in flight.
 
 `forced_kill_guard_test.go` enforces it. Every `KillTurn` call whose force is
 not the literal `false`, and every `KillTurnRequest` literal whose `Force` is

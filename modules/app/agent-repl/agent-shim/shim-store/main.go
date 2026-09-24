@@ -98,6 +98,7 @@ func run(socketPath, dbPath, logPath, pprofAddr string, watchBuffer int) (err er
 	}
 	defer closeLog()
 	defer logProcessExit(log, &err)
+	reportBuild(log, defaultBuildReportDeps())
 	return runWithLogger(socketPath, dbPath, pprofAddr, watchBuffer, log)
 }
 

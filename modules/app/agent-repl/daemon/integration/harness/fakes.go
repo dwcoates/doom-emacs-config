@@ -185,10 +185,17 @@ func NewFakeBrowser(t *testing.T, dir string) *Recorder {
 	return NewRecorderExecutable(t, dir, "browser")
 }
 
-// NewFakeDeployScript writes the rollout's deploy script.
-func NewFakeDeployScript(t *testing.T, dir string) *Recorder {
+// FakeDeployBuildRefusal is what the fake deploy builder prints before it
+// fails: a harness NEVER builds, so every deploy it drives is a build failure
+// that deploys nothing.
+const FakeDeployBuildRefusal = "fake deploy build: a harness never builds"
+
+// NewFakeLaunchctl writes the launchctl a service restart would drive
+// (AGENT_REPL_LAUNCHCTL), so nothing the daemon runs can reach the live
+// launchd.
+func NewFakeLaunchctl(t *testing.T, dir string) *Recorder {
 	t.Helper()
-	return NewRecorderExecutable(t, dir, "deploy-all.sh")
+	return NewRecorderExecutable(t, dir, "launchctl")
 }
 
 // NewFakeWebappDist writes a minimal webapp dist: an index.html entry point
@@ -199,8 +206,11 @@ func NewFakeWebappDist(t *testing.T, dir string) string {
 	if err := os.MkdirAll(assets, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", assets, err)
 	}
-	writeFile(t, filepath.Join(dir, "index.html"), "<!doctype html><title>agent-repl</title><script src=\"/assets/app.js\"></script>")
-	writeFile(t, filepath.Join(assets, "app.js"), "// fake webapp bundle\n")
+	// The entry names a hashed bundle exactly as Vite's does, because the
+	// deploy reads the served webapp's build off it (FakeWebappEntry).
+	writeFile(t, filepath.Join(dir, "index.html"), "<!doctype html><title>agent-repl</title><script src=\"/assets/index-"+FakeWebappEntry+".js\"></script>")
+	writeFile(t, filepath.Join(assets, "index-"+FakeWebappEntry+".js"), "// fake webapp bundle\n")
+	writeFile(t, filepath.Join(assets, "app.js"), "// fake webapp asset\n")
 	return dir
 }
 

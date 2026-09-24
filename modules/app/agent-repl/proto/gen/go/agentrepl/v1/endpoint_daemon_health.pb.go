@@ -400,7 +400,6 @@ type DaemonFault struct {
 	//
 	//	*DaemonFault_AdoptionWindowExpired
 	//	*DaemonFault_LogSinkPoisoned
-	//	*DaemonFault_DeployScriptFailed
 	//	*DaemonFault_SuccessorSpawnFailed
 	//	*DaemonFault_PromptsDirMissing
 	//	*DaemonFault_WsmReadOnly
@@ -472,15 +471,6 @@ func (x *DaemonFault) GetLogSinkPoisoned() *DaemonFaultLogSinkPoisoned {
 	return nil
 }
 
-func (x *DaemonFault) GetDeployScriptFailed() *DaemonFaultDeployScriptFailed {
-	if x != nil {
-		if x, ok := x.Kind.(*DaemonFault_DeployScriptFailed); ok {
-			return x.DeployScriptFailed
-		}
-	}
-	return nil
-}
-
 func (x *DaemonFault) GetSuccessorSpawnFailed() *DaemonFaultSuccessorSpawnFailed {
 	if x != nil {
 		if x, ok := x.Kind.(*DaemonFault_SuccessorSpawnFailed); ok {
@@ -532,11 +522,6 @@ type DaemonFault_LogSinkPoisoned struct {
 	LogSinkPoisoned *DaemonFaultLogSinkPoisoned `protobuf:"bytes,3,opt,name=log_sink_poisoned,json=logSinkPoisoned,proto3,oneof"`
 }
 
-type DaemonFault_DeployScriptFailed struct {
-	// The deploy script failed.
-	DeployScriptFailed *DaemonFaultDeployScriptFailed `protobuf:"bytes,4,opt,name=deploy_script_failed,json=deployScriptFailed,proto3,oneof"`
-}
-
 type DaemonFault_SuccessorSpawnFailed struct {
 	// Spawning the successor daemon failed.
 	SuccessorSpawnFailed *DaemonFaultSuccessorSpawnFailed `protobuf:"bytes,5,opt,name=successor_spawn_failed,json=successorSpawnFailed,proto3,oneof"`
@@ -560,8 +545,6 @@ type DaemonFault_DaemonStateUnreadable struct {
 func (*DaemonFault_AdoptionWindowExpired) isDaemonFault_Kind() {}
 
 func (*DaemonFault_LogSinkPoisoned) isDaemonFault_Kind() {}
-
-func (*DaemonFault_DeployScriptFailed) isDaemonFault_Kind() {}
 
 func (*DaemonFault_SuccessorSpawnFailed) isDaemonFault_Kind() {}
 
@@ -712,51 +695,6 @@ func (x *DaemonFaultLogSinkPoisoned) GetSink() string {
 	return ""
 }
 
-type DaemonFaultDeployScriptFailed struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The script's own account of the failure.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DaemonFaultDeployScriptFailed) Reset() {
-	*x = DaemonFaultDeployScriptFailed{}
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DaemonFaultDeployScriptFailed) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DaemonFaultDeployScriptFailed) ProtoMessage() {}
-
-func (x *DaemonFaultDeployScriptFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DaemonFaultDeployScriptFailed.ProtoReflect.Descriptor instead.
-func (*DaemonFaultDeployScriptFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *DaemonFaultDeployScriptFailed) GetDetail() string {
-	if x != nil {
-		return x.Detail
-	}
-	return ""
-}
-
 type DaemonFaultSuccessorSpawnFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The spawn's own account of the failure.
@@ -767,7 +705,7 @@ type DaemonFaultSuccessorSpawnFailed struct {
 
 func (x *DaemonFaultSuccessorSpawnFailed) Reset() {
 	*x = DaemonFaultSuccessorSpawnFailed{}
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +717,7 @@ func (x *DaemonFaultSuccessorSpawnFailed) String() string {
 func (*DaemonFaultSuccessorSpawnFailed) ProtoMessage() {}
 
 func (x *DaemonFaultSuccessorSpawnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +730,7 @@ func (x *DaemonFaultSuccessorSpawnFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonFaultSuccessorSpawnFailed.ProtoReflect.Descriptor instead.
 func (*DaemonFaultSuccessorSpawnFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DaemonFaultSuccessorSpawnFailed) GetDetail() string {
@@ -812,7 +750,7 @@ type DaemonFaultPromptsDirMissing struct {
 
 func (x *DaemonFaultPromptsDirMissing) Reset() {
 	*x = DaemonFaultPromptsDirMissing{}
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -824,7 +762,7 @@ func (x *DaemonFaultPromptsDirMissing) String() string {
 func (*DaemonFaultPromptsDirMissing) ProtoMessage() {}
 
 func (x *DaemonFaultPromptsDirMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -837,7 +775,7 @@ func (x *DaemonFaultPromptsDirMissing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonFaultPromptsDirMissing.ProtoReflect.Descriptor instead.
 func (*DaemonFaultPromptsDirMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DaemonFaultPromptsDirMissing) GetPath() string {
@@ -855,7 +793,7 @@ type DaemonFaultWsmReadOnly struct {
 
 func (x *DaemonFaultWsmReadOnly) Reset() {
 	*x = DaemonFaultWsmReadOnly{}
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -867,7 +805,7 @@ func (x *DaemonFaultWsmReadOnly) String() string {
 func (*DaemonFaultWsmReadOnly) ProtoMessage() {}
 
 func (x *DaemonFaultWsmReadOnly) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -880,7 +818,7 @@ func (x *DaemonFaultWsmReadOnly) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonFaultWsmReadOnly.ProtoReflect.Descriptor instead.
 func (*DaemonFaultWsmReadOnly) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{12}
 }
 
 // No arms: DaemonHealth has no refusal site (landing 4).
@@ -892,7 +830,7 @@ type DaemonHealthError struct {
 
 func (x *DaemonHealthError) Reset() {
 	*x = DaemonHealthError{}
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +842,7 @@ func (x *DaemonHealthError) String() string {
 func (*DaemonHealthError) ProtoMessage() {}
 
 func (x *DaemonHealthError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +855,7 @@ func (x *DaemonHealthError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealthError.ProtoReflect.Descriptor instead.
 func (*DaemonHealthError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP(), []int{13}
 }
 
 var File_agentrepl_v1_endpoint_daemon_health_proto protoreflect.FileDescriptor
@@ -942,25 +880,22 @@ const file_agentrepl_v1_endpoint_daemon_health_proto_rawDesc = "" +
 	"\x03pid\x18\x02 \x01(\x03R\x03pid\x12\x1b\n" +
 	"\tbuild_sha\x18\x03 \x01(\tR\bbuildSha\"D\n" +
 	"\x0fDaemonUnhealthy\x121\n" +
-	"\x06faults\x18\x01 \x03(\v2\x19.agentrepl.v1.DaemonFaultR\x06faults\"\xcb\x05\n" +
+	"\x06faults\x18\x01 \x03(\v2\x19.agentrepl.v1.DaemonFaultR\x06faults\"\x86\x05\n" +
 	"\vDaemonFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12h\n" +
 	"\x17adoption_window_expired\x18\x02 \x01(\v2..agentrepl.v1.DaemonFaultAdoptionWindowExpiredH\x00R\x15adoptionWindowExpired\x12V\n" +
-	"\x11log_sink_poisoned\x18\x03 \x01(\v2(.agentrepl.v1.DaemonFaultLogSinkPoisonedH\x00R\x0flogSinkPoisoned\x12_\n" +
-	"\x14deploy_script_failed\x18\x04 \x01(\v2+.agentrepl.v1.DaemonFaultDeployScriptFailedH\x00R\x12deployScriptFailed\x12e\n" +
+	"\x11log_sink_poisoned\x18\x03 \x01(\v2(.agentrepl.v1.DaemonFaultLogSinkPoisonedH\x00R\x0flogSinkPoisoned\x12e\n" +
 	"\x16successor_spawn_failed\x18\x05 \x01(\v2-.agentrepl.v1.DaemonFaultSuccessorSpawnFailedH\x00R\x14successorSpawnFailed\x12\\\n" +
 	"\x13prompts_dir_missing\x18\x06 \x01(\v2*.agentrepl.v1.DaemonFaultPromptsDirMissingH\x00R\x11promptsDirMissing\x12J\n" +
 	"\rwsm_read_only\x18\a \x01(\v2$.agentrepl.v1.DaemonFaultWsmReadOnlyH\x00R\vwsmReadOnly\x12h\n" +
 	"\x17daemon_state_unreadable\x18\b \x01(\v2..agentrepl.v1.DaemonFaultDaemonStateUnreadableH\x00R\x15daemonStateUnreadableB\x06\n" +
-	"\x04kind\"\\\n" +
+	"\x04kindJ\x04\b\x04\x10\x05R\x14deploy_script_failed\"\\\n" +
 	" DaemonFaultAdoptionWindowExpired\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"8\n" +
 	" DaemonFaultDaemonStateUnreadable\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\"0\n" +
 	"\x1aDaemonFaultLogSinkPoisoned\x12\x12\n" +
-	"\x04sink\x18\x01 \x01(\tR\x04sink\"7\n" +
-	"\x1dDaemonFaultDeployScriptFailed\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"9\n" +
+	"\x04sink\x18\x01 \x01(\tR\x04sink\"9\n" +
 	"\x1fDaemonFaultSuccessorSpawnFailed\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"2\n" +
 	"\x1cDaemonFaultPromptsDirMissing\x12\x12\n" +
@@ -980,7 +915,7 @@ func file_agentrepl_v1_endpoint_daemon_health_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_daemon_health_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_daemon_health_proto_goTypes = []any{
 	(*DaemonHealthRequest)(nil),              // 0: agentrepl.v1.DaemonHealthRequest
 	(*DaemonHealthResponse)(nil),             // 1: agentrepl.v1.DaemonHealthResponse
@@ -992,33 +927,31 @@ var file_agentrepl_v1_endpoint_daemon_health_proto_goTypes = []any{
 	(*DaemonFaultAdoptionWindowExpired)(nil), // 7: agentrepl.v1.DaemonFaultAdoptionWindowExpired
 	(*DaemonFaultDaemonStateUnreadable)(nil), // 8: agentrepl.v1.DaemonFaultDaemonStateUnreadable
 	(*DaemonFaultLogSinkPoisoned)(nil),       // 9: agentrepl.v1.DaemonFaultLogSinkPoisoned
-	(*DaemonFaultDeployScriptFailed)(nil),    // 10: agentrepl.v1.DaemonFaultDeployScriptFailed
-	(*DaemonFaultSuccessorSpawnFailed)(nil),  // 11: agentrepl.v1.DaemonFaultSuccessorSpawnFailed
-	(*DaemonFaultPromptsDirMissing)(nil),     // 12: agentrepl.v1.DaemonFaultPromptsDirMissing
-	(*DaemonFaultWsmReadOnly)(nil),           // 13: agentrepl.v1.DaemonFaultWsmReadOnly
-	(*DaemonHealthError)(nil),                // 14: agentrepl.v1.DaemonHealthError
-	(*v1.WorkspaceRef)(nil),                  // 15: workspace.v1.WorkspaceRef
+	(*DaemonFaultSuccessorSpawnFailed)(nil),  // 10: agentrepl.v1.DaemonFaultSuccessorSpawnFailed
+	(*DaemonFaultPromptsDirMissing)(nil),     // 11: agentrepl.v1.DaemonFaultPromptsDirMissing
+	(*DaemonFaultWsmReadOnly)(nil),           // 12: agentrepl.v1.DaemonFaultWsmReadOnly
+	(*DaemonHealthError)(nil),                // 13: agentrepl.v1.DaemonHealthError
+	(*v1.WorkspaceRef)(nil),                  // 14: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_daemon_health_proto_depIdxs = []int32{
 	2,  // 0: agentrepl.v1.DaemonHealthResponse.success:type_name -> agentrepl.v1.DaemonHealthSuccess
-	14, // 1: agentrepl.v1.DaemonHealthResponse.error:type_name -> agentrepl.v1.DaemonHealthError
+	13, // 1: agentrepl.v1.DaemonHealthResponse.error:type_name -> agentrepl.v1.DaemonHealthError
 	3,  // 2: agentrepl.v1.DaemonHealthSuccess.healthy:type_name -> agentrepl.v1.DaemonHealthy
 	5,  // 3: agentrepl.v1.DaemonHealthSuccess.unhealthy:type_name -> agentrepl.v1.DaemonUnhealthy
 	4,  // 4: agentrepl.v1.DaemonHealthSuccess.identity:type_name -> agentrepl.v1.DaemonIdentity
 	6,  // 5: agentrepl.v1.DaemonUnhealthy.faults:type_name -> agentrepl.v1.DaemonFault
 	7,  // 6: agentrepl.v1.DaemonFault.adoption_window_expired:type_name -> agentrepl.v1.DaemonFaultAdoptionWindowExpired
 	9,  // 7: agentrepl.v1.DaemonFault.log_sink_poisoned:type_name -> agentrepl.v1.DaemonFaultLogSinkPoisoned
-	10, // 8: agentrepl.v1.DaemonFault.deploy_script_failed:type_name -> agentrepl.v1.DaemonFaultDeployScriptFailed
-	11, // 9: agentrepl.v1.DaemonFault.successor_spawn_failed:type_name -> agentrepl.v1.DaemonFaultSuccessorSpawnFailed
-	12, // 10: agentrepl.v1.DaemonFault.prompts_dir_missing:type_name -> agentrepl.v1.DaemonFaultPromptsDirMissing
-	13, // 11: agentrepl.v1.DaemonFault.wsm_read_only:type_name -> agentrepl.v1.DaemonFaultWsmReadOnly
-	8,  // 12: agentrepl.v1.DaemonFault.daemon_state_unreadable:type_name -> agentrepl.v1.DaemonFaultDaemonStateUnreadable
-	15, // 13: agentrepl.v1.DaemonFaultAdoptionWindowExpired.workspace:type_name -> workspace.v1.WorkspaceRef
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	10, // 8: agentrepl.v1.DaemonFault.successor_spawn_failed:type_name -> agentrepl.v1.DaemonFaultSuccessorSpawnFailed
+	11, // 9: agentrepl.v1.DaemonFault.prompts_dir_missing:type_name -> agentrepl.v1.DaemonFaultPromptsDirMissing
+	12, // 10: agentrepl.v1.DaemonFault.wsm_read_only:type_name -> agentrepl.v1.DaemonFaultWsmReadOnly
+	8,  // 11: agentrepl.v1.DaemonFault.daemon_state_unreadable:type_name -> agentrepl.v1.DaemonFaultDaemonStateUnreadable
+	14, // 12: agentrepl.v1.DaemonFaultAdoptionWindowExpired.workspace:type_name -> workspace.v1.WorkspaceRef
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_daemon_health_proto_init() }
@@ -1037,7 +970,6 @@ func file_agentrepl_v1_endpoint_daemon_health_proto_init() {
 	file_agentrepl_v1_endpoint_daemon_health_proto_msgTypes[6].OneofWrappers = []any{
 		(*DaemonFault_AdoptionWindowExpired)(nil),
 		(*DaemonFault_LogSinkPoisoned)(nil),
-		(*DaemonFault_DeployScriptFailed)(nil),
 		(*DaemonFault_SuccessorSpawnFailed)(nil),
 		(*DaemonFault_PromptsDirMissing)(nil),
 		(*DaemonFault_WsmReadOnly)(nil),
@@ -1049,7 +981,7 @@ func file_agentrepl_v1_endpoint_daemon_health_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_daemon_health_proto_rawDesc), len(file_agentrepl_v1_endpoint_daemon_health_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

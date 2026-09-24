@@ -2,6 +2,7 @@ package rollout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,17 +80,13 @@ func ReportJoiningAddr(stateDir, address string) error {
 		return fmt.Errorf("rollout: create the joining address report: %w", err)
 	}
 	if _, err := tmp.WriteString(address + "\n"); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return fmt.Errorf("rollout: write the joining address report: %w", err)
+		return fmt.Errorf("rollout: write the joining address report: %w", errors.Join(err, tmp.Close(), os.Remove(tmp.Name())))
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("rollout: close the joining address report: %w", err)
+		return fmt.Errorf("rollout: close the joining address report: %w", errors.Join(err, os.Remove(tmp.Name())))
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("rollout: install the joining address report: %w", err)
+		return fmt.Errorf("rollout: install the joining address report: %w", errors.Join(err, os.Remove(tmp.Name())))
 	}
 	return nil
 }

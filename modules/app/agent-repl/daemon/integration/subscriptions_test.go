@@ -576,7 +576,7 @@ func transportClosedRPCs() []transportClosedRPC {
 			return firstReceiveErr(s, err)
 		}},
 		{"WatchWebWorkspace", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
-			s, err := d.Client().WatchWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws}))
+			s, err := d.Client().WatchWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws, WebappBuild: harness.FakeWebappEntry}))
 			return firstReceiveErr(s, err)
 		}},
 		{"WatchLoginTerminal", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {

@@ -108,8 +108,12 @@ means the daemon and this build disagree about the contract.
   - `CLAUDE_CONFIG_DIR` (required) — which ACCOUNT the session runs as.
   - `AGENT_REPL_OWNED=1` (required) — the daemon's mark; a shim refuses to run
     unowned.
-  - `SHIM_BUILD_SHA` (required) — reported on `SessionStarted`; the daemon
-    compares it against the deploy stamp and bounces a stale survivor.
+  - `SHIM_BUILD_SHA` (required) — the content hash (lowercase hex SHA-256) of
+    the `dist/main.js` bundle the daemon spawned this process from, stated by
+    the daemon at spawn time. Reported on `SessionStarted` and on every
+    `SessionDiagnostics` frame (including a session-less shim's opening
+    WatchSession frame); the daemon's deploy compares it against a freshly
+    built bundle's own hash and bounces a shim whose reported hash differs.
   - `AGENT_REPL_STATE_DIR` (default `~/.claude-emacs`) — the one state root.
   - `AGENT_REPL_STORE_SOCKET` — the store socket when `--store-socket` is
     absent. **The flag beats the env.**
@@ -710,8 +714,27 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
   that close pushes nothing (no context usage, title or account re-probe).
 - **THE DAEMON NEVER SEES ONE.** No verb names a keep-alive as the turn in
   flight (`servedOpenTurn`): not `SessionStarted`, not `SessionLive`, not
-  `KillSession`, not `Hibernate`. The one keep-alive fact on the wire is the
-  ruled `turn_already_open.keepalive` refusal the daemon re-drives past.
+  `KillSession`, not `Hibernate`, and no refusal either: the retired
+  `turn_already_open.keepalive` flag (proto tag reserved) is gone.
+- **A REAL PROMPT WAITS BEHIND IT, INSIDE THE SHIM (2026-09-23).** A
+  `StartTurn` that lands while a keep-alive holds the slot waits for the
+  keep-alive to leave it — its own result, an abandoned beat, the query's
+  death, a teardown — and then opens its turn as on an idle session
+  (`TurnEngine.waitOutKeepalive`). Nothing of the turn exists during the wait,
+  so its two exits lose and double nothing: the bound
+  (`KEEPALIVE_YIELD_BUDGET_MS`) refuses `vendor_refused` at ERROR, and the
+  caller's abort signal refuses it undelivered at INFO. The keep-alive is never
+  interrupted, because the SDK declares no attribution for an interrupted
+  send's result. `setOpen` is the one writer of the slot, so every way a
+  keep-alive leaves releases the wait, ends the keep-alive's rewind watch (so a
+  later anchor refusal cannot re-deliver the keep-alive under the real turn),
+  and the keep-alive's rewind debt is counted before `closeTurn` first awaits.
+  A second `StartTurn` while one is being started is refused
+  `turn_already_open`, a beat is skipped while a start is in flight, and a
+  `KillTurn` naming the waiting turn waits for the start and then interrupts
+  the opened turn, as it would for any start. A `KillTurn` or main-agent
+  stop that finds ONLY a keep-alive open answers `no_turn_open` /
+  `nothing_running` and never interrupts it (`TurnEngine.servedTurn`).
 - **NOTHING IS STORED, ON EITHER PLANE (2026-09-23).** No purpose needs a
   row. The send, the answer and the scope's close are this process's memory;
   the rewind anchor is taken from the SDK messages as they pass

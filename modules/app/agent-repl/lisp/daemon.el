@@ -1313,9 +1313,10 @@ kernel releases the instant the old process ends, while Emacs runs that
 process\='s sentinel later.  So the restart\='s ensure spawns, and the
 predecessor\='s sentinel only then fires.  A clear at the spawn wiped the
 order before the exit it excused was ever recorded, and two orderly
-`bin/deploy-all.sh\' restarts were logged as unrequested exits at WARN
-(2026-09-13).  A t is still cleared on spawn: it names nobody, so it could
-otherwise excuse the new daemon.")
+restarts (ordered by the deploy script the daemon\='s own Deploy has since
+replaced) were logged as unrequested exits at WARN (2026-09-13).  A t is
+still cleared on spawn: it names nobody, so it could otherwise excuse the
+new daemon.")
 
 (defconst agent-repl-daemon--exit-log-format
   "elisp.daemon.exited status=%S event=%s requested=%s"
@@ -1333,12 +1334,13 @@ recording without a process death.
 THE LEVEL FOLLOWS WHO ASKED.  A daemon exit is not one fact:
 
   - AN EXIT THIS EDITOR ASKED FOR is the requested outcome arriving.  Every
-    deploy and every backend restart goes through
+    backend restart this editor orders goes through
     `agent-repl-frontend-daemon-stop\', and the exit that follows was the
-    point of the exercise — recorded at INFO.  Warning about it put a
-    `WARNING:\' line in *Messages* twice in one morning for two orderly
-    `bin/deploy-all.sh\' restarts, which is the log crying wolf about its
-    own instruction being obeyed.
+    point of the exercise — recorded at INFO.  (A deploy is the daemon\='s
+    own: its Deploy replaces a stale daemon by a blue-green handover, never
+    through this stop.)  Warning about it put a `WARNING:\' line in
+    *Messages* twice in one morning for two orderly restarts, which is the
+    log crying wolf about its own instruction being obeyed.
 
   - AN EXIT NOBODY ASKED FOR is the daemon leaving on its own.  A clean
     status still means work this editor believed was being served has

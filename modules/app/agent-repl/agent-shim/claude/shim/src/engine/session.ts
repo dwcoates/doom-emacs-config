@@ -120,7 +120,16 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
-import { TurnEngine, promptEntry, buildPrompt, saidText, textSaid, type OpenTurn, type SessionContext } from "./turn.js";
+import {
+  KEEPALIVE_YIELD_BUDGET_MS,
+  TurnEngine,
+  promptEntry,
+  buildPrompt,
+  saidText,
+  textSaid,
+  type OpenTurn,
+  type SessionContext,
+} from "./turn.js";
 
 const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engine.session" });
 
@@ -216,6 +225,12 @@ interface EngineDeps {
    * beats on {@link KEEPALIVE_INTERVAL_MS}.
    */
   readonly keepaliveIntervalMs?: number;
+  /**
+   * How long a `StartTurn` waits behind the shim's own keep-alive, when
+   * something overrode {@link KEEPALIVE_YIELD_BUDGET_MS}. A suite shortens it
+   * to reach the bound's refusal; production always uses the constant.
+   */
+  readonly keepaliveYieldBudgetMs?: number;
   /**
    * The teardown's per-tail conclusion budget, when something overrode the
    * module constant.
@@ -483,7 +498,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deps.identityStore ?? createAgentIdentityStore(deps.env.stateDir, workspaceKey, deps.nowMs);
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
   const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
-  const pushes = new SessionPushes(deps.nowMs);
+  const pushes = new SessionPushes(deps.nowMs, deps.runtime.shimBuildSha);
   const live = new LiveWorkTable();
   const foreground = new ForegroundUnitTable();
   const rewind = new KeepaliveRewind();
@@ -512,7 +527,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let query: QueryLike | undefined;
   let abort: AbortController | undefined;
   let prompts: PromptQueue | undefined;
+  /** The one turn that may be open. Written ONLY through {@link setOpen}. */
   let open: OpenTurn | undefined;
+  /**
+   * Settled the moment the keep-alive now open leaves the turn slot.
+   *
+   * Minted lazily by the first `StartTurn` that has to wait behind it, and
+   * one per keep-alive however many ask, so an expired wait leaves nothing
+   * behind to grow.
+   */
+  let keepaliveEnd: { readonly promise: Promise<void>; readonly resolve: () => void } | undefined;
   let effectiveModel = "";
   /**
    * The mode in force. `auto` IS THE UNSTATED MODE (owner ruling 2026-09-14):
@@ -2092,14 +2116,61 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /**
+   * THE ONE WRITER OF {@link open}.
+   *
+   * A keep-alive leaving the slot — by its own result, an abandoned beat, the
+   * query's death, a teardown or a kill — is the moment a `StartTurn` waiting
+   * behind it may go (engine/turn.ts), so every way out goes through here and
+   * the release cannot be forgotten on any of them.
+   */
+  function setOpen(turn: OpenTurn | undefined): void {
+    const left = open;
+    open = turn;
+    if (left?.keepalive !== true || left === turn) return;
+    // THE KEEP-ALIVE'S REWIND WATCH ENDS WITH IT. The watch holds the send to
+    // re-deliver if the vendor refuses the anchor; once the keep-alive has left
+    // the slot a refusal can no longer be about it, and a watch left standing
+    // would re-deliver the KEEP-ALIVE — client uuid and all — under the real
+    // turn that opens next.
+    if (rewindWatch?.keepalive === true) {
+      LOGGER.debug(
+        { keepalive_turn: left.id.value, resume_session_at: rewindWatch.anchorUuid },
+        "the keep-alive left the turn slot; its rewind watch ends with it",
+      );
+      rewindWatch = undefined;
+    }
+    const end = keepaliveEnd;
+    keepaliveEnd = undefined;
+    end?.resolve();
+  }
+
+  /** The promise a waiting `StartTurn` holds; absence when no keep-alive holds the slot. */
+  function keepaliveEnded(): Promise<void> | undefined {
+    if (open?.keepalive !== true) return undefined;
+    if (keepaliveEnd === undefined) {
+      let resolve = (): void => {};
+      const promise = new Promise<void>((settle) => {
+        resolve = settle;
+      });
+      keepaliveEnd = { promise, resolve };
+    }
+    return keepaliveEnd.promise;
+  }
+
   async function closeTurn(): Promise<void> {
     const ended = open;
-    open = undefined;
+    setOpen(undefined);
     // THE REQUEST ID DIES WITH ITS TURN. It named the vendor call this turn ran
     // under; carrying it past the end would attribute idle records and the next
     // turn to a request that is already answered.
     clearRequestId();
     if (ended === undefined) return;
+    // THE KEEP-ALIVE'S DEBT IS COUNTED BEFORE ANYTHING AWAITS. A `StartTurn`
+    // waiting behind it runs the moment this function first yields, and its
+    // yield obligation must already see the keep-alive it has to rewind past;
+    // counted after an await, that prompt would build on keep-alive context.
+    if (ended.keepalive) rewind.noteKeepaliveTurn();
     cadence?.resume();
     await applyPendingModel();
     if (identity !== undefined) {
@@ -2116,7 +2187,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // context usage it moved, the title it cannot have changed and the
       // account usage it spent all belong to housekeeping no surface shows, and
       // the next real turn's own end restates every one of them.
-      rewind.noteKeepaliveTurn();
       LOGGER.info({ turn_id: ended.id.value, keepalive: true }, "closed a turn");
       return;
     }
@@ -2262,7 +2332,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // needs the session-level fact, and a consumer with no WatchSession open
     // still needs its turn concluded.
     writeQueryDeathTerminal(detail);
-    open = undefined;
+    setOpen(undefined);
     keepaliveScope.abandon(`the vendor query died: ${detail}`);
     cadence?.stop();
     // NO RECOVERY PATH, DELIBERATELY. Nothing in this process restarts a query
@@ -3732,6 +3802,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function keepaliveBeat(): Promise<void> {
     if (open !== undefined || query === undefined || identity === undefined) return;
+    // A REAL START IN FLIGHT OWNS THE SLOT IT IS ABOUT TO OPEN, even before
+    // `open` says so: it is still writing its prompt row or reading its page.
+    if (turns.startInFlight()) {
+      LOGGER.logVerbose({ outcome: "skipped_start_in_flight" }, "keep-alive beat skipped: a StartTurn is being processed");
+      return;
+    }
     // A keep-alive turn's id NEVER reaches the wire: TurnIds are daemon-minted
     // and adopted, and this turn has no daemon behind it. The value exists only
     // so the turn has an identity in this process; its prompt entry is tagged
@@ -3741,7 +3817,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     });
     keepaliveCount += 1;
     const said = textSaid(keepalivePromptText(keepaliveCount));
-    open = { id: turn, keepalive: true, startedAtMs: deps.nowMs() };
+    setOpen({ id: turn, keepalive: true, startedAtMs: deps.nowMs() });
     // THE SCOPE OPENS BEFORE THE SEND, so the vendor cannot answer a send the
     // shim does not yet recognize as its own.
     keepaliveScope.begin(newUuid(), turn.value);
@@ -3760,7 +3836,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       pushes.resolveComponent(KEEPALIVE_COMPONENT, 0);
     } catch (err) {
-      open = undefined;
+      setOpen(undefined);
       keepaliveScope.abandon(`the keep-alive could not be submitted: ${err instanceof Error ? err.message : String(err)}`);
       pushes.fault(
         sessionFault(
@@ -3783,9 +3859,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     query: () => query,
     nowMs: deps.nowMs,
     openTurn: () => open,
+    keepaliveEnded,
+    keepaliveYieldBudgetMs: deps.keepaliveYieldBudgetMs ?? KEEPALIVE_YIELD_BUDGET_MS,
     submit,
     setOpenTurn: (turn) => {
-      open = turn;
+      setOpen(turn);
       if (turn === undefined) cadence?.resume();
       else cadence?.pause();
     },
@@ -4290,7 +4368,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // BEFORE `open` IS CLEARED: the terminal names the turn, and a teardown
     // that forgot the turn first would have nothing to write it for.
     writeHostShutdownTerminal(reason);
-    open = undefined;
+    setOpen(undefined);
     keepaliveScope.abandon(`the session is being torn down: ${reason}`);
     prompts?.close();
     abort?.abort();
@@ -4549,7 +4627,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     setSessionPermissionMode,
     hibernate,
     killSession,
-    startTurn: (request) => turns.startTurn(request),
+    startTurn: (request, signal) => turns.startTurn(request, signal),
     watchAgent: (request) => turns.watchAgent(request),
     updateAgent: (request) => turns.updateAgent(request),
     killTurn: (request) => turns.killTurn(request),

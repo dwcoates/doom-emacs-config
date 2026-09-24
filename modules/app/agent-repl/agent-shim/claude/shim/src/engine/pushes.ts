@@ -113,7 +113,22 @@ export class SessionPushes {
   private readonly current = new Map<string, conversationv1.SessionUpdate>();
   private standingDown = false;
 
-  constructor(private readonly nowMs: () => number = () => Date.now()) {}
+  /**
+   * `shimBuildSha` is REQUIRED on `SessionDiagnostics.shim_build` (every
+   * frame, including the opening one of a session-less WatchSession), so it
+   * is required here too rather than defaulted: `main.ts` refuses to start
+   * without `SHIM_BUILD_SHA`, so production never reaches this with an empty
+   * string, and a caller that does is a construction-site defect, loud rather
+   * than a silently empty required field on the wire.
+   */
+  constructor(
+    private readonly nowMs: () => number = () => Date.now(),
+    private readonly shimBuildSha: string,
+  ) {
+    if (this.shimBuildSha === "") {
+      throw new Error("SessionPushes: shimBuildSha is required and must not be empty");
+    }
+  }
 
   /** The arms a joining subscriber is caught up on, in the order it gets them. */
   //
@@ -235,6 +250,7 @@ export class SessionPushes {
         case: "diagnostics",
         value: create(conversationv1.SessionDiagnosticsSchema, {
           degradedWindows: [...this.degradedWindows],
+          shimBuild: this.shimBuildSha,
           health:
             this.faults.length === 0
               ? { case: "healthy", value: create(conversationv1.SessionHealthySchema, {}) }

@@ -202,6 +202,35 @@ describe("a WatchDaemon push arm this build has no case for", () => {
   });
 });
 
+// `reload_elisp` IS EMACS'S. The daemon addresses it to stale Emacs streams
+// alone, so a webview never meets it; one that did would skip it as skew,
+// raising nothing and keeping the stream.
+describe("a reload_elisp push reaching a webview", () => {
+  it("raises no failure card", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    harness.fake.pushReloadElisp("/checkout", "elisp-build");
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("leaves the stream standing, so the next push it DOES know still lands", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    harness.fake.pushReloadElisp("/checkout", "elisp-build");
+    await harness.settle();
+    // Act
+    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    await harness.settle();
+    // Assert
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+  });
+});
+
 describe("the drain banner", () => {
   it.each(DRAIN_REASON_ARMS)("draws a scheduled drain for the %s reason", async (arm) => {
     // Arrange
