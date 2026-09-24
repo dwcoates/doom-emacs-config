@@ -328,6 +328,91 @@ func TestATurnThatDrewNoProseAndNamedNoAnswerRaisesNothing(t *testing.T) {
 	}
 }
 
+// apiErrorNotice is the vendor's synthesized "API Error" notice as a producer
+// marks it: prose in the shape of an answer that no model wrote.
+func apiErrorNotice() *conversationv1.AgentResponseSuccess {
+	return &conversationv1.AgentResponseSuccess{
+		Prose: &conversationv1.AgentResponseProse{Markdown: "API Error: Can't reach the API server"},
+		Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{
+			SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
+				Subject: &conversationv1.AgentResponseSynthesizedNotice_Unclassified{
+					Unclassified: &conversationv1.AgentNoticeUnclassified{},
+				},
+			},
+		},
+	}
+}
+
+// TestATurnWhoseOnlyProseIsAVendorNoticeRaisesNothing pins the notice exclusion
+// (the 2026-09-24 replay of turn c9d7014b): a turn the vendor answered with its
+// own "API Error" notice and nothing else never had an answer to lose, so a
+// terminal naming no answer over it is not a defect.
+func TestATurnWhoseOnlyProseIsAVendorNoticeRaisesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), noAddress())
+
+	// Act.
+	h.concludeWithoutAnswer("turn-1")
+
+	// Assert.
+	if got := h.errorRecords("daemon.feed.final_answer_unresolved"); len(got) != 0 {
+		t.Fatalf("a notice-only turn logged %d unresolved records, want none", len(got))
+	}
+	if fault := h.standingAnswerFault(); fault != nil {
+		t.Fatalf("a notice-only turn raised a fault: %v", fault.Evidence)
+	}
+}
+
+// TestAVendorNoticeBesideModelProseStillRaisesTheFault pins that the exclusion covers the
+// notice alone: model prose drawn in the same turn is still an answer the
+// terminal owed a name.
+func TestAVendorNoticeBesideModelProseStillRaisesTheFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-2", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
+		}, nil), noAddress())
+
+	// Act.
+	h.concludeWithoutAnswer("turn-1")
+
+	// Assert.
+	fault := h.standingAnswerFault()
+	if fault == nil {
+		t.Fatal("no final-answer fault stands over the model's prose")
+	}
+	if fault.Evidence["unit"] != "unit-2" || fault.Evidence["why"] != whyNoAnswerNamed {
+		t.Fatalf("fault evidence = %v, want unit-2 and %q", fault.Evidence, whyNoAnswerNamed)
+	}
+}
+
+// TestAModelSettleOverANoticeMakesTheBlockAnswerProseAgain pins that the SETTLED WHOLE decides
+// authorship: a block first settled as a notice and re-settled as the model's
+// prose (the other store plane restating it) is answer prose again.
+func TestAModelSettleOverANoticeMakesTheBlockAnswerProseAgain(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
+		}, nil), noAddress())
+
+	// Act.
+	h.concludeWithoutAnswer("turn-1")
+
+	// Assert.
+	if fault := h.standingAnswerFault(); fault == nil || fault.Evidence["unit"] != "unit-1" {
+		t.Fatalf("standing fault = %v, want one about unit-1", fault)
+	}
+}
+
 // TestAContextCutDirectiveTurnRaisesNothing pins the other exclusion: /clear
 // draws no answering bubble at all, so it never had an answer to lose.
 func TestAContextCutDirectiveTurnRaisesNothing(t *testing.T) {

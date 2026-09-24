@@ -659,8 +659,13 @@ first is silent (`internal/resolve/feed/finalanswer.go`, `turnended.go`).
    a substatus is legal only under a status the fault claims, and neither
    claimable status would be true here.
 
-A CONTEXT-CUT DIRECTIVE and a turn that drew no prose at all are excluded from
-(2): neither ever had an answer to lose.
+A CONTEXT-CUT DIRECTIVE, a turn that drew no prose at all, and a turn whose
+only drawn prose is a VENDOR-SYNTHESIZED NOTICE (`AgentResponseSuccess.authorship
+= synthesized_notice`, e.g. "API Error: Can't reach the API server", which the
+feed already draws in the notice register) are excluded from (2): none ever had
+an answer to lose. The settled whole decides a block's authorship, so a block
+re-settled as the model's prose counts again; model prose beside a notice still
+raises.
 
 **THE ALIASING RULE.** One prose block can reach the resolver under two
 divergent activity ids (the two store planes disagreeing on
