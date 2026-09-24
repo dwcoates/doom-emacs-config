@@ -188,6 +188,38 @@ export function openStream<T>(
   return new Stream(open({ signal: controller.signal }), controller);
 }
 
+/**
+ * The first history entry matching `predicate` on a JUST-OPENED WatchAgent
+ * stream, searched on the OPENING PAGE and then on the tail.
+ *
+ * A row written before the watch opened is on the PAGE, and the shim never
+ * serves it again as a tail entry (the store pins the tail at the open). So a
+ * wait on the tail alone is a race against the store writer rather than a wait
+ * on the row: whenever the writer's batch lands before `OpenAgentSession`, the
+ * row is on the page and the tail wait never returns.
+ *
+ * The stream must not have been pulled yet, because its next frame has to be
+ * the page; a stream whose page was already consumed refuses loudly here
+ * instead of silently tailing past it.
+ */
+export async function awaitAgentEntry(
+  stream: Stream<shimv1.WatchAgentResponse>,
+  predicate: (entry: conversationv1.HistoryEntryAt) => boolean,
+): Promise<conversationv1.HistoryEntryAt> {
+  const opening = await stream.next();
+  if (opening.frame.case !== "page") {
+    throw new Error(
+      `awaitAgentEntry: expected the opening page, got ${opening.frame.case ?? "an unset oneof"}`,
+    );
+  }
+  const onPage = opening.frame.value.entries.find(predicate);
+  if (onPage !== undefined) return onPage;
+  for (;;) {
+    const frame = await stream.next();
+    if (frame.frame.case === "entry" && predicate(frame.frame.value)) return frame.frame.value;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // refusal helpers
 // ---------------------------------------------------------------------------
