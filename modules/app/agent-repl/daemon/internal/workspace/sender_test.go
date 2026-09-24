@@ -162,9 +162,9 @@ func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 	}
 }
 
-// TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal covers the boundary: a
-// turn_already_open that is NOT a keep-alive stays a genuine daemon bug, so the
-// queue must not re-drive it.
+// TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal covers a
+// turn_already_open, which is always the daemon's own bug: it is carried up as
+// its typed arm rather than retried.
 func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 	// Arrange
 	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
@@ -186,9 +186,6 @@ func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 	}
 	if refusal.Arm != "turn_already_open" {
 		t.Fatalf("refusal arm = %q, want turn_already_open", refusal.Arm)
-	}
-	if refusal.KeepaliveTurnAlreadyOpen() {
-		t.Fatalf("refusal = %+v, want a genuine daemon double-submit left terminal", refusal)
 	}
 }
 

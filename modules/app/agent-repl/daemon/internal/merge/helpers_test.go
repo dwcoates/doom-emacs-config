@@ -608,9 +608,6 @@ func (q *fakeQueue) Editing(ids.WorkspaceID) (promptqueue.Edit, bool) {
 func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
 	return nil
 }
-func (q *fakeQueue) CancelKeepaliveRedrive(context.Context, ids.WorkspaceID, ids.TurnID) bool {
-	return false
-}
 func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
 func (q *fakeQueue) Reviving(ids.WorkspaceID) bool                          { return false }
 func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
