@@ -284,12 +284,13 @@ unmarked is DISCRETIONARY by default.
        var.
      - SELF-RELOAD: a merged outcome whose TARGET matches the daemon's
        own checkout (git common-dir identity; sibling worktrees
-       excluded) triggers the self-redeploy — fires exactly once, only
-       after lease release and terminal publication, classifies the
-       landed range by changed subsystem prefixes and restarts ONLY
-       what changed; EXECUTION is delegated to the rollout controller
-       (the graceful-rollout entry below), which owns the
-       zero-perceived-downtime mechanics.
+       excluded) runs ONE deploy (SUPERSEDED 2026-09-23: the daemon owns
+       deploys) — told exactly once per landing with every commit it
+       landed, only after lease release and terminal publication, never
+       waited on; the deploy builds, judges each component by content
+       hash and restarts only what is out of date, acting through the
+       rollout controller (the graceful-rollout entry below), which owns
+       the zero-perceived-downtime mechanics.
    - THE BUBBLE AND ROUTING (settled at the merge-flow remediation):
      the merge bubble is a SUB-FEED (FeedMerge = head only; six
      FeedMergeTab rows: queue | rebase | tests | remediation | action |
@@ -377,13 +378,19 @@ unmarked is DISCRETIONARY by default.
    rate-limited with exact suppressed/total counts, never a flood.
 
 10. PRESCRIBED — THE ROLLOUT CONTROLLER (graceful doom-change rollout).
-   - RESPONSIBILITIES: turns the merge orchestrator's self-reload
-     trigger into a zero-perceived-downtime rollout, per changed
-     subsystem: daemon → blue-green handover; shim → per-workspace
-     preemptive relaunch; elisp → hot-load; webapp → hot asset swap;
-     SIDECAR and STORE → deliberately UNHANDLED (a user-initiated full
-     restart; both are rare-change codebases by design — revisitable in
-     a future project, not this one).
+   - RESPONSIBILITIES (SUPERSEDED 2026-09-23 by the daemon-owned deploy,
+     `internal/deploy` and `Deploy{force}`): the deploy builds into
+     staging, judges every component by content hash against what each
+     running process reported when it connected, installs, and acts per
+     out-of-date component: daemon → blue-green handover; shim → the
+     prompt queue's BOUNCE REGISTRY (bounced now when free, registered
+     and bounced on the freeness edge otherwise, queued prompts
+     delivered to the new shim; monitors, background shells and
+     background subagents block it); elisp → a pushed `reload_elisp`;
+     webapp → a pushed `reload_webapp`; STORE and SIDECAR → restarted at
+     once in the recorded safe order (bootout sidecar, kickstart store,
+     await store.sock, bootstrap sidecar). A FORCED deploy waits for
+     nothing.
    - DAEMON HANDOVER (product spec — the full agreed flow):
      1. SPAWN. The old daemon detects the self-merge, rebuilds, and
         spawns the new daemon itself. The new daemon starts in JOINING
@@ -458,19 +465,21 @@ unmarked is DISCRETIONARY by default.
      webviews pinning a deleted bundle).
    - SHIM RELAUNCH (product spec — the settled flow; the same engine
      serves the build-staleness bounce, one engine two triggers):
-     1. REBUILD once; per live workspace, independently and in
-        parallel, PRELAUNCH the new shim process — up and
-        daemon-connected but INERT by construction (no session started:
-        no vendor process, no store writes, no keep-alives), so it
-        coexists with the old shim indefinitely.
-     2. WAIT FOR FREENESS (no in-flight turn, no live detached work).
-        Freeness at shim kill is an INVARIANT of the rollout's design —
-        by construction nothing is running under the vendor process
-        when it dies, so killing the CLI is inconsequential by design
-        (ruled 2026-08-29; no orphan-process question arises).
-        Never-free gets the same wait-forever + periodic-warn ruling as
-        the daemon handover.
-     3. AT FREENESS: flip intake to the restart-pending HOLD
+     1. REGISTER (SUPERSEDED 2026-09-23: no per-workspace wait
+        goroutine). The prompt queue's BOUNCE REGISTRY decides, under
+        the same delivery lock every dispatch takes: a free workspace
+        is bounced now; a busy one is registered and taken on its
+        freeness edge (a turn or the last detached item ending). A
+        decided bounce DRAINS the workspace — nothing is dispatched —
+        so a prompt cannot start between "free" and "bounce"; queued
+        prompts never block it and are delivered to the new shim.
+     2. AT FREENESS (or at once when FORCED): PRELAUNCH the new shim —
+        daemon-connected but INERT (no session started). Freeness at
+        shim kill is an INVARIANT of an unforced bounce: nothing is
+        running under the vendor process when it dies. A forced bounce
+        stands the shim down forced, and its monitors, background
+        shells and background subagents end with the vendor child.
+     3. Flip intake to the restart-pending HOLD
         (tray-visible, existing semantics); STAND DOWN the old shim —
         stop keep-alives, WAIT FOR ALL STORE ACKS (an exit with
         unacknowledged writes is a loud failure; there is no durable
@@ -530,10 +539,13 @@ unmarked is DISCRETIONARY by default.
      successor is distinguishable because it is SPAWNED with an
      explicit joining argument — an unflagged second daemon loses the
      claim and exits without disturbing the incumbent's listeners.
-   - DEPLOY CHAIN (ruled 2026-08-29): build mechanics and ordering are
-     the ONE deploy script's domain — the rollout invokes it, never a
-     second build path; a proto-prefix change classifies as touching
-     every consumer of the regenerated bindings.
+   - DEPLOY (SUPERSEDED 2026-09-23; was the 2026-08-29 deploy-chain
+     ruling): there is no deploy script. The daemon builds with
+     `bin/build-frontend.sh --out` after `make -C proto all` — the ONE
+     build step, shared with Emacs's cold start — and staleness is each
+     running process's reported content hash, never a classified range
+     of changed paths. One deploy per complete change landing on
+     master, never one per commit.
    - GOTCHAS: headless workspaces transfer via WSM facts + lock claim
      alone and must never wait on an Emacs relay (Emacs may not be
      running); a never-free workspace leaves the rollout in a

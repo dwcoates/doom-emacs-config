@@ -74,6 +74,10 @@ type Manifest struct {
 	Successor string `json:"successor"`
 	// WrittenAt is when the manifest was written.
 	WrittenAt time.Time `json:"written_at"`
+	// Forced records that the handover was FORCED: the transfers did not wait
+	// for freeness, and the successor bounces the stale shims it adopts at once
+	// too, rather than registering them behind their work.
+	Forced bool `json:"forced"`
 	// Sessions is one record per session, in workspace order.
 	Sessions []ManifestSession `json:"sessions"`
 }
@@ -177,18 +181,17 @@ func (c *controller) writeManifest(ctx context.Context, m Manifest) error {
 		return fmt.Errorf("rollout: create the intent manifest: %w", err)
 	}
 	if _, err := tmp.Write(body); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		err = errors.Join(err, tmp.Close(), os.Remove(tmp.Name()))
 		c.log.Error(opManifest, "could not write the intent manifest", withCause(fields, err))
 		return fmt.Errorf("rollout: write the intent manifest: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
+		err = errors.Join(err, os.Remove(tmp.Name()))
 		c.log.Error(opManifest, "could not close the intent manifest", withCause(fields, err))
 		return fmt.Errorf("rollout: close the intent manifest: %w", err)
 	}
 	if err := os.Rename(tmp.Name(), c.deps.IntentManifest); err != nil {
-		os.Remove(tmp.Name())
+		err = errors.Join(err, os.Remove(tmp.Name()))
 		c.log.Error(opManifest, "could not install the intent manifest", withCause(fields, err))
 		return fmt.Errorf("rollout: install the intent manifest: %w", err)
 	}

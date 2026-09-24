@@ -6,7 +6,8 @@
 ;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
 ;; RestartWorkspace, SetWorkspacePriority, SubmitPrompt,
-;; UpdateShutdownSchedule, UpdateMergeQueue, DaemonHealth and SessionHealth.
+;; UpdateShutdownSchedule, Deploy, UpdateMergeQueue, DaemonHealth and
+;; SessionHealth.
 ;;
 ;; SCOPE.  This file owns exactly the messages declared in those endpoint
 ;; protos.  The shared leaf vocabularies — WorkspaceRef, RepositoryRef,
@@ -211,6 +212,12 @@ a non-string element is a contract breach."
    ((string-empty-p value)
     (agent-repl-wire-verbs--fail message field "required string is empty"))
    (t value)))
+
+(defun agent-repl-wire-verbs--decode-required-string (message field json)
+  "Decode MESSAGE's REQUIRED string FIELD out of JSON; empty is a breach."
+  (agent-repl-wire-verbs--require-string
+   message (symbol-name field)
+   (agent-repl-wire-verbs--decode-string message field json)))
 
 (defun agent-repl-wire-verbs--encode-bool (value)
   "Encode elisp VALUE as a protojson bool, spelled explicitly."
@@ -2328,86 +2335,278 @@ arm this codec does not know is refused as an unknown field."
    #'agent-repl-wire-decode-update-shutdown-schedule-response-error))
 
 
-;;;; ---- RollOutBuild ---------------------------------------------------
+;;;; ---- Deploy -------------------------------------------------------
 
-(defun agent-repl-wire-encode-roll-out-build-request (request)
-  "Encode RollOutBuildRequest from plist REQUEST (:daemon B :shim B :webapp B).
-EACH REBUILT SUBSYSTEM IS AN EMPTY MARKER whose PRESENCE is the fact, so a
-nil key is omitted rather than sent and a set one is `nil', which
-serializes as `{}'; a request naming none is refused
-here, because the daemon would only refuse it as malformed."
-  (let ((daemon (plist-get request :daemon))
-        (shim (plist-get request :shim))
-        (webapp (plist-get request :webapp)))
-    (unless (or daemon shim webapp)
-      (agent-repl-wire-verbs--fail "RollOutBuildRequest" "daemon"
-                                   "at least one rebuilt subsystem is required"))
-    (append (when daemon (list (cons 'daemon nil)))
-            (when shim (list (cons 'shim nil)))
-            (when webapp (list (cons 'webapp nil))))))
+(defun agent-repl-wire-encode-deploy-request (request)
+  "Encode DeployRequest from plist REQUEST (:force BOOL).
+FORCED is spelled explicitly either way: an unforced deploy ends no turn,
+and a forced one does not wait for in-flight work."
+  (list (cons 'force (agent-repl-wire-verbs--encode-bool (plist-get request :force)))))
 
-(defun agent-repl-wire-decode-roll-out-build-handover (json)
-  "Decode RollOutBuildHandover from JSON into (:workspaces N :busy N)."
-  (let ((message "RollOutBuildHandover"))
-    (agent-repl-wire-verbs--check-keys message json '(workspaces busy))
+(defconst agent-repl-wire-deploy-components
+  '(("DEPLOY_COMPONENT_DAEMON" . :daemon)
+    ("DEPLOY_COMPONENT_SHIM" . :shim)
+    ("DEPLOY_COMPONENT_WEBAPP" . :webapp)
+    ("DEPLOY_COMPONENT_STORE" . :store)
+    ("DEPLOY_COMPONENT_SIDECAR" . :sidecar)
+    ("DEPLOY_COMPONENT_ELISP" . :elisp))
+  "The DeployComponent vocabulary, wire name to keyword.
+UNSPECIFIED is deliberately ABSENT: it is never sent, and an outcome
+carrying it is malformed.")
+
+(defun agent-repl-wire-decode-deploy-component (message field json)
+  "Decode MESSAGE's REQUIRED DeployComponent FIELD out of JSON as a keyword.
+Absent (protojson's spelling of UNSPECIFIED), UNSPECIFIED itself and an
+unknown name are all contract breaches."
+  (let* ((raw (agent-repl-wire-verbs--decode-string message field json))
+         (keyword (cdr (assoc raw agent-repl-wire-deploy-components))))
+    (cond
+     ((member raw '("" "DEPLOY_COMPONENT_UNSPECIFIED"))
+      (agent-repl-wire-verbs--fail message (symbol-name field) "required field is unset"))
+     ((null keyword)
+      (agent-repl-wire-verbs--fail message (symbol-name field)
+                                   (format "unknown enum value %S" raw)))
+     (t keyword))))
+
+(defun agent-repl-wire-decode-deploy-up-to-date (json)
+  "Decode DeployUpToDate from JSON.  Empty: presence is the fact."
+  (agent-repl-wire-verbs--decode-empty "DeployUpToDate" json))
+
+(defun agent-repl-wire-decode-deploy-service-restarted (json)
+  "Decode DeployServiceRestarted from JSON.  Empty: presence is the fact."
+  (agent-repl-wire-verbs--decode-empty "DeployServiceRestarted" json))
+
+(defun agent-repl-wire-decode-deploy-handing-over (json)
+  "Decode DeployHandingOver from JSON into (:workspaces N :busy N :forced B)."
+  (let ((message "DeployHandingOver"))
+    (agent-repl-wire-verbs--check-keys message json '(workspaces busy forced))
     (list :workspaces (agent-repl-wire--decode-uint32 message 'workspaces json)
-          :busy (agent-repl-wire--decode-uint32 message 'busy json))))
+          :busy (agent-repl-wire--decode-uint32 message 'busy json)
+          :forced (agent-repl-wire--decode-bool message 'forced json))))
 
-(defun agent-repl-wire-decode-roll-out-build-shim-relaunch (json)
-  "Decode RollOutBuildShimRelaunch from JSON into (:workspaces N :busy N)."
-  (let ((message "RollOutBuildShimRelaunch"))
-    (agent-repl-wire-verbs--check-keys message json '(workspaces busy))
-    (list :workspaces (agent-repl-wire--decode-uint32 message 'workspaces json)
-          :busy (agent-repl-wire--decode-uint32 message 'busy json))))
+(defun agent-repl-wire-decode-deploy-bounced-now (json)
+  "Decode DeployBouncedNow from JSON into (:forced B)."
+  (let ((message "DeployBouncedNow"))
+    (agent-repl-wire-verbs--check-keys message json '(forced))
+    (list :forced (agent-repl-wire--decode-bool message 'forced json))))
 
-(defun agent-repl-wire-decode-roll-out-build-webapp-reload (json)
-  "Decode RollOutBuildWebappReload from JSON into (:webviews N)."
-  (let ((message "RollOutBuildWebappReload"))
-    (agent-repl-wire-verbs--check-keys message json '(webviews))
-    (list :webviews (agent-repl-wire--decode-uint32 message 'webviews json))))
+(defun agent-repl-wire-decode-deploy-bounce-registered (json)
+  "Decode DeployBounceRegistered from JSON.
+Returns (:turn-in-flight B :detached-work N)."
+  (let ((message "DeployBounceRegistered"))
+    (agent-repl-wire-verbs--check-keys message json '(turnInFlight detachedWork))
+    (list :turn-in-flight (agent-repl-wire--decode-bool message 'turnInFlight json)
+          :detached-work (agent-repl-wire--decode-uint32 message 'detachedWork json))))
 
-(defun agent-repl-wire-decode-roll-out-build-success (json)
-  "Decode RollOutBuildSuccess from JSON into (:action (:arm ARM :value V)).
-THE ARM IS THE ACTION TAKEN, so an unset action is a contract breach."
-  (let ((message "RollOutBuildSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(handover shimRelaunch webappReload))
-    (list :action
+(defun agent-repl-wire-decode-deploy-shim-bounce-bounced-now (json)
+  "Decode DeployShimBounce's `bounced_now' when arm from JSON."
+  (agent-repl-wire-decode-deploy-bounced-now json))
+
+(defun agent-repl-wire-decode-deploy-shim-bounce-registered (json)
+  "Decode DeployShimBounce's `registered' when arm from JSON."
+  (agent-repl-wire-decode-deploy-bounce-registered json))
+
+(defun agent-repl-wire-decode-deploy-shim-bounce (json)
+  "Decode DeployShimBounce from JSON.
+Returns (:workspace ID :when (:arm ARM :value V)).  The workspace is
+REQUIRED, and THE ARM IS WHEN, so an unset one is a breach."
+  (let ((message "DeployShimBounce"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace bouncedNow registered))
+    (list :workspace (agent-repl-wire-verbs--decode-required-string message 'workspace json)
+          :when (agent-repl-wire-verbs--decode-oneof
+                 message "when" json
+                 (list (list 'bouncedNow :bounced-now
+                             #'agent-repl-wire-decode-deploy-shim-bounce-bounced-now)
+                       (list 'registered :registered
+                             #'agent-repl-wire-decode-deploy-shim-bounce-registered))))))
+
+(defun agent-repl-wire-decode-deploy-shim-bounces-bounces (json)
+  "Decode DeployShimBounces' `bounces' element from JSON."
+  (agent-repl-wire-decode-deploy-shim-bounce json))
+
+(defun agent-repl-wire-decode-deploy-shim-bounces (json)
+  "Decode DeployShimBounces from JSON into (:bounces LIST)."
+  (let ((message "DeployShimBounces"))
+    (agent-repl-wire-verbs--check-keys message json '(bounces))
+    (list :bounces (agent-repl-wire-verbs--decode-repeated
+                    message 'bounces json
+                    #'agent-repl-wire-decode-deploy-shim-bounces-bounces))))
+
+(defun agent-repl-wire-decode-deploy-reload-pushed (json)
+  "Decode DeployReloadPushed from JSON into (:recipients N)."
+  (let ((message "DeployReloadPushed"))
+    (agent-repl-wire-verbs--check-keys message json '(recipients))
+    (list :recipients (agent-repl-wire--decode-uint32 message 'recipients json))))
+
+(defun agent-repl-wire-decode-deploy-deferred-to-successor (json)
+  "Decode DeployDeferredToSuccessor from JSON.  Empty: presence is the fact."
+  (agent-repl-wire-verbs--decode-empty "DeployDeferredToSuccessor" json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome-up-to-date (json)
+  "Decode DeployComponentOutcome's `up_to_date' arm from JSON."
+  (agent-repl-wire-decode-deploy-up-to-date json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome-restarted (json)
+  "Decode DeployComponentOutcome's `restarted' arm from JSON."
+  (agent-repl-wire-decode-deploy-service-restarted json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome-handing-over (json)
+  "Decode DeployComponentOutcome's `handing_over' arm from JSON."
+  (agent-repl-wire-decode-deploy-handing-over json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome-shims (json)
+  "Decode DeployComponentOutcome's `shims' arm from JSON."
+  (agent-repl-wire-decode-deploy-shim-bounces json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome-reload-pushed (json)
+  "Decode DeployComponentOutcome's `reload_pushed' arm from JSON."
+  (agent-repl-wire-decode-deploy-reload-pushed json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome-deferred-to-successor (json)
+  "Decode DeployComponentOutcome's `deferred_to_successor' arm from JSON."
+  (agent-repl-wire-decode-deploy-deferred-to-successor json))
+
+(defun agent-repl-wire-decode-deploy-component-outcome (json)
+  "Decode DeployComponentOutcome from JSON.
+Returns (:component KEYWORD :build HASH :outcome (:arm ARM :value V)).  The
+component and the build are REQUIRED, and THE ARM IS THE DECISION, so an
+unset one is a contract breach."
+  (let ((message "DeployComponentOutcome"))
+    (agent-repl-wire-verbs--check-keys
+     message json
+     '(component build upToDate restarted handingOver shims reloadPushed deferredToSuccessor))
+    (list :component (agent-repl-wire-decode-deploy-component message 'component json)
+          :build (agent-repl-wire-verbs--decode-required-string message 'build json)
+          :outcome
           (agent-repl-wire-verbs--decode-oneof
-           message "action" json
-           (list (list 'handover :handover #'agent-repl-wire-decode-roll-out-build-handover)
-                 (list 'shimRelaunch :shim-relaunch #'agent-repl-wire-decode-roll-out-build-shim-relaunch)
-                 (list 'webappReload :webapp-reload #'agent-repl-wire-decode-roll-out-build-webapp-reload))))))
+           message "outcome" json
+           (list (list 'upToDate :up-to-date
+                       #'agent-repl-wire-decode-deploy-component-outcome-up-to-date)
+                 (list 'restarted :restarted
+                       #'agent-repl-wire-decode-deploy-component-outcome-restarted)
+                 (list 'handingOver :handing-over
+                       #'agent-repl-wire-decode-deploy-component-outcome-handing-over)
+                 (list 'shims :shims
+                       #'agent-repl-wire-decode-deploy-component-outcome-shims)
+                 (list 'reloadPushed :reload-pushed
+                       #'agent-repl-wire-decode-deploy-component-outcome-reload-pushed)
+                 (list 'deferredToSuccessor :deferred-to-successor
+                       #'agent-repl-wire-decode-deploy-component-outcome-deferred-to-successor))))))
 
-(defun agent-repl-wire-decode-roll-out-build-already-rolling-out (json)
-  "Decode RollOutBuildAlreadyRollingOut from JSON into (:waiting-on IDS)."
-  (let ((message "RollOutBuildAlreadyRollingOut"))
+(defun agent-repl-wire-decode-deploy-success-components (json)
+  "Decode DeploySuccess' `components' element from JSON."
+  (agent-repl-wire-decode-deploy-component-outcome json))
+
+(defun agent-repl-wire-decode-deploy-success (json)
+  "Decode DeploySuccess from JSON into (:components LIST), in build order."
+  (let ((message "DeploySuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(components))
+    (list :components (agent-repl-wire-verbs--decode-repeated
+                       message 'components json
+                       #'agent-repl-wire-decode-deploy-success-components))))
+
+(defun agent-repl-wire-decode-deploy-build-failed (json)
+  "Decode DeployBuildFailed from JSON into (:step S :detail D :log L).
+The step and the detail are REQUIRED; the log path may be empty."
+  (let ((message "DeployBuildFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(step detail log))
+    (list :step (agent-repl-wire-verbs--decode-required-string message 'step json)
+          :detail (agent-repl-wire-verbs--decode-required-string message 'detail json)
+          :log (agent-repl-wire-verbs--decode-string message 'log json))))
+
+(defun agent-repl-wire-decode-deploy-already-deploying (json)
+  "Decode DeployAlreadyDeploying from JSON.  Empty: a deploy is running."
+  (agent-repl-wire-verbs--decode-empty "DeployAlreadyDeploying" json))
+
+(defun agent-repl-wire-decode-deploy-already-rolling-out (json)
+  "Decode DeployAlreadyRollingOut from JSON into (:waiting-on IDS)."
+  (let ((message "DeployAlreadyRollingOut"))
     (agent-repl-wire-verbs--check-keys message json '(waitingOn))
     (list :waiting-on
           (agent-repl-wire-verbs--decode-repeated-string message 'waitingOn json))))
 
-(defun agent-repl-wire-decode-roll-out-build-joining (json)
-  "Decode RollOutBuildJoining from JSON.  Empty: the daemon is a joining successor."
-  (agent-repl-wire-verbs--decode-empty "RollOutBuildJoining" json))
+(defun agent-repl-wire-decode-deploy-joining (json)
+  "Decode DeployJoining from JSON.  Empty: the daemon is a joining successor."
+  (agent-repl-wire-verbs--decode-empty "DeployJoining" json))
 
-(defun agent-repl-wire-decode-roll-out-build-error (json)
-  "Decode RollOutBuildError from JSON into (:cause (:arm ARM :value V)).
+(defun agent-repl-wire-decode-deploy-service-restart-failed (json)
+  "Decode DeployServiceRestartFailed from JSON into (:component K :detail D).
+Both are REQUIRED."
+  (let ((message "DeployServiceRestartFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(component detail))
+    (list :component (agent-repl-wire-decode-deploy-component message 'component json)
+          :detail (agent-repl-wire-verbs--decode-required-string message 'detail json))))
+
+(defun agent-repl-wire-decode-deploy-install-failed (json)
+  "Decode DeployInstallFailed from JSON into (:component K :detail D).
+Both are REQUIRED."
+  (let ((message "DeployInstallFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(component detail))
+    (list :component (agent-repl-wire-decode-deploy-component message 'component json)
+          :detail (agent-repl-wire-verbs--decode-required-string message 'detail json))))
+
+(defun agent-repl-wire-decode-deploy-error-build-failed (json)
+  "Decode DeployError's `build_failed' cause arm from JSON."
+  (agent-repl-wire-decode-deploy-build-failed json))
+
+(defun agent-repl-wire-decode-deploy-error-already-deploying (json)
+  "Decode DeployError's `already_deploying' cause arm from JSON."
+  (agent-repl-wire-decode-deploy-already-deploying json))
+
+(defun agent-repl-wire-decode-deploy-error-already-rolling-out (json)
+  "Decode DeployError's `already_rolling_out' cause arm from JSON."
+  (agent-repl-wire-decode-deploy-already-rolling-out json))
+
+(defun agent-repl-wire-decode-deploy-error-joining (json)
+  "Decode DeployError's `joining' cause arm from JSON."
+  (agent-repl-wire-decode-deploy-joining json))
+
+(defun agent-repl-wire-decode-deploy-error-service-restart-failed (json)
+  "Decode DeployError's `service_restart_failed' cause arm from JSON."
+  (agent-repl-wire-decode-deploy-service-restart-failed json))
+
+(defun agent-repl-wire-decode-deploy-error-install-failed (json)
+  "Decode DeployError's `install_failed' cause arm from JSON."
+  (agent-repl-wire-decode-deploy-install-failed json))
+
+(defun agent-repl-wire-decode-deploy-error (json)
+  "Decode DeployError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
-  (let ((message "RollOutBuildError"))
-    (agent-repl-wire-verbs--check-keys message json '(alreadyRollingOut joining))
+  (let ((message "DeployError"))
+    (agent-repl-wire-verbs--check-keys
+     message json
+     '(buildFailed alreadyDeploying alreadyRollingOut joining serviceRestartFailed installFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
-           (list (list 'alreadyRollingOut :already-rolling-out
-                       #'agent-repl-wire-decode-roll-out-build-already-rolling-out)
-                 (list 'joining :joining #'agent-repl-wire-decode-roll-out-build-joining))))))
+           (list (list 'buildFailed :build-failed
+                       #'agent-repl-wire-decode-deploy-error-build-failed)
+                 (list 'alreadyDeploying :already-deploying
+                       #'agent-repl-wire-decode-deploy-error-already-deploying)
+                 (list 'alreadyRollingOut :already-rolling-out
+                       #'agent-repl-wire-decode-deploy-error-already-rolling-out)
+                 (list 'joining :joining
+                       #'agent-repl-wire-decode-deploy-error-joining)
+                 (list 'serviceRestartFailed :service-restart-failed
+                       #'agent-repl-wire-decode-deploy-error-service-restart-failed)
+                 (list 'installFailed :install-failed
+                       #'agent-repl-wire-decode-deploy-error-install-failed))))))
 
-(defun agent-repl-wire-decode-roll-out-build-response (json)
-  "Decode RollOutBuildResponse from JSON into (:arm ARM :value V)."
+(defun agent-repl-wire-decode-deploy-response-success (json)
+  "Decode DeployResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-deploy-success json))
+
+(defun agent-repl-wire-decode-deploy-response-error (json)
+  "Decode DeployResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-deploy-error json))
+
+(defun agent-repl-wire-decode-deploy-response (json)
+  "Decode DeployResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
-   "RollOutBuildResponse" json
-   #'agent-repl-wire-decode-roll-out-build-success
-   #'agent-repl-wire-decode-roll-out-build-error))
+   "DeployResponse" json
+   #'agent-repl-wire-decode-deploy-response-success
+   #'agent-repl-wire-decode-deploy-response-error))
 
 
 ;;;; ---- UpdateMergeQueue -----------------------------------------------
@@ -2613,13 +2812,6 @@ Which sink."
     (agent-repl-wire-verbs--check-keys message json '(sink))
     (list :sink (agent-repl-wire-verbs--decode-string message 'sink json))))
 
-(defun agent-repl-wire-decode-daemon-fault-deploy-script-failed (json)
-  "Decode DaemonFaultDeployScriptFailed from JSON into (:detail).
-The script's own account of the failure."
-  (let ((message "DaemonFaultDeployScriptFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
-
 (defun agent-repl-wire-decode-daemon-fault-successor-spawn-failed (json)
   "Decode DaemonFaultSuccessorSpawnFailed from JSON into (:detail).
 The spawn's own account of the failure."
@@ -2660,11 +2852,6 @@ oneof unset, which every consumer reads as a contract breach."
 `DaemonFaultLogSinkPoisoned'."
   (agent-repl-wire-decode-daemon-fault-log-sink-poisoned json))
 
-(defun agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed (json)
-  "Decode DaemonFault's `deploy_script_failed' kind arm from JSON as a
-`DaemonFaultDeployScriptFailed'."
-  (agent-repl-wire-decode-daemon-fault-deploy-script-failed json))
-
 (defun agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed (json)
   "Decode DaemonFault's `successor_spawn_failed' kind arm from JSON as a
 `DaemonFaultSuccessorSpawnFailed'."
@@ -2693,7 +2880,6 @@ fault with no kind is a contract breach."
    "DaemonFault" "kind" json
    (list (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired)
                  (list 'logSinkPoisoned :log-sink-poisoned #'agent-repl-wire-decode-daemon-fault-kind-log-sink-poisoned)
-                 (list 'deployScriptFailed :deploy-script-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed)
                  (list 'successorSpawnFailed :successor-spawn-failed #'agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed)
                  (list 'promptsDirMissing :prompts-dir-missing #'agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing)
                  (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only)
@@ -2702,7 +2888,7 @@ fault with no kind is a contract breach."
 (defun agent-repl-wire-decode-daemon-fault (json)
   "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
   (let ((message "DaemonFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned deployScriptFailed successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-daemon-fault-kind json))))
 

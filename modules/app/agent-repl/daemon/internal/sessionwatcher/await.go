@@ -142,7 +142,12 @@ func (w *watcher) rememberClosedTurnLocked(turn ids.TurnID, how TurnClose) {
 // workspace is actually free. It is a no-op while anything is still in flight.
 func (w *watcher) signalFreenessLocked() {
 	if w.turn != nil || !w.liveWorkLocked().Empty() {
+		w.busy = true
 		return
+	}
+	if w.busy {
+		w.busy = false
+		w.freeEdgeLocked()
 	}
 	if len(w.freeWaiters) == 0 {
 		return
@@ -201,4 +206,22 @@ func (w *watcher) dropTurnWaiter(turn ids.TurnID, ch chan turnEnd) {
 			return
 		}
 	}
+}
+
+// freeEdgeLocked tells the lifecycle sink the workspace just fell free, OFF
+// the lock and joinable through the same WaitGroup the turn-end dispatch uses.
+// The sink reads this watcher (the bounce registry judges freeness itself,
+// under its own lock), so telling it inline would be a self-deadlock.
+func (w *watcher) freeEdgeLocked() {
+	if w.closed {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.free", "the workspace fell free; telling the lifecycle sink", dlog.Context{
+		"state": "busy", "before": true, "after": false,
+	})
+	w.dispatching.Add(1)
+	go func() {
+		defer w.dispatching.Done()
+		w.sinks.Lifecycle.OnFree(w.ws)
+	}()
 }

@@ -15,8 +15,9 @@
 # that no longer exists, so its next successful batch would advance positions
 # against a database that never saw the records they claim. Stopping it first
 # and starting it after the store is serving is the same recorded safe order
-# deploy-all.sh uses (store strictly before sidecar, with a wait on the socket
-# in between); a simultaneous bounce once cost a silent full re-read.
+# the daemon's deploy (daemon/internal/deploy) uses (store strictly before
+# sidecar, with a wait on the socket in between); a simultaneous bounce once
+# cost a silent full re-read.
 #
 # WHY THE OPT-IN ENVIRONMENT VARIABLE. This deletes every stored record on the
 # host, and the sidecar's re-read of the owner's whole corpus afterwards is
@@ -85,9 +86,8 @@ SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
 LAUNCH_AGENTS_DIR="${AGENT_REPL_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 service_plist() { printf '%s/%s.plist' "$LAUNCH_AGENTS_DIR" "$1"; }
 
-# Overridable so the hermetic harness can substitute its PATH stub, for the
-# same reason deploy-all.sh overrides emacsclient: reaching the LIVE launchd
-# from a test run is exactly what must never happen.
+# Overridable so the hermetic harness can substitute its PATH stub: reaching
+# the LIVE launchd from a test run is exactly what must never happen.
 LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
 
 uid="$(id -u)"

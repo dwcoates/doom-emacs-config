@@ -411,53 +411,54 @@ func TestInterruptTurnAnswersNothingRunningWhenTheTurnAlreadyEnded(t *testing.T)
 	}
 }
 
-func TestInterruptTurnCancelsATurnReDrivingBehindAKeepalive(t *testing.T) {
-	// Arrange: the user's turn is queued behind an in-flight keep-alive, so the
-	// queue reports it cancelled the re-drive.
+func TestInterruptTurnAnswersShimRefusedWhenTheShimNamesAnotherOpenTurn(t *testing.T) {
+	// Arrange: the shim's open turn is not the one the daemon believes runs.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	runningTurn(f, 0)
-	f.queue.redriveCancelled = true
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNotTheOpenTurn, Detail: "turn t2 is open"}
 
 	// Act.
-	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
 
-	// Assert: a graceful stop, driven by cancelling the queued turn, never a
-	// KillTurn against a turn the shim never started.
-	if err != nil {
-		t.Fatalf("Interrupt: %v, want a graceful stop of the queued turn", err)
-	}
-	if !outcome.Turn {
-		t.Fatalf("outcome = %+v, want the interrupted-turn arm", outcome)
-	}
-	if got := f.queue.cancelledRedrives; len(got) != 1 || got[0] != "t1" {
-		t.Fatalf("cancelled re-drives = %v, want the one turn cancelled", got)
-	}
-	if len(f.shim.killedTurns) != 0 {
-		t.Fatalf("killed turns = %+v, want no KillTurn against a turn the shim never started", f.shim.killedTurns)
+	// Assert: the typed shim_refused arm, never a nothing-running success.
+	asRefusal(t, err, ArmShimRefused)
+}
+
+func TestInterruptTurnCarriesTheShimsWordsWhenTheShimNamesAnotherOpenTurn(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNotTheOpenTurn, Detail: "turn t2 is open"}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Reason != "turn t2 is open" {
+		t.Fatalf("Interrupt = %v, want the shim's own detail as the refusal's reason", err)
 	}
 }
 
-func TestInterruptTurnAnswersNothingRunningWhenOnlyAKeepaliveIsOpen(t *testing.T) {
-	// Arrange: no re-drive stands (the user's turn already finished) and a
-	// keep-alive now holds the turn slot, so KillTurn answers not_the_open_turn.
+func TestInterruptTurnRecordsAnErrorWhenTheShimNamesAnotherOpenTurn(t *testing.T) {
+	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	runningTurn(f, 0)
-	f.queue.redriveCancelled = false
 	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNotTheOpenTurn}
 
 	// Act.
-	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+	_, _ = f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
 
-	// Assert: a graceful nothing-running, never the shim's not_the_open_turn
-	// surfaced as an error.
-	if err != nil {
-		t.Fatalf("Interrupt: %v, want nothing-running rather than a surfaced refusal", err)
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Operation == opInterrupt {
+			return
+		}
 	}
-	if !outcome.NothingRunning {
-		t.Fatalf("outcome = %+v, want the nothing-running arm", outcome)
-	}
+	t.Fatalf("records = %+v, want the disagreement recorded at error under %s", f.log.logger.Records(), opInterrupt)
 }
 
 func TestInterruptTurnPropagatesAnUninterruptibleTurn(t *testing.T) {

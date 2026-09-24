@@ -10,17 +10,17 @@ import (
 )
 
 // Restart bounces a workspace's shim. The bounce itself is the ROLLOUT's one
-// relaunch engine — prelaunch inert, wait for freeness, take the restart
-// hold, stand the old shim down gracefully, reap, resume, drain the holds — so
-// this verb adds only the two things the engine deliberately does not own.
+// engine, asked through the prompt queue's bounce registry — at once when the
+// workspace is free, when its work ends otherwise — so this verb adds only the
+// two things the engine deliberately does not own.
 //
-// force sends KillTurn{force:true} FIRST, because the engine waits for freeness
-// and a wedged turn would otherwise never let it start. That much is
-// synchronous: the caller is told whether the interrupt could be sent at all.
+// force sends KillTurn{force:true} FIRST and then asks for a FORCED bounce,
+// which the registry takes at once over whatever is still running. The
+// interrupt is synchronous: the caller is told whether it could be sent at all.
 //
-// The verb also owns the WEBAPP's half of a restart: when the served webapp
-// asset build changed, the webview is told to reload, so the user is not left
-// on a page built against a different daemon.
+// The verb also owns the WEBAPP's half of a restart: when the bounce is done,
+// the webview is told to reload, so the user is not left on a page built
+// against a different shim.
 func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) error {
 	_, log, err := v.owned(ctx, "RestartWorkspace", ws)
 	if err != nil {
@@ -33,37 +33,42 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) err
 		}
 	}
 
-	// THE VERB ACCEPTS; THE ENGINE RUNS BEHIND IT. The relaunch waits for
-	// FREENESS, forever if need be -- that wait is the whole design, and a
+	// THE VERB ACCEPTS; THE BOUNCE RUNS BEHIND IT. An unforced bounce waits
+	// for FREENESS, forever if need be -- that wait is the whole design, and a
 	// graceful restart asked for while a turn is running is precisely the
-	// case it exists for. Answering only once the engine finished would make
-	// the verb's answer a function of how long the agent takes, and the
-	// restart-pending hold is what the caller watches instead: the tray shows
-	// the held intake, and the relaunch's own faults record its failures.
+	// case it exists for. Answering only once it finished would make the
+	// verb's answer a function of how long the agent takes; the registry's
+	// completion is what the reload and the record below hang off instead.
 	//
-	// The context is DETACHED from the request for the same reason the watch
-	// fleet's is: the engine outlives the rpc that asked for it.
-	go v.runRelaunch(context.WithoutCancel(ctx), log, ws, force)
-
-	log.Info(opRestart, "accepted the restart; the relaunch engine runs behind it",
-		dlog.Context{"force": force})
+	// The context is DETACHED from the request: the bounce outlives the rpc.
+	detached := context.WithoutCancel(ctx)
+	decision, err := v.deps.Rollout.BounceShim(detached, ws, rollout.ReasonRestartVerb, force, func(err error) {
+		v.finishRestart(detached, log, ws, force, err)
+	})
+	if err != nil {
+		log.Error(opRestart, "the bounce registry refused the restart", dlog.Context{"force": force, "cause": err.Error()})
+		return fmt.Errorf("restart %q: %w", ws, err)
+	}
+	log.Info(opRestart, "accepted the restart; the bounce runs behind it", dlog.Context{
+		"force": force, "now": decision.Now, "turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
+	})
 	return nil
 }
 
-// runRelaunch drives the relaunch engine and the webapp reload that follows
-// it. It is the asynchronous half of Restart, so its failures are RECORDED
-// rather than returned: nobody is waiting on them.
-func (v *verbs) runRelaunch(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool) {
-	if err := v.deps.Rollout.RelaunchShim(ctx, ws, rollout.ReasonRestartVerb); err != nil {
+// finishRestart is the restart's completion: the webapp reload that follows a
+// bounce, or the bounce's failure. Nobody is waiting on it, so its failures
+// are RECORDED rather than returned.
+func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, err error) {
+	if err != nil {
 		log.Error(opRestart, "the shim relaunch failed", dlog.Context{"force": force, "cause": err.Error()})
 		return
 	}
 
-	// The reload_webapp push follows the relaunch, not the other way round: a
+	// The reload_webapp push follows the bounce, not the other way round: a
 	// webview reloading against a shim that is still standing down would
 	// re-mount onto a session that is about to be replaced.
 	if err := v.deps.Rollout.ReloadWebapp(ctx, ws); err != nil {
-		log.Warn(opRestart, "could not push the webapp reload", dlog.Context{"cause": err.Error()})
+		log.Error(opRestart, "could not push the webapp reload", dlog.Context{"cause": err.Error()})
 	} else {
 		log.Debug(opRestart, "pushed the webapp reload", nil)
 	}

@@ -33,9 +33,15 @@
 ;; how `agent-repl-test-daemon-stop-deletes-and-clears' came to HTTP-GET the
 ;; developer's real `claude-repld'.  The guards are re-armed below regardless,
 ;; since `config.el' itself defines the `--early-git-string' wrapper.
+;;
+;; The elisp build record is BOUND around the load: config.el resets it (as
+;; it must on every real load) and re-records whatever this load reaches, so
+;; the binding keeps the harness's record exactly what the harness itself
+;; loaded, whatever this reload does or does not get to.
 (cl-letf (((symbol-function 'message) #'ignore)
           ((symbol-function 'agent-repl--load-module) (lambda (&rest _args) nil)))
-  (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
+  (let ((dir (file-name-directory (or load-file-name buffer-file-name)))
+        (agent-repl--elisp-module-builds agent-repl--elisp-module-builds))
     ;; config.el stays at the module root; this suite lives in `lisp/'.
     (load (expand-file-name "../config.el" dir) nil t)))
 
@@ -245,6 +251,109 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
   (should-error (agent-repl--launchctl-call "list")
                 :type 'error))
 
+
+;;;; ---- The elisp build record ----
+
+(defun agent-repl-config-test--write-bytes (file content)
+  "Write CONTENT to FILE as its UTF-8 bytes, creating its directory."
+  (make-directory (file-name-directory file) t)
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert (encode-coding-string content 'utf-8))
+    (let ((coding-system-for-write 'no-conversion))
+      (write-region (point-min) (point-max) file nil 'silent))))
+
+(defmacro agent-repl-config-test--with-root (var &rest body)
+  "Bind VAR to a fresh temp module root for BODY, deleted afterwards."
+  (declare (indent 1))
+  `(let ((,var (file-name-as-directory (make-temp-file "agent-repl-config-root" t))))
+     (unwind-protect (progn ,@body)
+       (delete-directory ,var t))))
+
+(ert-deftest agent-repl-config-test-file-sha256-hashes-the-bytes ()
+  "A source's digest is the SHA-256 of its bytes on disk, non-ASCII included."
+  (agent-repl-config-test--with-root root
+    ;; Arrange
+    (let ((file (expand-file-name "lisp/glyphs.el" root))
+          (content ";; ⟢ — tree glyphs ├── └──\n"))
+      (agent-repl-config-test--write-bytes file content)
+      ;; Act / Assert
+      (should (equal (agent-repl--elisp-file-sha256 file)
+                     (secure-hash 'sha256 (encode-coding-string content 'utf-8)))))))
+
+(ert-deftest agent-repl-config-test-file-sha256-of-an-absent-file-is-nil ()
+  "An absent source has no digest."
+  (agent-repl-config-test--with-root root
+    ;; Arrange / Act / Assert
+    (should (null (agent-repl--elisp-file-sha256 (expand-file-name "lisp/ghost.el" root))))))
+
+(ert-deftest agent-repl-config-test-module-file-is-the-el-source ()
+  "A module's source is `lisp/NAME.el' under the root, never a `.elc'."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--elisp-module-file "/root/" "core") "/root/lisp/core.el")))
+
+(ert-deftest agent-repl-config-test-record-appends-in-load-order ()
+  "Recording appends, so the record stays in load order."
+  (agent-repl-config-test--with-root root
+    ;; Arrange
+    (agent-repl-config-test--write-bytes (expand-file-name "lisp/a.el" root) "a")
+    (agent-repl-config-test--write-bytes (expand-file-name "lisp/b.el" root) "b")
+    (let ((agent-repl--elisp-module-builds nil))
+      ;; Act
+      (agent-repl--elisp-record-module-build root "a")
+      (agent-repl--elisp-record-module-build root "b")
+      ;; Assert
+      (should (equal (mapcar #'car agent-repl--elisp-module-builds) '("a" "b"))))))
+
+(ert-deftest agent-repl-config-test-record-of-an-absent-module-is-nothing ()
+  "A module whose file is absent records nothing."
+  (agent-repl-config-test--with-root root
+    ;; Arrange
+    (let ((agent-repl--elisp-module-builds nil))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--boot-info) #'ignore))
+        (agent-repl--elisp-record-module-build root "ghost"))
+      ;; Assert
+      (should (null agent-repl--elisp-module-builds)))))
+
+(ert-deftest agent-repl-config-test-loader-records-the-module-it-loads ()
+  "`agent-repl--load-module' records the name and digest of the file it loads."
+  (agent-repl-config-test--with-root root
+    ;; Arrange
+    (let ((file (expand-file-name "lisp/probe.el" root)))
+      (agent-repl-config-test--write-bytes file ";;; probe.el\n")
+      (let ((agent-repl--elisp-module-builds nil)
+            (agent-repl--load-errors nil)
+            (load-file-name (expand-file-name "config.el" root)))
+        ;; Act
+        (cl-letf (((symbol-function 'agent-repl--boot-info) #'ignore))
+          (eval '(agent-repl--load-module "probe") t))
+        ;; Assert
+        (should (equal agent-repl--elisp-module-builds
+                       (list (cons "probe" (agent-repl--elisp-file-sha256 file)))))))))
+
+(ert-deftest agent-repl-config-test-load-resets-the-record ()
+  "Every load of config.el starts the record over, like its load errors.
+Read from the source rather than by re-loading config.el here: a real load
+re-loads every module, which this suite has no business doing again.  The
+reset must be a top-level `setq' that precedes the first module load."
+  ;; Arrange
+  (let ((forms (with-temp-buffer
+                 (insert-file-contents
+                  (expand-file-name "config.el" agent-repl-config-test--module-root))
+                 (let (acc)
+                   (condition-case nil
+                       (while t (push (read (current-buffer)) acc))
+                     (end-of-file nil))
+                   (nreverse acc)))))
+    ;; Act
+    (let ((reset (cl-position '(setq agent-repl--elisp-module-builds nil) forms
+                              :test #'equal))
+          (first-load (cl-position-if
+                       (lambda (form) (eq (car-safe form) 'agent-repl--load-module))
+                       forms)))
+      ;; Assert
+      (should (and reset first-load (< reset first-load))))))
 
 ;;;; ---- config.el's load list ----
 
