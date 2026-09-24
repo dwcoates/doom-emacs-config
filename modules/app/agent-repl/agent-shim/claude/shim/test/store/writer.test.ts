@@ -6,7 +6,8 @@
  * absorption — are the STORE's semantics, and a hand-rolled double would be
  * asserting our own beliefs about them rather than the contract.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -82,12 +83,10 @@ describe("PersistEntry → StoreEntry routing", () => {
     expect(item?.item.case).toBe("peerMessage");
   });
 
-  it("routes a keep-alive turn's frame to the unserved keepalive arm", () => {
-    const entry = toStoreEntry(PRODUCER, readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true }));
-
-    const update = entry.entry.value as storev1.StoreAgentUpdate;
-    expect(update.agentInfo.case).toBe("unservedItem");
-    expect((update.agentInfo.value as storev1.StoreUnservedItem).unservedItem.case).toBe("keepalive");
+  it("refuses to envelope a keep-alive turn's entry, which the door should have dropped", () => {
+    expect(() => toStoreEntry(PRODUCER, readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true }))).toThrow(
+      /keep-alive entry .* reached the envelope; nothing of a keep-alive is stored/,
+    );
   });
 
   it("routes a detached shell run's frame to the bash lifecycle arm, never a page line", () => {
@@ -415,14 +414,68 @@ describe("upsert by identity", () => {
     expect(fake.book("book-1")).toHaveLength(1);
   });
 
-  it("keeps a keep-alive row out of every book", async () => {
-    const { store: fake, persistence: plane } = await persistence("keepalive");
+});
+
+describe("a keep-alive turn's entries", () => {
+  /** Every log record written since `before`, as the durable sink received it. */
+  const logRecordsSince = (before: number): Array<Record<string, unknown>> =>
+    (vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>).map(
+      ([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+    );
+
+  it("are never sent to the store by write", async () => {
+    const { store: fake, persistence: plane } = await persistence("keepalive-write");
 
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true })]);
     await plane.flush();
 
-    expect(fake.book("book-1")).toHaveLength(0);
-    expect(fake.unserved()).toHaveLength(1);
+    expect(fake.writes()).toHaveLength(0);
+  });
+
+  it("are never sent to the store by writeDurable", async () => {
+    const { store: fake, persistence: plane } = await persistence("keepalive-durable");
+
+    await plane.writeDurable([readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true })]);
+
+    expect(fake.writes()).toHaveLength(0);
+  });
+
+  it("are dropped from a batch that also carries real entries, which still land", async () => {
+    const { store: fake, persistence: plane } = await persistence("keepalive-mixed");
+
+    plane.write([
+      readEntry(BOOK, "unit-ka", "/tmp/ka", { keepalive: true }),
+      readEntry(BOOK, "unit-real", "/tmp/real"),
+    ]);
+    await plane.flush();
+
+    const keys = fake.writes().flatMap((request) => request.batch?.entries.map((entry) => entry.upsertKey) ?? []);
+    expect(keys).toEqual([readEntry(BOOK, "unit-real", "/tmp/real").upsertKey]);
+  });
+
+  it("do not count as rows written under the producer", async () => {
+    const { persistence: plane } = await persistence("keepalive-producer");
+
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true })]);
+    await plane.flush();
+
+    expect(plane.producerHasWrittenRows()).toBe(false);
+  });
+
+  it("are each stated at debug, naming no upsert key", async () => {
+    const { persistence: plane } = await persistence("keepalive-log");
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a", { keepalive: true })]);
+    await plane.flush();
+
+    const drops = logRecordsSince(before).filter(
+      (record) => record.message === "a keep-alive turn's entry is never stored; dropped before the batch",
+    );
+    expect(drops.map((record) => [record.level, (record.context as Record<string, unknown>).upsert_key])).toEqual([
+      ["debug", undefined],
+    ]);
   });
 });
 

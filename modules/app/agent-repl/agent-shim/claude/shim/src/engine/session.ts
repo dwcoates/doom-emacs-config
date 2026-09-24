@@ -1550,8 +1550,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // already closed and the prompt already re-delivered on its replacement.
     if (await noteRewindOutcome(message)) return;
     // THE TAG, TAKEN ONCE. Everything below reads this one answer: the fold
-    // writes it into every row (the store keeps a tagged row and never serves
-    // it), and the push plane drops every tagged session fact.
+    // writes it into every row (the writer stores nothing tagged), and the push
+    // plane drops every tagged session fact.
     const attribution = keepaliveScope.attribute(message);
     noteRewindBoundary(message);
     notePreInitMessage(message);
@@ -1595,8 +1595,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * THE WATCHSESSION PLANE'S ONE FILTER over what the fold produced.
    *
    * A session fact the keep-alive turn produced — its rate-limit reading, its
-   * usage — is recorded with the rest of the batch and never pushed: the tag on
-   * the entry is the whole decision, so no reader downstream has to ask.
+   * usage — is neither stored nor pushed: the tag on the entry is the whole
+   * decision, so no reader downstream has to ask.
    */
   function serveSessionUpdates(entries: readonly PersistEntry[]): void {
     for (const entry of entries) {
@@ -1604,7 +1604,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (entry.keepalive) {
         LOGGER.logVerbose(
           { arm: entry.item.update.update.case },
-          "a session fact the keep-alive turn produced is recorded and never pushed",
+          "a session fact the keep-alive turn produced is never pushed (nor stored)",
         );
         continue;
       }
@@ -3662,8 +3662,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (open !== undefined || query === undefined || identity === undefined) return;
     // A keep-alive turn's id NEVER reaches the wire: TurnIds are daemon-minted
     // and adopted, and this turn has no daemon behind it. The value exists only
-    // so the prompt row has a key, and the row is flagged keep-alive so no page
-    // ever serves it.
+    // so the turn has an identity in this process; its prompt entry is tagged
+    // keep-alive, so the writer stores nothing of it.
     const turn = create(conversationv1.TurnIdSchema, {
       value: `keepalive-${deps.nowMs()}-${process.pid}`,
     });
@@ -3684,7 +3684,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       await submit(said, true);
       LOGGER.debug(
         { turn: turn.value, outcome: "keepalive_submitted" },
-        "submitted one of the shim's own keep-alive prompts; its rows are recorded and never served",
+        "submitted one of the shim's own keep-alive prompts; nothing of its turn is stored or served",
       );
       pushes.resolveComponent(KEEPALIVE_COMPONENT, 0);
     } catch (err) {
