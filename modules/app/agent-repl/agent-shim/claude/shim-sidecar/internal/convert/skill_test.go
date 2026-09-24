@@ -131,3 +131,29 @@ func TestAFailedSkillCarriesTheProducersAccount(t *testing.T) {
 		t.Fatalf("failure content = %q, want %q", text, want)
 	}
 }
+
+// TestAFailedSkillRestatesTheSkillItInvoked covers the settled frame standing
+// alone: the start it upserts over is gone once it lands, so the failure names
+// the skill itself, exactly as the success does.
+func TestAFailedSkillRestatesTheSkillItInvoked(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_skill", "Skill", `{"skill":"absent-skill"}`))
+	failed := toolResultLineWithError("u1", "toolu_skill", ts2,
+		`[{"type":"text","text":"Error: no such skill: absent-skill"}]`,
+		`{"commandName":"absent-skill","success":false}`, true)
+
+	// Act.
+	entries := convertLines(t, c, call, failed)
+
+	// Assert.
+	var name string
+	for _, e := range entries {
+		if f := activityOf(e).GetSkillUse().GetFailure(); f != nil {
+			name = f.GetSkill().GetName()
+		}
+	}
+	if name != "absent-skill" {
+		t.Fatalf("restated skill = %q, want %q", name, "absent-skill")
+	}
+}

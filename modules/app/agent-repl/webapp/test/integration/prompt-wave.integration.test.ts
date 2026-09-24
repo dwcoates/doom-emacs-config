@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing";
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
@@ -32,6 +32,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

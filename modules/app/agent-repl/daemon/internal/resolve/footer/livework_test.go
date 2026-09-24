@@ -255,3 +255,35 @@ func added(rec dlog.Record) []string {
 	out, _ := rec.Context["added"].([]string)
 	return out
 }
+
+// THE ZERO-TOKEN "subagent" ROW, reproduced: a detached run's own terminal
+// retires its described row, the watcher's set still lists the run, and the
+// reconcile re-opens a MINIMAL row for it — no type, no description, no tokens,
+// and nothing left to describe it, because the retirement makes every later
+// start a replay. The log now names it as such.
+func TestASetThatReListsARetiredRunReopensAMinimalRowAndSaysSo(t *testing.T) {
+	// Arrange: a described detached subagent, settled at its own terminal.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "work-1", "sonnet-medium"))
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+
+	// Act: the set still lists it.
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetLabel().GetText() != "subagent" || rows[0].GetTokens().GetText() != "0 tok" {
+		t.Fatalf("rows = %+v, want one minimal row labelled subagent with 0 tokens", rows)
+	}
+	rec := lastRecord(t, h, "daemon.footer.live_work_taken")
+	if got, _ := rec.Context["readded_retired"].([]string); len(got) != 1 || got[0] != "agent:work-1" {
+		t.Fatalf("readded_retired = %v, want the retired run the set re-listed", got)
+	}
+	jumps := recordsOf(h.log.Records(), "daemon.footer.jump_resolution")
+	last := jumps[len(jumps)-1]
+	if last.Context["provenance"] != "live_work_set" || last.Context["retired_before"] != true {
+		t.Fatalf("jump record = %+v, want provenance live_work_set and retired_before true", last.Context)
+	}
+}

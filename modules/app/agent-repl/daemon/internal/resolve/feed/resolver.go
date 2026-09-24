@@ -338,6 +338,10 @@ type feedState struct {
 	// nonDurable marks the rows that exist in resolver memory only and never
 	// appear in a page.
 	nonDurable map[string]bool
+	// superseded marks the THINKING rows a later response row in this feed has
+	// superseded (superseded.go): the record `upsert` stamps
+	// FeedResponse.superseded from on every draw.
+	superseded map[string]bool
 	// seq is the publication counter: every upsert publication takes the next
 	// value, and a watch token pins to one.
 	seq uint64
@@ -537,6 +541,7 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 		rows:       map[string]*frontendv1.FeedRow{},
 		rank:       map[string]rowRank{},
 		nonDurable: map[string]bool{},
+		superseded: map[string]bool{},
 		retention:  r.deps.TailRetention,
 		subs:       map[*tailSub]struct{}{},
 	}
@@ -676,6 +681,9 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// so no producer can publish a prompt that disagrees with the turn's
 	// lifecycle.
 	stampPromptWorking(s, snapshot)
+	// A THINKING ROW'S `superseded` IS STATED HERE TOO, from the feed's own
+	// record, so every draw of the fold restates it (superseded.go).
+	stampSuperseded(f, id, snapshot)
 	existing, seen := f.rows[id]
 	if seen && proto.Equal(existing, snapshot) {
 		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream
@@ -707,6 +715,15 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 				"seq":   f.seq,
 				"turn":  row.GetTurn().GetValue(),
 			})
+		// A RESPONSE ROW'S PLACEMENT SUPERSEDES THE THINKING ROW BEFORE IT. The
+		// earlier row is re-pushed AFTER this row's own publication, so a reader
+		// sees the new response land and then the thinking above it collapse,
+		// and the two publications take sequences in that order.
+		if isResponseRow(snapshot) {
+			if earlier := r.supersedeOnPlace(s, f, id, snapshot); earlier != "" {
+				defer r.republishSuperseded(s, at.feed, earlier)
+			}
+		}
 	}
 	f.rows[id] = snapshot
 	if !durable {
@@ -768,14 +785,26 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[id]; !ok"})
 		return false
 	}
+	wasResponse := isResponseRow(f.rows[id])
 	delete(f.rows, id)
 	delete(f.nonDurable, id)
 	delete(f.rank, id)
+	delete(f.superseded, id)
+	at := -1
 	for i, existing := range f.order {
 		if existing == id {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "existing == id"})
 			f.order = append(f.order[:i], f.order[i+1:]...)
+			at = i
 			break
+		}
+	}
+	// A RETIRED RESPONSE MAY HAVE BEEN THE ONLY ONE AFTER A THINKING ROW, which
+	// is then the feed's latest response again; it is re-pushed after the
+	// removal's own publication (superseded.go).
+	if wasResponse && at >= 0 {
+		if earlier := r.unsupersedeOnRetire(s, f, id, at); earlier != "" {
+			defer r.republishSuperseded(s, addr, earlier)
 		}
 	}
 	// PUBLISH THE REMOVAL, exactly as upsert publishes a change: mint a
@@ -960,24 +989,24 @@ func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversation
 }
 
 // MintSubFeedHead records a bubble row's sub-feed and its crumb label.
-func (r *resolver) MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, sub feedid.Feed, label string) {
+func (r *resolver) MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	r.mintSubFeed(s, head, sub, label)
+	r.mintSubFeed(s, head, headFeed, sub, label)
 }
 
 // mintSubFeed is MintSubFeedHead's body, called with the lock held.
-func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, sub feedid.Feed, label string) {
+//
+// THE PARENT IS THE FEED THE HEAD IS DRAWN ON, STATED BY THE CALLER. It used to
+// be searched for among the rows already placed, which a subagent bubble mints
+// BEFORE its row is upserted — so a first compose found nothing and recorded
+// the ROOT as the parent of a bubble drawn on another subagent's sub-feed. The
+// crumb chain of a subagent of a subagent then stopped one level short, and a
+// footer jump to it walked from the root into a crumb the root does not hold.
+func (r *resolver) mintSubFeed(s *wsState, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string) {
 	key := r.feedKey(s.id, sub)
-	parentKey := "root"
-	for existingKey, f := range s.feeds {
-		if _, ok := f.rows[head.GetValue()]; ok {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, ok := f.rows[head.GetValue()]; ok"})
-			parentKey = existingKey
-			break
-		}
-	}
+	parentKey := r.feedKey(s.id, headFeed)
 	s.subFeeds[key] = &subFeedHead{row: head, parentFeed: parentKey, label: label}
 	if sub.Agent != nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sub.Agent != nil"})

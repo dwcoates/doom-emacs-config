@@ -91,6 +91,50 @@ describe("the keep-alive-shaped turn", () => {
   });
 });
 
+describe("a turn the vendor runs on its own", () => {
+  it("runs ahead of the next send's own turn", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!queue-vendor-turn", "next send"]);
+
+    // Assert. Three results: the queuing turn, the vendor's own, the next send's.
+    expect(ofType(driven, "result").map((line) => line.result)).toEqual([
+      "ok",
+      "A background task finished.",
+      expect.any(String),
+    ]);
+  });
+
+  it("states where it came from on its result", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!queue-vendor-turn", "next send"]);
+
+    // Assert
+    expect(ofType(driven, "result")[1]?.origin).toEqual({ kind: "task-notification" });
+  });
+
+  it("names no send anywhere, though the next send carried a client uuid", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!queue-vendor-turn", "next send"], {
+      clientUuids: [undefined, "client-send-2"],
+    });
+    const vendorTurn = driven.messages.slice(
+      driven.messages.indexOf(ofType(driven, "result")[0] as never) + 1,
+      driven.messages.indexOf(ofType(driven, "result")[1] as never) + 1,
+    ) as Record<string, unknown>[];
+
+    // Assert
+    expect(vendorTurn.filter((message) => "user_message_uuid" in message)).toEqual([]);
+  });
+
+  it("runs only once", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!queue-vendor-turn", "second", "third"]);
+
+    // Assert
+    expect(ofType(driven, "result")).toHaveLength(4);
+  });
+});
+
 describe("query death with a permission ask left open", () => {
   it("opens the ask, then ends the iterable without resolving it itself", async () => {
     // Arrange + Act. The scenario never awaits the ask; only the shim's own

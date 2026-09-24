@@ -8,7 +8,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/figures"
 	"claude-repld/internal/ids"
 )
@@ -31,7 +30,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			s.tok.responses.Observe(unit, act.GetUsage() != nil)
 			s.tok.observeUsage(unit, s.usageAgent(agent.GetValue()), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
-			r.applyActivity(ws, s, unit, act)
+			r.applyActivity(ws, s, agent, unit, act)
 		})
 }
 
@@ -66,7 +65,7 @@ func activityArm(act *conversationv1.AgentActivity) string {
 }
 
 // applyActivity folds one activity frame into the accumulation.
-func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, unit string, act *conversationv1.AgentActivity) {
+func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, agent *conversationv1.AgentId, unit string, act *conversationv1.AgentActivity) {
 	switch item := act.GetItem().(type) {
 	case *conversationv1.AgentActivity_Response:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Response"})
@@ -76,7 +75,7 @@ func (r *resolver) applyActivity(ws ids.WorkspaceID, s *wsState, unit string, ac
 		r.applyHook(s, item.Hook)
 	case *conversationv1.AgentActivity_Subagent:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Subagent"})
-		r.applySubagent(s, unit, item.Subagent)
+		r.applySubagent(s, agent, unit, item.Subagent)
 	case *conversationv1.AgentActivity_Bash:
 		r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer state branch", dlog.Context{"function": "chips", "branch": "case *conversationv1.AgentActivity_Bash"})
 		r.applyBash(s, unit, item.Bash)
@@ -137,7 +136,7 @@ func (r *resolver) applyHook(s *wsState, hook *conversationv1.AgentHook) {
 // the work -- the caller's book or the agent's own -- so the retirement is the
 // handle's (OnSubagent), never an inference from the call that spawned it. The
 // spawning call returning is a LAUNCH RECEIPT and says nothing about the run.
-func (r *resolver) applySubagent(s *wsState, unit string, sub *conversationv1.AgentSubagent) {
+func (r *resolver) applySubagent(s *wsState, agent *conversationv1.AgentId, unit string, sub *conversationv1.AgentSubagent) {
 	switch item := sub.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
 		// A SPAWN UNIT REPLAYED AFTER ITS RUN SETTLED IS THE SAME REPLAY
@@ -149,7 +148,10 @@ func (r *resolver) applySubagent(s *wsState, unit string, sub *conversationv1.Ag
 		}
 		row, ok := s.agents[unit]
 		if !ok {
-			row = &agentRow{spawnUnit: unit, order: s.nextOrder()}
+			row = &agentRow{
+				spawnUnit: unit, order: s.nextOrder(),
+				provenance: provenanceSpawnFrame, spawnedOn: agent.GetValue(),
+			}
 			s.agents[unit] = row
 		}
 		row.createdAgent = item.Start.GetCreatedAgentId().GetValue()
@@ -617,6 +619,7 @@ func (r *resolver) applyCreatedWork(s *wsState, id string, created *conversation
 				description:  start.Start.GetPrompt().GetDescription(),
 				startedAt:    time.UnixMilli(start.Start.GetStartedAt().GetAtMs()),
 				order:        s.nextOrder(),
+				provenance:   provenanceAnnouncement,
 			}
 		}
 	case *conversationv1.DetachableWork_Monitor:
@@ -656,7 +659,7 @@ func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedW
 				}
 				row, ok := s.agents[id]
 				if !ok {
-					row = &agentRow{spawnUnit: id, order: s.nextOrder()}
+					row = &agentRow{spawnUnit: id, order: s.nextOrder(), provenance: provenanceRunFrame}
 					s.agents[id] = row
 				}
 				row.work = id
@@ -785,16 +788,24 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedAgents{}
 	for _, row := range rows {
+		workID := row.work
+		if workID == "" {
+			workID = row.spawnUnit
+		}
+		entry := s.entryFor(row.spawnUnit, row.work)
+		jump := jumpTo(entry, false)
+		s.noteJump(&row.jump, "agent", workID, jump, dlog.Context{
+			"provenance":      string(row.provenance),
+			"spawned_on":      row.spawnedOn,
+			"detached":        row.work != "",
+			"label":           row.label,
+			"has_description": row.description != "",
+			"tokens":          row.tokens,
+			"retired_before":  retiredAny(s, row.spawnUnit, row.work),
+		})
 		drawn := &frontendv1.FooterAgentRow{
-			Target: r.opts.encodeFeedID(feedid.Ref{
-				WS:   ws,
-				Feed: feedid.Feed{Root: true},
-				Row: feedid.RowKey{
-					Kind: feedid.KindActivity,
-					ID:   row.spawnUnit,
-					Sub:  row.createdAgent,
-				},
-			}),
+			Work:    &frontendv1.FooterWorkId{Value: workID},
+			Jump:    jump,
 			Label:   &frontendv1.FooterAgentRowLabel{Text: row.label},
 			Tokens:  &frontendv1.FooterAgentRowTokens{Text: figures.Tokens(row.tokens) + " tok"},
 			Runtime: &frontendv1.FooterAgentRowRuntime{StartedAtMs: epochMs(row.startedAt)},
@@ -848,14 +859,15 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedShells{}
 	for _, row := range rows {
+		// The jump lands on the shell bubble's HEAD, the row a reader expands —
+		// not the spool BODY on the sub-feed. The feed announces the head.
+		jump := jumpTo(s.entryFor(row.work), false)
+		s.noteJump(&row.jump, "shell", row.work, jump, dlog.Context{
+			"retired_before": retiredAny(s, row.work),
+		})
 		out.Rows = append(out.Rows, &frontendv1.FooterShellRow{
-			Target: r.opts.encodeFeedID(feedid.Ref{
-				WS:   ws,
-				Feed: feedid.Feed{Root: true},
-				// The jump lands on the shell bubble's HEAD (KindShellHead), the
-				// row a reader expands — not the spool BODY on the sub-feed.
-				Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: row.work},
-			}),
+			Work:    &frontendv1.FooterWorkId{Value: row.work},
+			Jump:    jump,
 			Command: &frontendv1.FooterShellRowCommand{Text: row.command},
 			Runtime: &frontendv1.FooterShellRowRuntime{StartedAtMs: epochMs(row.startedAt)},
 		})
@@ -863,8 +875,8 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 	return out
 }
 
-// monitorsPanel renders the 👁 panel. Monitors have no feed bubble, so no row
-// is a jump target.
+// monitorsPanel renders the 👁 panel. Monitors draw no feed entry, so every
+// row's jump is unresolved(no_feed_entry): a click says so and records why.
 func (r *resolver) monitorsPanel(s *wsState) *frontendv1.FooterExpandedMonitors {
 	rows := make([]*monitorRow, 0, len(s.monitors))
 	for _, row := range s.monitors {
@@ -873,7 +885,11 @@ func (r *resolver) monitorsPanel(s *wsState) *frontendv1.FooterExpandedMonitors 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedMonitors{}
 	for _, row := range rows {
+		jump := jumpTo(nil, true)
+		s.noteJump(&row.jump, "monitor", row.unit, jump, dlog.Context{})
 		drawn := &frontendv1.FooterMonitorRow{
+			Work:        &frontendv1.FooterWorkId{Value: row.unit},
+			Jump:        jump,
 			Description: &frontendv1.FooterMonitorRowDescription{Text: row.description},
 			Runtime:     &frontendv1.FooterMonitorRowRuntime{StartedAtMs: epochMs(row.startedAt)},
 		}
@@ -914,4 +930,127 @@ func (r *resolver) cronsPanel(s *wsState) *frontendv1.FooterExpandedCrons {
 		out.Rows = append(out.Rows, drawn)
 	}
 	return out
+}
+
+// ---- where a detached-work row's click lands --------------------------------
+
+// OnEntryPlaced records where the feed drew one detached-work-capable entry.
+// The feed resolver calls it (Deps.EntryPlaced) the moment it first draws the
+// entry and whenever the entry's FeedId changes, which is BEFORE the footer
+// takes the same frame (the watcher routes every frame to the feed first), so
+// a row the frame opens already names its entry.
+//
+// CALLED UNDER THE FEED RESOLVER'S LOCK. It takes this resolver's lock and
+// nothing else, and nothing here calls back into the feed.
+func (r *resolver) OnEntryPlaced(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
+	if unit == "" || row.GetValue() == "" {
+		r.workspaceLog(ws).Error("daemon.footer.entry_unaddressed",
+			"the feed announced an entry with no unit or no FeedId; no jump row can name it",
+			dlog.Context{"unit": unit, "row": row.GetValue()})
+		return
+	}
+	r.mutate(ws, "daemon.footer.on_entry_placed", "the footer took the feed's placement of a detached-work entry",
+		dlog.Context{"unit": unit, "row": row.GetValue()}, func(s *wsState) {
+			s.entries[unit] = row
+		})
+}
+
+// entryFor answers the entry the feed drew under the first of KEYS it has
+// announced, nil when it announced none of them. A row is addressed by more
+// than one identity (a subagent's spawn unit and its handle are one value by
+// contract, but a row may know only one of them), so each is tried.
+func (s *wsState) entryFor(keys ...string) *frontendv1.FeedId {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if entry, ok := s.entries[key]; ok {
+			return entry
+		}
+	}
+	return nil
+}
+
+// jumpTo states a row's jump: the entry when it is known, otherwise WHY it is
+// not. NOENTRY marks a kind that draws no feed entry at all.
+func jumpTo(entry *frontendv1.FeedId, noEntry bool) *frontendv1.FooterJump {
+	switch {
+	case noEntry:
+		return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Unresolved{Unresolved: &frontendv1.FooterJumpUnresolved{
+			Reason: &frontendv1.FooterJumpUnresolved_NoFeedEntry{NoFeedEntry: &frontendv1.FooterJumpNoFeedEntry{}},
+		}}}
+	case entry != nil:
+		return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Entry{Entry: entry}}
+	default:
+		return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Unresolved{Unresolved: &frontendv1.FooterJumpUnresolved{
+			Reason: &frontendv1.FooterJumpUnresolved_NotDrawn{NotDrawn: &frontendv1.FooterJumpNotDrawn{}},
+		}}}
+	}
+}
+
+// jumpResolution names a jump for the record: the entry's FeedId, or the
+// unresolved reason.
+func jumpResolution(jump *frontendv1.FooterJump) (resolution, entry string) {
+	switch target := jump.GetTarget().(type) {
+	case *frontendv1.FooterJump_Entry:
+		return "entry", target.Entry.GetValue()
+	case *frontendv1.FooterJump_Unresolved:
+		switch target.Unresolved.GetReason().(type) {
+		case *frontendv1.FooterJumpUnresolved_NotDrawn:
+			return "not_drawn", ""
+		case *frontendv1.FooterJumpUnresolved_NoFeedEntry:
+			return "no_feed_entry", ""
+		}
+	}
+	return "unset", ""
+}
+
+// noteJump queues the record of a row's jump resolution when it CHANGED since
+// the last one recorded for that row, so a row's resolution is diagnosable
+// from the log alone — which kind, which work, what the row is and where it
+// came from, and why a click cannot reach it — without a record on every push.
+// Written after the lock is released (see mutate).
+func (s *wsState) noteJump(memo *jumpMemo, kind, workID string, jump *frontendv1.FooterJump, facts dlog.Context) {
+	resolution, entry := jumpResolution(jump)
+	value := resolution + "|" + entry
+	if memo.recorded && memo.value == value {
+		return
+	}
+	memo.recorded = true
+	memo.value = value
+	note := dlog.Context{"kind": kind, "work_id": workID, "resolution": resolution, "entry": entry}
+	for k, v := range facts {
+		note[k] = v
+	}
+	s.jumpNotes = append(s.jumpNotes, note)
+}
+
+// retiredAny reports whether the footer has already seen a terminal for any
+// of the identities: a row standing for a retired run is one the live-work set
+// re-listed after the run's own terminal said it was over.
+func retiredAny(s *wsState, ids ...string) bool {
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, done := s.retiredWork[id]; done {
+			return true
+		}
+	}
+	return false
+}
+
+// drainJumpNotes hands over the queued jump records and empties the queue.
+func (s *wsState) drainJumpNotes() []dlog.Context {
+	notes := s.jumpNotes
+	s.jumpNotes = nil
+	return notes
+}
+
+// logJumpNotes writes the queued jump-resolution records.
+func logJumpNotes(log dlog.Logger, notes []dlog.Context) {
+	for _, note := range notes {
+		log.Info("daemon.footer.jump_resolution",
+			"a footer detached-work row's click resolution changed", note)
+	}
 }

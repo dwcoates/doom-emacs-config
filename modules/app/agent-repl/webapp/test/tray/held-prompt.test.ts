@@ -739,7 +739,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     ["no hold", null, []],
     ["a lease hold", { case: "shutdown", value: { scheduleId: "s" } }, ["lease-card"]],
     ["a keep-alive hold", { case: "keepAlive", value: { turn: { value: "ka-1" } } }, ["keep-alive-card"]],
-  ] as const)("names %s's frame with its hook, which selects only the border", (_name, hold, frames) => {
+  ] as const)("names %s by its hook, which selects no border", (_name, hold, frames) => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(hold === null ? {} : { hold: hold as never }), tc);
     expect(["lease-card", "keep-alive-card"].filter((frame) => card.classList.contains(frame))).toEqual(frames);

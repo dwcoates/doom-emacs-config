@@ -12,14 +12,22 @@
  * opening is no longer a request head at all — it is `SubscribePage`, a unary,
  * and a settle that returned before that unary answered would return before
  * the view it opens can have drawn anything.
+ *
+ * AND WHO PAYS THE COLD BOOT. Every file that boots the app pays its first
+ * boot in `bootColdOnce`'s `beforeAll`, never in a test body; the check that
+ * no file forgets to lives here, beside the harness it guards.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { log } from "../../src/log";
 
 let harness: Harness | undefined;
 let restoreFetch: (() => void) | undefined;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
@@ -116,4 +124,31 @@ describe("settle with a view's subscription outstanding", () => {
     // whose registration happened after the answer would leave this empty.
     expect(harness.$(".footer-tokens")).not.toBeNull();
   }, 1_500); // same holds, same reason
+});
+
+/** This directory's test files that boot the app, read off disk. */
+function bootingFiles(): { file: string; source: string }[] {
+  const dir = resolve(process.cwd(), "test/integration");
+  return readdirSync(dir)
+    .filter((file) => file.endsWith(".test.ts"))
+    .map((file) => ({ file, source: readFileSync(resolve(dir, file), "utf8") }))
+    .filter(({ source }) => source.includes("startHarness("));
+}
+
+describe("the cold boot", () => {
+  it("finds the files that boot the app", () => {
+    // Arrange / Act: the scan the per-file check below runs over.
+    const files = bootingFiles().map(({ file }) => file);
+
+    // Assert: a scan that found nothing would pass every file vacuously.
+    expect(files).toContain("harness.self.test.ts");
+  });
+
+  it.each(bootingFiles())("is paid before the first test of $file", ({ source }) => {
+    // Arrange / Act: the file's own top-level statements.
+    const calls = source.match(/^bootColdOnce\(\);$/gm) ?? [];
+
+    // Assert: exactly one top-level call, so the file's first boot is warm.
+    expect(calls).toHaveLength(1);
+  });
 });

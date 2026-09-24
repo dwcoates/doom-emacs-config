@@ -161,29 +161,33 @@
      the deep-orange --compact-rule and amber --async, so an in-progress
      reasoning card reads as its own state. Same 0.3px thickness the base bubble
      reserves; only the color lands here. */
-  --thinking-border: #eab308;
+  --thinking-border: #e3a008;
   /* The border around a FINISHED response the agent wrote MID-TURN (prose
      between tool calls: settled, but not the turn's answer): pear, the step
      between thinking's yellow and an answer's green (owner ruling,
      2026-09-23), so the border ladder runs monotonic toward done: yellow
      (reasoning) -> pear (said, not concluded) -> green (the answer). */
-  --interim-response-border: #a3b10b;
+  --interim-response-border: #b0b00c;
   /* The border around the response the reader has SELECTED to reply to
      (reply-to-a-past-response mode): blue, distinct from the green a final
      answer wears at rest, so the one bubble the next prompt will quote is
      unmistakable among the green answers around it. Only a final-response
      bubble is ever selected, so this is only ever seen replacing the green. */
   --selected-response: #2563eb;
-  /* The prompt bubble's own in-flight border: light purple, worn ONLY while
-     `data-wave="working"` is on the bubble (see `.bubble.user[data-wave=
-     "working"]` below and `armPromptWave` / `setPromptWave` in
-     breathing.ts, drawn from the prompt row's daemon-stated `working`
-     flag) — the SAME attribute that drives the
-     thinking-wave shadow band, so the border can never start or end a frame
-     out of step with the glimmer: one attribute, one lifecycle. Reads clearly
-     against the blue --user fill in this theme; the dark theme lifts it the
-     same way --final-response lifts for its own dark fill. */
+  /* The USER prompt bubble's border: light purple, worn PERMANENTLY (owner
+     ruling, 2026-09-23) — in flight and after its turn resolves alike, so it
+     is independent of the `working` flag and the wave. It used to be keyed on
+     `data-wave="working"` and vanish at the turn's terminal; the name is kept
+     because the token is the vocabulary other surfaces are written in. Reads
+     clearly against the blue --user fill in this theme; the dark theme lifts
+     it the same way --final-response lifts for its own dark fill. */
   --prompt-live-border: #c084fc;
+  /* THE AGENT-TO-AGENT PROMPT'S BORDER (owner ruling, 2026-09-23): the one
+     amber every prompt one agent addresses to another wears — the
+     agent-addressed prompt row (the lead's or any agent's send, and its
+     delivered copy) and the peer message alike. Its own token rather than
+     --async's, which means background work; the dark theme lifts it. */
+  --agent-prompt-border: #f59e0b;
   /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
      datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
@@ -359,14 +363,16 @@
     --final-response: #4ade80;
     /* Lighter yellow for the dark theme, as the other state borders lift, so
        the thinking hairline still reads against the dark purple fill. */
-    --thinking-border: #facc15;
-    --interim-response-border: #c7d32a;
+    --thinking-border: #f9c21b;
+    --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
     --prompt-live-border: #d8b4fe;
+    /* Brighter amber for the dark theme, as the other state borders lift. */
+    --agent-prompt-border: #fbbf24;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
     /* Brighter token yellow for the dark theme, so the figure reads on the
@@ -457,6 +463,13 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
+  /* THE SCROLLBAR'S GUTTER: the classic bar's width (see "bubble scrollbars"
+     below), which an expanded bubble lays out inside its scroll box whenever
+     its content passes the 50vh ceiling. A metaprompt tree's column budget
+     (src/bubble/body.ts `measureTreeCols`) always takes it off, collapsed or
+     not, so a tree is wrapped as if expanded and never re-wraps on a click
+     (owner ruling, 2026-09-23). One token, read by both. */
+  --scrollbar-gutter-width: 8px;
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -1508,17 +1521,22 @@ pre {
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
 }
-/* The in-flight prompt's light-purple border. Keyed on the SAME
-   `data-wave="working"` attribute the glimmer above reads, rather than a
-   separate class or JS toggle, so the two can never desync: whatever sets or
-   clears the attribute at the glimmer's own start/end drives this border too,
-   by construction. Only the color changes — `.bubble`'s base rule already
-   reserves the 0.3px border box for every bubble, so this never reflows the
-   feed. Static, not animated: the attribute's presence is itself the signal,
-   so it survives `prefers-reduced-motion` (which only stops the wave's
-   animation above) unchanged. */
-.bubble[data-role="prompt"][data-wave="working"] {
+/* THE PROMPT BORDERS (owner ruling, 2026-09-23). A border lands on a prompt
+   once it is RECEIVED — in flight or completed — and stays: none of these is
+   keyed on `data-wave`, so the turn resolving takes nothing away, and nothing
+   here animates. A HELD prompt in the tray has not been received and wears NO
+   border (only the base rule's transparent reservation).
+   The USER prompt wears the light purple, recoloring the 0.3px the base rule
+   already reserves, so it never reflows the feed. */
+.bubble[data-role="prompt"][data-variant="user"] {
   border-color: var(--prompt-live-border);
+}
+/* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
+   lead or any agent to another, on either end) and the peer message — is the
+   same blue prompt bubble in the one amber. */
+.bubble[data-role="prompt"][data-variant="agent"],
+.bubble[data-role="prompt"][data-variant="peer"] {
+  border: 1px solid var(--agent-prompt-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
@@ -1546,7 +1564,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* THE PEER MESSAGE'S HEADER STRIP: the sender label, the whole of its
    collapsed face (its cap is zero lines, src/feed/rows/peer-message.ts). One
-   line, ellipsized, clear of the has-more chevron that sits at its right. */
+   line, ellipsized, its right padding the room a has-more chevron once took
+   (the chevron is gone, owner ruling 2026-09-23; the padding is kept so the
+   label does not move). */
 .peer-label {
   font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.85;
@@ -2248,7 +2268,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    a shell bubble runs, a tool call's input line (command, path, query or plain
    input), a skill's invocation, a hook's headline, a subagent's description —
    is capped at TWO LINES while the fold that owns it is collapsed, and wears the
-   response bubble's fade and chevron (the `has-more` rules below) when it
+   response bubble's fade (the `has-more` rules below) when it
    actually overflows them. `line-clamp` caps by text rows and `max-height: none`
    drops each line's own preview cap (`.tool-input`, `.bash-input`), so the two
    rows are the only limit. This is the ONE title cap: title-fold.ts marks every
@@ -2286,16 +2306,16 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    scroll box wears it (one measurer, one rule) — never a tool-call section —
    and each fades into its OWN bubble background (`--bubble-bg`) so the last
    line dissolves rather than being hard-clipped.
-   Both pseudo-elements are absolutely positioned against the box, which the cap
-   holds still while collapsed (overflow-y: hidden), so bottom:0 is the visible
-   fold. `pointer-events: none` keeps a click on either one falling through to
-   click-to-expand. A tool card's TITLE fold (above) wears the same fade and
-   chevron from the same rules, fading into its card's `--title-fold-bg`; an
-   output section still never does.
+   The fade is absolutely positioned against the box, which the cap holds
+   still while collapsed (overflow-y: hidden), so bottom:0 is the visible
+   fold. `pointer-events: none` keeps a click on it falling through to
+   click-to-expand. A tool card's TITLE fold (above) wears the same fade from
+   the same rule, fading into its card's `--title-fold-bg`; an output section
+   still never does.
    THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
    scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
    (`position: relative` on the box itself, not on `.has-more`), and the fade
-   and chevron are out of flow, so the measurer toggling the class moves
+   is out of flow, so the measurer toggling the class moves
    nothing inside or around the box. */
 .bubble > .bubble-scroll,
 .title-fold {
@@ -2318,32 +2338,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .title-fold.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
 }
-/* The chevron, centered on the bottom edge over the fade. Generated content is
-   not selectable, so it needs no user-select carve-out. */
-.bubble > .bubble-scroll.has-more::before,
-.title-fold.has-more::before {
-  content: "\2304";
-  position: absolute;
-  left: 50%;
-  bottom: 0.05em;
-  transform: translateX(-50%);
-  z-index: 1;
-  pointer-events: none;
-  font-size: 1.05em;
-  line-height: 1;
-  color: var(--muted);
-}
-/* A ZERO-LINE CAP shows its header strip and nothing below it, so there is no
-   last line to fade: the chevron alone says there is more, at the strip's
-   right end where the box (zero tall) meets it. */
-.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::after {
-  background: none;
-}
-.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::before {
-  left: auto;
-  right: calc(0.9rem - var(--bubble-scroll-gap));
-  transform: none;
-}
+/* "MORE BELOW" IS THE FADE ONLY, NEVER A CHEVRON (owner ruling, 2026-09-23),
+   on every bubble and every title fold: nothing draws a glyph from `has-more`,
+   and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
    light up. The bars ride the SECTION (the whole card) rather than the
@@ -2573,17 +2570,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    A queued message is PARKED, not active. It must read as plainly distinct
    from a live prompt bubble, so the user sees the message is waiting for later
    and is explicitly NOT interrupting the running turn unless escalated: its
-   grey-blue held fill and its DASHED frame (a solid one is the live bubble's)
-   carry that, and everything else is the one bubble's. */
-/* THE HELD PROMPT'S FRAME (owner rulings, 2026-09-23): a held prompt is a
-   prompt-role bubble (src/tray/held-prompt.ts) on the grey-blue held fill
-   (`--held-prompt-bg`), and its variant sets its BORDER: DASHED in the very
-   --user blue the live bubble fills with, so parked it still reads as the
-   user's own prompt held back. A hold that is not the turn's names its own
-   frame below. */
-.bubble[data-variant="held"] {
-  border: 1px dashed var(--user);
-}
+   grey-blue held fill carries that, and everything else is the one bubble's.
+   A HELD PROMPT HAS NO BORDER (owner ruling, 2026-09-23): a border lands only
+   once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
+   frame, the lease hold's amber and the keep-alive hold's teal are gone; the
+   hold's badge alone says what holds it. */
 .queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
 /* The status pill: "queued — classifying…" → "queued — waiting" or
    "interrupting…". An interrupt lights up in the in-flight orange the rest
@@ -2620,18 +2611,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* --- the drain-lease bubble (render.ts LeaseHeldCard) ---------------------
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
    shares the queued card's geometry (same column, same fit-content width) so
-   it sits in the feed as one more parked prompt, and departs from it in
-   the cue that carries meaning: the border goes SOLID in the merge/bounce
-   amber rather than dashed user-blue.
-   The dashed blue card means "waiting on the turn above you"; this one means
-   "waiting on the whole daemon", and the reader must not have to read the
-   badge to tell them apart. */
-.bubble[data-variant="held"].lease-card {
-  border: 1px solid var(--merge-border);
-}
-/* The badge says WHY, and takes the same amber so the pill and the frame
-   agree — it is never the classifier's grey, because no classification
-   happened. */
+   it sits in the feed as one more parked prompt. Its `.lease-card` hook once
+   selected a solid merge-amber frame; a held prompt has no border now (owner
+   ruling, 2026-09-23), so the badge carries the distinction. */
+/* The badge says WHY, in the merge/bounce amber — it is never the
+   classifier's grey, because no classification happened. */
 .queued-badge.lease {
   color: var(--merge-border);
   border-color: var(--merge-border);
@@ -2649,12 +2633,10 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    out of hibernation, so it belongs to that vocabulary, and it is the
    textbook teal case — nothing is wired to this prompt yet, and nothing is
    wrong. The amber is spent on coordinated daemon work (merges, bounces),
-   which this is not. */
-.bubble[data-variant="held"].keep-alive-card {
-  border: 1px solid var(--hibernated);
-}
-/* The badge takes the same teal so pill and frame agree. Never the
-   classifier's grey: no classification happened, and none will. */
+   which this is not. Its `.keep-alive-card` hook once selected a teal frame;
+   a held prompt has no border now (owner ruling, 2026-09-23). */
+/* The badge takes the hibernation teal. Never the classifier's grey: no
+   classification happened, and none will. */
 .queued-badge.keep-alive {
   color: var(--hibernated);
   border-color: var(--hibernated);
@@ -4661,8 +4643,6 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.7rem;
   color: var(--muted);
 }
-/* An AGENT-addressed prompt wears the orange border the schema names for it. */
-.bubble[data-role="prompt"][data-variant="agent"] { border: 1px solid var(--thinking); }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
 /* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
    it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
@@ -6647,7 +6627,7 @@ bubble-body.bubble-body { display: block; }
 .skill-input::-webkit-scrollbar,
 .skill-content::-webkit-scrollbar,
 .fold-fixed > .agent-panel::-webkit-scrollbar {
-  width: 8px;
+  width: var(--scrollbar-gutter-width);
 }
 .bubble > .bubble-scroll::-webkit-scrollbar-track,
 .tool-input::-webkit-scrollbar-track,
@@ -6736,4 +6716,15 @@ bubble-body.bubble-body { display: block; }
   max-width: none;
   margin-left: 0;
   margin-right: 0;
+}
+
+/* ---- the detached-work id (src/feed/work-id.ts) ---- */
+/* The id an async bubble's head names its work by (owner ruling, 2026-09-23):
+   the head's quiet figures' size and muted ink, in the monospace ids read in,
+   and selectable so a reader can copy it to refer to the work. */
+.async-work-id {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  user-select: text;
 }

@@ -176,6 +176,8 @@ export interface ResultSpec {
   readonly structuredOutput?: unknown;
   /** Extra model rows in `modelUsage` beyond the session model's. */
   readonly extraModelUsage?: Record<string, Record<string, unknown>>;
+  /** Where a turn no send started came from (`origin` on the result, sdk.d.ts). */
+  readonly origin?: { readonly kind: string };
 }
 
 /** One task the mock is tracking, foreground or background. */
@@ -394,6 +396,12 @@ export interface ScenarioContext {
    * new model, which is the only evidence the swap happened at all.
    */
   fallbackTo(model: string): void;
+  /**
+   * Queue a turn the VENDOR runs on its own, ahead of the next send's turn —
+   * the real CLI's background-task notification turn. Nothing in it answers a
+   * send, so nothing in it is stamped with a `user_message_uuid`.
+   */
+  queueVendorTurn(): void;
 
   // -- logging -------------------------------------------------------------
   /** Log through `src/log.ts`. Every branch of every scenario logs. */

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { installTreeLayout, stagedCols, useTreeLayout } from "./tree-layout.js";
+import { SCROLLBAR_GUTTER_TOKEN } from "../src/bubble/body.js";
 
 /** A column holding a bubble holding a body and a tree probe. */
 function stage(attached: boolean): { column: HTMLElement; bubble: HTMLElement; body: HTMLElement; probe: HTMLElement } {
@@ -63,6 +64,37 @@ describe("installTreeLayout", () => {
     }
   });
 
+  it.each([
+    ["an attached", true, "6px"],
+    ["a detached", false, ""],
+  ] as const)("answers %s body's scrollbar gutter token as a real engine does", (_label, attached, want) => {
+    // Arrange
+    const { uninstall } = installTreeLayout({ scrollbarPx: 6 });
+    const { body } = stage(attached);
+    try {
+      // Act
+      const read = getComputedStyle(body).getPropertyValue(SCROLLBAR_GUTTER_TOKEN);
+      // Assert
+      expect(read).toBe(want);
+    } finally {
+      uninstall();
+    }
+  });
+
+  it("answers a staged unreadable gutter token verbatim", () => {
+    // Arrange
+    const { uninstall } = installTreeLayout({ scrollbarToken: "0.5rem" });
+    const { body } = stage(true);
+    try {
+      // Act
+      const read = getComputedStyle(body).getPropertyValue(SCROLLBAR_GUTTER_TOKEN);
+      // Assert
+      expect(read).toBe("0.5rem");
+    } finally {
+      uninstall();
+    }
+  });
+
   it("puts jsdom back when uninstalled", () => {
     // Arrange
     const { uninstall } = installTreeLayout();
@@ -76,11 +108,12 @@ describe("installTreeLayout", () => {
 
 describe("stagedCols", () => {
   it.each([
-    { name: "a percentage cap", maxWidth: "77%", want: 93 },
-    { name: "a px cap", maxWidth: "560px", want: 67 },
-  ])("computes the budget of $name", ({ maxWidth, want }) => {
+    { name: "a percentage cap", maxWidth: "77%", scrollbarPx: 8, want: 92 },
+    { name: "a px cap", maxWidth: "560px", scrollbarPx: 8, want: 66 },
+    { name: "a cap with no gutter", maxWidth: "77%", scrollbarPx: 0, want: 93 },
+  ])("computes the budget of $name", ({ maxWidth, scrollbarPx, want }) => {
     // Act + Assert
-    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10 })).toBe(want);
+    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx })).toBe(want);
   });
 });
 

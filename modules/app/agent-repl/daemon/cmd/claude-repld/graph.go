@@ -382,6 +382,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// Zero leaves the resolver's own DefaultTailRetention in force; the
 		// flag and its environment knob are what make token_expired reachable.
 		TailRetention: p.Opts.feedTailRetention,
+		// THE FOOTER'S JUMP ROWS NAME THE ENTRY THE FEED DREW, on the feed that
+		// draws it: a subagent of a subagent lands on its parent's sub-feed,
+		// and only the feed knows that. Called under the feed's lock; the
+		// footer never calls back into the feed (the fault path above already
+		// takes the same feed-then-footer order).
+		EntryPlaced: footerResolver.OnEntryPlaced,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
@@ -570,6 +576,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// one exists.
 		Spawns:       supervisor,
 		Freeness:     fleet.Freeness(),
+		Reviving:     queue.Reviving,
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,
 		PublishHost:  relay.PublishHostWorkspace,
