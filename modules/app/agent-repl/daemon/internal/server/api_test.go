@@ -188,7 +188,7 @@ func TestPushTransferredReachesTheWebStreamWithTheAddress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream, err := h.Client.WatchWebWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref()}))
+		connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref(), WebappBuild: "webapp-test"}))
 	if err != nil {
 		t.Fatalf("open the web stream: %v", err)
 	}

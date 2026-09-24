@@ -61,7 +61,6 @@ func TestFaultFooterCellPartitionsEveryDaemonKind(t *testing.T) {
 		{"an absent prompts directory", KindPromptsDirMissing},
 		{"a state client that opened read-only", KindWsmReadOnly},
 		{"a durable sink that cannot be written", KindLogSinkPoisoned},
-		{"a self-reload whose deploy script failed", KindDeployScriptFailed},
 		{"a handover whose successor would not start", KindSuccessorSpawnFailed},
 		{"a state client that will not answer", KindStateUnreadable},
 		{"a handover nobody claimed", KindAdoptionWindowExpired},

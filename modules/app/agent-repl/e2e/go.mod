@@ -3,6 +3,7 @@ module agentrepl/e2e
 go 1.23.0
 
 require (
+	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	claude-repld v0.0.0-00010101000000-000000000000
 	connectrpc.com/connect v1.17.0
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	agentrepl/logging v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect

@@ -53,7 +53,7 @@ func TestWatchDaemonFlushesHeadersOnAcceptance(t *testing.T) {
 	// Act: the open must complete on HEADERS alone.  connect-go writes them
 	// on the first Send, so without the acceptance flush this call would sit
 	// here until the context deadline.
-	resp, cancel := openRawStream(t, baseURL, "WatchDaemon", "{}", 5*time.Second)
+	resp, cancel := openRawStream(t, baseURL, "WatchDaemon", emacsWatchDaemonJSON, 5*time.Second)
 	defer cancel()
 	defer resp.Body.Close()
 
@@ -111,7 +111,7 @@ func TestAcceptedStreamStillDeliversItsFirstPush(t *testing.T) {
 	// Arrange: headers already flushed, so the first frame arrives on a
 	// response the client has long since accepted.
 	server, baseURL := newTestServer(t)
-	resp, cancel := openRawStream(t, baseURL, "WatchDaemon", "{}", 5*time.Second)
+	resp, cancel := openRawStream(t, baseURL, "WatchDaemon", emacsWatchDaemonJSON, 5*time.Second)
 	defer cancel()
 	defer resp.Body.Close()
 	server.awaitSubscribers(streamDaemon, "", 1)

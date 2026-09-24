@@ -39,7 +39,7 @@ func openHost(t *testing.T, server *fakeServer, client agentreplv1connectClient,
 func openDaemon(t *testing.T, server *fakeServer, client agentreplv1connectClient) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	stream, err := client.WatchDaemon(ctx, connect.NewRequest(emacsWatchDaemon()))
 	if err != nil {
 		cancel()
 		t.Fatalf("WatchDaemon: %v", err)

@@ -2125,6 +2125,9 @@ export const WATCH_DAEMON_PUSHES = [
   // contract: `unreachablePushArm` raises `UnknownPushArm`, and the stream
   // pipeline skips it quietly rather than filing a bad frame.
   "mutationProgress",
+  // Addressed to stale EMACS streams alone, never to a webview; a page that
+  // meets one skips it as the same forward-compat skew.
+  "reloadElisp",
 ] as const;
 
 export function shutdownAnnounced(init?: {
@@ -2188,7 +2191,6 @@ export const hostWorkspacePush = (): WatchHostWorkspaceResponse =>
 export const DAEMON_FAULT_ARMS = [
   "adoptionWindowExpired",
   "logSinkPoisoned",
-  "deployScriptFailed",
   "successorSpawnFailed",
   "promptsDirMissing",
   "wsmReadOnly",
@@ -2220,8 +2222,6 @@ export function daemonFault(arm: DaemonFaultArm, detail?: string): DaemonFaultIn
         return { case: "adoptionWindowExpired" as const, value: { workspace: workspaceRef() } };
       case "logSinkPoisoned":
         return { case: "logSinkPoisoned" as const, value: { sink: "the durable log" } };
-      case "deployScriptFailed":
-        return { case: "deployScriptFailed" as const, value: { detail: "the deploy script exited 1" } };
       case "successorSpawnFailed":
         return { case: "successorSpawnFailed" as const, value: { detail: "the successor never came up" } };
       case "promptsDirMissing":

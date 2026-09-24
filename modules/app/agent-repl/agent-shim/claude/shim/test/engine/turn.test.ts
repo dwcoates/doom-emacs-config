@@ -61,6 +61,8 @@ interface Harness {
    * is the only handle a test has on the conclusion the handler observes.
    */
   readonly watchers: AgentPageSession[];
+  /** Keep-alive holds taken and not yet released. */
+  keepaliveHolds: number;
 }
 
 /** Every structured record the logger wrote since `before`. */
@@ -106,6 +108,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     knows: true,
     queryDead: false,
     watchers: [] as AgentPageSession[],
+    keepaliveHolds: 0,
   };
   const context: SessionContext = {
     persistence,
@@ -132,6 +135,12 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     },
     setOpenTurn: (turn) => {
       state.open = turn;
+    },
+    holdKeepalive: () => {
+      state.keepaliveHolds += 1;
+      return () => {
+        state.keepaliveHolds -= 1;
+      };
     },
   };
   return Object.assign(state, { turns: new TurnEngine(context) });
@@ -1728,6 +1737,58 @@ describe("the prompt row's own guard", () => {
     const prompt = create(conversationv1.AgentPromptSchema, { agent: AGENT, said: textSaid("x") });
 
     expect(() => promptEntry(prompt, AGENT, false)).toThrow(/no turn id cannot be recorded/);
+  });
+});
+
+// A START IN FLIGHT OWNS THE SUBMITTER SLOT: the keep-alive beat is held from
+// the call's arrival until it settles, so no beat submits in the two store
+// round trips before the start adopts its turn.
+describe("StartTurn's keep-alive hold", () => {
+  it("holds the keep-alive beat while the start is inside its durable write", async () => {
+    // Arrange
+    const h = await harness();
+    let releaseStart = (): void => {};
+    const blocked = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    let holdsDuringWrite = -1;
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      holdsDuringWrite = h.keepaliveHolds;
+      await blocked;
+      await durable(entries);
+    };
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+    releaseStart();
+    await starting;
+
+    // Assert
+    expect(holdsDuringWrite).toBe(1);
+  });
+
+  it("releases the hold once the start has opened its turn", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.keepaliveHolds).toBe(0);
+  });
+
+  it("releases the hold when the start is refused", async () => {
+    // Arrange
+    const h = await harness();
+    h.submitRejects = new Error("the vendor refused the prompt");
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.keepaliveHolds).toBe(0);
   });
 });
 

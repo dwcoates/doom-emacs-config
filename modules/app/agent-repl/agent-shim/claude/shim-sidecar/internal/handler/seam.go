@@ -92,7 +92,7 @@ func (h *AgentTranscriptHandler) SetTaskStopObserver(fn func(taskID string)) {
 // The frame itself is RunOutput's, so it is the identical frame every other
 // handler asked for a cancelled terminal spells.
 func (h *ShellOutputHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
-	return h.RunOutput.Cancelled(taskID, run, ownerAgentID, settledAtMs)
+	return h.Cancelled(taskID, run, ownerAgentID, settledAtMs)
 }
 
 // SetTerminalObserver adopts the reader's terminal-read sink.
@@ -108,7 +108,7 @@ func (h *ShellOutputHandler) SetTerminalObserver(fn func(path, run string)) {
 // LostTerminal spells the reader's LOST conclusion as the detached run's
 // terminal. The frame is RunOutput's, for the reason CancelTerminal's is.
 func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string, catchup bool) []*storev1.StoreEntry {
-	return h.RunOutput.Lost(taskID, runActivityID, ownerAgentID, reason, catchup)
+	return h.Lost(taskID, runActivityID, ownerAgentID, reason, catchup)
 }
 
 // LostTerminal spells the reader's LOST conclusion as the BACKGROUNDED
