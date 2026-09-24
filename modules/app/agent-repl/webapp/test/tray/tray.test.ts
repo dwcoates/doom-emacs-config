@@ -89,6 +89,7 @@ const promptItem = (turn: string): DaemonHoldItem =>
         said: { content: { blocks: [{ block: { case: "text", value: { text: "hi" } } }] } },
         queuedAt: { atMs: BigInt(NOW) },
         classification: { case: "classifying", value: {} },
+        badges: [{ label: "classifying", detail: "queued — classifying" }],
       },
     },
   });
@@ -105,6 +106,7 @@ const multiLineItem = (turn: string): DaemonHoldItem =>
         },
         queuedAt: { atMs: BigInt(NOW) },
         classification: { case: "classifying", value: {} },
+        badges: [{ label: "classifying", detail: "queued — classifying" }],
       },
     },
   });

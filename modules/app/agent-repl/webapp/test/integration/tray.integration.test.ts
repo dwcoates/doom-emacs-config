@@ -32,6 +32,7 @@ import {
   HELD_OFFER_ARMS,
   HELD_OFFER_HEADLINE,
   HELD_TURN_ID,
+  HOLD_BADGES,
   HOLD_ACCEPTABLE_ARM,
   HOLD_ARMS,
   HOLD_CLASSIFICATION_ARMS,
@@ -127,13 +128,13 @@ describe("classification detail", () => {
     );
   });
 
-  it("draws the uninterruptible turn's own command", async () => {
+  it("draws the uninterruptible turn's daemon-named badge verbatim", async () => {
     // Arrange / Act
     await withTray({ items: [heldPromptItem({ classification: "uninterruptibleTurn" })] });
     // Assert
     expect(
-      harness.$(`[data-held-turn="${HELD_TURN_ID}"] [data-command]`),
-    ).not.toBeNull();
+      harness.$(`[data-held-turn="${HELD_TURN_ID}"] [data-held-status="uninterruptibleTurn"]`)?.textContent,
+    ).toBe(HOLD_BADGES.uninterruptibleTurn?.label);
   });
 
   // This set assertion boots one real-socket harness per classification.

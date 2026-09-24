@@ -1977,6 +1977,23 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
 
 export const HELD_TURN_ID = "turn-held";
 
+/**
+ * The badge the daemon composes for each status (daemon/internal/resolve/holds),
+ * as a scripted daemon serves it. The webapp draws these words verbatim.
+ */
+export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: string }>> = {
+  classifying: { label: "classifying", detail: "queued — classifying" },
+  interject: { label: "interrupting", detail: "interjects" },
+  holdForTurnEnd: { label: "after this turn" },
+  uninterruptibleTurn: { label: "after /compact", detail: "waits for /compact to finish" },
+  classificationError: { label: "unclassified" },
+  accepted: { label: "confirmed" },
+  shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
+  keepAlive: { label: "keep-alive", detail: "held behind a keep-alive, waiting on turn turn-live" },
+  sessionStarting: { label: "starting up", detail: "held until the session is up" },
+  buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
+};
+
 export function heldPrompt(init?: {
   turn?: string;
   text?: string;
@@ -1984,12 +2001,18 @@ export function heldPrompt(init?: {
   hold?: HoldArm;
   accepted?: boolean;
 }): HeldPrompt {
+  const classification = init?.classification ?? "interject";
+  const hold = init?.hold ?? "keepAlive";
+  const statuses: string[] = [classification];
+  if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
+  statuses.push(hold);
   return create(HeldPromptSchema, {
     turn: turnId(init?.turn ?? HELD_TURN_ID),
     said: userSaid(init?.text ?? "also fix the footer"),
     queuedAt: { atMs: 3_000n },
-    classification: classificationValue(init?.classification ?? "interject", init?.accepted),
-    hold: holdValue(init?.hold ?? "keepAlive"),
+    classification: classificationValue(classification, init?.accepted),
+    hold: holdValue(hold),
+    badges: statuses.map((status) => HOLD_BADGES[status] ?? { label: status }),
   });
 }
 
