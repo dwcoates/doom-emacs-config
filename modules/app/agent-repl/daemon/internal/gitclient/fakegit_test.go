@@ -404,6 +404,11 @@ func fakeGitMain() {
 // pretending to be reachable.
 type testSurfaces struct {
 	global *dlog.TestLogger
+	// dirEvents records every DetachDir and AttachDir call, in order, as
+	// "detach <dir>" and "attach <dir>".
+	dirEvents []string
+	// dirFailure, when set, is what DetachDir and AttachDir answer.
+	dirFailure error
 }
 
 func newTestSurfaces() *testSurfaces { return &testSurfaces{global: dlog.NewTestLogger()} }
@@ -428,16 +433,22 @@ func (s *testSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s *testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+func (s *testSurfaces) DetachDir(dir string) error {
+	s.dirEvents = append(s.dirEvents, "detach "+dir)
+	return s.dirFailure
+}
+
+func (s *testSurfaces) AttachDir(dir string) error {
+	s.dirEvents = append(s.dirEvents, "attach "+dir)
+	return s.dirFailure
+}
+
 func (s *testSurfaces) ClientLog(string, dlog.ClientRecord) error {
 	panic("gitclient must never persist a client record")
 }
 
 func (s *testSurfaces) Evict(string) error {
 	panic("gitclient must never evict a workspace's sinks")
-}
-
-func (s *testSurfaces) Retire(string) error {
-	panic("gitclient must never retire a workspace's sinks")
 }
 
 func (s *testSurfaces) Close() error { return nil }

@@ -342,23 +342,25 @@ interface ReaderOptions extends ReadRetryOptions {
 const BASH_ROW_RECHECK_MS = 25;
 
 /**
- * How long a waiter keeps waiting for a run's first row AFTER the run has left
- * the live set with no terminal row of its own written.
+ * The ceiling a shell run's recheck backs off to while it waits.
  *
- * THE CONCLUDED-BUT-UNWRITTEN WINDOW. A run announced to the daemon can retire
- * before its first row is committed: the daemon subscribes within a few
- * milliseconds of the announcement, and a shell that ends immediately leaves
- * the live set on the very message whose fold produces its rows. Waiting only
- * while the run is LIVE therefore refuses `WatchBash` for a run that plainly
- * exists, purely on write ordering.
+ * AN ANNOUNCED RUN IS WAITED FOR UNTIL ITS ROWS LAND, however long that takes.
+ * The rows of a detached shell are the SIDECAR's to write, from the spool it
+ * reads only once the spawning call's launch has been observed, so their
+ * arrival is bounded by nothing in this process. A wall-clock window here --
+ * this used to give a run that had left the live set 500ms -- refused the
+ * watch the moment a loaded host made the sidecar slower than that
+ * (TestBashDetachExplicitPoll, 2026-09-24: rows durable 523ms after the run
+ * concluded), and the daemon, told the run does not exist, never re-opened it:
+ * the shell's head never settled. The consumer's own cancel ends the wait.
  *
- * The wait's real bound is the terminal row LANDING — that write wakes the
- * waiter — so this is only the backstop for the one path that retires a run
- * without a terminal of its own: a vendor LEVEL that simply omits it. Twenty
- * rechecks of the cadence above, against an observed window of about five
- * milliseconds.
+ * The recheck doubles from BASH_ROW_RECHECK_MS to this, so a run whose rows
+ * are late costs four store reads a second rather than forty. It is the agent
+ * recheck's cadence (AGENT_ROW_RECHECK_MS), so a late shell is seen no later
+ * than a late agent book, and the first rechecks stay the 25ms the detached
+ * shell perf row is budgeted on (e2e/PERF-SPEC.md).
  */
-const BASH_CONCLUDED_WINDOW_MS = 500;
+const BASH_ROW_RECHECK_CEILING_MS = 250;
 
 /**
  * How long a waiter sleeps before re-asking the store for an AGENT's book.
@@ -384,7 +386,8 @@ const AGENT_ROW_RECHECK_MS = 250;
  *   yet, and the wait stands for as long as that holds.
  * - `concluded` — the run was announced and has already left the live set. Its
  *   rows may still be unwritten (the fold that retires a run is the same fold
- *   that produces them), so the wait stands through that window.
+ *   that produces them, and a detached shell's rows are the sidecar's), so the
+ *   wait stands until they land.
  * - `unknown` — nothing was ever announced under this handle. There is no
  *   promise to wait on, and the store's refusal is the answer.
  */
@@ -394,8 +397,11 @@ export type BashRunStanding = "live" | "concluded" | "unknown";
 interface FirstRowGate {
   /** Wake everyone waiting on this key; the store now holds a row for it. */
   wake(key: string): void;
-  /** Wait for this key's first row to land, or for the recheck cadence. */
-  wait(key: string): Promise<void>;
+  /**
+   * Wait for this key's first row to land, or for the recheck cadence (or
+   * DELAYMS, for a caller backing its recheck off).
+   */
+  wait(key: string, delayMs?: number): Promise<void>;
 }
 
 /**
@@ -414,7 +420,7 @@ function firstRowGate(recheckMs: number): FirstRowGate {
       waiters.delete(key);
       for (const wake of waiting) wake();
     },
-    wait(key) {
+    wait(key, delayMs = recheckMs) {
       return new Promise<void>((resolve) => {
         let settled = false;
         const finish = (): void => {
@@ -424,7 +430,7 @@ function firstRowGate(recheckMs: number): FirstRowGate {
           waiters.get(key)?.delete(finish);
           resolve();
         };
-        const timer = setTimeout(finish, recheckMs);
+        const timer = setTimeout(finish, delayMs);
         // Never hold the process open for a wait nobody is blocked on.
         timer.unref?.();
         const waiting = waiters.get(key) ?? new Set<() => void>();
@@ -483,8 +489,8 @@ export function createReader(options: ReaderOptions): Reader {
   /** Wake everyone waiting on this run; the store now holds a row for it. */
   const wakeFirstRowWaiters = (runValue: string): void => bashRows.wake(runValue);
 
-  /** Wait for this run's first row to land, or for the recheck cadence. */
-  const awaitFirstRow = (runValue: string): Promise<void> => bashRows.wait(runValue);
+  /** Wait for this run's first row to land, or for DELAYMS to recheck. */
+  const awaitFirstRow = (runValue: string, delayMs: number): Promise<void> => bashRows.wait(runValue, delayMs);
 
   /**
    * Runs whose TERMINAL row this shim has written, by run value.
@@ -1227,7 +1233,7 @@ export function createReader(options: ReaderOptions): Reader {
       const abort = new AbortController();
       LOGGER.debug({ run: runValue, work: work.value }, "following a shell run's stored rows");
       let opened = false;
-      let concludedSince: number | undefined;
+      let recheckMs = BASH_ROW_RECHECK_MS;
       return {
         async *[Symbol.asyncIterator]() {
           try {
@@ -1266,23 +1272,19 @@ export function createReader(options: ReaderOptions): Reader {
                 const standing = announcement();
                 if (standing === "unknown") throw error;
                 if (abort.signal.aborted) throw error;
-                if (standing === "concluded") {
-                  // THE CONCLUDED-BUT-UNWRITTEN WINDOW. A run that has already
-                  // left the live set was still ANNOUNCED, and an announced run
-                  // whose rows are merely late is not a run that does not
-                  // exist. This leg ends when the run's terminal row lands —
-                  // after that write the store's refusal is about a genuinely
-                  // absent run — or, for the one path that retires a run
-                  // without writing a terminal at all, at the backstop.
-                  if (bashTerminalsWritten.has(runValue)) throw error;
-                  concludedSince ??= Date.now();
-                  if (Date.now() - concludedSince >= BASH_CONCLUDED_WINDOW_MS) throw error;
-                }
+                // A RUN THAT LEFT THE LIVE SET WAS STILL ANNOUNCED, and an
+                // announced run whose rows are merely late is not a run that
+                // does not exist: its rows are the sidecar's to write, on no
+                // schedule this process can see (BASH_ROW_RECHECK_CEILING_MS).
+                // Only THIS shim having written the run's terminal makes the
+                // store's refusal an answer about a genuinely absent run.
+                if (standing === "concluded" && bashTerminalsWritten.has(runValue)) throw error;
                 LOGGER.logVerbose(
-                  { run: runValue, work: work.value },
+                  { run: runValue, work: work.value, standing, recheck_ms: recheckMs },
                   "the store has no row for this shell run yet; waiting for its first row",
                 );
-                await awaitFirstRow(runValue);
+                await awaitFirstRow(runValue, recheckMs);
+                recheckMs = Math.min(recheckMs * 2, BASH_ROW_RECHECK_CEILING_MS);
               }
             }
           } catch (error) {

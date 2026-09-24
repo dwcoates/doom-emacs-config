@@ -333,6 +333,16 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the write named no such record", withError(fields, err))
 			return err
 		}
+		// A LEASE ALREADY HELD IS THE ARBITRATION ANSWERING, not the store
+		// failing: the typed refusal names the standing holder, and every
+		// caller (the drain, the queue, the merge) decides what it means and
+		// states that at its own level. Recording it here at ERROR put an
+		// ERROR beside every ordinary hold and every drain.
+		var held *LeaseHeldError
+		if errors.As(err, &held) {
+			s.log.Debug(op, "the lease is already held; the arbitration refused the acquisition", withError(fields, err))
+			return err
+		}
 		s.log.Error(op, "refused the write", withError(fields, err))
 		return err
 	}

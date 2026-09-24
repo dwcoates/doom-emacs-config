@@ -201,6 +201,10 @@ func (s *fakeSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+func (s *fakeSurfaces) DetachDir(string) error { return nil }
+
+func (s *fakeSurfaces) AttachDir(string) error { return nil }
+
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }
 
 func (s *fakeSurfaces) Close() error { return nil }
@@ -292,6 +296,3 @@ func verbNames(calls []verbCall) []string {
 
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s *fakeSurfaces) Evict(_ string) error { return nil }
-
-// Retire implements dlog.Surfaces; no command file retires a directory.
-func (s *fakeSurfaces) Retire(_ string) error { return nil }

@@ -630,10 +630,38 @@ describe("startLifecycle: the daemon stream", () => {
     expect(sink.suppressed).toEqual([["daemonUnreachable", NOW + 8000]]);
   });
 
-  it("takes the restarting notice down when any stream reads a frame again", async () => {
+  it("takes the restarting notice down when a stream that dropped reads again", async () => {
     // ARRANGE: the daemon answering is what ends an outage, not the countdown,
-    // and a bounce takes every stream down together — so the FIRST frame any
-    // of them reads is the daemon being back.
+    // and a bounce takes every stream down together — so the FIRST stream to
+    // read again is the daemon being back.
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: {
+            case: "shutdownAnnounced",
+            value: announced({
+              cause: { kind: { case: "selfMergeRollout", value: {} } },
+              outageMs: 8000,
+              mintedAtMs: NOW,
+            }),
+          },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ACT
+    ctx.noteLinkRestored();
+    // ASSERT
+    expect(host.children.length).toBe(0);
+    handle.dispose();
+  });
+
+  it("keeps the restarting notice while the announcing daemon's streams still push", async () => {
+    // ARRANGE: the outgoing daemon goes on pushing on its standing streams
+    // until it exits; a frame on a link that never dropped is not a new daemon.
     const host = document.createElement("div");
     const { client } = lifecycleClient({
       daemon: async function* () {
@@ -655,7 +683,7 @@ describe("startLifecycle: the daemon stream", () => {
     // ACT
     ctx.notePush();
     // ASSERT
-    expect(host.children.length).toBe(0);
+    expect(host.querySelector("[data-shutdown-cause]")).not.toBeNull();
     handle.dispose();
   });
 
@@ -667,9 +695,11 @@ describe("startLifecycle: the daemon stream", () => {
     const handle = startLifecycle(ctx, { drainBannerHost: host });
     await settle();
     handle.dispose();
-    // ACT / ASSERT: the banner is gone with the mount, and a late frame
-    // reaches nothing that would draw into a host this page no longer owns.
+    // ACT / ASSERT: the banner is gone with the mount, and a late frame or a
+    // late reconnection reaches nothing that would draw into a host this page
+    // no longer owns.
     expect(() => ctx.notePush()).not.toThrow();
+    expect(() => ctx.noteLinkRestored()).not.toThrow();
   });
 
   it("draws the restarting notice from the announcement", async () => {

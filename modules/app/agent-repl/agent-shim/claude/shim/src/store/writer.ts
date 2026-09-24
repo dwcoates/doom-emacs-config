@@ -627,6 +627,33 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   };
 
   /**
+   * State every entry the store SKIPPED as a book conflict.
+   *
+   * THE BATCH IS DURABLE AND THESE ROWS ARE NOT IN IT. The store keeps the row
+   * an upsert key was first written under when a later write names a different
+   * book, so a stream-plane row the file plane had already booked elsewhere
+   * never reaches the book this shim writes and the daemon watches: the turn's
+   * answer and its cleared cut went missing that way, with nothing on this side
+   * saying so. The contract (`WriteBatchSuccess.skipped`) has the producer
+   * speak up on a steady-state skip; this writer has no catch-up window, so
+   * every skip is one, and it is a row lost from the book the daemon reads --
+   * an ERROR, not a caution.
+   */
+  const reportSkipped = (skipped: readonly storev1.WriteBatchSkippedEntry[]): void => {
+    for (const skip of skipped) {
+      LOGGER.error(
+        {
+          upsert_key: skip.upsertKey,
+          from_book: skip.fromBook,
+          to_book: skip.toBook,
+          detail: `the store kept ${skip.upsertKey} in book ${skip.fromBook}; this write named ${skip.toBook}`,
+        },
+        "the store skipped a row this shim wrote: its upsert key already names a row in another book, so the book this shim writes does not carry it",
+      );
+    }
+  };
+
+  /**
    * Send one batch once.
    *
    * Resolves with the store's own refusal, or null when the batch is durable.
@@ -664,7 +691,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       };
     }
     const result = response.result;
-    if (result.case === "success") return null;
+    if (result.case === "success") {
+      reportSkipped(result.value.skipped);
+      return null;
+    }
     if (result.case === "failure") {
       // AN `invalid_request` IS THE STORE ANSWERING, not the store failing: it
       // read the batch and named a malformed row. The store is reachable, so
