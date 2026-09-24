@@ -1657,3 +1657,15 @@ interject → KillTurn, with the footer's waiting-interrupting state).
 | the boot sweep's spawn closing | what the agent's book records for the unit | The record is the only place the commission survives a bounce; the created agent falls back to the minting rule when the book holds only a running beat. |
 | a bare pre-contract subagent settle | still held and drawn at the turn's end, at INFO instead of WARN | Old failed spawns drew a bubble before; drawing nothing would be a visual change. A stamped settle naming no agent draws nothing at ERROR. |
 | a missing restated start | ERROR (stamped) or INFO, and the card still draws | The start costs only the runtime chip; losing the card for it would drop a fact the settle does restate. |
+
+## E2E load flakes (2026-09-23)
+
+| call | chosen | why |
+|---|---|---|
+| how a rotated transcript seen before its link is booked | held unread until an identity record names it, then read from its start | The store keeps the first book an upsert key lands in, so a record converted under the file's own id stranded the shim's stream-plane writes of the same keys in the wrong book for good. The hold is evidence-only: an unrecorded main transcript that opens with a `/clear` (or has not yet written the user record that says), in a project directory where another transcript is named by a shim record. |
+| a `/clear` run outside the shim in a directory a shim conversation shares | stays held, stated once at INFO | Nothing will ever link it, and there is no evidence on disk that tells it from a shim rotation whose link is owed. A conversation the shim never recorded keeps R9's own-id default. |
+| a ClientLog that reaches a daemon already exiting | answered UNAVAILABLE, recorded at INFO only | The record needs the registry, and the state client is being closed; ordering every resolution read against Close makes the read either complete or never start, so it cannot fail at ERROR. During a drain's wait (before the exit) a ClientLog persists as ever. |
+| a lease acquisition refused because another holder has it | DEBUG in the store, INFO in the drain | It is the arbitration answering, and every caller states its meaning; nobody must act on it. A drain's fire now skips the holds its own schedule took, which it had been re-asking for on every workspace. |
+| the footer's turn-open edge for a turn already accepted | re-takes only the context baseline | SetTurn precedes StartTurn, so it precedes every frame of the turn; the edge's full reset wiped usage, activity and blocks the shim had already streamed. |
+| the integration harness's wait after an accepted SIGKILL | awaits the reap itself | The exit is decided; the 2s bound measured only CPU scheduling on a saturated host. A kill that never completes is left to the test binary's -timeout. The freeze confirmation keeps its bound, because its outcome is not decided. |
+| a late record opening a sink of a worktree the daemon is removing | the gitclient detaches the directory first; the sink writes its target with no link | A sink open re-created the removed worktree. |

@@ -332,3 +332,38 @@ func TestAnUnterminatedCommandTagIsNotACommandEnvelope(t *testing.T) {
 		}
 	}
 }
+
+// TestIsClearCommandIsTheRuleTheConverterDrawsACutBy pins the exported helper
+// to the converter's own verdict, one edge case per row: the rotation hold in
+// the reader and the converter here must never disagree about what a clear is.
+func TestIsClearCommandIsTheRuleTheConverterDrawsACutBy(t *testing.T) {
+	cases := []struct {
+		name    string
+		message map[string]any
+		want    bool
+	}{
+		{"the expanded envelope", map[string]any{"content": "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"}, true},
+		{"a bare /clear prompt", map[string]any{"content": "/clear"}, true},
+		{"an argument", map[string]any{"content": "<command-name>/clear</command-name><command-args>everything</command-args>"}, false},
+		{"a quoted envelope", map[string]any{"content": "see <command-name>/clear</command-name> here"}, false},
+		{"another command", map[string]any{"content": "<command-name>/compact</command-name>"}, false},
+		{"a blocks-form message", map[string]any{"content": []any{map[string]any{"type": "text", "text": "/clear"}}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+
+			// Act.
+			got := IsClearCommand(tc.message)
+
+			// Assert.
+			if got != tc.want {
+				t.Errorf("IsClearCommand(%v) = %v, want %v", tc.message, got, tc.want)
+			}
+			if shared := c.isClearCommand(tc.message); shared != got {
+				t.Errorf("the converter's isClearCommand = %v, the exported rule = %v; the two spellings diverged", shared, got)
+			}
+		})
+	}
+}

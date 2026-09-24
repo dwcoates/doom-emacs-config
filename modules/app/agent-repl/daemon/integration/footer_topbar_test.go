@@ -310,6 +310,9 @@ func TestFooterTokensCellVerdictIsIncompleteWhenAResponseCarriedNoUsage(t *testi
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-tok-incomplete", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	// The turn's frames follow the shim being ASKED to start it, as they must:
+	// a shim cannot stream a turn it has not been handed.
+	f.shim.ExpectStartTurn()
 
 	// Act: the response's terminal frame settles with NO unit ever having
 	// carried usage.
@@ -342,6 +345,11 @@ func TestFooterTokensCellVerdictIsCompleteWhenTheUsageRodeAnEarlierUnitOfTheSame
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-tok-complete", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	// THE TURN'S FRAMES FOLLOW THE SHIM BEING ASKED TO START IT. A fake that
+	// pushes them before StartTurn has reached it is doing what no shim can,
+	// and on the revival path that let them land before the turn was even
+	// accepted, where the acceptance's reset wiped the usage they carried.
+	f.shim.ExpectStartTurn()
 
 	// Act
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{

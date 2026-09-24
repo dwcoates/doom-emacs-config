@@ -170,6 +170,11 @@ type sidecar struct {
 	// ORIGINAL id — the shim-minted main AgentId — through the identity files
 	// the shim writes. It is refreshed on the rescan interval, beside discovery.
 	identity *identity.Index
+	// rotationHeld is every main transcript held UNREAD because its book is
+	// owed by a rotation link the shim has not written yet (rotation.go), by
+	// resolved path. Process-scoped: the hold is a fact about the disk, which a
+	// store outage does not change.
+	rotationHeld map[string]discover.Target
 
 	// settling holds the files whose converter READ a run's own terminal in the
 	// batch currently in flight. The tracker is only told once that batch is
@@ -375,6 +380,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		rewound:            map[string]bool{},
 		workspaceBySession: map[string]workspaceAttribution{},
 		workspaceFailures:  map[string]string{},
+		rotationHeld:       map[string]discover.Target{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
 		now:        time.Now,
@@ -862,6 +868,9 @@ func (s *sidecar) watchTargets(targets []discover.Target, now time.Time) (int, b
 		}
 		resolved, ok := s.resolveTarget(target, now)
 		if !ok {
+			continue
+		}
+		if s.awaitsRotationLink(resolved) {
 			continue
 		}
 		if resolved.WorkspaceDir != "" {
@@ -1387,6 +1396,9 @@ func (s *sidecar) trackDetached(target discover.Target, now time.Time) {
 func (s *sidecar) pollAll() {
 	s.requireCursors("pollAll")
 	s.rekeyRotations()
+	// AFTER the re-key, which has just asked the link directories whether a
+	// link landed: a held rotation is released by the very next read.
+	s.reexamineRotationHolds(s.now())
 	nowMs := s.now().UnixMilli()
 	s.enrollWatchers()
 	slice := s.pollSlice()

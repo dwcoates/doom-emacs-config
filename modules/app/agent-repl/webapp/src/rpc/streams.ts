@@ -81,6 +81,13 @@ export interface StreamContext {
    * test's minimal context need not carry one.
    */
   notePush?: () => void;
+  /**
+   * Publish that the LINK CAME BACK: a stream that ended without our cancel
+   * has just read a frame again. It is the one fact that ends an announced
+   * outage -- a frame on a stream that never dropped is the OUTGOING daemon
+   * still talking, not a new one answering. Optional for the same reason.
+   */
+  noteLinkRestored?: () => void;
 }
 
 export interface WatchStreamOptions<Res extends Message> {
@@ -171,6 +178,7 @@ export function watchStream<Res extends Message>(
       // (the shutdown announcement) is not immediately taken back down by its
       // own arrival.
       ctx.notePush?.();
+      if (unreachableFiled) ctx.noteLinkRestored?.();
       opts.onPush(response);
     } catch (err) {
       if (!isMalformedView(err)) throw err;

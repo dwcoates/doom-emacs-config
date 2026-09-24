@@ -135,6 +135,41 @@ describe("notePush", () => {
   });
 });
 
+describe("noteLinkRestored", () => {
+  it("tells a subscriber that the link came back", () => {
+    // Arrange
+    const context = ctx();
+    const fn = vi.fn();
+    context.onLinkRestored(fn);
+    // Act
+    context.noteLinkRestored();
+    // Assert
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells one that unsubscribed nothing", () => {
+    // Arrange
+    const context = ctx();
+    const fn = vi.fn();
+    context.onLinkRestored(fn)();
+    // Act
+    context.noteLinkRestored();
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("is not told by an ordinary frame", () => {
+    // Arrange
+    const context = ctx();
+    const fn = vi.fn();
+    context.onLinkRestored(fn);
+    // Act
+    context.notePush();
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
 describe("onQuiesced after the page has already gone quiet", () => {
   it("runs a late subscriber AT ONCE, so a stream opened in the window is not stranded", () => {
     // ARRANGE
