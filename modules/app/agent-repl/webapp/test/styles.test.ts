@@ -1494,10 +1494,52 @@ describe("the removed amber async border", () => {
   });
 });
 
-describe("the selected-response border (reply-to-a-past-response)", () => {
+describe("the selected-entry mark (a jump's landing, a reply selection)", () => {
+  it("rings the selected card with the selection token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".entry-selected:not(.final-response)");
+
+    // Assert
+    expect(rule).toMatch(/outline:\s*2px solid var\(--selected-response\)/);
+  });
+
+  it("pulls the ring inside the card's own box, so nothing reflows or clips", () => {
+    // Arrange / Act — an outline takes no layout space; a negative offset of
+    // its own width keeps it inside the row's paint containment.
+    const rule = declarationsOf(".entry-selected:not(.final-response)");
+
+    // Assert
+    expect(rule).toMatch(/outline-offset:\s*-2px/);
+  });
+
+  it("never changes a border width or the card's own shadow to mark a card", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".entry-selected:not(.final-response)") ?? "";
+
+    // Assert
+    expect(/\bborder(-width)?\s*:|box-shadow\s*:/.test(rule)).toBe(false);
+  });
+
+  it("no longer marks the full-width row wrapper", () => {
+    // Arrange / Act
+    const css = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
+
+    // Assert
+    expect(css.includes(".row-revealed")).toBe(false);
+  });
+
+  it("keeps the ring off a selected final response, whose own border turns blue", () => {
+    // Arrange
+    const card = document.createElement("div");
+    card.className = "bubble final-response entry-selected";
+
+    // Act, Assert — the ring's selector does not match it.
+    expect(card.matches(".entry-selected:not(.final-response)")).toBe(false);
+  });
+
   it("recolors the selected final-response bubble with the blue selection token", () => {
     // Arrange / Act
-    const rule = declarationsOf(".bubble.final-response.response-selected");
+    const rule = declarationsOf(".bubble.final-response.entry-selected");
 
     // Assert
     expect(rule).toMatch(/border-color:\s*var\(--selected-response\)/);
@@ -1520,7 +1562,7 @@ describe("the selected-response border (reply-to-a-past-response)", () => {
     // The green rule excludes thinking bubbles (`:not([data-variant="thinking"])`),
     // so the concluded answer's border can never land on intermediate reasoning.
     const green = css.indexOf('.bubble.final-response:not([data-variant="thinking"]) {');
-    const blue = css.indexOf(".bubble.final-response.response-selected");
+    const blue = css.indexOf(".bubble.final-response.entry-selected");
 
     // Assert
     expect(green).toBeGreaterThanOrEqual(0);
