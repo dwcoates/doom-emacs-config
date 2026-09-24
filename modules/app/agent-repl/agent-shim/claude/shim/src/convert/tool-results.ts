@@ -17,7 +17,7 @@ import { bindLog } from "../log.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { toolResultContent } from "./blocks.js";
-import type { FoldContext } from "./fold-context.js";
+import { spawningCallOf, type FoldContext } from "./fold-context.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import {
   convertProgressBeat,
@@ -84,6 +84,8 @@ export function convertUserRecord(
 
   const settledAtMs = context.nowMs();
   const structured = record.tool_use_result;
+  // THE STREAM THE RESULTS RODE — the identity their calls were held under.
+  const stream = spawningCallOf(message.parent_tool_use_id);
   // THE SDK DECLARES A USER RECORD'S uuid OPTIONAL, and a write id needs a
   // coordinate. The settling call's own id is the deterministic stand-in: it
   // names exactly this settle and nothing else, so a replay still absorbs.
@@ -132,6 +134,7 @@ export function convertUserRecord(
           toolUseId,
           { content: undefined, isError: true, structured: undefined, settledAtMs },
           { vendorUuid: uuidOf(toolUseId) },
+          stream,
         ),
       );
       continue;
@@ -164,9 +167,15 @@ export function convertUserRecord(
       if (detachment !== undefined) entries.push(detachment);
     }
     entries.push(
-      ...convertToolResult(converters, context, registry, toolUseId, outcome, {
-        vendorUuid: uuidOf(toolUseId),
-      }),
+      ...convertToolResult(
+        converters,
+        context,
+        registry,
+        toolUseId,
+        outcome,
+        { vendorUuid: uuidOf(toolUseId) },
+        stream,
+      ),
     );
   }
   return entries;

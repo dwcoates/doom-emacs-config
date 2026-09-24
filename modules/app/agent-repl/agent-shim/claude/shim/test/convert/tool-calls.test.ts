@@ -7,7 +7,8 @@
  * recognizable built-in in that last set is a producer defect, so the suite
  * forbids it by name.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
@@ -19,8 +20,9 @@ import {
   EXEMPT_TOOLS,
   UNMODELED_KEY,
   createCallRegistry,
-  cutOpenCalls,
   dispositionOf,
+  endQueryCalls,
+  endTurnCalls,
   environmentOf,
   type PendingCall,
   type ToolConverter,
@@ -39,6 +41,40 @@ function call(toolUseId: string, toolName = "Read"): PendingCall {
     agentId: MAIN_AGENT,
   };
 }
+
+/** One call on a subagent's stream: the spawning call its message named. */
+function onStream(toolUseId: string, spawningCall: string): PendingCall {
+  return { ...call(toolUseId), spawningCall };
+}
+
+interface LogRecord {
+  readonly level: string;
+  readonly message: string;
+  readonly context: Record<string, unknown>;
+}
+
+/** Every log record `act` wrote, parsed back out of the mocked sink. */
+function recordsDuring(act: () => unknown): LogRecord[] {
+  const mockedWriteSync = vi.mocked(writeSync);
+  const before = mockedWriteSync.mock.calls.length;
+  act();
+  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as LogRecord,
+  );
+}
+
+const REGISTRY_FULL =
+  "invariant violated: the in-flight call registry is full; the oldest call is forgotten and its unit can no longer settle on this plane";
+const UNHELD_STREAM_RESULT =
+  "a tool result on a stream this plane does not hold (a backgrounded agent's); the file plane settles its unit";
+const UNANNOUNCED_RESULT =
+  "a tool result arrived for a call this shim never saw announced; no terminal is produced";
+const STREAM_MISMATCH =
+  "invariant violated: a tool result's stream is not its call's; settling by the vendor's call id";
+const TURN_RELEASED =
+  "the turn ended with calls held that no record on this stream will settle; they are released";
+const QUERY_RELEASED = "the query ended with calls held; they are released and nothing is written for them";
 
 /** One settled outcome. */
 function outcome(): ToolOutcome {
@@ -67,14 +103,71 @@ describe("the registry of calls in flight", () => {
   });
 
   it("stays BOUNDED: a vendor that never returns a result cannot grow it forever", () => {
+    // Arrange
     const registry = createCallRegistry();
+
+    // Act
     for (let index = 0; index <= CALL_REGISTRY_CAPACITY; index += 1) {
       registry.remember(call(`toolu_${index}`));
     }
 
-    // The oldest is forgotten rather than the table growing without bound.
+    // Assert: the oldest is forgotten rather than the table growing without bound.
     expect(registry.peek("toolu_0")).toBeUndefined();
     expect(registry.peek(`toolu_${CALL_REGISTRY_CAPACITY}`)).toBeDefined();
+  });
+
+  it("raises reaching the bound as an ERROR-level invariant violation", () => {
+    // Arrange: the table drains at every turn's end, so reaching the bound
+    // means a path held calls and never let them go — and the eviction loses
+    // that card's settle, which is never a quiet warning.
+    const registry = createCallRegistry();
+    for (let index = 0; index < CALL_REGISTRY_CAPACITY; index += 1) {
+      registry.remember(call(`toolu_${index}`));
+    }
+
+    // Act
+    const records = recordsDuring(() => registry.remember(call("toolu_overflow")));
+
+    // Assert
+    expect(records.filter((record) => record.message === REGISTRY_FULL)).toMatchObject([
+      {
+        level: "error",
+        context: {
+          tool_use_id: "toolu_0",
+          tool: "Read",
+          capacity: CALL_REGISTRY_CAPACITY,
+          held: CALL_REGISTRY_CAPACITY,
+        },
+      },
+    ]);
+  });
+
+  it("writes no warning at all when the bound is reached", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    for (let index = 0; index < CALL_REGISTRY_CAPACITY; index += 1) {
+      registry.remember(call(`toolu_${index}`));
+    }
+
+    // Act
+    const records = recordsDuring(() => registry.remember(call("toolu_overflow")));
+
+    // Assert
+    expect(records.filter((record) => record.level === "warn")).toEqual([]);
+  });
+
+  it("does not evict when a call already held is held again", () => {
+    // Arrange: a re-remembered call replaces itself; it does not grow the table.
+    const registry = createCallRegistry();
+    for (let index = 0; index < CALL_REGISTRY_CAPACITY; index += 1) {
+      registry.remember(call(`toolu_${index}`));
+    }
+
+    // Act
+    registry.remember(call("toolu_5"));
+
+    // Assert
+    expect(registry.peek("toolu_0")).toBeDefined();
   });
 
   it("peeks without settling, which is what a progress beat needs", () => {
@@ -98,7 +191,275 @@ describe("the registry of calls in flight", () => {
   });
 });
 
-describe("the calls a stop cut short", () => {
+describe("the streams the registry holds calls for", () => {
+  it("holds a call on the main agent's own stream", () => {
+    // Arrange
+    const registry = createCallRegistry();
+
+    // Act
+    const held = registry.remember(call("toolu_1"));
+
+    // Assert
+    expect(held).toBe(true);
+  });
+
+  it("holds a call on a subagent's stream while its spawning call is held", () => {
+    // Arrange: an awaited spawn's own calls return on this stream.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_spawn", "Agent"));
+
+    // Act
+    const held = registry.remember(onStream("toolu_sub", "toolu_spawn"));
+
+    // Assert
+    expect(held).toBe(true);
+  });
+
+  it("REFUSES a call on a stream whose spawning call it never held", () => {
+    // Arrange: a backgrounded agent's calls reach this stream with no result
+    // behind them, so the file plane settles them and nothing here ever would.
+    const registry = createCallRegistry();
+
+    // Act
+    const held = registry.remember(onStream("toolu_sub", "toolu_unknown_spawn"));
+
+    // Assert
+    expect(held).toBe(false);
+    expect(registry.open()).toEqual([]);
+  });
+
+  it("releases a subagent's calls when its spawning call settles", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_spawn", "Agent"));
+    registry.remember(onStream("toolu_sub", "toolu_spawn"));
+
+    // Act
+    registry.take("toolu_spawn");
+
+    // Assert
+    expect(registry.peek("toolu_sub")).toBeUndefined();
+  });
+
+  it("releases a nested subagent's calls with the agent that spawned it", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_spawn", "Agent"));
+    registry.remember({ ...onStream("toolu_nested", "toolu_spawn"), toolName: "Agent" });
+    registry.remember(onStream("toolu_deep", "toolu_nested"));
+
+    // Act
+    registry.take("toolu_spawn");
+
+    // Assert
+    expect(registry.open()).toEqual([]);
+  });
+
+  it("releases a spawn's calls at its handoff, and keeps the spawning call held", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_spawn", "Agent"));
+    registry.remember(onStream("toolu_sub", "toolu_spawn"));
+
+    // Act
+    registry.detach("toolu_spawn");
+
+    // Assert
+    expect(registry.open().map((pending) => pending.toolUseId)).toEqual(["toolu_spawn"]);
+  });
+
+  it("refuses a handed-off spawn's later calls", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_spawn", "Agent"));
+    registry.detach("toolu_spawn");
+
+    // Act
+    const held = registry.remember(onStream("toolu_sub", "toolu_spawn"));
+
+    // Assert
+    expect(held).toBe(false);
+  });
+
+  it("marks a handed-off call detached", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_bash", "Bash"));
+
+    // Act
+    registry.detach("toolu_bash");
+
+    // Assert
+    expect(registry.isDetached("toolu_bash")).toBe(true);
+  });
+
+  it("ignores a handoff for a call it does not hold", () => {
+    // Arrange
+    const registry = createCallRegistry();
+
+    // Act
+    registry.detach("toolu_never");
+
+    // Assert
+    expect(registry.isDetached("toolu_never")).toBe(false);
+  });
+
+  it("empties itself when drained", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_1"));
+    registry.remember(call("toolu_2"));
+
+    // Act
+    const drained = registry.drain();
+
+    // Assert
+    expect(drained.map(({ call: pending }) => pending.toolUseId)).toEqual(["toolu_1", "toolu_2"]);
+    expect(registry.open()).toEqual([]);
+  });
+});
+
+describe("a result's settle", () => {
+  it("takes the call out even when it produces no terminal", () => {
+    // Arrange: a subagent's result carries no typed output on this stream, so
+    // the read writes nothing — and nothing later here could settle it.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_r"));
+
+    // Act
+    const entries = convertToolResult(TOOL_CONVERTERS, foldContext(), registry, "toolu_r", outcome(), {
+      vendorUuid: "u_1",
+    });
+
+    // Assert
+    expect(entries).toEqual([]);
+    expect(registry.peek("toolu_r")).toBeUndefined();
+  });
+
+  it("releases a backgrounded shell's call at its receipt", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600", run_in_background: true } });
+
+    // Act
+    convertToolResult(
+      TOOL_CONVERTERS,
+      foldContext(),
+      registry,
+      "toolu_bash",
+      { ...outcome(), structured: { stdout: "", stderr: "", interrupted: false, backgroundTaskId: "b1" } },
+      { vendorUuid: "u_1" },
+    );
+
+    // Assert
+    expect(registry.peek("toolu_bash")).toBeUndefined();
+  });
+
+  it("releases an async spawn's call, and its agent's stream, at its launch receipt", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_spawn", "Agent"), input: { prompt: "sweep", run_in_background: true } });
+    registry.remember(onStream("toolu_sub", "toolu_spawn"));
+
+    // Act
+    convertToolResult(
+      TOOL_CONVERTERS,
+      foldContext(),
+      registry,
+      "toolu_spawn",
+      { ...outcome(), structured: { isAsync: true, status: "async_launched", agentId: "a1" } },
+      { vendorUuid: "u_1" },
+    );
+
+    // Assert
+    expect(registry.open()).toEqual([]);
+  });
+
+  it("releases a monitor's call at its arming receipt", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_mon", "Monitor"), input: { command: "tail -f log", description: "watch" } });
+
+    // Act
+    convertToolResult(TOOL_CONVERTERS, foldContext(), registry, "toolu_mon", outcome(), {
+      vendorUuid: "u_1",
+    });
+
+    // Assert
+    expect(registry.peek("toolu_mon")).toBeUndefined();
+  });
+
+  it("logs a result on a stream it does not hold at debug, never as a warning", () => {
+    // Arrange: a backgrounded agent's result that did reach this stream.
+    const registry = createCallRegistry();
+
+    // Act
+    const records = recordsDuring(() =>
+      convertToolResult(
+        TOOL_CONVERTERS,
+        foldContext(),
+        registry,
+        "toolu_sub",
+        outcome(),
+        { vendorUuid: "u_1" },
+        "toolu_unknown_spawn",
+      ),
+    );
+
+    // Assert
+    expect(records.filter((record) => record.message === UNHELD_STREAM_RESULT).map((r) => r.level)).toEqual([
+      "debug",
+    ]);
+    expect(records.filter((record) => record.level === "warn")).toEqual([]);
+  });
+
+  it("still warns for an unannounced result on a stream it holds", () => {
+    // Arrange
+    const registry = createCallRegistry();
+
+    // Act
+    const records = recordsDuring(() =>
+      convertToolResult(TOOL_CONVERTERS, foldContext(), registry, "toolu_never", outcome(), {
+        vendorUuid: "u_1",
+      }),
+    );
+
+    // Assert
+    expect(records.filter((record) => record.message === UNANNOUNCED_RESULT).map((r) => r.level)).toEqual([
+      "warn",
+    ]);
+  });
+
+  it("raises a result on another stream than its call's as an ERROR", () => {
+    // Arrange: registration and settlement share one identity; a result that
+    // rides a different stream from its announcement breaks that.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_r"));
+
+    // Act
+    const records = recordsDuring(() =>
+      convertToolResult(
+        TOOL_CONVERTERS,
+        foldContext(),
+        registry,
+        "toolu_r",
+        outcome(),
+        { vendorUuid: "u_1" },
+        "toolu_some_spawn",
+      ),
+    );
+
+    // Assert
+    expect(records.filter((record) => record.message === STREAM_MISMATCH)).toMatchObject([
+      {
+        level: "error",
+        context: { registered_on: "main", settled_on: "toolu_some_spawn" },
+      },
+    ]);
+  });
+});
+
+describe("the turn's end", () => {
   // A stopped turn returns no `tool_result` for the call it landed inside, so
   // these terminals are owed here or nowhere, and a unit left on its running
   // arm draws a live tool inside a turn that has ended.
@@ -110,7 +471,7 @@ describe("the calls a stop cut short", () => {
     registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
 
     // Act
-    const entries = cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+    const entries = endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, true);
 
     // Assert
     expect(entries).toHaveLength(1);
@@ -123,24 +484,89 @@ describe("the calls a stop cut short", () => {
     registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
 
     // Act
-    cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+    endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, true);
 
     // Assert
     expect(registry.peek("toolu_bash")).toBeUndefined();
   });
 
-  it("LEAVES a kind that states no cut alone, and leaves it remembered", () => {
-    // Arrange: a read has no vocabulary for being cut short, so retiring its
-    // unit into silence would be worse than the open unit it already had.
+  it("writes nothing for a kind that states no cut", () => {
+    // Arrange: a read has no vocabulary for being cut short, so no frame
+    // could say how it ended.
     const registry = createCallRegistry();
     registry.remember(call("toolu_read", "Read"));
 
     // Act
-    const entries = cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+    const entries = endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, true);
 
     // Assert
     expect(entries).toHaveLength(0);
-    expect(registry.peek("toolu_read")).toBeDefined();
+  });
+
+  it("releases a kind that states no cut, since nothing after the turn settles it", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_read", "Read"));
+
+    // Act
+    endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, true);
+
+    // Assert
+    expect(registry.peek("toolu_read")).toBeUndefined();
+  });
+
+  it("never cuts a call whose work was handed off", () => {
+    // Arrange: a backgrounded shell still running elsewhere is not open here.
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
+    registry.detach("toolu_bash");
+
+    // Act
+    const entries = endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, true);
+
+    // Assert
+    expect(entries).toEqual([]);
+  });
+
+  it("cuts nothing when the turn ended on its own", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
+
+    // Act
+    const entries = endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, false);
+
+    // Assert
+    expect(entries).toEqual([]);
+  });
+
+  it("drains the registry at a turn that ended on its own", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_skill", "Skill"), input: { skill: "debug-logs" } });
+
+    // Act
+    endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, false);
+
+    // Assert
+    expect(registry.open()).toEqual([]);
+  });
+
+  it("logs the calls it released at info", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_read", "Read"));
+
+    // Act
+    const records = recordsDuring(() => endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, false));
+
+    // Assert
+    expect(records.filter((record) => record.message === TURN_RELEASED)).toMatchObject([
+      {
+        level: "info",
+        context: { released: 1, tool_use_ids: ["toolu_read"] },
+      },
+    ]);
   });
 
   it("gives each cut frame its own block ordinal, so two cannot share a write id", () => {
@@ -152,10 +578,52 @@ describe("the calls a stop cut short", () => {
     registry.remember({ ...call("toolu_b", "Bash"), input: { command: "sleep 2" } });
 
     // Act
-    const entries = cutOpenCalls(TOOL_CONVERTERS, foldContext(), registry, stop);
+    const entries = endTurnCalls(TOOL_CONVERTERS, foldContext(), registry, stop, true);
 
     // Assert
     expect(entries.map((entry) => entry.source.blockIndex)).toEqual([0, 1]);
+  });
+});
+
+describe("the query's end", () => {
+  it("releases every call still held", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
+
+    // Act
+    endQueryCalls(registry, "the vendor query died");
+
+    // Assert
+    expect(registry.open()).toEqual([]);
+  });
+
+  it("logs what it released at info", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_read", "Read"));
+
+    // Act
+    const records = recordsDuring(() => endQueryCalls(registry, "the vendor query died"));
+
+    // Assert
+    expect(records.filter((record) => record.message === QUERY_RELEASED)).toMatchObject([
+      {
+        level: "info",
+        context: { why: "the vendor query died", released: 1 },
+      },
+    ]);
+  });
+
+  it("logs nothing when nothing was held", () => {
+    // Arrange
+    const registry = createCallRegistry();
+
+    // Act
+    const records = recordsDuring(() => endQueryCalls(registry, "the vendor query died"));
+
+    // Assert
+    expect(records.filter((record) => record.message === QUERY_RELEASED)).toEqual([]);
   });
 });
 

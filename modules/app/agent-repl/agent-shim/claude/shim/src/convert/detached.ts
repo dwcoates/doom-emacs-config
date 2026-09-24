@@ -602,6 +602,13 @@ export function convertDetached(
         );
         return [];
       }
+      // WORK THE VENDOR SAYS STARTED IN THE BACKGROUND is HANDED OFF on this
+      // plane: a backgrounded agent's calls reach this stream without their
+      // results, and a stop must not cut work still running elsewhere. Only
+      // the explicit flag says so — an older vendor's `task_started` states no
+      // `is_backgrounded` for foreground work too. The call itself stays held
+      // until its own receipt, which still restates its facts.
+      if (raw.is_backgrounded === true) calls.detach(toolUseId);
       // A SHELL TASK IS NOT A DETACHMENT YET. The vendor tracks a FOREGROUND
       // shell as a task the moment it starts — that is what makes Ctrl-B
       // addressable at all — so `task_started` says nothing about whether the
@@ -655,6 +662,7 @@ export function convertDetached(
       // a person backgrounded running work by hand, which the shell path
       // harvests from its tool result and the agent path only states here.
       LOGGER.info({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
+      calls.detach(toolUseId);
       taskKinds.rememberCause(taskId, "by_user");
       return [
         detachmentEntry(context, agentId, uuid, {

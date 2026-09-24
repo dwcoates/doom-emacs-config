@@ -538,6 +538,8 @@ export class RecordingFold implements EngineFold {
   readonly seen: SdkMessage[] = [];
   readonly contexts: FoldContext[] = [];
   entriesFor: (message: SdkMessage) => PersistEntry[] = () => [];
+  /** Every `endQuery` the engine called, by its stated reason. */
+  readonly queryEnds: string[] = [];
   /** When it answers a detail, the fold REFUSED this message and says so. */
   faultFor: (message: SdkMessage) => string | undefined = () => undefined;
 
@@ -558,6 +560,10 @@ export class RecordingFold implements EngineFold {
           },
         }
       : { entries };
+  }
+
+  endQuery(why: string): void {
+    this.queryEnds.push(why);
   }
 }
 

@@ -819,6 +819,48 @@ it is seen open; its terminals and running beats restate the prompt from it and
 the created agent by the minting rule. The boot sweep's spawn closing restates
 what the agent's book records for the unit.
 
+## The in-flight call registry: it holds only what this stream can settle
+
+The fold remembers each announced tool call (`convert/tool-calls.ts`
+`CallRegistry`) so the call's terminal can restate the call's own input. It is
+a constant-size join, and these are its invariants:
+
+- **A CALL IS HELD ONLY ON A STREAM THIS PLANE CAN SETTLE.** Each call records
+  the stream it rode (`PendingCall.spawningCall`, the message's
+  `parent_tool_use_id` read through `spawningCallOf`, the same rule as the book
+  and the block state). The main stream is always held. A subagent's stream is
+  held while its spawning call is held and not handed off. A BACKGROUNDED
+  agent's calls are announced and never held: the SDK forwards its `tool_use`
+  blocks onto the stream but not its `tool_result` records (the
+  `subagent-detached` capture), so the file plane settles those units from the
+  sidechain transcript.
+- **A RESULT ALWAYS RELEASES ITS CALL.** It stays held only when the converter's
+  `retain` says the unit awaits a later record on this stream (the skill's
+  document). A result that writes no terminal still releases the call. That
+  covers a subagent's result, which carries no `tool_use_result` on the stream,
+  a backgrounded shell's receipt, an async spawn's launch receipt and a
+  monitor's arming receipt.
+- **A HANDOFF IS NEVER CUT.** `task_started{is_backgrounded: true}` and a
+  `task_updated` backgrounding patch mark the call detached and release its
+  stream's calls. A stop never cuts a detached call.
+- **AN AGENT'S END RELEASES ITS STREAM.** A spawning call's settle releases every
+  call its stream still held, recursively.
+- **NO CALL OUTLIVES ITS TURN.** Every turn terminal drains the registry
+  (`endTurnCalls`). A stop cuts only the genuinely open calls whose kind states
+  a `cut`, and each cut frame gets its own block ordinal. Everything else is
+  released at INFO. A query's death or replacement drains it too
+  (`EngineFold.endQuery`), with no frame written.
+- **THE BOUND IS AN INVARIANT, NOT A LIMIT.** `CALL_REGISTRY_CAPACITY` (512) is
+  never reached in normal operation. Reaching it is logged at ERROR, because the
+  eviction loses a card's settle.
+- **REGISTRATION AND SETTLEMENT SHARE ONE IDENTITY.** A result that rides another
+  stream than its call is logged at ERROR and still settled by the vendor's call
+  id. A result on a stream this plane does not hold is logged at DEBUG, because
+  the file plane settles it. An unannounced result on a held stream stays a WARN.
+- `Fold.inFlightCalls()` is the snapshot the suites assert against. After every
+  capture's terminals, and after a mixed fake-SDK workload, it is empty
+  (`test/convert/fold.test.ts`).
+
 ## The store writer: it never drops a row
 
 `src/store/writer.ts` is the ONE ordered writer every row the shim produces goes
