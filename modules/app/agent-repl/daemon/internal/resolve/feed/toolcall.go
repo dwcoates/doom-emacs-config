@@ -2,12 +2,14 @@ package feed
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -1081,6 +1083,96 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 		return row, nil
 	}
 	return nil, errNotARow
+}
+
+// ---- MCP ----
+
+// drawMcpToolCall draws an MCP server's tool as the ORDINARY tool card: the
+// tool as the agent named it in the head, its arguments as the input line, and
+// what it returned (or how it failed) as the output. Nothing here knows any one
+// server's tool: the arguments are untyped, so the line is their JSON.
+func (r *resolver) drawMcpToolCall(s *wsState, at placement, act *conversationv1.AgentActivity, call *conversationv1.AgentMcpToolCall) (*frontendv1.FeedRow, error) {
+	unitID := act.GetActivityId().GetValue()
+	u := s.unit(unitID)
+
+	switch state := call.GetResult().(type) {
+	case *conversationv1.AgentMcpToolCall_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Start"})
+		u.startHeld = true
+		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
+		input, err := mcpInputLine(state.Start.GetArguments())
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		name := state.Start.GetTool().GetName()
+		if u.denied {
+			return r.toolRow(s, at, unitID, name, deniedOutcome()), nil
+		}
+		return r.toolRow(s, at, unitID, name, runningOutcome(u)), nil
+	case *conversationv1.AgentMcpToolCall_Progress:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Progress"})
+		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
+		if u.name == "" {
+			// A beat names no tool, and no frame of this unit has drawn one:
+			// there is no head to draw the card under yet.
+			return nil, errNotARow
+		}
+		return r.toolRow(s, at, unitID, u.name, runningOutcome(u)), nil
+	case *conversationv1.AgentMcpToolCall_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Success"})
+		name, err := r.restatedMcpCall(s, act, u, state.Success.GetTool(), state.Success.GetArguments())
+		if err != nil {
+			return nil, err
+		}
+		return r.toolRow(s, at, unitID, name,
+			r.settledOutcome(s, act, u, "mcp_tool_call", true, r.contentForm(s, state.Success.GetContent(), false),
+				state.Success.GetSettledAt())), nil
+	case *conversationv1.AgentMcpToolCall_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Failure"})
+		name, err := r.restatedMcpCall(s, act, u, state.Failure.GetTool(), state.Failure.GetArguments())
+		if err != nil {
+			return nil, err
+		}
+		return r.toolRow(s, at, unitID, name,
+			r.settledOutcome(s, act, u, "mcp_tool_call", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
+	}
+	return nil, errNotARow
+}
+
+// restatedMcpCall answers the head a settled MCP frame draws, and folds the
+// restated arguments into the unit's input line. The tool's name is what the
+// settle must restate (restatedOrHeld); arguments a settle does not carry keep
+// the line the start drew.
+func (r *resolver) restatedMcpCall(s *wsState, act *conversationv1.AgentActivity, u *unitState, tool *conversationv1.AgentMcpTool, args *structpb.Struct) (string, error) {
+	name, err := r.restatedOrHeld(s, act, u, "mcp_tool_call", tool.GetName(), u.name)
+	if err != nil {
+		return "", err
+	}
+	if args != nil {
+		input, err := mcpInputLine(args)
+		if err != nil {
+			return "", err
+		}
+		u.input = input
+	}
+	return name, nil
+}
+
+// mcpInputLine is an MCP call's input line: its arguments as compact JSON, keys
+// sorted, drawn verbatim (the card caps and folds a long line). No arguments
+// draw an empty line. structpb spells a non-finite number by its name; an
+// encoding failure is still an error the sink records, and no card is drawn.
+func mcpInputLine(args *structpb.Struct) (string, error) {
+	if len(args.GetFields()) == 0 {
+		return "", nil
+	}
+	line, err := json.Marshal(args.AsMap())
+	if err != nil {
+		return "", fmt.Errorf("feed: an MCP call's arguments do not encode as JSON: %w", err)
+	}
+	return string(line), nil
 }
 
 // linkInput makes a card's input line a hyperlink.
