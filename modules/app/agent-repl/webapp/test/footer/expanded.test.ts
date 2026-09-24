@@ -12,7 +12,9 @@ import type { FooterActivity } from "../../src/footer/strip.js";
 import {
   EXPANDED_FOOTER_MAX_ROWS,
   FOOTER_PANELS,
+  createJumpNotices,
   drawFooterExpanded,
+  type ExpandedDeps,
   type FooterPanel,
 } from "../../src/footer/expanded.js";
 import {
@@ -23,6 +25,8 @@ import {
   type Harness,
 } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 const NOW = 1_800_000_000_000;
 
@@ -40,23 +44,46 @@ interface Drawn {
   h: Harness;
 }
 
-/** Draw one panel, recording every jump it asks the feed for. */
+/**
+ * Draw one panel, recording every jump it asks the feed for. REDRAW draws the
+ * same view into the same section, exactly as the mount's redraw does, so a
+ * click's outcome lands on the section the test holds.
+ */
 function drawPanel(
   selection: FooterPanel,
   init: ExpandedInit = {},
-  reached = true,
+  reached: boolean | (() => Promise<boolean>) = true,
   view?: FooterExpanded,
 ): Drawn {
   const revealed: FeedId[] = [];
   const h = harness();
-  const panel = drawFooterExpanded(view ?? expanded(init), selection, { ctx: h.ctx, stops: createStopControls(h.ctx),
+  const u = view ?? expanded(init);
+  let panel: HTMLElement | null = null;
+  const deps: ExpandedDeps = {
+    ctx: h.ctx,
+    stops: createStopControls(h.ctx),
+    notices: createJumpNotices(),
+    redraw: () => {
+      panel = drawFooterExpanded(u, selection, deps, panel);
+    },
     selectDetachedWork: async (id) => {
       revealed.push(id);
-      return reached;
+      return typeof reached === "function" ? reached() : reached;
     },
-  });
+  };
+  panel = drawFooterExpanded(u, selection, deps, null);
   if (panel === null) throw new Error("the panel was not drawn");
   return { panel, revealed, h };
+}
+
+/** A jump to a known entry. */
+function toEntry(id: string) {
+  return { target: { case: "entry" as const, value: feedId(id) } };
+}
+
+/** A jump the daemon could not resolve, for REASON. */
+function unresolvedFor(reason: "notDrawn" | "noFeedEntry") {
+  return { target: { case: "unresolved" as const, value: { reason: { case: reason, value: {} } } } };
 }
 
 /** One activity, as the strip resolves it, for the usage rows to expand. */
@@ -70,7 +97,7 @@ function activity(kindCase: string, kindValue: Record<string, unknown>): FooterA
 /** The tokens panel, drawn with ACTIVITY standing on the strip. */
 function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
   const h = harness();
-  const panel = drawFooterExpanded(expanded(), "tokens", { ctx: h.ctx, stops: createStopControls(h.ctx),
+  const panel = drawFooterExpanded(expanded(), "tokens", { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
     selectDetachedWork: async () => true,
     activity: kind,
   });
@@ -180,7 +207,7 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   it("draws NOTHING when no strip element is selected", () => {
     const h = harness();
     expect(
-      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx), selectDetachedWork: async () => true }),
+      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined, selectDetachedWork: async () => true }),
     ).toBeNull();
   });
 
@@ -198,7 +225,7 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   it("refuses a view whose selected panel message is unset", () => {
     const h = harness();
     expect(() =>
-      drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", { ctx: h.ctx, stops: createStopControls(h.ctx),
+      drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
         selectDetachedWork: async () => true,
       }),
     ).toThrow(MalformedView);
@@ -206,7 +233,8 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
 
   it("scrolls its own content past the row ceiling rather than growing the page", () => {
     const rows = Array.from({ length: EXPANDED_FOOTER_MAX_ROWS + 2 }, (_unused, index) => ({
-      target: feedId(`shell-${index}`),
+      work: { value: `work-${index}` },
+      jump: toEntry(`shell-${index}`),
       command: { text: `cmd ${index}` },
       runtime: { startedAtMs: BigInt(NOW) },
     }));
@@ -482,7 +510,8 @@ describe("the tokens panel's per-agent spend", () => {
 // ---- the agents panel ------------------------------------------------------
 
 const AGENT_ROW = {
-  target: feedId("bubble-1"),
+  work: { value: "work-a" },
+  jump: toEntry("bubble-1"),
   label: { text: "Explore" },
   description: { text: "sweep the repo" },
   tokens: { text: "12.4k tok" },
@@ -570,7 +599,7 @@ describe("the agents panel", () => {
     expect(
       drawFooterExpanded(expanded({ agents: [] }), "agents", {
         ctx: h.ctx,
-        stops: createStopControls(h.ctx),
+        stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
         selectDetachedWork: async () => true,
       }),
     ).toBeNull();
@@ -589,15 +618,17 @@ describe("the agents panel", () => {
     const panel = drawFooterExpanded(expanded({ agents: [] }), "agents", {
       ctx: h.ctx,
       stops,
+      notices: createJumpNotices(),
+      redraw: () => undefined,
       selectDetachedWork: async () => true,
     });
     expect(panel).not.toBeNull();
     expect(panel?.querySelector(".footer-stop-note")?.textContent).toBe("stopped 4 agents");
   });
 
-  it("refuses a row with no jump target", () => {
+  it("refuses a row with no jump", () => {
     expect(() =>
-      drawPanel("agents", { agents: [{ ...AGENT_ROW, target: undefined }] }),
+      drawPanel("agents", { agents: [{ ...AGENT_ROW, jump: undefined }] }),
     ).toThrow(MalformedView);
   });
 });
@@ -676,7 +707,8 @@ describe("the tasks panel", () => {
 // ---- the shells panel ------------------------------------------------------
 
 const SHELL_ROW = {
-  target: feedId("shell-1"),
+  work: { value: "work-s" },
+  jump: toEntry("shell-1"),
   command: { text: "npm run build" },
   runtime: { startedAtMs: BigInt(NOW - 5000) },
 };
@@ -720,6 +752,8 @@ describe("the shells panel", () => {
 // ---- the monitors panel ----------------------------------------------------
 
 const MONITOR_ROW = {
+  work: { value: "work-m" },
+  jump: unresolvedFor("noFeedEntry"),
   description: { text: "watching the deploy" },
   runtime: { startedAtMs: BigInt(NOW - 90_000) },
 };
@@ -747,9 +781,9 @@ describe("the monitors panel", () => {
     expect(panel.querySelector("[data-marker]")).toBeNull();
   });
 
-  it("is NOT a jump target: a monitor has no feed bubble", () => {
+  it("is a jump row whose unresolved reason is the daemon's: a monitor draws no feed entry", () => {
     const { panel } = drawPanel("monitors", { monitors: [MONITOR_ROW] });
-    expect(panel.querySelector("[data-jump]")).toBeNull();
+    expect(panel.querySelector("[data-jump-unresolved]")?.getAttribute("data-jump-unresolved")).toBe("noFeedEntry");
   });
 
   it("draws its empty line when nothing is live", () => {
@@ -813,7 +847,7 @@ describe("an arm this build has no case for", () => {
     const h = harness();
     // ACT / ASSERT
     expect(() =>
-      drawFooterExpanded(expanded(), "sessions" as FooterPanel, { ctx: h.ctx, stops: createStopControls(h.ctx),
+      drawFooterExpanded(expanded(), "sessions" as FooterPanel, { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
         selectDetachedWork: async () => true,
       }),
     ).toThrow(MalformedView);
@@ -852,5 +886,319 @@ describe("an arm this build has no case for", () => {
     ).rows[0];
     row.status.status = { case: "abandoned", value: {} };
     expect(() => drawPanel("tasks", {}, true, view)).toThrow(MalformedView);
+  });
+});
+
+// ---- the click invariant ---------------------------------------------------
+
+/** One field of a forwarded record's context. */
+function field(record: ClientLogRecord, key: string): unknown {
+  return record.context?.[key];
+}
+
+/** What one click on the first jump row came to. */
+interface Outcome {
+  selected: boolean;
+  notice: boolean;
+}
+
+/** Click the first jump row in PANEL and read what the click came to. */
+async function clickFirstJump(drawn: Drawn, reached: boolean): Promise<Outcome> {
+  drawn.panel.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+  await settle();
+  return {
+    selected: drawn.revealed.length === 1 && reached,
+    notice: drawn.panel.querySelector(".footer-row-unreachable")?.textContent === "not on screen",
+  };
+}
+
+describe("the click invariant: exactly one outcome, never neither", () => {
+  const cases: {
+    name: string;
+    row: Record<string, unknown>;
+    panel: "agents" | "shells" | "monitors";
+    select: () => Promise<boolean>;
+    reached: boolean;
+    want: Outcome;
+  }[] = [
+    {
+      name: "a known entry that lands is selected, with no notice",
+      row: AGENT_ROW,
+      panel: "agents",
+      select: async () => true,
+      reached: true,
+      want: { selected: true, notice: false },
+    },
+    {
+      name: "a known entry the feed cannot bring on screen shows the notice",
+      row: AGENT_ROW,
+      panel: "agents",
+      select: async () => false,
+      reached: false,
+      want: { selected: false, notice: true },
+    },
+    {
+      name: "a known entry whose selection answer is unreadable shows the notice",
+      row: SHELL_ROW,
+      panel: "shells",
+      select: async () => {
+        throw new MalformedView("OpenFeedResponse.result", "a oneof sets no arm");
+      },
+      reached: false,
+      want: { selected: false, notice: true },
+    },
+    {
+      name: "a known entry whose selection throws shows the notice",
+      row: SHELL_ROW,
+      panel: "shells",
+      select: async () => {
+        throw new Error("the reveal broke");
+      },
+      reached: false,
+      want: { selected: false, notice: true },
+    },
+    {
+      name: "an entry the feed has not drawn shows the notice without asking the feed",
+      row: { ...AGENT_ROW, jump: unresolvedFor("notDrawn") },
+      panel: "agents",
+      select: async () => true,
+      reached: false,
+      want: { selected: false, notice: true },
+    },
+    {
+      name: "a monitor, which draws no entry, shows the notice without asking the feed",
+      row: MONITOR_ROW,
+      panel: "monitors",
+      select: async () => true,
+      reached: false,
+      want: { selected: false, notice: true },
+    },
+  ];
+
+  it.each(cases)("$name", async ({ row, panel, select, reached, want }) => {
+    // Arrange
+    const drawn = drawPanel(panel, { [panel]: [row] }, select);
+
+    // Act
+    const got = await clickFirstJump(drawn, reached);
+
+    // Assert
+    expect(got).toEqual(want);
+  });
+
+  it.each(cases)("never neither: $name", async ({ row, panel, select, reached }) => {
+    // Arrange
+    const drawn = drawPanel(panel, { [panel]: [row] }, select);
+
+    // Act
+    const got = await clickFirstJump(drawn, reached);
+
+    // Assert: exactly one of the two outcomes, every arm.
+    expect(Number(got.selected) + Number(got.notice)).toBe(1);
+  });
+
+  it("does not ask the feed for an unresolved row", async () => {
+    // Arrange
+    const drawn = drawPanel("agents", { agents: [{ ...AGENT_ROW, jump: unresolvedFor("notDrawn") }] });
+
+    // Act
+    await clickFirstJump(drawn, false);
+
+    // Assert
+    expect(drawn.revealed).toHaveLength(0);
+  });
+
+  it("refuses a jump that sets no arm", () => {
+    expect(() =>
+      drawPanel("agents", { agents: [{ ...AGENT_ROW, jump: {} }] }),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses an unresolved jump that states no reason", () => {
+    expect(() =>
+      drawPanel("agents", {
+        agents: [{ ...AGENT_ROW, jump: { target: { case: "unresolved" as const, value: {} } } }],
+      }),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a row with no work id", () => {
+    expect(() => drawPanel("shells", { shells: [{ ...SHELL_ROW, work: undefined }] })).toThrow(
+      MalformedView,
+    );
+  });
+});
+
+describe("the not-on-screen record", () => {
+  it.each([
+    {
+      name: "an unresolved row names its work, kind, the missing entry and the reason",
+      row: { ...AGENT_ROW, jump: unresolvedFor("notDrawn") },
+      panel: "agents" as const,
+      want: { work_id: "work-a", kind: "agents", feed_id: "unresolved", jump: "notDrawn", reason: "notDrawn" },
+      level: "warn",
+    },
+    {
+      name: "a known entry that did not land names the entry it tried",
+      row: AGENT_ROW,
+      panel: "agents" as const,
+      want: { work_id: "work-a", kind: "agents", feed_id: "bubble-1", jump: "entry", reason: "entry_not_revealed" },
+      level: "warn",
+    },
+    {
+      name: "a monitor names why it has no entry",
+      row: MONITOR_ROW,
+      panel: "monitors" as const,
+      want: { work_id: "work-m", kind: "monitors", feed_id: "unresolved", jump: "noFeedEntry", reason: "noFeedEntry" },
+      level: "info",
+    },
+  ])("$name", async ({ row, panel, want, level }) => {
+    // Arrange
+    const capture = captureLogRecords();
+    const drawn = drawPanel(panel, { [panel]: [row] }, false);
+
+    // Act
+    await clickFirstJump(drawn, false);
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.expanded.jump-unreachable");
+    expect(record.level.case).toBe(level);
+    for (const [key, value] of Object.entries(want)) expect(field(record, key)).toBe(value);
+  });
+
+  it("records an unreadable selection answer at error and files it", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const drawn = drawPanel("shells", { shells: [SHELL_ROW] }, async () => {
+      throw new MalformedView("OpenFeedResponse.result", "a oneof sets no arm");
+    });
+
+    // Act
+    await clickFirstJump(drawn, false);
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.expanded.jump-undecodable");
+    expect(record.level.case).toBe("error");
+    expect(field(record, "work_id")).toBe("work-s");
+    expect(drawn.h.sink.reported).toContain("frameUndecodable");
+  });
+
+  it("records a thrown selection at error with its cause", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const drawn = drawPanel("shells", { shells: [SHELL_ROW] }, async () => {
+      throw new Error("the reveal broke");
+    });
+
+    // Act
+    await clickFirstJump(drawn, false);
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.expanded.jump-failed");
+    expect(record.level.case).toBe("error");
+    expect(field(record, "cause")).toBe("Error: the reveal broke");
+  });
+
+  it("clears a standing notice when a later click selects", async () => {
+    // Arrange: the first click misses, the second lands.
+    let answer = false;
+    const drawn = drawPanel("agents", { agents: [AGENT_ROW] }, async () => answer);
+    await clickFirstJump(drawn, false);
+    answer = true;
+
+    // Act
+    const got = await clickFirstJump(drawn, true);
+
+    // Assert
+    expect(got.notice).toBe(false);
+  });
+});
+
+describe("the section keeps the reader's scroll", () => {
+  it("caps the section at four rows", () => {
+    expect(EXPANDED_FOOTER_MAX_ROWS).toBe(4);
+  });
+
+  it("carries the cap in the markup for the stylesheet to read", () => {
+    const { panel } = drawPanel("shells", { shells: [SHELL_ROW] });
+    expect(panel.style.getPropertyValue("--pfooter-sheet-rows")).toBe("4");
+  });
+
+  it.each([
+    { rows: 4, scrolls: false },
+    { rows: 5, scrolls: true },
+  ])("scrolls its own content only past the cap ($rows rows)", ({ rows, scrolls }) => {
+    // Arrange
+    const shells = Array.from({ length: rows }, (_unused, index) => ({
+      ...SHELL_ROW,
+      work: { value: `work-${index}` },
+    }));
+
+    // Act
+    const { panel } = drawPanel("shells", { shells });
+
+    // Assert
+    expect(panel.classList.contains("scrolls")).toBe(scrolls);
+  });
+
+  it("redraws a push's rows inside the section it already drew", () => {
+    // Arrange
+    const h = harness();
+    const deps: ExpandedDeps = {
+      ctx: h.ctx,
+      stops: createStopControls(h.ctx),
+      notices: createJumpNotices(),
+      redraw: () => undefined,
+      selectDetachedWork: async () => true,
+    };
+    const first = drawFooterExpanded(expanded({ shells: [SHELL_ROW] }), "shells", deps, null);
+
+    // Act
+    const second = drawFooterExpanded(expanded({ shells: [SHELL_ROW] }), "shells", deps, first);
+
+    // Assert
+    expect(second).toBe(first);
+  });
+
+  it("keeps the reader's scroll position across a push", () => {
+    // Arrange: the reader has scrolled the section.
+    const h = harness();
+    const deps: ExpandedDeps = {
+      ctx: h.ctx,
+      stops: createStopControls(h.ctx),
+      notices: createJumpNotices(),
+      redraw: () => undefined,
+      selectDetachedWork: async () => true,
+    };
+    const shells = Array.from({ length: 6 }, (_unused, index) => ({ ...SHELL_ROW, work: { value: `w-${index}` } }));
+    const first = drawFooterExpanded(expanded({ shells }), "shells", deps, null);
+    if (first === null) throw new Error("not drawn");
+    document.body.replaceChildren(first);
+    first.scrollTop = 40;
+
+    // Act
+    drawFooterExpanded(expanded({ shells }), "shells", deps, first);
+
+    // Assert
+    expect(first.scrollTop).toBe(40);
+  });
+
+  it("starts a fresh section for a different panel", () => {
+    // Arrange
+    const h = harness();
+    const deps: ExpandedDeps = {
+      ctx: h.ctx,
+      stops: createStopControls(h.ctx),
+      notices: createJumpNotices(),
+      redraw: () => undefined,
+      selectDetachedWork: async () => true,
+    };
+    const shells = drawFooterExpanded(expanded({ shells: [SHELL_ROW] }), "shells", deps, null);
+
+    // Act
+    const monitors = drawFooterExpanded(expanded({ monitors: [MONITOR_ROW] }), "monitors", deps, shells);
+
+    // Assert
+    expect(monitors).not.toBe(shells);
   });
 });

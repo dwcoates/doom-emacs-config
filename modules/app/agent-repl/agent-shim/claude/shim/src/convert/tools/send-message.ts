@@ -17,6 +17,13 @@
  * sets exactly when it resumed a dormant agent. That field is therefore the
  * whole basis of the `delivery` arm: present means `resumed_recipient`, absent
  * means `queued_to_live`.
+ *
+ * # The settle stands alone
+ *
+ * Both settle arms RESTATE the address and the summary from the call's own
+ * input. The start and the settle upsert ONE unit, so once the send settles the
+ * store holds the settle alone, and a replay drawing it with no start beside it
+ * drew the send with an empty body.
  */
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
@@ -68,6 +75,23 @@ function summaryOf(call: PendingCall): conversationv1.AgentSendMessageSummary | 
 }
 
 /**
+ * WHO the caller addressed, exactly as written. Read by the start AND by both
+ * settle arms: a settled frame restates it so it stands alone, because the start
+ * and the settle upsert one unit and a store keeping the latest frame has no
+ * start left to read it from.
+ */
+function addressedToOf(call: PendingCall): string {
+  const addressedTo = str(call.input, "to");
+  if (addressedTo === undefined) {
+    LOGGER.debug(
+      { tool_use_id: call.toolUseId },
+      "a send addresses nobody; the recipient is carried empty",
+    );
+  }
+  return addressedTo ?? "";
+}
+
+/**
  * WHICH AGENT the send actually reached.
  *
  * `resumedAgentId` first because it is the vendor's own statement of the
@@ -88,17 +112,10 @@ export const sendMessageConverter: ToolConverter = {
   carriesProgress: true,
 
   start(call) {
-    const addressedTo = str(call.input, "to");
-    if (addressedTo === undefined) {
-      LOGGER.debug(
-        { tool_use_id: call.toolUseId },
-        "a send addresses nobody; the recipient is carried empty",
-      );
-    }
     return sendItem({
       case: "start",
       value: create(conversationv1.AgentSendMessageStartSchema, {
-        addressedTo: addressedTo ?? "",
+        addressedTo: addressedToOf(call),
         summary: summaryOf(call),
         body: bodyOf(call),
         startedAt: startedAt(call.startedAtMs),
@@ -111,7 +128,13 @@ export const sendMessageConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a send failed");
       return sendItem({
         case: "failure",
-        value: create(conversationv1.AgentSendMessageFailureSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentSendMessageFailureSchema, {
+          error: failureOf(outcome),
+          // RESTATED so the settled frame stands alone: a refused send is
+          // still drawn, and its start is gone once the settle upserts over it.
+          addressedTo: addressedToOf(call),
+          summary: summaryOf(call),
+        }),
       });
     }
     const structured = asRecord(outcome.structured);
@@ -145,6 +168,10 @@ export const sendMessageConverter: ToolConverter = {
               value: create(conversationv1.AgentSendMessageQueuedToLiveSchema, {}),
             },
         settledAt: settledAt(outcome.settledAtMs),
+        // RESTATED so the settled frame stands alone: a replay of the unit's
+        // latest frame draws the send from this alone.
+        addressedTo: addressedToOf(call),
+        summary: summaryOf(call),
       }),
     });
   },

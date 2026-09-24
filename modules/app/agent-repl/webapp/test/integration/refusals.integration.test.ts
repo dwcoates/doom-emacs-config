@@ -26,7 +26,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
-import { chipFailureArms, startHarness, type Harness } from "./harness";
+import { bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import {
   ACCOUNT_CONFIG_DIR,
@@ -52,6 +52,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

@@ -8198,8 +8198,10 @@ func (x *FooterExpandedMonitors) GetRows() []*FooterMonitorRow {
 	return nil
 }
 
-// One live monitor's line: 👁 · description · (persistent) · clock. NOT a
-// jump target: monitors have no feed bubble, unlike the agent and shell rows.
+// One live monitor's line: 👁 · description · (persistent) · clock · ▸. A
+// monitor draws NO feed entry, so its jump is always the `unresolved` arm with
+// the `no_feed_entry` reason: a click says so at the row and records why,
+// rather than doing nothing.
 type FooterMonitorRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What is being watched, drawn verbatim (the agent's description).
@@ -8207,7 +8209,11 @@ type FooterMonitorRow struct {
 	// The runtime clock; the client ticks from the start instant.
 	Runtime *FooterMonitorRowRuntime `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`
 	// Present iff the watch is persistent; draws the "persistent" marker.
-	Persistent    *FooterMonitorRowPersistent `protobuf:"bytes,3,opt,name=persistent,proto3,oneof" json:"persistent,omitempty"`
+	Persistent *FooterMonitorRowPersistent `protobuf:"bytes,3,opt,name=persistent,proto3,oneof" json:"persistent,omitempty"`
+	// Which work this row is. NOT DRAWN in the footer; see FooterWorkId.
+	Work *FooterWorkId `protobuf:"bytes,4,opt,name=work,proto3" json:"work,omitempty"`
+	// Where a click on the row lands. See FooterJump.
+	Jump          *FooterJump `protobuf:"bytes,5,opt,name=jump,proto3" json:"jump,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8259,6 +8265,20 @@ func (x *FooterMonitorRow) GetRuntime() *FooterMonitorRowRuntime {
 func (x *FooterMonitorRow) GetPersistent() *FooterMonitorRowPersistent {
 	if x != nil {
 		return x.Persistent
+	}
+	return nil
+}
+
+func (x *FooterMonitorRow) GetWork() *FooterWorkId {
+	if x != nil {
+		return x.Work
+	}
+	return nil
+}
+
+func (x *FooterMonitorRow) GetJump() *FooterJump {
+	if x != nil {
+		return x.Jump
 	}
 	return nil
 }
@@ -9292,8 +9312,7 @@ func (x *FooterTokensLineVerdictInvalid) GetText() string {
 }
 
 // The live agent-spawned subagents — the subagents that ALSO have feed
-// bubbles. One row per live subagent; each row is a jump target to its
-// bubble. Rows leave the list when the subagent's run ends. A TRUE LIST:
+// bubbles. One row per live subagent; each row is a jump row (`FooterJump`). Rows leave the list when the subagent's run ends. A TRUE LIST:
 // every row is the same kind of thing.
 type FooterExpandedAgents struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -9344,9 +9363,6 @@ func (x *FooterExpandedAgents) GetRows() []*FooterAgentRow {
 // One live subagent's line: glyph · type · description · tokens · clock · ▸.
 type FooterAgentRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Jump target: the subagent bubble's FeedId, exactly as the feed served
-	// it. Echoed into navigation, never parsed.
-	Target *FeedId `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// The subagent type ("Explore") — the row's leading label.
 	Label *FooterAgentRowLabel `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
 	// The commission's description. UNSET when the spawn carried none; the
@@ -9355,7 +9371,11 @@ type FooterAgentRow struct {
 	// The subagent's running token sum, daemon-formatted.
 	Tokens *FooterAgentRowTokens `protobuf:"bytes,4,opt,name=tokens,proto3" json:"tokens,omitempty"`
 	// The row's clock. The client ticks from the instant.
-	Runtime       *FooterAgentRowRuntime `protobuf:"bytes,5,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	Runtime *FooterAgentRowRuntime `protobuf:"bytes,5,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	// Which work this row is. NOT DRAWN in the footer; see FooterWorkId.
+	Work *FooterWorkId `protobuf:"bytes,6,opt,name=work,proto3" json:"work,omitempty"`
+	// Where a click on the row lands. See FooterJump.
+	Jump          *FooterJump `protobuf:"bytes,7,opt,name=jump,proto3" json:"jump,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9390,13 +9410,6 @@ func (*FooterAgentRow) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{141}
 }
 
-func (x *FooterAgentRow) GetTarget() *FeedId {
-	if x != nil {
-		return x.Target
-	}
-	return nil
-}
-
 func (x *FooterAgentRow) GetLabel() *FooterAgentRowLabel {
 	if x != nil {
 		return x.Label
@@ -9421,6 +9434,20 @@ func (x *FooterAgentRow) GetTokens() *FooterAgentRowTokens {
 func (x *FooterAgentRow) GetRuntime() *FooterAgentRowRuntime {
 	if x != nil {
 		return x.Runtime
+	}
+	return nil
+}
+
+func (x *FooterAgentRow) GetWork() *FooterWorkId {
+	if x != nil {
+		return x.Work
+	}
+	return nil
+}
+
+func (x *FooterAgentRow) GetJump() *FooterJump {
+	if x != nil {
+		return x.Jump
 	}
 	return nil
 }
@@ -10039,7 +10066,7 @@ func (*FooterTaskRowCompleted) Descriptor() ([]byte, []int) {
 }
 
 // The live detached shells. One row per running background command; each
-// row jumps to the shell's feed bubble. No token element — a shell has no
+// row is a jump row (`FooterJump`) to the shell's feed bubble. No token element — a shell has no
 // token cost. A TRUE LIST, like the agents panel.
 type FooterExpandedShells struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -10089,12 +10116,14 @@ func (x *FooterExpandedShells) GetRows() []*FooterShellRow {
 // One live shell's line: $ · command · clock · ▸.
 type FooterShellRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Jump target: the shell bubble's FeedId, exactly as the feed served it.
-	Target *FeedId `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// The command line being run.
 	Command *FooterShellRowCommand `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
 	// The row's clock. The client ticks from the instant.
-	Runtime       *FooterShellRowRuntime `protobuf:"bytes,3,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	Runtime *FooterShellRowRuntime `protobuf:"bytes,3,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	// Which work this row is. NOT DRAWN in the footer; see FooterWorkId.
+	Work *FooterWorkId `protobuf:"bytes,4,opt,name=work,proto3" json:"work,omitempty"`
+	// Where a click on the row lands. See FooterJump.
+	Jump          *FooterJump `protobuf:"bytes,5,opt,name=jump,proto3" json:"jump,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10129,13 +10158,6 @@ func (*FooterShellRow) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{155}
 }
 
-func (x *FooterShellRow) GetTarget() *FeedId {
-	if x != nil {
-		return x.Target
-	}
-	return nil
-}
-
 func (x *FooterShellRow) GetCommand() *FooterShellRowCommand {
 	if x != nil {
 		return x.Command
@@ -10150,6 +10172,335 @@ func (x *FooterShellRow) GetRuntime() *FooterShellRowRuntime {
 	return nil
 }
 
+func (x *FooterShellRow) GetWork() *FooterWorkId {
+	if x != nil {
+		return x.Work
+	}
+	return nil
+}
+
+func (x *FooterShellRow) GetJump() *FooterJump {
+	if x != nil {
+		return x.Jump
+	}
+	return nil
+}
+
+// WHICH WORK A ROW IS: the run's `conversation.v1.DetachedWorkId` value — the
+// same string the daemon keys it by and the feed bubble's head draws
+// (`FeedDetachedWorkId`). For an IN-TURN subagent, which is not detached work
+// yet, it is the spawn unit's `AgentActivityId` value: the contract makes the
+// two one value (`DetachedWorkId.value == AgentActivityId.value`), so the row
+// keeps this identity if the spawn detaches.
+//
+// NOT DRAWN (owner ruling, 2026-09-23: no visual change to the footer). The
+// client carries it only into the record a click writes, and as the key its
+// per-row click outcome is held under across whole-view pushes.
+type FooterWorkId struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The id, exactly as the daemon holds it. Never parsed.
+	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterWorkId) Reset() {
+	*x = FooterWorkId{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[156]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterWorkId) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterWorkId) ProtoMessage() {}
+
+func (x *FooterWorkId) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[156]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterWorkId.ProtoReflect.Descriptor instead.
+func (*FooterWorkId) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{156}
+}
+
+func (x *FooterWorkId) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+// WHERE A CLICK ON A DETACHED-WORK ROW LANDS, stated by the daemon for every
+// row (owner ruling, 2026-09-23). EXACTLY ONE ARM, so a row whose click
+// reaches nothing and says nothing is unrepresentable:
+//
+//	entry        the feed entry that draws this work is KNOWN: the client
+//	             selects that entry and scrolls to it (the scroll module's
+//	             `detachedWorkSelected` cause). If the client then cannot
+//	             bring it onto the page, it says so at the row — never silence.
+//	unresolved   the daemon does NOT know the entry, and says why: the client
+//	             shows the "not on screen" notice at the row and records the
+//	             reason, with the row's work id, kind and this arm.
+//
+// An UNSET arm is malformed.
+type FooterJump struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Target:
+	//
+	//	*FooterJump_Entry
+	//	*FooterJump_Unresolved
+	Target        isFooterJump_Target `protobuf_oneof:"target"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterJump) Reset() {
+	*x = FooterJump{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[157]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterJump) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterJump) ProtoMessage() {}
+
+func (x *FooterJump) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[157]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterJump.ProtoReflect.Descriptor instead.
+func (*FooterJump) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{157}
+}
+
+func (x *FooterJump) GetTarget() isFooterJump_Target {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *FooterJump) GetEntry() *FeedId {
+	if x != nil {
+		if x, ok := x.Target.(*FooterJump_Entry); ok {
+			return x.Entry
+		}
+	}
+	return nil
+}
+
+func (x *FooterJump) GetUnresolved() *FooterJumpUnresolved {
+	if x != nil {
+		if x, ok := x.Target.(*FooterJump_Unresolved); ok {
+			return x.Unresolved
+		}
+	}
+	return nil
+}
+
+type isFooterJump_Target interface {
+	isFooterJump_Target()
+}
+
+type FooterJump_Entry struct {
+	// The entry's FeedId, exactly as the feed served it — ON THE FEED THAT
+	// DRAWS IT, which for a subagent of a subagent is its parent's sub-feed,
+	// not the root. Echoed into navigation, never parsed.
+	Entry *FeedId `protobuf:"bytes,1,opt,name=entry,proto3,oneof"`
+}
+
+type FooterJump_Unresolved struct {
+	// The daemon cannot name the entry.
+	Unresolved *FooterJumpUnresolved `protobuf:"bytes,2,opt,name=unresolved,proto3,oneof"`
+}
+
+func (*FooterJump_Entry) isFooterJump_Target() {}
+
+func (*FooterJump_Unresolved) isFooterJump_Target() {}
+
+// Why the daemon cannot name a row's feed entry. THE ARM IS THE REASON.
+type FooterJumpUnresolved struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Reason:
+	//
+	//	*FooterJumpUnresolved_NotDrawn
+	//	*FooterJumpUnresolved_NoFeedEntry
+	Reason        isFooterJumpUnresolved_Reason `protobuf_oneof:"reason"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterJumpUnresolved) Reset() {
+	*x = FooterJumpUnresolved{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[158]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterJumpUnresolved) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterJumpUnresolved) ProtoMessage() {}
+
+func (x *FooterJumpUnresolved) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[158]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterJumpUnresolved.ProtoReflect.Descriptor instead.
+func (*FooterJumpUnresolved) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{158}
+}
+
+func (x *FooterJumpUnresolved) GetReason() isFooterJumpUnresolved_Reason {
+	if x != nil {
+		return x.Reason
+	}
+	return nil
+}
+
+func (x *FooterJumpUnresolved) GetNotDrawn() *FooterJumpNotDrawn {
+	if x != nil {
+		if x, ok := x.Reason.(*FooterJumpUnresolved_NotDrawn); ok {
+			return x.NotDrawn
+		}
+	}
+	return nil
+}
+
+func (x *FooterJumpUnresolved) GetNoFeedEntry() *FooterJumpNoFeedEntry {
+	if x != nil {
+		if x, ok := x.Reason.(*FooterJumpUnresolved_NoFeedEntry); ok {
+			return x.NoFeedEntry
+		}
+	}
+	return nil
+}
+
+type isFooterJumpUnresolved_Reason interface {
+	isFooterJumpUnresolved_Reason()
+}
+
+type FooterJumpUnresolved_NotDrawn struct {
+	// The feed has drawn no entry for this work (yet): no placement for its
+	// unit has reached the footer. Resolves on its own the moment the feed
+	// draws it.
+	NotDrawn *FooterJumpNotDrawn `protobuf:"bytes,1,opt,name=not_drawn,json=notDrawn,proto3,oneof"`
+}
+
+type FooterJumpUnresolved_NoFeedEntry struct {
+	// This kind of work draws no feed entry at all (a monitor).
+	NoFeedEntry *FooterJumpNoFeedEntry `protobuf:"bytes,2,opt,name=no_feed_entry,json=noFeedEntry,proto3,oneof"`
+}
+
+func (*FooterJumpUnresolved_NotDrawn) isFooterJumpUnresolved_Reason() {}
+
+func (*FooterJumpUnresolved_NoFeedEntry) isFooterJumpUnresolved_Reason() {}
+
+// The entry is not drawn. Empty: the arm is the whole fact.
+type FooterJumpNotDrawn struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterJumpNotDrawn) Reset() {
+	*x = FooterJumpNotDrawn{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[159]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterJumpNotDrawn) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterJumpNotDrawn) ProtoMessage() {}
+
+func (x *FooterJumpNotDrawn) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[159]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterJumpNotDrawn.ProtoReflect.Descriptor instead.
+func (*FooterJumpNotDrawn) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{159}
+}
+
+// The kind draws no entry. Empty: the arm is the whole fact.
+type FooterJumpNoFeedEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterJumpNoFeedEntry) Reset() {
+	*x = FooterJumpNoFeedEntry{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[160]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterJumpNoFeedEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterJumpNoFeedEntry) ProtoMessage() {}
+
+func (x *FooterJumpNoFeedEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[160]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterJumpNoFeedEntry.ProtoReflect.Descriptor instead.
+func (*FooterJumpNoFeedEntry) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{160}
+}
+
 // The row's command element.
 type FooterShellRowCommand struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -10162,7 +10513,7 @@ type FooterShellRowCommand struct {
 
 func (x *FooterShellRowCommand) Reset() {
 	*x = FooterShellRowCommand{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[156]
+	mi := &file_frontend_v1_footer_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10174,7 +10525,7 @@ func (x *FooterShellRowCommand) String() string {
 func (*FooterShellRowCommand) ProtoMessage() {}
 
 func (x *FooterShellRowCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[156]
+	mi := &file_frontend_v1_footer_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10187,7 +10538,7 @@ func (x *FooterShellRowCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRowCommand.ProtoReflect.Descriptor instead.
 func (*FooterShellRowCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{156}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *FooterShellRowCommand) GetText() string {
@@ -10209,7 +10560,7 @@ type FooterShellRowRuntime struct {
 
 func (x *FooterShellRowRuntime) Reset() {
 	*x = FooterShellRowRuntime{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[157]
+	mi := &file_frontend_v1_footer_proto_msgTypes[162]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10221,7 +10572,7 @@ func (x *FooterShellRowRuntime) String() string {
 func (*FooterShellRowRuntime) ProtoMessage() {}
 
 func (x *FooterShellRowRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[157]
+	mi := &file_frontend_v1_footer_proto_msgTypes[162]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10234,7 +10585,7 @@ func (x *FooterShellRowRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRowRuntime.ProtoReflect.Descriptor instead.
 func (*FooterShellRowRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{157}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{162}
 }
 
 func (x *FooterShellRowRuntime) GetStartedAtMs() int64 {
@@ -10666,13 +11017,15 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x16FooterCronRowRecurring\"\x16\n" +
 	"\x14FooterCronRowDurable\"K\n" +
 	"\x16FooterExpandedMonitors\x121\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1d.frontend.v1.FooterMonitorRowR\x04rows\"\xfb\x01\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1d.frontend.v1.FooterMonitorRowR\x04rows\"\xd7\x02\n" +
 	"\x10FooterMonitorRow\x12J\n" +
 	"\vdescription\x18\x01 \x01(\v2(.frontend.v1.FooterMonitorRowDescriptionR\vdescription\x12>\n" +
 	"\aruntime\x18\x02 \x01(\v2$.frontend.v1.FooterMonitorRowRuntimeR\aruntime\x12L\n" +
 	"\n" +
 	"persistent\x18\x03 \x01(\v2'.frontend.v1.FooterMonitorRowPersistentH\x00R\n" +
-	"persistent\x88\x01\x01B\r\n" +
+	"persistent\x88\x01\x01\x12-\n" +
+	"\x04work\x18\x04 \x01(\v2\x19.frontend.v1.FooterWorkIdR\x04work\x12+\n" +
+	"\x04jump\x18\x05 \x01(\v2\x17.frontend.v1.FooterJumpR\x04jumpB\r\n" +
 	"\v_persistent\"1\n" +
 	"\x1bFooterMonitorRowDescription\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"=\n" +
@@ -10745,14 +11098,15 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x1eFooterTokensLineVerdictInvalid\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"G\n" +
 	"\x14FooterExpandedAgents\x12/\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterAgentRowR\x04rows\"\xcd\x02\n" +
-	"\x0eFooterAgentRow\x12+\n" +
-	"\x06target\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06target\x126\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterAgentRowR\x04rows\"\x8a\x03\n" +
+	"\x0eFooterAgentRow\x126\n" +
 	"\x05label\x18\x02 \x01(\v2 .frontend.v1.FooterAgentRowLabelR\x05label\x12M\n" +
 	"\vdescription\x18\x03 \x01(\v2&.frontend.v1.FooterAgentRowDescriptionH\x00R\vdescription\x88\x01\x01\x129\n" +
 	"\x06tokens\x18\x04 \x01(\v2!.frontend.v1.FooterAgentRowTokensR\x06tokens\x12<\n" +
-	"\aruntime\x18\x05 \x01(\v2\".frontend.v1.FooterAgentRowRuntimeR\aruntimeB\x0e\n" +
-	"\f_description\")\n" +
+	"\aruntime\x18\x05 \x01(\v2\".frontend.v1.FooterAgentRowRuntimeR\aruntime\x12-\n" +
+	"\x04work\x18\x06 \x01(\v2\x19.frontend.v1.FooterWorkIdR\x04work\x12+\n" +
+	"\x04jump\x18\a \x01(\v2\x17.frontend.v1.FooterJumpR\x04jumpB\x0e\n" +
+	"\f_descriptionJ\x04\b\x01\x10\x02R\x06target\")\n" +
 	"\x13FooterAgentRowLabel\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"/\n" +
 	"\x19FooterAgentRowDescription\x12\x12\n" +
@@ -10782,11 +11136,27 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x18\n" +
 	"\x16FooterTaskRowCompleted\"G\n" +
 	"\x14FooterExpandedShells\x12/\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterShellRowR\x04rows\"\xb9\x01\n" +
-	"\x0eFooterShellRow\x12+\n" +
-	"\x06target\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06target\x12<\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1b.frontend.v1.FooterShellRowR\x04rows\"\xf6\x01\n" +
+	"\x0eFooterShellRow\x12<\n" +
 	"\acommand\x18\x02 \x01(\v2\".frontend.v1.FooterShellRowCommandR\acommand\x12<\n" +
-	"\aruntime\x18\x03 \x01(\v2\".frontend.v1.FooterShellRowRuntimeR\aruntime\"+\n" +
+	"\aruntime\x18\x03 \x01(\v2\".frontend.v1.FooterShellRowRuntimeR\aruntime\x12-\n" +
+	"\x04work\x18\x04 \x01(\v2\x19.frontend.v1.FooterWorkIdR\x04work\x12+\n" +
+	"\x04jump\x18\x05 \x01(\v2\x17.frontend.v1.FooterJumpR\x04jumpJ\x04\b\x01\x10\x02R\x06target\"$\n" +
+	"\fFooterWorkId\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\x88\x01\n" +
+	"\n" +
+	"FooterJump\x12+\n" +
+	"\x05entry\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x05entry\x12C\n" +
+	"\n" +
+	"unresolved\x18\x02 \x01(\v2!.frontend.v1.FooterJumpUnresolvedH\x00R\n" +
+	"unresolvedB\b\n" +
+	"\x06target\"\xaa\x01\n" +
+	"\x14FooterJumpUnresolved\x12>\n" +
+	"\tnot_drawn\x18\x01 \x01(\v2\x1f.frontend.v1.FooterJumpNotDrawnH\x00R\bnotDrawn\x12H\n" +
+	"\rno_feed_entry\x18\x02 \x01(\v2\".frontend.v1.FooterJumpNoFeedEntryH\x00R\vnoFeedEntryB\b\n" +
+	"\x06reason\"\x14\n" +
+	"\x12FooterJumpNotDrawn\"\x17\n" +
+	"\x15FooterJumpNoFeedEntry\"+\n" +
 	"\x15FooterShellRowCommand\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\";\n" +
 	"\x15FooterShellRowRuntime\x12\"\n" +
@@ -10804,7 +11174,7 @@ func file_frontend_v1_footer_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_footer_proto_rawDescData
 }
 
-var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 158)
+var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 163)
 var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterView)(nil),                                  // 0: frontend.v1.FooterView
 	(*FooterStrip)(nil),                                 // 1: frontend.v1.FooterStrip
@@ -10962,9 +11332,14 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterTaskRowCompleted)(nil),                      // 153: frontend.v1.FooterTaskRowCompleted
 	(*FooterExpandedShells)(nil),                        // 154: frontend.v1.FooterExpandedShells
 	(*FooterShellRow)(nil),                              // 155: frontend.v1.FooterShellRow
-	(*FooterShellRowCommand)(nil),                       // 156: frontend.v1.FooterShellRowCommand
-	(*FooterShellRowRuntime)(nil),                       // 157: frontend.v1.FooterShellRowRuntime
-	(*FeedId)(nil),                                      // 158: frontend.v1.FeedId
+	(*FooterWorkId)(nil),                                // 156: frontend.v1.FooterWorkId
+	(*FooterJump)(nil),                                  // 157: frontend.v1.FooterJump
+	(*FooterJumpUnresolved)(nil),                        // 158: frontend.v1.FooterJumpUnresolved
+	(*FooterJumpNotDrawn)(nil),                          // 159: frontend.v1.FooterJumpNotDrawn
+	(*FooterJumpNoFeedEntry)(nil),                       // 160: frontend.v1.FooterJumpNoFeedEntry
+	(*FooterShellRowCommand)(nil),                       // 161: frontend.v1.FooterShellRowCommand
+	(*FooterShellRowRuntime)(nil),                       // 162: frontend.v1.FooterShellRowRuntime
+	(*FeedId)(nil),                                      // 163: frontend.v1.FeedId
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	1,   // 0: frontend.v1.FooterView.strip:type_name -> frontend.v1.FooterStrip
@@ -11143,46 +11518,54 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	122, // 173: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
 	123, // 174: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
 	124, // 175: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
-	129, // 176: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
-	130, // 177: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	131, // 178: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	132, // 179: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
-	133, // 180: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
-	134, // 181: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
-	135, // 182: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
-	136, // 183: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
-	126, // 184: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
-	128, // 185: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
-	127, // 186: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
-	129, // 187: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
-	130, // 188: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	131, // 189: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	132, // 190: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
-	137, // 191: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
-	138, // 192: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
-	139, // 193: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
-	141, // 194: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
-	158, // 195: frontend.v1.FooterAgentRow.target:type_name -> frontend.v1.FeedId
-	142, // 196: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
-	143, // 197: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
-	144, // 198: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
-	145, // 199: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
-	147, // 200: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
-	149, // 201: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
-	148, // 202: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
-	150, // 203: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
-	151, // 204: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
-	153, // 205: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
-	152, // 206: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
-	155, // 207: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	158, // 208: frontend.v1.FooterShellRow.target:type_name -> frontend.v1.FeedId
-	156, // 209: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	157, // 210: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
-	211, // [211:211] is the sub-list for method output_type
-	211, // [211:211] is the sub-list for method input_type
-	211, // [211:211] is the sub-list for extension type_name
-	211, // [211:211] is the sub-list for extension extendee
-	0,   // [0:211] is the sub-list for field type_name
+	156, // 176: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
+	157, // 177: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
+	129, // 178: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
+	130, // 179: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	131, // 180: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	132, // 181: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
+	133, // 182: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
+	134, // 183: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
+	135, // 184: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
+	136, // 185: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
+	126, // 186: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
+	128, // 187: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
+	127, // 188: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
+	129, // 189: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
+	130, // 190: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	131, // 191: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	132, // 192: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
+	137, // 193: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
+	138, // 194: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
+	139, // 195: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
+	141, // 196: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
+	142, // 197: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
+	143, // 198: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
+	144, // 199: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
+	145, // 200: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
+	156, // 201: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
+	157, // 202: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
+	147, // 203: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
+	149, // 204: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
+	148, // 205: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
+	150, // 206: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
+	151, // 207: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
+	153, // 208: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
+	152, // 209: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
+	155, // 210: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
+	161, // 211: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	162, // 212: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	156, // 213: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
+	157, // 214: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
+	163, // 215: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	158, // 216: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
+	159, // 217: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
+	160, // 218: frontend.v1.FooterJumpUnresolved.no_feed_entry:type_name -> frontend.v1.FooterJumpNoFeedEntry
+	219, // [219:219] is the sub-list for method output_type
+	219, // [219:219] is the sub-list for method input_type
+	219, // [219:219] is the sub-list for extension type_name
+	219, // [219:219] is the sub-list for extension extendee
+	0,   // [0:219] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -11388,13 +11771,21 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterTaskRowStatus_Completed)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[151].OneofWrappers = []any{}
+	file_frontend_v1_footer_proto_msgTypes[157].OneofWrappers = []any{
+		(*FooterJump_Entry)(nil),
+		(*FooterJump_Unresolved)(nil),
+	}
+	file_frontend_v1_footer_proto_msgTypes[158].OneofWrappers = []any{
+		(*FooterJumpUnresolved_NotDrawn)(nil),
+		(*FooterJumpUnresolved_NoFeedEntry)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_footer_proto_rawDesc), len(file_frontend_v1_footer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   158,
+			NumMessages:   163,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
