@@ -13,11 +13,11 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
 | `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a47129c3ca68414a3` (the e2e port in `feat/dod-e2e`, then it merges into this branch) | 21:xx (REVIVED after the session restart) |
-| `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `acd09641d23117b76` | 21:xx (REVIVED after the session restart) |
 | `fix/shim-writer-never-drops` | `~/.config/doom-worktrees/shim-writer-never-drops` | The shim's store writer never drops writes (it was "DROPPING store writes" at 256 batches); it uses backpressure, bounded batches, and latency-critical frames not stuck behind a backlog. | `a81508fcefcb60065` | 22:10 |
 | `fix/store-checkpoint-and-cache` | `~/.config/doom-worktrees/store-checkpoint-and-cache` | Checkpoints become bulk-tier jobs (autocheckpoint off, `journal_size_limit`), plus a larger page cache (and maybe mmap), measured before and after. | `a959c0a4401ddeef2` | 22:10 |
 | `fix/shell-output-tail-only` | `~/.config/doom-worktrees/shell-output-tail-only` | Shell output is stored as a rolling tail at the renderer's 16 KiB cap (one shared constant) instead of contiguous deltas from 0; live and replay show what they show today. | `a11d136b2405a419b` | 22:10 |
 | `fix/keepalive-rows-unstored` | `~/.config/doom-worktrees/keepalive-rows-unstored` | Stop storing keep-alive rows (shim and sidecar) if running and rewinding them don't need it; the purpose table decides. | `a7a271a7c6c5b3e92` | 22:10 |
+| `fix/fake-git-killed-flake` | `~/.config/doom-worktrees/fake-git-killed-flake` | Root-cause the flake `TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal` (fake git SIGKILLed under load; suspect cross-run stray reaping). Make ownership-scoped reaping structural. | `af0db7ff97ed4c775` | 22:35 |
 
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
@@ -42,6 +42,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Detached work is drawn only in its owner's feed, at its spawning call's row (the announcement names the owner). Unplaceable work draws nothing and raises an ERROR plus a topbar warning; the root fallbacks are gone. Also: the sidecar reads a shell launch from the vendor's sentence when `toolUseResult` is missing, and a caller-cancelled open-faults read is DEBUG (`fix/detached-work-in-owning-feed`, daemon suite green on master).
 - The footer token cell is the in-flight turn's growth of the main context (the topbar's `SessionContextUsage`), refreshed after each main API response. Subagents are per agent in the panel, idle shows `--`, a mid-turn cut rebases, and the alarm stays on whole-turn uncached input (`fix/footer-turn-context-delta`, all suites green).
 - Editing a held prompt: Edit claims it under the delivery lock (it and everything after it stay held); Emacs takes it into the input (existing text saved to history); a send replaces and reclassifies; the claim ends with the editor's host stream; cancel is `C-c C-c` (`feat/edit-held-prompt`, daemon/webapp/ERT green on master).
 - Store: one writer takes interactive before bulk (bulk granted after 8 interactive grants in a row); bulk is split at 64 rows, 1 MiB or 100ms; ledger sweeps are paged (they had held the writer 137s and 848s); an unclassified write is refused; the shim writes interactive and the sidecar bulk (`fix/store-interactive-writes-first`). DEPLOY NOTE: the store, shim and sidecar must deploy together, because the new store refuses unclassified writes.
