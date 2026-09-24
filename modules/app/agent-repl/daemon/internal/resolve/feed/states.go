@@ -155,6 +155,12 @@ type proseState struct {
 	// stamping once keeps a re-delivery of the terminal (the file plane after
 	// the stream plane) serving the same instant rather than the replay time.
 	settledAtMs int64
+	// notice records that the block's settled whole is a VENDOR-SYNTHESIZED
+	// NOTICE ("API Error: …", an allowance notice), which the feed draws in the
+	// notice register rather than as the agent's answer. No model wrote it, so
+	// it is not answer prose: a turn whose only drawn text is a notice never had
+	// an answer to lose (finalanswer.go, turnDrewProse).
+	notice bool
 	// turn is the turn this response block belongs to, learned when the fold is
 	// first drawn. It scopes CROSS-UNIT reconciliation: one turn's response
 	// block can reach the resolver under two DIFFERENT activity ids when the two
