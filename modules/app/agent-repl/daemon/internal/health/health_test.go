@@ -460,6 +460,49 @@ func TestOpenFaultsSurfacesTheReadFailure(t *testing.T) {
 	}
 }
 
+// TestOpenFaultsLevelsACallerCancelledReadAtDebug: a read the caller
+// cancelled (a request that ended, a daemon stopping) is an ordinary outcome
+// and is recorded at DEBUG; any other read failure stays ERROR. Both are
+// returned to the caller.
+func TestOpenFaultsLevelsACallerCancelledReadAtDebug(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		faultsErr error
+		wantLevel string
+	}{
+		{name: "a read the caller cancelled", ctx: cancelled, faultsErr: context.Canceled, wantLevel: "debug"},
+		{name: "a read that failed on its own", ctx: context.Background(), faultsErr: errors.New("corrupt row"), wantLevel: "error"},
+		{name: "a cancellation the caller did not ask for", ctx: context.Background(), faultsErr: context.Canceled, wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := newStubSurfaces()
+			r := newReporter(t, &stubDB{faultsErr: tt.faultsErr}, alwaysLive, log)
+
+			// Act.
+			_, err := r.OpenFaults(tt.ctx, wsm.FaultScope{})
+
+			// Assert.
+			if err == nil {
+				t.Fatal("OpenFaults() = nil error, want the failure surfaced")
+			}
+			var level string
+			for _, record := range log.logger.Records() {
+				if record.Operation == opOpenFaults {
+					level = record.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("open_faults record level = %q, want %q", level, tt.wantLevel)
+			}
+		})
+	}
+}
+
 func TestOpenFaultsPassesTheScopeThrough(t *testing.T) {
 	// Arrange.
 	db := &stubDB{}
