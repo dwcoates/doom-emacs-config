@@ -44,12 +44,48 @@ import (
 // and the only remedy for "no" is to recreate it.
 const SchemaVersion = 7
 
-// JournalSizeLimitBytes is the size the -wal file is cut back to when the
-// log restarts. A checkpoint every DefaultCheckpointPages frames keeps the WAL
-// near 4 MB, so 16 MiB is four checkpoint intervals of headroom: a normal burst
-// never pays to shrink and regrow the file, and a 119 MB high-water left by a
-// pinned reader goes back down at the next restart.
-const JournalSizeLimitBytes = 16 * 1024 * 1024
+// THE PAGE CACHE AND THE MAP. SQLite's default cache is 2 MB per connection,
+// against an events.db of 1.1 GB on the owner's box, so an upsert's B-tree
+// seeks below the top levels were each a read(2) from the OS. Measured on a
+// copy of that database (the store's AGENTS.md has the numbers): the upsert's
+// hashed-key probes went from p50 29us / p99 ~230us at the default to
+// p50 24us / p99 ~60-120us with the sizes below.
+//
+// WHAT IT COSTS: at most 64 MiB for the writer plus 16 MiB per open reader —
+// 96 MiB with database/sql's two idle readers — of heap SQLite fills lazily,
+// and a map of up to 256 MiB of the file that is the kernel's own page cache,
+// shared, not a copy.
+const (
+	// WriteCacheKiB is the ONE write connection's page cache, in KiB (SQLite's
+	// negative cache_size). An interactive upsert touches the entry and
+	// write_ledger B-trees and their nine indexes; the four it seeks by a
+	// hashed key (entry.upsert_key, entry.write_id, the ledger's primary key
+	// and its upsert_key index) total about 140 MB and are hit at random,
+	// while the write_seq and position indexes are only appended at their
+	// right edge. 64 MiB holds every interior page and about half of those
+	// leaves. The write connection lives as long as the store, so its cache is
+	// never discarded.
+	WriteCacheKiB = 64 * 1024
+	// ReadCacheKiB is each READ connection's page cache. The read pool is not
+	// capped, and a reader's private cache dies with its connection, so
+	// readers lean on the shared map below and keep a small cache of their
+	// own.
+	ReadCacheKiB = 16 * 1024
+	// MmapSizeBytes maps up to this much of the database file on every
+	// connection, so a page read there is a memory access into the kernel's
+	// file cache instead of a read(2) plus a copy into a private cache. The
+	// map is shared by every connection and reclaimable by the kernel. Writes
+	// still go through the WAL, and the file only grows (the store never
+	// VACUUMs, and a nuke unlinks after closing), so nothing truncates a
+	// mapped region under a reader.
+	MmapSizeBytes = 256 * 1024 * 1024
+	// JournalSizeLimitBytes is the size the -wal file is cut back to when the
+	// log restarts. A checkpoint every DefaultCheckpointPages frames keeps the
+	// WAL near 4 MB, so 16 MiB is four checkpoint intervals of headroom: a
+	// normal burst never pays to shrink and regrow the file, and a 119 MB
+	// high-water left by a pinned reader goes back down at the next restart.
+	JournalSizeLimitBytes = 16 * 1024 * 1024
+)
 
 // mono reads the DB's monotonic clock — the one every measured duration is
 // taken from. A zero-value DB (only constructible inside this package, by a
@@ -258,6 +294,9 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// journal_size_limit: the -wal file is cut back to this size the next time
 	// the log restarts after a checkpoint, rather than staying at whatever
 	// high-water a burst or a pinned reader once pushed it to.
+	//
+	// cache_size and mmap_size: WriteCacheKiB and MmapSizeBytes, at the top of
+	// this file, say what they cost and why.
 	writeDSN := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",
@@ -266,6 +305,8 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"foreign_keys(ON)",
 			"wal_autocheckpoint(0)",
 			fmt.Sprintf("journal_size_limit(%d)", JournalSizeLimitBytes),
+			fmt.Sprintf("cache_size(-%d)", WriteCacheKiB),
+			fmt.Sprintf("mmap_size(%d)", MmapSizeBytes),
 		},
 		"_txlock": {"immediate"},
 	}.Encode()
@@ -292,6 +333,8 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		"_pragma": {
 			"busy_timeout(5000)",
 			"foreign_keys(ON)",
+			fmt.Sprintf("cache_size(-%d)", ReadCacheKiB),
+			fmt.Sprintf("mmap_size(%d)", MmapSizeBytes),
 			"query_only(true)",
 		},
 	}.Encode()
