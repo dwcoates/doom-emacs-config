@@ -38,7 +38,7 @@ import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { detachedWorkId, subagentId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
-import type { CallRegistry } from "./tool-calls.js";
+import type { CallRegistry, PendingCall } from "./tool-calls.js";
 import { activityEntry, agentActivity } from "./entries.js";
 
 const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
@@ -391,6 +391,19 @@ export interface TaskKindRegistry {
   /** The owner remembered for a task, or `undefined` if the fold never saw its call. */
   ownerOf(taskId: string): conversationv1.AgentId | undefined;
   /**
+   * Remember the SPAWNING CALL itself: what it was asked and when it started.
+   *
+   * LEARNED ONCE, while the call is still open, exactly as the owner is. A
+   * `task_notification` states neither the spawn's prompt nor its start
+   * instant, yet the terminal it produces is a SETTLED FRAME, and a settled
+   * frame stands alone: a replay serves it with no start beside it, so it must
+   * restate both. The call is the one authority for them, and this table is
+   * where it survives the call registry forgetting it.
+   */
+  rememberCall(taskId: string, call: PendingCall): void;
+  /** The spawning call remembered for a task, or `undefined` if the fold never saw it open. */
+  callOf(taskId: string): PendingCall | undefined;
+  /**
    * Whether a settling task is an AGENT run, and so owns a subagent terminal.
    *
    * A task whose kind was never stated answers `true`: the subagent terminal is
@@ -425,6 +438,7 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       toolUseId?: string;
       foreground?: boolean;
       owner?: conversationv1.AgentId;
+      call?: PendingCall;
     }
   >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
@@ -464,6 +478,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     },
     ownerOf(taskId) {
       return facts.get(taskId)?.owner;
+    },
+    rememberCall(taskId, call) {
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), call });
+    },
+    callOf(taskId) {
+      return facts.get(taskId)?.call;
     },
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
@@ -535,8 +556,13 @@ export function convertDetached(
   // backgrounded subagent's own calls never reach this stream — leaves it
   // UNDEFINED, and the announcement says so rather than naming the main agent.
   const openCall = toolUseId === undefined || toolUseId === "" ? undefined : calls.peek(toolUseId);
-  if (openCall !== undefined) taskKinds.rememberOwner(taskId, openCall.agentId);
+  if (openCall !== undefined) {
+    taskKinds.rememberOwner(taskId, openCall.agentId);
+    taskKinds.rememberCall(taskId, openCall);
+  }
   const owner = openCall?.agentId ?? taskKinds.ownerOf(taskId);
+  // Read NOW, before a settling notification forgets the task's facts.
+  const spawnCall = openCall ?? taskKinds.callOf(taskId);
 
   switch (raw.subtype) {
     case "task_started": {
@@ -707,7 +733,7 @@ export function convertDetached(
         );
         return entries;
       }
-      entries.push(...subagentTerminalEntries(context, agentId, uuid, toolUseId, raw));
+      entries.push(...subagentTerminalEntries(context, agentId, uuid, toolUseId, raw, spawnCall));
       return entries;
     }
 
@@ -799,9 +825,18 @@ function subagentTerminalEntries(
   vendorUuid: string,
   toolUseId: string,
   raw: RawTask,
+  spawnCall: PendingCall | undefined,
 ): readonly PersistEntry[] {
   const activityId = toolCallActivityId(toolUseId);
-  const settled = settledAt(context.nowMs());
+  if (spawnCall === undefined) {
+    LOGGER.debug(
+      { task_id: raw.task_id, tool_use_id: toolUseId },
+      "the fold never saw this task's spawning call open; its terminal restates no start",
+    );
+  }
+  // THE SPAWN'S OWN START, restated on the settle so a replayed bubble states
+  // how long the run took.
+  const settled = settledAt(context.nowMs(), spawnCall?.startedAtMs);
   const totalTokens = raw.usage?.total_tokens;
   if (raw.status === "stopped") {
     LOGGER.info({ task_id: raw.task_id }, "a person stopped the detached run");

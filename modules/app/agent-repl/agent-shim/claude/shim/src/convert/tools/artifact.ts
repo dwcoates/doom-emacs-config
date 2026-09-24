@@ -88,7 +88,7 @@ export const artifactConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the artifact call never ran");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentArtifactFailureSchema, { failure: failureOf(outcome) }),
+        value: create(conversationv1.AgentArtifactFailureSchema, { failure: failureOf(call, outcome) }),
       });
     }
     const output = asRecord(outcome.structured);

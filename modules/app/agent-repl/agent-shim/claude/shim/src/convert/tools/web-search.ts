@@ -130,7 +130,7 @@ export const webSearchConverter: ToolConverter = {
         case: "failure",
         value: create(conversationv1.AgentWebSearchFailureSchema, {
           query: queryOf(call),
-          failure: failureOf(outcome),
+          failure: failureOf(call, outcome),
         }),
       });
     }

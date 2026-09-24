@@ -29,9 +29,24 @@ export function startedAt(atMs: number): conversationv1.AgentActivityStartedAt {
   return create(conversationv1.AgentActivityStartedAtSchema, { atMs: BigInt(Math.trunc(atMs)) });
 }
 
-/** When a call reached its outcome. */
-export function settledAt(atMs: number): conversationv1.AgentActivitySettledAt {
-  return create(conversationv1.AgentActivitySettledAtSchema, { atMs: BigInt(Math.trunc(atMs)) });
+/**
+ * When a call reached its outcome, and the start it closes.
+ *
+ * THE START IS RESTATED ON THE SETTLE so a settled frame alone states the
+ * call's runtime: its start and its settle upsert one unit, and a replay serves
+ * the settle with no start beside it. The parameter is REQUIRED, so every
+ * settle site decides: the call's own start instant, or `undefined` for an arm
+ * whose start carries no instant (a prose or reasoning block) or a producer
+ * that genuinely never saw the start.
+ */
+export function settledAt(
+  atMs: number,
+  startedAtMs: number | undefined,
+): conversationv1.AgentActivitySettledAt {
+  return create(conversationv1.AgentActivitySettledAtSchema, {
+    atMs: BigInt(Math.trunc(atMs)),
+    startedAt: startedAtMs === undefined ? undefined : startedAt(startedAtMs),
+  });
 }
 
 /** The vendor's per-call liveness beat, relayed as observed. */
@@ -76,10 +91,11 @@ export function toolResultText(text: string): conversationv1.ToolResultContent {
 export function toolFailure(
   content: conversationv1.ToolResultContent | undefined,
   settledAtMs: number,
+  startedAtMs: number | undefined,
 ): conversationv1.AgentToolFailure {
   return create(conversationv1.AgentToolFailureSchema, {
     content,
-    settledAt: settledAt(settledAtMs),
+    settledAt: settledAt(settledAtMs, startedAtMs),
   });
 }
 

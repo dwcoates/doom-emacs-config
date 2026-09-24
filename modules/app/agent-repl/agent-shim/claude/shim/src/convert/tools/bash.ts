@@ -338,7 +338,7 @@ export const bashConverter: ToolConverter = {
           result: {
             case: "failure",
             value: create(conversationv1.AgentBashFailureSchema, {
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
               command: bashCommand(call, line),
             }),
           },
@@ -389,7 +389,7 @@ export const bashConverter: ToolConverter = {
           value: create(conversationv1.AgentBashSuccessSchema, {
             command: bashCommand(call, line),
             outcome: bashOutcome(record, output, exited),
-            settledAt: settle(outcome),
+            settledAt: settle(call, outcome),
           }),
         },
       }),
@@ -449,7 +449,7 @@ export const bashConverter: ToolConverter = {
                 },
               }),
             },
-            settledAt: settledAt(atMs),
+            settledAt: settledAt(atMs, call.startedAtMs),
           }),
         },
       }),

@@ -301,7 +301,7 @@ export const subagentConverter: ToolConverter = {
             value: create(conversationv1.AgentSubagentFailureSchema, {
               // `cause` stays UNSET: no vendor field states a user stop, and an
               // arm claiming one would say a person did what nothing observed.
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
             }),
           },
         }),
@@ -364,7 +364,7 @@ function settleCompleted(
           // The agent TYPE that actually ran — `resolvedModel` names a MODEL and
           // belongs to `models_used`, not here.
           resolvedSubagentType: str(structured, "agentType"),
-          settledAt: settledAt(settledAtMs),
+          settledAt: settledAt(settledAtMs, call.startedAtMs),
         }),
       },
     }),

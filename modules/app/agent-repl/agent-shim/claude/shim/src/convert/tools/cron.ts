@@ -103,12 +103,13 @@ function item(state: conversationv1.AgentCron["state"]): conversationv1.AgentAct
 
 /** A settled frame around one answered act. */
 function success(
+  call: PendingCall,
   act: conversationv1.AgentCronSuccess["act"],
   outcome: ToolOutcome,
 ): conversationv1.AgentActivity["item"] {
   return item({
     case: "success",
-    value: create(conversationv1.AgentCronSuccessSchema, { act, settledAt: settle(outcome) }),
+    value: create(conversationv1.AgentCronSuccessSchema, { act, settledAt: settle(call, outcome) }),
   });
 }
 
@@ -134,7 +135,7 @@ export const cronConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the cron call never ran");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentCronFailureSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentCronFailureSchema, { error: failureOf(call, outcome) }),
       });
     }
     const act = actNameOf(call);
@@ -160,6 +161,7 @@ export const cronConverter: ToolConverter = {
         .filter((job): job is conversationv1.AgentCronJob => job !== undefined);
       LOGGER.logVerbose({ tool_use_id: call.toolUseId, jobs: rows.length }, "the job set was read");
       return success(
+        call,
         { case: "listed", value: create(conversationv1.AgentCronListedSchema, { jobs: rows }) },
         outcome,
       );
@@ -177,12 +179,14 @@ export const cronConverter: ToolConverter = {
     if (act === "delete") {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId, job_id: jobId }, "a job was removed");
       return success(
+        call,
         { case: "deleted", value: create(conversationv1.AgentCronDeletedSchema, { jobId }) },
         outcome,
       );
     }
     LOGGER.logVerbose({ tool_use_id: call.toolUseId, job_id: jobId }, "a job was created");
     return success(
+      call,
       {
         case: "created",
         value: create(conversationv1.AgentCronCreatedSchema, {

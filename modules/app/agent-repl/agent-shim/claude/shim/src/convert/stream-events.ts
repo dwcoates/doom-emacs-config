@@ -676,12 +676,16 @@ function recordSettledAt(
   // Observed shapes beat declared types: every real record carries a top-level
   // `timestamp` (see synthesizedSubject, which reads the record the same way),
   // but the SDK's own union does not declare it on every arm.
+  //
+  // NO START IS RESTATED: a prose or reasoning block's start arm carries no
+  // instant (AgentResponseStart and AgentThinkingStart are empty), so there is
+  // nothing for the settle to restate and no runtime a surface draws for it.
   const raw = (message as unknown as { readonly timestamp?: unknown }).timestamp;
   if (typeof raw === "string" && raw !== "") {
     const ms = Date.parse(raw);
-    if (!Number.isNaN(ms)) return settledAt(ms);
+    if (!Number.isNaN(ms)) return settledAt(ms, undefined);
   }
-  return settledAt(context.nowMs());
+  return settledAt(context.nowMs(), undefined);
 }
 
 /**

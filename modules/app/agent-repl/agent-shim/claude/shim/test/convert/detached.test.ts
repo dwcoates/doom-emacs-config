@@ -826,6 +826,68 @@ describe("convertDetached: task_notification", () => {
   });
 });
 
+/**
+ * A detached spawn's terminal restates its spawn: the notification states
+ * neither the prompt nor the start, and a replay serves the terminal alone.
+ */
+describe("convertDetached: a notification's terminal restates its spawn", () => {
+  /** The spawning Agent call, open in the call registry when the task starts. */
+  function openSpawn(): CallRegistry {
+    const calls = createCallRegistry();
+    calls.remember({
+      toolUseId: "toolu_1",
+      toolName: "Agent",
+      input: { description: "tidy the docs", prompt: "Tidy every doc.", subagent_type: "general" },
+      startedAtMs: 1_000,
+      agentId: MAIN_AGENT,
+    });
+    return calls;
+  }
+
+  /** The settled spawn a start-then-notify pair produces, for a given status. */
+  function settledSpawn(
+    status: string,
+    calls: CallRegistry = openSpawn(),
+  ): conversationv1.AgentSubagent | undefined {
+    const registry = createTaskKindRegistry();
+    drain(
+      convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" }, {}, registry, calls),
+    );
+    const entries = convert(
+      { subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", status },
+      {},
+      registry,
+      createCallRegistry(),
+    );
+    const settled = entries.find((entry) => entry.source.discriminator.startsWith("activity.subagent."));
+    return activityOf(settled)?.item.value as conversationv1.AgentSubagent | undefined;
+  }
+
+  it.each([["completed"], ["failed"]])(
+    "restates the spawn's start instant on a %s run's settle",
+    (status) => {
+      // Arrange + Act
+      const spawn = settledSpawn(status);
+
+      // Assert
+      const settledAt =
+        spawn?.result.case === "success"
+          ? spawn.result.value.settledAt
+          : (spawn?.result.value as conversationv1.AgentSubagentFailure).error?.settledAt;
+      expect(settledAt?.startedAt?.atMs).toBe(1_000n);
+    },
+  );
+
+  it("restates no start when the fold never saw the spawning call open", () => {
+    // Arrange + Act
+    const spawn = settledSpawn("completed", createCallRegistry());
+
+    // Assert
+    const success = spawn?.result.value as conversationv1.AgentSubagentSuccess;
+    expect(success.settledAt?.startedAt).toBeUndefined();
+  });
+});
+
 describe("convertDetached: a task subtype no converter owns", () => {
   it("lands as residue named for the subtype", () => {
     const entries = convert({ subtype: "task_teleported", task_id: "t1" });
