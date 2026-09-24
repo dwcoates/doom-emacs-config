@@ -113,6 +113,12 @@ npm run build              typecheck plus vite build
 npm run test:integration   the whole app against a loopback fake daemon
 ```
 
+The test and coverage scripts (and their `pre*` hooks) run through
+`../bin/background.sh`, at background priority; every vitest config imports
+`../bin/require-background.mjs`, so a bare `npx vitest` refuses to start
+(prefix it: `../bin/background.sh npx vitest run ...`). `build`, `dev`, `lint`
+and `typecheck` stay at normal priority.
+
 `bin/build-frontend.sh webapp` is what actually SHIPS a build: it writes
 `dist/.built-sha` and `dist/.build-id` beside the artifact, and the build id is
 what the webview URL carries as `&build=`, which is the only thing that defeats
