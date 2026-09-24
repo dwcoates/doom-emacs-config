@@ -339,7 +339,6 @@ func TestWriteBatchLandsAnUnservedItemWithNoBook(t *testing.T) {
 		item *storev1.StoreUnservedItem
 		kind string
 	}{
-		{name: "keepalive", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")}}, kind: kindKeepalive},
 		{name: "vendor specific", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}}}, kind: kindVendorSpecific},
 		{name: "unknown", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{Discriminator: "widget", Raw: rawRecord("widget")}}}, kind: kindUnknown},
 		{name: "unparsed", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "t.jsonl", Raw: "{\"broken\":"}}}, kind: kindUnparsed},

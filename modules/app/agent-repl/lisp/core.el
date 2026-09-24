@@ -1827,12 +1827,39 @@ canonical link names the current target alone."
       (match-string 1 path)
     path))
 
+(defvar agent-repl-roster-view)
+(defvar agent-repl-roster-update-functions)
+(declare-function agent-repl-roster-walk "roster")
+(declare-function agent-repl-roster-row-ref "roster")
+
+(defun agent-repl--roster-workspace-dirs ()
+  "Return every workspace directory the last roster push names, CLOSED included.
+Nil before the first push.  A closed workspace has no tab and no entry in
+`agent-repl--workspaces', so the roster is the only thing in this runtime
+that still names its directory -- and with it the canonical link that names
+its log target."
+  (when (and (boundp 'agent-repl-roster-view) agent-repl-roster-view
+             (fboundp 'agent-repl-roster-walk))
+    (let (dirs)
+      (dolist (entry (agent-repl-roster-walk agent-repl-roster-view))
+        (let ((dir (plist-get (agent-repl-roster-row-ref (plist-get entry :row)) :dir)))
+          (when (and (stringp dir) (not (string-empty-p dir)))
+            (push dir dirs))))
+      (nreverse dirs))))
+
 (defun agent-repl--referenced-log-targets ()
   "Return a hash table of every log target a canonical link or this runtime names.
-Both sources are consulted because either alone is incomplete: the in-memory
-registry knows only this Emacs instance's sinks, and the canonical links know
-only workspaces this instance has registered.  A target named by either is
-NOT an orphan."
+Three sources are consulted because each alone is incomplete: the in-memory
+registry knows only this Emacs instance's sinks, the open workspaces' links
+know only the workspaces with a tab, and the roster's directories are the
+only record of a CLOSED workspace's link.  A target named by any of them is
+NOT an orphan.
+
+THE ROSTER IS A SOURCE BECAUSE ITS ABSENCE DELETED A LIVE TARGET.  A closed
+workspace has no tab, so its link was never read, and the sweep unlinked
+the target that link named: workspace 2b81f45a724642ef's `emacs.log' was
+found dangling at a target minted 2026-09-11 14:29, the day this sweep
+landed (realtest 7, 2026-09-24)."
   (let ((referenced (make-hash-table :test #'equal)))
     (maphash (lambda (_key entry)
                (when-let ((target (plist-get entry :target)))
@@ -1845,6 +1872,10 @@ NOT an orphan."
                (dest (file-symlink-p (agent-repl--workspace-emacs-log-path dir))))
           (when (stringp dest)
             (puthash dest t referenced)))))
+    (dolist (dir (agent-repl--roster-workspace-dirs))
+      (let ((dest (file-symlink-p (agent-repl--workspace-emacs-log-path dir))))
+        (when (stringp dest)
+          (puthash dest t referenced))))
     referenced))
 
 (defun agent-repl--sweep-orphan-log-targets (&optional directory)
@@ -1908,7 +1939,28 @@ files there would hold the frame off screen to tidy a directory."
   :group 'agent-repl)
 
 (defun agent-repl-schedule-orphan-log-sweep ()
-  "Arm the one-shot idle timer that sweeps orphaned Emacs log targets."
+  "Arm the one-shot idle timer that sweeps orphaned Emacs log targets.
+THE SWEEP WAITS FOR THE FIRST ROSTER PUSH.  Before it, a closed workspace's
+link is named by nothing this runtime holds, so every target such a link
+names would read as an orphan (`agent-repl--referenced-log-targets').  With
+no roster yet, the arming is deferred to the first accepted push."
+  (if (and (boundp 'agent-repl-roster-view) agent-repl-roster-view)
+      (agent-repl--arm-orphan-log-sweep)
+    (add-hook 'agent-repl-roster-update-functions
+              #'agent-repl--arm-orphan-log-sweep-on-first-roster)
+    (agent-repl--info
+     '(:agent-repl-central "the orphan log-target sweep spans workspaces")
+     "elisp.core.log-sweep-deferred: until=first-roster-push")
+    nil))
+
+(defun agent-repl--arm-orphan-log-sweep-on-first-roster (_roster)
+  "Arm the deferred orphan log sweep once, on the first roster push."
+  (remove-hook 'agent-repl-roster-update-functions
+               #'agent-repl--arm-orphan-log-sweep-on-first-roster)
+  (agent-repl--arm-orphan-log-sweep))
+
+(defun agent-repl--arm-orphan-log-sweep ()
+  "Arm the one-shot idle timer that runs the orphan log sweep."
   (prog1 (run-with-idle-timer agent-repl-log-sweep-idle-seconds nil
                               #'agent-repl--sweep-orphan-log-targets)
     (agent-repl--info
@@ -1918,6 +1970,47 @@ files there would hold the frame off screen to tidy a directory."
      agent-repl-log-sweep-max-files
      agent-repl-log-sweep-min-age-seconds)))
 
+
+;;; Dangling canonical links
+
+(defvar agent-repl--dangling-log-links-checked (make-hash-table :test #'equal)
+  "Workspace directories whose canonical `emacs.log' link this runtime checked.
+The check is once per directory per runtime: a link this module later
+re-points always names a target it just created.")
+
+(defun agent-repl--retire-dangling-emacs-log-links (_roster)
+  "Remove every roster workspace's canonical `emacs.log' link that names no file.
+A link whose target is gone names records that no longer exist anywhere, and
+every reader that resolves it -- an operator, the log reader, the realtest
+harvest -- meets a path to nothing.  Only a link naming a target THIS module
+could have minted (`agent-repl--emacs-log-owned-target-p') is removed: a
+foreign link is the workspace's, not ours.  The next record the workspace
+writes mints a fresh target and a fresh link, exactly as a first open does.
+
+Registered on `agent-repl-roster-update-functions', because the roster is the
+one place a CLOSED workspace's directory is still named."
+  (dolist (dir (agent-repl--roster-workspace-dirs))
+    (unless (gethash dir agent-repl--dangling-log-links-checked)
+      (puthash dir t agent-repl--dangling-log-links-checked)
+      (let* ((canonical (agent-repl--workspace-emacs-log-path dir))
+             (dest (file-symlink-p canonical)))
+        (when (and (stringp dest)
+                   (not (file-exists-p canonical))
+                   (agent-repl--emacs-log-owned-target-p dest))
+          (condition-case err
+              (progn
+                (delete-file canonical)
+                (agent-repl--info
+                 '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
+                 "elisp.core.log-link-retired: dir=%s link=%s gone_target=%s"
+                 dir canonical dest))
+            (file-error
+             (agent-repl--warn
+              '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
+              "elisp.core.log-link-retire-failed: dir=%s link=%s error=%S"
+              dir canonical err))))))))
+
+(add-hook 'agent-repl-roster-update-functions #'agent-repl--retire-dangling-emacs-log-links)
 
 (defun agent-repl--secure-log-file-mode (path)
   "Require PATH to be a regular file and force its permissions to 0600.

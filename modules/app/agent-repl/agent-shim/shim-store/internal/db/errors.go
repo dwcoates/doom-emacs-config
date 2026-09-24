@@ -66,6 +66,10 @@ const (
 	// contract's AgentBashTailCap: output beyond what is rendered is never
 	// stored (owner ruling 2026-09-23), so the store refuses to hold it.
 	SiteBashTailOverCap = "bash_tail_over_cap"
+	// SiteKeepaliveRetired is a write of the retired keep-alive arm. Nothing of
+	// a keep-alive is stored on either plane (2026-09-23), and a held one
+	// claimed an upsert_key a real record later needed.
+	SiteKeepaliveRetired = "keepalive_retired"
 	// SiteUnknownAgent is a well-formed agent id the store holds no agent row
 	// for. An agent the store HAS heard of but that has said nothing yet is not
 	// this: it is a legal, empty book.

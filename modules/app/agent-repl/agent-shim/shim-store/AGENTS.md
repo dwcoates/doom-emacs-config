@@ -554,11 +554,28 @@ and not something this change touches.
 - **Pageability is the PRODUCER's decision**, read from exactly one place:
   `StoreAgentUpdate.agent_info`. `serveable_frame` names its book
   (`page_agent_id`) and is the ONLY thing a page can ever return;
-  `unserved_item` (keepalive / vendor_specific / unknown / unparsed) is durable
-  and never served; `bash` and `workflow` are structurally not page lines.
-  (No producer writes the `keepalive` arm since 2026-09-23 — nothing of a
-  keep-alive is stored on either plane — but the store still accepts it, and
-  the rows written before stand.)
+  `unserved_item` (vendor_specific / unknown / unparsed) is durable and never
+  served; `bash` and `workflow` are structurally not page lines.
+- **THE `keepalive` ARM IS REFUSED** (`keepalive_retired`, on
+  `entries[i].agent_update.unserved_item.keepalive`). Nothing of a keep-alive is
+  stored on either plane (2026-09-23), and the rows written before it were not
+  harmless: the shim that predated the rule tagged a backgrounded subagent's
+  frames arriving during a keep-alive turn, so held keep-alive rows sat under
+  real subagent upsert_keys, and the sidecar's page line for each was refused as
+  an identity change (`keepalive` → `page_line`), parking the subagent's whole
+  transcript.
+- **A RETIRED `keepalive` ROW MAY BE SUPERSEDED BY A REAL RECORD OF ANY KIND**
+  (`applyIdentityPolicy`), the one kind change that is not
+  `upsert_changes_identity`: the real record takes the key and its book, and
+  the store records it ONCE per key at INFO with `old_kind` and `new_kind`
+  (once by construction — the row then holds a real kind). Every other kind
+  change is still refused.
+- **THE OTHER HELD KEEP-ALIVE ROWS STAY, AND THEY ARE INERT.** They carry no
+  book, so no page, replay or watch can reach them; nothing reads them; and
+  nothing can add to them, because the arm is refused. They are not deleted:
+  the store is never migrated, and nuking `events.db` would also throw away the
+  stream-plane rows the shim wrote live (asks, stream-only frames), which no
+  producer can rebuild.
 - One transaction per batch, and **failure commits nothing**. Per entry, in
   producer order: absorb by `write_id` against the **write ledger** (a hit is
   success), else check that the upsert does not change the row's IDENTITY, then
@@ -743,6 +760,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `cursor_file_id_empty`, `agent_id_empty`, `page_size_zero`, `pointer_empty`,
 `token_empty`, `unknown_watch_token`, `file_id_empty`, `run_empty`,
 `unknown_bash_run`, `store_refused_request`, `upsert_changes_identity`,
+`keepalive_retired`, `bash_tail_over_cap`,
 `page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
 `session_empty`, `write_class_unset`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
 `listen_occupied`.

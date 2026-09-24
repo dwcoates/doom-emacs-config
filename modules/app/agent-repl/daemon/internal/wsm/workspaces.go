@@ -8,45 +8,23 @@ import (
 	"path/filepath"
 	"time"
 
+	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
 )
 
 // normalizeDir is the ONE spelling of a worktree directory this store keys on:
-// absolute, symlinks resolved, cleaned (which trims the trailing slash and the
-// "." and ".." elements). Registration is idempotent by it, so every spelling
-// of one directory reaches the same row.
-//
-// A path that does not exist cannot have its symlinks resolved; the deepest
-// existing ancestor is resolved instead and the remainder is appended, so a
-// directory under a symlinked parent still normalizes the same way once it
-// appears.
+// dirpath.Canonical's — absolute, cleaned, symlinks resolved, and every
+// existing component in its on-disk case. Registration is idempotent by it, so
+// every spelling of one directory, case included, reaches the same row.
 func normalizeDir(dir string) (string, error) {
 	if dir == "" {
 		return "", errors.New("wsm: empty workspace dir")
 	}
-	abs, err := filepath.Abs(dir)
+	normalized, err := dirpath.Canonical(dir)
 	if err != nil {
-		return "", fmt.Errorf("wsm: absolutize %q: %w", dir, err)
+		return "", fmt.Errorf("wsm: normalize %q: %w", dir, err)
 	}
-	abs = filepath.Clean(abs)
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return filepath.Clean(resolved), nil
-	}
-	// Walk up to the deepest existing ancestor, resolve that, and re-join the
-	// tail so the answer is stable once the leaf is created.
-	rest := ""
-	head := abs
-	for {
-		parent := filepath.Dir(head)
-		if parent == head {
-			return abs, nil
-		}
-		rest = filepath.Join(filepath.Base(head), rest)
-		head = parent
-		if resolved, err := filepath.EvalSymlinks(head); err == nil {
-			return filepath.Clean(filepath.Join(resolved, rest)), nil
-		}
-	}
+	return normalized, nil
 }
 
 // workspaceColumns is the one select list every workspace read shares, so a
