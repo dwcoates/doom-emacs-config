@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -31,6 +32,7 @@ type fakeLaunchd struct {
 	onStorePrint func(n int)
 	storePrints  int
 	kickErr      error
+	bootoutErr   error
 	bootstrapErr error
 	printErr     error
 }
@@ -91,7 +93,7 @@ func (l *fakeLaunchd) Bootout(_ context.Context, label string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.loaded[label] = false
-	return nil
+	return l.bootoutErr
 }
 
 func (l *fakeLaunchd) Bootstrap(_ context.Context, plist string) error {
@@ -357,5 +359,60 @@ func TestRestartSidecarSurfacesAFailedKickstart(t *testing.T) {
 	// Assert
 	if err == nil || !loggedTo(h.log, "error", "the sidecar kickstart failed") {
 		t.Fatalf("RestartSidecar = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
+	}
+}
+
+func TestRestartStoreBootoutAnswers(t *testing.T) {
+	tests := []struct {
+		name      string
+		bootout   error
+		wantLevel string
+		wantMsg   string
+	}{
+		{
+			name:      "a sidecar already gone at the bootout is recorded at INFO",
+			bootout:   fmt.Errorf("%w: launchctl bootout exited 113", ErrServiceNotLoaded),
+			wantLevel: "info",
+			wantMsg:   "had already left the user domain",
+		},
+		{
+			name:      "any other bootout failure is a WARN while launchd's view decides",
+			bootout:   errors.New("deploy: launchctl bootout exited 5"),
+			wantLevel: "warn",
+			wantMsg:   "bootout answered an error",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			h.launchd.bootoutErr = tc.bootout
+			h.launchd.onKickstart = func() { h.bindSocket(t) }
+
+			// Act
+			err := h.r.RestartStore(context.Background())
+
+			// Assert
+			if err != nil || !loggedTo(h.log, tc.wantLevel, tc.wantMsg) {
+				t.Fatalf("RestartStore = %v, records %+v; want %s %q", err, h.log.Records(), tc.wantLevel, tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestRestartStoreRecordsNoWarningWhenTheSidecarWasAlreadyGone(t *testing.T) {
+	// Arrange
+	h := newRestarter(t)
+	h.launchd.bootoutErr = fmt.Errorf("%w: launchctl bootout exited 113", ErrServiceNotLoaded)
+	h.launchd.onKickstart = func() { h.bindSocket(t) }
+
+	// Act
+	err := h.r.RestartStore(context.Background())
+
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "warn" || r.Level == "error" {
+			t.Fatalf("RestartStore = %v, record %+v; want nothing above INFO", err, r)
+		}
 	}
 }
