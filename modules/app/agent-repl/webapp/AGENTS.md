@@ -99,7 +99,7 @@ and are contract on the same terms:
 | `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held`; cap `feed` \| `2` \| `0` | one-bubble, 2026-09-23 |
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
-| `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId) and `data-jump-unresolved` (`notDrawn` \| `noFeedEntry`) | footer-rows-and-work-ids, 2026-09-23 |
+| `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId: a subagent's bubble, a shell's head, a monitor's Monitor tool-call card) and `data-jump-unresolved` (`notDrawn`; `noFeedEntry` is retired, owner ruling 2026-09-23) | footer-rows-and-work-ids, 2026-09-23 |
 | `.bubble-expand-only` class | every element of a bubble's expand-only region (`expandOnly` in src/bubble/draw.ts), after the scroll box | — (hidden while the sibling `.bubble-scroll` is not `.expanded`; a held prompt's one `.queued-details` element — queued age, rationale or failure detail, actions — wears it) | held-prompt-compact-badges, 2026-09-23 |
 | `data-held-status` + `.held-badge` class | every status badge in a held prompt's header strip (a `.badge`) | the status: a `classification` arm, a `hold` arm, or `accepted`; its tone class comes from `HELD_STATUS_BADGES` (src/tray/held-prompt.ts), the one table | held-prompt-compact-badges, 2026-09-23 |
 | `data-held-action="release"` | the held card's release control | `release` — the wire verb and the hook; the control is LABELLED "Send now" (`SEND_NOW_LABEL`, src/tray/held-prompt.ts), which is also its accessible name, and its forbidding-arm tooltips (`NO_RELEASE_TITLES`) say "send", never "release" | send-now-label, 2026-09-23 |
@@ -328,7 +328,10 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   writes `footer.expanded.jump-unreachable` with `work_id`, `kind`, `feed_id`,
   `jump` and `reason`. The notice is the footer mount's state
   (`JumpNotices`), painted by every draw — never a mark on the clicked
-  element, which the next whole-view push throws away.
+  element, which the next whole-view push throws away. A MONITOR's entry is
+  its Monitor call's ordinary tool-call card (owner ruling, 2026-09-23): the
+  webapp draws it as any tool card and holds no monitor knowledge; the click
+  centers it (`detachedWorkSelected`) and rings it with `.entry-selected`.
 - **A COLLAPSED BUBBLE HOLDS NOTHING** (owner ruling, 2026-09-23). Expanding a
   subagent or async bubble paints the sub-feed's newest `OpenFeed` page and
   tails it; collapsing disposes the child controller, its rows and the
