@@ -5,7 +5,8 @@
  * ends of the delivery (the sender's outgoing send and the recipient's
  * delivered prompt), because the daemon composes the address line for whichever
  * feed it resolved. So this reuses the prompt bubble's own shape and body
- * vocabulary, and wears the ORANGE border the schema names for it.
+ * vocabulary, and wears the one AMBER agent-to-agent border
+ * (`--agent-prompt-border`, owner ruling 2026-09-23), as a peer message does.
  *
  * WHY NOT ONE FUNCTION FOR BOTH KINDS. They are two messages with two
  * different fields where the attribution goes (`author` vs `address`), and the
@@ -44,8 +45,8 @@ export const DELIVERY_WORDS = {
 } as const satisfies Record<string, string>;
 
 /**
- * The agent-addressed prompt bubble: the prompt bubble's chrome plus the
- * orange marker class, with the composed address line where the user kind
+ * The agent-addressed prompt bubble: the prompt bubble's chrome in the agent
+ * variant (the amber border), with the composed address line where the user kind
  * draws its author.
  */
 export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement): HTMLElement {

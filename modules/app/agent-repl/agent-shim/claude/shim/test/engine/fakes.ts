@@ -433,9 +433,21 @@ export class RecordingPersistence implements Persistence {
     this.closedPages++;
     return Promise.resolve(this.page);
   }
-  readAgentPage(): Promise<conversationv1.HistoryPage> {
+  /**
+   * The older pages `readAgentPage` serves, oldest last, one per call; when
+   * none are queued it serves `page`, as it always did.
+   */
+  olderPages: conversationv1.HistoryPage[] = [];
+  /** Every pointer an older-page read walked down from, in order. */
+  readonly olderPageAfter: string[] = [];
+  readAgentPage(
+    _agent?: conversationv1.AgentId,
+    _pageSize?: number,
+    after?: conversationv1.HistoryPointer,
+  ): Promise<conversationv1.HistoryPage> {
     if (this.readError !== undefined) return Promise.reject(this.readError);
-    return Promise.resolve(this.page);
+    this.olderPageAfter.push(after?.value ?? "");
+    return Promise.resolve(this.olderPages.shift() ?? this.page);
   }
   /** The session every live-work read was scoped to, in order. */
   readonly liveWorkSessions: string[] = [];

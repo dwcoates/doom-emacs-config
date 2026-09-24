@@ -547,6 +547,35 @@ export function createFakeQuery(
   let resultEmitted = false;
   let promptId = opts.newUuid();
   let releaseInterrupt: (() => void) | null = null;
+  /**
+   * THE SEND THIS TURN ANSWERS, as the vendor echoes it (sdk.d.ts,
+   * `user_message_uuid`): the client `uuid` the send carried, stamped on the
+   * turn's first top-level stream event, its first top-level assistant message
+   * and its result. Absent for a send that carried none, and for a turn the
+   * vendor started on its own — which is exactly what the real CLI does.
+   */
+  let answering: string | undefined;
+  let streamStamped = false;
+  let assistantStamped = false;
+  /**
+   * A turn the vendor will run ON ITS OWN, ahead of the next send — the
+   * background-task notification turn of the real CLI. Queued by a scenario
+   * (`queueVendorTurn`), spent before the next send's own turn.
+   */
+  let vendorTurnQueued = false;
+
+  /** The echo a reply frame carries, once per frame kind, per turn. */
+  const echo = (kind: "stream" | "assistant" | "result"): Record<string, unknown> => {
+    if (answering === undefined) return {};
+    if (kind === "stream") {
+      if (streamStamped) return {};
+      streamStamped = true;
+    } else if (kind === "assistant") {
+      if (assistantStamped) return {};
+      assistantStamped = true;
+    }
+    return { user_message_uuid: answering, user_message_uuids: [answering] };
+  };
 
   const out = new AsyncQueue<SdkMessage>();
   opts.abortSignal?.addEventListener("abort", () => out.end(), { once: true });
@@ -596,6 +625,8 @@ export function createFakeQuery(
       // A fake message_start models the same SDK timing contract as a live one,
       // so the real ephemeral-correlation path stays exercised.
       ...(event.type === "message_start" ? { ttft_ms: 1 } : {}),
+      // Subagent frames are never stamped.
+      ...(streamParentToolUseId === null ? echo("stream") : {}),
     });
 
   const mintMessageId = (): string => `msg_fake_${spawnTag}_${++messageCounter}`;
@@ -829,6 +860,7 @@ export function createFakeQuery(
         timestamp,
         ...(options.error === undefined ? {} : { error: options.error }),
         ...(options.aborted === true ? { aborted: true } : {}),
+        ...(options.agent === undefined ? echo("assistant") : {}),
         ...(options.agent === undefined
           ? {}
           : {
@@ -1038,6 +1070,7 @@ export function createFakeQuery(
     // value. Two uuids would put one turn's ending in the book twice.
     const uuid = opts.newUuid();
     emitWithUuid(uuid, {
+      ...echo("result"),
       type: "result",
       subtype: spec.subtype,
       is_error: spec.subtype !== "success",
@@ -1082,6 +1115,7 @@ export function createFakeQuery(
       // emitting it on success results alone left every `!api-*` row reaching
       // the `unmodeled` kind -- the twelve statuses were indistinguishable.
       api_error_status: spec.apiErrorStatus ?? null,
+      ...(spec.origin === undefined ? {} : { origin: spec.origin }),
       ...(spec.subtype === "success"
         ? {
             result: spec.result ?? "",
@@ -1339,6 +1373,13 @@ export function createFakeQuery(
       // it rather than carrying a stale explanation.
       fastModeDisabledReason = state === "on" ? undefined : reason;
     },
+    queueVendorTurn: () => {
+      LOGGER.debug(
+        { claude_session_id: sessionUuid },
+        "fake vendor queued a turn of its OWN, to run ahead of the next send",
+      );
+      vendorTurnQueued = true;
+    },
     fallbackTo: (next) => {
       LOGGER.debug(
         { claude_session_id: sessionUuid, previous_model: model, model: next },
@@ -1347,6 +1388,23 @@ export function createFakeQuery(
       model = next;
     },
     log: LOGGER.with({ claude_session_id: sessionUuid }),
+  };
+
+  /**
+   * A TURN NO SEND STARTED: the background-task notification turn the real
+   * CLI runs by itself. It answers nothing, so nothing in it is stamped, and
+   * its result says where it came from (`origin`, sdk.d.ts).
+   */
+  const runVendorTurn = (): void => {
+    turn++;
+    resultEmitted = false;
+    answering = undefined;
+    LOGGER.info(
+      { claude_session_id: sessionUuid, turn },
+      "fake vendor runs a turn of its OWN before the next send; nothing in it is stamped",
+    );
+    assistant([{ type: "text", text: "A background task finished." }], { stopReason: "end_turn" });
+    result({ subtype: "success", result: "A background task finished.", origin: { kind: "task-notification" } });
   };
 
   const promptTextOf = (message: SdkUserMessage): string => {
@@ -1451,10 +1509,17 @@ export function createFakeQuery(
         );
         emitInit();
       }
+      if (vendorTurnQueued) {
+        vendorTurnQueued = false;
+        runVendorTurn();
+      }
       turn++;
       interrupted = false;
       resultEmitted = false;
       promptId = opts.newUuid();
+      answering = userMessage.uuid;
+      streamStamped = false;
+      assistantStamped = false;
       const text = promptTextOf(userMessage);
       await awaitTurnGate(text, awaitInterrupt);
       if (out.isEnded) return;

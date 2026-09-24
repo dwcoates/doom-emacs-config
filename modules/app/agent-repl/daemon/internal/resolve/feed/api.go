@@ -190,7 +190,9 @@ type Resolver interface {
 	// resolve their breadcrumbs. The resolver calls it for subagent bubbles
 	// itself; the merge orchestrator calls it for the merge head it
 	// synthesizes, because only the orchestrator knows the branch line.
-	MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, sub feedid.Feed, label string)
+	// HEADFEED is the feed the head row is drawn ON: the crumb chain climbs
+	// through it, so it is stated by the caller rather than searched for.
+	MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string)
 }
 
 // PortedPrompt is one prompt a FORK carried over from its parent: a question
@@ -270,6 +272,18 @@ type Deps struct {
 	// log as the only record, which is what a test that is not about the topbar
 	// wants.
 	Warnings WarningRaiser
+	// EntryPlaced is told the FeedId of every detached-work-capable entry the
+	// moment the feed first draws it, and again whenever that FeedId changes:
+	// a subagent bubble keyed by its spawn unit, a shell bubble's head keyed by
+	// its work id. It is how the footer's jump rows name the entry ON THE FEED
+	// THAT DRAWS IT (a subagent of a subagent is on its parent's sub-feed, not
+	// the root) instead of guessing an address.
+	//
+	// CALLED WITH THE RESOLVER'S LOCK HELD, the same order the fault path
+	// already takes (feed, then footer): the receiver must never call back
+	// into this resolver. nil tells nobody, which is what a test that is not
+	// about the footer wants.
+	EntryPlaced func(ws ids.WorkspaceID, unit string, row *frontendv1.FeedId)
 	// PageSize is how many rows a page carries. Defaults to DefaultPageSize.
 	PageSize int
 	// TailRetention is how many published rows a feed retains for a tail's

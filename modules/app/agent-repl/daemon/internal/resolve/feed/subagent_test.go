@@ -2947,3 +2947,176 @@ func TestARestatedMoveKeepsTheHeadWhereAndWhenItWasSpawned(t *testing.T) {
 		}
 	}
 }
+
+// ---- the detached-work id and the entry placement ---------------------------
+
+func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	tests := []struct {
+		name string
+		act  func(h *harness) *frontendv1.FeedDetachedWorkId
+		want string
+	}{
+		{
+			name: "a synchronous spawn names no work",
+			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
+				return bubbleOf(h.spawnSubagent("spawn-1", created, "Explore", "map")).GetWorkId()
+			},
+			want: "",
+		},
+		{
+			name: "a spawn that detached names the announcement's handle",
+			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
+				h.spawnSubagent("spawn-1", created, "Explore", "map")
+				h.detachWork("work-1", "spawn-1")
+				return bubbleOf(h.bubbleRow("spawn-1", created)).GetWorkId()
+			},
+			want: "work-1",
+		},
+		{
+			name: "a detachment announced before the spawn drew is named once it draws",
+			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
+				h.detachWork("work-1", "spawn-1")
+				return bubbleOf(h.spawnSubagent("spawn-1", created, "Explore", "map")).GetWorkId()
+			},
+			want: "work-1",
+		},
+		{
+			name: "a subagent created detached names its own handle",
+			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
+				h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+					Work: &conversationv1.DetachedWorkId{Value: "work-7"},
+					Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+						WorkCreated: &conversationv1.DetachableWork{
+							Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
+								Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+									CreatedAgentId: created,
+									Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go"},
+									StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+								}},
+							}},
+						},
+					}},
+				}, noAddress())
+				return bubbleOf(h.rows(rootFeed())[0]).GetWorkId()
+			},
+			want: "work-7",
+		},
+		{
+			name: "a shell head names its work",
+			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
+				h.bash("work-3", &conversationv1.AgentBashStart{
+					Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				})
+				return h.shellHead().GetWorkId()
+			},
+			want: "work-3",
+		},
+		{
+			name: "a shell's spool body names none",
+			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
+				h.bash("work-3", &conversationv1.AgentBashStart{
+					Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				})
+				h.bash("work-3", &conversationv1.AgentBashUpdate{NewOutput: "ok\n", FromOffset: 0})
+				return h.shellBody("work-3").GetWorkId()
+			},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			got := tt.act(h)
+
+			// Assert
+			if got.GetText() != tt.want {
+				t.Fatalf("work id = %q, want %q", got.GetText(), tt.want)
+			}
+			if tt.want == "" && got != nil {
+				t.Fatalf("work id element = %+v, want it unset", got)
+			}
+		})
+	}
+}
+
+func TestAnEntryIsAnnouncedOnTheFeedThatDrawsIt(t *testing.T) {
+	// Arrange: a subagent spawned by the main agent, then one spawned BY it.
+	h := newHarness(t)
+	outer := &conversationv1.AgentId{Value: "agent-outer"}
+	inner := &conversationv1.AgentId{Value: "agent-inner"}
+	h.spawnSubagent("spawn-outer", outer, "opus", "lead")
+	prompt := &conversationv1.AgentSubagentPrompt{Text: "go"}
+
+	// Act: the nested spawn arrives on the OUTER agent's stream.
+	h.resolver.OnActivity(testWorkspace, outer, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-inner"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: inner, Prompt: prompt,
+				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}},
+		}},
+	}, noAddress())
+
+	// Assert
+	want := testEncode(feedid.Ref{
+		WS: testWorkspace, Feed: feedid.Feed{Agent: outer},
+		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "spawn-inner", Sub: "agent-inner"},
+	}).GetValue()
+	last := h.placed[len(h.placed)-1]
+	if last.unit != "spawn-inner" || last.row != want {
+		t.Fatalf("placed = %+v, want spawn-inner at %q on the outer agent's sub-feed", last, want)
+	}
+}
+
+func TestARedrawAtTheSameAddressAnnouncesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map")
+	before := len(h.placed)
+
+	// Act
+	h.progressBeat("spawn-1", 10)
+
+	// Assert
+	if len(h.placed) != before || before != 1 {
+		t.Fatalf("placements = %d then %d, want exactly one for the first draw", before, len(h.placed))
+	}
+}
+
+func TestAShellHeadIsAnnouncedByItsWorkId(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	h.bash("work-3", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert
+	if len(h.placed) != 1 || h.placed[0].unit != "work-3" {
+		t.Fatalf("placed = %+v, want the shell head announced under its work id", h.placed)
+	}
+}
+
+// A DETACHED SHELL'S FAILURE RESTATES ITS COMMAND, as the success does, so a
+// head drawn from the ending alone still names what ran.
+func TestADetachedShellsFailureNamesTheCommandItRestated(t *testing.T) {
+	// Arrange, Act: the ending alone, as a replay serves it.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashFailure{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Error:   &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000}},
+	})
+
+	// Assert.
+	if got := h.shellHead().GetCommand().GetText(); got != "npm run dev" {
+		t.Fatalf("command = %q, want the restated command", got)
+	}
+}

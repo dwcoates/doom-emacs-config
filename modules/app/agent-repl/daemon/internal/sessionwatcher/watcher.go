@@ -130,7 +130,7 @@ type watcher struct {
 
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
-	// viewsMain is the main agent the FEED AND FOOTER were last told
+	// viewsMain is the main agent the FEED was last told
 	// (nameMainForViewsLocked). It is learned from StartTurn's naming AND from
 	// the main watch itself — every frame that watch carries is the main
 	// agent's — so the views know the root's owner before they route the first
@@ -508,7 +508,7 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 	}
 }
 
-// nameMainForViewsLocked tells the feed and the footer which agent is the
+// nameMainForViewsLocked tells the feed which agent is the
 // session's main one, once per distinct naming.
 //
 // THE ROOT IS THE MAIN AGENT'S FEED AND NOTHING ELSE'S. The feed used to latch
@@ -535,12 +535,11 @@ func (w *watcher) nameMainForViewsLocked(agent *conversationv1.AgentId, source s
 			"previous_agent_id": before, "agent_id": agent.GetValue(), "source": source,
 		})
 	} else {
-		w.log.Info("daemon.sessionwatcher.views_main_agent", "the feed and footer were told the session's main agent", dlog.Context{
+		w.log.Info("daemon.sessionwatcher.views_main_agent", "the feed was told the session's main agent", dlog.Context{
 			"agent_id": agent.GetValue(), "source": source,
 		})
 	}
 	w.sinks.Feed.OnMainAgent(w.ws, agent)
-	w.sinks.Footer.OnMainAgent(w.ws, agent)
 }
 
 // OnTurnOpening records the turn a caller is about to hand to the shim. See

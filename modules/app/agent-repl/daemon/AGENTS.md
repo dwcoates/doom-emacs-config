@@ -368,6 +368,19 @@ ids the watcher ADOPTED (an `OnDetachedWork` with no announcer, the one shape
 adoption takes) and ids already retired (a replay). A re-take of the same set
 mints nothing, and crons, tasks and workflows are never in the set.
 
+### A footer jump names the entry THE FEED drew
+
+Every detached-work row the footer publishes states a `FooterJump`: the
+entry's FeedId, or `unresolved` with the reason (`not_drawn`,
+`no_feed_entry`). The FeedId is never composed by the footer. The feed
+resolver announces each subagent bubble's and shell head's FeedId the moment it
+first draws it, and again when it changes (`feed.Deps.EntryPlaced`, wired in
+`graph.go` to `footer.OnEntryPlaced`). A subagent of a subagent lives on its
+parent's sub-feed, and only the feed knows that. The call runs under the feed's
+lock and takes the footer's, which is the same feed-then-footer order the fault
+path already takes. The footer never calls back into the feed. Each row's
+resolution change is recorded as `daemon.footer.jump_resolution`.
+
 ## History is replayed ONLY on a workspace open or a transcript select
 
 Owner rule, 2026-09-23: history is replayed only when a workspace is OPENED or
@@ -577,6 +590,23 @@ The integration fakes conclude turns through `pushConcludedTurn`, which pushes
 the answering response block BEFORE the terminal that names it: a real producer
 never names an answer it did not emit, and a fake that pushes the terminal alone
 trips rule 2(b) — correctly.
+
+## A thinking row is superseded once a later response lands in its feed
+
+Owner rule, 2026-09-23. `FeedResponse.superseded` is set on a THINKING row
+exactly when some response row (thinking, prose or a final answer) sorts after
+it in the SAME feed; tool calls, prompts and every other row kind never count.
+It is decided in one place, `internal/resolve/feed/superseded.go`:
+
+- The feed keeps a per-feed record, updated only at the two structural edges
+  (a response row PLACED, a response row RETIRED), and `upsert` stamps the flag
+  from it on every draw, so a later fragment of a superseded fold keeps it.
+- Placing a response supersedes the nearest earlier thinking row and RE-PUSHES
+  it after the new row's own publication; a thinking row placed above a later
+  response (older history over live rows) is placed superseded. Retiring the
+  only later response re-pushes the thinking row un-superseded.
+- Pages serve the stored rows, so replay, pages and live agree; a sub-feed
+  follows the rule within itself and never across feeds.
 
 ## Conventions
 
