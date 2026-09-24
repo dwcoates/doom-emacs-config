@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -256,19 +257,37 @@ func TestWriteBatchRefusesUnparsedResidueWithEmptyRawBytes(t *testing.T) {
 	}
 }
 
-func TestKeepaliveResidueNeedsNoRawRecord(t *testing.T) {
-	// Arrange: a keep-alive is a WELL-FORMED fact with no book, not material
-	// that failed to convert — there is nothing verbatim to preserve.
+func TestAKeepaliveIsRefusedAsRetired(t *testing.T) {
+	// Arrange: nothing of a keep-alive is stored on either plane, and a held
+	// one claimed an upsert_key a real record later needed.
 	d, _ := newStore(t)
 
 	// Act
-	writeOK(t, d, unservedEntry("w1", "u1", &storev1.StoreUnservedItem{
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1", &storev1.StoreUnservedItem{
 		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")},
-	}))
+	})), nil)
 
 	// Assert
-	if got := scalar[string](t, d, `SELECT kind FROM entry WHERE upsert_key = 'u1'`); got != kindKeepalive {
-		t.Fatalf("kind = %q, want %q", got, kindKeepalive)
+	if !errors.Is(err, ErrInvalid) || RefusalSite(err) != SiteKeepaliveRetired {
+		t.Fatalf("WriteBatch = %v (site %q), want ErrInvalid at %q", err, RefusalSite(err), SiteKeepaliveRetired)
+	}
+}
+
+func TestARefusedKeepaliveWritesNoRow(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1", &storev1.StoreUnservedItem{
+		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")},
+	})), nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("WriteBatch accepted a keep-alive")
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = 'u1'`); got != 0 {
+		t.Fatalf("rows = %d, want the refused keep-alive to write none", got)
 	}
 }
 
