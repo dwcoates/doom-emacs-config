@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/wsm"
 )
 
 // THE TAKEOVER RECOVERS WHAT NOTHING ADOPTED. A cold-started daemon's handover
@@ -171,5 +172,51 @@ func TestTheTakeoverLeavesAHandedOverWorkspaceToItsRendezvous(t *testing.T) {
 	// Assert
 	if got := records(h.log, opOrphans); len(levelRecords(got, dlog.LevelInfo)) != 0 {
 		t.Fatalf("orphan INFO records = %+v, want the sweep to leave a handed-over workspace alone", got)
+	}
+}
+
+func TestTheTakeoverClaimsAnOrphanOnTheJoiningReadOnlyHandle(t *testing.T) {
+	// Arrange: a successor handed NOTHING never promoted its handle inside
+	// an adoption, so the takeover is the first writer it has (live deploy
+	// 2026-09-24 15:07, `wsm: handle is read-only` x3).
+	h := newHarness(t)
+	ws := orphan(t, h)
+	h.joiningHandle(t)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Serving: %v", err)
+	}
+	if owner == nil || *owner != selfInstance {
+		t.Fatalf("serving owner = %q, want this daemon: the takeover promotes before it claims", ownerText(owner))
+	}
+}
+
+// refusingPromote is a state client whose promotion fails.
+type refusingPromote struct{ wsm.DB }
+
+func (refusingPromote) Promote(context.Context) error {
+	return errors.New("arranged: the writing handle could not be opened")
+}
+
+func TestATakeoverThatCannotPromoteRecoversNoOrphan(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	orphan(t, h)
+	h.c.deps.DB = refusingPromote{DB: h.db}
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want no shim adopted whose claim could not be written", got)
+	}
+	if errs := levelRecords(records(h.log, opAdopt), dlog.LevelError); len(errs) != 1 {
+		t.Fatalf("takeover ERROR records = %d, want exactly one naming the refused promotion", len(errs))
 	}
 }
