@@ -39,7 +39,7 @@
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_CLAUDE_BIN                 the claude binary for the login pty and the classifier
-//	AGENT_REPL_DEPLOY_SCRIPT              overrides bin/deploy-all.sh for the self-reload trigger
+//	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's stages what runs)
 //
 // Fake-shim-only (read by the fake, never by the daemon; they ride the
 // daemon's own environment into the spawned shim):
@@ -210,6 +210,9 @@ func mainIn(m *testing.M, module, root string) int {
 func newPinnedCheckout(dir, repo string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir the pinned checkout %s: %w", dir, err)
+	}
+	if err := writePinnedConfig(dir); err != nil {
+		return "", fmt.Errorf("lay the elisp loader into the pinned checkout %s: %w", dir, err)
 	}
 	link := filepath.Join(dir, "proto")
 	if err := os.Symlink(filepath.Join(repo, "proto"), link); err != nil && !errors.Is(err, fs.ErrExist) {

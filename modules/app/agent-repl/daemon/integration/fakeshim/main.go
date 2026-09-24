@@ -386,6 +386,11 @@ func (p *process) apply(line []byte) Reply {
 		if err := proto.Unmarshal(payload, u); err != nil {
 			return Reply{Error: fmt.Sprintf("fakeshim: decode session update: %v", err)}
 		}
+		// EVERY DIAGNOSTICS FRAME STATES THE SHIM'S BUILD, as the real shim's
+		// do: a test pushing a verdict need not restate it.
+		if diagnostics := u.GetDiagnostics(); diagnostics != nil && diagnostics.GetShimBuild() == "" {
+			diagnostics.ShimBuild = p.srv.buildSHA()
+		}
 		p.srv.sessions.publish(u)
 		return Reply{OK: true, Count: p.srv.sessions.count()}
 

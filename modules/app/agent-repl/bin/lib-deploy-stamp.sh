@@ -5,8 +5,8 @@
 # Opt-in (`-o all`) style checks, declined for the same reasons spelled out at
 # the top of build-frontend.sh.
 #
-# lib-deploy-stamp.sh — the stamp vocabulary shared by build-frontend.sh,
-# deploy-all.sh, and readiness-report.sh. Sourced, never executed.
+# lib-deploy-stamp.sh — the stamp vocabulary shared by build-frontend.sh and
+# readiness-report.sh. Sourced, never executed.
 #
 # There are THREE INDEPENDENT stamp families here and conflating them is the
 # whole reason this file exists:
@@ -17,11 +17,13 @@
 #      behind master a deployed artifact is. They say nothing about whether
 #      anything is running that image.
 #
-#   2. DEPLOYED-FINGERPRINT stamps (`.<name>.deployed`) answer "is the RUNNING
-#      launchd service executing the installed binary". Written by deploy-all.sh
-#      at kickstart time, and they are the bounce-detection signal — never
-#      rewrite one from a build step, or a `--no-bounce` install would look
-#      deployed while the live process still serves the old image.
+#   2. SERVICE BUILD REPORTS (`<run dir>/<name>.build.json`) answer "is the
+#      RUNNING launchd service executing the installed binary". Written by the
+#      service ITSELF at boot (agent-shim/logging/go/buildreport): its pid and
+#      the sha256 of the binary it was exec'd from. They are the
+#      bounce-detection signal, and nothing here ever writes one — a report
+#      written by anyone but the running process could say it runs a build it
+#      does not.
 #
 #   3. SOURCE-TREE stamps (`.source-tree` beside each artifact) answer "which
 #      SOURCE CONTENT is this artifact built from". They are what decides
@@ -33,8 +35,9 @@
 #      the gate reporting a system behind while the build insisted it was fresh
 #      and refused to rebuild it.
 #
-# Family 1 is additive; family 2 is pre-existing and must keep its exact
-# semantics. All three live here so the scripts cannot drift apart on any.
+# Family 2's file is owned by the Go package above, which the daemon's deploy
+# (daemon/internal/deploy) reads too; the shape read here is that package's.
+# All three live here so the scripts cannot drift apart on any.
 
 # ---- family 1: built-sha stamps -------------------------------------------
 
@@ -117,32 +120,66 @@ built_sha_is_dirty() {
 # built_sha_commit VALUE — echo the bare 40-hex commit, dirty marker stripped.
 built_sha_commit() { printf '%s\n' "${1%-dirty}"; }
 
-# ---- family 2: deployed-fingerprint stamps --------------------------------
+# ---- family 2: service build reports --------------------------------------
 
 binary_fingerprint() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
-# service_needs_bounce CACHE_BIN NAME — return 0 when the RUNNING service is
-# not executing the installed binary.
-#
-# A stamp written at kickstart time, NOT "did this build change the file".
-# Those are different questions, and conflating them is a real failure mode: a
-# `--no-bounce` run installs a new binary without restarting anything, so the
-# next run's build is "unchanged" while the live process is still on the old
-# image — and the deploy silently skips the bounce the user asked for.
-#
-# A MISSING installed binary is not "in sync": there is nothing to be in sync
-# with, so say bounce and let the caller decide.
-service_needs_bounce() {
-    local cache_bin="$1" name="$2"
-    local stamp="$cache_bin/.$name.deployed"
-    [ -f "$cache_bin/$name" ] || return 0
-    [ -f "$stamp" ] || return 0
-    [ "$(binary_fingerprint "$cache_bin/$name")" = "$(cat "$stamp")" ] && return 1
-    return 0
+# service_report_dir — the run directory the services write their reports in:
+# $AGENT_REPL_LOCK_DIR when set, else ~/.cache/agent-repl/run. The same rule as
+# buildreport.ResolveDir, so a harness that isolates the kernel locks isolates
+# the reports with them.
+service_report_dir() {
+    if [ -n "${AGENT_REPL_LOCK_DIR:-}" ]; then
+        printf '%s\n' "$AGENT_REPL_LOCK_DIR"
+    else
+        printf '%s\n' "$HOME/.cache/agent-repl/run"
+    fi
 }
 
-record_service_deployed() {
-    binary_fingerprint "$1/$2" > "$1/.$2.deployed"
+# read_service_report FILE — echo "<pid> <build>" from a report, or return 1
+# when it does not parse.
+#
+# The report is written by Go's encoding/json from a two-field struct, so its
+# shape is exact and compact: {"pid":<n>,"build":"<hex>"}. A sed over that
+# shape is the whole parser; anything else — a truncated file, a hand edit, a
+# future field — fails to match and is reported as unparseable, never read as
+# a partial answer.
+read_service_report() {
+    local parsed
+    parsed="$(sed -n 's/^{"pid":\([1-9][0-9]*\),"build":"\([0-9a-f]\{64\}\)"}$/\1 \2/p' "$1" 2>/dev/null)"
+    [ -n "$parsed" ] || return 1
+    printf '%s\n' "$parsed"
+}
+
+# service_needs_bounce CACHE_BIN NAME — return 0 when the RUNNING service is
+# not executing the installed binary, 1 when it is.
+#
+# The authority is the service's own report, not "did this build change the
+# file": an install that restarted nothing leaves a new binary on disk while
+# the live process still serves the old image, and only the process can say
+# which one it runs. Needs a bounce when ANY of these holds:
+#   - the installed binary CACHE_BIN/NAME is missing: there is nothing to be in
+#     sync with, so say bounce and let the caller decide;
+#   - no report exists: the service never booted, or predates reporting;
+#   - the report does not parse (also warned on stderr — a report that exists
+#     and cannot be read is a fault, never silently fresh);
+#   - the reporting pid is not alive: nothing is running that build;
+#   - the reported build is not the sha256 of the installed binary.
+service_needs_bounce() {
+    local cache_bin="$1" name="$2"
+    local report parsed pid build
+    [ -f "$cache_bin/$name" ] || return 0
+    report="$(service_report_dir)/$name.build.json"
+    [ -f "$report" ] || return 0
+    if ! parsed="$(read_service_report "$report")"; then
+        echo "lib-deploy-stamp: WARNING: unparseable service build report $report; treating $name as needing a bounce" >&2
+        return 0
+    fi
+    pid="${parsed%% *}"
+    build="${parsed#* }"
+    kill -0 "$pid" 2>/dev/null || return 0
+    [ "$(binary_fingerprint "$cache_bin/$name")" = "$build" ] && return 1
+    return 0
 }
 
 # ---- family 3: source-tree stamps ------------------------------------------

@@ -1618,20 +1618,6 @@ describe("the keep-alive turn serves nothing", () => {
       session_id: "s",
     }) as never;
 
-  /** The StartTurn refusal's `turn_already_open.keepalive`, or absence. */
-  async function refusedBehindKeepalive(h: Harness, turnId: string): Promise<boolean | undefined> {
-    const response = await h.engine.startTurn(
-      create(shimv1.StartTurnRequestSchema, {
-        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
-        said: textSaid("go"),
-        origin: conversationv1.PromptOrigin.USER_SENT,
-        pageSize: 5,
-      }),
-    );
-    if (response.result.case !== "failure") return undefined;
-    const kind = response.result.value.kind;
-    return kind.case === "turnAlreadyOpen" ? kind.value.keepalive : undefined;
-  }
 
   it("sends the keep-alive with a client uuid of its own", async () => {
     // Arrange
@@ -1839,8 +1825,8 @@ describe("the keep-alive turn serves nothing", () => {
     // Act
     await h.engine.onSdkMessage(resultMessage("vendor-result"));
 
-    // Assert
-    expect(await refusedBehindKeepalive(h, "turn-1")).toBe(true);
+    // Assert: a real prompt still waits behind the keep-alive.
+    expect(await settledSoon(startDuring(h, "turn-1"))).toBe(false);
   });
 
   it("keeps the keep-alive's answer off every page when it arrives after a vendor turn", async () => {
@@ -1868,8 +1854,8 @@ describe("the keep-alive turn serves nothing", () => {
     // Act
     await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
 
-    // Assert: the next real prompt is accepted, not refused behind the keep-alive.
-    expect(await refusedBehindKeepalive(h, "turn-1")).toBeUndefined();
+    // Assert: the next real prompt is accepted at once.
+    expect((await startDuring(h, "turn-1")).result.case).toBe("success");
   });
 
   it("leaves a real turn right after a keep-alive tagged as served", async () => {
@@ -2003,6 +1989,302 @@ describe("the keep-alive turn serves nothing", () => {
     expect(logContextFor(before, "a keep-alive's turn scope closed WITHOUT its answer")?.reason).toMatch(
       /^the vendor query died/,
     );
+  });
+});
+
+/**
+ * A REAL PROMPT THAT ARRIVES DURING A KEEP-ALIVE (2026-09-23).
+ *
+ * WHAT THIS GUARDS: the keep-alive is invisible outside the shim, so a
+ * StartTurn that lands while one runs — before its send, mid-stream, or as
+ * its result arrives — is never refused: it waits inside the shim and opens its
+ * turn once the keep-alive leaves the slot, delivering its prompt exactly once
+ * and after the keep-alive's send.
+ */
+describe("a real prompt that arrives during a keep-alive", () => {
+  it("before the keep-alive is sent: the start is accepted once the keep-alive answers", async () => {
+    // Arrange: the beat has claimed the slot but not yet pushed its send.
+    const h = harness({ drainSends: [] });
+    await started(h);
+    h.scheduler.fire(0);
+    const starting = startDuring(h, "turn-1");
+    await drainTurns();
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect((await starting).result.case).toBe("success");
+  });
+
+  it("before the keep-alive is sent: the keep-alive goes first and the prompt exactly once after", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    h.scheduler.fire(0);
+    const starting = startDuring(h, "turn-1");
+    await drainTurns();
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await starting;
+    await drainTurns();
+
+    // Assert
+    expect(sendKinds(sends)).toEqual(["keepalive", "real"]);
+  });
+
+  it("mid-stream: the start waits while the keep-alive is still answering", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+
+    // Act
+    const starting = startDuring(h, "turn-1");
+
+    // Assert
+    expect(await settledSoon(starting)).toBe(false);
+  });
+
+  it("mid-stream: the keep-alive's result releases the start, which is accepted", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+    const starting = startDuring(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect((await starting).result.case).toBe("success");
+  });
+
+  it("mid-stream: the prompt is sent exactly once, after the keep-alive", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+    const starting = startDuring(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await starting;
+    await drainTurns();
+
+    // Assert
+    expect(sendKinds(sends)).toEqual(["keepalive", "real"]);
+  });
+
+  it("at the keep-alive's result: a start arriving with it is accepted", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+
+    // Act: the result and the start race.
+    const closing = h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    const starting = startDuring(h, "turn-1");
+    await closing;
+
+    // Assert
+    expect((await starting).result.case).toBe("success");
+  });
+
+  it("at the keep-alive's result: the prompt is sent exactly once, after the keep-alive", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+
+    // Act
+    const closing = h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    const starting = startDuring(h, "turn-1");
+    await Promise.all([closing, starting]);
+    await drainTurns();
+
+    // Assert
+    expect(sendKinds(sends)).toEqual(["keepalive", "real"]);
+  });
+
+  it("at the keep-alive's result: the prompt still rides the rewind to the last real record", async () => {
+    // Arrange: a real turn leaves the anchor; the keep-alive after it is the debt.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-assistant-uuid")]);
+    h.scheduler.fire(0);
+    await drainTurns();
+
+    // Act
+    const closing = h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    const starting = startDuring(h, "turn-1");
+    await Promise.all([closing, starting]);
+
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-assistant-uuid");
+  });
+
+  it("mid-stream: the prompt rides the rewind to the last real record", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-assistant-uuid")]);
+    h.scheduler.fire(0);
+    await drainTurns();
+    const starting = startDuring(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await starting;
+
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-assistant-uuid");
+  });
+
+  it("names the real turn, never the keep-alive's, as the turn in flight once it opens", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+    const starting = startDuring(h, "turn-1");
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await starting;
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await iterator.next();
+
+    // Act
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    // Assert
+    expect(second.frame.case === "sessionStarted" ? second.frame.value.turnInFlight?.value : "not-started").toBe(
+      "turn-1",
+    );
+  });
+
+  it("does not beat while a StartTurn is still being processed", async () => {
+    // Arrange: the start is held inside its durable prompt write.
+    const h = harness();
+    await started(h);
+    h.persistence.writeDurable = () => new Promise<void>(() => {});
+    void startDuring(h, "turn-1");
+
+    // Act
+    h.scheduler.fire(0);
+    await drainTurns();
+
+    // Assert
+    expect(h.minted).toEqual([]);
+  });
+
+  it("answers query_dead to a start waiting when the query dies under the keep-alive", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+    const starting = startDuring(h, "turn-1");
+
+    // Act
+    h.queries[0]?.query.end();
+
+    // Assert
+    const response = await starting;
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("queryDead");
+  });
+
+  it("delivers nothing for a start the caller abandons while it waits", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    h.scheduler.fire(0);
+    await drainTurns();
+    const caller = new AbortController();
+    const starting = startDuring(h, "turn-1", caller.signal);
+
+    // Act
+    caller.abort();
+    await starting;
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await drainTurns();
+
+    // Assert
+    expect(sendKinds(sends)).toEqual(["keepalive"]);
+  });
+
+  it("re-delivers a refused-rewind keep-alive once and the waiting prompt once", async () => {
+    // Arrange: an anchor, one keep-alive of debt, and the next beat's rewind,
+    // with a real prompt already waiting behind that beat.
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    h.scheduler.fire(0);
+    await drainTurns();
+    const starting = startDuring(h, "turn-1");
+
+    // Act: the vendor refuses the anchor, then answers the re-delivered keep-alive.
+    await h.engine.onSdkMessage(
+      errorResultMessage({ errors: ["No message found with message.uuid of: assistant-uuid"] }),
+    );
+    await drainTurns();
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await starting;
+    await drainTurns();
+
+    // Assert: the first keep-alive, the refused beat and its re-delivery, then the prompt.
+    expect(sendKinds(sends.slice(1))).toEqual(["keepalive", "keepalive", "keepalive", "real"]);
+  });
+
+  it("ends the keep-alive's rewind watch when the keep-alive leaves the slot", async () => {
+    // Arrange: the beat rewound, and the keep-alive then ends on an error that
+    // is not about the anchor.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    h.scheduler.fire(0);
+    await drainTurns();
+    const before = logCursor();
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, errorResultMessage({ errors: ["overloaded"] })));
+
+    // Assert
+    expect(logLevelFor(before, "the keep-alive left the turn slot; its rewind watch ends with it")).toBe("debug");
+  });
+
+  it("serves a resumed session's prompt that arrived during a keep-alive", async () => {
+    // Arrange: a warm resume, then a keep-alive with a prompt waiting behind it.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+    h.scheduler.fire(0);
+    await drainTurns();
+    const starting = startDuring(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+
+    // Assert
+    expect((await starting).result.case).toBe("success");
   });
 });
 
@@ -5076,6 +5358,51 @@ function answering(h: Harness, message: SdkMessage): SdkMessage {
   const send = h.minted.at(-1);
   if (send === undefined) throw new Error("no keep-alive send was minted a client uuid");
   return { ...message, user_message_uuid: send, user_message_uuids: [send] } as SdkMessage;
+}
+
+/** A real StartTurn, left pending: the caller decides when to await it. */
+function startDuring(h: Harness, turnId: string, signal?: AbortSignal): Promise<shimv1.StartTurnResponse> {
+  return h.engine.startTurn(
+    create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+      said: textSaid("go"),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      pageSize: 5,
+    }),
+    signal,
+  );
+}
+
+/**
+ * Whether `promise` settles within a few event-loop turns — never a clock.
+ *
+ * Every step the engine takes before a StartTurn answers is a microtask or an
+ * immediate (the scripted store and query answer in-process), so a start that
+ * has not settled after these turns is waiting on something that has not
+ * happened.
+ */
+async function settledSoon(promise: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  void promise.then(
+    () => {
+      done = true;
+    },
+    () => {
+      done = true;
+    },
+  );
+  for (let turn = 0; turn < 20 && !done; turn++) await new Promise((resolve) => setImmediate(resolve));
+  return done;
+}
+
+/** Each send the vendor received, as `keepalive` (it carries a client uuid) or `real`. */
+function sendKinds(sends: readonly SdkUserMessage[]): string[] {
+  return sends.map((send) => (send.uuid === undefined ? "real" : "keepalive"));
+}
+
+/** Let every queued send reach the drained prompt stream. */
+async function drainTurns(): Promise<void> {
+  for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
 }
 
 /** One activity frame row, as the fold produces them. */

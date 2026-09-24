@@ -103,6 +103,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	c.recordManifestSeen()
+	c.recordForcedTakeover(m.Forced)
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
 	// here by construction, so the no-manifest accounting cannot apply.
 	if _, err := c.Reconcile(ctx, nil); err != nil {
@@ -307,6 +308,7 @@ func (c *controller) armFromManifest() error {
 		return err
 	}
 	c.recordManifestSeen()
+	c.recordForcedTakeover(m.Forced)
 	added := c.armSessions(m.Daemon, m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
@@ -568,12 +570,35 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
 
+	// THE ADOPTED SHIM IS JUDGED NOW THAT IT IS OURS. Its build report arrived
+	// when the adoption dialed it, which was before this daemon owned the
+	// workspace and so before it could bounce it.
+	if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
+		c.log.Error(opStaleness, "the adopted shim could not be judged against the installed build", withCause(fields, err))
+	}
+
 	if complete && c.deps.WriteDaemonAddr != nil {
 		// A JOINING DAEMON OTHERWISE NEVER WRITES daemon.addr: until every
 		// workspace is its own, the incumbent's file is still the truth.
 		c.advertise(ctx, fields)
 	}
 	return nil
+}
+
+// recordForcedTakeover latches that the handover this successor joins was
+// FORCED, so the stale shims it adopts are bounced at once rather than
+// registered behind their work.
+func (c *controller) recordForcedTakeover(forced bool) {
+	if !forced {
+		return
+	}
+	c.mu.Lock()
+	before := c.forcedTakeover
+	c.forcedTakeover = true
+	c.mu.Unlock()
+	if !before {
+		c.log.Info(opJoin, "the handover being joined was forced; stale adopted shims are bounced at once", nil)
+	}
 }
 
 // recordManifestSeen latches that the incumbent's intent manifest has been
@@ -829,7 +854,7 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
 	c.adoptStragglers(fields)
-	c.bounceStaleFleet(fields)
+	c.bounceStaleAdopted(fields)
 }
 
 // tookOverSignalLocked answers the channel that closes when this daemon takes
@@ -890,26 +915,18 @@ func (c *controller) adoptStragglers(fields dlog.Context) {
 	}
 }
 
-// bounceStaleFleet relaunches every adopted shim that runs an older build than
-// the one deployed, EACH AT ITS OWN FREENESS.
+// bounceStaleAdopted judges every workspace this daemon now serves against the
+// installed shim bundle, once it has taken over.
 //
 // THE HANDOVER'S OTHER HALF. A deploy that rebuilt the daemon and the shim
-// rolls out as a handover alone, and the successor ADOPTS the running shims —
-// which are still the old build. The staleness check that bounces them used to
-// run only when a workspace was OPENED, so an adopted shim stayed on the old
-// build until someone happened to reopen its workspace: a vendor-SDK upgrade
-// did not reach a single running session. The successor is the one that knows
-// the handover is over, so it runs the check here, once, for every live shim.
-//
-// ONE GOROUTINE PER WORKSPACE, because each relaunch waits for its own
-// workspace's freeness for as long as that takes: a busy workspace must never
-// hold up the others. Each bounce fires at most once per reported build stamp
-// (`claimStaleBounce`), and a shim already on the deployed build is left alone.
-func (c *controller) bounceStaleFleet(fields dlog.Context) {
-	lifetime := c.deps.Lifetime
-	if lifetime == nil {
-		lifetime = context.Background()
-	}
+// hands over, and the successor ADOPTS the running shims — which are still the
+// old build. Each adopted shim reports its build the moment it is attached,
+// but a report that arrived while this daemon was still joining was not its to
+// act on (checkStale refuses a workspace it does not own yet), so the takeover
+// re-judges them all. Each stale one goes to the bounce registry, which bounces
+// it now or when its work ends; nothing here waits on a workspace.
+func (c *controller) bounceStaleAdopted(fields dlog.Context) {
+	lifetime := c.lifetime(context.Background())
 	workspaces, err := c.deps.DB.ListWorkspaces(lifetime)
 	if err != nil {
 		c.log.Error(opStaleness, "could not list the workspaces to check for stale shims", withCause(fields, err))
@@ -921,16 +938,12 @@ func (c *controller) bounceStaleFleet(fields dlog.Context) {
 			continue
 		}
 		checked++
-		c.staleBounces.Add(1)
-		go func(ws ids.WorkspaceID) {
-			defer c.staleBounces.Done()
-			if err := c.RelaunchShim(lifetime, ws, ReasonBuildStale); err != nil {
-				c.log.Error(opStaleness, "a stale shim could not be relaunched onto the deployed build",
-					withCause(merge(fields, dlog.Context{"workspace": string(ws)}), err))
-			}
-		}(ws.ID)
+		if _, err := c.checkStale(lifetime, ws.ID, c.takeoverForce(ws.ID)); err != nil {
+			c.log.Error(opStaleness, "an adopted shim could not be judged against the installed build",
+				withCause(merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
+		}
 	}
-	c.log.Info(opStaleness, "checking every adopted shim against the deployed build",
+	c.log.Info(opStaleness, "judged every adopted shim against the installed build",
 		merge(fields, dlog.Context{"live_shims": checked}))
 }
 
