@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,11 +107,11 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 
 	// Assert: the successor bounces the adopted shim for its stale build, and
 	// the bounce finishes as soon as the shim has stood down.
-	bouncing := awaitRunLogRecord(t, cold, "the successor's stale-build bounce", func(r harness.LogRecord) bool {
+	bouncing := cold.AwaitRunLogRecordFromAnyProcess("the successor's stale-build bounce", func(r harness.LogRecord) bool {
 		return r.PID != cold.PID() && r.Operation == "daemon.rollout.staleness" &&
 			strings.HasPrefix(r.Message, "the shim runs an older build than the installed one")
 	})
-	relaunched := awaitRunLogRecord(t, cold, "the successor's relaunch", func(r harness.LogRecord) bool {
+	relaunched := cold.AwaitRunLogRecordFromAnyProcess("the successor's relaunch", func(r harness.LogRecord) bool {
 		return r.PID == bouncing.PID && r.Operation == "daemon.rollout.relaunch" &&
 			r.Message == "relaunched the workspace's shim"
 	})
@@ -150,30 +149,6 @@ func coldStartSelfRepoDaemonOn(t *testing.T, first *harness.Daemon, shimMain str
 		ShimMain:   shimMain,
 	})
 	return selfRepo, d
-}
-
-// awaitRunLogRecord polls the shared run log for a record from ANY process,
-// bounded by one harness wait: Daemon.AwaitLogRecord reads only the daemon's
-// own pid, and the records awaited here are its successor's.
-func awaitRunLogRecord(t *testing.T, d *harness.Daemon, what string, pred func(harness.LogRecord) bool) harness.LogRecord {
-	t.Helper()
-	wait, cancel := context.WithTimeout(d.Ctx(), harness.DefaultTimeout)
-	defer cancel()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		for _, r := range harness.ReadLog(t, d.RunLogPath()) {
-			if pred(r) {
-				return r
-			}
-		}
-		select {
-		case <-ticker.C:
-		case <-wait.Done():
-			t.Fatalf("waiting for %s in the run log: %v", what, wait.Err())
-			return harness.LogRecord{}
-		}
-	}
 }
 
 // recordTime parses a record's timestamp.

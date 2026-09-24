@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -268,5 +269,29 @@ func TestReadLogStillFailsOnATerminatedLineThatDoesNotParse(t *testing.T) {
 	// Assert
 	if !fake.Failed() {
 		t.Fatal("ReadLog accepted a newline-terminated line that is not JSON; a malformed record must still fail the test")
+	}
+}
+
+// TestAwaitLogRecordReturnsTheFirstRecordThePredicateAccepts covers the one
+// poll loop Daemon.AwaitLogRecord and AwaitRunLogRecordFromAnyProcess share:
+// it reads every process's records, and the callers decide whose count.
+func TestAwaitLogRecordReturnsTheFirstRecordThePredicateAccepts(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	lines := `{"timestamp":"2026-09-24T18:06:04Z","level":"info","pid":1,"operation":"daemon.a","message":"the incumbent's"}
+{"timestamp":"2026-09-24T18:06:05Z","level":"info","pid":2,"operation":"daemon.a","message":"the successor's"}
+`
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+	wait, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// Act.
+	got := awaitLogRecord(t, wait, path, "the successor's record", func(r LogRecord) bool { return r.PID == 2 })
+
+	// Assert.
+	if got.Message != "the successor's" {
+		t.Fatalf("record = %+v, want the successor's", got)
 	}
 }
