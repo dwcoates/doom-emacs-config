@@ -12,10 +12,14 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/post-bootstrap-log-defects` | `~/.config/doom-worktrees/post-bootstrap-log-defects` | Post-bootstrap log defects (plus realtest 7's case-duplicate workspace dirs crossing log sinks and a dangling emacs.log link): legacy `keepalive` rows block sidecar upserts (files parked); a DIED shim stays in the stand-down manifest forever; the script runner WARNs on caller-judged exits (launchctl 113); `final_answer_unresolved` after the stop; the restore_holds orphan. | `af712ab9121aecd4b` | 09-24 |
+| `fix/post-bootstrap-log-defects` | `~/.config/doom-worktrees/post-bootstrap-log-defects` | Post-bootstrap log defects (plus realtest 7's case-duplicate workspace dirs crossing log sinks and a dangling emacs.log link): legacy `keepalive` rows block sidecar upserts (files parked); a DIED shim stays in the stand-down manifest forever; the script runner WARNs on caller-judged exits (launchctl 113); `final_answer_unresolved` after the stop; the restore_holds orphan. | `af712ab9121aecd4b` (reworking: the keepalive store fix becomes a supersede rule, NOT a schema-bump nuke of the 1.1 GB events.db) | 09-24 |
 
 ## Still waiting on the owner
 
+- Retiring the `keepalive` kind in the PROTO (`reserved`) is a breaking change; the store refuses it for now.
+- `HostFault.bounce_died` is no longer opened by anything (a DIED shim with a free lock resolves at INFO). Want an open record kept?
+- On replay, a terminal is charged to a turn by position (a stored terminal carries no turn id). Add a turn identity to the terminal frame or `HistoryEntryAt`? (proto)
+- An adopted session's open turn rows aren't checked against what its shim reports. Which component should own closing such a row?
 - Lock-holder failures other than a failed spawn (exits with a non-3 code, a signal, a wrong ready line) still read as `conversation_owned`, although the shim's AGENTS.md says they never should. Split them too?
 - MCP tools (`mcp__*`) are unmodeled: WARN `daemon.sessionwatcher.unmodeled_activity` for each (102 in one session) and no card. Model them generically?
 - `AGENT_REPL_STORE_PPROF_ADDR` is set via `launchctl setenv`, so the store WARNs `store.pprof.enabled` at every start. Keep profiling on?
