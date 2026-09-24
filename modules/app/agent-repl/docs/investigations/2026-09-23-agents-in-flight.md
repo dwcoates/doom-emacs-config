@@ -12,12 +12,10 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a47129c3ca68414a3` (the e2e port in `feat/dod-e2e`, then it merges into this branch) | 21:xx (REVIVED after the session restart) |
 | `fix/e2e-load-flakes` | `~/.config/doom-worktrees/e2e-load-flakes` | Root-cause the e2e flakes `TestWebappLayerRoster` (ClientLog/lease ERRORs during a drain) and `TestClearRotatesIdentity` (the separation row timed out; `final_answer_unresolved`). | `a3cc32b3e6611f35f` | 22:55 |
 | `fix/restate-rest-and-old-row-level` | `~/.config/doom-worktrees/restate-rest-and-old-row-level` | Pre-contract unrestated rows log INFO (a new defect stays ERROR). Subagent and artifact failures restate; every settle carries `started_at`. | `aa95f06fc74ba5cf4` | 23:05 |
-| `fix/remove-keepalive-hold` | `~/.config/doom-worktrees/remove-keepalive-hold` | Remove `turn_already_open.keepalive` and the keep-alive hold arm and badge. The shim handles a real prompt during a keep-alive internally, and the daemon never sees keep-alives. | `a3d48a539c2a3b1c4` | 23:05 |
-| `feat/monitor-feed-card` | `~/.config/doom-worktrees/monitor-feed-card` | A Monitor call draws an ordinary tool-call card in its owner's feed; its footer row jumps to and centers it (owner: monitors clickable and centered). | `ab71a2baf32886c69` (resumed) | 23:25 |
 | `fix/shim-open-call-leak` | `~/.config/doom-worktrees/shim-open-call-leak` | The shim's in-flight tool registry leaks (full at 512; an interrupt cut 493 phantom calls). Settle and remove every call on its settling path; reaching the bound is an ERROR. | `a90cb0143868c171b` | 23:55 |
+| `integrate/deploys-and-keepalive` | `~/.config/doom-worktrees/integrate-deploys-keepalive` | Integrate `feat/daemon-owned-deploys` (e2e ported, `deploy_script_failed` removed) and `fix/remove-keepalive-hold` onto master; fix stale deploy docs and the `ensure-deps` shared-node-store wipe; write the one-time bootstrap from the old runtime. | `a47129c3ca68414a3` | 00:05 |
 
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
@@ -26,6 +24,8 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
+- The shared `~/.cache/agent-repl/node-store` webapp entry was emptied by a worktree's `npm ci`. Repopulating it is outside the project: the owner runs it, or approves.
+- The shim reports "another process owns this conversation" when it can't even spawn its lock holder. A new refusal arm?
 - Ordering contract: a turn's ending still waits behind every row produced before it (the store gets rows in exact production order, which subagent consumers rely on). Should a terminal ever overtake? That's an ordering-contract change.
 - Harness stray reaping still selects by argv path, not a kernel mark (a session id would break handover successors and Emacs-launched e2e daemons). Keep it as is?
 - `DaemonFault.deploy_script_failed` removal is folded into the deploy branch's finishing agent.
@@ -35,6 +35,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- A Monitor call draws the ordinary tool-call card in its owner's feed; its footer row centers and rings it; the monitor's settles restate its call (`no_feed_entry` reserved) (`feat/monitor-feed-card`, all suites green).
 - Shell output is stored as one rolling tail at the shared 16 KiB cap (`AgentBashTail`; `update` retired); live and replay draw the same body; old delta rows are skipped at INFO (`fix/shell-output-tail-only`).
 - Store: checkpoints are a bulk-tier job (autocheckpoint off, `journal_size_limit` 16 MiB), and the page cache is 64/16 MiB plus a 256 MiB mmap (`fix/store-checkpoint-and-cache`).
 - The shim's store writer never drops a row: bounded batches, backpressure on the vendor loop, persistent failures held and loud, batches ending at every prompt or terminal (`fix/shim-writer-never-drops`, 5734 unit and 339 integration tests pass).

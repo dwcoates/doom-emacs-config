@@ -44,6 +44,7 @@ import {
   closingAgentTerminal,
   closingBashTerminal,
   closingMonitorTerminal,
+  findMonitorCall,
   closingSubagentTerminal,
   findBashStart,
   findUnit,
@@ -3749,7 +3750,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         continue;
       }
       if (item?.case === "monitor") {
-        closing.push(closingMonitorTerminal(agentId, run));
+        closing.push(closingMonitorTerminal(agentId, run, findMonitorCall(book, run)));
         continue;
       }
       const recorded = findBashStart(book, run);

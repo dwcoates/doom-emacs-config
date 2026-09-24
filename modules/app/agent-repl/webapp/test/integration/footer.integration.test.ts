@@ -40,10 +40,12 @@ import {
   FOOTER_STATUS_WITHOUT_SUBSTATUS,
   FOOTER_AGENT_TARGET,
   FOOTER_SHELL_TARGET,
+  FOOTER_MONITOR_TARGET,
   FOOTER_TOKENS_VERDICTS,
   WORKSPACE_ID,
   activityRow,
   detachedShellRow,
+  monitorCallUnit,
   feedId,
   feedPageSuccess,
   footerView,
@@ -703,24 +705,23 @@ describe("panel jump rows", () => {
     expect(harness.row(FOOTER_AGENT_TARGET)?.dataset.revealed).toBe("true");
   });
 
-  it("makes a monitor row a jump row that names no FeedId", async () => {
+  it("makes a monitor row a jump row naming its tool-call card", async () => {
     // Arrange
     await withFooter({ status: "idle" });
     // Act
     await harness.click('.footer-chip[data-chip="monitors"]');
-    // Assert: a monitor draws no feed entry, so the daemon states why.
-    expect(harness.$('.footer-expanded[data-panel="monitors"] [data-jump]')).toBeNull();
+    // Assert
     expect(
-      harness.$('.footer-expanded[data-panel="monitors"] [data-jump-unresolved="noFeedEntry"]'),
+      harness.$(`.footer-expanded[data-panel="monitors"] [data-jump="${FOOTER_MONITOR_TARGET}"]`),
     ).not.toBeNull();
   });
 
-  it("says not on screen when a monitor row is clicked", async () => {
+  it("says not on screen when an unplaced monitor's row is clicked", async () => {
     // Arrange
     await withFooter({ status: "idle" });
     await harness.click('.footer-chip[data-chip="monitors"]');
     // Act
-    await harness.click('.footer-expanded[data-panel="monitors"] [data-jump-unresolved]');
+    await harness.click('.footer-expanded[data-panel="monitors"] [data-jump-unresolved="notDrawn"]');
     // Assert
     expect(harness.text('.footer-expanded[data-panel="monitors"] .footer-row-unreachable')).toBe(
       "not on screen",
@@ -1163,6 +1164,55 @@ describe("a jump into a rendered shell row", () => {
     await harness.click(`[data-jump="${FOOTER_SHELL_TARGET}"]`);
     // Assert: a drawn row is scrolled to, never re-opened.
     expect(harness.fake.calls("openFeed")).toHaveLength(0);
+  });
+});
+
+/**
+ * A JUMP INTO A MONITOR'S CARD. A monitor's entry is its Monitor call's
+ * ordinary tool-call card, selected exactly as a shell's head is.
+ */
+describe("a jump into a monitor's tool-call card", () => {
+  const withMonitorCard = async (): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" }));
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(monitorCallUnit(), { id: feedId(FOOTER_MONITOR_TARGET) })]),
+        );
+      },
+    });
+    await harness.click('.footer-chip[data-chip="monitors"]');
+  };
+
+  it("lands on the monitor's card", async () => {
+    // Arrange
+    await withMonitorCard();
+    // Act
+    await harness.click(`[data-jump="${FOOTER_MONITOR_TARGET}"]`);
+    // Assert
+    expect(harness.row(FOOTER_MONITOR_TARGET)?.dataset.revealed).toBe("true");
+  });
+
+  it("rings the monitor's card with the selected-entry mark", async () => {
+    // Arrange
+    await withMonitorCard();
+    // Act
+    await harness.click(`[data-jump="${FOOTER_MONITOR_TARGET}"]`);
+    // Assert
+    expect(harness.row(FOOTER_MONITOR_TARGET)?.firstElementChild?.classList.contains("entry-selected")).toBe(
+      true,
+    );
+  });
+
+  it("draws no not-on-screen notice for a card it reached", async () => {
+    // Arrange
+    await withMonitorCard();
+    // Act
+    await harness.click(`[data-jump="${FOOTER_MONITOR_TARGET}"]`);
+    // Assert
+    expect(harness.$('.footer-expanded[data-panel="monitors"] .footer-row-unreachable')).toBeNull();
   });
 });
 

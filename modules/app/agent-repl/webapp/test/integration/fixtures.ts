@@ -395,6 +395,16 @@ export const toolCallReturnedUnit = (
   };
 };
 
+/** A Monitor call's card: the ordinary tool-call card, named Monitor, running. */
+export const monitorCallUnit = (): ActivityUnit => ({
+  case: "simpleToolCall",
+  value: {
+    name: { text: "Monitor" },
+    input: { text: "tail -f daemon.log", form: { case: "command", value: {} } },
+    outcome: { case: "running", value: {} },
+  },
+});
+
 export const toolCallDeniedUnit = (): ActivityUnit => ({
   case: "simpleToolCall",
   value: {
@@ -1444,6 +1454,8 @@ export const FOOTER_TOKENS_VERDICTS = ["complete", "incomplete", "invalid"] as c
 /** The FeedIds the expanded panels' jump rows target. */
 export const FOOTER_AGENT_TARGET = "agent-row";
 export const FOOTER_SHELL_TARGET = "shell-row";
+/** The FeedId the first monitor row jumps to: its Monitor call's tool-call card. */
+export const FOOTER_MONITOR_TARGET = "monitor-row";
 
 type FooterInit = {
   status?: string;
@@ -1558,15 +1570,22 @@ function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
       rows: [
         {
           work: { value: "work-monitor" },
-          jump: {
-            target: {
-              case: "unresolved" as const,
-              value: { reason: { case: "noFeedEntry" as const, value: {} } },
-            },
-          },
+          jump: { target: { case: "entry" as const, value: feedId(FOOTER_MONITOR_TARGET) } },
           description: { text: "watch the daemon log" },
           runtime: { startedAtMs: 1_000n },
           persistent: {},
+        },
+        {
+          // A monitor whose card the feed has not placed: the daemon says so.
+          work: { value: "work-monitor-unplaced" },
+          jump: {
+            target: {
+              case: "unresolved" as const,
+              value: { reason: { case: "notDrawn" as const, value: {} } },
+            },
+          },
+          description: { text: "watch the build" },
+          runtime: { startedAtMs: 1_000n },
         },
       ],
     },
