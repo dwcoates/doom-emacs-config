@@ -30,7 +30,8 @@ type Launchd interface {
 	// Kickstart restarts a loaded service (kickstart -k).
 	Kickstart(ctx context.Context, label string) error
 	// Bootout removes a service from the user domain, which takes its
-	// KeepAlive relaunch with it.
+	// KeepAlive relaunch with it. A service the domain no longer holds
+	// answers an error wrapping ErrServiceNotLoaded.
 	Bootout(ctx context.Context, label string) error
 	// Bootstrap loads a service from its plist; RunAtLoad starts it.
 	Bootstrap(ctx context.Context, plist string) error
@@ -143,7 +144,11 @@ func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error 
 		return nil
 	}
 	r.Log.Info(opServices, "booting the sidecar out before the store restarts", fields)
-	if err := r.Launchd.Bootout(ctx, SidecarLabel); err != nil {
+	if err := r.Launchd.Bootout(ctx, SidecarLabel); errors.Is(err, ErrServiceNotLoaded) {
+		// THE SIDECAR LEFT BETWEEN THE LOOK AND THE BOOTOUT: the domain no
+		// longer holds it, which is the state the bootout was asked to reach.
+		r.Log.Info(opServices, "the sidecar had already left the user domain when it was booted out", withCause(fields, err))
+	} else if err != nil {
 		// A bootout that errs may still have taken effect; the wait below is
 		// the authority on whether it did.
 		r.Log.Warn(opServices, "the sidecar bootout answered an error; waiting on launchd's own view", withCause(fields, err))
