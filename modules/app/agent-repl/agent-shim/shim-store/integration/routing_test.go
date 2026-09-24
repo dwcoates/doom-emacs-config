@@ -315,7 +315,6 @@ func TestUnservedArmsNeverAppearAnywhere(t *testing.T) {
 		name   string
 		update *storev1.StoreAgentUpdate
 	}{
-		{name: "keepalive", update: keepaliveLine(agentID("main"), promptFact("turn-ka", "main", "keep alive"))},
 		{name: "vendor_specific", update: vendorSpecificLine("vendor_only_thing")},
 		{name: "unknown", update: unknownLine("some_new_kind", "type")},
 		{name: "unparsed", update: unparsedLine("/transcripts/x.jsonl", 900, "unexpected byte", "{oops")},

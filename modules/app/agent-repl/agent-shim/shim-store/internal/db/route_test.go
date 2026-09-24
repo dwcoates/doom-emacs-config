@@ -79,11 +79,6 @@ func TestClassifyRoutesEveryArmToItsKind(t *testing.T) {
 			wantBook: "agent-1",
 		},
 		{
-			name:     "keepalive is never served",
-			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")}}),
-			wantKind: kindKeepalive,
-		},
-		{
 			name:     "vendor specific residue is never served",
 			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}}}),
 			wantKind: kindVendorSpecific,
@@ -252,8 +247,8 @@ func TestClassifyRefusesEachUnsetRequiredField(t *testing.T) {
 			entry: unservedEntry("w", "u", &storev1.StoreUnservedItem{}),
 		},
 		{
-			name:  "keepalive with no item arm",
-			entry: unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: &storev1.StoreAgentItem{}}}),
+			name:  "the retired keepalive arm",
+			entry: unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")}}),
 		},
 		{
 			name:  "bash frame with no run identity",
