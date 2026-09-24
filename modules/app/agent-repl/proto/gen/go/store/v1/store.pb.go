@@ -724,15 +724,14 @@ func (*PlaneFile) Descriptor() ([]byte, []int) {
 	return file_store_v1_store_proto_rawDescGZIP(), []int{8}
 }
 
-// A fact the store holds but never serves. THE ARM IS WHY: material with no
-// book (a keep-alive), or material the producer could not convert at all.
-// The residue arms are what keep eager conversion at the edge a reversible
-// bet — nothing unconvertible is dropped; it lands durably and whole.
+// A fact the store holds but never serves. THE ARM IS WHY: material the
+// producer could not convert at all. The residue arms are what keep eager
+// conversion at the edge a reversible bet — nothing unconvertible is dropped;
+// it lands durably and whole.
 type StoreUnservedItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to UnservedItem:
 	//
-	//	*StoreUnservedItem_Keepalive
 	//	*StoreUnservedItem_VendorSpecific
 	//	*StoreUnservedItem_Unknown
 	//	*StoreUnservedItem_Unparsed
@@ -778,15 +777,6 @@ func (x *StoreUnservedItem) GetUnservedItem() isStoreUnservedItem_UnservedItem {
 	return nil
 }
 
-func (x *StoreUnservedItem) GetKeepalive() *StoreAgentItem {
-	if x != nil {
-		if x, ok := x.UnservedItem.(*StoreUnservedItem_Keepalive); ok {
-			return x.Keepalive
-		}
-	}
-	return nil
-}
-
 func (x *StoreUnservedItem) GetVendorSpecific() *StoreVendorSpecific {
 	if x != nil {
 		if x, ok := x.UnservedItem.(*StoreUnservedItem_VendorSpecific); ok {
@@ -818,12 +808,6 @@ type isStoreUnservedItem_UnservedItem interface {
 	isStoreUnservedItem_UnservedItem()
 }
 
-type StoreUnservedItem_Keepalive struct {
-	// A well-formed conversation fact with no book: keep-alive turns and
-	// their kin. Never returned by any page; excluded from every read.
-	Keepalive *StoreAgentItem `protobuf:"bytes,1,opt,name=keepalive,proto3,oneof"`
-}
-
 type StoreUnservedItem_VendorSpecific struct {
 	// Something one vendor does that no vendor-agnostic feed can show.
 	// UNDERSTOOD, unlike the two arms below: we know what it is and have
@@ -842,8 +826,6 @@ type StoreUnservedItem_Unparsed struct {
 	// fields exist so it is investigable rather than merely counted.
 	Unparsed *StoreUnparsed `protobuf:"bytes,4,opt,name=unparsed,proto3,oneof"`
 }
-
-func (*StoreUnservedItem_Keepalive) isStoreUnservedItem_UnservedItem() {}
 
 func (*StoreUnservedItem_VendorSpecific) isStoreUnservedItem_UnservedItem() {}
 
@@ -1558,13 +1540,12 @@ const file_store_v1_store_proto_rawDesc = "" +
 	"\x04file\x18\x02 \x01(\v2\x13.store.v1.PlaneFileH\x00R\x04fileB\a\n" +
 	"\x05plane\"\r\n" +
 	"\vPlaneStream\"\v\n" +
-	"\tPlaneFile\"\x93\x02\n" +
-	"\x11StoreUnservedItem\x128\n" +
-	"\tkeepalive\x18\x01 \x01(\v2\x18.store.v1.StoreAgentItemH\x00R\tkeepalive\x12H\n" +
+	"\tPlaneFile\"\xea\x01\n" +
+	"\x11StoreUnservedItem\x12H\n" +
 	"\x0fvendor_specific\x18\x02 \x01(\v2\x1d.store.v1.StoreVendorSpecificH\x00R\x0evendorSpecific\x122\n" +
 	"\aunknown\x18\x03 \x01(\v2\x16.store.v1.StoreUnknownH\x00R\aunknown\x125\n" +
 	"\bunparsed\x18\x04 \x01(\v2\x17.store.v1.StoreUnparsedH\x00R\bunparsedB\x0f\n" +
-	"\runserved_item\"T\n" +
+	"\runserved_itemJ\x04\b\x01\x10\x02R\tkeepalive\"T\n" +
 	"\x13StoreVendorSpecific\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12)\n" +
 	"\x03raw\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x03raw\"\x90\x01\n" +
@@ -1670,25 +1651,24 @@ var file_store_v1_store_proto_depIdxs = []int32{
 	28, // 16: store.v1.StoreAgentWorkflow.frame:type_name -> conversation.v1.AgentWorkflow
 	7,  // 17: store.v1.Plane.stream:type_name -> store.v1.PlaneStream
 	8,  // 18: store.v1.Plane.file:type_name -> store.v1.PlaneFile
-	3,  // 19: store.v1.StoreUnservedItem.keepalive:type_name -> store.v1.StoreAgentItem
-	10, // 20: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
-	11, // 21: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
-	12, // 22: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
-	29, // 23: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
-	29, // 24: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
-	0,  // 25: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
-	14, // 26: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
-	15, // 27: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
-	2,  // 28: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
-	15, // 29: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
-	16, // 30: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
-	17, // 31: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
-	18, // 32: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	10, // 19: store.v1.StoreUnservedItem.vendor_specific:type_name -> store.v1.StoreVendorSpecific
+	11, // 20: store.v1.StoreUnservedItem.unknown:type_name -> store.v1.StoreUnknown
+	12, // 21: store.v1.StoreUnservedItem.unparsed:type_name -> store.v1.StoreUnparsed
+	29, // 22: store.v1.StoreVendorSpecific.raw:type_name -> google.protobuf.Struct
+	29, // 23: store.v1.StoreUnknown.raw:type_name -> google.protobuf.Struct
+	0,  // 24: store.v1.EntryBatch.entries:type_name -> store.v1.StoreEntry
+	14, // 25: store.v1.EntryBatch.cursor_advance:type_name -> store.v1.CursorState
+	15, // 26: store.v1.StoreLineAt.at:type_name -> store.v1.StoreItemPointer
+	2,  // 27: store.v1.StoreLineAt.line:type_name -> store.v1.StorePageLine
+	15, // 28: store.v1.ReadAgentPageMore.last_item:type_name -> store.v1.StoreItemPointer
+	16, // 29: store.v1.AgentSessionPage.lines:type_name -> store.v1.StoreLineAt
+	17, // 30: store.v1.AgentSessionPage.more:type_name -> store.v1.ReadAgentPageMore
+	18, // 31: store.v1.AgentSessionPage.floor:type_name -> store.v1.ReadAgentPageFloor
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_store_proto_init() }
@@ -1716,7 +1696,6 @@ func file_store_v1_store_proto_init() {
 		(*Plane_File)(nil),
 	}
 	file_store_v1_store_proto_msgTypes[9].OneofWrappers = []any{
-		(*StoreUnservedItem_Keepalive)(nil),
 		(*StoreUnservedItem_VendorSpecific)(nil),
 		(*StoreUnservedItem_Unknown)(nil),
 		(*StoreUnservedItem_Unparsed)(nil),
