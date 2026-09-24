@@ -135,7 +135,17 @@ func TestWriteBatchRefusesAMalformedRequestEnvelope(t *testing.T) {
 			wantField: "producer",
 			wantSite:  "producer_empty",
 			request: func(p *producer) *storev1.WriteBatchRequest {
-				return &storev1.WriteBatchRequest{Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+				return &storev1.WriteBatchRequest{WriteClass: p.writeClass(), Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+					p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x"))),
+				}}}
+			},
+		},
+		{
+			name:      "no write class",
+			wantField: "write_class",
+			wantSite:  "write_class_unset",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Producer: p.name, Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
 					p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x"))),
 				}}}
 			},
@@ -145,7 +155,7 @@ func TestWriteBatchRefusesAMalformedRequestEnvelope(t *testing.T) {
 			wantField: "batch",
 			wantSite:  "batch_missing",
 			request: func(p *producer) *storev1.WriteBatchRequest {
-				return &storev1.WriteBatchRequest{Producer: p.name}
+				return &storev1.WriteBatchRequest{Producer: p.name, WriteClass: p.writeClass()}
 			},
 		},
 		{
@@ -153,7 +163,7 @@ func TestWriteBatchRefusesAMalformedRequestEnvelope(t *testing.T) {
 			wantField: "cursor_advance.file_id",
 			wantSite:  "cursor_file_id_empty",
 			request: func(p *producer) *storev1.WriteBatchRequest {
-				return &storev1.WriteBatchRequest{Producer: p.name, Batch: &storev1.EntryBatch{
+				return &storev1.WriteBatchRequest{Producer: p.name, WriteClass: p.writeClass(), Batch: &storev1.EntryBatch{
 					CursorAdvance: cursorState("", "/transcripts/a.jsonl", 4096, nil),
 				}}
 			},

@@ -31,7 +31,14 @@ import (
 // A terminal has to carry the run's output, so SOMETHING must be held; this is
 // how much, and everything past it is reported as omitted rather than silently
 // dropped or unboundedly accumulated.
-const maxRememberedOutput = 1 << 20
+//
+// IT IS THE RENDERER'S OWN CAP, AND IT HOLDS THE TAIL. The daemon draws a
+// detached shell's last 16 KiB (`spoolCap`, daemon/internal/resolve/feed) and
+// draws nothing of a terminal's output at all, so holding a megabyte — the old
+// bound, a PREFIX — put up to 1 MiB into every terminal row for nobody to read.
+// The run's most recent bytes are what a reader is shown, so they are what a
+// terminal keeps.
+const maxRememberedOutput = 16 << 10
 
 // fileCoords is where a handler last read: the cursor's own identity for the
 // file, and how far into it the handler has seen.
@@ -46,8 +53,8 @@ type fileCoords struct {
 type RunOutput struct {
 	conv *convert.Converter
 	log  *logging.Bound
-	// seen is what this run has said SO FAR, bounded by maxRememberedOutput, and
-	// omitted counts the bytes past that bound.
+	// seen is the TAIL of what this run has said so far, bounded by
+	// maxRememberedOutput, and omitted counts the earlier bytes it dropped.
 	//
 	// A TERMINAL STATES THE RUN'S OUTPUT, and the only place the whole of it
 	// exists is the spool this handler is the sole reader of. The deltas the
@@ -100,28 +107,28 @@ func (r *RunOutput) RememberCoords(ctx *Context) {
 	r.coords = fileCoords{Path: ctx.Path, FileID: ctx.FileID, Offset: ctx.BytesObserved}
 }
 
-// Remember accumulates the run's output up to the bound, counting the rest.
+// Remember accumulates the TAIL of the run's output up to the bound, counting
+// the earlier bytes it drops.
 func (r *RunOutput) Remember(ctx *Context, raw []byte) {
 	r.read = true
-	room := maxRememberedOutput - len(r.seen)
-	if room <= 0 {
-		r.omitted += uint64(len(raw))
+	crossed := r.omitted == 0
+	r.seen = append(r.seen, raw...)
+	if len(r.seen) <= maxRememberedOutput {
 		return
 	}
-	if len(raw) <= room {
-		r.seen = append(r.seen, raw...)
+	drop := len(r.seen) - maxRememberedOutput
+	r.omitted += uint64(drop)
+	r.seen = append(r.seen[:0], r.seen[drop:]...)
+	if !crossed {
 		return
 	}
-	r.seen = append(r.seen, raw[:room]...)
-	r.omitted += uint64(len(raw) - room)
 	// THE TERMINAL ITSELF CARRIES THE OMITTED COUNT, so the reader is told what
 	// it is looking at and nothing is silently truncated. The bound firing is
-	// the bound doing its job on a talkative run — a run that says more than a
-	// megabyte is ordinary, and three of them put three warnings in the owner's
-	// log on 2026-09-13 at 16:10 — so the record is informational and states
-	// the counts.
+	// the bound doing its job on a talkative run, so the record is
+	// informational, states the counts, and is written once: on the batch that
+	// first crosses it.
 	r.log.With(handleCtx("run-output-bound", ctx)).Log(
-		"the run has said more than %d bytes; its terminal states the first %d and reports %d omitted rather than claiming to carry the whole",
+		"the run has said more than %d bytes; its terminal states the last %d and reports %d omitted rather than claiming to carry the whole",
 		maxRememberedOutput, maxRememberedOutput, r.omitted)
 }
 

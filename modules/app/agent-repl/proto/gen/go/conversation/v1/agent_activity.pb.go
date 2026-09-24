@@ -7816,7 +7816,12 @@ func (*AgentReadCutAtTokenCap) Descriptor() ([]byte, []int) {
 type AgentReadFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// What was to be read, restated from the start so the settled frame stands
+	// alone: a call's start and its settle upsert ONE unit, so once the call
+	// settles its start is gone from any store that keeps the latest frame, and
+	// a replay drawing this frame alone must still name the file.
+	Path          *ReadPath `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7854,6 +7859,13 @@ func (*AgentReadFailure) Descriptor() ([]byte, []int) {
 func (x *AgentReadFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentReadFailure) GetPath() *ReadPath {
+	if x != nil {
+		return x.Path
 	}
 	return nil
 }
@@ -8498,7 +8510,12 @@ func (*AgentWriteUpdated) Descriptor() ([]byte, []int) {
 type AgentWriteFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// What was to be written, restated from the start so the settled frame
+	// stands alone: a call's start and its settle upsert ONE unit, so once the
+	// call settles its start is gone from any store that keeps the latest frame,
+	// and a replay drawing this frame alone must still name the file.
+	Path          *ReadPath `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8536,6 +8553,13 @@ func (*AgentWriteFailure) Descriptor() ([]byte, []int) {
 func (x *AgentWriteFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentWriteFailure) GetPath() *ReadPath {
+	if x != nil {
+		return x.Path
 	}
 	return nil
 }
@@ -8828,7 +8852,12 @@ func (x *AgentEditSuccess) GetSettledAt() *AgentActivitySettledAt {
 type AgentEditFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// What was to be edited, restated from the start so the settled frame stands
+	// alone: a call's start and its settle upsert ONE unit, so once the call
+	// settles its start is gone from any store that keeps the latest frame, and
+	// a replay drawing this frame alone must still name the file.
+	Path          *ReadPath `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8866,6 +8895,13 @@ func (*AgentEditFailure) Descriptor() ([]byte, []int) {
 func (x *AgentEditFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentEditFailure) GetPath() *ReadPath {
+	if x != nil {
+		return x.Path
 	}
 	return nil
 }
@@ -9739,7 +9775,12 @@ func (x *AgentGrepCount) GetMatches() uint32 {
 type AgentGrepFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// What was searched for, restated from the start so the settled frame stands
+	// alone: a call's start and its settle upsert ONE unit, so once the call
+	// settles its start is gone from any store that keeps the latest frame, and
+	// a replay drawing this frame alone must still state the query.
+	Query         *AgentGrepQuery `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9777,6 +9818,13 @@ func (*AgentGrepFailure) Descriptor() ([]byte, []int) {
 func (x *AgentGrepFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentGrepFailure) GetQuery() *AgentGrepQuery {
+	if x != nil {
+		return x.Query
 	}
 	return nil
 }
@@ -10377,7 +10425,12 @@ func (x *AgentGlobOmittedAtLeast) GetFilesOmittedAtLeast() uint32 {
 type AgentGlobFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// What was matched against, restated from the start so the settled frame
+	// stands alone: a call's start and its settle upsert ONE unit, so once the
+	// call settles its start is gone from any store that keeps the latest frame,
+	// and a replay drawing this frame alone must still state the pattern.
+	Query         *AgentGlobQuery `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10415,6 +10468,13 @@ func (*AgentGlobFailure) Descriptor() ([]byte, []int) {
 func (x *AgentGlobFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentGlobFailure) GetQuery() *AgentGlobQuery {
+	if x != nil {
+		return x.Query
 	}
 	return nil
 }
@@ -11924,7 +11984,13 @@ func (x *AgentBashOutputImage) GetMediaType() string {
 type AgentBashFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// What was run, restated from the start so the settled frame stands alone,
+	// exactly as the success arm restates it: a call's start and its settle
+	// upsert ONE unit, so once the call settles its start is gone from any store
+	// that keeps the latest frame, and a replay drawing this frame alone must
+	// still state the command.
+	Command       *AgentBashCommand `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11962,6 +12028,13 @@ func (*AgentBashFailure) Descriptor() ([]byte, []int) {
 func (x *AgentBashFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentBashFailure) GetCommand() *AgentBashCommand {
+	if x != nil {
+		return x.Command
 	}
 	return nil
 }
@@ -14271,7 +14344,13 @@ func (x *AgentSkillAllowedTools) GetToolNames() []string {
 type AgentSkillUseFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// Which skill was invoked, restated so the settled frame stands alone,
+	// exactly as the success arm restates it: a call's start and its settle
+	// upsert ONE unit, so once the call settles its start is gone from any store
+	// that keeps the latest frame, and a replay drawing this frame alone must
+	// still name the skill.
+	Skill         *AgentSkillName `protobuf:"bytes,2,opt,name=skill,proto3" json:"skill,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14309,6 +14388,13 @@ func (*AgentSkillUseFailure) Descriptor() ([]byte, []int) {
 func (x *AgentSkillUseFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentSkillUseFailure) GetSkill() *AgentSkillName {
+	if x != nil {
+		return x.Skill
 	}
 	return nil
 }
@@ -14640,7 +14726,18 @@ type AgentSendMessageSuccess struct {
 	//	*AgentSendMessageSuccess_ResumedRecipient
 	Delivery isAgentSendMessageSuccess_Delivery `protobuf_oneof:"delivery"`
 	// When the send settled. UNSET when the producer observed no instant.
-	SettledAt     *AgentActivitySettledAt `protobuf:"bytes,4,opt,name=settled_at,json=settledAt,proto3,oneof" json:"settled_at,omitempty"`
+	SettledAt *AgentActivitySettledAt `protobuf:"bytes,4,opt,name=settled_at,json=settledAt,proto3,oneof" json:"settled_at,omitempty"`
+	// WHO THE CALLER ADDRESSED, restated from the start so the settled frame
+	// stands alone. A send's start and its settle upsert ONE unit, so once the
+	// send settles the start is gone from any store that keeps the latest frame,
+	// and a replay drawing this frame alone must still name the recipient as the
+	// caller wrote it. Same value, same meaning, as AgentSendMessageStart's.
+	AddressedTo string `protobuf:"bytes,5,opt,name=addressed_to,json=addressedTo,proto3" json:"addressed_to,omitempty"`
+	// The one-line preview, restated from the start so the settled frame stands
+	// alone, for the same reason as the address above. UNSET exactly when the
+	// start's was: the caller supplied none, and a surface draws the recipient
+	// alone — never the body.
+	Summary       *AgentSendMessageSummary `protobuf:"bytes,6,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14710,6 +14807,20 @@ func (x *AgentSendMessageSuccess) GetResumedRecipient() *AgentSendMessageResumed
 func (x *AgentSendMessageSuccess) GetSettledAt() *AgentActivitySettledAt {
 	if x != nil {
 		return x.SettledAt
+	}
+	return nil
+}
+
+func (x *AgentSendMessageSuccess) GetAddressedTo() string {
+	if x != nil {
+		return x.AddressedTo
+	}
+	return ""
+}
+
+func (x *AgentSendMessageSuccess) GetSummary() *AgentSendMessageSummary {
+	if x != nil {
+		return x.Summary
 	}
 	return nil
 }
@@ -14820,7 +14931,16 @@ func (*AgentSendMessageResumedRecipient) Descriptor() ([]byte, []int) {
 type AgentSendMessageFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What the call said when it failed, and when it settled.
-	Error         *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Error *AgentToolFailure `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	// WHO THE CALLER ADDRESSED, restated from the start so the settled frame
+	// stands alone: a refused send is still drawn, and once it settles its start
+	// is gone from any store that keeps the latest frame of the unit. Same
+	// value, same meaning, as AgentSendMessageStart's.
+	AddressedTo string `protobuf:"bytes,2,opt,name=addressed_to,json=addressedTo,proto3" json:"addressed_to,omitempty"`
+	// The one-line preview, restated from the start so the settled frame stands
+	// alone. UNSET exactly when the start's was: the caller supplied none, and a
+	// surface draws the recipient alone — never the body.
+	Summary       *AgentSendMessageSummary `protobuf:"bytes,3,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14858,6 +14978,20 @@ func (*AgentSendMessageFailure) Descriptor() ([]byte, []int) {
 func (x *AgentSendMessageFailure) GetError() *AgentToolFailure {
 	if x != nil {
 		return x.Error
+	}
+	return nil
+}
+
+func (x *AgentSendMessageFailure) GetAddressedTo() string {
+	if x != nil {
+		return x.AddressedTo
+	}
+	return ""
+}
+
+func (x *AgentSendMessageFailure) GetSummary() *AgentSendMessageSummary {
+	if x != nil {
+		return x.Summary
 	}
 	return nil
 }
@@ -19446,9 +19580,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\ttoken_cap\x18\x04 \x01(\v2'.conversation.v1.AgentReadCutAtTokenCapH\x00R\btokenCapB\x05\n" +
 	"\x03cut\"\x17\n" +
 	"\x15AgentReadCutAtLineCap\"\x18\n" +
-	"\x16AgentReadCutAtTokenCap\"Z\n" +
+	"\x16AgentReadCutAtTokenCap\"\x89\x01\n" +
 	"\x10AgentReadFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x12-\n" +
+	"\x04path\x18\x02 \x01(\v2\x19.conversation.v1.ReadPathR\x04pathB\b\n" +
 	"\x06_error\"\x1e\n" +
 	"\bReadPath\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"-\n" +
@@ -19484,9 +19619,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\aoutcomeB\r\n" +
 	"\v_settled_at\"\x13\n" +
 	"\x11AgentWriteCreated\"\x13\n" +
-	"\x11AgentWriteUpdated\"[\n" +
+	"\x11AgentWriteUpdated\"\x8a\x01\n" +
 	"\x11AgentWriteFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x12-\n" +
+	"\x04path\x18\x02 \x01(\v2\x19.conversation.v1.ReadPathR\x04pathB\b\n" +
 	"\x06_error\"\xdf\x02\n" +
 	"\tAgentEdit\x127\n" +
 	"\x05start\x18\x01 \x01(\v2\x1f.conversation.v1.AgentEditStartH\x00R\x05start\x12D\n" +
@@ -19505,9 +19641,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\ruser_modified\x18\x03 \x01(\bR\fuserModified\x12K\n" +
 	"\n" +
 	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x00R\tsettledAt\x88\x01\x01B\r\n" +
-	"\v_settled_at\"Z\n" +
+	"\v_settled_at\"\x89\x01\n" +
 	"\x10AgentEditFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x12-\n" +
+	"\x04path\x18\x02 \x01(\v2\x19.conversation.v1.ReadPathR\x04pathB\b\n" +
 	"\x06_error\"\x92\x02\n" +
 	"\tAgentGrep\x127\n" +
 	"\x05start\x18\x01 \x01(\v2\x1f.conversation.v1.AgentGrepStartH\x00R\x05start\x12D\n" +
@@ -19560,9 +19697,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x0efiles_returned\x18\x01 \x01(\rR\rfilesReturned\x12#\n" +
 	"\rfiles_omitted\x18\x02 \x01(\rR\ffilesOmitted\"*\n" +
 	"\x0eAgentGrepCount\x12\x18\n" +
-	"\amatches\x18\x01 \x01(\rR\amatches\"Z\n" +
+	"\amatches\x18\x01 \x01(\rR\amatches\"\x91\x01\n" +
 	"\x10AgentGrepFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x125\n" +
+	"\x05query\x18\x02 \x01(\v2\x1f.conversation.v1.AgentGrepQueryR\x05queryB\b\n" +
 	"\x06_error\"\x92\x02\n" +
 	"\tAgentGlob\x127\n" +
 	"\x05start\x18\x01 \x01(\v2\x1f.conversation.v1.AgentGlobStartH\x00R\x05start\x12D\n" +
@@ -19597,9 +19735,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x15AgentGlobOmittedExact\x12#\n" +
 	"\rfiles_omitted\x18\x01 \x01(\rR\ffilesOmitted\"N\n" +
 	"\x17AgentGlobOmittedAtLeast\x123\n" +
-	"\x16files_omitted_at_least\x18\x01 \x01(\rR\x13filesOmittedAtLeast\"Z\n" +
+	"\x16files_omitted_at_least\x18\x01 \x01(\rR\x13filesOmittedAtLeast\"\x91\x01\n" +
 	"\x10AgentGlobFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x125\n" +
+	"\x05query\x18\x02 \x01(\v2\x1f.conversation.v1.AgentGlobQueryR\x05queryB\b\n" +
 	"\x06_error\"\xce\x02\n" +
 	"\tAgentBash\x127\n" +
 	"\x05start\x18\x01 \x01(\v2\x1f.conversation.v1.AgentBashStartH\x00R\x05start\x12:\n" +
@@ -19680,9 +19819,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x14AgentBashOutputImage\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
-	"media_type\x18\x02 \x01(\tR\tmediaType\"Z\n" +
+	"media_type\x18\x02 \x01(\tR\tmediaType\"\x97\x01\n" +
 	"\x10AgentBashFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x12;\n" +
+	"\acommand\x18\x02 \x01(\v2!.conversation.v1.AgentBashCommandR\acommandB\b\n" +
 	"\x06_error\"\x9c\x02\n" +
 	"\rAgentSubagent\x12;\n" +
 	"\x05start\x18\x01 \x01(\v2#.conversation.v1.AgentSubagentStartH\x00R\x05start\x12>\n" +
@@ -19845,9 +19985,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown\"7\n" +
 	"\x16AgentSkillAllowedTools\x12\x1d\n" +
 	"\n" +
-	"tool_names\x18\x01 \x03(\tR\ttoolNames\"^\n" +
+	"tool_names\x18\x01 \x03(\tR\ttoolNames\"\x95\x01\n" +
 	"\x14AgentSkillUseFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x125\n" +
+	"\x05skill\x18\x02 \x01(\v2\x1f.conversation.v1.AgentSkillNameR\x05skillB\b\n" +
 	"\x06_error\"\xae\x02\n" +
 	"\x10AgentSendMessage\x12>\n" +
 	"\x05start\x18\x01 \x01(\v2&.conversation.v1.AgentSendMessageStartH\x00R\x05start\x12D\n" +
@@ -19866,21 +20007,29 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x17AgentSendMessageSummary\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"*\n" +
 	"\x14AgentSendMessageBody\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x82\x03\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xfa\x03\n" +
 	"\x17AgentSendMessageSuccess\x12F\n" +
 	"\x12recipient_agent_id\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x10recipientAgentId\x12U\n" +
 	"\x0equeued_to_live\x18\x02 \x01(\v2-.conversation.v1.AgentSendMessageQueuedToLiveH\x00R\fqueuedToLive\x12`\n" +
 	"\x11resumed_recipient\x18\x03 \x01(\v21.conversation.v1.AgentSendMessageResumedRecipientH\x00R\x10resumedRecipient\x12K\n" +
 	"\n" +
-	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01B\n" +
+	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01\x12!\n" +
+	"\faddressed_to\x18\x05 \x01(\tR\vaddressedTo\x12G\n" +
+	"\asummary\x18\x06 \x01(\v2(.conversation.v1.AgentSendMessageSummaryH\x02R\asummary\x88\x01\x01B\n" +
 	"\n" +
 	"\bdeliveryB\r\n" +
-	"\v_settled_at\"\x1e\n" +
+	"\v_settled_atB\n" +
+	"\n" +
+	"\b_summary\"\x1e\n" +
 	"\x1cAgentSendMessageQueuedToLive\"\"\n" +
-	" AgentSendMessageResumedRecipient\"a\n" +
+	" AgentSendMessageResumedRecipient\"\xd9\x01\n" +
 	"\x17AgentSendMessageFailure\x12<\n" +
-	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\xa2\x02\n" +
+	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01\x12!\n" +
+	"\faddressed_to\x18\x02 \x01(\tR\vaddressedTo\x12G\n" +
+	"\asummary\x18\x03 \x01(\v2(.conversation.v1.AgentSendMessageSummaryH\x01R\asummary\x88\x01\x01B\b\n" +
+	"\x06_errorB\n" +
+	"\n" +
+	"\b_summary\"\xa2\x02\n" +
 	"\rAgentWebFetch\x12;\n" +
 	"\x05start\x18\x01 \x01(\v2#.conversation.v1.AgentWebFetchStartH\x00R\x05start\x12D\n" +
 	"\bprogress\x18\x02 \x01(\v2&.conversation.v1.AgentToolCallProgressH\x00R\bprogress\x12A\n" +
@@ -20621,226 +20770,235 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	107, // 151: conversation.v1.AgentReadHead.line_cap:type_name -> conversation.v1.AgentReadCutAtLineCap
 	108, // 152: conversation.v1.AgentReadHead.token_cap:type_name -> conversation.v1.AgentReadCutAtTokenCap
 	5,   // 153: conversation.v1.AgentReadFailure.error:type_name -> conversation.v1.AgentToolFailure
-	113, // 154: conversation.v1.FilePatchHunk.old_range:type_name -> conversation.v1.FilePatchHunkRange
-	113, // 155: conversation.v1.FilePatchHunk.new_range:type_name -> conversation.v1.FilePatchHunkRange
-	115, // 156: conversation.v1.AgentWrite.start:type_name -> conversation.v1.AgentWriteStart
-	61,  // 157: conversation.v1.AgentWrite.progress:type_name -> conversation.v1.AgentToolCallProgress
-	116, // 158: conversation.v1.AgentWrite.success:type_name -> conversation.v1.AgentWriteSuccess
-	119, // 159: conversation.v1.AgentWrite.failure:type_name -> conversation.v1.AgentWriteFailure
-	256, // 160: conversation.v1.AgentWrite.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
-	110, // 161: conversation.v1.AgentWriteStart.path:type_name -> conversation.v1.ReadPath
-	111, // 162: conversation.v1.AgentWriteStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	110, // 163: conversation.v1.AgentWriteSuccess.path:type_name -> conversation.v1.ReadPath
-	117, // 164: conversation.v1.AgentWriteSuccess.created:type_name -> conversation.v1.AgentWriteCreated
-	118, // 165: conversation.v1.AgentWriteSuccess.updated:type_name -> conversation.v1.AgentWriteUpdated
-	112, // 166: conversation.v1.AgentWriteSuccess.patch:type_name -> conversation.v1.FilePatchHunk
-	6,   // 167: conversation.v1.AgentWriteSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	5,   // 168: conversation.v1.AgentWriteFailure.error:type_name -> conversation.v1.AgentToolFailure
-	121, // 169: conversation.v1.AgentEdit.start:type_name -> conversation.v1.AgentEditStart
-	61,  // 170: conversation.v1.AgentEdit.progress:type_name -> conversation.v1.AgentToolCallProgress
-	122, // 171: conversation.v1.AgentEdit.success:type_name -> conversation.v1.AgentEditSuccess
-	123, // 172: conversation.v1.AgentEdit.failure:type_name -> conversation.v1.AgentEditFailure
-	256, // 173: conversation.v1.AgentEdit.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
-	110, // 174: conversation.v1.AgentEditStart.path:type_name -> conversation.v1.ReadPath
-	111, // 175: conversation.v1.AgentEditStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	110, // 176: conversation.v1.AgentEditSuccess.path:type_name -> conversation.v1.ReadPath
-	112, // 177: conversation.v1.AgentEditSuccess.patch:type_name -> conversation.v1.FilePatchHunk
-	6,   // 178: conversation.v1.AgentEditSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	5,   // 179: conversation.v1.AgentEditFailure.error:type_name -> conversation.v1.AgentToolFailure
-	126, // 180: conversation.v1.AgentGrep.start:type_name -> conversation.v1.AgentGrepStart
-	61,  // 181: conversation.v1.AgentGrep.progress:type_name -> conversation.v1.AgentToolCallProgress
-	127, // 182: conversation.v1.AgentGrep.success:type_name -> conversation.v1.AgentGrepSuccess
-	135, // 183: conversation.v1.AgentGrep.failure:type_name -> conversation.v1.AgentGrepFailure
-	125, // 184: conversation.v1.AgentGrepStart.query:type_name -> conversation.v1.AgentGrepQuery
-	111, // 185: conversation.v1.AgentGrepStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	125, // 186: conversation.v1.AgentGrepSuccess.query:type_name -> conversation.v1.AgentGrepQuery
-	128, // 187: conversation.v1.AgentGrepSuccess.content:type_name -> conversation.v1.AgentGrepContent
-	131, // 188: conversation.v1.AgentGrepSuccess.files:type_name -> conversation.v1.AgentGrepFiles
-	134, // 189: conversation.v1.AgentGrepSuccess.count:type_name -> conversation.v1.AgentGrepCount
-	6,   // 190: conversation.v1.AgentGrepSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	129, // 191: conversation.v1.AgentGrepContent.all:type_name -> conversation.v1.AgentGrepContentAll
-	130, // 192: conversation.v1.AgentGrepContent.partial:type_name -> conversation.v1.AgentGrepContentPartial
-	132, // 193: conversation.v1.AgentGrepFiles.all:type_name -> conversation.v1.AgentGrepFilesAll
-	133, // 194: conversation.v1.AgentGrepFiles.partial:type_name -> conversation.v1.AgentGrepFilesPartial
-	5,   // 195: conversation.v1.AgentGrepFailure.error:type_name -> conversation.v1.AgentToolFailure
-	138, // 196: conversation.v1.AgentGlob.start:type_name -> conversation.v1.AgentGlobStart
-	61,  // 197: conversation.v1.AgentGlob.progress:type_name -> conversation.v1.AgentToolCallProgress
-	139, // 198: conversation.v1.AgentGlob.success:type_name -> conversation.v1.AgentGlobSuccess
-	144, // 199: conversation.v1.AgentGlob.failure:type_name -> conversation.v1.AgentGlobFailure
-	137, // 200: conversation.v1.AgentGlobStart.query:type_name -> conversation.v1.AgentGlobQuery
-	111, // 201: conversation.v1.AgentGlobStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	137, // 202: conversation.v1.AgentGlobSuccess.query:type_name -> conversation.v1.AgentGlobQuery
-	140, // 203: conversation.v1.AgentGlobSuccess.all:type_name -> conversation.v1.AgentGlobAll
-	141, // 204: conversation.v1.AgentGlobSuccess.partial:type_name -> conversation.v1.AgentGlobPartial
-	6,   // 205: conversation.v1.AgentGlobSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	142, // 206: conversation.v1.AgentGlobPartial.exact:type_name -> conversation.v1.AgentGlobOmittedExact
-	143, // 207: conversation.v1.AgentGlobPartial.at_least:type_name -> conversation.v1.AgentGlobOmittedAtLeast
-	5,   // 208: conversation.v1.AgentGlobFailure.error:type_name -> conversation.v1.AgentToolFailure
-	149, // 209: conversation.v1.AgentBash.start:type_name -> conversation.v1.AgentBashStart
-	150, // 210: conversation.v1.AgentBash.update:type_name -> conversation.v1.AgentBashUpdate
-	61,  // 211: conversation.v1.AgentBash.progress:type_name -> conversation.v1.AgentToolCallProgress
-	151, // 212: conversation.v1.AgentBash.success:type_name -> conversation.v1.AgentBashSuccess
-	166, // 213: conversation.v1.AgentBash.failure:type_name -> conversation.v1.AgentBashFailure
-	147, // 214: conversation.v1.AgentBashCommand.sandboxed:type_name -> conversation.v1.AgentBashSandboxed
-	148, // 215: conversation.v1.AgentBashCommand.sandbox_disabled:type_name -> conversation.v1.AgentBashSandboxDisabled
-	146, // 216: conversation.v1.AgentBashStart.command:type_name -> conversation.v1.AgentBashCommand
-	111, // 217: conversation.v1.AgentBashStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	146, // 218: conversation.v1.AgentBashSuccess.command:type_name -> conversation.v1.AgentBashCommand
-	152, // 219: conversation.v1.AgentBashSuccess.completed:type_name -> conversation.v1.AgentBashCompleted
-	156, // 220: conversation.v1.AgentBashSuccess.interrupted:type_name -> conversation.v1.AgentBashInterrupted
-	6,   // 221: conversation.v1.AgentBashSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	159, // 222: conversation.v1.AgentBashCompleted.output:type_name -> conversation.v1.AgentBashOutput
-	153, // 223: conversation.v1.AgentBashCompleted.termination:type_name -> conversation.v1.AgentBashTermination
-	154, // 224: conversation.v1.AgentBashTermination.exited:type_name -> conversation.v1.AgentBashExited
-	155, // 225: conversation.v1.AgentBashTermination.killed:type_name -> conversation.v1.AgentBashKilled
-	159, // 226: conversation.v1.AgentBashInterrupted.output:type_name -> conversation.v1.AgentBashOutput
-	157, // 227: conversation.v1.AgentBashInterrupted.by_user:type_name -> conversation.v1.AgentBashInterruptedByUser
-	158, // 228: conversation.v1.AgentBashInterrupted.timed_out:type_name -> conversation.v1.AgentBashInterruptedByTimeout
-	57,  // 229: conversation.v1.AgentBashInterrupted.lost:type_name -> conversation.v1.DetachedLost
-	161, // 230: conversation.v1.AgentBashOutput.text:type_name -> conversation.v1.AgentBashOutputText
-	165, // 231: conversation.v1.AgentBashOutput.image:type_name -> conversation.v1.AgentBashOutputImage
-	160, // 232: conversation.v1.AgentBashOutput.not_observed:type_name -> conversation.v1.AgentBashOutputNotObserved
-	162, // 233: conversation.v1.AgentBashOutputText.whole:type_name -> conversation.v1.AgentBashOutputWhole
-	163, // 234: conversation.v1.AgentBashOutputText.partial:type_name -> conversation.v1.AgentBashOutputPartial
-	164, // 235: conversation.v1.AgentBashOutputPartial.spilled:type_name -> conversation.v1.AgentBashSpilledOutput
-	5,   // 236: conversation.v1.AgentBashFailure.error:type_name -> conversation.v1.AgentToolFailure
-	168, // 237: conversation.v1.AgentSubagent.start:type_name -> conversation.v1.AgentSubagentStart
-	173, // 238: conversation.v1.AgentSubagent.update:type_name -> conversation.v1.AgentSubagentUpdate
-	178, // 239: conversation.v1.AgentSubagent.success:type_name -> conversation.v1.AgentSubagentSuccess
-	188, // 240: conversation.v1.AgentSubagent.failure:type_name -> conversation.v1.AgentSubagentFailure
-	62,  // 241: conversation.v1.AgentSubagentStart.created_agent_id:type_name -> conversation.v1.AgentId
-	169, // 242: conversation.v1.AgentSubagentStart.prompt:type_name -> conversation.v1.AgentSubagentPrompt
-	111, // 243: conversation.v1.AgentSubagentStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	265, // 244: conversation.v1.AgentSubagentPrompt.requested_model:type_name -> conversation.v1.AgentModel
-	170, // 245: conversation.v1.AgentSubagentPrompt.none:type_name -> conversation.v1.AgentSubagentIsolationNone
-	171, // 246: conversation.v1.AgentSubagentPrompt.worktree:type_name -> conversation.v1.AgentSubagentIsolationWorktree
-	172, // 247: conversation.v1.AgentSubagentPrompt.remote:type_name -> conversation.v1.AgentSubagentIsolationRemote
-	169, // 248: conversation.v1.AgentSubagentUpdate.prompt:type_name -> conversation.v1.AgentSubagentPrompt
-	175, // 249: conversation.v1.AgentSubagentUpdate.progress:type_name -> conversation.v1.AgentSubagentProgress
-	176, // 250: conversation.v1.AgentSubagentUpdate.note:type_name -> conversation.v1.AgentSubagentNote
-	177, // 251: conversation.v1.AgentSubagentUpdate.activity:type_name -> conversation.v1.AgentSubagentActivityLabel
-	174, // 252: conversation.v1.AgentSubagentUpdate.retry:type_name -> conversation.v1.AgentSubagentRetry
-	169, // 253: conversation.v1.AgentSubagentSuccess.prompt:type_name -> conversation.v1.AgentSubagentPrompt
-	179, // 254: conversation.v1.AgentSubagentSuccess.report:type_name -> conversation.v1.AgentSubagentReport
-	180, // 255: conversation.v1.AgentSubagentSuccess.totals:type_name -> conversation.v1.AgentSubagentTotals
-	265, // 256: conversation.v1.AgentSubagentSuccess.models_used:type_name -> conversation.v1.AgentModel
-	183, // 257: conversation.v1.AgentSubagentSuccess.worktree:type_name -> conversation.v1.AgentSubagentWorktree
-	6,   // 258: conversation.v1.AgentSubagentSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	62,  // 259: conversation.v1.AgentSubagentSuccess.created_agent_id:type_name -> conversation.v1.AgentId
-	100, // 260: conversation.v1.AgentSubagentReport.prose:type_name -> conversation.v1.AgentResponseProse
-	266, // 261: conversation.v1.AgentSubagentReport.structured_result:type_name -> google.protobuf.Struct
-	263, // 262: conversation.v1.AgentSubagentTotals.full:type_name -> conversation.v1.TokenUsage
-	181, // 263: conversation.v1.AgentSubagentTotals.total_only:type_name -> conversation.v1.AgentSubagentAsyncUsage
-	182, // 264: conversation.v1.AgentSubagentTotals.tool_stats:type_name -> conversation.v1.AgentSubagentToolStats
-	184, // 265: conversation.v1.AgentSubagentWorktree.created:type_name -> conversation.v1.AgentSubagentWorktreeCreated
-	185, // 266: conversation.v1.AgentSubagentWorktree.inherited:type_name -> conversation.v1.AgentSubagentWorktreeInherited
-	186, // 267: conversation.v1.AgentSubagentWorktree.removed:type_name -> conversation.v1.AgentSubagentWorktreeRemoved
-	187, // 268: conversation.v1.AgentSubagentWorktree.retained:type_name -> conversation.v1.AgentSubagentWorktreeRetained
-	5,   // 269: conversation.v1.AgentSubagentFailure.error:type_name -> conversation.v1.AgentToolFailure
-	189, // 270: conversation.v1.AgentSubagentFailure.stopped_by_user:type_name -> conversation.v1.AgentSubagentStoppedByUser
-	57,  // 271: conversation.v1.AgentSubagentFailure.lost:type_name -> conversation.v1.DetachedLost
-	191, // 272: conversation.v1.AgentSkillUse.start:type_name -> conversation.v1.AgentSkillUseStart
-	61,  // 273: conversation.v1.AgentSkillUse.progress:type_name -> conversation.v1.AgentToolCallProgress
-	193, // 274: conversation.v1.AgentSkillUse.success:type_name -> conversation.v1.AgentSkillUseSuccess
-	196, // 275: conversation.v1.AgentSkillUse.failure:type_name -> conversation.v1.AgentSkillUseFailure
-	192, // 276: conversation.v1.AgentSkillUseStart.skill:type_name -> conversation.v1.AgentSkillName
-	111, // 277: conversation.v1.AgentSkillUseStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	192, // 278: conversation.v1.AgentSkillUseSuccess.skill:type_name -> conversation.v1.AgentSkillName
-	194, // 279: conversation.v1.AgentSkillUseSuccess.document:type_name -> conversation.v1.AgentSkillDocument
-	195, // 280: conversation.v1.AgentSkillUseSuccess.allowed_tools:type_name -> conversation.v1.AgentSkillAllowedTools
-	6,   // 281: conversation.v1.AgentSkillUseSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	5,   // 282: conversation.v1.AgentSkillUseFailure.error:type_name -> conversation.v1.AgentToolFailure
-	198, // 283: conversation.v1.AgentSendMessage.start:type_name -> conversation.v1.AgentSendMessageStart
-	61,  // 284: conversation.v1.AgentSendMessage.progress:type_name -> conversation.v1.AgentToolCallProgress
-	201, // 285: conversation.v1.AgentSendMessage.success:type_name -> conversation.v1.AgentSendMessageSuccess
-	204, // 286: conversation.v1.AgentSendMessage.failure:type_name -> conversation.v1.AgentSendMessageFailure
-	199, // 287: conversation.v1.AgentSendMessageStart.summary:type_name -> conversation.v1.AgentSendMessageSummary
-	200, // 288: conversation.v1.AgentSendMessageStart.body:type_name -> conversation.v1.AgentSendMessageBody
-	111, // 289: conversation.v1.AgentSendMessageStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	62,  // 290: conversation.v1.AgentSendMessageSuccess.recipient_agent_id:type_name -> conversation.v1.AgentId
-	202, // 291: conversation.v1.AgentSendMessageSuccess.queued_to_live:type_name -> conversation.v1.AgentSendMessageQueuedToLive
-	203, // 292: conversation.v1.AgentSendMessageSuccess.resumed_recipient:type_name -> conversation.v1.AgentSendMessageResumedRecipient
-	6,   // 293: conversation.v1.AgentSendMessageSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	5,   // 294: conversation.v1.AgentSendMessageFailure.error:type_name -> conversation.v1.AgentToolFailure
-	206, // 295: conversation.v1.AgentWebFetch.start:type_name -> conversation.v1.AgentWebFetchStart
-	61,  // 296: conversation.v1.AgentWebFetch.progress:type_name -> conversation.v1.AgentToolCallProgress
-	208, // 297: conversation.v1.AgentWebFetch.success:type_name -> conversation.v1.AgentWebFetchSuccess
-	210, // 298: conversation.v1.AgentWebFetch.failure:type_name -> conversation.v1.AgentWebFetchFailure
-	207, // 299: conversation.v1.AgentWebFetchStart.target:type_name -> conversation.v1.AgentWebFetchTarget
-	207, // 300: conversation.v1.AgentWebFetchSuccess.target:type_name -> conversation.v1.AgentWebFetchTarget
-	209, // 301: conversation.v1.AgentWebFetchSuccess.status:type_name -> conversation.v1.AgentWebFetchHttpStatus
-	207, // 302: conversation.v1.AgentWebFetchFailure.target:type_name -> conversation.v1.AgentWebFetchTarget
-	5,   // 303: conversation.v1.AgentWebFetchFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	212, // 304: conversation.v1.AgentWebSearch.start:type_name -> conversation.v1.AgentWebSearchStart
-	61,  // 305: conversation.v1.AgentWebSearch.progress:type_name -> conversation.v1.AgentToolCallProgress
-	214, // 306: conversation.v1.AgentWebSearch.success:type_name -> conversation.v1.AgentWebSearchSuccess
-	218, // 307: conversation.v1.AgentWebSearch.failure:type_name -> conversation.v1.AgentWebSearchFailure
-	213, // 308: conversation.v1.AgentWebSearchStart.query:type_name -> conversation.v1.AgentWebSearchQuery
-	213, // 309: conversation.v1.AgentWebSearchSuccess.query:type_name -> conversation.v1.AgentWebSearchQuery
-	215, // 310: conversation.v1.AgentWebSearchSuccess.results:type_name -> conversation.v1.AgentWebSearchResult
-	216, // 311: conversation.v1.AgentWebSearchResult.link:type_name -> conversation.v1.AgentWebSearchLink
-	217, // 312: conversation.v1.AgentWebSearchResult.note:type_name -> conversation.v1.AgentWebSearchNote
-	213, // 313: conversation.v1.AgentWebSearchFailure.query:type_name -> conversation.v1.AgentWebSearchQuery
-	5,   // 314: conversation.v1.AgentWebSearchFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	220, // 315: conversation.v1.AgentMonitor.start:type_name -> conversation.v1.AgentMonitorStart
-	225, // 316: conversation.v1.AgentMonitor.ended:type_name -> conversation.v1.AgentMonitorEnded
-	226, // 317: conversation.v1.AgentMonitor.failure:type_name -> conversation.v1.AgentMonitorFailure
-	221, // 318: conversation.v1.AgentMonitorStart.deadline:type_name -> conversation.v1.AgentMonitorDeadline
-	222, // 319: conversation.v1.AgentMonitorStart.persistent:type_name -> conversation.v1.AgentMonitorPersistent
-	223, // 320: conversation.v1.AgentMonitorStart.command:type_name -> conversation.v1.AgentMonitorCommand
-	224, // 321: conversation.v1.AgentMonitorStart.websocket:type_name -> conversation.v1.AgentMonitorWebsocket
-	5,   // 322: conversation.v1.AgentMonitorFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	228, // 323: conversation.v1.AgentScheduleWakeup.start:type_name -> conversation.v1.AgentScheduleWakeupStart
-	231, // 324: conversation.v1.AgentScheduleWakeup.success:type_name -> conversation.v1.AgentScheduleWakeupSuccess
-	234, // 325: conversation.v1.AgentScheduleWakeup.failure:type_name -> conversation.v1.AgentScheduleWakeupFailure
-	229, // 326: conversation.v1.AgentScheduleWakeupStart.schedule:type_name -> conversation.v1.AgentScheduleWakeupSchedule
-	230, // 327: conversation.v1.AgentScheduleWakeupStart.stop:type_name -> conversation.v1.AgentScheduleWakeupStop
-	232, // 328: conversation.v1.AgentScheduleWakeupSuccess.scheduled:type_name -> conversation.v1.AgentScheduleWakeupScheduled
-	233, // 329: conversation.v1.AgentScheduleWakeupSuccess.stopped:type_name -> conversation.v1.AgentScheduleWakeupStopped
-	5,   // 330: conversation.v1.AgentScheduleWakeupFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	236, // 331: conversation.v1.AgentArtifact.start:type_name -> conversation.v1.AgentArtifactStart
-	239, // 332: conversation.v1.AgentArtifact.success:type_name -> conversation.v1.AgentArtifactSuccess
-	242, // 333: conversation.v1.AgentArtifact.failure:type_name -> conversation.v1.AgentArtifactFailure
-	237, // 334: conversation.v1.AgentArtifactStart.publish:type_name -> conversation.v1.AgentArtifactPublish
-	238, // 335: conversation.v1.AgentArtifactStart.list:type_name -> conversation.v1.AgentArtifactList
-	240, // 336: conversation.v1.AgentArtifactSuccess.published:type_name -> conversation.v1.AgentArtifactPublished
-	241, // 337: conversation.v1.AgentArtifactSuccess.listed:type_name -> conversation.v1.AgentArtifactListed
-	5,   // 338: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	244, // 339: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
-	267, // 340: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
-	268, // 341: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
-	269, // 342: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
-	246, // 343: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
-	61,  // 344: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
-	247, // 345: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
-	248, // 346: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
-	266, // 347: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
-	111, // 348: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	243, // 349: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
-	6,   // 350: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	243, // 351: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
-	6,   // 352: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	250, // 353: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
-	251, // 354: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
-	253, // 355: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
-	254, // 356: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
-	255, // 357: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
-	0,   // 358: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
-	4,   // 359: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
-	111, // 360: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	252, // 361: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
-	252, // 362: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
-	257, // 363: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
-	258, // 364: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
-	1,   // 365: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
-	260, // 366: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
-	261, // 367: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
-	262, // 368: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
-	369, // [369:369] is the sub-list for method output_type
-	369, // [369:369] is the sub-list for method input_type
-	369, // [369:369] is the sub-list for extension type_name
-	369, // [369:369] is the sub-list for extension extendee
-	0,   // [0:369] is the sub-list for field type_name
+	110, // 154: conversation.v1.AgentReadFailure.path:type_name -> conversation.v1.ReadPath
+	113, // 155: conversation.v1.FilePatchHunk.old_range:type_name -> conversation.v1.FilePatchHunkRange
+	113, // 156: conversation.v1.FilePatchHunk.new_range:type_name -> conversation.v1.FilePatchHunkRange
+	115, // 157: conversation.v1.AgentWrite.start:type_name -> conversation.v1.AgentWriteStart
+	61,  // 158: conversation.v1.AgentWrite.progress:type_name -> conversation.v1.AgentToolCallProgress
+	116, // 159: conversation.v1.AgentWrite.success:type_name -> conversation.v1.AgentWriteSuccess
+	119, // 160: conversation.v1.AgentWrite.failure:type_name -> conversation.v1.AgentWriteFailure
+	256, // 161: conversation.v1.AgentWrite.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
+	110, // 162: conversation.v1.AgentWriteStart.path:type_name -> conversation.v1.ReadPath
+	111, // 163: conversation.v1.AgentWriteStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	110, // 164: conversation.v1.AgentWriteSuccess.path:type_name -> conversation.v1.ReadPath
+	117, // 165: conversation.v1.AgentWriteSuccess.created:type_name -> conversation.v1.AgentWriteCreated
+	118, // 166: conversation.v1.AgentWriteSuccess.updated:type_name -> conversation.v1.AgentWriteUpdated
+	112, // 167: conversation.v1.AgentWriteSuccess.patch:type_name -> conversation.v1.FilePatchHunk
+	6,   // 168: conversation.v1.AgentWriteSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	5,   // 169: conversation.v1.AgentWriteFailure.error:type_name -> conversation.v1.AgentToolFailure
+	110, // 170: conversation.v1.AgentWriteFailure.path:type_name -> conversation.v1.ReadPath
+	121, // 171: conversation.v1.AgentEdit.start:type_name -> conversation.v1.AgentEditStart
+	61,  // 172: conversation.v1.AgentEdit.progress:type_name -> conversation.v1.AgentToolCallProgress
+	122, // 173: conversation.v1.AgentEdit.success:type_name -> conversation.v1.AgentEditSuccess
+	123, // 174: conversation.v1.AgentEdit.failure:type_name -> conversation.v1.AgentEditFailure
+	256, // 175: conversation.v1.AgentEdit.diagnostics:type_name -> conversation.v1.AgentDiagnosticsReport
+	110, // 176: conversation.v1.AgentEditStart.path:type_name -> conversation.v1.ReadPath
+	111, // 177: conversation.v1.AgentEditStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	110, // 178: conversation.v1.AgentEditSuccess.path:type_name -> conversation.v1.ReadPath
+	112, // 179: conversation.v1.AgentEditSuccess.patch:type_name -> conversation.v1.FilePatchHunk
+	6,   // 180: conversation.v1.AgentEditSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	5,   // 181: conversation.v1.AgentEditFailure.error:type_name -> conversation.v1.AgentToolFailure
+	110, // 182: conversation.v1.AgentEditFailure.path:type_name -> conversation.v1.ReadPath
+	126, // 183: conversation.v1.AgentGrep.start:type_name -> conversation.v1.AgentGrepStart
+	61,  // 184: conversation.v1.AgentGrep.progress:type_name -> conversation.v1.AgentToolCallProgress
+	127, // 185: conversation.v1.AgentGrep.success:type_name -> conversation.v1.AgentGrepSuccess
+	135, // 186: conversation.v1.AgentGrep.failure:type_name -> conversation.v1.AgentGrepFailure
+	125, // 187: conversation.v1.AgentGrepStart.query:type_name -> conversation.v1.AgentGrepQuery
+	111, // 188: conversation.v1.AgentGrepStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	125, // 189: conversation.v1.AgentGrepSuccess.query:type_name -> conversation.v1.AgentGrepQuery
+	128, // 190: conversation.v1.AgentGrepSuccess.content:type_name -> conversation.v1.AgentGrepContent
+	131, // 191: conversation.v1.AgentGrepSuccess.files:type_name -> conversation.v1.AgentGrepFiles
+	134, // 192: conversation.v1.AgentGrepSuccess.count:type_name -> conversation.v1.AgentGrepCount
+	6,   // 193: conversation.v1.AgentGrepSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	129, // 194: conversation.v1.AgentGrepContent.all:type_name -> conversation.v1.AgentGrepContentAll
+	130, // 195: conversation.v1.AgentGrepContent.partial:type_name -> conversation.v1.AgentGrepContentPartial
+	132, // 196: conversation.v1.AgentGrepFiles.all:type_name -> conversation.v1.AgentGrepFilesAll
+	133, // 197: conversation.v1.AgentGrepFiles.partial:type_name -> conversation.v1.AgentGrepFilesPartial
+	5,   // 198: conversation.v1.AgentGrepFailure.error:type_name -> conversation.v1.AgentToolFailure
+	125, // 199: conversation.v1.AgentGrepFailure.query:type_name -> conversation.v1.AgentGrepQuery
+	138, // 200: conversation.v1.AgentGlob.start:type_name -> conversation.v1.AgentGlobStart
+	61,  // 201: conversation.v1.AgentGlob.progress:type_name -> conversation.v1.AgentToolCallProgress
+	139, // 202: conversation.v1.AgentGlob.success:type_name -> conversation.v1.AgentGlobSuccess
+	144, // 203: conversation.v1.AgentGlob.failure:type_name -> conversation.v1.AgentGlobFailure
+	137, // 204: conversation.v1.AgentGlobStart.query:type_name -> conversation.v1.AgentGlobQuery
+	111, // 205: conversation.v1.AgentGlobStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	137, // 206: conversation.v1.AgentGlobSuccess.query:type_name -> conversation.v1.AgentGlobQuery
+	140, // 207: conversation.v1.AgentGlobSuccess.all:type_name -> conversation.v1.AgentGlobAll
+	141, // 208: conversation.v1.AgentGlobSuccess.partial:type_name -> conversation.v1.AgentGlobPartial
+	6,   // 209: conversation.v1.AgentGlobSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	142, // 210: conversation.v1.AgentGlobPartial.exact:type_name -> conversation.v1.AgentGlobOmittedExact
+	143, // 211: conversation.v1.AgentGlobPartial.at_least:type_name -> conversation.v1.AgentGlobOmittedAtLeast
+	5,   // 212: conversation.v1.AgentGlobFailure.error:type_name -> conversation.v1.AgentToolFailure
+	137, // 213: conversation.v1.AgentGlobFailure.query:type_name -> conversation.v1.AgentGlobQuery
+	149, // 214: conversation.v1.AgentBash.start:type_name -> conversation.v1.AgentBashStart
+	150, // 215: conversation.v1.AgentBash.update:type_name -> conversation.v1.AgentBashUpdate
+	61,  // 216: conversation.v1.AgentBash.progress:type_name -> conversation.v1.AgentToolCallProgress
+	151, // 217: conversation.v1.AgentBash.success:type_name -> conversation.v1.AgentBashSuccess
+	166, // 218: conversation.v1.AgentBash.failure:type_name -> conversation.v1.AgentBashFailure
+	147, // 219: conversation.v1.AgentBashCommand.sandboxed:type_name -> conversation.v1.AgentBashSandboxed
+	148, // 220: conversation.v1.AgentBashCommand.sandbox_disabled:type_name -> conversation.v1.AgentBashSandboxDisabled
+	146, // 221: conversation.v1.AgentBashStart.command:type_name -> conversation.v1.AgentBashCommand
+	111, // 222: conversation.v1.AgentBashStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	146, // 223: conversation.v1.AgentBashSuccess.command:type_name -> conversation.v1.AgentBashCommand
+	152, // 224: conversation.v1.AgentBashSuccess.completed:type_name -> conversation.v1.AgentBashCompleted
+	156, // 225: conversation.v1.AgentBashSuccess.interrupted:type_name -> conversation.v1.AgentBashInterrupted
+	6,   // 226: conversation.v1.AgentBashSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	159, // 227: conversation.v1.AgentBashCompleted.output:type_name -> conversation.v1.AgentBashOutput
+	153, // 228: conversation.v1.AgentBashCompleted.termination:type_name -> conversation.v1.AgentBashTermination
+	154, // 229: conversation.v1.AgentBashTermination.exited:type_name -> conversation.v1.AgentBashExited
+	155, // 230: conversation.v1.AgentBashTermination.killed:type_name -> conversation.v1.AgentBashKilled
+	159, // 231: conversation.v1.AgentBashInterrupted.output:type_name -> conversation.v1.AgentBashOutput
+	157, // 232: conversation.v1.AgentBashInterrupted.by_user:type_name -> conversation.v1.AgentBashInterruptedByUser
+	158, // 233: conversation.v1.AgentBashInterrupted.timed_out:type_name -> conversation.v1.AgentBashInterruptedByTimeout
+	57,  // 234: conversation.v1.AgentBashInterrupted.lost:type_name -> conversation.v1.DetachedLost
+	161, // 235: conversation.v1.AgentBashOutput.text:type_name -> conversation.v1.AgentBashOutputText
+	165, // 236: conversation.v1.AgentBashOutput.image:type_name -> conversation.v1.AgentBashOutputImage
+	160, // 237: conversation.v1.AgentBashOutput.not_observed:type_name -> conversation.v1.AgentBashOutputNotObserved
+	162, // 238: conversation.v1.AgentBashOutputText.whole:type_name -> conversation.v1.AgentBashOutputWhole
+	163, // 239: conversation.v1.AgentBashOutputText.partial:type_name -> conversation.v1.AgentBashOutputPartial
+	164, // 240: conversation.v1.AgentBashOutputPartial.spilled:type_name -> conversation.v1.AgentBashSpilledOutput
+	5,   // 241: conversation.v1.AgentBashFailure.error:type_name -> conversation.v1.AgentToolFailure
+	146, // 242: conversation.v1.AgentBashFailure.command:type_name -> conversation.v1.AgentBashCommand
+	168, // 243: conversation.v1.AgentSubagent.start:type_name -> conversation.v1.AgentSubagentStart
+	173, // 244: conversation.v1.AgentSubagent.update:type_name -> conversation.v1.AgentSubagentUpdate
+	178, // 245: conversation.v1.AgentSubagent.success:type_name -> conversation.v1.AgentSubagentSuccess
+	188, // 246: conversation.v1.AgentSubagent.failure:type_name -> conversation.v1.AgentSubagentFailure
+	62,  // 247: conversation.v1.AgentSubagentStart.created_agent_id:type_name -> conversation.v1.AgentId
+	169, // 248: conversation.v1.AgentSubagentStart.prompt:type_name -> conversation.v1.AgentSubagentPrompt
+	111, // 249: conversation.v1.AgentSubagentStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	265, // 250: conversation.v1.AgentSubagentPrompt.requested_model:type_name -> conversation.v1.AgentModel
+	170, // 251: conversation.v1.AgentSubagentPrompt.none:type_name -> conversation.v1.AgentSubagentIsolationNone
+	171, // 252: conversation.v1.AgentSubagentPrompt.worktree:type_name -> conversation.v1.AgentSubagentIsolationWorktree
+	172, // 253: conversation.v1.AgentSubagentPrompt.remote:type_name -> conversation.v1.AgentSubagentIsolationRemote
+	169, // 254: conversation.v1.AgentSubagentUpdate.prompt:type_name -> conversation.v1.AgentSubagentPrompt
+	175, // 255: conversation.v1.AgentSubagentUpdate.progress:type_name -> conversation.v1.AgentSubagentProgress
+	176, // 256: conversation.v1.AgentSubagentUpdate.note:type_name -> conversation.v1.AgentSubagentNote
+	177, // 257: conversation.v1.AgentSubagentUpdate.activity:type_name -> conversation.v1.AgentSubagentActivityLabel
+	174, // 258: conversation.v1.AgentSubagentUpdate.retry:type_name -> conversation.v1.AgentSubagentRetry
+	169, // 259: conversation.v1.AgentSubagentSuccess.prompt:type_name -> conversation.v1.AgentSubagentPrompt
+	179, // 260: conversation.v1.AgentSubagentSuccess.report:type_name -> conversation.v1.AgentSubagentReport
+	180, // 261: conversation.v1.AgentSubagentSuccess.totals:type_name -> conversation.v1.AgentSubagentTotals
+	265, // 262: conversation.v1.AgentSubagentSuccess.models_used:type_name -> conversation.v1.AgentModel
+	183, // 263: conversation.v1.AgentSubagentSuccess.worktree:type_name -> conversation.v1.AgentSubagentWorktree
+	6,   // 264: conversation.v1.AgentSubagentSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	62,  // 265: conversation.v1.AgentSubagentSuccess.created_agent_id:type_name -> conversation.v1.AgentId
+	100, // 266: conversation.v1.AgentSubagentReport.prose:type_name -> conversation.v1.AgentResponseProse
+	266, // 267: conversation.v1.AgentSubagentReport.structured_result:type_name -> google.protobuf.Struct
+	263, // 268: conversation.v1.AgentSubagentTotals.full:type_name -> conversation.v1.TokenUsage
+	181, // 269: conversation.v1.AgentSubagentTotals.total_only:type_name -> conversation.v1.AgentSubagentAsyncUsage
+	182, // 270: conversation.v1.AgentSubagentTotals.tool_stats:type_name -> conversation.v1.AgentSubagentToolStats
+	184, // 271: conversation.v1.AgentSubagentWorktree.created:type_name -> conversation.v1.AgentSubagentWorktreeCreated
+	185, // 272: conversation.v1.AgentSubagentWorktree.inherited:type_name -> conversation.v1.AgentSubagentWorktreeInherited
+	186, // 273: conversation.v1.AgentSubagentWorktree.removed:type_name -> conversation.v1.AgentSubagentWorktreeRemoved
+	187, // 274: conversation.v1.AgentSubagentWorktree.retained:type_name -> conversation.v1.AgentSubagentWorktreeRetained
+	5,   // 275: conversation.v1.AgentSubagentFailure.error:type_name -> conversation.v1.AgentToolFailure
+	189, // 276: conversation.v1.AgentSubagentFailure.stopped_by_user:type_name -> conversation.v1.AgentSubagentStoppedByUser
+	57,  // 277: conversation.v1.AgentSubagentFailure.lost:type_name -> conversation.v1.DetachedLost
+	191, // 278: conversation.v1.AgentSkillUse.start:type_name -> conversation.v1.AgentSkillUseStart
+	61,  // 279: conversation.v1.AgentSkillUse.progress:type_name -> conversation.v1.AgentToolCallProgress
+	193, // 280: conversation.v1.AgentSkillUse.success:type_name -> conversation.v1.AgentSkillUseSuccess
+	196, // 281: conversation.v1.AgentSkillUse.failure:type_name -> conversation.v1.AgentSkillUseFailure
+	192, // 282: conversation.v1.AgentSkillUseStart.skill:type_name -> conversation.v1.AgentSkillName
+	111, // 283: conversation.v1.AgentSkillUseStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	192, // 284: conversation.v1.AgentSkillUseSuccess.skill:type_name -> conversation.v1.AgentSkillName
+	194, // 285: conversation.v1.AgentSkillUseSuccess.document:type_name -> conversation.v1.AgentSkillDocument
+	195, // 286: conversation.v1.AgentSkillUseSuccess.allowed_tools:type_name -> conversation.v1.AgentSkillAllowedTools
+	6,   // 287: conversation.v1.AgentSkillUseSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	5,   // 288: conversation.v1.AgentSkillUseFailure.error:type_name -> conversation.v1.AgentToolFailure
+	192, // 289: conversation.v1.AgentSkillUseFailure.skill:type_name -> conversation.v1.AgentSkillName
+	198, // 290: conversation.v1.AgentSendMessage.start:type_name -> conversation.v1.AgentSendMessageStart
+	61,  // 291: conversation.v1.AgentSendMessage.progress:type_name -> conversation.v1.AgentToolCallProgress
+	201, // 292: conversation.v1.AgentSendMessage.success:type_name -> conversation.v1.AgentSendMessageSuccess
+	204, // 293: conversation.v1.AgentSendMessage.failure:type_name -> conversation.v1.AgentSendMessageFailure
+	199, // 294: conversation.v1.AgentSendMessageStart.summary:type_name -> conversation.v1.AgentSendMessageSummary
+	200, // 295: conversation.v1.AgentSendMessageStart.body:type_name -> conversation.v1.AgentSendMessageBody
+	111, // 296: conversation.v1.AgentSendMessageStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	62,  // 297: conversation.v1.AgentSendMessageSuccess.recipient_agent_id:type_name -> conversation.v1.AgentId
+	202, // 298: conversation.v1.AgentSendMessageSuccess.queued_to_live:type_name -> conversation.v1.AgentSendMessageQueuedToLive
+	203, // 299: conversation.v1.AgentSendMessageSuccess.resumed_recipient:type_name -> conversation.v1.AgentSendMessageResumedRecipient
+	6,   // 300: conversation.v1.AgentSendMessageSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	199, // 301: conversation.v1.AgentSendMessageSuccess.summary:type_name -> conversation.v1.AgentSendMessageSummary
+	5,   // 302: conversation.v1.AgentSendMessageFailure.error:type_name -> conversation.v1.AgentToolFailure
+	199, // 303: conversation.v1.AgentSendMessageFailure.summary:type_name -> conversation.v1.AgentSendMessageSummary
+	206, // 304: conversation.v1.AgentWebFetch.start:type_name -> conversation.v1.AgentWebFetchStart
+	61,  // 305: conversation.v1.AgentWebFetch.progress:type_name -> conversation.v1.AgentToolCallProgress
+	208, // 306: conversation.v1.AgentWebFetch.success:type_name -> conversation.v1.AgentWebFetchSuccess
+	210, // 307: conversation.v1.AgentWebFetch.failure:type_name -> conversation.v1.AgentWebFetchFailure
+	207, // 308: conversation.v1.AgentWebFetchStart.target:type_name -> conversation.v1.AgentWebFetchTarget
+	207, // 309: conversation.v1.AgentWebFetchSuccess.target:type_name -> conversation.v1.AgentWebFetchTarget
+	209, // 310: conversation.v1.AgentWebFetchSuccess.status:type_name -> conversation.v1.AgentWebFetchHttpStatus
+	207, // 311: conversation.v1.AgentWebFetchFailure.target:type_name -> conversation.v1.AgentWebFetchTarget
+	5,   // 312: conversation.v1.AgentWebFetchFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	212, // 313: conversation.v1.AgentWebSearch.start:type_name -> conversation.v1.AgentWebSearchStart
+	61,  // 314: conversation.v1.AgentWebSearch.progress:type_name -> conversation.v1.AgentToolCallProgress
+	214, // 315: conversation.v1.AgentWebSearch.success:type_name -> conversation.v1.AgentWebSearchSuccess
+	218, // 316: conversation.v1.AgentWebSearch.failure:type_name -> conversation.v1.AgentWebSearchFailure
+	213, // 317: conversation.v1.AgentWebSearchStart.query:type_name -> conversation.v1.AgentWebSearchQuery
+	213, // 318: conversation.v1.AgentWebSearchSuccess.query:type_name -> conversation.v1.AgentWebSearchQuery
+	215, // 319: conversation.v1.AgentWebSearchSuccess.results:type_name -> conversation.v1.AgentWebSearchResult
+	216, // 320: conversation.v1.AgentWebSearchResult.link:type_name -> conversation.v1.AgentWebSearchLink
+	217, // 321: conversation.v1.AgentWebSearchResult.note:type_name -> conversation.v1.AgentWebSearchNote
+	213, // 322: conversation.v1.AgentWebSearchFailure.query:type_name -> conversation.v1.AgentWebSearchQuery
+	5,   // 323: conversation.v1.AgentWebSearchFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	220, // 324: conversation.v1.AgentMonitor.start:type_name -> conversation.v1.AgentMonitorStart
+	225, // 325: conversation.v1.AgentMonitor.ended:type_name -> conversation.v1.AgentMonitorEnded
+	226, // 326: conversation.v1.AgentMonitor.failure:type_name -> conversation.v1.AgentMonitorFailure
+	221, // 327: conversation.v1.AgentMonitorStart.deadline:type_name -> conversation.v1.AgentMonitorDeadline
+	222, // 328: conversation.v1.AgentMonitorStart.persistent:type_name -> conversation.v1.AgentMonitorPersistent
+	223, // 329: conversation.v1.AgentMonitorStart.command:type_name -> conversation.v1.AgentMonitorCommand
+	224, // 330: conversation.v1.AgentMonitorStart.websocket:type_name -> conversation.v1.AgentMonitorWebsocket
+	5,   // 331: conversation.v1.AgentMonitorFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	228, // 332: conversation.v1.AgentScheduleWakeup.start:type_name -> conversation.v1.AgentScheduleWakeupStart
+	231, // 333: conversation.v1.AgentScheduleWakeup.success:type_name -> conversation.v1.AgentScheduleWakeupSuccess
+	234, // 334: conversation.v1.AgentScheduleWakeup.failure:type_name -> conversation.v1.AgentScheduleWakeupFailure
+	229, // 335: conversation.v1.AgentScheduleWakeupStart.schedule:type_name -> conversation.v1.AgentScheduleWakeupSchedule
+	230, // 336: conversation.v1.AgentScheduleWakeupStart.stop:type_name -> conversation.v1.AgentScheduleWakeupStop
+	232, // 337: conversation.v1.AgentScheduleWakeupSuccess.scheduled:type_name -> conversation.v1.AgentScheduleWakeupScheduled
+	233, // 338: conversation.v1.AgentScheduleWakeupSuccess.stopped:type_name -> conversation.v1.AgentScheduleWakeupStopped
+	5,   // 339: conversation.v1.AgentScheduleWakeupFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	236, // 340: conversation.v1.AgentArtifact.start:type_name -> conversation.v1.AgentArtifactStart
+	239, // 341: conversation.v1.AgentArtifact.success:type_name -> conversation.v1.AgentArtifactSuccess
+	242, // 342: conversation.v1.AgentArtifact.failure:type_name -> conversation.v1.AgentArtifactFailure
+	237, // 343: conversation.v1.AgentArtifactStart.publish:type_name -> conversation.v1.AgentArtifactPublish
+	238, // 344: conversation.v1.AgentArtifactStart.list:type_name -> conversation.v1.AgentArtifactList
+	240, // 345: conversation.v1.AgentArtifactSuccess.published:type_name -> conversation.v1.AgentArtifactPublished
+	241, // 346: conversation.v1.AgentArtifactSuccess.listed:type_name -> conversation.v1.AgentArtifactListed
+	5,   // 347: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
+	244, // 348: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
+	267, // 349: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
+	268, // 350: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
+	269, // 351: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
+	246, // 352: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
+	61,  // 353: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
+	247, // 354: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
+	248, // 355: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
+	266, // 356: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
+	111, // 357: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	243, // 358: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
+	6,   // 359: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	243, // 360: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
+	6,   // 361: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	250, // 362: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
+	251, // 363: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
+	253, // 364: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
+	254, // 365: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
+	255, // 366: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
+	0,   // 367: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
+	4,   // 368: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
+	111, // 369: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	252, // 370: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
+	252, // 371: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
+	257, // 372: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
+	258, // 373: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
+	1,   // 374: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
+	260, // 375: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
+	261, // 376: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
+	262, // 377: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
+	378, // [378:378] is the sub-list for method output_type
+	378, // [378:378] is the sub-list for method input_type
+	378, // [378:378] is the sub-list for extension type_name
+	378, // [378:378] is the sub-list for extension extendee
+	0,   // [0:378] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_activity_proto_init() }

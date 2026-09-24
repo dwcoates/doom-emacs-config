@@ -116,6 +116,12 @@ describe("PersistEntry → StoreEntry routing", () => {
     expect(request.batch?.cursorAdvance).toBeUndefined();
   });
 
+  it("states the interactive class: a live frame goes ahead of any queued bulk copy", () => {
+    const request = toWriteBatchRequest(PRODUCER, [readEntry(BOOK, "unit-1", "/tmp/a")]);
+
+    expect(request.writeClass?.writeClass.case).toBe("interactive");
+  });
+
   it("mints the same write id for the same frame re-sent, so the store absorbs the replay", () => {
     const first = toStoreEntry(PRODUCER, readEntry(BOOK, "unit-1", "/tmp/a"));
     const second = toStoreEntry(PRODUCER, readEntry(BOOK, "unit-1", "/tmp/a"));

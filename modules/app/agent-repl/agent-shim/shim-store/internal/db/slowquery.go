@@ -82,6 +82,12 @@ const (
 	StatementBashRun     = "bash_run"
 	// StatementResidueShapes is the residue shape catalog listing.
 	StatementResidueShapes = "residue_shapes"
+	// StatementLedgerSweep is one transaction of the write-ledger sweep. It
+	// holds the one writer like any batch does, so it is timed like one: on
+	// 2026-09-23 two sweeps held the writer for 137s and 848s and left no
+	// record at all, because a sweep that removed nothing was only ever
+	// narrated at verbose.
+	StatementLedgerSweep = "ledger_sweep"
 )
 
 // SlowQueryFromEnv resolves the slow-query threshold from the environment.
@@ -280,7 +286,18 @@ func (d *DB) observeQuery(statement, table string, fields logging.Fields, starte
 		return
 	}
 	elapsed := d.mono().Sub(started)
-	over, window := d.observeBudget(statement, elapsed >= threshold)
+	// A WRITE'S WINDOW IS KEPT PER CLASS. A bulk transaction and an
+	// interactive one share a statement family but not a cause: a backlog of
+	// bulk work over budget must not make an interactive write's isolated
+	// spike read as a persistent defect, nor the reverse.
+	windowKey := statement
+	classSuffix := ""
+	if fields.WriteClass != "" {
+		windowKey = statement + "/" + fields.WriteClass
+		classSuffix = " write_class=" + fields.WriteClass
+		fields.Exec = elapsed - fields.LockWait
+	}
+	over, window := d.observeBudget(windowKey, elapsed >= threshold)
 	if elapsed < threshold {
 		return
 	}
@@ -294,11 +311,35 @@ func (d *DB) observeQuery(statement, table string, fields logging.Fields, starte
 	fields.BudgetWindow = window
 	if over >= BudgetWarnAt {
 		fields.Level = "warn"
-		d.log.Log(fields, "SQLite statement family is persistently over its budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d",
-			statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window)
+		d.log.Log(fields, "SQLite statement family is persistently over its budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d%s",
+			statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window, classSuffix)
 		return
 	}
 	fields.Level = "info"
-	d.log.Log(fields, "SQLite statement exceeded its budget on an isolated sample — the family's recent statements are within budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d",
-		statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window)
+	d.log.Log(fields, "SQLite statement exceeded its budget on an isolated sample — the family's recent statements are within budget statement=%s duration_ms=%d lock_wait_ms=%d rows=%d threshold_ms=%d over_budget_recent=%d/%d%s",
+		statement, elapsed.Milliseconds(), fields.LockWait.Milliseconds(), rows, threshold.Milliseconds(), over, window, classSuffix)
+}
+
+// WriteTimingOperation is the operation every per-write timing record carries.
+const WriteTimingOperation = "store.db.write-timing"
+
+// traceWriteTiming records one write transaction's queue wait and execution
+// time, by class — EVERY write, not only a slow one.
+//
+// The slow-query record answers "was this one over budget"; this answers "what
+// is the writer's queue doing", which needs the healthy writes too: an
+// interactive write that waited 40ms behind a bulk transaction is within every
+// budget and is exactly the number the two-tier queue exists to keep small.
+// It is VERBOSE because it is per-operation narration on the hot path, like
+// the statement trace beside it.
+func (d *DB) traceWriteTiming(statement string, fields logging.Fields, started time.Time, rows int64, transaction int) {
+	elapsed := d.mono().Sub(started)
+	fields.Operation = WriteTimingOperation
+	fields.Level = "debug"
+	fields.Statement = statement
+	fields.Duration = elapsed
+	fields.Exec = elapsed - fields.LockWait
+	fields.Rows = rows
+	d.log.LogVerbose(fields, "write timed statement=%s write_class=%s transaction=%d queue_wait_ms=%d exec_ms=%d rows=%d",
+		statement, fields.WriteClass, transaction, fields.LockWait.Milliseconds(), fields.Exec.Milliseconds(), rows)
 }

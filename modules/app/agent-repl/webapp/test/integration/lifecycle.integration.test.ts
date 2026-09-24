@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
 import { DrainReasonSchema } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { REFUSAL_FACTS, ROOT_FEED, type RpcName } from "./fake-daemon";
 import {
   DRAIN_REASON_ARMS,
@@ -40,6 +40,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

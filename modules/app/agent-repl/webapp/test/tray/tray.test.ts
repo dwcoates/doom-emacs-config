@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -19,10 +19,13 @@ import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import {
+  HELD_ENTRY_SELECTOR,
   drawDaemonHoldItem,
   drawDaemonHoldTray,
   mountHoldTray,
 } from "../../src/tray/tray.js";
+import { resetLoggingForTests } from "../../src/log.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -161,6 +164,15 @@ describe("drawDaemonHoldTray", () => {
     expect(drawn?.querySelector(".hold-tray-items")?.classList.contains("list-rows")).toBe(true);
   });
 
+  it("names every held card, in order, by its held-entry selector", () => {
+    // Arrange
+    const drawn = drawDaemonHoldTray(tray([promptItem("t1"), offerItem(), promptItem("t2")]), trayContext());
+    // Act
+    const entries = [...(drawn?.querySelectorAll(HELD_ENTRY_SELECTOR) ?? [])];
+    // Assert
+    expect(entries.map((node) => node.getAttribute("data-held-turn"))).toEqual(["t1", null, "t2"]);
+  });
+
 });
 
 describe("drawDaemonHoldItem", () => {
@@ -186,7 +198,7 @@ describe("mountHoldTray", () => {
     const ctx = streamingContext(async function* () {
       yield tray([promptItem("t1")]);
     });
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     expect(host.querySelector('[data-held-turn="t1"]')).not.toBeNull();
     handle.dispose();
@@ -198,7 +210,7 @@ describe("mountHoldTray", () => {
       yield tray([promptItem("t1")]);
       yield tray([promptItem("t2")]);
     });
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     expect(host.querySelector('[data-held-turn="t1"]')).toBeNull();
     expect(host.querySelector('[data-held-turn="t2"]')).not.toBeNull();
@@ -212,7 +224,7 @@ describe("mountHoldTray", () => {
       yield tray([promptItem("t1")]);
       yield tray([promptItem("t2")]);
     }, ticker);
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     expect(ticker.subscribers()).toBe(1);
     handle.dispose();
@@ -226,7 +238,7 @@ describe("mountHoldTray", () => {
       yield tray([]);
     });
     // Act
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     // Assert
     expect(host.childElementCount).toBe(0);
@@ -239,7 +251,7 @@ describe("mountHoldTray", () => {
     const ctx = streamingContext(async function* () {
       yield tray([promptItem("t1")]);
     }, ticker);
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     handle.dispose();
     expect(host.childElementCount).toBe(0);
@@ -252,7 +264,7 @@ describe("mountHoldTray", () => {
     const ctx = streamingContext(async function* () {
       yield tray([multiLineItem("t1")]);
     });
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     // Act — a click on the header strip, as on any bubble.
     host.querySelector<HTMLElement>(".queued-head")?.click();
@@ -271,7 +283,7 @@ describe("mountHoldTray", () => {
       await next;
       yield tray([multiLineItem("t1")]);
     });
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     const first = host.querySelector('[data-held-turn="t1"]');
     // Act
@@ -292,7 +304,7 @@ describe("mountHoldTray", () => {
       await reader;
       yield tray([multiLineItem("t1")]);
     });
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     host.querySelector<HTMLElement>(".queued-text")?.click();
     // Act
@@ -314,7 +326,7 @@ describe("mountHoldTray", () => {
       await reader;
       yield tray([multiLineItem("t2")]);
     });
-    const handle = mountHoldTray(host, ctx);
+    const handle = mountHoldTray(host, ctx, { promptHeld: vi.fn() });
     await settle();
     host.querySelector<HTMLElement>(".queued-text")?.click();
     // Act
@@ -324,5 +336,98 @@ describe("mountHoldTray", () => {
     expect(host.querySelector('[data-held-turn="t2"] > .bubble-scroll')?.classList.contains("expanded"))
       .toBe(false);
     handle.dispose();
+  });
+});
+
+/**
+ * A HELD PROMPT'S FIRST DRAW PARKS THE FEED (owner ruling, 2026-09-23): the
+ * tray calls `promptHeld` once a push has PLACED a card it did not hold before,
+ * and never for a re-push or a removal.
+ */
+describe("mountHoldTray's park on a held prompt's first draw", () => {
+  /** A tray fed PUSHES in order, and a promptHeld spy recording whether its card was placed. */
+  function mounted(pushes: DaemonHoldTray[]): {
+    host: HTMLElement;
+    promptHeld: ReturnType<typeof vi.fn>;
+    placed: boolean[];
+    handle: { dispose(): void };
+  } {
+    const host = document.createElement("section");
+    const placed: boolean[] = [];
+    const promptHeld = vi.fn((turn: string) => {
+      placed.push(host.querySelector(`[data-held-turn="${turn}"]`) !== null);
+    });
+    const ctx = streamingContext(async function* () {
+      for (const push of pushes) yield push;
+    });
+    const handle = mountHoldTray(host, ctx, { promptHeld });
+    return { host, promptHeld, placed, handle };
+  }
+
+  it("parks once when a held prompt's card is first drawn", async () => {
+    // Arrange / Act
+    const m = mounted([tray([promptItem("t1")])]);
+    await settle();
+    // Assert
+    expect(m.promptHeld.mock.calls).toEqual([["t1"]]);
+    m.handle.dispose();
+  });
+
+  it("parks only after the card is placed in the tray", async () => {
+    // Arrange / Act
+    const m = mounted([tray([promptItem("t1")])]);
+    await settle();
+    // Assert
+    expect(m.placed).toEqual([true]);
+    m.handle.dispose();
+  });
+
+  it("parks again for a second held prompt landing beside the first", async () => {
+    // Arrange / Act
+    const m = mounted([tray([promptItem("t1")]), tray([promptItem("t1"), promptItem("t2")])]);
+    await settle();
+    // Assert
+    expect(m.promptHeld.mock.calls).toEqual([["t1"], ["t2"]]);
+    m.handle.dispose();
+  });
+
+  it("does not park on a re-push of a card already drawn", async () => {
+    // Arrange / Act
+    const m = mounted([tray([promptItem("t1")]), tray([multiLineItem("t1")])]);
+    await settle();
+    // Assert
+    expect(m.promptHeld.mock.calls).toEqual([["t1"]]);
+    m.handle.dispose();
+  });
+
+  it("does not park when a held prompt leaves the tray", async () => {
+    // Arrange / Act
+    const m = mounted([tray([promptItem("t1"), promptItem("t2")]), tray([promptItem("t1")])]);
+    await settle();
+    // Assert
+    expect(m.promptHeld.mock.calls).toEqual([["t2"]]);
+    m.handle.dispose();
+  });
+
+  it("does not park for an offer, which is no prompt", async () => {
+    // Arrange / Act
+    const m = mounted([tray([offerItem()])]);
+    await settle();
+    // Assert
+    expect(m.promptHeld).not.toHaveBeenCalled();
+    m.handle.dispose();
+  });
+
+  it("logs the landing with the turns it parked for", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    const m = mounted([tray([promptItem("t1")])]);
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt-landed");
+    expect(record.context).toMatchObject({ turns: ["t1"] });
+    m.handle.dispose();
+    resetLoggingForTests();
   });
 });

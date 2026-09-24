@@ -60,6 +60,7 @@ const (
 	SiteResidueRawUnset       = db.SiteResidueRawUnset
 	SiteUnknownAgent          = db.SiteUnknownAgent
 	SiteSessionEmpty          = db.SiteSessionEmpty
+	SiteWriteClassUnset       = db.SiteWriteClassUnset
 )
 
 // refusalClass is WHICH FAILURE ARM a refusal becomes.
@@ -304,6 +305,12 @@ func validateEntryBatch(b *storev1.EntryBatch, carriesShapes bool) *refusal {
 func validateWriteBatchRequest(req *storev1.WriteBatchRequest) *refusal {
 	if req.GetProducer() == "" {
 		return refuse(SiteProducerEmpty, "producer", "producer: the write names no producer, so nothing can be attributed")
+	}
+	// THE CLASS IS REQUIRED AND NEVER DEFAULTED. It decides which queue the
+	// write takes into the one writer, and a guessed class is how a bulk copy
+	// ends up ahead of a live turn.
+	if req.GetWriteClass().GetWriteClass() == nil {
+		return refuse(SiteWriteClassUnset, "write_class", "write_class: the write states neither interactive nor bulk, and the store never guesses which queue a write belongs in")
 	}
 	if ref := validateEntryBatch(req.GetBatch(), len(req.GetShapes()) > 0); ref != nil {
 		return ref

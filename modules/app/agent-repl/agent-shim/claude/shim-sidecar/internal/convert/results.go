@@ -568,10 +568,14 @@ func bashSpilledOutput(result map[string]any, total uint64) *conversationv1.Agen
 // the message, the other RESTARTED A DORMANT AGENT, which begins consuming
 // tokens again.
 func sendMessageSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentSendMessageSuccess {
-	recipient := firstNonEmpty(str(result["resumedAgentId"]), str(pick(call.input, "to", "agent", "recipient")))
+	recipient := firstNonEmpty(str(result["resumedAgentId"]), sendAddressedTo(call.input))
 	success := &conversationv1.AgentSendMessageSuccess{
 		RecipientAgentId: agentID(recipient),
 		SettledAt:        settledAt(ts),
+		// RESTATED so the settled frame stands alone: the start it upserts
+		// over is gone once it lands, and a replay draws the send from this.
+		AddressedTo: sendAddressedTo(call.input),
+		Summary:     sendMessageSummary(call.input),
 	}
 	if str(result["resumedAgentId"]) != "" {
 		success.Delivery = &conversationv1.AgentSendMessageSuccess_ResumedRecipient{ResumedRecipient: &conversationv1.AgentSendMessageResumedRecipient{}}

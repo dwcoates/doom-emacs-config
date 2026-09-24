@@ -117,9 +117,15 @@ export const skillUseConverter: ToolConverter = {
         { tool_use_id: call.toolUseId },
         "a skill could not be loaded; the invocation settles as a failure",
       );
+      // THE SETTLED FRAME STANDS ALONE: it restates the skill, exactly as the
+      // success does, since the start it upserts over is gone once it lands.
+      // An invocation that named no skill had no start either, so it gets no
+      // failure frame (skillNameOf says why at debug).
+      const skill = skillNameOf(call);
+      if (skill === undefined) return undefined;
       return skillItem({
         case: "failure",
-        value: create(conversationv1.AgentSkillUseFailureSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentSkillUseFailureSchema, { error: failureOf(outcome), skill }),
       });
     }
     LOGGER.debug(

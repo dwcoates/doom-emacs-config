@@ -24,7 +24,7 @@ import { SubmitPromptSuccessSchema } from "../../../proto/gen/ts/agentrepl/v1/en
 import { SubmitPromptCommandPanelSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   COMMAND_PANEL_ARMS,
@@ -44,6 +44,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

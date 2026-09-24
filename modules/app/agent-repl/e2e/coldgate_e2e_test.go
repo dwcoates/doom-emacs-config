@@ -242,7 +242,19 @@ func raiseColdGate(t *testing.T) *coldGate {
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, first.Daemon, repo.Dir)
 
-	driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "cold-seed")
+	seed := driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "cold-seed")
+	// THE CRASH WAITS FOR THE SEED TURN'S DURABLE CLOSE. The feed publishes a
+	// turn's end before the prompt queue stamps its close, so a kill landing
+	// between the two leaves the turn open on disk, and the successor rightly
+	// closes it as an orphan at WARN (`daemon.promptqueue.restore_holds`) — a
+	// crash inside that window is not this arrangement's subject, and racing
+	// it failed TestColdGate/Compact one run in three. The queue's own record
+	// of the turn end is written after the close, so it is the edge to wait on.
+	first.Daemon.AwaitWorkspaceLogRecord(ws.GetDir(), "the first daemon's durable close of the seed turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_ended" &&
+			r.Message == "the turn ended; nothing is waiting to be delivered" &&
+			r.Context["turn"] == seed.GetValue()
+	})
 	configDir := first.DefaultConfigDir
 
 	// Act: crash the daemon and kill its shim, so the successor has nothing to

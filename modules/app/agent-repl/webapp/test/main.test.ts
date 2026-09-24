@@ -57,6 +57,9 @@ const loginOpen = vi.fn();
 /** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
 let footerSelectDetachedWork: ((id: unknown) => void) | null = null;
 const feedSelectDetachedWork = vi.fn();
+/** The tray's `promptHeld`, and the feed handle's it must reach. */
+let trayPromptHeld: ((turn: string) => void) | null = null;
+const feedPromptHeld = vi.fn();
 /** The last `mountFeed` deps, for the composer-factory contract. */
 let feedDeps: { composerFactory?: unknown } | null = null;
 /** The context the boot built, so its stream's fate can be read off it. */
@@ -191,17 +194,20 @@ async function bootMain(): Promise<void> {
     mountFeed: mounts.feed.mockImplementation((_host: HTMLElement, _ctx, deps: typeof feedDeps) => {
       order.push("feed");
       feedDeps = deps;
-      return { dispose: vi.fn(), selectDetachedWork: feedSelectDetachedWork };
+      return { dispose: vi.fn(), selectDetachedWork: feedSelectDetachedWork, promptHeld: feedPromptHeld };
     }),
   }));
   vi.doMock("../src/feed/renderers.js", () => ({
     createRowRenderers: vi.fn(() => ({})),
   }));
   vi.doMock("../src/tray/tray.js", () => ({
-    mountHoldTray: mounts.holdTray.mockImplementation(() => {
-      order.push("holdTray");
-      return { dispose: vi.fn() };
-    }),
+    mountHoldTray: mounts.holdTray.mockImplementation(
+      (_host: HTMLElement, _ctx, deps: { promptHeld: (turn: string) => void }) => {
+        order.push("holdTray");
+        trayPromptHeld = deps.promptHeld;
+        return { dispose: vi.fn() };
+      },
+    ),
   }));
   vi.doMock("../src/footer/footer.js", () => ({
     mountFooter: mounts.footer.mockImplementation(
@@ -260,8 +266,10 @@ beforeEach(() => {
   onFooterStatus = null;
   openLogin = null;
   footerSelectDetachedWork = null;
+  trayPromptHeld = null;
   loginOpen.mockClear();
   feedSelectDetachedWork.mockClear();
+  feedPromptHeld.mockClear();
   onComposerPanel = null;
   feedDeps = null;
   drawnPanel = null;
@@ -399,6 +407,14 @@ describe("the boot", { timeout: coverageBootTimeoutMS }, () => {
     footerSelectDetachedWork?.({ value: "row-1" });
 
     expect(feedSelectDetachedWork).toHaveBeenCalledWith({ value: "row-1" });
+  });
+
+  test("routes the hold tray's first-drawn held prompt to the feed it mounted", async () => {
+    await bootMain();
+
+    trayPromptHeld?.("turn-1");
+
+    expect(feedPromptHeld).toHaveBeenCalledWith("turn-1");
   });
 
   test("mints a page identity without crypto.randomUUID", async () => {

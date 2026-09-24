@@ -711,14 +711,16 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// are what "resubmitted twice" would duplicate.
 	afterSecondBoot := mqOpenFeedWatch(t, w, child, nil)
 	defer afterSecondBoot.Close()
+	// DISTINCT ROWS: Rows() holds every push, and a replayed prompt row is
+	// pushed again when its turn's end settles it.
 	mqDisplacedRows := func(rows []*frontendv1.FeedRow) int {
-		n := 0
+		ids := map[string]bool{}
 		for _, row := range rows {
 			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
-				n++
+				ids[row.GetId().GetValue()] = true
 			}
 		}
-		return n
+		return len(ids)
 	}
 	afterSecondBoot.AwaitRow("the replayed rows carrying the displaced turn's words", func(*frontendv1.FeedRow) bool {
 		return mqDisplacedRows(afterSecondBoot.Rows()) >= matches
@@ -729,6 +731,19 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 
 	// A resubmission the boot sweep made would arrive as one more such row.
 	// Nothing else can end this wait, so it necessarily waits out the probe.
+	//
+	// A NEW ROW, NOT A NEW PUSH. The replay draws each prompt row and then
+	// re-publishes it once its turn's end is replayed ("no longer working"),
+	// and whether that restatement lands before or after the wait above is
+	// how the stream happens to be drained — so counting pushes failed this
+	// test on a row the feed already held. A resubmission is a turn of its
+	// own, drawn as a row id the feed has not held.
+	seen := map[string]bool{}
+	for _, row := range afterSecondBoot.Rows() {
+		if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
+			seen[row.GetId().GetValue()] = true
+		}
+	}
 	deadline := time.NewTimer(harness.ProbeWindow)
 	defer deadline.Stop()
 	for done := false; !done; {
@@ -738,7 +753,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 				done = true
 				break
 			}
-			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
+			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText && !seen[row.GetId().GetValue()] {
 				t.Fatalf("a further root feed row carries the displaced turn's words after a second bounce, want unchanged at %d (never resubmitted twice)", matches)
 			}
 		case <-deadline.C:

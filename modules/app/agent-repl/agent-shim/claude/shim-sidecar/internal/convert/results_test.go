@@ -61,6 +61,59 @@ func TestSendMessageSuccessReportsAResumedRecipient(t *testing.T) {
 	}
 }
 
+// A SETTLED SEND STANDS ALONE: it restates the address and the summary, since
+// the start it upserts over is gone once it lands.
+func TestSendMessageSuccessRestatesTheStartsFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		input map[string]any
+		// restated reads the one restated field under test.
+		restated func(*conversationv1.AgentSendMessageSuccess) string
+		want     string
+	}{
+		{
+			name:     "the address as the caller wrote it",
+			input:    map[string]any{"to": "vetter", "message": "go"},
+			restated: func(s *conversationv1.AgentSendMessageSuccess) string { return s.GetAddressedTo() },
+			want:     "vetter",
+		},
+		{
+			name:     "the caller's one-line summary",
+			input:    map[string]any{"to": "vetter", "message": "go", "summary": "Scroll fix landed; merge master in"},
+			restated: func(s *conversationv1.AgentSendMessageSuccess) string { return s.GetSummary().GetText() },
+			want:     "Scroll fix landed; merge master in",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			call := openCall{input: tt.input}
+			result := map[string]any{"resumedAgentId": "agent-7"}
+
+			// Act
+			got := sendMessageSuccess(call, result, 1000)
+
+			// Assert
+			if restated := tt.restated(got); restated != tt.want {
+				t.Fatalf("restated = %q, want %q", restated, tt.want)
+			}
+		})
+	}
+}
+
+func TestSendMessageSuccessLeavesTheSummaryUnsetWhenTheCallerGaveNone(t *testing.T) {
+	// Arrange
+	call := openCall{input: map[string]any{"to": "vetter", "message": "go"}}
+
+	// Act
+	got := sendMessageSuccess(call, map[string]any{"resumedAgentId": "agent-7"}, 1000)
+
+	// Assert
+	if got.GetSummary() != nil {
+		t.Fatalf("Summary = %v, want unset: the caller supplied none", got.GetSummary())
+	}
+}
+
 func TestWebFetchSuccessCarriesTheServedStatusAlongsideTheContent(t *testing.T) {
 	// Arrange: an HTTP error page is still a served answer, not a failure.
 	call := openCall{input: map[string]any{"url": "https://example.com"}}

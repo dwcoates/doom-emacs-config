@@ -20,6 +20,7 @@ import {
   type BubbleBody,
 } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
+import { EXPANDED_CLASS } from "../../src/expand.js";
 import { useTreeLayout } from "../tree-layout.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
@@ -70,12 +71,37 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
 
 
   it("measures the cap less the chrome, in columns of the tree font", () => {
-    // Arrange — 77% of 1000px = 770px, less 2 x 10px body padding = 750px.
+    // Arrange — 77% of 1000px = 770px, less 2 x 10px body padding and the 8px
+    // scrollbar gutter = 742px.
     const body = stageBody();
     // Act
     const cols = measureTreeCols(body);
-    // Assert — floor(750 / 8).
-    expect(cols).toBe(93);
+    // Assert — floor(742 / 8).
+    expect(cols).toBe(92);
+  });
+
+  it("takes the expanded scrollbar's gutter token off the budget", () => {
+    // Arrange — a 24px gutter is three columns of the 8px tree font.
+    const body = stageBody();
+    const narrow = measureTreeCols(body);
+    // Act
+    staged.layout.scrollbarPx = 0;
+    const gutterless = measureTreeCols(body);
+    // Assert — 742/8 against 750/8: the gutter is one column here.
+    expect([narrow, gutterless]).toEqual([92, 93]);
+  });
+
+  it("wraps a collapsed bubble to the same budget as the expanded one", () => {
+    // Arrange
+    const body = stageBody();
+    const scroll = body.parentElement;
+    if (scroll === null) throw new Error("no scroll box");
+    const collapsed = measureTreeCols(body);
+    // Act
+    scroll.classList.add(EXPANDED_CLASS);
+    const expanded = measureTreeCols(body);
+    // Assert
+    expect(expanded).toBe(collapsed);
   });
 
   it("resolves the percentage cap against the containing block, so a wider column yields more columns", () => {
@@ -93,8 +119,8 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     // Arrange — an engine that resolves the cap to px hands it back as px.
     staged.layout.maxWidth = "560px";
     const body = stageBody();
-    // Act + Assert — 560 - 20 = 540px, floor(540 / 8).
-    expect(measureTreeCols(body)).toBe(67);
+    // Act + Assert — 560 - 20 - 8 = 532px, floor(532 / 8).
+    expect(measureTreeCols(body)).toBe(66);
   });
 
   it("resolves a single-percentage calc() cap as that percentage", () => {
@@ -102,7 +128,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     staged.layout.maxWidth = "calc(77%)";
     const body = stageBody();
     // Act + Assert
-    expect(measureTreeCols(body)).toBe(93);
+    expect(measureTreeCols(body)).toBe(92);
   });
 
   it("never reads the bubble's own fit-content width", () => {
@@ -127,7 +153,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     measureTreeCols(body);
     // Assert
     const record = await forwardedRecord(capture, "bubble.body.tree-cols");
-    expect(record.context).toMatchObject({ cols: 93, char_px: 8 });
+    expect(record.context).toMatchObject({ cols: 92, char_px: 8, gutter_px: 8 });
   });
 });
 
@@ -207,6 +233,14 @@ describe("an unmeasurable tree width is an invariant violation", () => {
     // Act + Assert
     expect(await violation(body)).toBe("a computed length is not in px");
     vi.restoreAllMocks();
+  });
+
+  it("refuses a scrollbar gutter token that is not in px", async () => {
+    // Arrange
+    staged.layout.scrollbarToken = "0.5rem";
+    const body = stageBody();
+    // Act + Assert
+    expect(await violation(body)).toBe("the scrollbar gutter token is not in px");
   });
 
   it("refuses a cap whose content width holds no column", async () => {

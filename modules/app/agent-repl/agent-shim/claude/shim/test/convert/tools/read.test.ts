@@ -387,6 +387,25 @@ describe("readConverter.settle", () => {
     expect(failure.error?.settledAt?.atMs).toBe(1_700_000_001_000n);
     expect(failure.error?.content).toBeUndefined();
   });
+
+  // THE SETTLED FRAME STANDS ALONE: the start it upserts over is gone once it
+  // lands, so a replay of the failure alone must still name the file.
+  it("restates the requested path on the failure arm", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome("Error: no such file", true));
+
+    // Assert.
+    const failure = (item?.value as conversationv1.AgentRead).result.value as conversationv1.AgentReadFailure;
+    expect(failure.path?.path).toBe("/tmp/a.txt");
+  });
+
+  it("produces NO failure frame for a call that named no path, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(readConverter.settle(call({}), outcome("Error: file_path required", true))).toBeUndefined();
+  });
 });
 
 describe("readConverter.progress", () => {
