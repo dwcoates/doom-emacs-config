@@ -429,8 +429,13 @@ interface PermissionGateDeps {
   agentFor(vendorAgentId: string): conversationv1.AgentId | undefined;
   /** Record a frame. Enqueued, never awaited: the vendor is blocked on us. */
   persist(entries: PersistEntry[]): void;
-  /** True while the open turn is a keep-alive. */
-  keepalive(): boolean;
+  /**
+   * True when the keep-alive produced an ask raised on `agentId`'s book: the
+   * running vendor turn for the main agent, the keep-alive's own spawn for a
+   * subagent. A backgrounded subagent asking while a keep-alive runs is a real
+   * question.
+   */
+  keepalive(agentId: conversationv1.AgentId): boolean;
   readonly nowMs: () => number;
   /** A standing grant carried a mode change; the session restates it authoritatively. */
   onPermissionModeSet(mode: conversationv1.AgentPermissionMode): void;
@@ -917,7 +922,7 @@ export class PermissionGate {
       // anything about the call. The call's own tool_use_id is the stable
       // coordinate for these rows, and it is unique per call by construction.
       source: { vendorUuid: toolUseId, discriminator },
-      keepalive: this.deps.keepalive(),
+      keepalive: this.deps.keepalive(agentId),
       item: {
         kind: "frame",
         frame: create(conversationv1.AgentFrameSchema, {

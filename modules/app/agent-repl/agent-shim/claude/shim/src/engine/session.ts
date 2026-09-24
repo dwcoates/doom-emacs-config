@@ -756,8 +756,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     persist: (entries) => deps.persistence.write(entries),
     // THE RUNNING VENDOR TURN'S ATTRIBUTION, not the shim's open turn: a
     // question a task-notification turn asks while the keep-alive waits is a
-    // real question, and hiding it would leave the vendor waiting forever.
-    keepalive: () => keepaliveScope.producing(),
+    // real question, and hiding it would leave the vendor waiting forever. A
+    // SUBAGENT's ask is the keep-alive's only when the keep-alive spawned it:
+    // a backgrounded subagent keeps asking across the turns after its own.
+    keepalive: (agentId) =>
+      agentId.value === requireIdentity().agentId.value
+        ? keepaliveScope.producing()
+        : keepaliveScope.spawned(agentId.value),
     nowMs: deps.nowMs,
     onPermissionModeSet: (mode) => {
       permissionMode = mode;
