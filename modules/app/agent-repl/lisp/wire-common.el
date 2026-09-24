@@ -178,6 +178,19 @@ negative value is a contract breach for an unsigned field."
           (agent-repl-wire--fail message-name field "expected a non-negative integer"))
         n))))
 
+(defun agent-repl-wire--decode-uint64 (message-name field object)
+  "Decode OBJECT's non-optional uint64 FIELD of MESSAGE-NAME.
+protojson EMITS a 64-bit integer as a decimal string; an absent field is
+the proto3 default 0, and a negative value is a breach for an unsigned
+field."
+  (let ((raw (agent-repl-wire--raw object field)))
+    (if (null raw)
+        0
+      (let ((n (agent-repl-wire--parse-integer message-name field raw)))
+        (when (< n 0)
+          (agent-repl-wire--fail message-name field "expected a non-negative integer"))
+        n))))
+
 (defun agent-repl-wire--decode-optional-uint32 (message-name field object)
   "Decode OBJECT's optional uint32 FIELD of MESSAGE-NAME, nil when absent."
   (let ((raw (agent-repl-wire--raw object field)))
@@ -330,6 +343,15 @@ The ref is a daemon-minted echo token: both halves travel back verbatim."
      "TurnId"
      (list :value (agent-repl-wire--decode-string "TurnId" 'value object)))))
 
+(defun agent-repl-wire-encode-turn-id (value)
+  "Encode the TurnId plist VALUE `(:value)' as a protojson alist.
+The id is an ECHO TOKEN: the daemon-minted value travels back verbatim,
+never one Emacs builds itself."
+  (agent-repl-wire--encoded
+   "TurnId"
+   (list (cons 'value (agent-repl-wire--encode-string
+                       "TurnId" 'value (plist-get value :value))))))
+
 ;;;; ---- frontend.v1.FeedId ----
 
 (defun agent-repl-wire-decode-feed-id (value)
@@ -353,10 +375,12 @@ here rather than sent for the daemon to reject."
    (list (cons 'value (agent-repl-wire--encode-string
                        "FeedId" 'value (plist-get value :value))))))
 
-;;;; ---- conversation.v1 user content (ENCODE only) ----
+;;;; ---- conversation.v1 user content ----
 ;;
-;; Emacs PRODUCES a user message and never consumes one: the feed is the
-;; webview's surface, so nothing here has a decode half.
+;; Emacs PRODUCES a user message, and consumes exactly one: the held prompt
+;; the host view hands back while it is being edited
+;; (`HostHeldPromptEdit.said'), which is put into the composer.  The feed is
+;; the webview's surface, so that is the decode half's only reader.
 
 (defun agent-repl-wire-encode-text-block (value)
   "Encode the TextBlock plist VALUE `(:text)' as a protojson alist."
@@ -451,6 +475,96 @@ they are shown."
    "UserSaid"
    (list (cons 'content (agent-repl-wire-encode-user-said-content
                          (plist-get value :content))))))
+
+;;;; ---- conversation.v1 user content (DECODE, for a held-prompt edit) ----
+
+(defun agent-repl-wire-decode-text-block (value)
+  "Decode VALUE as a `TextBlock' plist `(:text)'."
+  (let ((object (agent-repl-wire--object "TextBlock" value)))
+    (agent-repl-wire--check-keys "TextBlock" object '(text))
+    (agent-repl-wire--decoded
+     "TextBlock"
+     (list :text (agent-repl-wire--decode-string "TextBlock" 'text object)))))
+
+(defun agent-repl-wire-decode-image-block-path (value)
+  "Decode VALUE as an `ImageBlockPath' plist `(:path)'."
+  (let ((object (agent-repl-wire--object "ImageBlockPath" value)))
+    (agent-repl-wire--check-keys "ImageBlockPath" object '(path))
+    (agent-repl-wire--decoded
+     "ImageBlockPath"
+     (list :path (agent-repl-wire--decode-string "ImageBlockPath" 'path object)))))
+
+(defun agent-repl-wire-decode-image-block-url (value)
+  "Decode VALUE as an `ImageBlockUrl' plist `(:url)'."
+  (let ((object (agent-repl-wire--object "ImageBlockUrl" value)))
+    (agent-repl-wire--check-keys "ImageBlockUrl" object '(url))
+    (agent-repl-wire--decoded
+     "ImageBlockUrl"
+     (list :url (agent-repl-wire--decode-string "ImageBlockUrl" 'url object)))))
+
+(defun agent-repl-wire-decode-image-block-location (object)
+  "Decode `ImageBlock''s `location' oneof from OBJECT.
+WHICH kind of reference is stated by arm, so an unset location is a breach."
+  (agent-repl-wire--decode-oneof
+   "ImageBlock" 'location object
+   '((path :path agent-repl-wire-decode-image-block-path)
+     (url :url agent-repl-wire-decode-image-block-url))))
+
+(defun agent-repl-wire-decode-image-block (value)
+  "Decode VALUE as an `ImageBlock' plist `(:location :media-type)'."
+  (let ((object (agent-repl-wire--object "ImageBlock" value)))
+    (agent-repl-wire--check-keys "ImageBlock" object '(path url mediaType))
+    (agent-repl-wire--decoded
+     "ImageBlock"
+     (list :location (agent-repl-wire-decode-image-block-location object)
+           :media-type (agent-repl-wire--decode-string "ImageBlock" 'mediaType object)))))
+
+(defun agent-repl-wire-decode-unsupported-block (value)
+  "Decode VALUE as an `UnsupportedBlock' plist `(:kind :raw)'.
+RAW is the untyped Struct, kept verbatim: nothing is drawn from it."
+  (let ((object (agent-repl-wire--object "UnsupportedBlock" value)))
+    (agent-repl-wire--check-keys "UnsupportedBlock" object '(kind raw))
+    (agent-repl-wire--decoded
+     "UnsupportedBlock"
+     (list :kind (agent-repl-wire--decode-string "UnsupportedBlock" 'kind object)
+           :raw (agent-repl-wire--raw object 'raw)))))
+
+(defun agent-repl-wire-decode-user-content-block (value)
+  "Decode VALUE as a `UserContentBlock', the oneof `(:arm :value)'."
+  (let ((object (agent-repl-wire--object "UserContentBlock" value)))
+    (agent-repl-wire--check-keys "UserContentBlock" object '(text image unsupported))
+    (agent-repl-wire--decoded
+     "UserContentBlock"
+     (agent-repl-wire--decode-oneof
+      "UserContentBlock" 'block object
+      '((text :text agent-repl-wire-decode-text-block)
+        (image :image agent-repl-wire-decode-image-block)
+        (unsupported :unsupported agent-repl-wire-decode-unsupported-block))))))
+
+(defun agent-repl-wire-decode-user-content (value)
+  "Decode VALUE as a `UserContent' plist `(:blocks)', blocks in order."
+  (let ((object (agent-repl-wire--object "UserContent" value)))
+    (agent-repl-wire--check-keys "UserContent" object '(blocks))
+    (agent-repl-wire--decoded
+     "UserContent"
+     (list :blocks (agent-repl-wire--decode-repeated
+                    "UserContent" 'blocks object
+                    #'agent-repl-wire-decode-user-content-block)))))
+
+(defun agent-repl-wire-decode-user-said-content (value)
+  "Decode UserSaid's `content' field VALUE as a UserContent."
+  (agent-repl-wire-decode-user-content value))
+
+(defun agent-repl-wire-decode-user-said (value)
+  "Decode VALUE as a `UserSaid' plist `(:content)'.
+`content' is REQUIRED: what a person said is the whole message."
+  (let ((object (agent-repl-wire--object "UserSaid" value)))
+    (agent-repl-wire--check-keys "UserSaid" object '(content))
+    (agent-repl-wire--decoded
+     "UserSaid"
+     (list :content (agent-repl-wire--decode-message
+                     "UserSaid" 'content object
+                     #'agent-repl-wire-decode-user-said-content)))))
 
 ;;;; ---- conversation.v1.PromptOrigin (ENCODE only) ----
 
