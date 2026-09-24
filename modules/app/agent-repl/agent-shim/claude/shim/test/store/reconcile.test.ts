@@ -810,9 +810,9 @@ describe("findBashStart on a unit that is not at its start", () => {
                       case: "bash",
                       value: create(conversationv1.AgentBashSchema, {
                         result: {
-                          case: "update",
-                          value: create(conversationv1.AgentBashUpdateSchema, {
-                            newOutput: "working\n",
+                          case: "tail",
+                          value: create(conversationv1.AgentBashTailSchema, {
+                            text: "working\n",
                           }),
                         },
                       }),
