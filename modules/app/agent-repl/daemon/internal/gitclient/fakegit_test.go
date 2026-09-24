@@ -409,6 +409,9 @@ type testSurfaces struct {
 	dirEvents []string
 	// dirFailure, when set, is what DetachDir and AttachDir answer.
 	dirFailure error
+	// attachFailure, when set, is what AttachDir answers in dirFailure's
+	// place, so a detach can succeed and the re-attach after it fail.
+	attachFailure error
 }
 
 func newTestSurfaces() *testSurfaces { return &testSurfaces{global: dlog.NewTestLogger()} }
@@ -440,6 +443,9 @@ func (s *testSurfaces) DetachDir(dir string) error {
 
 func (s *testSurfaces) AttachDir(dir string) error {
 	s.dirEvents = append(s.dirEvents, "attach "+dir)
+	if s.attachFailure != nil {
+		return s.attachFailure
+	}
 	return s.dirFailure
 }
 

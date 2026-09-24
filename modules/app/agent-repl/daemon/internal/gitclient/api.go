@@ -82,6 +82,58 @@ type Git interface {
 	IsClean(ctx context.Context, dir string) (bool, error)
 	// CurrentBranch reports the checked-out branch.
 	CurrentBranch(ctx context.Context, dir string) (string, error)
+
+	// ListWorktrees lists every worktree the repository registers, main first.
+	ListWorktrees(ctx context.Context, repoDir string) ([]Worktree, error)
+	// PruneWorktrees retires the registrations whose directories are gone.
+	PruneWorktrees(ctx context.Context, repoDir string) error
+	// RemoveCleanWorktree removes a worktree WITHOUT --force, leaving its
+	// branch: git refuses a tree with modified or untracked content.
+	RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir string) error
+	// AdminDir reports a worktree's own git directory.
+	AdminDir(ctx context.Context, worktreeDir string) (string, error)
+	// CommitterTime reports a commit's committer time.
+	CommitterTime(ctx context.Context, dir, ref string) (time.Time, error)
+	// TreeOf resolves a ref to the tree it records.
+	TreeOf(ctx context.Context, dir, ref string) (string, error)
+	// MergeTree computes the tree merging other into base would record,
+	// touching no worktree, index or ref.
+	MergeTree(ctx context.Context, dir, base, other string) (MergeTreeOutcome, error)
+	// DeleteBranchAt deletes a local branch only while it still points at
+	// head.
+	DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error
+}
+
+// Worktree is one entry of `git worktree list --porcelain`.
+type Worktree struct {
+	// Dir is the worktree's directory exactly as git printed it.
+	Dir string
+	// Head is the checked-out commit, empty for a bare entry.
+	Head string
+	// Branch is the checked-out branch's short name, empty when HEAD is
+	// detached and for a bare entry.
+	Branch string
+	// Detached reports a detached HEAD.
+	Detached bool
+	// Bare reports the bare repository's own entry.
+	Bare bool
+	// Locked reports `git worktree lock`; LockedReason is its reason, empty
+	// when none was given.
+	Locked       bool
+	LockedReason string
+	// Prunable reports a registration `git worktree prune` would retire;
+	// PrunableReason is git's reason.
+	Prunable       bool
+	PrunableReason string
+}
+
+// MergeTreeOutcome is MergeTree's answer.
+type MergeTreeOutcome struct {
+	// Tree is the tree the merge would record. A conflicted merge still has
+	// one, with conflict markers in it.
+	Tree string
+	// Conflicted reports that the merge would stop on conflicts.
+	Conflicted bool
 }
 
 // MergeOutcome is a merge attempt's answer. Exactly one of Landed and
