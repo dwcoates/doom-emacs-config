@@ -1194,14 +1194,7 @@ func resolveHoldoutWarnEvery() (time.Duration, error) {
 	if raw == "" {
 		return 0, nil
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", HoldoutWarnEnv, raw, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", HoldoutWarnEnv, raw)
-	}
-	return d, nil
+	return parsePositiveDuration(HoldoutWarnEnv, raw)
 }
 
 // adoptedDeathWitness renders a kernel-lock probe as the supervisor's
@@ -1231,14 +1224,7 @@ func resolveStartBound(value string) (time.Duration, error) {
 	if strings.TrimSpace(value) == "" {
 		return workspace.DefaultStartSessionBound, nil
 	}
-	bound, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envStartSessionBound, value, err)
-	}
-	if bound <= 0 {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envStartSessionBound, value)
-	}
-	return bound, nil
+	return parsePositiveDuration(envStartSessionBound, value)
 }
 
 // envBootAdoptBound overrides boot.DefaultAdoptBound. It exists for the
@@ -1253,14 +1239,7 @@ func resolveAdoptBound(value string) (time.Duration, error) {
 	if strings.TrimSpace(value) == "" {
 		return boot.DefaultAdoptBound, nil
 	}
-	bound, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envBootAdoptBound, value, err)
-	}
-	if bound <= 0 {
-		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envBootAdoptBound, value)
-	}
-	return bound, nil
+	return parsePositiveDuration(envBootAdoptBound, value)
 }
 
 // footerFaults is the health package's fault sink, drawn on the footer. It
