@@ -223,14 +223,7 @@ const envFooterMomentaryDwell = "AGENT_REPL_FOOTER_MOMENTARY_DWELL"
 // long the daemon actually held the status.
 func resolveFooterMomentaryDwell(flagValue time.Duration, envValue string) (time.Duration, error) {
 	if envValue != "" {
-		d, err := time.ParseDuration(envValue)
-		if err != nil {
-			return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envFooterMomentaryDwell, envValue, err)
-		}
-		if d <= 0 {
-			return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envFooterMomentaryDwell, envValue)
-		}
-		return d, nil
+		return parsePositiveDuration(envFooterMomentaryDwell, envValue)
 	}
 	if flagValue < 0 {
 		return 0, fmt.Errorf("claude-repld: -footer-momentary-dwell=%s is not a positive duration", flagValue)
