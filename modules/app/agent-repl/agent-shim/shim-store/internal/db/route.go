@@ -6,6 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -432,17 +433,6 @@ func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, e
 		return "", invalidFieldf(entryField(index, "agent_update.unserved_item"), "entries[%d].agent_update.unserved_item is nil", index)
 	}
 	switch arm := item.GetUnservedItem().(type) {
-	case *storev1.StoreUnservedItem_Keepalive:
-		// NOTHING OF A KEEP-ALIVE IS STORED, ON EITHER PLANE (2026-09-23), so
-		// the arm is refused rather than routed. Held rows named real work: the
-		// shim that predated the rule tagged a backgrounded subagent's frames
-		// arriving during a keep-alive turn, and the sidecar's page line for the
-		// same upsert_key was then refused as an identity change, parking the
-		// subagent's whole transcript. A producer still minting the arm is a
-		// defect to surface, never a row to keep.
-		return "", invalidSitef(SiteKeepaliveRetired,
-			entryField(index, "agent_update.unserved_item.keepalive"),
-			"entries[%d].agent_update.unserved_item.keepalive is retired — nothing of a keep-alive is stored, on either plane", index)
 	case *storev1.StoreUnservedItem_VendorSpecific:
 		// THE VERBATIM RECORD IS THE ONLY THING RESIDUE IS FOR. These arms exist
 		// so nothing unconvertible is dropped — a row saying only "there was
@@ -470,8 +460,51 @@ func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, e
 		}
 		return kindUnparsed, nil
 	default:
+		if carriesRetiredKeepalive(item) {
+			// NOTHING OF A KEEP-ALIVE IS STORED, ON EITHER PLANE (2026-09-23),
+			// and the arm is now RESERVED in the proto, so a stale producer
+			// still minting it reaches here with the arm as an unknown field.
+			// Held rows named real work: the shim that predated the rule
+			// tagged a backgrounded subagent's frames arriving during a
+			// keep-alive turn, and the sidecar's page line for the same
+			// upsert_key was then refused as an identity change, parking the
+			// subagent's whole transcript. A producer still minting the arm is
+			// a defect to surface, never a row to keep.
+			return "", invalidSitef(SiteKeepaliveRetired,
+				entryField(index, "agent_update.unserved_item.keepalive"),
+				"entries[%d].agent_update.unserved_item.keepalive is retired — nothing of a keep-alive is stored, on either plane", index)
+		}
 		return "", invalidFieldf(entryField(index, "agent_update.unserved_item"), "entries[%d].agent_update.unserved_item sets no arm — the residue must say WHY it cannot be served", index)
 	}
+}
+
+// retiredKeepaliveField is store.v1.StoreUnservedItem's RESERVED tag 1, the
+// retired `keepalive` arm.
+const retiredKeepaliveField protowire.Number = 1
+
+// carriesRetiredKeepalive reports whether an unserved item holds the retired
+// `keepalive` arm. Generated code no longer knows the tag, so a stale
+// producer's arm decodes as an UNKNOWN FIELD, and this reads it there. Unknown
+// bytes that do not parse as a field sequence are no keep-alive arm; the item
+// is then refused for setting no arm, which is still a loud refusal.
+func carriesRetiredKeepalive(item *storev1.StoreUnservedItem) bool {
+	unknown := item.ProtoReflect().GetUnknown()
+	for len(unknown) > 0 {
+		number, kind, n := protowire.ConsumeTag(unknown)
+		if n < 0 {
+			return false
+		}
+		if number == retiredKeepaliveField && kind == protowire.BytesType {
+			return true
+		}
+		unknown = unknown[n:]
+		m := protowire.ConsumeFieldValue(number, kind, unknown)
+		if m < 0 {
+			return false
+		}
+		unknown = unknown[m:]
+	}
+	return false
 }
 
 // validateStoreAgentBash is the base function for store.v1.StoreAgentBash. The
