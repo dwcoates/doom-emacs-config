@@ -534,7 +534,24 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 			return nil, nil, fmt.Errorf("rollout: handover: %w", err)
 		}
 		if owner == nil || *owner != c.deps.Instance {
-			continue
+			// A LIVE SESSION IS THE TRUTH, the row is only its record. A
+			// workspace this daemon holds a live shim client for IS served
+			// by this daemon whatever the row says, and skipping it is how a
+			// cold-started daemon's handover orphaned three live shims
+			// (2026-09-24: the rows named dead instance ce34b5e9cd834d09, the
+			// successor adopted nothing). The disagreement is an invariant
+			// violation -- every bring-up claims serving (workspace
+			// claimServing) -- so it is stated at ERROR, the row is repaired
+			// so the transfer's release and the successor's adoption see this
+			// daemon as the owner, and the workspace is handed over.
+			if _, live := c.deps.Shims.Client(ws.ID); !live {
+				c.log.Debug(opHandover, "a workspace this daemon holds no session for is served by another instance or none; it is not handed over",
+					dlog.Context{"workspace": string(ws.ID), "owner": ownerText(owner)})
+				continue
+			}
+			if err := c.reclaimLiveSession(ctx, ws.ID, owner); err != nil {
+				return nil, nil, err
+			}
 		}
 		// A WORKSPACE WHOSE WORKTREE IS GONE HAS NOTHING TO HAND OVER. A merged
 		// workspace's worktree is removed at the merge's terminal while its
@@ -561,6 +578,29 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 		out = append(out, ws)
 	}
 	return out, left, nil
+}
+
+// ownerText spells a serving owner for a record; none is the empty string.
+func ownerText(owner *ids.InstanceID) string {
+	if owner == nil {
+		return ""
+	}
+	return string(*owner)
+}
+
+// reclaimLiveSession repairs the serving row of a workspace this daemon holds
+// a live session for while the row names another instance (or none), stating
+// the violation at ERROR first. A claim that fails abandons the handover: the
+// transfer would then release nothing and the successor would refuse the
+// adoption of a workspace "served by an unexpected daemon".
+func (c *controller) reclaimLiveSession(ctx context.Context, ws ids.WorkspaceID, owner *ids.InstanceID) error {
+	fields := dlog.Context{"workspace": string(ws), "owner": ownerText(owner), "instance": string(c.deps.Instance)}
+	c.log.Error(opHandover, "this daemon holds a live session for a workspace whose serving row names another instance; the live session is the truth, so it is reclaimed and handed over", fields)
+	if err := c.deps.DB.ClaimServing(ctx, ws, c.deps.Instance); err != nil {
+		c.log.Error(opHandover, "could not reclaim serving ownership of a workspace this daemon holds a live session for", withCause(fields, err))
+		return fmt.Errorf("rollout: handover: reclaim serving for %q: %w", ws, err)
+	}
+	return nil
 }
 
 // standDownTheUntransferred stops the shim of every workspace this daemon

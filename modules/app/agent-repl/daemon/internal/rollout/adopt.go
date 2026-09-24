@@ -883,6 +883,7 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
 	c.adoptStragglers(fields)
+	c.recoverOrphans(fields)
 	c.bounceStaleAdopted(fields)
 }
 

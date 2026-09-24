@@ -134,6 +134,25 @@ type fakeDB struct {
 	spawnedPIDs []*int
 	// spawnedPIDErr fails the write, which the fake's own map cannot.
 	spawnedPIDErr error
+
+	// claims records every ClaimServing in order, and claimErr fails the
+	// write, which the fake's own slice cannot.
+	claims   []servingClaim
+	claimErr error
+}
+
+// servingClaim is one recorded ClaimServing.
+type servingClaim struct {
+	ws       ids.WorkspaceID
+	instance ids.InstanceID
+}
+
+func (d *fakeDB) ClaimServing(_ context.Context, id ids.WorkspaceID, instance ids.InstanceID) error {
+	if d.claimErr != nil {
+		return d.claimErr
+	}
+	d.claims = append(d.claims, servingClaim{ws: id, instance: instance})
+	return nil
 }
 
 func (d *fakeDB) SetSpawnedShimPID(_ context.Context, id ids.WorkspaceID, pid *int) error {

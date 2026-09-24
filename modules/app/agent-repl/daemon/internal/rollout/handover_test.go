@@ -296,13 +296,18 @@ func TestHandoverExitsAfterTheLastTransfer(t *testing.T) {
 }
 
 func TestHandoverIgnoresAWorkspaceAnotherDaemonServes(t *testing.T) {
-	// Arrange
+	// Arrange: another daemon serves `theirs`, and THIS daemon holds no
+	// session for it. (One this daemon holds a live session for is its own
+	// whatever the row says; see TestHandoverHandsOverALiveSessionWhoseRowNamesAnotherInstance.)
 	h := newHarness(t)
 	mine, _ := h.workspace(t)
 	theirs, _ := h.workspace(t)
 	if err := h.db.ClaimServing(context.Background(), theirs, ids.InstanceID("some-other-daemon")); err != nil {
 		t.Fatalf("ClaimServing: %v", err)
 	}
+	h.fleet.mu.Lock()
+	delete(h.fleet.live, theirs)
+	h.fleet.mu.Unlock()
 
 	// Act
 	if err := runHandover(t, h, 1); err != nil {
@@ -313,6 +318,114 @@ func TestHandoverIgnoresAWorkspaceAnotherDaemonServes(t *testing.T) {
 	calls := h.pusher.Calls()
 	if len(calls) != 1 || calls[0].WS != mine {
 		t.Fatalf("pushes = %+v, want only the workspace this daemon serves", calls)
+	}
+}
+
+// A COLD-STARTED DAEMON'S LIVE SESSIONS ARE ITS OWN. The three below pin the
+// fix for the 2026-09-24 orphaning: a live session whose serving row names a
+// dead instance was silently skipped, and its shim was left serving nobody.
+
+// foreignLiveSession arranges a workspace this daemon holds a live session for
+// while its serving row names another instance, as a cold-started daemon's
+// pre-fix bring-up left it.
+func foreignLiveSession(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	ws, _ := h.workspace(t)
+	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("a-dead-instance")); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	return ws
+}
+
+func TestHandoverHandsOverALiveSessionWhoseRowNamesAnotherInstance(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := foreignLiveSession(t, h)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	calls := h.pusher.Calls()
+	if len(calls) != 1 || calls[0].WS != ws {
+		t.Fatalf("pushes = %+v, want the live session transferred", calls)
+	}
+}
+
+func TestHandoverStatesALiveSessionWithAForeignServingRowAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	foreignLiveSession(t, h)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	violations := 0
+	for _, rec := range h.log.Records() {
+		if rec.Level == dlog.LevelError && rec.Operation == opHandover && strings.Contains(rec.Message, "the live session is the truth") {
+			violations++
+		}
+	}
+	if violations != 1 {
+		t.Fatalf("invariant-violation ERROR records = %d, want exactly one", violations)
+	}
+}
+
+func TestHandoverReleasesTheReclaimedRowOfALiveSession(t *testing.T) {
+	// Arrange: the successor waits for THIS daemon's release, so the row must
+	// name this daemon before the transfer releases it.
+	h := newHarness(t)
+	ws := foreignLiveSession(t, h)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Serving: %v", err)
+	}
+	if owner != nil {
+		t.Fatalf("serving owner = %q, want the row released for the successor", *owner)
+	}
+}
+
+func TestHandoverSkipsASessionlessForeignWorkspaceAtDebug(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	theirs, _ := h.workspace(t)
+	if err := h.db.ClaimServing(context.Background(), theirs, ids.InstanceID("some-other-daemon")); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	h.fleet.mu.Lock()
+	delete(h.fleet.live, theirs)
+	h.fleet.mu.Unlock()
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	skips := 0
+	for _, rec := range h.log.Records() {
+		if rec.Operation == opHandover && rec.Context["workspace"] == string(theirs) && strings.Contains(rec.Message, "it is not handed over") {
+			if rec.Level != dlog.LevelDebug {
+				t.Fatalf("skip record level = %q, want debug", rec.Level)
+			}
+			skips++
+		}
+	}
+	if skips != 1 {
+		t.Fatalf("skip records for the foreign workspace = %d, want exactly one", skips)
 	}
 }
 
