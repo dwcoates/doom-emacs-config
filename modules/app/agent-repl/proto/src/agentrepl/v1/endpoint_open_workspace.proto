@@ -55,7 +55,19 @@ message OpenWorkspaceError {
     // the shim's account, for a human and for logs; never switched on.
     // (Landing 9, 2026-09-03, user-approved.)
     OpenWorkspaceVendorStartFailed vendor_start_failed = 8;
+    // The session's shim came up but could not spawn its own kernel-lock
+    // holder (shim.v1 StartSessionFailure.lock_holder_unavailable relayed by
+    // name), so it refused to start a session it could not prove it alone
+    // owns. NOBODY ELSE OWNS THE CONVERSATION: this is a broken lock helper
+    // (`binary`, `os_error`), not an ownership conflict.
+    OpenWorkspaceLockHolderUnavailable lock_holder_unavailable = 9;
   }
+}
+message OpenWorkspaceLockHolderUnavailable {
+  // The lock-holder binary the shim tried to spawn.
+  string binary = 1;
+  // The operating system's account of why the spawn failed.
+  string os_error = 2;
 }
 message OpenWorkspaceVendorStartFailed {
   string detail = 1;

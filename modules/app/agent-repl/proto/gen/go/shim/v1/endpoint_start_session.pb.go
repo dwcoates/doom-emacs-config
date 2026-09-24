@@ -455,6 +455,7 @@ type StartSessionFailure struct {
 	//	*StartSessionFailure_UnknownSession
 	//	*StartSessionFailure_AlreadyStarted
 	//	*StartSessionFailure_ConversationOwned
+	//	*StartSessionFailure_LockHolderUnavailable
 	Cause isStartSessionFailure_Cause `protobuf_oneof:"cause"`
 	// The shim's account, for a human and for logs; never switched on.
 	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
@@ -544,6 +545,15 @@ func (x *StartSessionFailure) GetConversationOwned() *StartSessionConversationOw
 	return nil
 }
 
+func (x *StartSessionFailure) GetLockHolderUnavailable() *StartSessionLockHolderUnavailable {
+	if x != nil {
+		if x, ok := x.Cause.(*StartSessionFailure_LockHolderUnavailable); ok {
+			return x.LockHolderUnavailable
+		}
+	}
+	return nil
+}
+
 func (x *StartSessionFailure) GetDetail() string {
 	if x != nil {
 		return x.Detail
@@ -583,6 +593,16 @@ type StartSessionFailure_ConversationOwned struct {
 	ConversationOwned *StartSessionConversationOwned `protobuf:"bytes,6,opt,name=conversation_owned,json=conversationOwned,proto3,oneof"`
 }
 
+type StartSessionFailure_LockHolderUnavailable struct {
+	// THIS shim could not spawn its own kernel-lock holder (`shim-lock`), so
+	// no claim was ever attempted and NOBODY is known to own the
+	// conversation. Distinct from conversation_owned, which is a real
+	// ownership conflict: this one is a defect in this shim's deployment (a
+	// missing or unexecutable binary), and naming it as an ownership conflict
+	// sends the reader hunting for a second process that does not exist.
+	LockHolderUnavailable *StartSessionLockHolderUnavailable `protobuf:"bytes,7,opt,name=lock_holder_unavailable,json=lockHolderUnavailable,proto3,oneof"`
+}
+
 func (*StartSessionFailure_Cold) isStartSessionFailure_Cause() {}
 
 func (*StartSessionFailure_VendorStartFailed) isStartSessionFailure_Cause() {}
@@ -592,6 +612,8 @@ func (*StartSessionFailure_UnknownSession) isStartSessionFailure_Cause() {}
 func (*StartSessionFailure_AlreadyStarted) isStartSessionFailure_Cause() {}
 
 func (*StartSessionFailure_ConversationOwned) isStartSessionFailure_Cause() {}
+
+func (*StartSessionFailure_LockHolderUnavailable) isStartSessionFailure_Cause() {}
 
 type StartSessionVendorStartFailed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -737,6 +759,61 @@ func (*StartSessionConversationOwned) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{10}
 }
 
+type StartSessionLockHolderUnavailable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The lock-holder binary the shim tried to spawn.
+	Binary string `protobuf:"bytes,1,opt,name=binary,proto3" json:"binary,omitempty"`
+	// The operating system's account of why the spawn failed (e.g.
+	// `spawn /path/shim-lock ENOENT`).
+	OsError       string `protobuf:"bytes,2,opt,name=os_error,json=osError,proto3" json:"os_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartSessionLockHolderUnavailable) Reset() {
+	*x = StartSessionLockHolderUnavailable{}
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartSessionLockHolderUnavailable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartSessionLockHolderUnavailable) ProtoMessage() {}
+
+func (x *StartSessionLockHolderUnavailable) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartSessionLockHolderUnavailable.ProtoReflect.Descriptor instead.
+func (*StartSessionLockHolderUnavailable) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *StartSessionLockHolderUnavailable) GetBinary() string {
+	if x != nil {
+		return x.Binary
+	}
+	return ""
+}
+
+func (x *StartSessionLockHolderUnavailable) GetOsError() string {
+	if x != nil {
+		return x.OsError
+	}
+	return ""
+}
+
 var File_shim_v1_endpoint_start_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
@@ -762,19 +839,23 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\afailure\x18\x02 \x01(\v2\x1c.shim.v1.StartSessionFailureH\x00R\afailureB\b\n" +
 	"\x06result\"P\n" +
 	"\x13StartSessionSuccess\x129\n" +
-	"\asession\x18\x01 \x01(\v2\x1f.conversation.v1.SessionStartedR\asession\"\xbd\x03\n" +
+	"\asession\x18\x01 \x01(\v2\x1f.conversation.v1.SessionStartedR\asession\"\xa3\x04\n" +
 	"\x13StartSessionFailure\x122\n" +
 	"\x04cold\x18\x01 \x01(\v2\x1c.conversation.v1.SessionColdH\x00R\x04cold\x12X\n" +
 	"\x13vendor_start_failed\x18\x03 \x01(\v2&.shim.v1.StartSessionVendorStartFailedH\x00R\x11vendorStartFailed\x12N\n" +
 	"\x0funknown_session\x18\x04 \x01(\v2#.shim.v1.StartSessionUnknownSessionH\x00R\x0eunknownSession\x12N\n" +
 	"\x0falready_started\x18\x05 \x01(\v2#.shim.v1.StartSessionAlreadyStartedH\x00R\x0ealreadyStarted\x12W\n" +
-	"\x12conversation_owned\x18\x06 \x01(\v2&.shim.v1.StartSessionConversationOwnedH\x00R\x11conversationOwned\x12\x16\n" +
+	"\x12conversation_owned\x18\x06 \x01(\v2&.shim.v1.StartSessionConversationOwnedH\x00R\x11conversationOwned\x12d\n" +
+	"\x17lock_holder_unavailable\x18\a \x01(\v2*.shim.v1.StartSessionLockHolderUnavailableH\x00R\x15lockHolderUnavailable\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detailB\a\n" +
 	"\x05cause\"\x1f\n" +
 	"\x1dStartSessionVendorStartFailed\"\x1c\n" +
 	"\x1aStartSessionUnknownSession\"\x1c\n" +
 	"\x1aStartSessionAlreadyStarted\"\x1f\n" +
-	"\x1dStartSessionConversationOwnedB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x1dStartSessionConversationOwned\"V\n" +
+	"!StartSessionLockHolderUnavailable\x12\x16\n" +
+	"\x06binary\x18\x01 \x01(\tR\x06binary\x12\x19\n" +
+	"\bos_error\x18\x02 \x01(\tR\aosErrorB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_start_session_proto_rawDescOnce sync.Once
@@ -788,45 +869,47 @@ func file_shim_v1_endpoint_start_session_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_start_session_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_shim_v1_endpoint_start_session_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
-	(*StartSessionRequest)(nil),           // 0: shim.v1.StartSessionRequest
-	(*StartSessionFresh)(nil),             // 1: shim.v1.StartSessionFresh
-	(*StartSessionResume)(nil),            // 2: shim.v1.StartSessionResume
-	(*StartSessionRebind)(nil),            // 3: shim.v1.StartSessionRebind
-	(*StartSessionResponse)(nil),          // 4: shim.v1.StartSessionResponse
-	(*StartSessionSuccess)(nil),           // 5: shim.v1.StartSessionSuccess
-	(*StartSessionFailure)(nil),           // 6: shim.v1.StartSessionFailure
-	(*StartSessionVendorStartFailed)(nil), // 7: shim.v1.StartSessionVendorStartFailed
-	(*StartSessionUnknownSession)(nil),    // 8: shim.v1.StartSessionUnknownSession
-	(*StartSessionAlreadyStarted)(nil),    // 9: shim.v1.StartSessionAlreadyStarted
-	(*StartSessionConversationOwned)(nil), // 10: shim.v1.StartSessionConversationOwned
-	(*v1.AgentModel)(nil),                 // 11: conversation.v1.AgentModel
-	(*v1.AgentPermissionMode)(nil),        // 12: conversation.v1.AgentPermissionMode
-	(*v1.SessionColdRemediation)(nil),     // 13: conversation.v1.SessionColdRemediation
-	(*v1.SessionStarted)(nil),             // 14: conversation.v1.SessionStarted
-	(*v1.SessionCold)(nil),                // 15: conversation.v1.SessionCold
+	(*StartSessionRequest)(nil),               // 0: shim.v1.StartSessionRequest
+	(*StartSessionFresh)(nil),                 // 1: shim.v1.StartSessionFresh
+	(*StartSessionResume)(nil),                // 2: shim.v1.StartSessionResume
+	(*StartSessionRebind)(nil),                // 3: shim.v1.StartSessionRebind
+	(*StartSessionResponse)(nil),              // 4: shim.v1.StartSessionResponse
+	(*StartSessionSuccess)(nil),               // 5: shim.v1.StartSessionSuccess
+	(*StartSessionFailure)(nil),               // 6: shim.v1.StartSessionFailure
+	(*StartSessionVendorStartFailed)(nil),     // 7: shim.v1.StartSessionVendorStartFailed
+	(*StartSessionUnknownSession)(nil),        // 8: shim.v1.StartSessionUnknownSession
+	(*StartSessionAlreadyStarted)(nil),        // 9: shim.v1.StartSessionAlreadyStarted
+	(*StartSessionConversationOwned)(nil),     // 10: shim.v1.StartSessionConversationOwned
+	(*StartSessionLockHolderUnavailable)(nil), // 11: shim.v1.StartSessionLockHolderUnavailable
+	(*v1.AgentModel)(nil),                     // 12: conversation.v1.AgentModel
+	(*v1.AgentPermissionMode)(nil),            // 13: conversation.v1.AgentPermissionMode
+	(*v1.SessionColdRemediation)(nil),         // 14: conversation.v1.SessionColdRemediation
+	(*v1.SessionStarted)(nil),                 // 15: conversation.v1.SessionStarted
+	(*v1.SessionCold)(nil),                    // 16: conversation.v1.SessionCold
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	1,  // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
 	2,  // 1: shim.v1.StartSessionRequest.resume:type_name -> shim.v1.StartSessionResume
-	11, // 2: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
-	12, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	13, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
+	12, // 2: shim.v1.StartSessionFresh.model:type_name -> conversation.v1.AgentModel
+	13, // 3: shim.v1.StartSessionFresh.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	14, // 4: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
 	3,  // 5: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
 	5,  // 6: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
 	6,  // 7: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	14, // 8: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	15, // 9: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	15, // 8: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	16, // 9: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
 	7,  // 10: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
 	8,  // 11: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
 	9,  // 12: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
 	10, // 13: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	11, // 14: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }
@@ -850,6 +933,7 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 		(*StartSessionFailure_UnknownSession)(nil),
 		(*StartSessionFailure_AlreadyStarted)(nil),
 		(*StartSessionFailure_ConversationOwned)(nil),
+		(*StartSessionFailure_LockHolderUnavailable)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -857,7 +941,7 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_start_session_proto_rawDesc), len(file_shim_v1_endpoint_start_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
