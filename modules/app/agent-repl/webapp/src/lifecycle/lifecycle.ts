@@ -161,10 +161,17 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   const unregisterMoved = registerWorkspaceMoved(onMoved);
 
   // THE LINK ANSWERING AGAIN IS WHAT ENDS AN OUTAGE, not the countdown, and
-  // any stream's frame is that answer: a bounce takes them all down together,
-  // so the first one back is the daemon being back. A no-op while no restart
-  // notice stands.
-  const unsubscribeFromPushes = ctx.onPush(() => banner.clearRestarting());
+  // any stream coming back is that answer: a bounce takes them all down
+  // together, so the first one to read again is the daemon being back. A no-op
+  // while no restart notice stands.
+  //
+  // IT IS A STREAM COMING BACK, NEVER MERELY A FRAME. The announcing daemon
+  // goes on pushing on its standing streams until it exits -- the drain's own
+  // lease change republishes views -- and a notice cleared by any frame was
+  // taken down by the very daemon that announced it (webapp layer, roster:
+  // "the drain banner was never drawn", the host still reading
+  // drain-scheduled).
+  const unsubscribeFromRestored = ctx.onLinkRestored(() => banner.clearRestarting());
 
   const webLink = watchStream(ctx, {
     name: "WatchWebWorkspace",
@@ -215,16 +222,13 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
         }
       }
     },
-    // THE LINK COMING BACK IS WHAT ENDS AN OUTAGE, not the countdown: a plain
-    // bounce's banner clears when this daemon answers again.
-    onReconnected: () => banner.clearRestarting(),
   });
 
   return {
     dispose(): void {
       log.debug("disposing the page lifecycle", { operation: "lifecycle.dispose" });
       unregisterMoved();
-      unsubscribeFromPushes();
+      unsubscribeFromRestored();
       webLink.cancel();
       daemon.cancel();
       banner.dispose();
