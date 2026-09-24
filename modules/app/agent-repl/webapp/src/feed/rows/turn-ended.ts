@@ -22,6 +22,7 @@
  * shared clock. An UNSET wait is not zero: the vendor said nothing about when
  * to retry, and the wording says exactly that rather than inventing "now".
  */
+import { drawBubble } from "../../bubble/draw.js";
 import { formatDurationCeil } from "../../duration.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -75,6 +76,24 @@ const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
  */
 export const TURN_ERROR_WAIT_ARMS: readonly string[] = ["rateLimited", "overloaded"];
 
+/**
+ * THE ENDED-TURN BUBBLE (owner ruling, 2026-09-24): "if the turn ends, we
+ * should have SOMETHING in the webapp denoting that". A turn that ended any
+ * way but a normal completed answer draws a RESPONSE bubble — the purple
+ * response fill, a red border (its own variant) — stating in plain words what
+ * happened, above the row's own line. A conclusion draws none.
+ */
+export const TURN_ENDED_BUBBLE_CLASS = "turn-ended-bubble";
+
+/** The class of the plain-words sentence the ended-turn bubble states. */
+export const TURN_ENDED_BUBBLE_SAYS_CLASS = "turn-ended-bubble-says";
+
+/** The class of the element holding an ended turn's bubble and its line. */
+export const TURN_ENDED_OUTCOME_CLASS = "turn-ended-outcome";
+
+/** What the bubble says for a stop, which carries no daemon sentence. */
+export const INTERRUPTED_SENTENCE = "the turn was interrupted";
+
 /** The terminal row. */
 export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLElement {
   const outcome = requireCase(msg.outcome, `${PATH}.outcome`);
@@ -98,7 +117,50 @@ export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLEleme
   // The row's state is HOW THE TURN ENDED. The errored arm keeps its own
   // `data-turn-error` for which failure it was; this is the outcome above it.
   el.setAttribute("data-state", outcome.case);
-  return el;
+  if (outcome.case === "concluded") return el;
+
+  // Every other ending draws the bubble above its line. Its words are the
+  // daemon's headline for a failure, drawn verbatim, and the stop's own
+  // sentence for an interrupt.
+  const says =
+    outcome.case === "errored"
+      ? requireMessage(outcome.value.headline, `${PATH}.errored.headline`).text
+      : INTERRUPTED_SENTENCE;
+  // THE ROW STATES HOW ITS TURN ENDED on its own element, as the line alone
+  // did before the bubble joined it: the outcome, the arm and the failure.
+  const row = document.createElement("div");
+  row.className = TURN_ENDED_OUTCOME_CLASS;
+  for (const name of ["data-state", "data-arm", "data-turn-error"]) {
+    const value = el.getAttribute(name);
+    if (value !== null) row.setAttribute(name, value);
+  }
+  row.append(drawTurnEndedBubble(says, rc.previous), el);
+  log.info("drew the ended-turn bubble", {
+    operation: "feed.draw-turn-ended-bubble",
+    context: { outcome: outcome.case },
+  });
+  return row;
+}
+
+/**
+ * The ended-turn bubble, drawn by the one bubble. PREVIOUS is the row's
+ * previous draw; its bubble is updated in place.
+ */
+function drawTurnEndedBubble(says: string, previous?: HTMLElement): HTMLElement {
+  const text = document.createElement("div");
+  text.className = TURN_ENDED_BUBBLE_SAYS_CLASS;
+  text.textContent = says;
+  const prior = previous?.querySelector<HTMLElement>(`:scope > .${TURN_ENDED_BUBBLE_CLASS}`) ?? undefined;
+  return drawBubble(
+    {
+      role: "response",
+      variant: "turn-ended",
+      hooks: [TURN_ENDED_BUBBLE_CLASS],
+      content: [text],
+      capLines: "feed",
+    },
+    prior,
+  ).bubble;
 }
 
 /**
