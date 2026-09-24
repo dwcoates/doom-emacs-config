@@ -174,9 +174,9 @@ func TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity(t *testing.T) 
 	}
 }
 
-// TestBashDeltasCarryContiguousOffsets asserts every update's from_offset
-// equals the bytes already accumulated — no gap and no overlap.
-func TestBashDeltasCarryContiguousOffsets(t *testing.T) {
+// TestTheRunsTailIsItsWholeOutputInsideTheCap asserts a run that grew three
+// times, all inside the renderer's cap, replays a tail holding every byte.
+func TestTheRunsTailIsItsWholeOutputInsideTheCap(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -200,33 +200,23 @@ func TestBashDeltasCarryContiguousOffsets(t *testing.T) {
 		awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 	}
 
-	// Assert: read the run back and walk its deltas in the order the store
-	// replays them, which is the order a consumer accumulates them in.
+	// Assert: read the run back as a consumer would.
 	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID, bashRowsOnTheWire(fake.Entries(), fx.CallID))
 	if !ok {
 		t.Fatalf("the run %q was not readable at all; runs seen: %v", fx.CallID, runsSeen(fake.Entries()))
 	}
-	var updates int
-	for _, row := range rows {
-		if row.GetUpdate() != nil {
-			updates++
-		}
-	}
-	if updates == 0 {
-		t.Fatalf("the spool grew three times and produced no update row: %v", describeBashRows(rows))
-	}
-	joined := requireContiguousDeltas(t, fx.CallID, rows)
+	latest := requireLatestTail(t, fx.CallID, rows)
 	want := string(chunks[0]) + string(chunks[1]) + string(chunks[2])
-	if joined != want {
-		t.Errorf("the deltas concatenate to %q, wanted the spool's bytes %q", joined, want)
+	if latest != want {
+		t.Errorf("the run's tail is %q, wanted the spool's bytes %q", latest, want)
 	}
 }
 
-// TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother asserts the per-row key
-// space where it is observable: the store holds one row per write, so a run that
-// grew three times replays THREE deltas. One key for the run would leave only
-// the last, and the output before it would be gone.
-func TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother(t *testing.T) {
+// TestEveryGrowthSupersedesTheRunsOneTailRow asserts output beyond what is
+// rendered is never stored: a run that grew three times is written three
+// times, every write under the run's ONE tail key, each carrying the whole
+// window so far.
+func TestEveryGrowthSupersedesTheRunsOneTailRow(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -247,22 +237,21 @@ func TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother(t *testing.T) {
 	}
 
 	// Assert.
-	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID, bashRowsOnTheWire(fake.Entries(), fx.CallID))
-	if !ok {
-		t.Fatalf("the run %q was not readable at all", fx.CallID)
-	}
-	var deltas int
-	for _, row := range rows {
-		if row.GetUpdate() != nil {
-			deltas++
+	var tails []string
+	for _, e := range fake.Entries() {
+		if e.GetAgentUpdate().GetBash().GetRun().GetValue() != fx.CallID {
+			continue
+		}
+		if tail := e.GetAgentUpdate().GetBash().GetFrame().GetTail(); tail != nil {
+			if e.GetUpsertKey() != "bash:"+fx.CallID+":tail" {
+				t.Fatalf("a tail was written under %q, want the run's one tail key", e.GetUpsertKey())
+			}
+			tails = append(tails, tail.GetText())
 		}
 	}
-	if deltas != len(chunks) {
-		t.Fatalf("the run replayed %d delta rows for %d writes: %v; each write is its own row",
-			deltas, len(chunks), describeBashRows(rows))
-	}
-	if got := requireContiguousDeltas(t, fx.CallID, rows); got != strings.Join(chunks, "") {
-		t.Errorf("the replayed deltas concatenate to %q, wanted every chunk", got)
+	want := []string{"one\n", "one\ntwo\n", "one\ntwo\nthree\n"}
+	if strings.Join(tails, "|") != strings.Join(want, "|") {
+		t.Fatalf("the run's tail writes were %q, want each to carry the whole window so far %q", tails, want)
 	}
 }
 
@@ -356,9 +345,9 @@ func TestASplitSpoolLineConvertsOnceAndWhole(t *testing.T) {
 
 	// Assert.
 	rows := awaitBashRunTerminal(ctx, t, storeClient(fake.Socket), fx.CallID)
-	whole := requireContiguousDeltas(t, fx.CallID, rows)
+	whole := requireLatestTail(t, fx.CallID, rows)
 	if strings.Count(whole, "a line that will be cut in half") != 1 {
-		t.Fatalf("the split line converted %d times, wanted exactly once; deltas joined to %q",
+		t.Fatalf("the split line converted %d times, wanted exactly once; the tail is %q",
 			strings.Count(whole, "a line that will be cut in half"), whole)
 	}
 }
@@ -447,7 +436,7 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	// THE CANCELLED TERMINAL OWES THE OUTPUT THE SPOOL HELD: the run said
 	// something before it was stopped, and the terminal is the last thing any
 	// reader sees of it.
-	if want := requireContiguousDeltas(t, fx.CallID, rows); interrupted.GetOutput().GetText().GetStdout() != want {
+	if want := requireLatestTail(t, fx.CallID, rows); interrupted.GetOutput().GetText().GetStdout() != want {
 		t.Errorf("the cancelled terminal carries stdout %q, wanted exactly the run's joined deltas %q",
 			interrupted.GetOutput().GetText().GetStdout(), want)
 	}
