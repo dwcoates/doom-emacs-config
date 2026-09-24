@@ -482,7 +482,10 @@ deploy calls it.
 
 A DEPLOY IN FLIGHT IS NEVER STARTED AGAIN (`already_deploying`), a handover
 in flight refuses a second (`already_rolling_out`, naming the holdouts), and
-a successor still joining refuses (`joining`). Every deploy decision is
+a successor still joining refuses (`joining`). A handover owns ONE successor
+slot: one that fails after its spawn stops that successor (confirmed by the
+reap) before it frees the slot, and one whose successor will not stop stays in
+flight, so two successors never coexist. Every deploy decision is
 recorded through the daemon's logger under `daemon.deploy.*`.
 
 A running shim rides a store restart out on its retry buffer, which holds every
