@@ -55,6 +55,7 @@ func TestLaunchctlPrint(t *testing.T) {
 		{name: "a running service", answer: runAnswer{out: "gui/501/x = {\n\tpid = 4242\n}\n"}, wantLoaded: true, wantPID: 4242},
 		{name: "loaded, not running", answer: runAnswer{out: "gui/501/x = {\n\tstate = waiting\n}\n"}, wantLoaded: true},
 		{name: "not in the domain", answer: runAnswer{out: "Could not find service \"x\" in domain for user gui: 501", code: 113}},
+		{name: "exit 113 is not loaded whatever launchctl prints", answer: runAnswer{out: "Bad request.", code: 113}},
 		{name: "any other failure is an error", answer: runAnswer{out: "Operation not permitted", code: 1}, wantErr: "exited 1"},
 		{name: "a run that could not start is an error", answer: runAnswer{err: errors.New("exec: not found")}, wantErr: "not found"},
 	}
@@ -120,5 +121,33 @@ func TestALaunchctlVerbThatExitsNonZeroFails(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "no such service") {
 		t.Fatalf("Kickstart = %v, want the exit and launchctl's words", err)
+	}
+}
+
+func TestLaunchctlBootoutAnswers(t *testing.T) {
+	tests := []struct {
+		name          string
+		answer        runAnswer
+		wantErr       bool
+		wantNotLoaded bool
+	}{
+		{name: "a loaded service is booted out", answer: runAnswer{}},
+		{name: "exit 113 is a service the domain no longer holds", answer: runAnswer{out: "Boot-out failed: 113: Could not find specified service", code: 113}, wantErr: true, wantNotLoaded: true},
+		{name: "any other exit is a failed bootout", answer: runAnswer{out: "Boot-out failed: 5: Input/output error", code: 5}, wantErr: true},
+		{name: "a run that could not start is a failed bootout", answer: runAnswer{err: errors.New("exec: not found")}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			l, _ := newLaunchctl(map[string]runAnswer{"launchctl bootout gui/501/x": tc.answer})
+
+			// Act
+			err := l.Bootout(context.Background(), "x")
+
+			// Assert
+			if (err != nil) != tc.wantErr || errors.Is(err, ErrServiceNotLoaded) != tc.wantNotLoaded {
+				t.Fatalf("Bootout = %v; want error %v, not-loaded %v", err, tc.wantErr, tc.wantNotLoaded)
+			}
+		})
 	}
 }
