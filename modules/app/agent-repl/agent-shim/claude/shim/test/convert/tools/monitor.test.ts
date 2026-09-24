@@ -173,17 +173,40 @@ describe("monitorConverter.settle", () => {
     expect(monitor.result.case).toBe("failure");
     expect(failure.failure?.settledAt?.atMs).toBe(1_700_000_000_500n);
   });
+
+  it("restates the call on a failed arming, so the settle stands alone", () => {
+    // Arrange.
+    const call = callWith({ description: "d", command: "tail -f log" });
+
+    // Act.
+    const monitor = monitorOf(monitorConverter.settle(call, outcomeWith(undefined, true)));
+
+    // Assert.
+    const failure = monitor.result.value as conversationv1.AgentMonitorFailure;
+    expect(failure.call).toEqual(startOf(call));
+  });
 });
 
 describe("monitorEnded", () => {
   it("mints the ended arm, which claims no cause", () => {
     // Arrange, Act.
-    const monitor = monitorOf(monitorEnded());
+    const monitor = monitorOf(monitorEnded(undefined));
 
     // Assert.
     expect(monitor.result).toEqual({
       case: "ended",
       value: create(conversationv1.AgentMonitorEndedSchema, {}),
     });
+  });
+
+  it("restates the call the watch was armed with", () => {
+    // Arrange.
+    const armed = startOf(callWith({ description: "d", command: "tail -f log" }));
+
+    // Act.
+    const monitor = monitorOf(monitorEnded(armed));
+
+    // Assert.
+    expect((monitor.result.value as conversationv1.AgentMonitorEnded).call).toEqual(armed);
   });
 });
