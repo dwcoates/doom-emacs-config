@@ -2,10 +2,12 @@ package feed
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // ONE SHARED SHELL, per-tool specifics composed by the DAEMON: the client holds
@@ -39,6 +41,8 @@ func activityOf(unit string, item any) *conversationv1.AgentActivity {
 		act.Item = &conversationv1.AgentActivity_WebSearch{WebSearch: i}
 	case *conversationv1.AgentUnmodeled:
 		act.Item = &conversationv1.AgentActivity_Unmodeled{Unmodeled: i}
+	case *conversationv1.AgentMcpToolCall:
+		act.Item = &conversationv1.AgentActivity_McpToolCall{McpToolCall: i}
 	}
 	return act
 }
@@ -1716,5 +1720,273 @@ func TestAPreContractSettleRestatingNoStartIsRecordedAtInfo(t *testing.T) {
 				t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
 			}
 		})
+	}
+}
+
+// ---- MCP ----
+
+// The shapes below are the claude-in-chrome server's, as real transcripts
+// carry them: a qualified name, small scalar arguments, text-block results and
+// a bare error sentence.
+
+// mcpTool is the claude-in-chrome navigate tool.
+func mcpTool() *conversationv1.AgentMcpTool {
+	return &conversationv1.AgentMcpTool{
+		Name:    "mcp__claude-in-chrome__navigate",
+		Address: &conversationv1.AgentMcpToolAddress{Server: "claude-in-chrome", Tool: "navigate"},
+	}
+}
+
+// mcpArguments is a navigate call's input.
+func mcpArguments(t *testing.T) *structpb.Struct {
+	t.Helper()
+	args, err := structpb.NewStruct(map[string]any{"url": "https://example.com", "tabId": 7})
+	if err != nil {
+		t.Fatalf("building arguments: %v", err)
+	}
+	return args
+}
+
+// mcpStart is a navigate call announcing itself.
+func mcpStart(t *testing.T) *conversationv1.AgentActivity {
+	return activityOf("unit-1", &conversationv1.AgentMcpToolCall{
+		Result: &conversationv1.AgentMcpToolCall_Start{Start: &conversationv1.AgentMcpToolCallStart{
+			Tool: mcpTool(), Arguments: mcpArguments(t),
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	})
+}
+
+// mcpSuccess is a navigate call returning, restating its call.
+func mcpSuccess(t *testing.T, blocks ...*conversationv1.ToolResultContentBlock) *conversationv1.AgentActivity {
+	return bound(activityOf("unit-1", &conversationv1.AgentMcpToolCall{
+		Result: &conversationv1.AgentMcpToolCall_Success{Success: &conversationv1.AgentMcpToolCallSuccess{
+			Tool: mcpTool(), Arguments: mcpArguments(t),
+			Content: &conversationv1.ToolResultContent{Blocks: blocks},
+			SettledAt: &conversationv1.AgentActivitySettledAt{
+				AtMs: 3_500, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			},
+		}},
+	}))
+}
+
+// mcpFailure is a navigate call failing, restating its call.
+func mcpFailure(t *testing.T, text string) *conversationv1.AgentActivity {
+	return bound(activityOf("unit-1", &conversationv1.AgentMcpToolCall{
+		Result: &conversationv1.AgentMcpToolCall_Failure{Failure: &conversationv1.AgentMcpToolCallFailure{
+			Tool: mcpTool(), Arguments: mcpArguments(t),
+			Error: &conversationv1.AgentToolFailure{
+				Content:   &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{textResultBlock(text)}},
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000},
+			},
+		}},
+	}))
+}
+
+func TestAnMcpToolCallDrawsTheOrdinaryToolCard(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpStart(t))
+
+	// Assert: the one shared shell, running.
+	if h.card() == nil || h.card().GetRunning() == nil {
+		t.Fatalf("row = %+v, want a running simple tool card", h.only(rootFeed()))
+	}
+}
+
+func TestAnMcpToolCardIsHeadedByTheToolAsTheAgentNamedIt(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpStart(t))
+
+	// Assert.
+	if got := h.card().GetName().GetText(); got != "mcp__claude-in-chrome__navigate" {
+		t.Fatalf("head = %q, want the qualified tool name", got)
+	}
+}
+
+func TestAnMcpToolCardsInputLineIsItsArgumentsAsJSON(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpStart(t))
+
+	// Assert: compact, keys sorted, plain text.
+	input := h.card().GetInput()
+	if input.GetText() != `{"tabId":7,"url":"https://example.com"}` || input.GetForm() != nil {
+		t.Fatalf("input = %+v, want the arguments' JSON as a plain line", input)
+	}
+}
+
+func TestAnMcpToolCallsSuccessDrawsWhatItReturned(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpStart(t))
+	h.send(mcpSuccess(t, textResultBlock("Navigated to https://example.com")))
+
+	// Assert.
+	returned := h.card().GetReturned()
+	if returned.GetSucceeded() == nil || returned.GetText().GetText() != "Navigated to https://example.com" {
+		t.Fatalf("returned = %+v, want succeeded with the tool's text", returned)
+	}
+}
+
+func TestAnMcpToolCallsSuccessStatesItsRuntime(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpSuccess(t, textResultBlock("ok")))
+
+	// Assert: the settle restates its start, so a replay states the runtime.
+	if h.card().GetReturned().GetRuntime() == nil {
+		t.Fatal("runtime unset; want the settle's restated start to state it")
+	}
+}
+
+func TestAnMcpToolCallThatReturnedNothingDrawsNoOutput(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpSuccess(t))
+
+	// Assert.
+	if h.card().GetReturned().GetNone() == nil {
+		t.Fatalf("form = %T, want the none arm", h.card().GetReturned().GetForm())
+	}
+}
+
+func TestAnMcpToolCallThatReturnedAnImageDrawsIt(t *testing.T) {
+	// Arrange, Act: a screenshot tool.
+	h := newHarness(t)
+	h.send(mcpSuccess(t, imageResultBlock()))
+
+	// Assert.
+	if h.card().GetReturned().GetImage().GetSrc() != "https://host/img" {
+		t.Fatalf("form = %T, want the image", h.card().GetReturned().GetForm())
+	}
+}
+
+func TestAnUnresolvableMcpResultImageDrawsNoBodyAndIsWarned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.deps.ResolveImage = func(*conversationv1.ImageBlock) (string, string, error) {
+		return "", "", fmt.Errorf("the reference names nothing servable")
+	}
+
+	// Act.
+	h.send(mcpSuccess(t, imageResultBlock()))
+
+	// Assert.
+	if !h.hasRecord("warn", "daemon.feed.tool_result_image_unresolved") {
+		t.Fatalf("records = %+v, want a WARN daemon.feed.tool_result_image_unresolved", h.records())
+	}
+}
+
+func TestAnMcpToolCallsFailureDrawsItsAccount(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(mcpFailure(t, "Error: Couldn't determine which page this action targets."))
+
+	// Assert.
+	returned := h.card().GetReturned()
+	if returned.GetFailed() == nil || returned.GetText().GetText() != "Error: Couldn't determine which page this action targets." {
+		t.Fatalf("returned = %+v, want failed with the tool's account", returned)
+	}
+}
+
+func TestAReplayedMcpSettleDrawsItsCardAlone(t *testing.T) {
+	// Arrange, Act: no start held, as a store replay serves the unit.
+	h := newHarness(t)
+	h.send(mcpFailure(t, "Error: no page"))
+
+	// Assert: head and input restated by the settle.
+	card := h.card()
+	if card.GetName().GetText() != "mcp__claude-in-chrome__navigate" || card.GetInput().GetText() != `{"tabId":7,"url":"https://example.com"}` {
+		t.Fatalf("card = %+v, want the restated tool and arguments", card)
+	}
+}
+
+func TestABoundMcpSettleRestatingNoToolDrawsNoRowAndIsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.send(bound(activityOf("unit-1", &conversationv1.AgentMcpToolCall{
+		Result: &conversationv1.AgentMcpToolCall_Success{Success: &conversationv1.AgentMcpToolCallSuccess{}},
+	})))
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want none", len(rows))
+	}
+	if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
+		t.Fatalf("records = %+v, want the bare settle recorded at ERROR", h.records())
+	}
+}
+
+func TestAnMcpProgressBeatBeforeAnyStartDrawsNothing(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentMcpToolCall{
+		Result: &conversationv1.AgentMcpToolCall_Progress{Progress: &conversationv1.AgentToolCallProgress{LastProgressAtMs: 1_500}},
+	}))
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want none: a beat names no tool", len(rows))
+	}
+}
+
+func TestAnMcpProgressBeatAfterTheStartRedrawsTheRunningCard(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(mcpStart(t))
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentMcpToolCall{
+		Result: &conversationv1.AgentMcpToolCall_Progress{Progress: &conversationv1.AgentToolCallProgress{LastProgressAtMs: 1_500}},
+	}))
+
+	// Assert.
+	if got := h.card().GetRunning().GetLastProgress().GetAtMs(); got != 1_500 {
+		t.Fatalf("last progress = %d, want the beat's instant", got)
+	}
+}
+
+func TestMcpInputLineWordsArguments(t *testing.T) {
+	// Arrange.
+	nested, err := structpb.NewStruct(map[string]any{"actions": []any{map[string]any{"b": 1.5, "a": "x"}}})
+	if err != nil {
+		t.Fatalf("building arguments: %v", err)
+	}
+	tests := []struct {
+		name string
+		args *structpb.Struct
+		want string
+	}{
+		{name: "no arguments", args: nil, want: ""},
+		{name: "an empty object", args: &structpb.Struct{}, want: ""},
+		{name: "nested values keep their shape", args: nested, want: `{"actions":[{"a":"x","b":1.5}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := mcpInputLine(tt.args)
+
+			// Assert.
+			if err != nil || got != tt.want {
+				t.Fatalf("mcpInputLine = (%q, %v), want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestMcpInputLineSpellsANumberJSONCannotAsItsName(t *testing.T) {
+	// Arrange: structpb spells a non-finite number as its name.
+	args := &structpb.Struct{Fields: map[string]*structpb.Value{"x": structpb.NewNumberValue(math.NaN())}}
+
+	// Act.
+	got, err := mcpInputLine(args)
+
+	// Assert.
+	if err != nil || got != `{"x":"NaN"}` {
+		t.Fatalf("mcpInputLine = (%q, %v), want NaN spelled by name", got, err)
 	}
 }

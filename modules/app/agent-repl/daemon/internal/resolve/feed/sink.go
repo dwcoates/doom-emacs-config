@@ -103,6 +103,9 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	case *conversationv1.AgentActivity_WebFetch:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebFetch"})
 		row, err = r.drawWebFetch(s, at, act, item.WebFetch)
+	case *conversationv1.AgentActivity_McpToolCall:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_McpToolCall"})
+		row, err = r.drawMcpToolCall(s, at, act, item.McpToolCall)
 	case *conversationv1.AgentActivity_WebSearch:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebSearch"})
 		row, err = r.drawWebSearch(s, at, act, item.WebSearch)

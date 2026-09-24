@@ -1058,6 +1058,18 @@ func unmodeledActivity(activityID, tool string) *conversationv1.AgentActivity {
 	}
 }
 
+// mcpActivity is an MCP server's tool call announcing itself.
+func mcpActivity(activityID, tool string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_McpToolCall{McpToolCall: &conversationv1.AgentMcpToolCall{
+			Result: &conversationv1.AgentMcpToolCall_Start{Start: &conversationv1.AgentMcpToolCallStart{
+				Tool: &conversationv1.AgentMcpTool{Name: tool},
+			}},
+		}},
+	}
+}
+
 // subagentActivity is the spawn that names the agent a detached subagent watch
 // is addressed by.
 func subagentActivity(activityID, created string) *conversationv1.AgentActivity {
