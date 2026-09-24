@@ -154,8 +154,8 @@ func TestSettlePermissionRefusesAnAskItWasNeverToldAbout(t *testing.T) {
 func TestSubscribeBashReplaysAFramePushedBeforeTheStreamOpened(t *testing.T) {
 	// Arrange
 	srv := newServer(NewRecorder(), Profile{}, nil)
-	early := &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n"},
+	early := &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "building...\n"},
 	}}
 	srv.publishBash("work-1", early)
 
@@ -174,8 +174,8 @@ func TestSubscribeBashReplaysAFramePushedBeforeTheStreamOpened(t *testing.T) {
 func TestSubscribeBashLeavesAnotherWorkHandlesFramesOutOfTheBacklog(t *testing.T) {
 	// Arrange
 	srv := newServer(NewRecorder(), Profile{}, nil)
-	srv.publishBash("work-other", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "elsewhere\n"},
+	srv.publishBash("work-other", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "elsewhere\n"},
 	}})
 
 	// Act
@@ -197,8 +197,8 @@ func TestPublishBashAfterASubscriptionStaysOffTheBacklog(t *testing.T) {
 	if len(backlog) != 0 {
 		t.Fatalf("the backlog at open = %v, want nothing published yet", backlog)
 	}
-	late := &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "later\n"},
+	late := &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "later\n"},
 	}}
 
 	// Act
@@ -220,8 +220,8 @@ func TestPublishBashAfterASubscriptionStaysOffTheBacklog(t *testing.T) {
 func TestDropBashStreamsForgetsTheBacklog(t *testing.T) {
 	// Arrange
 	srv := newServer(NewRecorder(), Profile{}, nil)
-	srv.publishBash("work-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "before the drop\n"},
+	srv.publishBash("work-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "before the drop\n"},
 	}})
 
 	// Act
@@ -316,8 +316,8 @@ func TestAWatchOnARunThatIsStillGoingIsHandedNoEnding(t *testing.T) {
 	// Arrange: output, and no terminal. Inventing one would settle a run that
 	// has not finished.
 	srv := newServer(NewRecorder(), Profile{}, nil)
-	srv.publishBash("work-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n"},
+	srv.publishBash("work-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "building...\n"},
 	}})
 	srv.dropBashStreams()
 

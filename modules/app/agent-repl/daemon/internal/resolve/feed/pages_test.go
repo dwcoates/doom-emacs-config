@@ -717,7 +717,7 @@ func TestADetachedShellsSpoolIsNotPushedToARootTailThatNeverOpenedTheBubble(t *t
 		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 	h.deliverPrompt("turn-new", "sentinel")
 
 	// Assert: the spool BODY row id never reaches the root tail; the sentinel

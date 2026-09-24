@@ -8219,3 +8219,18 @@ unchanged. `TurnKilled.agent_only` now also covers an unforced kill that
 spared live work. `KillTurnFailure.live` / `TurnLive` are NO LONGER
 PRODUCED; the arm is retained, documented as such, pending an owner ruling
 on removal. No field, arm or number changed.
+
+## 2026-09-23 — a detached shell's output is stored as its RENDERED TAIL (breaking; owner-ruled)
+
+Owner ruling: output beyond what is rendered is not stored. `AgentBash` gains
+the `tail` arm (6), `AgentBashTail{text, bytes_omitted, lines_omitted}`, a
+SNAPSHOT that supersedes its predecessor whole, and `AgentBashTailCap`
+(`AGENT_BASH_TAIL_CAP_BYTES = 16384`), the ONE number the producer bounds the
+tail by and the renderer draws by. The producer cuts (line start once anything
+is omitted); the renderer draws verbatim. The contiguous-delta model is
+RETIRED: `update` (2) and `AgentBashUpdate` are reserved once every consumer
+reads `tail`, and with them `from_offset` and its gap detector — the earlier
+entry recording `from_offset` as "a GAP DETECTOR on a live delta stream" no
+longer describes the wire. Stored `bash:<run>:<offset>` delta rows are left in
+place as OUTMODED: they decode with no arm this build knows, and the store's
+run replay skips them with one INFO per replay rather than serving them.

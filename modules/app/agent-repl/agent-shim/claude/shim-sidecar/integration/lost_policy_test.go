@@ -254,7 +254,7 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	// THE TERMINAL OWES EXACTLY THE RUN'S DELTAS, byte for byte: a reader that
 	// concatenates the deltas and a reader that takes the terminal's stdout must
 	// see the same output, and a containment check could not tell those apart.
-	wantStdout := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
+	wantStdout := requireLatestTail(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
 	if got := cut.GetOutput().GetText().GetStdout(); got != wantStdout {
 		t.Errorf("the LOST terminal carries stdout %q, wanted exactly the run's joined deltas %q", got, wantStdout)
 	}
@@ -314,7 +314,7 @@ func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	// Assert.
 	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
 	requireLostCause(t, cut, "went_silent")
-	wantStdout := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
+	wantStdout := requireLatestTail(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
 	if got := cut.GetOutput().GetText().GetStdout(); got != wantStdout {
 		t.Errorf("the LOST terminal carries stdout %q, wanted exactly the run's joined deltas %q", got, wantStdout)
 	}

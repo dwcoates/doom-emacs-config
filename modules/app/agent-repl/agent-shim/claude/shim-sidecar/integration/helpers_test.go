@@ -2075,8 +2075,8 @@ func describeBashRows(rows []*conversationv1.AgentBash) []string {
 		switch {
 		case row.GetStart() != nil:
 			out = append(out, "start")
-		case row.GetUpdate() != nil:
-			out = append(out, fmt.Sprintf("update@%d", row.GetUpdate().GetFromOffset()))
+		case row.GetTail() != nil:
+			out = append(out, fmt.Sprintf("tail@%d", row.GetTail().GetBytesOmitted()+uint64(len(row.GetTail().GetText()))))
 		case row.GetProgress() != nil:
 			out = append(out, "progress")
 		case row.GetSuccess() != nil:
@@ -2091,7 +2091,7 @@ func describeBashRows(rows []*conversationv1.AgentBash) []string {
 }
 
 // requireBashReplayOrder states the endpoint's ordering contract: the start
-// first if there is one, then the deltas, then the terminal LAST and once.
+// first if there is one, then the tail, then the terminal LAST and once.
 func requireBashReplayOrder(t *testing.T, run string, rows []*conversationv1.AgentBash) {
 	t.Helper()
 	if len(rows) == 0 {
@@ -2103,7 +2103,7 @@ func requireBashReplayOrder(t *testing.T, run string, rows []*conversationv1.Age
 		if row.GetStart() != nil && seenTerminal {
 			t.Errorf("run %s replayed a start AFTER its terminal: %v", run, describeBashRows(rows))
 		}
-		if row.GetUpdate() != nil && seenTerminal {
+		if row.GetTail() != nil && seenTerminal {
 			updatesAfterTerminal++
 		}
 		if isTerminalFrame(row) {
@@ -2115,33 +2115,38 @@ func requireBashReplayOrder(t *testing.T, run string, rows []*conversationv1.Age
 		t.Errorf("run %s replayed %d terminal rows, want exactly 1: %v", run, terminals, describeBashRows(rows))
 	}
 	if updatesAfterTerminal != 0 {
-		t.Errorf("run %s replayed %d delta rows after its terminal: %v", run, updatesAfterTerminal, describeBashRows(rows))
+		t.Errorf("run %s replayed %d tail rows after its terminal: %v", run, updatesAfterTerminal, describeBashRows(rows))
 	}
 	if !isTerminalFrame(rows[len(rows)-1]) {
 		t.Errorf("run %s did not end on its terminal row: %v", run, describeBashRows(rows))
 	}
 }
 
-// requireContiguousDeltas states the from_offset contract across a replay:
-// every delta's from_offset equals the bytes the consumer has accumulated, so a
-// consumer concatenating them can never draw output that never existed.
-func requireContiguousDeltas(t *testing.T, run string, rows []*conversationv1.AgentBash) string {
+// requireLatestTail states the tail contract across a run's rows and answers
+// the newest tail's text: no tail carries more than the renderer's cap, and each
+// one accounts for at least as many written bytes as the one before it, so a
+// consumer drawing the newest never draws a run going backwards.
+func requireLatestTail(t *testing.T, run string, rows []*conversationv1.AgentBash) string {
 	t.Helper()
-	var accumulated uint64
-	var joined strings.Builder
+	var written uint64
+	var latest string
 	for i, row := range rows {
-		update := row.GetUpdate()
-		if update == nil {
+		tail := row.GetTail()
+		if tail == nil {
 			continue
 		}
-		if update.GetFromOffset() != accumulated {
-			t.Fatalf("run %s row %d states from_offset %d, wanted %d — from_offset is a gap detector and must equal the bytes already accumulated (%v)",
-				run, i, update.GetFromOffset(), accumulated, describeBashRows(rows))
+		if n := len(tail.GetText()); n > int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES) {
+			t.Fatalf("run %s row %d stores %d bytes of tail, past the renderer's cap (%v)", run, i, n, describeBashRows(rows))
 		}
-		joined.WriteString(update.GetNewOutput())
-		accumulated += uint64(len(update.GetNewOutput()))
+		total := tail.GetBytesOmitted() + uint64(len(tail.GetText()))
+		if total < written {
+			t.Fatalf("run %s row %d accounts for %d written bytes after a row that accounted for %d (%v)",
+				run, i, total, written, describeBashRows(rows))
+		}
+		written = total
+		latest = tail.GetText()
 	}
-	return joined.String()
+	return latest
 }
 
 // ---------------------------------------------------------------------------

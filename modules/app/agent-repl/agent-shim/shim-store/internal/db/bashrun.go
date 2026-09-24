@@ -30,11 +30,10 @@ type BashRunReplay struct {
 // BashRun reads every stored row of one detached shell run, in FIRST-INSERT
 // order, plus the pin the live tail begins after.
 //
-// THE ORDER IS `position`, NOT `write_seq`. A run's rows are a spool being
-// filled in: the start, then each delta, then the terminal. What a consumer
-// needs is the run's own sequence, which is the order the rows were first
-// inserted in — a redelivered delta that upserts its row must appear where it
-// always was, not at the end. (WatchAgentSession replays by write_seq for the
+// THE ORDER IS `position`, NOT `write_seq`. A run's rows are its start, its
+// one rendered tail, and its terminal. What a consumer needs is the run's own
+// sequence, which is the order the rows were first inserted in — the tail,
+// superseded by every write, must appear where it always was, not at the end. (WatchAgentSession replays by write_seq for the
 // opposite reason: a book's upsert is NEW INFORMATION about a line the caller
 // has already read past.)
 func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
@@ -58,6 +57,7 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 		return BashRunReplay{}, d.refuse(base, storagef(err, "reading the rows of run %q", runID))
 	}
 	var out []BashRowWritten
+	outmoded := 0
 	for rows.Next() {
 		var position int64
 		var seq uint64
@@ -70,6 +70,16 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 		if err != nil {
 			rows.Close() //nolint:errcheck // the decode already failed
 			return BashRunReplay{}, d.refuse(base, err)
+		}
+		if row.GetFrame().GetResult() == nil {
+			// AN OUTMODED ROW, NOT DAMAGE. Every write is refused without a
+			// result arm, so a stored row that decodes to none was written
+			// under an arm this build no longer carries — the retired
+			// contiguous-delta `update` (`bash:<run>:<from_offset>`). It is
+			// left in the store untouched and served to nobody: a consumer
+			// could only draw nothing from it.
+			outmoded++
+			continue
 		}
 		out = append(out, BashRowWritten{RunID: runID, Row: row, WriteSeq: seq})
 	}
@@ -84,6 +94,13 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	var pinSeq uint64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(write_seq), 0) FROM entry`).Scan(&pinSeq); err != nil {
 		return BashRunReplay{}, d.refuse(base, storagef(err, "reading the watch pin"))
+	}
+	if outmoded > 0 {
+		// ONCE PER REPLAY, AT INFO: old data is accepted as outmoded, and a
+		// run holding a hundred of those rows is one fact, not a hundred.
+		info := base
+		info.Level = "info"
+		d.log.Log(info, "bash run replay skipped %d outmoded row(s) written under a retired arm; they are left in place and drawn by nothing", outmoded)
 	}
 	d.observeQuery(StatementBashRun, "entry", base, started, int64(len(out)))
 	d.traceStatement(ctx, StatementBashRun, "entry", base, int64(len(out)))
