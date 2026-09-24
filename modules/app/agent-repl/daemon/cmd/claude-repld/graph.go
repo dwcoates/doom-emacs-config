@@ -448,6 +448,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
+		Instance:    p.Instance,
 		Accounts:    accounts,
 		Supervisor:  supervisor,
 		Sinks: sessionwatcher.Sinks{

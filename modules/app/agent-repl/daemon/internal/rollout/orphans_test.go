@@ -1,0 +1,175 @@
+package rollout
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"testing"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionlock"
+)
+
+// THE TAKEOVER RECOVERS WHAT NOTHING ADOPTED. A cold-started daemon's handover
+// used to list none of its sessions, so its successor took over with their
+// shims still running, locks held, served by no daemon (2026-09-24).
+
+// orphan arranges a workspace whose shim a gone daemon left running: its lock
+// is held, its serving row names a dead instance, and THIS daemon holds no
+// client for it and was handed nothing for it.
+func orphan(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	ws, _ := h.workspace(t)
+	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("a-dead-instance")); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	h.fleet.mu.Lock()
+	delete(h.fleet.live, ws)
+	h.fleet.mu.Unlock()
+	return ws
+}
+
+// takeOver runs the takeover of a joining successor and waits for every
+// adoption it started.
+func takeOver(h *harness) {
+	h.c.mu.Lock()
+	h.c.joiningMode = true
+	h.c.mu.Unlock()
+	h.c.becomeIncumbent(nil)
+	h.c.stragglerAdoptions.Wait()
+}
+
+func TestTheTakeoverAdoptsAShimNothingAdopted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.fleet.Adoptions(); !slices.Equal(got, []ids.WorkspaceID{ws}) {
+		t.Fatalf("adoptions = %v, want the orphan adopted", got)
+	}
+}
+
+func TestTheTakeoverClaimsTheRecoveredOrphansWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Serving: %v", err)
+	}
+	if owner == nil || *owner != selfInstance {
+		t.Fatalf("serving owner = %v, want this daemon so its next handover hands it over", owner)
+	}
+}
+
+func TestTheTakeoverLeavesAFreeLockAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateFree
+	h.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want nothing dialed for a lock no shim holds", got)
+	}
+}
+
+func TestTheTakeoverLeavesAClosedWorkspaceAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	if err := h.db.SetClosed(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetClosed: %v", err)
+	}
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want a closed workspace left alone", got)
+	}
+}
+
+func TestTheTakeoverDoesNotReadAnUnreadableLockAsHeld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[record.Dir] = sessionlock.StateUnknown
+	h.lockErr[record.Dir] = errors.New("arranged: the lock could not be read")
+	h.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want nothing adopted on a lock that could not be read", got)
+	}
+	if warns := levelRecords(records(h.log, opOrphans), dlog.LevelWarn); len(warns) != 1 {
+		t.Fatalf("orphan WARN records = %d, want exactly one naming the unreadable lock", len(warns))
+	}
+}
+
+func TestAnOrphanThatCannotBeAdoptedIsLoudAndNotKilled(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := orphan(t, h)
+	h.fleet.mu.Lock()
+	h.fleet.adoptErr[ws] = errors.New("arranged: the dial was refused")
+	h.fleet.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if errs := levelRecords(records(h.log, opOrphans), dlog.LevelError); len(errs) != 1 {
+		t.Fatalf("orphan ERROR records = %d, want exactly one", len(errs))
+	}
+	if steps := h.order.Taken(); slices.Contains(steps, "force_kill") || slices.Contains(steps, "kill_session") {
+		t.Fatalf("steps = %v, want no stop of any kind attempted", steps)
+	}
+}
+
+func TestTheTakeoverLeavesAHandedOverWorkspaceToItsRendezvous(t *testing.T) {
+	// Arrange: the manifest named this workspace, so the rendezvous (or the
+	// straggler adoption) is what brings it over, never the orphan sweep.
+	h := newHarness(t)
+	ws := orphan(t, h)
+	h.c.mu.Lock()
+	h.c.joining = map[ids.WorkspaceID]bool{ws: true}
+	h.c.owned = map[ids.WorkspaceID]bool{ws: true}
+	h.c.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := records(h.log, opOrphans); len(levelRecords(got, dlog.LevelInfo)) != 0 {
+		t.Fatalf("orphan INFO records = %+v, want the sweep to leave a handed-over workspace alone", got)
+	}
+}
