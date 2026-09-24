@@ -12,7 +12,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/takeover-claims-after-writable` | `~/.config/doom-worktrees/takeover-claims-after-writable` | The takeover's orphan recovery claims serving while the wsm handle is still read-only (live at 15:07: the 3 orphans were adopted but unclaimed, ERROR x3); plus `Fleet.Adopt` dials `NewestLive`. | `a5be0435771b765a7` | 09-24 |
 
 ## Still waiting on the owner
 
@@ -26,6 +25,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- The takeover promotes the wsm handle before it adopts, recovers or claims (a successor handed nothing had served READ-ONLY for its whole life); a refused claim leaves the fleet untouched; `Fleet.Adopt` dials `NewestLive` (`fix/takeover-claims-after-writable`). Live: the read-only daemon 80861 was cold-restarted at 15:18 via `agent-repl-frontend-daemon-restart`; 3 sessions came up fresh, claimed by 894735edfd134d30, with no WARN or ERROR. The live handover check waits for the next daemon change.
 - Every session the fleet begins holding claims serving; `served()` hands over a live session under a foreign owner at ERROR and reclaims its row; the takeover adopts orphaned shims (`fix/cold-start-claims-serving`, daemon unit+integration green). Deployed 15:07: the orphan claim FAILED on a read-only handle (follow-up running).
 - The revive WARN came from the fake vendor, which replayed an `is_backgrounded` patch for work already in the background; captures show the real vendor never does. A silent lock holder is killed and refused `lock_holder_unavailable` after 5 s: the agent's 250 ms off the bench was widened by the lead, because a false expiry refuses a real session start on a loaded host (`fix/revive-warn-and-lock-bound`; shim 6103 unit + 347 integration).
 - The killed-shim "hang" was a test artifact: the detached announcement could land on the watch's opening page, while the test waited only on the tail. The new `awaitAgentEntry` searches the page, then the tail, with a regression test (`fix/killed-shim-revive-hang`; shim integration 346 on master).
