@@ -385,15 +385,24 @@ mints nothing, and crons, tasks and workflows are never in the set.
 ### A footer jump names the entry THE FEED drew
 
 Every detached-work row the footer publishes states a `FooterJump`: the
-entry's FeedId, or `unresolved` with the reason (`not_drawn`,
-`no_feed_entry`). The FeedId is never composed by the footer. The feed
-resolver announces each subagent bubble's and shell head's FeedId the moment it
-first draws it, and again when it changes (`feed.Deps.EntryPlaced`, wired in
+entry's FeedId, or `unresolved(not_drawn)` until the feed has announced one
+(`no_feed_entry` is retired: every kind draws an entry). The FeedId is never
+composed by the footer. The feed resolver announces each subagent bubble's,
+shell head's and Monitor call's tool-call card's FeedId the moment it first
+draws it, and again when it changes (`feed.Deps.EntryPlaced`, wired in
 `graph.go` to `footer.OnEntryPlaced`). A subagent of a subagent lives on its
 parent's sub-feed, and only the feed knows that. The call runs under the feed's
 lock and takes the footer's, which is the same feed-then-footer order the fault
 path already takes. The footer never calls back into the feed. Each row's
 resolution change is recorded as `daemon.footer.jump_resolution`.
+
+A MONITOR's entry is its call's ordinary tool-call card (owner ruling,
+2026-09-23), drawn in its owner's feed at the call's position and keyed by the
+monitor's unit, which is also its detached-work id. The monitor is detached from
+birth, so its detachment announcement continues the card as it stands (never a
+shell head), its `ended` and `failure` arms restate the call so a replay draws
+the card alone, and a card still running when the live set drops the monitor is
+settled there (`settleMonitorsLeftLive`, `daemon.feed.monitor_left_live`).
 
 ## History is replayed ONLY on a workspace open or a transcript select
 

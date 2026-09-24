@@ -6597,6 +6597,37 @@ describe("reconciliation when the record cannot describe the work", () => {
     expect(discriminators).not.toContain("agent_bash.success.interrupted.lost.swept_up");
   });
 
+  it("restates the recorded start on the monitor it closes, so its card still draws", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_watch" })],
+    });
+    const armed = create(conversationv1.AgentMonitorStartSchema, { description: "watch the log" });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [
+        unitEntry("1", "toolu_watch", {
+          case: "monitor",
+          value: create(conversationv1.AgentMonitorSchema, { result: { case: "start", value: armed } }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    const closed = h.persistence.buffered.find(
+      (entry) => entry.source.discriminator === "activity.monitor.ended.swept_up",
+    );
+    const frame = closed?.item.kind === "frame" ? closed.item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate | undefined)?.update;
+    const monitor = (update?.value as conversationv1.AgentActivity | undefined)?.item.value as
+      | conversationv1.AgentMonitor
+      | undefined;
+    expect((monitor?.result.value as conversationv1.AgentMonitorEnded | undefined)?.call?.description).toBe(
+      "watch the log",
+    );
+  });
+
   it("neither re-adopts nor closes a live WORKFLOW run", async () => {
     // WORKFLOW IS KICKED this wave: a terminal written for one would close an
     // obligation nothing in this build owns.
