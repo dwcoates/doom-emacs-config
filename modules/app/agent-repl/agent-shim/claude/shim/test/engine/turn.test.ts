@@ -4,7 +4,9 @@
  * WHAT THIS GUARDS: the two invariants a consumer cannot see being broken. One
  * turn is in flight STRUCTURALLY — a second StartTurn is refused, never queued,
  * because a queue nobody can see makes the daemon's model of what is pending
- * silently untrue. And the prompt row is DURABLE before the prompt is submitted
+ * silently untrue. The one wait is behind the shim's OWN keep-alive, which no
+ * consumer can see either: that StartTurn opens its turn, once, when the
+ * keep-alive leaves the slot. And the prompt row is DURABLE before the prompt is submitted
  * (R15) — a crash between the two would leave a turn's activity hanging under a
  * prompt that was never recorded.
  */
@@ -54,6 +56,10 @@ interface Harness {
   knows: boolean;
   /** When set, `SessionContext.query()` answers absence, as a dead query does. */
   queryDead: boolean;
+  /** What `SessionContext.keepaliveEnded()` answers; set by {@link openKeepalive}. */
+  keepaliveEnd: Promise<void> | undefined;
+  /** What `SessionContext.keepaliveYieldBudgetMs` answers. */
+  yieldBudgetMs: number;
   /**
    * Every reading session the engine registered with the session, in order.
    *
@@ -105,6 +111,8 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     storeRecoveries: [] as number[],
     knows: true,
     queryDead: false,
+    keepaliveEnd: undefined,
+    yieldBudgetMs: 60_000,
     watchers: [] as AgentPageSession[],
   };
   const context: SessionContext = {
@@ -116,6 +124,10 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     query: () => (state.queryDead ? undefined : query),
     nowMs: () => 1,
     openTurn: () => state.open,
+    keepaliveEnded: () => (state.open?.keepalive === true ? state.keepaliveEnd : undefined),
+    get keepaliveYieldBudgetMs() {
+      return state.yieldBudgetMs;
+    },
     watcherOpened: (_agent, page) => {
       state.watchers.push(page);
       return () => undefined;
@@ -151,16 +163,333 @@ function failureKind(response: { result: { case?: string; value?: unknown } }): 
   return failure?.kind?.case ?? failure?.cause?.case;
 }
 
-// Reads the turn_already_open arm's keepalive flag off a StartTurn refusal.
-function turnAlreadyOpenKeepalive(response: {
-  result: { case?: string; value?: unknown };
-}): boolean | undefined {
-  const failure = response.result.value as {
-    kind?: { case?: string; value?: { keepalive?: boolean } };
+const KEEPALIVE_TURN = create(conversationv1.TurnIdSchema, { value: "keepalive-1" });
+
+/**
+ * Put the shim's own keep-alive in the slot; the returned callback makes it
+ * leave, as the session's one slot writer does (open cleared, then released).
+ */
+function openKeepalive(h: Harness): () => void {
+  let release = (): void => {};
+  h.keepaliveEnd = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  h.open = { id: KEEPALIVE_TURN, keepalive: true, startedAtMs: 1 };
+  return () => {
+    h.open = undefined;
+    h.keepaliveEnd = undefined;
+    release();
   };
-  if (failure?.kind?.case !== "turnAlreadyOpen") return undefined;
-  return failure.kind.value?.keepalive;
 }
+
+/** Whether `promise` has settled, observed without waiting on a clock. */
+async function settled(promise: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  void promise.then(
+    () => {
+      done = true;
+    },
+    () => {
+      done = true;
+    },
+  );
+  for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+  return done;
+}
+
+describe("StartTurn behind the shim's own keep-alive", () => {
+  it("does not answer while the keep-alive holds the slot", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(await settled(starting)).toBe(false);
+  });
+
+  it("opens the turn once the keep-alive leaves the slot", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act
+    leave();
+    const response = await starting;
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("delivers the waiting prompt exactly once", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act
+    leave();
+    await starting;
+
+    // Assert
+    expect(h.submitted.map((entry) => [saidText(entry.said), entry.keepalive])).toEqual([["do the thing", false]]);
+  });
+
+  it("writes no prompt row while it waits", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+    await settled(starting);
+
+    // Assert
+    expect(h.persistence.buffered.map((entry) => entry.upsertKey)).not.toContain("prompt:turn-1");
+  });
+
+  it("answers with the requested turn, never the keep-alive's", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act
+    leave();
+    const response = await starting;
+
+    // Assert
+    expect(response.result.case === "success" ? response.result.value.prompt?.id?.value : undefined).toBe("turn-1");
+  });
+
+  it("reports a start in flight while it waits", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    void h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.turns.startInFlight()).toBe(true);
+  });
+
+  it("reports no start in flight once the waiting start has opened its turn", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act
+    leave();
+    await starting;
+
+    // Assert
+    expect(h.turns.startInFlight()).toBe(false);
+  });
+
+  it("refuses a second StartTurn that arrives while the first waits", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const first = h.turns.startTurn(startTurn());
+
+    // Act
+    const second = await h.turns.startTurn(startTurn());
+    leave();
+    await first;
+
+    // Assert
+    expect([failureKind(second), h.submitted.length]).toEqual(["turnAlreadyOpen", 1]);
+  });
+
+  it("answers query_dead when the vendor query died under the keep-alive", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act
+    h.queryDead = true;
+    leave();
+    const response = await starting;
+
+    // Assert
+    expect(failureKind(response)).toBe("queryDead");
+  });
+
+  it("records the wait at info when it begins", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    const starting = h.turns.startTurn(startTurn());
+    await settled(starting);
+
+    // Assert
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message:
+          "a StartTurn arrived while the shim's own keep-alive runs; it waits for the keep-alive to end, then opens its turn",
+      }),
+    );
+  });
+
+  it("refuses vendor_refused when the keep-alive outlasts the bound", async () => {
+    // Arrange: a keep-alive that never leaves, and a bound that expires.
+    const h = await harness();
+    openKeepalive(h);
+    h.yieldBudgetMs = 1;
+
+    // Act
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(failureKind(response)).toBe("vendorRefused");
+  });
+
+  it("delivers nothing when the keep-alive outlasts the bound", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    h.yieldBudgetMs = 1;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect([h.submitted.length, h.open?.keepalive]).toEqual([0, true]);
+  });
+
+  it("records the expired bound at error", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    h.yieldBudgetMs = 1;
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message:
+          "a StartTurn waited out its budget behind the shim's own keep-alive; refusing the turn undelivered",
+      }),
+    );
+  });
+
+  it("refuses undelivered when the caller aborts while it waits", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    const caller = new AbortController();
+    const starting = h.turns.startTurn(startTurn(), caller.signal);
+
+    // Act
+    caller.abort();
+    const response = await starting;
+
+    // Assert
+    expect([failureKind(response), h.submitted.length]).toEqual(["vendorRefused", 0]);
+  });
+
+  it("refuses undelivered when the caller had already aborted", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    const caller = new AbortController();
+    caller.abort();
+
+    // Act
+    const response = await h.turns.startTurn(startTurn(), caller.signal);
+
+    // Assert
+    expect([failureKind(response), h.submitted.length]).toEqual(["vendorRefused", 0]);
+  });
+
+  it("does not deliver an abandoned start when the keep-alive later leaves", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const caller = new AbortController();
+    const starting = h.turns.startTurn(startTurn(), caller.signal);
+    caller.abort();
+    await starting;
+
+    // Act
+    leave();
+    await settled(Promise.resolve());
+
+    // Assert
+    expect(h.submitted).toEqual([]);
+  });
+
+  it("records an abandoned wait at info", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+    const caller = new AbortController();
+    const starting = h.turns.startTurn(startTurn(), caller.signal);
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act
+    caller.abort();
+    await starting;
+
+    // Assert
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message:
+          "the caller abandoned a StartTurn while it waited behind the shim's own keep-alive; nothing was delivered",
+      }),
+    );
+  });
+
+  it("lets a KillTurn for the waiting turn interrupt it once it opens", async () => {
+    // Arrange
+    const h = await harness();
+    const leave = openKeepalive(h);
+    const starting = h.turns.startTurn(startTurn());
+    const killing = h.turns.killTurn(create(shimv1.KillTurnRequestSchema, { turn: TURN }));
+
+    // Act
+    leave();
+    const [, killed] = await Promise.all([starting, killing]);
+
+    // Assert
+    expect([killed.result.case, h.query.calls.includes("interrupt"), h.open]).toEqual(["success", true, undefined]);
+  });
+
+  it("keeps a KillTurn for the waiting turn waiting past the ordinary start budget", async () => {
+    // Arrange: the clock is the suite's, so the 1s budget can be passed
+    // without waiting on it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const h = await harness();
+      openKeepalive(h);
+      void h.turns.startTurn(startTurn());
+      const killing = h.turns.killTurn(create(shimv1.KillTurnRequestSchema, { turn: TURN }));
+
+      // Act
+      vi.advanceTimersByTime(1_500);
+
+      // Assert
+      expect(await settled(killing)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("what the user said", () => {
   it("is the text of the text blocks", () => {
@@ -311,28 +640,46 @@ describe("StartTurn", () => {
     expect(failureKind(second)).toBe("turnAlreadyOpen");
   });
 
-  // A DAEMON DOUBLE-SUBMIT is a genuine daemon bug, so the collision reports
-  // keepalive=false and the daemon surfaces it terminally.
-  it("marks a real turn's collision as NOT a keep-alive", async () => {
+  it("REFUSES a StartTurn while another is still being started", async () => {
+    // Arrange: the first start is held inside its durable prompt write.
     const h = await harness();
-    await h.turns.startTurn(startTurn());
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    let release = (): void => {};
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.persistence.writeDurable = async (entries) => {
+      await blocked;
+      await durable(entries);
+    };
+    const first = h.turns.startTurn(startTurn());
 
+    // Act
     const second = await h.turns.startTurn(startTurn());
+    release();
+    await first;
 
-    expect(turnAlreadyOpenKeepalive(second)).toBe(false);
+    // Assert
+    expect(failureKind(second)).toBe("turnAlreadyOpen");
   });
 
-  // A KEEP-ALIVE PING is shim-internal and invisible to the daemon's queue, so
-  // its collision reports keepalive=true and the daemon re-drives rather than
-  // failing.
-  it("marks a keep-alive turn's collision as a keep-alive", async () => {
+  it("records the refusal of a StartTurn that overlaps another start at debug", async () => {
+    // Arrange
     const h = await harness();
-    h.open = { id: TURN, keepalive: true, startedAtMs: 1 };
+    h.persistence.writeDurable = () => new Promise<void>(() => {});
+    void h.turns.startTurn(startTurn());
+    const before = vi.mocked(writeSync).mock.calls.length;
 
-    const response = await h.turns.startTurn(startTurn());
+    // Act
+    await h.turns.startTurn(startTurn());
 
-    expect(failureKind(response)).toBe("turnAlreadyOpen");
-    expect(turnAlreadyOpenKeepalive(response)).toBe(true);
+    // Assert
+    expect(recordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        message: "refused a StartTurn because another StartTurn is still being started",
+      }),
+    );
   });
 
   it("does not queue the refused prompt", async () => {
