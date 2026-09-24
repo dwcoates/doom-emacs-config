@@ -428,8 +428,8 @@ func TestContextInjectedSkills(t *testing.T) {
 // CRON DRAWS NO TOOL CARD. feed.proto's FeedTurnActivity oneof has no cron
 // arm, and the daemon's own resolver says so in its default arm
 // (daemon/internal/resolve/feed/sink.go: "Every other kind that draws
-// nowhere (thinking, task acts, monitors, wakeups, cron, notifications,
-// injected context, sends) answers the same way" — errNotARow).
+// nowhere (task acts, wakeups, cron, notifications, injected context)
+// answers the same way" — errNotARow).
 // docs/overhaul/webapp.md:282 states the same from the client's side: "NOT
 // in the feed: ... crons (footer only)". The contracted surface is the
 // FOOTER's ⏱ chip (footer.proto FooterChipCrons, "Set iff at least one"),

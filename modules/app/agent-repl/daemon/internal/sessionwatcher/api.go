@@ -42,8 +42,9 @@ type LiveWorkSet struct {
 	Agents []*conversationv1.AgentId
 	// Shells are the live detached shells.
 	Shells []*conversationv1.DetachedWorkId
-	// Monitors are the live background watchers. FOOTER-ONLY — a monitor
-	// opens no stream of its own (the contract gives it none), so the watcher
+	// Monitors are the live background watchers. A monitor opens no stream
+	// of its own (the contract gives it none; its feed entry is its call's
+	// tool-call card, drawn from the call's own frames), so the watcher
 	// tracks its liveness from the announcement and from the monitor
 	// activity's own terminal. It counts toward freeness like any other
 	// detached item: a session with a live monitor is not free.

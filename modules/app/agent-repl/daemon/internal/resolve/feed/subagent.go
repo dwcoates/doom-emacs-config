@@ -525,9 +525,15 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 			// which is the same move a detachment makes, keyed by the same bytes.
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedWork", "branch": "case *conversationv1.DetachableWork_Bash"})
 			r.detachUnit(s, announcer, workID, workID, stated)
+		case *conversationv1.DetachableWork_Monitor:
+			// A MONITOR'S ENTRY IS ITS CALL'S OWN CARD, drawn from the call's
+			// frames (a replay serves them too); the announcement describes the
+			// watch for the footer and draws nothing more.
+			log.Debug("daemon.feed.detached_monitor_card_is_entry",
+				"a created monitor's announcement draws nothing; its tool-call card is its entry",
+				dlog.Context{"work": workID})
 		default:
-			// A workflow is kicked this wave, and a monitor is FOOTER-ONLY:
-			// neither has a feed row.
+			// A workflow is kicked this wave: it has no feed row.
 			log.Debug("daemon.feed.detached_draws_nothing",
 				"a detached-work kind draws no feed row", dlog.Context{"work": workID})
 		}
@@ -551,6 +557,18 @@ func (r *resolver) detachUnit(s *wsState, announcer *conversationv1.AgentId, uni
 			dlog.Context{"unit": unitID, "work": workID})
 		return
 	}
+	// A MONITOR'S CARD IS ALREADY ITS ENTRY: the watch was detached from
+	// birth, so its announcement continues the card as it stands.
+	if u, ok := s.units[unitID]; ok && u.monitor {
+		if _, err := feedid.DetachedOwner(stated, u.carrier); err != nil {
+			r.reportUnplaceableWork(s, workID, "monitor", stated, announcer.GetValue(), err.Error())
+			return
+		}
+		log.Debug("daemon.feed.detached_monitor_card_is_entry",
+			"a monitor's detachment continues its tool-call card, which is its entry",
+			dlog.Context{"unit": unitID, "work": workID})
+		return
+	}
 	if u, ok := s.units[unitID]; ok && u.input != "" && u.at.feed != (feedid.Feed{}) {
 		if _, err := feedid.DetachedOwner(stated, u.carrier); err != nil {
 			r.reportUnplaceableWork(s, workID, "shell", stated, announcer.GetValue(), err.Error())
@@ -559,11 +577,10 @@ func (r *resolver) detachUnit(s *wsState, announcer *conversationv1.AgentId, uni
 		r.detachForegroundShell(s, unitID, workID)
 		return
 	}
-	// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
-	// A monitor is footer-only and always detached, so its announcement
-	// has no row to continue and never will; holding it would report the
-	// footer's own bookkeeping as a producer fault at the turn's
-	// terminal.
+	// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw: its
+	// announcement has no row to continue and never will, and holding it
+	// would report the footer's own bookkeeping as a producer fault at the
+	// turn's terminal.
 	if s.undrawable(unitID) {
 		log.Debug("daemon.feed.detachment_draws_nothing",
 			"a detachment named a unit whose kind draws no feed row; the footer carries the work",
@@ -732,8 +749,20 @@ func (r *resolver) applyHeldDetachment(s *wsState, unitID string) {
 	said := s.heldDetachments[unitID]
 	delete(s.heldDetachments, unitID)
 	if u, ok := s.units[unitID]; ok {
+		kind := "shell"
+		if u.monitor {
+			kind = "monitor"
+		}
 		if _, err := feedid.DetachedOwner(said.owner, u.carrier); err != nil {
-			r.reportUnplaceableWork(s, work, "shell", said.owner, said.announcer, err.Error())
+			r.reportUnplaceableWork(s, work, kind, said.owner, said.announcer, err.Error())
+			return
+		}
+		// A MONITOR'S CARD, NOW DRAWN, IS THE ENTRY the held announcement
+		// was waiting for; there is no shell head to move it to.
+		if u.monitor {
+			r.logger(s.id).Debug("daemon.feed.detached_monitor_card_is_entry",
+				"a held monitor detachment found its tool-call card, which is its entry",
+				dlog.Context{"unit": unitID, "work": work})
 			return
 		}
 	}

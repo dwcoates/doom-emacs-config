@@ -1296,9 +1296,9 @@ message FooterExpandedMonitors {
 }
 
 // One live monitor's line: 👁 · description · (persistent) · clock · ▸. A
-// monitor draws NO feed entry, so its jump is always the `unresolved` arm with
-// the `no_feed_entry` reason: a click says so at the row and records why,
-// rather than doing nothing.
+// monitor's feed entry is its Monitor call's tool-call card, drawn in its
+// owner's feed at the call's position (owner ruling, 2026-09-23), so its jump
+// names that card exactly as a shell row's names its head.
 message FooterMonitorRow {
   // What is being watched, drawn verbatim (the agent's description).
   FooterMonitorRowDescription description = 1;
@@ -1658,14 +1658,15 @@ message FooterJumpUnresolved {
     // unit has reached the footer. Resolves on its own the moment the feed
     // draws it.
     FooterJumpNotDrawn not_drawn = 1;
-    // This kind of work draws no feed entry at all (a monitor).
-    FooterJumpNoFeedEntry no_feed_entry = 2;
+    // Tag 2 is RETIRED: `no_feed_entry` said a kind drew no feed entry at
+    // all, and only a monitor did. A monitor's entry is now its tool-call
+    // card (owner ruling, 2026-09-23), so every detached-work kind draws one.
   }
+  reserved 2;
+  reserved "no_feed_entry";
 }
 // The entry is not drawn. Empty: the arm is the whole fact.
 message FooterJumpNotDrawn {}
-// The kind draws no entry. Empty: the arm is the whole fact.
-message FooterJumpNoFeedEntry {}
 // The row's command element.
 message FooterShellRowCommand {
   // The command text, drawn verbatim (the daemon may truncate for width —

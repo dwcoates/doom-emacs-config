@@ -715,9 +715,8 @@ export function drawFooterShellRowRuntime(
 // ---- the monitors panel ---------------------------------------------------
 
 /**
- * The live monitors. Each is a jump row whose jump the daemon states as
- * unresolved(no_feed_entry) — a monitor draws no feed entry — so a click says
- * so at the row and records it rather than doing nothing.
+ * The live monitors. Each is a jump row, exactly as an agent or shell row is:
+ * its jump names the Monitor call's tool-call card, which a click centers.
  */
 export function drawFooterExpandedMonitors(
   u: FooterExpandedMonitors,
@@ -1007,14 +1006,10 @@ function notice(click: JumpClick, deps: ExpandedDeps, reason: string): void {
       reason,
     },
   };
-  // A KIND THAT DRAWS NO ENTRY BY DESIGN (a monitor) is not a defect to
-  // remediate, so its record is INFO; every other miss — an entry the daemon
-  // has not drawn, or one it named that the page could not show — is WARN.
-  if (click.resolution === "noFeedEntry") {
-    log.info("a footer detached-work row's kind draws no feed entry", record);
-  } else {
-    log.warn("a footer detached-work row's entry is not on screen", record);
-  }
+  // Every kind draws an entry now (a monitor's is its call's tool-call card),
+  // so every miss — an entry the daemon has not drawn, or one it named that
+  // the page could not show — is WARN.
+  log.warn("a footer detached-work row's entry is not on screen", record);
   deps.redraw();
 }
 

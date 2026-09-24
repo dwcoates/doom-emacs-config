@@ -1149,7 +1149,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 
 	case kindMonitor:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "case kindMonitor"})
-		// FOOTER-ONLY: the contract gives a monitor no stream, so liveness is
+		// NO STREAM: the contract gives a monitor none, so liveness is
 		// tracked from this announcement and dropped at the monitor
 		// activity's own terminal.
 		if _, ok := w.monitors[handle.GetValue()]; ok {

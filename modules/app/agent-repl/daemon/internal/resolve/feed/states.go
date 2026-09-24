@@ -87,8 +87,12 @@ type unitState struct {
 	// restates the addressed string, and the address line prefers a name a
 	// reader recognizes.
 	sendAddressedTo string
+	// monitor records that this unit is a MONITOR's tool-call card, which is
+	// the monitor's feed entry itself: a detachment naming it continues
+	// nothing, and it is never redrawn as a shell head.
+	monitor bool
 	// drawsNoRow records that this unit's KIND draws no feed row at all —
-	// a monitor, a wakeup, an unmodeled tool. It is not "has not drawn yet":
+	// a wakeup, an unmodeled tool. It is not "has not drawn yet":
 	// nothing will ever draw it, so a detachment naming it can never be
 	// claimed by a row and is retired rather than held.
 	drawsNoRow bool
