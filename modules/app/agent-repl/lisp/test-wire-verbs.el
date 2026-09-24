@@ -743,90 +743,227 @@ wire."
                   :type 'agent-repl-wire-error)))
 
 
-;;;; ---- RollOutBuild ----------------------------------------------------
+;;;; ---- Deploy -----------------------------------------------------------
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-marker-is-an-empty-object ()
-  "A rebuilt subsystem rides the wire as an empty object: presence is the fact."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize
-                    (agent-repl-wire-encode-roll-out-build-request '(:daemon t)))
-                   "{\"daemon\":{}}"))))
+(defun agent-repl-test-wire-verbs--deploy (json)
+  "Decode the DeployResponse JSON text with the codec, quietly."
+  (agent-repl-wire-decode-deploy-response (agent-repl-test-wire-verbs--parse json)))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-omits-what-was-not-rebuilt ()
-  "A subsystem that was not rebuilt is omitted, never sent as a false marker."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (mapcar #'car
-                           (agent-repl-wire-encode-roll-out-build-request
-                            '(:daemon nil :shim t :webapp t)))
-                   '(shim webapp)))))
+(defun agent-repl-test-wire-verbs--deploy-breach (json)
+  "Return the `agent-repl-wire-error' data decoding DeployResponse JSON raises."
+  (condition-case err
+      (progn (agent-repl-test-wire-verbs--deploy json) nil)
+    (agent-repl-wire-error (cdr err))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-naming-nothing-errors ()
-  "A request naming nothing rebuilt is malformed and errors before send."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-encode-roll-out-build-request '())
-                  :type 'agent-repl-wire-error)))
+(defun agent-repl-test-wire-verbs--outcome-json (arm-json)
+  "Return a DeployResponse success carrying one daemon outcome with ARM-JSON."
+  (concat "{\"success\":{\"components\":[{\"component\":\"DEPLOY_COMPONENT_DAEMON\","
+          "\"build\":\"h1\"," arm-json "}]}}"))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-handover ()
-  "The handover arm carries how many workspaces transfer and how many are busy."
+(ert-deftest agent-repl-test-wire-verbs-deploy-request-unforced ()
+  "An unforced deploy spells `force' explicitly false."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-roll-out-build-response
-                    '((success . ((handover . ((workspaces . 3) (busy . 1)))))))
+    (should (equal (json-serialize (agent-repl-wire-encode-deploy-request '(:force nil)))
+                   "{\"force\":false}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-request-forced ()
+  "A forced deploy carries `force' true."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-deploy-request '(:force t)))
+                   "{\"force\":true}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-decodes-every-outcome-arm ()
+  "Every DeployComponentOutcome arm decodes to its keyword and its fields."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case
+             '(("\"upToDate\":{}" (:arm :up-to-date :value nil))
+               ("\"restarted\":{}" (:arm :restarted :value nil))
+               ("\"handingOver\":{\"workspaces\":3,\"busy\":1,\"forced\":true}"
+                (:arm :handing-over :value (:workspaces 3 :busy 1 :forced t)))
+               ("\"shims\":{\"bounces\":[{\"workspace\":\"ws-a\",\"bouncedNow\":{\"forced\":true}},{\"workspace\":\"ws-b\",\"registered\":{\"turnInFlight\":true,\"detachedWork\":2}}]}"
+                (:arm :shims
+                 :value (:bounces ((:workspace "ws-a" :when (:arm :bounced-now :value (:forced t)))
+                                   (:workspace "ws-b"
+                                    :when (:arm :registered
+                                           :value (:turn-in-flight t :detached-work 2)))))))
+               ("\"reloadPushed\":{\"recipients\":4}"
+                (:arm :reload-pushed :value (:recipients 4)))
+               ("\"deferredToSuccessor\":{}" (:arm :deferred-to-successor :value nil))))
+      (should (equal (list (car case)
+                           (plist-get
+                            (car (plist-get
+                                  (plist-get (agent-repl-test-wire-verbs--deploy
+                                              (agent-repl-test-wire-verbs--outcome-json (car case)))
+                                             :value)
+                                  :components))
+                            :outcome))
+                     (list (car case) (cadr case)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-decodes-component-and-build ()
+  "An outcome names its component as a keyword and the fresh build's hash."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy
+                    (concat "{\"success\":{\"components\":["
+                            "{\"component\":\"DEPLOY_COMPONENT_ELISP\",\"build\":\"e1\",\"upToDate\":{}},"
+                            "{\"component\":\"DEPLOY_COMPONENT_STORE\",\"build\":\"s1\",\"restarted\":{}}]}}"))
                    '(:arm :success
-                     :value (:action (:arm :handover
-                                      :value (:workspaces 3 :busy 1))))))))
+                     :value (:components
+                             ((:component :elisp :build "e1" :outcome (:arm :up-to-date :value nil))
+                              (:component :store :build "s1"
+                               :outcome (:arm :restarted :value nil)))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-free-handover ()
-  "protojson omits zero counts, so an absent `busy' decodes as zero."
+(ert-deftest agent-repl-test-wire-verbs-deploy-decodes-every-component ()
+  "Every DeployComponent name decodes to its keyword."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (plist-get
-                    (plist-get (plist-get (plist-get
-                                           (agent-repl-wire-decode-roll-out-build-response
-                                            '((success . ((handover . ((workspaces . 2)))))))
-                                           :value)
-                                          :action)
-                               :value)
-                    :busy)
-                   0))))
+    (dolist (case '(("DEPLOY_COMPONENT_DAEMON" :daemon) ("DEPLOY_COMPONENT_SHIM" :shim)
+                    ("DEPLOY_COMPONENT_WEBAPP" :webapp) ("DEPLOY_COMPONENT_STORE" :store)
+                    ("DEPLOY_COMPONENT_SIDECAR" :sidecar) ("DEPLOY_COMPONENT_ELISP" :elisp)))
+      (should (equal (plist-get
+                      (car (plist-get
+                            (plist-get (agent-repl-test-wire-verbs--deploy
+                                        (format "{\"success\":{\"components\":[{\"component\":%S,\"build\":\"h\",\"upToDate\":{}}]}}"
+                                                (car case)))
+                                       :value)
+                            :components))
+                      :component)
+                     (cadr case))))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-shim-relaunch ()
-  "The shim-relaunch arm decodes under its own keyword."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-roll-out-build-response
-                    '((success . ((shimRelaunch . ((workspaces . 2) (busy . 2)))))))
-                   '(:arm :success
-                     :value (:action (:arm :shim-relaunch
-                                      :value (:workspaces 2 :busy 2))))))))
+(ert-deftest agent-repl-test-wire-verbs-deploy-component-vocabulary-pinned ()
+  "The component vocabulary is exactly the schema's, UNSPECIFIED aside."
+  (should (equal (sort (delete "DEPLOY_COMPONENT_UNSPECIFIED"
+                               (agent-repl-test--generated-enum-names
+                                "agentrepl/v1/endpoint_deploy.pb.go" "DEPLOY_COMPONENT_"))
+                       #'string<)
+                 (sort (mapcar #'car agent-repl-wire-deploy-components) #'string<))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-a-webapp-reload ()
-  "The webapp-reload arm carries how many webviews were told to reload."
+(ert-deftest agent-repl-test-wire-verbs-deploy-unset-component-is-a-breach ()
+  "An outcome naming no component is malformed."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-roll-out-build-response
-                    '((success . ((webappReload . ((webviews . 4)))))))
-                   '(:arm :success
-                     :value (:action (:arm :webapp-reload :value (:webviews 4))))))))
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"success\":{\"components\":[{\"build\":\"h\",\"upToDate\":{}}]}}")
+                   '("DeployComponentOutcome" "component" "required field is unset")))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-already-rolling-out ()
-  "A rollout in flight is an ANSWER naming the workspaces it still waits on."
+(ert-deftest agent-repl-test-wire-verbs-deploy-unspecified-component-is-a-breach ()
+  "UNSPECIFIED is never sent, so an outcome carrying it is malformed."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-roll-out-build-response
-                    '((error . ((alreadyRollingOut . ((waitingOn . ("ws-a" "ws-b"))))))))
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"success\":{\"components\":[{\"component\":\"DEPLOY_COMPONENT_UNSPECIFIED\",\"build\":\"h\",\"upToDate\":{}}]}}")
+                   '("DeployComponentOutcome" "component" "required field is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-empty-build-is-a-breach ()
+  "Every outcome names the fresh build it was compared against."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"success\":{\"components\":[{\"component\":\"DEPLOY_COMPONENT_SHIM\",\"upToDate\":{}}]}}")
+                   '("DeployComponentOutcome" "build" "required string is empty")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-unset-decision-is-a-breach ()
+  "THE ARM IS THE DECISION, so an outcome deciding nothing is malformed."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"success\":{\"components\":[{\"component\":\"DEPLOY_COMPONENT_SHIM\",\"build\":\"h\"}]}}")
+                   '("DeployComponentOutcome" "outcome" "oneof is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-shim-bounce-without-a-workspace-is-a-breach ()
+  "A shim bounce names the workspace it serves."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    (agent-repl-test-wire-verbs--outcome-json
+                     "\"shims\":{\"bounces\":[{\"bouncedNow\":{}}]}"))
+                   '("DeployShimBounce" "workspace" "required string is empty")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-shim-bounce-without-a-when-is-a-breach ()
+  "THE ARM IS WHEN, so a bounce with neither is malformed."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    (agent-repl-test-wire-verbs--outcome-json
+                     "\"shims\":{\"bounces\":[{\"workspace\":\"ws-a\"}]}"))
+                   '("DeployShimBounce" "when" "oneof is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-decodes-every-error-arm ()
+  "Every DeployError arm decodes to its keyword and its fields."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case
+             '(("{\"buildFailed\":{\"step\":\"webapp\",\"detail\":\"tsc: 2 errors\",\"log\":\"/tmp/b.log\"}}"
+                (:arm :build-failed :value (:step "webapp" :detail "tsc: 2 errors" :log "/tmp/b.log")))
+               ("{\"alreadyDeploying\":{}}" (:arm :already-deploying :value nil))
+               ("{\"alreadyRollingOut\":{\"waitingOn\":[\"ws-a\",\"ws-b\"]}}"
+                (:arm :already-rolling-out :value (:waiting-on ("ws-a" "ws-b"))))
+               ("{\"joining\":{}}" (:arm :joining :value nil))
+               ("{\"serviceRestartFailed\":{\"component\":\"DEPLOY_COMPONENT_STORE\",\"detail\":\"exit 78\"}}"
+                (:arm :service-restart-failed :value (:component :store :detail "exit 78")))
+               ("{\"installFailed\":{\"component\":\"DEPLOY_COMPONENT_DAEMON\",\"detail\":\"EACCES\"}}"
+                (:arm :install-failed :value (:component :daemon :detail "EACCES")))))
+      (should (equal (list (car case)
+                           (agent-repl-test-wire-verbs--deploy
+                            (format "{\"error\":%s}" (car case))))
+                     (list (car case)
+                           (list :arm :error :value (list :cause (cadr case)))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-build-failed-log-may-be-empty ()
+  "The archived log path is optional detail; an absent one decodes as empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy
+                    "{\"error\":{\"buildFailed\":{\"step\":\"lock\",\"detail\":\"held\"}}}")
                    '(:arm :error
-                     :value (:cause (:arm :already-rolling-out
-                                     :value (:waiting-on ("ws-a" "ws-b")))))))))
+                     :value (:cause (:arm :build-failed
+                                     :value (:step "lock" :detail "held" :log ""))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-decodes-joining ()
-  "A joining successor's refusal decodes as its own empty arm."
+(ert-deftest agent-repl-test-wire-verbs-deploy-build-failed-without-a-step-is-a-breach ()
+  "A failed build names the step that failed."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-roll-out-build-response
-                    '((error . ((joining . nil)))))
-                   '(:arm :error :value (:cause (:arm :joining :value nil)))))))
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"error\":{\"buildFailed\":{\"detail\":\"x\"}}}")
+                   '("DeployBuildFailed" "step" "required string is empty")))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-out-build-refuses-an-unknown-action ()
-  "A success arm this codec does not know is refused, never guessed at."
+(ert-deftest agent-repl-test-wire-verbs-deploy-build-failed-without-detail-is-a-breach ()
+  "A failed build carries the step's own words."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-decode-roll-out-build-response
-                   '((success . ((storeRestart . nil)))))
-                  :type 'agent-repl-wire-error)))
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"error\":{\"buildFailed\":{\"step\":\"shim\"}}}")
+                   '("DeployBuildFailed" "detail" "required string is empty")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-restart-failed-without-a-component-is-a-breach ()
+  "A failed restart names the service that did not come back."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"error\":{\"serviceRestartFailed\":{\"detail\":\"x\"}}}")
+                   '("DeployServiceRestartFailed" "component" "required field is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-install-failed-without-detail-is-a-breach ()
+  "A failed install says why."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach
+                    "{\"error\":{\"installFailed\":{\"component\":\"DEPLOY_COMPONENT_SHIM\"}}}")
+                   '("DeployInstallFailed" "detail" "required string is empty")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-unset-cause-is-a-breach ()
+  "THE ARM IS THE REFUSAL, so an error naming none is malformed."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach "{\"error\":{}}")
+                   '("DeployError" "cause" "oneof is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-unknown-cause-is-refused ()
+  "An error arm this codec does not know is refused, never guessed at."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--deploy-breach "{\"error\":{\"diskFull\":{}}}")
+                   '("DeployError" "diskFull" "unknown field")))))
+
+(ert-deftest agent-repl-test-wire-verbs-deploy-arms-pinned ()
+  "Every Deploy oneof carries exactly the arms this codec decodes."
+  (dolist (case '(("DeployComponentOutcome"
+                   ("upToDate" "restarted" "handingOver" "shims" "reloadPushed"
+                    "deferredToSuccessor"))
+                  ("DeployShimBounce" ("bouncedNow" "registered"))
+                  ("DeployError"
+                   ("buildFailed" "alreadyDeploying" "alreadyRollingOut" "joining"
+                    "serviceRestartFailed" "installFailed"))
+                  ("DeployResponse" ("success" "error"))))
+    (should (equal (list (car case)
+                         (sort (agent-repl-test--generated-oneof-arms
+                                "agentrepl/v1/endpoint_deploy.pb.go" (car case))
+                               #'string<))
+                   (list (car case) (sort (copy-sequence (cadr case)) #'string<))))))
 
 ;;;; ---- UpdateShutdownSchedule ------------------------------------------
 
@@ -2431,14 +2568,6 @@ window closed."
                     (agent-repl-test-wire-verbs--parse "{\"logSinkPoisoned\":{\"sink\":\"emacs\"}}"))
                    '(:detail "" :kind (:arm :log-sink-poisoned :value (:sink "emacs")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-script-failed-kind ()
-  "DaemonFault's `deploy_script_failed' kind decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-daemon-fault
-                    (agent-repl-test-wire-verbs--parse "{\"deployScriptFailed\":{\"detail\":\"exit 1\"}}"))
-                   '(:detail "" :kind (:arm :deploy-script-failed :value (:detail "exit 1")))))))
-
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-successor-spawn-failed-kind ()
   "DaemonFault's `successor_spawn_failed' kind decodes with everything it
 carries."
@@ -2470,11 +2599,11 @@ carries."
                    '(:detail "" :kind (:arm :daemon-state-unreadable :value (:cause "state client refused")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
-  "DaemonFault's kind oneof has exactly the seven arms decoded here."
+  "DaemonFault's kind oneof has exactly the six arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
                        #'string<)
-                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "deployScriptFailed" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
                        #'string<))))
 
 ;;;; ---- Interrupt -------------------------------------------------------

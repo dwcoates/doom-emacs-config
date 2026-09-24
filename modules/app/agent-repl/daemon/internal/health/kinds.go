@@ -19,8 +19,6 @@ const (
 	KindAdoptionWindowExpired = "adoption_window_expired"
 	// KindLogSinkPoisoned is a durable sink that can no longer be written.
 	KindLogSinkPoisoned = "log_sink_poisoned"
-	// KindDeployScriptFailed is a self-reload whose deploy script failed.
-	KindDeployScriptFailed = "deploy_script_failed"
 	// KindSuccessorSpawnFailed is a handover whose successor would not start.
 	KindSuccessorSpawnFailed = "successor_spawn_failed"
 	// KindPromptsDirMissing is an absent prompts directory: every composed
@@ -125,10 +123,6 @@ func daemonFault(f wsm.Fault) *agentreplv1.DaemonFault {
 	case KindLogSinkPoisoned:
 		out.Kind = &agentreplv1.DaemonFault_LogSinkPoisoned{
 			LogSinkPoisoned: &agentreplv1.DaemonFaultLogSinkPoisoned{Sink: f.Evidence["sink"]},
-		}
-	case KindDeployScriptFailed:
-		out.Kind = &agentreplv1.DaemonFault_DeployScriptFailed{
-			DeployScriptFailed: &agentreplv1.DaemonFaultDeployScriptFailed{Detail: evidenceDetail(f)},
 		}
 	case KindSuccessorSpawnFailed:
 		out.Kind = &agentreplv1.DaemonFault_SuccessorSpawnFailed{

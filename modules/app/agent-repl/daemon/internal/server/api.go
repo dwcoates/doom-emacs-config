@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/commandfile"
+	"claude-repld/internal/deploy"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/feedid"
@@ -66,6 +68,8 @@ type Deps struct {
 	Drain drain.Controller
 	// Rollout backs AdoptHostWorkspace and AdoptWebWorkspace.
 	Rollout rollout.Controller
+	// Deploy backs the Deploy rpc: the daemon's own build-and-roll-out.
+	Deploy Deployer
 	// Health backs DaemonHealth and SessionHealth.
 	Health health.Reporter
 	// SessionFacts answers the LIVE half of the host view — the session
@@ -135,6 +139,9 @@ type Server interface {
 	// Announcer publishes the daemon-scoped pushes onto every WatchDaemon
 	// stream. It also satisfies rollout.Announcer, whose one method it shares.
 	drain.Announcer
+	// Clients are the connected clients' reported builds and the reload pushes
+	// a deploy addresses to the stale ones (deploy.go).
+	deploy.Clients
 
 	// Relay is the host-push relay the workspace verbs use. It is a SEPARATE
 	// value rather than an embedded interface because workspace.HostRelay's
@@ -227,6 +234,14 @@ type server struct {
 	// daemon is standing down from the announcement rather than from the
 	// socket going away underneath it.
 	daemonWatchers map[*daemonWatcher]struct{}
+	// daemonWatcherSeq names each WatchDaemon stream, so a deploy's elisp
+	// reload is addressed to exactly the Emacs streams it judged stale.
+	daemonWatcherSeq uint64
+	// webBuilds is the webapp build every open web stream reported, per
+	// workspace and per stream: what a deploy compares the fresh build to.
+	webBuilds map[ids.WorkspaceID]map[string]string
+	// webStreamSeq names each web stream's entry in webBuilds.
+	webStreamSeq uint64
 	// watchTokens memoizes which workspace and feed each minted watch token
 	// addresses. WatchFeedRequest carries ONLY the token while the feed
 	// resolver's Tail takes the workspace and feed explicitly, so the one mint
@@ -312,6 +327,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a drain controller")
 	case deps.Rollout == nil:
 		return nil, missing("a rollout controller")
+	case deps.Deploy == nil:
+		return nil, missing("a deployer")
 	case deps.Health == nil:
 		return nil, missing("a health reporter")
 	case deps.Login == nil:
@@ -354,6 +371,7 @@ func New(deps Deps) (Server, error) {
 		webStateTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
 		webTopics:           make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
 		daemonWatchers:      make(map[*daemonWatcher]struct{}),
+		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
 		hostHeld:            make(map[ids.WorkspaceID]int),
 		webHeld:             make(map[ids.WorkspaceID]int),
 		watchTokens:         make(map[string]tokenTarget),
@@ -635,6 +653,13 @@ const announcementFlush = 2 * time.Second
 type daemonWatcher struct {
 	once sync.Once
 	sent chan struct{}
+	// id names the stream for an addressed push.
+	id string
+	// emacs reports that the client is Emacs, which states elispBuild.
+	emacs      bool
+	elispBuild string
+	// elisp carries the pushes addressed to this stream alone.
+	elisp chan *agentreplv1.WatchDaemonResponse
 }
 
 func (w *daemonWatcher) done() { w.once.Do(func() { close(w.sent) }) }
@@ -642,6 +667,8 @@ func (w *daemonWatcher) done() { w.once.Do(func() { close(w.sent) }) }
 func (s *server) addDaemonWatcher(w *daemonWatcher) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.daemonWatcherSeq++
+	w.id = "watch-daemon-" + strconv.FormatUint(s.daemonWatcherSeq, 10)
 	s.daemonWatchers[w] = struct{}{}
 }
 

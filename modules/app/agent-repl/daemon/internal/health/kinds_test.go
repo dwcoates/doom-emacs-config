@@ -17,7 +17,6 @@ func TestDaemonFaultFillsEveryTypedArm(t *testing.T) {
 	}{
 		{name: "adoption window expired", fault: wsm.Fault{Kind: KindAdoptionWindowExpired}},
 		{name: "log sink poisoned", fault: wsm.Fault{Kind: KindLogSinkPoisoned}},
-		{name: "deploy script failed", fault: wsm.Fault{Kind: KindDeployScriptFailed}},
 		{name: "successor spawn failed", fault: wsm.Fault{Kind: KindSuccessorSpawnFailed}},
 		{name: "prompts dir missing", fault: wsm.Fault{Kind: KindPromptsDirMissing}},
 		{name: "wsm read only", fault: wsm.Fault{Kind: KindWsmReadOnly}},
@@ -426,22 +425,6 @@ func TestDetailArmPrefersTheRecordedEvidenceOverTheProse(t *testing.T) {
 		detail func(*agentreplv1.DaemonFault) string
 		want   string
 	}{
-		{
-			name: "deploy script, evidence recorded",
-			fault: wsm.Fault{
-				Kind:     KindDeployScriptFailed,
-				Detail:   "the prose",
-				Evidence: map[string]string{"detail": "exit 2 running deploy.sh"},
-			},
-			detail: func(f *agentreplv1.DaemonFault) string { return f.GetDeployScriptFailed().GetDetail() },
-			want:   "exit 2 running deploy.sh",
-		},
-		{
-			name:   "deploy script, nothing recorded",
-			fault:  wsm.Fault{Kind: KindDeployScriptFailed, Detail: "the prose"},
-			detail: func(f *agentreplv1.DaemonFault) string { return f.GetDeployScriptFailed().GetDetail() },
-			want:   "the prose",
-		},
 		{
 			name: "successor spawn, evidence recorded",
 			fault: wsm.Fault{

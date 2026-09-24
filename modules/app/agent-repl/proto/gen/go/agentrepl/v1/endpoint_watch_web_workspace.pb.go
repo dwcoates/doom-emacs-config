@@ -38,7 +38,16 @@ const (
 type WatchWebWorkspaceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace this webview is bound to.
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// THE WEBAPP BUILD THIS PAGE IS RUNNING, because every process reports its
+	// build when it connects: a deploy pushes `reload_webapp` to exactly the
+	// webviews whose build is not the one it just built. REQUIRED — a watch
+	// without it is refused.
+	//
+	// It is the CONTENT HASH Vite gives the entry bundle: the `<hash>` in the
+	// page's own `assets/index-<hash>.js`, read from the running module's URL.
+	// The daemon reads the fresh build's from the `index.html` it serves.
+	WebappBuild   string `protobuf:"bytes,2,opt,name=webapp_build,json=webappBuild,proto3" json:"webapp_build,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -78,6 +87,13 @@ func (x *WatchWebWorkspaceRequest) GetWorkspace() *v1.WorkspaceRef {
 		return x.Workspace
 	}
 	return nil
+}
+
+func (x *WatchWebWorkspaceRequest) GetWebappBuild() string {
+	if x != nil {
+		return x.WebappBuild
+	}
+	return ""
 }
 
 type WatchWebWorkspaceResponse struct {
@@ -292,9 +308,10 @@ var File_agentrepl_v1_endpoint_watch_web_workspace_proto protoreflect.FileDescri
 
 const file_agentrepl_v1_endpoint_watch_web_workspace_proto_rawDesc = "" +
 	"\n" +
-	"/agentrepl/v1/endpoint_watch_web_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"T\n" +
+	"/agentrepl/v1/endpoint_watch_web_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"w\n" +
 	"\x18WatchWebWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xc6\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12!\n" +
+	"\fwebapp_build\x18\x02 \x01(\tR\vwebappBuild\"\xc6\x01\n" +
 	"\x19WatchWebWorkspaceResponse\x12I\n" +
 	"\vtransferred\x18\x01 \x01(\v2%.agentrepl.v1.WebWorkspaceTransferredH\x00R\vtransferred\x12V\n" +
 	"\x10session_identity\x18\x02 \x01(\v2).agentrepl.v1.WebWorkspaceSessionIdentityH\x00R\x0fsessionIdentityB\x06\n" +

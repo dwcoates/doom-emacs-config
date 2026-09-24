@@ -61,6 +61,7 @@ assertions.**
    | `AGENT_REPL_E2E_DAEMON_URL` | `http://<daemon.addr>` | the transport's base url |
    | `AGENT_REPL_E2E_WORKSPACE_ID` | the registered ref's id | `workspaceRef(...)` |
    | `AGENT_REPL_E2E_WORKSPACE_DIR` | the registered ref's dir | `workspaceRef(...)` |
+   | `AGENT_REPL_E2E_WEBAPP_BUILD` | the entry the daemon's served dist names (`harness.FakeWebappEntry`) | the harness shell's built entry tag, which the page reads as its webapp build |
    | `AGENT_REPL_FORBID_VENDOR_CALLS` | `1` | standing tripwire, as in the fake-daemon integration config |
 
    The child's stdout/stderr are streamed into the Go test's log, so a vitest
@@ -80,8 +81,8 @@ assertions.**
 - **One bring-up definition.** Bring-up here is not "start four processes" —
   it is `NewWorld`: a store on a short unix socket with its own log,
   a sidecar pinned to the one spool root the fake SDK writes into, a daemon
-  with `ShimNode`/`ShimMain`/`StoreSocket` forced, `buildIdentityEnv()`
-  (`SHIM_BUILD_SHA` == `AGENT_REPL_DEPLOY_STAMP`, checked before `m.Run()`),
+  with `ShimNode`/`ShimMain`/`StoreSocket` forced, the real services
+  reporting their builds where the daemon's deploy reads them,
   `resolveConfigRoots` symlink resolution, `assertOneSpoolRoot`,
   `preserveLogsOnFailure`, the scripted fake git, and a LIFO teardown whose
   order is itself load-bearing. Option (b) reuses all of it verbatim and adds
@@ -422,10 +423,10 @@ because it is the one area whose Go side acts WHILE the page is mounted.
 THE RENDEZVOUS. The child logs a marker through the daemon's own `ClientLog`
 rpc (`webapp-layer.handover.page-mounted`) once its page is mounted and its
 streams are standing; the Go side awaits that record with `AwaitLogRecord` on
-`harness.ClientLogPath(ws)` and only then lands the commit that fires the
-rollout. Nothing sleeps on either side. The handover itself is the suite's
-existing machinery, reused verbatim from `adoption_e2e_test.go`
-(`adSelfRepoWorld`, `adTriggerSelfMergeRollout`, `adDial`,
+`harness.ClientLogPath(ws)` and only then lands the commit whose one deploy
+finds the daemon stale and hands it over. Nothing sleeps on either side. The
+handover itself is the suite's existing machinery, reused verbatim from
+`adoption_e2e_test.go` (`adSelfRepoWorld`, `adTriggerDeploy`, `adDial`,
 `adAwaitAddrFileChange`) — there is no second way to replace a daemon here.
 
 WHAT THE PAGE ASSERTS: the `transferred{address}` push draws the terminal

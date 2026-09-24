@@ -6,11 +6,16 @@
 #
 # test-readiness-report.sh — hermetic tests for readiness-report.sh.
 #
-# Builds a throwaway GIT repository around a copy of readiness-report.sh (the
-# script is all git plumbing, so a scratch repo with real commits is the honest
+# Builds a throwaway repository around a copy of readiness-report.sh (the
+# script is all git plumbing, so a scratch repo with commits is the honest
 # fixture — the same approach test-build-frontend.sh takes with a scratch tree)
 # and stubs `pgrep` and `ps` on PATH so no real process, launchd job, or
-# machine state is consulted. Tests assert what the JSON says under each
+# machine state is consulted.
+#
+# NO REAL GIT RUNS HERE (owner rule). The repository is bin/fake-git.sh's model
+# (history, index and working tree as files under <root>/.fakegit), installed as
+# the only `git` on PATH for the harness AND the script it runs; the harness
+# refuses to start if any other `git` would answer. Tests assert what the JSON says under each
 # deployed-vs-source scenario.
 #
 # Every scenario also re-asserts that the document PARSES. "Valid JSON always,
@@ -25,14 +30,30 @@
 
 set -euo pipefail
 
-# A pre-commit hook exports its live index to children. This harness owns only
-# scratch repositories, so inheriting that binding would let fixture `git add`
-# and `git commit` rewrite the caller's real staging index.
+# A pre-commit hook exports its live index to children. The fake git ignores
+# them, but nothing here should carry a binding to the caller's repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+# The services' build reports live under $AGENT_REPL_LOCK_DIR when it is set.
+# A value inherited from the caller would point every fixture at a real run
+# directory, so the harness sets it only where a test means to.
+unset AGENT_REPL_LOCK_DIR
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/readiness-report.sh"
 LIB_UNDER_TEST="$THIS_DIR/lib-deploy-stamp.sh"
+
+# The fake git, first on PATH for the whole run. Every invocation's argv is
+# recorded in FAKE_GIT_LOG.
+FAKE_GIT_BIN="$(mktemp -d)"
+cp "$THIS_DIR/fake-git.sh" "$FAKE_GIT_BIN/git"
+chmod +x "$FAKE_GIT_BIN/git"
+export PATH="$FAKE_GIT_BIN:$PATH"
+export FAKE_GIT_LOG="$FAKE_GIT_BIN/argv.log"
+trap 'rm -rf "$FAKE_GIT_BIN"' EXIT
+if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
+    echo "test-readiness-report.sh: the fake git is not the git on PATH; refusing to run real git" >&2
+    exit 2
+fi
 
 # The fixtures stamp with the SAME functions the report reads with, so a
 # hand-rolled id here can never agree with a broken script.
@@ -51,11 +72,9 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 
 # --- fixture ----------------------------------------------------------------
 
+# git_c ROOT ARGS... — git (the fake) run in the fixture ROOT.
 git_c() {
-    # Scratch commits are fixture construction, not authored repository
-    # changes. Isolate them from the parent checkout's absolute shared hook.
-    git -c user.name=t -c user.email=t@example.com \
-        -c core.hooksPath=/dev/null -C "$1" "${@:2}"
+    git -C "$1" "${@:2}"
 }
 
 # make_repo ROOT — a scratch git repo whose top level IS the module root, with
@@ -392,13 +411,24 @@ t_daemon_started_after_binary_is_fresh() {
     rm -rf "$root"
 }
 
-# --- 10. a launchd service whose deployed stamp disagrees is stale ----------
+# write_service_report FILE PID BUILD — a report exactly as buildreport.Write
+# lays it down: Go encoding/json's compact two-field object.
+write_service_report() {
+    mkdir -p "$(dirname "$1")"
+    printf '{"pid":%s,"build":"%s"}' "$2" "$3" > "$1"
+}
+
+# --- 10. a launchd service reporting another build is stale -----------------
+# The service's report (written at boot into the default run dir, since HOME is
+# the fixture's) names a live pid running a DIFFERENT binary than the one
+# installed: an install that restarted nothing.
 t_service_fingerprint_mismatch_is_stale() {
     local root cache; root="$(new_root)"
     cache="$root/home/.cache/agent-repl/bin"
     stamp "$cache/.shim-store.built-sha" "$(head_sha "$root")"
     printf 'installed-v2' > "$cache/shim-store"
-    printf 'a-digest-from-the-previous-image' > "$cache/.shim-store.deployed"
+    write_service_report "$root/home/.cache/agent-repl/run/shim-store.build.json" \
+        "$$" "$(printf 'installed-v1' | shasum -a 256 | cut -d' ' -f1)"
     set +e
     HOME="$root/home" PATH="$root/stubs:$PATH" \
         FAKE_PROC_MATCH="shim-store" FAKE_PROC_PID=555 \
@@ -408,22 +438,23 @@ t_service_fingerprint_mismatch_is_stale() {
     OUT="$root/out.json"
     if [ "$(jq_get "$OUT" 'sysmap["shim-store"]["running"]["stale_binary"]')" = "True" ] \
        && [ "$(jq_get "$OUT" 'sysmap["shim-store"]["ready"]')" = "False" ]; then
-        pass "a service whose kickstart fingerprint disagrees with the installed binary is stale"
+        pass "a service whose build report names another binary than the installed one is stale"
     else
-        fail "a service whose kickstart fingerprint disagrees with the installed binary is stale" \
+        fail "a service whose build report names another binary than the installed one is stale" \
              "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
     fi
     rm -rf "$root"
 }
 
-# --- 11. a matching deployed fingerprint is not stale -----------------------
+# --- 11. a live service reporting the installed build is not stale ---------
 t_service_fingerprint_match_is_fresh() {
     local root cache; root="$(new_root)"
     cache="$root/home/.cache/agent-repl/bin"
     stamp "$cache/.shim-store.built-sha" "$(head_sha "$root")"
     stamp_tree "$root" shim-store
     printf 'installed-v2' > "$cache/shim-store"
-    shasum -a 256 "$cache/shim-store" | cut -d' ' -f1 > "$cache/.shim-store.deployed"
+    write_service_report "$root/home/.cache/agent-repl/run/shim-store.build.json" \
+        "$$" "$(shasum -a 256 "$cache/shim-store" | cut -d' ' -f1)"
     set +e
     HOME="$root/home" PATH="$root/stubs:$PATH" \
         FAKE_PROC_MATCH="shim-store" FAKE_PROC_PID=556 \
@@ -433,9 +464,9 @@ t_service_fingerprint_match_is_fresh() {
     OUT="$root/out.json"
     if [ "$(jq_get "$OUT" 'sysmap["shim-store"]["running"]["stale_binary"]')" = "False" ] \
        && [ "$(jq_get "$OUT" 'sysmap["shim-store"]["ready"]')" = "True" ]; then
-        pass "a service running the installed binary's fingerprint is not stale"
+        pass "a live service whose build report is the installed binary's hash is not stale"
     else
-        fail "a service running the installed binary's fingerprint is not stale" \
+        fail "a live service whose build report is the installed binary's hash is not stale" \
              "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
     fi
     rm -rf "$root"
@@ -662,6 +693,130 @@ t_source_tree_drift_is_not_ready
 t_reverted_change_is_ready_though_commits_behind
 t_dirty_tree_is_flagged_but_still_ready
 t_missing_source_tree_stamp_is_not_ready
+
+# --- service_needs_bounce, straight off the library ---------------------------
+#
+# The one authority for "is this launchd service running the installed binary",
+# read by this report and restated by nothing: the service's own build report.
+# Each edge is one case. The reports go under AGENT_REPL_LOCK_DIR, the variable
+# the services themselves honor.
+
+# bounce_fixture — a temp dir holding an installed shim-store binary, with
+# AGENT_REPL_LOCK_DIR pointed at its run dir. Sets BOUNCE_DIR, BOUNCE_BIN,
+# BOUNCE_REPORT, BOUNCE_BUILD.
+bounce_fixture() {
+    BOUNCE_DIR="$(mktemp -d)"
+    BOUNCE_BIN="$BOUNCE_DIR/bin"
+    mkdir -p "$BOUNCE_BIN" "$BOUNCE_DIR/run"
+    printf 'the-installed-store' > "$BOUNCE_BIN/shim-store"
+    BOUNCE_BUILD="$(shasum -a 256 "$BOUNCE_BIN/shim-store" | cut -d' ' -f1)"
+    BOUNCE_REPORT="$BOUNCE_DIR/run/shim-store.build.json"
+}
+
+# needs_bounce — run service_needs_bounce on the fixture; echo "bounce" or
+# "fresh", stderr to $BOUNCE_DIR/err.
+needs_bounce() {
+    if AGENT_REPL_LOCK_DIR="$BOUNCE_DIR/run" \
+           service_needs_bounce "$BOUNCE_BIN" shim-store 2>"$BOUNCE_DIR/err"; then
+        echo bounce
+    else
+        echo fresh
+    fi
+}
+
+# dead_pid — the pid of a child that has already exited and been reaped.
+dead_pid() {
+    local pid
+    true & pid=$!
+    wait "$pid"
+    printf '%s' "$pid"
+}
+
+t_bounce_live_matching_report_is_fresh() {
+    local got; bounce_fixture
+    write_service_report "$BOUNCE_REPORT" "$$" "$BOUNCE_BUILD"
+    got="$(needs_bounce)"
+    if [ "$got" = fresh ] && [ ! -s "$BOUNCE_DIR/err" ]; then
+        pass "bounce: a live pid reporting the installed binary's hash needs no bounce"
+    else
+        fail "bounce: a live pid reporting the installed binary's hash needs no bounce" \
+             "got=$got err: $(cat "$BOUNCE_DIR/err")"
+    fi
+    rm -rf "$BOUNCE_DIR"
+}
+
+t_bounce_missing_binary_is_stale() {
+    local got; bounce_fixture
+    write_service_report "$BOUNCE_REPORT" "$$" "$BOUNCE_BUILD"
+    rm -f "$BOUNCE_BIN/shim-store"
+    got="$(needs_bounce)"
+    if [ "$got" = bounce ]; then
+        pass "bounce: a missing installed binary needs a bounce"
+    else
+        fail "bounce: a missing installed binary needs a bounce" "got=$got"
+    fi
+    rm -rf "$BOUNCE_DIR"
+}
+
+t_bounce_missing_report_is_stale() {
+    local got; bounce_fixture
+    got="$(needs_bounce)"
+    if [ "$got" = bounce ]; then
+        pass "bounce: a service with no build report needs a bounce"
+    else
+        fail "bounce: a service with no build report needs a bounce" "got=$got"
+    fi
+    rm -rf "$BOUNCE_DIR"
+}
+
+t_bounce_dead_pid_is_stale() {
+    local got; bounce_fixture
+    write_service_report "$BOUNCE_REPORT" "$(dead_pid)" "$BOUNCE_BUILD"
+    got="$(needs_bounce)"
+    if [ "$got" = bounce ]; then
+        pass "bounce: a report whose pid is not alive needs a bounce"
+    else
+        fail "bounce: a report whose pid is not alive needs a bounce" "got=$got"
+    fi
+    rm -rf "$BOUNCE_DIR"
+}
+
+t_bounce_mismatched_hash_is_stale() {
+    local got; bounce_fixture
+    write_service_report "$BOUNCE_REPORT" "$$" \
+        "$(printf 'the-previous-store' | shasum -a 256 | cut -d' ' -f1)"
+    got="$(needs_bounce)"
+    if [ "$got" = bounce ]; then
+        pass "bounce: a report naming another build than the installed binary needs a bounce"
+    else
+        fail "bounce: a report naming another build than the installed binary needs a bounce" \
+             "got=$got"
+    fi
+    rm -rf "$BOUNCE_DIR"
+}
+
+# A report that exists and does not parse is a FAULT: stale, and said so on
+# stderr naming the file, never silently fresh.
+t_bounce_unparseable_report_is_stale_and_warns() {
+    local got; bounce_fixture
+    printf '{"pid":%s,"build":' "$$" > "$BOUNCE_REPORT"
+    got="$(needs_bounce)"
+    if [ "$got" = bounce ] && grep -q "WARNING" "$BOUNCE_DIR/err" &&
+           grep -qF "$BOUNCE_REPORT" "$BOUNCE_DIR/err"; then
+        pass "bounce: an unparseable report needs a bounce and warns naming the file"
+    else
+        fail "bounce: an unparseable report needs a bounce and warns naming the file" \
+             "got=$got err: $(cat "$BOUNCE_DIR/err")"
+    fi
+    rm -rf "$BOUNCE_DIR"
+}
+
+t_bounce_live_matching_report_is_fresh
+t_bounce_missing_binary_is_stale
+t_bounce_missing_report_is_stale
+t_bounce_dead_pid_is_stale
+t_bounce_mismatched_hash_is_stale
+t_bounce_unparseable_report_is_stale_and_warns
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"

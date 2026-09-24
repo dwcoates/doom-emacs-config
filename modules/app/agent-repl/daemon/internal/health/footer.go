@@ -124,7 +124,6 @@ var daemonFaultCells = map[string]FaultCell{
 	KindPromptsDirMissing:     {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindWsmReadOnly:           {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindLogSinkPoisoned:       {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
-	KindDeployScriptFailed:    {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindSuccessorSpawnFailed:  {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindStateUnreadable:       {FaultStatusBlocked, FaultSubStatusDaemonImpaired},
 	KindAdoptionWindowExpired: {FaultStatusBlocked, FaultSubStatusDaemonImpaired},

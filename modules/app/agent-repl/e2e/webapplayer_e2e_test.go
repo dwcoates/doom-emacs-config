@@ -16,7 +16,8 @@
 // WHY THE LIFECYCLE STAYS HERE: bring-up in this suite is not "start four
 // processes", it is NewWorld — the store's short socket and log, the one spool
 // root the fake SDK writes and the sidecar globs, the forced
-// ShimNode/ShimMain/StoreSocket, buildIdentityEnv's one sha in both roles,
+// ShimNode/ShimMain/StoreSocket, the real services reporting their builds
+// into the daemon's lock dir,
 // resolveConfigRoots' symlink resolution, assertOneSpoolRoot,
 // preserveLogsOnFailure, and a LIFO teardown whose order is load-bearing. Two
 // of those invariants fail SILENTLY when broken (SPEC.md section B). A
@@ -532,8 +533,8 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 //     no assumption about how long a vitest boot takes.
 //   - The handover itself is the SUITE'S EXISTING MACHINERY, reused verbatim
 //     from adoption_e2e_test.go: adSelfRepoWorld (a fake-git SelfRepo with a
-//     passing merge gate), adTriggerSelfMergeRollout (a real landed commit
-//     firing the real blue-green self-rollout), adDial (reaching the
+//     passing merge gate), adTriggerDeploy (a real landed commit whose one
+//     deploy finds the daemon stale and hands it over blue-green), adDial (reaching the
 //     successor at the address the announcement carried). There is no second
 //     way to replace a daemon in this package.
 //   - THE ADOPTS ARE ISSUED FROM HERE, not from the page, and that is the
@@ -591,7 +592,7 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 
 	// Act: a real landed commit on the daemon's own checkout fires the real
 	// self-merge rollout.
-	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced",
 		func(r *agentreplv1.WatchDaemonResponse) bool { return r.GetShutdownAnnounced() != nil },
 	).GetShutdownAnnounced()
@@ -810,7 +811,8 @@ func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string)
 }
 
 // wlChildEnv is the environment one vitest child is handed: the gate, the
-// daemon's own published address, and the workspace the page is addressed to.
+// daemon's own published address, the workspace the page is addressed to, and
+// the webapp build the daemon serves.
 func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
 	t.Helper()
 	if w.Addr == "" {
@@ -821,6 +823,10 @@ func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
 		"AGENT_REPL_E2E_DAEMON_URL=http://"+w.Addr,
 		"AGENT_REPL_E2E_WORKSPACE_ID="+ws.GetId(),
 		"AGENT_REPL_E2E_WORKSPACE_DIR="+ws.GetDir(),
+		// The build the daemon's served dist names, which the page states as
+		// its own through its entry tag: a page stating any other build is
+		// one a deploy would push a reload.
+		"AGENT_REPL_E2E_WEBAPP_BUILD="+harness.FakeWebappEntry,
 		// The same standing tripwire the vitest config sets, in case the child
 		// is ever run through a different script: the vendor in this chain is
 		// the fake SDK inside the real shim, never a network one.

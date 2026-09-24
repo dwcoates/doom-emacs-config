@@ -64,6 +64,13 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		log.Warn(opRelease, "the session's bring-up is still running; the release is refused", nil)
 		return ErrReleaseRefused
 	}
+	// A DRAINING WORKSPACE IS BETWEEN SHIMS: the bounce's own finish delivers
+	// every held prompt to the new one, so a release here has nothing to
+	// deliver through.
+	if q.isDraining(ws) {
+		log.Warn(opRelease, "the workspace is draining for a bounce; the release is refused and the prompt goes to the new shim", nil)
+		return ErrReleaseRefused
+	}
 
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {

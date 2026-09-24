@@ -221,6 +221,14 @@ func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Reques
 
 func (s *fakeServer) WatchDaemon(ctx context.Context, req *connect.Request[v1.WatchDaemonRequest], stream *connect.ServerStream[v1.WatchDaemonResponse]) error {
 	s.record(ctx, "WatchDaemon", req.Msg)
+	if err := validateWatchDaemonRequest(req.Msg); err != nil {
+		// The real daemon refuses a watch that names no client, and an Emacs
+		// watch that does not state the elisp it has loaded: a deploy could
+		// not tell whether that Emacs runs the checkout's elisp.
+		logError("fakedaemon.stream.invalid-request", "refused a stream request that breaches the validation invariant",
+			map[string]any{"method": "WatchDaemon", "error": err.Error()})
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
 	if err := awaitAcceptanceGate(ctx, s, "WatchDaemon"); err != nil {
 		return err
 	}
@@ -309,6 +317,6 @@ func (s *fakeServer) ListWorkspaceTranscripts(ctx context.Context, req *connect.
 	return handleUnary[v1.ListWorkspaceTranscriptsRequest, v1.ListWorkspaceTranscriptsResponse](ctx, s, "ListWorkspaceTranscripts", req.Msg)
 }
 
-func (s *fakeServer) RollOutBuild(ctx context.Context, req *connect.Request[v1.RollOutBuildRequest]) (*connect.Response[v1.RollOutBuildResponse], error) {
-	return handleUnary[v1.RollOutBuildRequest, v1.RollOutBuildResponse](ctx, s, "RollOutBuild", req.Msg)
+func (s *fakeServer) Deploy(ctx context.Context, req *connect.Request[v1.DeployRequest]) (*connect.Response[v1.DeployResponse], error) {
+	return handleUnary[v1.DeployRequest, v1.DeployResponse](ctx, s, "Deploy", req.Msg)
 }

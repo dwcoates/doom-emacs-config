@@ -257,7 +257,7 @@ func (d *Daemon) WatchWeb(ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.Wat
 	d.t.Helper()
 	return runStream(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse], error) {
-			return d.Client().WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws}))
+			return d.Client().WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws, WebappBuild: FakeWebappEntry}))
 		},
 		func(r *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.WatchWebWorkspaceResponse { return r })
 }
@@ -286,7 +286,7 @@ func (d *Daemon) WatchDaemonStreamOn(client interface {
 	d.t.Helper()
 	return runStream(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
-			return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+			return client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: PinnedElispBuild}}}))
 		},
 		func(r *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return r })
 }

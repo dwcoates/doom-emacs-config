@@ -22,3 +22,17 @@ func completeSubmit(key string) *agentreplv1.SubmitPromptRequest {
 		Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
 	}
 }
+
+// emacsWatchDaemon is the WatchDaemon request Emacs sends: the client arm is
+// REQUIRED, and the Emacs arm must state the elisp it has loaded.
+func emacsWatchDaemon() *agentreplv1.WatchDaemonRequest {
+	return &agentreplv1.WatchDaemonRequest{
+		Client: &agentreplv1.WatchDaemonRequest_Emacs{
+			Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "fixture-elisp-build"},
+		},
+	}
+}
+
+// emacsWatchDaemonJSON is emacsWatchDaemon's protojson spelling, for the tests
+// that speak the wire by hand.
+const emacsWatchDaemonJSON = `{"emacs":{"elispBuild":"fixture-elisp-build"}}`

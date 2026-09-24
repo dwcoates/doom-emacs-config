@@ -2085,7 +2085,6 @@ regression on any of the other five would go uncaught."
              `((adoptionWindowExpired
                 . ((workspace . ((id . "aw-ws") (dir . "/tmp/aw-ws")))))
                (logSinkPoisoned . ((sink . "emacs.jsonl")))
-               (deployScriptFailed . ((detail . "deploy.sh exit 1")))
                (successorSpawnFailed . ((detail . "bind: address in use")))
                (promptsDirMissing . ((path . "/var/prompts")))
                (wsmReadOnly . ())))

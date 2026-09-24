@@ -16,6 +16,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/account"
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
@@ -685,11 +686,6 @@ type fakeQueue struct {
 	submitErr   error
 	acts        map[ids.WorkspaceID][]promptqueue.Act
 	actErr      error
-	// cancelledRedrives records every CancelKeepaliveRedrive call, and
-	// redriveCancelled is what the fake answers — true when a re-drive stood
-	// behind the interrupt.
-	cancelledRedrives []ids.TurnID
-	redriveCancelled  bool
 }
 
 func newFakeQueue() *fakeQueue {
@@ -710,11 +706,6 @@ func (q *fakeQueue) SubmitSessionAct(_ context.Context, ws ids.WorkspaceID, act 
 	}
 	q.acts[ws] = append(q.acts[ws], act)
 	return nil
-}
-
-func (q *fakeQueue) CancelKeepaliveRedrive(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) bool {
-	q.cancelledRedrives = append(q.cancelledRedrives, turn)
-	return q.redriveCancelled
 }
 
 // fakeMerge is a merge.Orchestrator.
@@ -760,6 +751,7 @@ type fakeRollout struct {
 	mu          sync.Mutex
 	relaunches  []rolloutCall
 	relaunchErr error
+	checkErr    error
 	reloads     []ids.WorkspaceID
 	reloadErr   error
 	// done fires once per finished relaunch. The restart verb ACCEPTS and
@@ -771,17 +763,34 @@ type fakeRollout struct {
 type rolloutCall struct {
 	WS     ids.WorkspaceID
 	Reason rollout.RelaunchReason
+	Force  bool
 }
 
-func (r *fakeRollout) RelaunchShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason) error {
+// BounceShim records the bounce and completes it on a goroutine of its own,
+// as the registry does: with relaunchErr as the bounce's outcome.
+func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
-	r.relaunches = append(r.relaunches, rolloutCall{ws, reason})
+	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
 	err := r.relaunchErr
 	r.mu.Unlock()
-	if err != nil {
-		r.signal()
-	}
-	return err
+	go func() {
+		if done != nil {
+			done(err)
+		}
+		if err != nil {
+			r.signal()
+		}
+	}()
+	return bounce.Decision{Now: true, Forced: force}, nil
+}
+
+// CheckStaleness records the mount's staleness check as a build-stale call,
+// failing with checkErr.
+func (r *fakeRollout) CheckStaleness(_ context.Context, ws ids.WorkspaceID, force bool) (rollout.StaleCheck, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: rollout.ReasonBuildStale, Force: force})
+	return rollout.StaleCheck{}, r.checkErr
 }
 
 func (r *fakeRollout) ReloadWebapp(_ context.Context, ws ids.WorkspaceID) error {

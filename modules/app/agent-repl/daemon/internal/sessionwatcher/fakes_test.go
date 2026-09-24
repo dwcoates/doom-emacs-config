@@ -396,6 +396,11 @@ func (e event) name() string { return e.sink + "." + e.method }
 // waits for routing to finish rather than sleeping through it.
 type recorder struct {
 	ch chan event
+	// frees carries every OnFree edge on a channel of its own. The edge is
+	// told on a goroutine, so its arrival relative to the ordered sink calls
+	// is not fixed, and folding it into ch would make every sequence
+	// assertion depend on scheduling.
+	frees chan ids.WorkspaceID
 
 	// mu guards mains.
 	mu sync.Mutex
@@ -404,7 +409,9 @@ type recorder struct {
 	mains []string
 }
 
-func newRecorder() *recorder { return &recorder{ch: make(chan event, 512)} }
+func newRecorder() *recorder {
+	return &recorder{ch: make(chan event, 512), frees: make(chan ids.WorkspaceID, 64)}
+}
 
 func (r *recorder) emit(e event) { r.ch <- e }
 
@@ -689,6 +696,8 @@ func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	held := live
 	s.rec.emit(event{sink: "lifecycle", method: "OnLiveWorkChanged", live: &held})
 }
+
+func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) { s.rec.frees <- ws }
 
 func (s *lifecycleSink) OnLinkChanged(_ ids.WorkspaceID, attached bool) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnLinkChanged", attached: &attached})
