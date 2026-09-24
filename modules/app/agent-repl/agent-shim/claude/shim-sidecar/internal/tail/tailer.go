@@ -11,10 +11,25 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-// defaultMaxRead bounds one Poll's physical read so a huge appended chunk (or a
-// full re-read after truncation) is drained across several bounded batches
-// rather than one unbounded allocation (§7.2 "bounded reads").
-const defaultMaxRead = 4 << 20
+// MaxBatchBytes bounds one Poll's physical read, and so the bytes ONE store
+// write carries: a huge appended chunk (or a full re-read after truncation) is
+// drained across several bounded batches rather than one unbounded allocation
+// (§7.2 "bounded reads").
+//
+// IT IS ALSO A BOUND ON HOW LONG ONE WRITE HOLDS THE STORE. Every batch is one
+// store transaction on its single write slot, so a batch sized by what the file
+// happened to hold was a write sized by the file: a 4 MiB read of a growing
+// test log became one 4 MiB delta row, and a transcript's backlog one
+// transaction of hundreds of rows (one such write held the store 163s on
+// 2026-09-23 while every other writer waited). A file with more to say than
+// one batch reports PollResult.More, and the reader polls it again on the same
+// tick, so the bound costs latency nothing.
+const MaxBatchBytes = 1 << 20
+
+// MaxBatchFrames bounds how many frames ONE batch hands its handler, and so
+// how many rows one store write carries. Frames past it are left unread: the
+// cursor stops at the first of them and the next poll starts there.
+const MaxBatchFrames = 128
 
 // Tailer is the Layer-1 cursored reader for ONE file: on each Poll it stats the
 // file, detects truncation/rotation, reads appended bytes (bounded), frames them
@@ -22,12 +37,13 @@ const defaultMaxRead = 4 << 20
 // memory; the caller commits a batch's advance only after the store acks it, so a
 // crash re-reads and dedup absorbs the overlap (§7.3 exactly-once).
 type Tailer struct {
-	path    string
-	codec   Codec
-	handler Handler
-	ctx     *Context
-	log     *logging.Bound
-	maxRead int
+	path      string
+	codec     Codec
+	handler   Handler
+	ctx       *Context
+	log       *logging.Bound
+	maxRead   int
+	maxFrames int
 
 	// committed cursor state
 	fileID  string
@@ -52,7 +68,7 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 	}
 	ctx.Path = path
 	log.With(logging.Context{Operation: "tailer-new", Path: path}).LogVerbose("constructing tailer codec=%T handler=%T", codec, h)
-	return &Tailer{path: path, codec: codec, handler: h, ctx: ctx, log: log, maxRead: defaultMaxRead}
+	return &Tailer{path: path, codec: codec, handler: h, ctx: ctx, log: log, maxRead: MaxBatchBytes, maxFrames: MaxBatchFrames}
 }
 
 // Restore seeds the committed cursor from a recovered CursorState (§7.3 startup
@@ -80,6 +96,12 @@ type PollResult struct {
 	Next    *storev1.CursorState
 	Records int64
 	Changed bool
+	// More reports that the batch stopped at a BOUND (MaxBatchBytes or
+	// MaxBatchFrames) with bytes still unread past its cursor, so the reader may
+	// poll the file again at once rather than waiting out a poll interval. It is
+	// never set for a batch the handler HELD a frame in: a hold waits for the
+	// next line on purpose, and an immediate re-poll would force it early.
+	More bool
 }
 
 // LastSize returns the file size seen by the last successful poll, and whether
@@ -132,8 +154,10 @@ func (t *Tailer) Poll() (PollResult, error) {
 	}
 
 	toRead := size - offset
+	bounded := false
 	if toRead > int64(t.maxRead) {
 		toRead = int64(t.maxRead)
+		bounded = true
 	}
 	buf := make([]byte, toRead)
 	if err := readAt(t.path, buf, offset); err != nil {
@@ -142,12 +166,27 @@ func (t *Tailer) Poll() (PollResult, error) {
 
 	full := append(append([]byte(nil), carry...), buf...)
 	frames, newCarry := t.codec.Decode(full, offset-int64(len(carry)))
+	newOffset := offset + toRead
+	if len(frames) > t.maxFrames {
+		// THE BATCH STOPS AT THE FIRST FRAME PAST THE BOUND, and the cursor with
+		// it: that frame's first byte is where the next poll starts, so nothing
+		// is skipped and the carry — every byte of which follows the kept
+		// frames — is re-read rather than carried.
+		t.log.With(logging.Context{Operation: "tailer-bound", Path: t.path, FileID: fileID, Offset: logging.Off(frames[t.maxFrames].Offset)}).
+			LogVerbose("batch bounded at %d of %d decoded frame(s); the rest are read by the next poll", t.maxFrames, len(frames))
+		newOffset = frames[t.maxFrames].Offset
+		newCarry = nil
+		frames = frames[:t.maxFrames]
+		bounded = true
+	} else if bounded {
+		t.log.With(logging.Context{Operation: "tailer-bound", Path: t.path, FileID: fileID, Offset: logging.Off(newOffset)}).
+			LogVerbose("batch bounded at %d byte(s) with %d unread past it; the rest are read by the next poll", toRead, size-newOffset)
+	}
 	for _, f := range frames {
 		if f.Obj != nil {
 			records++
 		}
 	}
-	newOffset := offset + toRead
 
 	// Fill the counters the handler reports (totals through this batch).
 	t.ctx.RecordsObserved = records
@@ -161,6 +200,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 	t.ctx.HoldForced = t.ctx.HeldDeliveries > 0
 	forced := t.ctx.HoldForced
 	entries := t.handler.Handle(frames, t.ctx)
+	held := t.ctx.HeldDeliveries > 0
 	newOffset, newCarry, records, err = t.applyHold(frames, forced, offset, newOffset, newCarry, records)
 	if err != nil {
 		return PollResult{}, err
@@ -174,10 +214,11 @@ func (t *Tailer) Poll() (PollResult, error) {
 		// store, so it is not a change to write: the next poll re-reads those
 		// same bytes.
 		Changed: newOffset != t.offset || fileID != t.fileID || len(entries) > 0,
+		More:    bounded && !held,
 	}
 	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: fileID, Offset: logging.Off(result.Next.GetOffset())}).
-		LogVerbose("poll decoded frames=%d entries=%d read_bytes=%d carry_bytes=%d held_deliveries=%d changed=%t",
-			len(frames), len(entries), toRead, len(result.Next.GetCarry()), t.ctx.HeldDeliveries, result.Changed)
+		LogVerbose("poll decoded frames=%d entries=%d read_bytes=%d carry_bytes=%d held_deliveries=%d changed=%t more=%t",
+			len(frames), len(entries), toRead, len(result.Next.GetCarry()), t.ctx.HeldDeliveries, result.Changed, result.More)
 	return result, nil
 }
 
