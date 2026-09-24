@@ -186,7 +186,7 @@ const ledgerPruneDeleteSQL = `DELETE FROM write_ledger WHERE rowid IN (
 func (d *DB) pruneLedgerBatch(ctx context.Context) (int64, error) {
 	base := logging.Fields{Operation: "store.db.ledger-sweep", Table: "write_ledger"}
 
-	tx, release, err := d.beginWrite(ctx)
+	tx, release, err := d.beginWrite(ctx, WriteBulk)
 	if err != nil {
 		if isContextError(err) {
 			return 0, d.refuse(base, err)

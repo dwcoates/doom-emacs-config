@@ -81,7 +81,7 @@ func TestPruneWriteLedgerNeverPrunesARowItCannotMeasure(t *testing.T) {
 			arrange: func(t *testing.T, d *DB) {
 				entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
 				entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-				if _, err := d.WriteBatch(ctx(), "test-producer", batch(entry), nil); err != nil {
+				if _, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(entry), nil); err != nil {
 					t.Fatalf("WriteBatch: %v", err)
 				}
 				advanceCursor(t, d, "12:34", 5_000_000)
@@ -239,7 +239,7 @@ func TestASweepAndAProducerRunConcurrently(t *testing.T) {
 					defer wg.Done()
 					<-start
 					id := fmt.Sprintf("probe-%d", i)
-					_, errs[i] = d.WriteBatch(ctx(), "test-producer", batch(
+					_, errs[i] = d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(
 						pageEntry(id, id, "agent-1", frameItem(activityFrame("agent-1", "act-"+id, prose())))), nil)
 				}(i)
 			}
@@ -331,7 +331,7 @@ func writeFileBatch(t *testing.T, d *DB, fileID string, offset int64, writeID, u
 	t.Helper()
 	entry := pageEntry(writeID, upsertKey, "agent-1", frameItem(activityFrame("agent-1", "act-"+upsertKey, prose())))
 	entry.Plane = &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
-	result, err := d.WriteBatch(ctx(), "test-sidecar", &storev1.EntryBatch{
+	result, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{entry},
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset},
 	}, nil)
@@ -345,7 +345,7 @@ func writeFileBatch(t *testing.T, d *DB, fileID string, offset int64, writeID, u
 // is exactly how a sidecar that read bytes yielding no entries reports progress.
 func advanceCursor(t *testing.T, d *DB, fileID string, offset int64) {
 	t.Helper()
-	if _, err := d.WriteBatch(ctx(), "test-sidecar", &storev1.EntryBatch{
+	if _, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: "/t/a.jsonl", Offset: offset},
 	}, nil); err != nil {
 		t.Fatalf("advancing the cursor: %v", err)
@@ -442,7 +442,7 @@ func TestASweepBatchAndAProducersBatchTogetherStayWithinTheProducersBudget(t *te
 		t.Fatalf("PruneWriteLedger: %v", err)
 	}
 	writeStarted := time.Now()
-	if _, err := d.WriteBatch(ctx(), "test-sidecar", thirtyRowFileBatch("live", "corpus-file-0", 1<<40), nil); err != nil {
+	if _, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, thirtyRowFileBatch("live", "corpus-file-0", 1<<40), nil); err != nil {
 		t.Fatalf("WriteBatch after the sweep: %v", err)
 	}
 	writeElapsed := time.Since(writeStarted)
@@ -495,3 +495,4 @@ func TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt(t *testing.T) {
 		t.Fatalf("the sweep's delete does not seek the ledger through write_ledger_source:\n%s", plan)
 	}
 }
+
