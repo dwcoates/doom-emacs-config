@@ -12,18 +12,19 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `feat/daemon-reaps-landed-worktrees` | `~/.config/doom-worktrees/daemon-reaps-landed-worktrees` | A daily daemon sweep removes clean, idle worktrees whose changes landed on the default branch (`merge-tree --write-tree` equals its tree), via `gitclient.RemoveWorktree`. | `aa74819e023c7efe2` | 09-24 |
+| `fix/post-bootstrap-log-defects` | `~/.config/doom-worktrees/post-bootstrap-log-defects` | Post-bootstrap log defects: legacy `keepalive` rows block sidecar upserts (files parked); a DIED shim stays in the stand-down manifest forever; the script runner WARNs on caller-judged exits (launchctl 113); `final_answer_unresolved` after the stop; the restore_holds orphan. | `af712ab9121aecd4b` | 09-24 |
+| `fix/system-scrollbar-stable-gutter` | `~/.config/doom-worktrees/system-scrollbar-stable-gutter` | System default scrollbars everywhere; `scrollbar-gutter: stable` on the bubble scroll box; the tree budget measures the real gutter. | `a258ca893b04f5160` | 09-24 |
 | `fix/lock-spawn-refusal-and-store-self-heal` | `~/.config/doom-worktrees/lock-spawn-refusal-and-store-self-heal` | A separate refusal for a lock holder that can't be spawned; a broken node-store entry is repaired in place (locked, atomic swap) by `link_node_modules` and `ensure-deps`. | `a9a5534645c1dacfe` | 09-24 |
 
 ## Still waiting on the owner
 
-- Ordering contract: a turn's ending still waits behind every row produced before it (the store gets rows in exact production order, which subagent consumers rely on). Should a terminal ever overtake? That's an ordering-contract change.
-- The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
-- A successor announcement can't be retracted after a manifest-write failure (clients see the successor stop and stay on the incumbent). A retraction arm is a contract change.
-- The one-time bootstrap onto daemon-owned deploys (AGENTS.md "ONE-TIME"), then the `SPC TAB f` retry.
+- `SPC TAB f` retry (the bootstrap is done).
+- MCP tools (`mcp__*`) are unmodeled: WARN `daemon.sessionwatcher.unmodeled_activity` for each (102 in one session) and no card. Model them generically?
+- `AGENT_REPL_STORE_PPROF_ADDR` is set via `launchctl setenv`, so the store WARNs `store.pprof.enabled` at every start. Keep profiling on?
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- 09-24: the BOOTSTRAP onto daemon-owned deploys is done (lead, owner-authorized: stop, Emacs restart, deploy restarted store+sidecar, a second deploy all up-to-date); the ONE-TIME AGENTS.md section is deleted. The daily landed-worktree reaper landed (`feat/daemon-reaps-landed-worktrees`, daemon unit+integration green on master). Owner rulings: no terminal overtake; no successor-retraction arm.
 - 09-24 lead: the webapp node-store entry `webapp-4153e127492d6543` was repopulated (owner approved); 86 landed worktrees pruned (clean, and `merge-tree` into master was a no-op); 37 dirty or unlanded ones kept. Stray reaping by argv path is kept (owner ruling).
 - e2e load flakes fixed at their sources: the sidecar holds a rotated transcript until a record names its book; registry reads are ordered against Close; worktree log sinks detach inside `RemoveWorktree` and re-attach in `CreateWorktree` (master's `Surfaces.Retire` removed as the duplicate); one adoption per rendezvous; the restarting notice waits for a dropped stream to read again; `WatchBash` waits for an announced run's rows; store `unknown_run` at INFO (`fix/e2e-load-flakes`, e2e 3x green on the branch). Open: `forkSession` rotations aren't held; a `/clear` outside the shim in a shared directory is held forever (INFO once).
 - A handover owns one successor slot: every post-spawn failure stops (TERM, KILL, reap) its successor and disarms the rendezvous; an unstoppable successor keeps the slot claimed. A shim's departure is a freeness edge: a dead shim in an open workspace is relaunched at once, an ordered or closed-workspace departure unregisters the bounce (INFO) (`fix/handover-leak-and-dead-shim-freeness`, daemon unit and integration green on master). Open for the owner: no proto arm retracts a successor announcement after a manifest-write failure.

@@ -496,43 +496,6 @@ A running shim rides a store restart out on its retry buffer, which holds every
 row until it lands and never drops one (its vendor stream pauses instead while
 the backlog is high); the sidecar re-reads its files from its cursor.
 
-## ONE-TIME: moving the live runtime onto the daemon-owned deploy
-
-Run ONCE, by the owner, the first time master carries the daemon-owned deploy
-while the live daemon still predates it. Delete this section once that has
-happened. The old daemon has no `Deploy` rpc, and its own rollout chain calls
-`bin/deploy-all.sh`, which is gone, so the new runtime cannot be reached
-THROUGH the old one. The new daemon also refuses a `WatchDaemon` that states
-no `elisp_build`, which the old elisp never sends, so the running Emacs has to
-restart around the swap. Nothing new is needed; every step is a door that
-already exists:
-
-1. Pick a quiet moment: the stop in step 2 is `UpdateShutdownSchedule{now}`,
-   which ENDS every running turn and kills every live monitor, background
-   shell and background subagent with its shim.
-2. In the running (old) Emacs: `M-x agent-repl-frontend-daemon-stop`. The old
-   daemon stands every session down (its shims exit), flushes, and exits
-   itself; Emacs records the stop as requested and does not respawn one.
-3. Quit Emacs (`C-x C-c`). The store and sidecar keep running under launchd.
-4. Start Emacs (`open -a Emacs`). With no daemon answering, its cold start
-   runs `bin/build-frontend.sh` IN PLACE for every target whose source moved
-   (the landing moves the daemon, the shim and the webapp, so the new daemon
-   lands in `daemon/bin`, with the shim bundle, the webapp dist and
-   `shim-lock` in `~/.cache/agent-repl/bin`), then spawns the new
-   `claude-repld`, which serves the new elisp. Workspaces get new shims as
-   they are mounted.
-5. Deploy once: `modules/app/agent-repl/daemon/bin/claude-repld deploy` (or
-   `M-x agent-repl-deploy`). The old store and sidecar binaries write no build
-   report, so this deploy judges both stale: it builds them into staging,
-   installs them into `~/.cache/agent-repl/bin`, and restarts them in the
-   recorded safe order (bootout the sidecar, kickstart the store, await
-   `store.sock`, bootstrap the sidecar). Every other component answers
-   `up_to_date`. The launchd plists are unchanged, so nothing is reinstalled
-   under `~/Library/LaunchAgents`.
-6. Verify: a second `claude-repld deploy` answers `up_to_date` for every
-   component, and the tails of
-   `~/.cache/agent-repl/log/shim-{store,claude-sidecar}.log` show a clean
-   start (the sidecar at `store link UP`).
 
 ## Every landed remediation gets a changelog line
 
