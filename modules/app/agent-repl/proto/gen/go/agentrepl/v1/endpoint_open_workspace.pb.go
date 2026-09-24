@@ -10,6 +10,7 @@
 package agentreplv1
 
 import (
+	v11 "agentrepl/proto/conversation/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -390,11 +391,11 @@ type OpenWorkspaceError_VendorStartFailed struct {
 }
 
 type OpenWorkspaceError_LockHolderUnavailable struct {
-	// The session's shim came up but could not spawn its own kernel-lock
-	// holder (shim.v1 StartSessionFailure.lock_holder_unavailable relayed by
-	// name), so it refused to start a session it could not prove it alone
-	// owns. NOBODY ELSE OWNS THE CONVERSATION: this is a broken lock helper
-	// (`binary`, `os_error`), not an ownership conflict.
+	// The session's shim came up but its own kernel-lock holder failed
+	// (shim.v1 StartSessionFailure.lock_holder_unavailable relayed by name),
+	// so it refused to start a session it could not prove it alone owns.
+	// NOBODY ELSE OWNS THE CONVERSATION: this is a broken lock helper, and
+	// `failure` says how it broke, not an ownership conflict.
 	LockHolderUnavailable *OpenWorkspaceLockHolderUnavailable `protobuf:"bytes,9,opt,name=lock_holder_unavailable,json=lockHolderUnavailable,proto3,oneof"`
 }
 
@@ -418,10 +419,9 @@ func (*OpenWorkspaceError_LockHolderUnavailable) isOpenWorkspaceError_Cause() {}
 
 type OpenWorkspaceLockHolderUnavailable struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The lock-holder binary the shim tried to spawn.
-	Binary string `protobuf:"bytes,1,opt,name=binary,proto3" json:"binary,omitempty"`
-	// The operating system's account of why the spawn failed.
-	OsError       string `protobuf:"bytes,2,opt,name=os_error,json=osError,proto3" json:"os_error,omitempty"`
+	// Which holder failed, and how: the shim's account, relayed whole. Always
+	// set.
+	Failure       *v11.LockHolderFailure `protobuf:"bytes,3,opt,name=failure,proto3" json:"failure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -456,18 +456,11 @@ func (*OpenWorkspaceLockHolderUnavailable) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *OpenWorkspaceLockHolderUnavailable) GetBinary() string {
+func (x *OpenWorkspaceLockHolderUnavailable) GetFailure() *v11.LockHolderFailure {
 	if x != nil {
-		return x.Binary
+		return x.Failure
 	}
-	return ""
-}
-
-func (x *OpenWorkspaceLockHolderUnavailable) GetOsError() string {
-	if x != nil {
-		return x.OsError
-	}
-	return ""
+	return nil
 }
 
 type OpenWorkspaceVendorStartFailed struct {
@@ -815,7 +808,7 @@ var File_agentrepl_v1_endpoint_open_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_open_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"e\n" +
+	"*agentrepl/v1/endpoint_open_workspace.proto\x12\fagentrepl.v1\x1a\x1dconversation/v1/session.proto\x1a\x1cworkspace/v1/workspace.proto\"e\n" +
 	"\x14OpenWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x13\n" +
 	"\x05op_id\x18\x02 \x01(\tR\x04opId\"\x9b\x01\n" +
@@ -834,10 +827,9 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\fspawn_failed\x18\a \x01(\v2&.agentrepl.v1.OpenWorkspaceSpawnFailedH\x00R\vspawnFailed\x12^\n" +
 	"\x13vendor_start_failed\x18\b \x01(\v2,.agentrepl.v1.OpenWorkspaceVendorStartFailedH\x00R\x11vendorStartFailed\x12j\n" +
 	"\x17lock_holder_unavailable\x18\t \x01(\v20.agentrepl.v1.OpenWorkspaceLockHolderUnavailableH\x00R\x15lockHolderUnavailableB\a\n" +
-	"\x05cause\"W\n" +
-	"\"OpenWorkspaceLockHolderUnavailable\x12\x16\n" +
-	"\x06binary\x18\x01 \x01(\tR\x06binary\x12\x19\n" +
-	"\bos_error\x18\x02 \x01(\tR\aosError\"8\n" +
+	"\x05cause\"\x80\x01\n" +
+	"\"OpenWorkspaceLockHolderUnavailable\x12<\n" +
+	"\afailure\x18\x03 \x01(\v2\".conversation.v1.LockHolderFailureR\afailureJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06binaryR\bos_error\"8\n" +
 	"\x1eOpenWorkspaceVendorStartFailed\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x1f\n" +
 	"\x1dOpenWorkspaceUnknownWorkspace\"F\n" +
@@ -881,6 +873,7 @@ var file_agentrepl_v1_endpoint_open_workspace_proto_goTypes = []any{
 	(*OpenWorkspaceTranscriptMissing)(nil),     // 11: agentrepl.v1.OpenWorkspaceTranscriptMissing
 	(*OpenWorkspaceSpawnFailed)(nil),           // 12: agentrepl.v1.OpenWorkspaceSpawnFailed
 	(*v1.WorkspaceRef)(nil),                    // 13: workspace.v1.WorkspaceRef
+	(*v11.LockHolderFailure)(nil),              // 14: conversation.v1.LockHolderFailure
 }
 var file_agentrepl_v1_endpoint_open_workspace_proto_depIdxs = []int32{
 	13, // 0: agentrepl.v1.OpenWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -895,11 +888,12 @@ var file_agentrepl_v1_endpoint_open_workspace_proto_depIdxs = []int32{
 	12, // 9: agentrepl.v1.OpenWorkspaceError.spawn_failed:type_name -> agentrepl.v1.OpenWorkspaceSpawnFailed
 	5,  // 10: agentrepl.v1.OpenWorkspaceError.vendor_start_failed:type_name -> agentrepl.v1.OpenWorkspaceVendorStartFailed
 	4,  // 11: agentrepl.v1.OpenWorkspaceError.lock_holder_unavailable:type_name -> agentrepl.v1.OpenWorkspaceLockHolderUnavailable
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	14, // 12: agentrepl.v1.OpenWorkspaceLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_workspace_proto_init() }
