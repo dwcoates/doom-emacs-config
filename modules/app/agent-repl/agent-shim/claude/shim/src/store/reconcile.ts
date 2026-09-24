@@ -40,6 +40,8 @@
  * walking the agent's own book for the unit — the one place the fact still is.
  */
 import { create } from "@bufbuild/protobuf";
+import { agentActivity } from "../convert/entries.js";
+import { subagentId } from "../convert/ids.js";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
@@ -89,10 +91,16 @@ interface Reconciler {
    * detached AGENT's own book, and this closes the calling agent's unit that
    * spawned it. Both are owed — a reader looking at the spawn bubble and a
    * reader looking at the subagent's container are looking at two rows.
+   *
+   * `recorded` is the spawn unit as the agent's book holds it (see
+   * {@link findUnit}): the closing is a settled frame, so it restates what the
+   * spawn was asked and which agent it created, and the record is the one
+   * place those facts still are after a bounce.
    */
   closingSubagentTerminal(
     agent: conversationv1.AgentId,
     spawn: conversationv1.AgentActivityId,
+    recorded: conversationv1.AgentSubagent,
   ): PersistEntry;
 }
 
@@ -127,27 +135,79 @@ export function closingAgentTerminal(agent: conversationv1.AgentId): PersistEntr
   };
 }
 
+/**
+ * What a recorded spawn unit says it was asked, off whichever arm the record
+ * holds: the start, a running beat, or a settle. UNDEFINED when the arm states
+ * none.
+ */
+function recordedPrompt(
+  recorded: conversationv1.AgentSubagent,
+): conversationv1.AgentSubagentPrompt | undefined {
+  switch (recorded.result.case) {
+    case "start":
+    case "update":
+    case "success":
+    case "failure":
+      return recorded.result.value.prompt;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Which agent a recorded spawn unit says it created. A running beat names
+ * none, and then the minting rule is the answer: a subagent's identity IS its
+ * spawning call's id, which is this unit's own.
+ */
+function recordedCreatedAgent(
+  recorded: conversationv1.AgentSubagent,
+  spawn: conversationv1.AgentActivityId,
+): conversationv1.AgentId {
+  switch (recorded.result.case) {
+    case "start":
+    case "success":
+    case "failure": {
+      const created = recorded.result.value.createdAgentId;
+      if (created !== undefined && created.value !== "") return created;
+      break;
+    }
+    default:
+      break;
+  }
+  return subagentId(spawn.value);
+}
+
 export function closingSubagentTerminal(
   agent: conversationv1.AgentId,
   spawn: conversationv1.AgentActivityId,
+  recorded: conversationv1.AgentSubagent,
 ): PersistEntry {
   LOGGER.debug(
-    { agent: agent.value, spawn: spawn.value },
+    { agent: agent.value, spawn: spawn.value, recorded: recorded.result.case ?? "" },
     "closing a spawn unit the record holds no terminal for as lost",
   );
-  const activity = create(conversationv1.AgentActivitySchema, {
-    activityId: spawn,
-    item: {
-      case: "subagent",
-      value: create(conversationv1.AgentSubagentSchema, {
-        result: {
-          case: "failure",
-          value: create(conversationv1.AgentSubagentFailureSchema, {
-            cause: { case: "lost", value: sweptUp() },
-          }),
-}
-      }),
-}
+  const prompt = recordedPrompt(recorded);
+  if (prompt === undefined) {
+    LOGGER.debug(
+      { agent: agent.value, spawn: spawn.value },
+      "the recorded spawn unit states no prompt; the closing restates an empty one",
+    );
+  }
+  const activity = agentActivity(spawn, {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {
+      result: {
+        case: "failure",
+        value: create(conversationv1.AgentSubagentFailureSchema, {
+          cause: { case: "lost", value: sweptUp() },
+          // RESTATED FROM THE RECORD: a replay serves this closing with no
+          // start beside it, and it must still draw the spawn's label and
+          // address its sub-feed.
+          prompt: prompt ?? create(conversationv1.AgentSubagentPromptSchema, { text: "" }),
+          createdAgentId: recordedCreatedAgent(recorded, spawn),
+        }),
+      },
+    }),
   });
   return {
     agentId: agent,
@@ -189,16 +249,13 @@ export function closingMonitorTerminal(
     { agent: agent.value, monitor: monitor.value, restated: call !== undefined },
     "closing a monitor the record holds no terminal for as ended",
   );
-  const activity = create(conversationv1.AgentActivitySchema, {
-    activityId: monitor,
-    item: {
-      case: "monitor",
-      value: create(conversationv1.AgentMonitorSchema, {
-        // THE CALL IS RESTATED from the record's own start: this row replaces
-        // it, and the daemon draws the monitor's card from it on a replay.
-        result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call }) },
-      }),
-    },
+  const activity = agentActivity(monitor, {
+    case: "monitor",
+    value: create(conversationv1.AgentMonitorSchema, {
+      // THE CALL IS RESTATED from the record's own start: this row replaces
+      // it, and the daemon draws the monitor's card from it on a replay.
+      result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call }) },
+    }),
   });
   return {
     agentId: agent,

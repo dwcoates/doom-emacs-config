@@ -38,7 +38,10 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	prompt := subagentPrompt(call, result)
 
 	if failed {
-		f := &conversationv1.AgentSubagentFailure{Error: failure}
+		// RESTATED, exactly as the success arm restates them: a replay serves
+		// this failure with no start beside it, and it must still draw the
+		// spawn's label and address its sub-feed.
+		f := &conversationv1.AgentSubagentFailure{Error: failure, Prompt: prompt, CreatedAgentId: agentID(created)}
 		if boolean(pick(result, "stoppedByUser", "stopped_by_user")) {
 			f.Cause = &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}}
 		}
@@ -104,7 +107,7 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		Report:               subagentReport(result),
 		Totals:               subagentTotals(result),
 		ResolvedSubagentType: optionalString(pick(result, "agentType", "resolvedSubagentType")),
-		SettledAt:            settledAt(ts),
+		SettledAt:            settledAt(ts, call.startedAt),
 	}
 	if model := str(pick(result, "resolvedModel", "model")); model != "" {
 		success.ModelsUsed = []*conversationv1.AgentModel{{Name: model}}
@@ -115,6 +118,22 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	return item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 		Result: &conversationv1.AgentSubagent_Success{Success: success},
 	}})
+}
+
+// spawnRecord is what a detached spawn's later settles restate: the commission
+// its launch was given.
+type spawnRecord struct {
+	prompt *conversationv1.AgentSubagentPrompt
+}
+
+// spawnPrompt is the commission a detached spawn's settle restates: the one its
+// launch recorded, or an EMPTY one — never an invented one — when this reader
+// never saw the launch.
+func (c *Converter) spawnPrompt(run string) *conversationv1.AgentSubagentPrompt {
+	if record, ok := c.spawns[run]; ok && record.prompt != nil {
+		return record.prompt
+	}
+	return &conversationv1.AgentSubagentPrompt{}
 }
 
 // subagentPrompt reads WHAT THE SUBAGENT WAS ASKED TO DO. Carried on every frame

@@ -64,6 +64,25 @@ func TestStartedAtAndSettledAtComeFromTheFileRecords(t *testing.T) {
 	}
 }
 
+func TestASettleRestatesTheCallRecordsTimestampAsItsStart(t *testing.T) {
+	// Arrange. The settle and the start upsert one unit, so a replay serving the
+	// settle alone must still state the runtime: the start rides the settle.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", "2026-07-22T19:58:36.000Z",
+		toolCall("toolu_r", "Read", `{"file_path":"/f.go"}`))
+	result := toolResultLine("u1", "toolu_r", "2026-07-22T19:58:40.000Z", `[{"type":"text","text":"c"}]`,
+		`{"type":"text","file":{"filePath":"/f.go","content":"c","numLines":1,"totalLines":1}}`)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	settled := entries[len(entries)-1]
+	if got := activityOf(settled).GetRead().GetSuccess().GetSettledAt().GetStartedAt().GetAtMs(); got != 1784750316000 {
+		t.Fatalf("restated started_at = %d, want the CALL record's timestamp", got)
+	}
+}
+
 func TestOrphanToolResultIsResidueRatherThanAnInventedParent(t *testing.T) {
 	// Arrange. The call was read before this reader's cursor. There is no unit to
 	// settle and none is invented — and after a restart this is a genuinely lost
@@ -763,6 +782,46 @@ func TestASendSettledFromTheTranscriptRestatesItsAddressAndSummary(t *testing.T)
 			if to != "vetter" || summary != "Scroll fix landed; merge master in" {
 				t.Fatalf("restated (to, summary) = (%q, %q), want (%q, %q)",
 					to, summary, "vetter", "Scroll fix landed; merge master in")
+			}
+		})
+	}
+}
+
+func TestAnAgentStopRestatesTheCommissionItsLaunchRecorded(t *testing.T) {
+	tests := []struct {
+		name     string
+		restated func(*conversationv1.AgentSubagentFailure) string
+		want     string
+	}{
+		{
+			name:     "the description",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetPrompt().GetDescription() },
+			want:     "d",
+		},
+		{
+			name:     "the created agent",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetCreatedAgentId().GetValue() },
+			want:     "toolu_spawn",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a detached launch, then the stop that settles it.
+			c := newTestConverter(t)
+			launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+			launched := toolResultLine("u0", "toolu_spawn", ts1, `[{"type":"text","text":"launched"}]`,
+				`{"isAsync":true,"agentId":"a9","outputFile":"/tmp/a9.output"}`)
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
+			result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+				`{"command":"stop","task_type":"agent","task_id":"a9","message":"stopped"}`)
+
+			// Act
+			entries := convertLines(t, c, launch, launched, call, result)
+
+			// Assert
+			failure := activityOf(lastEntryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetFailure()
+			if got := tt.restated(failure); got != tt.want {
+				t.Fatalf("restated = %q, want %q", got, tt.want)
 			}
 		})
 	}

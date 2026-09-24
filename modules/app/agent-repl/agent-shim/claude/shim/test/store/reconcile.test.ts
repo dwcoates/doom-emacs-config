@@ -12,7 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { producerId } from "../../src/store/keys.js";
-import { PersistenceError } from "../../src/store/persistence.js";
+import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import {
   closingMonitorTerminal,
   findMonitorCall,
@@ -86,6 +86,43 @@ function recordsSince(before: number): Record<string, unknown>[] {
 }
 
 /** One recorded bash start, as it would come back from the agent's own book. */
+/** A spawn unit as the book records its start. */
+function recordedSpawnStart(): conversationv1.AgentSubagent {
+  return create(conversationv1.AgentSubagentSchema, {
+    result: {
+      case: "start",
+      value: create(conversationv1.AgentSubagentStartSchema, {
+        createdAgentId: agent("agent-created"),
+        prompt: create(conversationv1.AgentSubagentPromptSchema, {
+          description: "tidy the docs",
+          text: "Tidy every doc.",
+        }),
+      }),
+    },
+  });
+}
+
+/** A spawn unit as the book records a running beat that upserted its start. */
+function recordedSpawnBeat(): conversationv1.AgentSubagent {
+  return create(conversationv1.AgentSubagentSchema, {
+    result: {
+      case: "update",
+      value: create(conversationv1.AgentSubagentUpdateSchema, {
+        prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "keep going" }),
+      }),
+    },
+  });
+}
+
+/** The failure a spawn closing settles with. */
+function closedSpawn(entry: PersistEntry): conversationv1.AgentSubagentFailure {
+  const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+  const activity = (frame?.result.value as conversationv1.AgentUpdate).update
+    .value as conversationv1.AgentActivity;
+  return (activity.item.value as conversationv1.AgentSubagent).result
+    .value as conversationv1.AgentSubagentFailure;
+}
+
 function recordedBashStart(line: string): conversationv1.HistoryEntryAt {
   return create(conversationv1.HistoryEntryAtSchema, {
     at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
@@ -462,14 +499,52 @@ describe("closingAgentTerminal", () => {
   it("closes the SPAWN unit too, since the spawn bubble is a second row", async () => {
     const { reconciler: plane } = await reconciler("close-spawn");
 
-    const entry = plane.closingSubagentTerminal(BOOK, RUN);
+    const entry = plane.closingSubagentTerminal(BOOK, RUN, recordedSpawnStart());
+
+    expect(closedSpawn(entry).cause.case).toBe("lost");
+  });
+
+  it("restates the prompt the record holds for the spawn", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn-prompt");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN, recordedSpawnStart());
+
+    expect(closedSpawn(entry).prompt?.description).toBe("tidy the docs");
+  });
+
+  it("restates the created agent the recorded start names", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn-created");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN, recordedSpawnStart());
+
+    expect(closedSpawn(entry).createdAgentId?.value).toBe("agent-created");
+  });
+
+  it("restates the minting rule's created agent when the record holds only a running beat", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn-beat");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN, recordedSpawnBeat());
+
+    expect(closedSpawn(entry).createdAgentId?.value).toBe(RUN.value);
+  });
+
+  it("restates the beat's prompt when the record holds only a running beat", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn-beat-prompt");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN, recordedSpawnBeat());
+
+    expect(closedSpawn(entry).prompt?.text).toBe("keep going");
+  });
+
+  it("stamps the closed spawn unit with the stands-alone contract", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn-contract");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN, recordedSpawnStart());
 
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const activity = update.value as conversationv1.AgentActivity;
-    const subagent = activity.item.value as conversationv1.AgentSubagent;
-    const failed = subagent.result.value as conversationv1.AgentSubagentFailure;
-    expect(failed.cause.case).toBe("lost");
+    const activity = (frame?.result.value as conversationv1.AgentUpdate).update
+      .value as conversationv1.AgentActivity;
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
   });
 
   it("keys the row deterministically, so a second reconciliation upserts one ending", async () => {
@@ -548,6 +623,15 @@ describe("closingMonitorTerminal", () => {
     const activity = update.value as conversationv1.AgentActivity;
     expect(activity.item.case).toBe("monitor");
     expect((activity.item.value as conversationv1.AgentMonitor).result.case).toBe("ended");
+  });
+
+  it("stamps the closed monitor unit with the stands-alone contract", () => {
+    const entry = closingMonitorTerminal(BOOK, RUN, undefined);
+
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    const activity = (frame?.result.value as conversationv1.AgentUpdate).update
+      .value as conversationv1.AgentActivity;
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
   });
 
   it("keys the row by the monitor's own unit, so the unit concludes in place", () => {

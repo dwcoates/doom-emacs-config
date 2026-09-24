@@ -149,6 +149,17 @@ type Converter struct {
 	// what this file already said — the converter cannot ask the reader anything.
 	spawnedRuns map[string]string
 
+	// spawns maps a detached spawn's run (the spawning call's tool_use_id) to
+	// what the spawn was asked and when, written where the launch result is
+	// read. ONE ENTRY PER OPEN AGENT LAUNCH.
+	//
+	// A SPAWN'S LATER SETTLES ARE READ FROM WHAT THIS FILE ALREADY SAID. A
+	// TaskStop result and a reader-concluded loss both settle the spawn unit,
+	// and a settled frame stands alone — a replay serves it with no start beside
+	// it — so each restates the commission; neither carries one, and the call
+	// they settle left openCalls when its launch receipt landed.
+	spawns map[string]spawnRecord
+
 	// foreignSpawns maps a vendor task id to the SESSION that launched it, for
 	// the runs whose launch was written to a different transcript than this one
 	// (foreignspawn.go). ONE ENTRY PER OBSERVED FOREIGN NOTIFICATION.
@@ -194,6 +205,7 @@ func New(log *logging.Bound) *Converter {
 		openCalls:      map[string]openCall{},
 		openSkills:     map[string]openCall{},
 		spawnedRuns:    map[string]string{},
+		spawns:         map[string]spawnRecord{},
 		foreignSpawns:  map[string]string{},
 		keepaliveScope: newKeepaliveScope(),
 	}

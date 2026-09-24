@@ -29,7 +29,11 @@ import {
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
-import { createCallRegistry, type CallRegistry } from "../../src/convert/tool-calls.js";
+import {
+  createCallRegistry,
+  type CallRegistry,
+  type PendingCall,
+} from "../../src/convert/tool-calls.js";
 import { activityOf, foldContext, MAIN_AGENT } from "./fold-harness.js";
 
 /**
@@ -103,17 +107,42 @@ describe("lostBashEntry", () => {
 
 describe("lostSubagentEntry", () => {
   it("settles the spawn unit's failure cause as lost, never as an error", () => {
-    const entry = lostSubagentEntry(foldContext(), MAIN_AGENT, RUN, wentSilent());
+    const entry = lostSubagentEntry(foldContext(), MAIN_AGENT, lostSpawn(), wentSilent());
 
-    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
-    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
-    const activity = update.value as conversationv1.AgentActivity;
-    const subagent = activity.item.value as conversationv1.AgentSubagent;
-    const failed = subagent.result.value as conversationv1.AgentSubagentFailure;
+    const failed = lostFailure(entry);
     expect(failed.cause.case).toBe("lost");
     expect(failed.error).toBeUndefined();
   });
+
+  it("restates what the lost spawn was asked", () => {
+    const failed = lostFailure(lostSubagentEntry(foldContext(), MAIN_AGENT, lostSpawn(), wentSilent()));
+
+    expect(failed.prompt?.description).toBe("watch the build");
+  });
+
+  it("restates the agent the lost spawn created", () => {
+    const failed = lostFailure(lostSubagentEntry(foldContext(), MAIN_AGENT, lostSpawn(), wentSilent()));
+
+    expect(failed.createdAgentId?.value).toBe("run-1");
+  });
 });
+
+/** The spawning call of a detached run the engine later concludes lost. */
+function lostSpawn(): PendingCall {
+  return {
+    toolUseId: "run-1",
+    toolName: "Agent",
+    input: { description: "watch the build", prompt: "Watch it." },
+    startedAtMs: 5,
+    agentId: MAIN_AGENT,
+  };
+}
+
+/** The failure a lost-spawn row settles with. */
+function lostFailure(entry: PersistEntry): conversationv1.AgentSubagentFailure {
+  const subagent = activityOf(entry)?.item.value as conversationv1.AgentSubagent;
+  return subagent.result.value as conversationv1.AgentSubagentFailure;
+}
 
 describe("lostAgentEntry", () => {
   it("closes the agent's own book with the lost arm", () => {
@@ -823,6 +852,129 @@ describe("convertDetached: task_notification", () => {
     const subagent = activity?.item.value as conversationv1.AgentSubagent;
     const success = subagent.result.value as conversationv1.AgentSubagentSuccess;
     expect(success.report?.prose?.markdown).toBe("");
+  });
+});
+
+/**
+ * A detached spawn's terminal restates its spawn: the notification states
+ * neither the prompt nor the start, and a replay serves the terminal alone.
+ */
+describe("convertDetached: a notification's terminal restates its spawn", () => {
+  /** The spawning Agent call, open in the call registry when the task starts. */
+  function openSpawn(): CallRegistry {
+    const calls = createCallRegistry();
+    calls.remember({
+      toolUseId: "toolu_1",
+      toolName: "Agent",
+      input: { description: "tidy the docs", prompt: "Tidy every doc.", subagent_type: "general" },
+      startedAtMs: 1_000,
+      agentId: MAIN_AGENT,
+    });
+    return calls;
+  }
+
+  /** The settled spawn a start-then-notify pair produces, for a given status. */
+  function settledSpawn(
+    status: string,
+    calls: CallRegistry = openSpawn(),
+  ): conversationv1.AgentSubagent | undefined {
+    const registry = createTaskKindRegistry();
+    drain(
+      convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" }, {}, registry, calls),
+    );
+    const entries = convert(
+      { subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", status },
+      {},
+      registry,
+      createCallRegistry(),
+    );
+    const settled = entries.find((entry) => entry.source.discriminator.startsWith("activity.subagent."));
+    return activityOf(settled)?.item.value as conversationv1.AgentSubagent | undefined;
+  }
+
+  it.each([["completed"], ["failed"]])(
+    "restates the spawn's start instant on a %s run's settle",
+    (status) => {
+      // Arrange + Act
+      const spawn = settledSpawn(status);
+
+      // Assert
+      const settledAt =
+        spawn?.result.case === "success"
+          ? spawn.result.value.settledAt
+          : (spawn?.result.value as conversationv1.AgentSubagentFailure).error?.settledAt;
+      expect(settledAt?.startedAt?.atMs).toBe(1_000n);
+    },
+  );
+
+  it.each([["completed"], ["failed"], ["stopped"]])(
+    "restates the spawn's prompt on a %s run's settle",
+    (status) => {
+      // Arrange + Act
+      const spawn = settledSpawn(status);
+
+      // Assert
+      const settled = spawn?.result.value as
+        | conversationv1.AgentSubagentSuccess
+        | conversationv1.AgentSubagentFailure;
+      expect(settled.prompt?.description).toBe("tidy the docs");
+    },
+  );
+
+  it.each([["failed"], ["stopped"]])(
+    "restates the created agent on a %s run's failure",
+    (status) => {
+      // Arrange + Act
+      const spawn = settledSpawn(status);
+
+      // Assert
+      const failure = spawn?.result.value as conversationv1.AgentSubagentFailure;
+      expect(failure.createdAgentId?.value).toBe("toolu_1");
+    },
+  );
+
+  it("restates an EMPTY prompt, never an invented one, when the spawning call was never seen", () => {
+    // Arrange + Act
+    const spawn = settledSpawn("failed", createCallRegistry());
+
+    // Assert
+    const failure = spawn?.result.value as conversationv1.AgentSubagentFailure;
+    expect(failure.prompt?.text).toBe("");
+  });
+
+  it("restates the spawn's prompt on a running beat, which upserts the spawn's row", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    drain(
+      convert(
+        { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" },
+        {},
+        registry,
+        openSpawn(),
+      ),
+    );
+
+    // Act
+    const beat = convert(
+      { subtype: "task_progress", task_id: "t1", usage: { total_tokens: 5 } },
+      {},
+      registry,
+      createCallRegistry(),
+    );
+
+    // Assert
+    const update = (activityOf(beat[0])?.item.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentUpdate;
+    expect(update.prompt?.description).toBe("tidy the docs");
+  });
+
+  it("restates no start when the fold never saw the spawning call open", () => {
+    // Arrange + Act
+    const spawn = settledSpawn("completed", createCallRegistry());
+
+    // Assert
+    const success = spawn?.result.value as conversationv1.AgentSubagentSuccess;
+    expect(success.settledAt?.startedAt).toBeUndefined();
   });
 });
 

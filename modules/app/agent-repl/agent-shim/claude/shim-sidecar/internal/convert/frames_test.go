@@ -87,3 +87,55 @@ func quote(s string) string {
 	}
 	return string(append(out, '"'))
 }
+
+func TestEveryActivityThisPlaneLandsIsStampedWithTheStandsAloneContract(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name:  "a prose block",
+			lines: []string{assistantWith("a1", "msg_1", ts1, `{"type":"text","text":"x"}`)},
+		},
+		{
+			name: "a call's announcement and its settle",
+			lines: []string{
+				assistantWith("a1", "msg_1", ts1, toolCall("toolu_r", "Read", `{"file_path":"/f.go"}`)),
+				toolResultLine("u1", "toolu_r", ts2, `[{"type":"text","text":"c"}]`,
+					`{"type":"text","file":{"filePath":"/f.go","content":"c","numLines":1,"totalLines":1}}`),
+			},
+		},
+		{
+			name: "a failed call's settle, whatever its arm restated",
+			lines: []string{
+				assistantWith("a1", "msg_1", ts1, toolCall("toolu_x", "Read", `{"file_path":"/f.go"}`)),
+				toolResultLineWithError("u1", "toolu_x", ts2, `"Error: refused"`, `null`, true),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := newTestConverter(t)
+
+			// Act
+			entries := convertLines(t, c, tt.lines...)
+
+			// Assert
+			var activities int
+			for _, e := range entries {
+				activity := activityOf(e)
+				if activity == nil {
+					continue
+				}
+				activities++
+				if activity.GetContract() != ActivityContract {
+					t.Fatalf("activity %q contract = %v, want %v", activity.GetActivityId().GetValue(), activity.GetContract(), ActivityContract)
+				}
+			}
+			if activities == 0 {
+				t.Fatal("the lines landed no activity to check")
+			}
+		})
+	}
+}

@@ -73,7 +73,7 @@ export const scheduleWakeupConverter: ToolConverter = {
       return item({
         case: "failure",
         value: create(conversationv1.AgentScheduleWakeupFailureSchema, {
-          failure: failureOf(outcome),
+          failure: failureOf(call, outcome),
         }),
       });
     }

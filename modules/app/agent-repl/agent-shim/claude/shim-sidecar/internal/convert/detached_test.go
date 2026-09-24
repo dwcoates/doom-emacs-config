@@ -609,3 +609,56 @@ func TestABacklogSubagentLostVerdictIsNotAWarning(t *testing.T) {
 		t.Fatalf("a startup catch-up subagent conclusion was recorded as a warning: %s", sink.String())
 	}
 }
+
+func TestALostSubagentRestatesItsSpawn(t *testing.T) {
+	tests := []struct {
+		name     string
+		launched bool
+		restated func(*conversationv1.AgentSubagentFailure) string
+		want     string
+	}{
+		{
+			name:     "the commission its launch recorded",
+			launched: true,
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetPrompt().GetDescription() },
+			want:     "watch the build",
+		},
+		{
+			name:     "an empty commission, never an invented one, when the launch was never read",
+			launched: false,
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetPrompt().GetDescription() },
+			want:     "",
+		},
+		{
+			name:     "the created agent, by the minting rule",
+			launched: false,
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetCreatedAgentId().GetValue() },
+			want:     "toolu_spawn",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := newTestConverter(t)
+			if tt.launched {
+				launch := assistantWith("a0", "msg_0", ts1,
+					toolCall("toolu_spawn", "Agent", `{"description":"watch the build","prompt":"Watch it."}`))
+				launched := toolResultLine("u0", "toolu_spawn", ts1, `[{"type":"text","text":"launched"}]`,
+					`{"isAsync":true,"agentId":"a9","outputFile":"/tmp/a9.output"}`)
+				convertLines(t, c, launch, launched)
+			}
+			at := testAttribution(0)
+			at.TaskID = "a9"
+
+			// Act
+			entry := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostWentSilent, false)
+
+			// Assert
+			failure := entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().
+				GetUpdate().GetActivity().GetSubagent().GetFailure()
+			if got := tt.restated(failure); got != tt.want {
+				t.Fatalf("restated = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

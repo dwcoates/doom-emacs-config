@@ -77,7 +77,7 @@ func (r *resolver) drawSkill(s *wsState, at placement, act *conversationv1.Agent
 		if name := state.Failure.GetSkill().GetName(); name != "" {
 			restated = composeInvocation(name, "", false)
 		}
-		input, err := r.restatedOrHeld(s, u, unitID, "skill_use", restated, u.input)
+		input, err := r.restatedOrHeld(s, act, u, "skill_use", restated, u.input)
 		if err != nil {
 			return nil, err
 		}

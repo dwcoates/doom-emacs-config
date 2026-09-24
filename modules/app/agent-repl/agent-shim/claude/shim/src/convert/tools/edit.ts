@@ -63,7 +63,7 @@ function editSuccess(
     path: readPath(path),
     patch: hunksOf(record["structuredPatch"]),
     userModified: bool(record, "userModified") ?? false,
-    settledAt: settle(outcome),
+    settledAt: settle(call, outcome),
   });
 }
 
@@ -110,7 +110,7 @@ export const editConverter: ToolConverter = {
           result: {
             case: "failure",
             value: create(conversationv1.AgentEditFailureSchema, {
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
               path: readPath(path),
             }),
           },

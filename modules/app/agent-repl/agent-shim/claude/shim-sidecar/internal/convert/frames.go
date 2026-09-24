@@ -23,8 +23,18 @@ func updateFrame(agent string, update *conversationv1.AgentUpdate) *conversation
 	}
 }
 
+// ActivityContract is the stands-alone contract revision this producer writes
+// every unit under.
+const ActivityContract = conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE
+
 // activityFrame wraps one unit of work as the agent's frame.
+//
+// IT STAMPS THE STANDS-ALONE CONTRACT, here where every unit this plane writes
+// passes, and never in the per-kind code that does the restating: a new arm
+// that forgets to restate is still stamped, so a consumer grades its bare
+// settle a defect rather than old data.
 func activityFrame(agent string, activity *conversationv1.AgentActivity) *conversationv1.AgentFrame {
+	activity.Contract = ActivityContract
 	return updateFrame(agent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Activity{Activity: activity},
 	})

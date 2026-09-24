@@ -43,6 +43,25 @@ func activityOf(unit string, item any) *conversationv1.AgentActivity {
 	return act
 }
 
+// bound stamps an activity as written by a producer bound by the stands-alone
+// contract, the stamp every current producer writes at its one activity
+// constructor. An unstamped fixture is a row that predates the contract.
+func bound(act *conversationv1.AgentActivity) *conversationv1.AgentActivity {
+	act.Contract = conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE
+	return act
+}
+
+// anyErrors is every ERROR the resolver recorded, by operation.
+func (h *harness) anyErrors() []string {
+	var out []string
+	for _, record := range h.records() {
+		if record.Level == "error" {
+			out = append(out, record.Operation)
+		}
+	}
+	return out
+}
+
 // send pushes one activity through the sink.
 func (h *harness) send(act *conversationv1.AgentActivity) {
 	h.t.Helper()
@@ -1476,8 +1495,8 @@ func TestAReplayedFailureRestatingNothingIsRecordedAtError(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 
-			// Act.
-			h.send(tc.act)
+			// Act: a producer bound by the contract that restated nothing.
+			h.send(bound(tc.act))
 
 			// Assert.
 			if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
@@ -1514,11 +1533,188 @@ func TestAFailureRestatingNothingIsRecordedAtErrorWithTheStartHeld(t *testing.T)
 		}},
 	}))
 
-	// Act.
-	h.send(replayedFailures("")[0].act)
+	// Act: a producer bound by the contract that restated nothing.
+	h.send(bound(replayedFailures("")[0].act))
 
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+	}
+}
+
+func TestAReplayedPreContractFailureRestatingNothingIsRecordedAtInfo(t *testing.T) {
+	for _, tc := range replayedFailures("") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: a row written before the contract, replayed alone.
+			h.send(tc.act)
+
+			// Assert.
+			if !h.hasRecord("info", "daemon.feed.settle_predates_contract") {
+				t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract", h.records())
+			}
+		})
+	}
+}
+
+func TestAReplayedPreContractFailureRestatingNothingRecordsNoError(t *testing.T) {
+	for _, tc := range replayedFailures("") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: a row written before the contract, replayed alone.
+			h.send(tc.act)
+
+			// Assert: expected old data is not a defect.
+			if errs := h.anyErrors(); len(errs) != 0 {
+				t.Fatalf("errors = %v, want none for a row that predates the contract", errs)
+			}
+		})
+	}
+}
+
+func TestAPreContractFailureRestatingNothingIsRecordedAtInfoWithTheStartHeld(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path: &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+		}},
+	}))
+
+	// Act: a pre-contract settle that restated nothing.
+	h.send(replayedFailures("")[0].act)
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.feed.settle_predates_contract") || len(h.anyErrors()) != 0 {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
+	}
+}
+
+// replayedSettles is each tool family's settle, served alone as a replay serves
+// it, carrying a settle instant of 4000 that restates the start `startMs`.
+func replayedSettles(startMs int64) []struct {
+	name string
+	act  *conversationv1.AgentActivity
+} {
+	settled := &conversationv1.AgentActivitySettledAt{AtMs: 4_000}
+	if startMs != 0 {
+		settled.StartedAt = &conversationv1.AgentActivityStartedAt{AtMs: startMs}
+	}
+	failure := &conversationv1.AgentToolFailure{SettledAt: settled}
+	path := &conversationv1.ReadPath{Path: "internal/feed/row.go"}
+	return []struct {
+		name string
+		act  *conversationv1.AgentActivity
+	}{
+		{"a read's success", activityOf("unit-1", &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Success{
+			Success: &conversationv1.AgentReadSuccess{Path: path, SettledAt: settled,
+				Extent: &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "x"}}}}})},
+		{"a read's failure", activityOf("unit-1", &conversationv1.AgentRead{Result: &conversationv1.AgentRead_Failure{
+			Failure: &conversationv1.AgentReadFailure{Error: failure, Path: path}}})},
+		{"a write's success", activityOf("unit-1", &conversationv1.AgentWrite{Result: &conversationv1.AgentWrite_Success{
+			Success: &conversationv1.AgentWriteSuccess{Path: path, SettledAt: settled}}})},
+		{"an edit's failure", activityOf("unit-1", &conversationv1.AgentEdit{Result: &conversationv1.AgentEdit_Failure{
+			Failure: &conversationv1.AgentEditFailure{Error: failure, Path: path}}})},
+		{"a grep's success", activityOf("unit-1", &conversationv1.AgentGrep{Result: &conversationv1.AgentGrep_Success{
+			Success: &conversationv1.AgentGrepSuccess{Query: &conversationv1.AgentGrepQuery{Pattern: "x"}, SettledAt: settled}}})},
+		{"a glob's success", activityOf("unit-1", &conversationv1.AgentGlob{Result: &conversationv1.AgentGlob_Success{
+			Success: &conversationv1.AgentGlobSuccess{Query: &conversationv1.AgentGlobQuery{Pattern: "x"}, SettledAt: settled}}})},
+		{"a shell call's failure", activityOf("unit-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{
+			Failure: &conversationv1.AgentBashFailure{Error: failure, Command: &conversationv1.AgentBashCommand{Line: "make"}}}})},
+		{"a fetch's failure", activityOf("unit-1", &conversationv1.AgentWebFetch{Result: &conversationv1.AgentWebFetch_Failure{
+			Failure: &conversationv1.AgentWebFetchFailure{Failure: failure, Target: &conversationv1.AgentWebFetchTarget{Url: "https://x"}}}})},
+		{"a search's failure", activityOf("unit-1", &conversationv1.AgentWebSearch{Result: &conversationv1.AgentWebSearch_Failure{
+			Failure: &conversationv1.AgentWebSearchFailure{Failure: failure, Query: &conversationv1.AgentWebSearchQuery{Terms: "x"}}}})},
+	}
+}
+
+func TestAReplayedCardStatesItsRuntimeFromTheRestatedStart(t *testing.T) {
+	for _, tc := range replayedSettles(1_000) {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: the settle alone, as a replay serves it.
+			h.send(bound(tc.act))
+
+			// Assert: 4000 - 1000.
+			if got := h.card().GetReturned().GetRuntime().GetText(); got != "ran 3 s" {
+				t.Fatalf("runtime = %q, want the span from the restated start", got)
+			}
+		})
+	}
+}
+
+func TestAHeldStartOutranksTheRestatedStart(t *testing.T) {
+	// Arrange: this process drew the start at 2000.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 2_000},
+		}},
+	}))
+
+	// Act: a settle restating another plane's start at 1000.
+	h.send(bound(replayedSettles(1_000)[0].act))
+
+	// Assert: the live clock does not jump.
+	if got := h.card().GetReturned().GetRuntime().GetText(); got != "ran 2 s" {
+		t.Fatalf("runtime = %q, want the span from the held start", got)
+	}
+}
+
+func TestABoundSettleRestatingNoStartIsRecordedAtError(t *testing.T) {
+	for _, tc := range replayedSettles(0) {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: a bound producer's settle whose instant restates no start.
+			h.send(bound(tc.act))
+
+			// Assert.
+			if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
+				t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+			}
+		})
+	}
+}
+
+func TestABoundSettleRestatingNoStartStillDrawsItsCard(t *testing.T) {
+	for _, tc := range replayedSettles(0) {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.send(bound(tc.act))
+
+			// Assert: the card stands; only its runtime is lost.
+			if returned := h.card().GetReturned(); returned == nil || returned.GetRuntime() != nil {
+				t.Fatalf("returned = %+v, want a settled card with no runtime", returned)
+			}
+		})
+	}
+}
+
+func TestAPreContractSettleRestatingNoStartIsRecordedAtInfo(t *testing.T) {
+	for _, tc := range replayedSettles(0) {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: a row written before the contract.
+			h.send(tc.act)
+
+			// Assert.
+			if !h.hasRecord("info", "daemon.feed.settle_predates_contract") || len(h.anyErrors()) != 0 {
+				t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
+			}
+		})
 	}
 }

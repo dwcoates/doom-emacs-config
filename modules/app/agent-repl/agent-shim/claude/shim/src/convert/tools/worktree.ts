@@ -135,7 +135,7 @@ export const worktreeConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the worktree call never ran");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentWorktreeFailureSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentWorktreeFailureSchema, { error: failureOf(call, outcome) }),
       });
     }
     const act = actNameOf(call);
@@ -182,7 +182,7 @@ export const worktreeConverter: ToolConverter = {
                   message: strOr(output, "message"),
                 }),
               },
-        settledAt: settle(outcome),
+        settledAt: settle(call, outcome),
       }),
     });
   },

@@ -1254,6 +1254,74 @@ func TestASettledSendAloneDrawsItsRestatedAddressAndSummary(t *testing.T) {
 	}
 }
 
+// A FAILED SPAWN STANDS ALONE. A replay serves the spawn's latest frame alone,
+// so a failure from a producer bound by the stands-alone contract must draw the
+// bubble's description from the commission it restates.
+func TestAFailedSpawnAloneDrawsItsRestatedDescription(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-spawn-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	description := "Explore the code"
+
+	// Act: the failure alone.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("spawn-failed"),
+		Contract:   conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE,
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Failure{
+			Failure: &conversationv1.AgentSubagentFailure{
+				Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{
+					AtMs: 9_000, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "look around", Description: &description},
+				CreatedAgentId: &conversationv1.AgentId{Value: "agent-failed"},
+			},
+		}}},
+	}))
+
+	// Assert
+	bubble := awaitRow(t, f, tail, "the failed spawn's bubble head", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSubagent() != nil
+	})
+	if got := bubble.GetActivity().GetSubagent().GetDescription().GetText(); got != description {
+		t.Fatalf("the bubble's description = %q, want the restated commission's", got)
+	}
+}
+
+// A FAILED PUBLISH STANDS ALONE: its card is drawn from the act its failure
+// restates.
+func TestAFailedPublishAloneDrawsItsRestatedCard(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-publish-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	title := "Merge Queue Report"
+
+	// Act: the failure alone.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("publish-failed"),
+		Contract:   conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE,
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{Result: &conversationv1.AgentArtifact_Failure{
+			Failure: &conversationv1.AgentArtifactFailure{
+				Failure: &conversationv1.AgentToolFailure{},
+				Act: &conversationv1.AgentArtifactFailure_Publish{Publish: &conversationv1.AgentArtifactPublish{
+					FilePath: "/tmp/report.html", Title: &title,
+				}},
+			},
+		}}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the failed publish's card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetArtifact() != nil
+	})
+	if got := row.GetActivity().GetArtifact().GetHeading().GetText(); got != title {
+		t.Fatalf("the card's heading = %q, want the restated publish's title", got)
+	}
+}
+
 // ==========================================================================
 // Plan mode.
 // ==========================================================================

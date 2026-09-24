@@ -139,7 +139,7 @@ export const monitorConverter: ToolConverter = {
         // THE CALL IS RESTATED: the failure replaces the start in the store,
         // and a replay draws the monitor's card from this frame alone.
         value: create(conversationv1.AgentMonitorFailureSchema, {
-          failure: failureOf(outcome),
+          failure: failureOf(call, outcome),
           call: armedAs(call),
         }),
       });

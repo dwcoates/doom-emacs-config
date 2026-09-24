@@ -265,12 +265,25 @@ func TestAnEndedMonitorThatRestatesNothingAndHeldNoStartIsRecordedAtError(t *tes
 	// Arrange.
 	h := newHarness(t)
 
-	// Act.
-	h.send(monitorEnded("toolu_monitor", nil))
+	// Act: a producer bound by the stands-alone contract that restated nothing.
+	h.send(bound(monitorEnded("toolu_monitor", nil)))
 
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
 		t.Fatalf("records = %+v, want the producer's violation recorded at ERROR", h.records())
+	}
+}
+
+func TestAPreContractEndedMonitorThatRestatesNothingAndHeldNoStartIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act: a row written before the contract, replayed alone.
+	h.send(monitorEnded("toolu_monitor", nil))
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.feed.settle_predates_contract") || len(h.anyErrors()) != 0 {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
 	}
 }
 

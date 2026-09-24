@@ -91,7 +91,7 @@ export const planModeConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the plan-mode call never ran");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentPlanModeFailureSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentPlanModeFailureSchema, { error: failureOf(call, outcome) }),
       });
     }
     const act = actNameOf(call);
@@ -124,7 +124,7 @@ export const planModeConverter: ToolConverter = {
                 }),
               }
             : { case: "exited", value: exited(output) },
-        settledAt: settle(outcome),
+        settledAt: settle(call, outcome),
       }),
     });
   },

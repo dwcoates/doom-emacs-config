@@ -212,7 +212,9 @@ func (c *Converter) BashCancelled(at Attribution, run, output string, omitted ui
 		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user, output_observed=%t carrying %d byte(s)", observed, len(output))
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
-			SettledAt: settledAt(settledAtMs),
+			// NO START IS RESTATED: this is the detached run's own terminal,
+			// and its start instant rides the run's own start frame.
+			SettledAt: settledAt(settledAtMs, 0),
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
 				// A stop for a run whose spool was never readable states
 				// not_observed: the stop is evidence about the PERSON's
@@ -325,6 +327,12 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
 				Cause: &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
+				// RESTATED so the stopped spawn a replay serves alone still
+				// draws its label and addresses its sub-feed: the commission
+				// its launch recorded, and the created agent the minting rule
+				// names (the spawning call itself).
+				Prompt:         c.spawnPrompt(run),
+				CreatedAgentId: agentID(run),
 			}},
 		}})
 		activity.ActivityId = activityID(run)
@@ -419,7 +427,7 @@ func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason 
 	} else {
 		bound.Log(line, reason)
 	}
-	return SubagentLostEntry(at, run, ownerAgent, reason)
+	return SubagentLostEntry(at, run, ownerAgent, reason, c.spawnPrompt(run))
 }
 
 // SubagentLostEntry is SubagentLost without a converter, so a caller that holds
@@ -428,10 +436,16 @@ func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason 
 // THE WRITE IDENTITY IS STABLE FOR THE VERDICT, exactly as the bash terminal's
 // is: a run is lost once however many sweeps observe it, so a re-emission is
 // absorbed at the store rather than appending a second settle.
-func SubagentLostEntry(at Attribution, run, ownerAgent string, reason LostReason) *storev1.StoreEntry {
+//
+// THE LOSS IS A SETTLED FRAME AND RESTATES THE SPAWN: `prompt` is the
+// commission the launch recorded (empty when the caller never saw it), and the
+// created agent is the run itself by the minting rule.
+func SubagentLostEntry(at Attribution, run, ownerAgent string, reason LostReason, prompt *conversationv1.AgentSubagentPrompt) *storev1.StoreEntry {
 	activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 		Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
-			Cause: &conversationv1.AgentSubagentFailure_Lost{Lost: DetachedLostArm(reason)},
+			Cause:          &conversationv1.AgentSubagentFailure_Lost{Lost: DetachedLostArm(reason)},
+			Prompt:         prompt,
+			CreatedAgentId: agentID(run),
 		}},
 	}})
 	activity.ActivityId = activityID(run)

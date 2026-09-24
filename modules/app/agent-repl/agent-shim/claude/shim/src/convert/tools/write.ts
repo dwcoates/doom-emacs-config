@@ -101,7 +101,7 @@ function writeSuccess(
     outcome: written,
     patch: diffHunks(original, content),
     userModified: bool(record, "userModified") ?? false,
-    settledAt: settle(outcome),
+    settledAt: settle(call, outcome),
   });
 }
 
@@ -148,7 +148,7 @@ export const writeConverter: ToolConverter = {
           result: {
             case: "failure",
             value: create(conversationv1.AgentWriteFailureSchema, {
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
               path: readPath(path),
             }),
           },
