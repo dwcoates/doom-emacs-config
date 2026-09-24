@@ -173,12 +173,29 @@ func (s *writeScheduler) withdraw(w *writeWaiter) bool {
 // ahead of a live turn. The context is checked next, so an already-canceled
 // caller is answered deterministically.
 func (d *DB) acquireWrite(ctx context.Context, class WriteClass) (release func(), err error) {
+	if err := d.acquireSlot(ctx, class); err != nil {
+		return nil, err
+	}
+	return d.releaseWrite, nil
+}
+
+// releaseWrite is every writer's release: it reads the WAL-index for the
+// checkpoint job while it still holds the writer (checkpoint.go), then hands
+// the slot on. The checkpoint itself releases through writes.release directly.
+func (d *DB) releaseWrite() {
+	d.observeWAL()
+	d.writes.release()
+}
+
+// acquireSlot is acquireWrite without the release wrapper, for the one caller
+// whose release must not wake the checkpoint job: the checkpoint itself.
+func (d *DB) acquireSlot(ctx context.Context, class WriteClass) error {
 	if !class.valid() {
-		return nil, invalidSitef(SiteWriteClassUnset, "write_class",
+		return invalidSitef(SiteWriteClassUnset, "write_class",
 			"write_class is unset — every write states whether it is interactive or bulk, and the store never guesses")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 	s := &d.writes
 	s.mu.Lock()
@@ -187,7 +204,7 @@ func (d *DB) acquireWrite(ctx context.Context, class WriteClass) (release func()
 	if !s.held {
 		s.held = true
 		s.mu.Unlock()
-		return s.release, nil
+		return nil
 	}
 	w := &writeWaiter{class: class, granted: make(chan struct{})}
 	if class == WriteInteractive {
@@ -201,7 +218,7 @@ func (d *DB) acquireWrite(ctx context.Context, class WriteClass) (release func()
 	}
 	select {
 	case <-w.granted:
-		return s.release, nil
+		return nil
 	case <-ctx.Done():
 		s.mu.Lock()
 		withdrawn := s.withdraw(w)
@@ -212,7 +229,7 @@ func (d *DB) acquireWrite(ctx context.Context, class WriteClass) (release func()
 			// again.
 			s.release()
 		}
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 }
 

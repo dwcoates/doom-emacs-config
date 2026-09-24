@@ -44,6 +44,13 @@ import (
 // and the only remedy for "no" is to recreate it.
 const SchemaVersion = 7
 
+// JournalSizeLimitBytes is the size the -wal file is cut back to when the
+// log restarts. A checkpoint every DefaultCheckpointPages frames keeps the WAL
+// near 4 MB, so 16 MiB is four checkpoint intervals of headroom: a normal burst
+// never pays to shrink and regrow the file, and a 119 MB high-water left by a
+// pinned reader goes back down at the next restart.
+const JournalSizeLimitBytes = 16 * 1024 * 1024
+
 // mono reads the DB's monotonic clock — the one every measured duration is
 // taken from. A zero-value DB (only constructible inside this package, by a
 // test that cares about nothing else) falls back to time.Now rather than
@@ -128,6 +135,25 @@ type DB struct {
 	// goroutine against this one DB, so the windows are shared state.
 	budgetMu sync.Mutex
 	budgets  map[string]*budgetWindow
+	// path is the database file, which the checkpoint job's WAL-index reading
+	// sits beside (checkpoint.go).
+	path string
+	// wal is the hand-off from every writer's release to the checkpoint job,
+	// and walMu guards the reading it carries. Its signal is made only once
+	// the database is fully open, so nothing observes a half-opened one.
+	wal   walWatch
+	walMu sync.Mutex
+	// runCheckpoint, when set, replaces the PRAGMA a checkpoint runs. It is
+	// the seam a test uses to make a checkpoint FAIL and then succeed — the
+	// retry path — which a real WAL will not do on demand. Nil in production.
+	runCheckpoint func(context.Context) (busy int, frames, checkpointed int64, err error)
+	// checkpointDone, when set, is called by the checkpoint job after every
+	// checkpoint it runs, with what it returned. It is the seam a test waits
+	// on instead of sleeping. Nil in production.
+	checkpointDone func(CheckpointResult, error)
+	// newCheckpointTimer, when set, makes the job's idle timer, so a test
+	// fires the idle trigger by hand. Nil in production, which is time.Timer.
+	newCheckpointTimer func(time.Duration) checkpointTimer
 }
 
 // Options are the injectable knobs Open resolves from the environment.
@@ -224,12 +250,22 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	// path too and made a page repaint queue for the write lock a producer was
 	// holding — and be refused by it. See beginRead in read.go for why a
 	// deferred read still pins its watch in the page's own snapshot.
+	//
+	// wal_autocheckpoint(0): NO COMMIT CHECKPOINTS. The checkpoint is the
+	// store's own bulk-class job (checkpoint.go), so an interactive commit
+	// never pays for copying pages somebody else appended.
+	//
+	// journal_size_limit: the -wal file is cut back to this size the next time
+	// the log restarts after a checkpoint, rather than staying at whatever
+	// high-water a burst or a pinned reader once pushed it to.
 	writeDSN := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",
 			"busy_timeout(5000)",
 			"synchronous(NORMAL)",
 			"foreign_keys(ON)",
+			"wal_autocheckpoint(0)",
+			fmt.Sprintf("journal_size_limit(%d)", JournalSizeLimitBytes),
 		},
 		"_txlock": {"immediate"},
 	}.Encode()
@@ -362,6 +398,7 @@ var reopenAfterNuke = openAt
 // finishOpen records the ready state. It is the one exit both the first attempt
 // and the post-nuke attempt take.
 func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, error) {
+	d.wal.kick = make(chan struct{}, 1)
 	log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
 		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d bulk_base_ms=%d bulk_per_row_ms=%d",
 		SchemaVersion, opts.SlowQuery.Milliseconds(), d.bulkBase.Milliseconds(), d.bulkPerRow.Milliseconds())
@@ -411,6 +448,7 @@ func openAt(writeDSN, readDSN, path string, log *logging.Logger, opts Options, c
 		bulk:       resolveBulkBounds(opts),
 
 		ledgerRetention: ledgerRetention,
+		path:            path,
 	}
 	if err := d.ensureSchema(context.Background(), path); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
@@ -479,6 +517,18 @@ func (d *DB) Close() error {
 		if firstErr == nil {
 			firstErr = storagef(err, "closing the database")
 		}
+	}
+	// THE -shm DESCRIPTOR CLOSES LAST, after every SQLite connection has, so
+	// its close cannot release a lock SQLite still holds (see readWAL).
+	if d.wal.shm != nil {
+		if err := d.wal.shm.Close(); err != nil {
+			d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+				"closing the WAL-index descriptor failed: %v", err)
+			if firstErr == nil {
+				firstErr = storagef(err, "closing the WAL-index descriptor")
+			}
+		}
+		d.wal.shm = nil
 	}
 	if firstErr != nil {
 		return firstErr

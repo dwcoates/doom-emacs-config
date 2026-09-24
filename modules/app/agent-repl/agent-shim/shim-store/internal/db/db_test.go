@@ -1028,3 +1028,96 @@ func assertNoTableScan(t *testing.T, what, plan string) {
 		}
 	}
 }
+
+// ---- connection pragmas ----
+
+// pragmaOn reads one integer pragma on one connection.
+func pragmaOn(t *testing.T, conn *sql.Conn, name string) int64 {
+	t.Helper()
+	var value int64
+	if err := conn.QueryRowContext(ctx(), "PRAGMA "+name).Scan(&value); err != nil {
+		t.Fatalf("PRAGMA %s: %v", name, err)
+	}
+	return value
+}
+
+func TestTheWriteConnectionRunsNoAutocheckpoint(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	conn, err := d.sql.Conn(ctx())
+	if err != nil {
+		t.Fatalf("Conn: %v", err)
+	}
+	defer conn.Close() //nolint:errcheck // best-effort test teardown
+
+	// Act
+	pages := pragmaOn(t, conn, "wal_autocheckpoint")
+
+	// Assert
+	if pages != 0 {
+		t.Fatalf("wal_autocheckpoint = %d, want 0: checkpoints are the store's bulk job, never a commit's", pages)
+	}
+}
+
+func TestTheWriteConnectionLimitsTheWALFileItLeavesBehind(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	conn, err := d.sql.Conn(ctx())
+	if err != nil {
+		t.Fatalf("Conn: %v", err)
+	}
+	defer conn.Close() //nolint:errcheck // best-effort test teardown
+
+	// Act
+	limit := pragmaOn(t, conn, "journal_size_limit")
+
+	// Assert
+	if limit != JournalSizeLimitBytes {
+		t.Fatalf("journal_size_limit = %d, want %d", limit, JournalSizeLimitBytes)
+	}
+}
+
+func TestCloseReleasesTheWALIndexDescriptor(t *testing.T) {
+	// Arrange
+	_, log := newSink(t)
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	writeOne(t, d, "a")
+	shm := d.wal.shm
+
+	// Act
+	err = d.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if shm == nil || d.wal.shm != nil {
+		t.Fatalf("the WAL-index descriptor was never opened or was not released: before=%v after=%v", shm, d.wal.shm)
+	}
+	if _, statErr := shm.Stat(); !errors.Is(statErr, os.ErrClosed) {
+		t.Fatalf("the descriptor is still open after Close: %v", statErr)
+	}
+}
+
+func TestCloseReportsAWALIndexDescriptorThatWillNotClose(t *testing.T) {
+	// Arrange: a descriptor already closed, so closing it again fails.
+	s, log := newSink(t)
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{Now: func() int64 { return testNow }})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	writeOne(t, d, "a")
+	d.wal.shm.Close() //nolint:errcheck // closed early on purpose
+
+	// Act
+	err = d.Close()
+
+	// Assert
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("Close = %v, want a storage failure", err)
+	}
+	s.assertLogged(t, "error", "closing the WAL-index descriptor failed")
+}
