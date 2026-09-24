@@ -388,8 +388,9 @@ export type DetachableWork = Message<"conversation.v1.DetachableWork"> & {
     case: "workflow";
   } | {
     /**
-     * A background watcher. FOOTER-ONLY: no feed bubble exists — the daemon
-     * tracks liveness for the footer's monitors chip and panel.
+     * A background watcher. Its feed entry is the Monitor call's tool-call
+     * card, already drawn from the call's own frames; the daemon tracks
+     * liveness for the footer's monitors chip and panel.
      *
      * @generated from field: conversation.v1.AgentMonitor monitor = 4;
      */
