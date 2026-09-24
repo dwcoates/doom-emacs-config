@@ -6,9 +6,9 @@ package convert
 // the stream plane authors that unit whole (see streamowned.go), so the name is
 // dropped before it ever reaches this table.
 //
-// A NAME NOT LISTED HERE IS NOT AUTOMATICALLY UNMODELED. AgentUnmodeled means "a
-// tool whose schema genuinely cannot be known" — an MCP server's tool, or one
-// the vendor added after this schema was written. A recognizable built-in
+// A NAME NOT LISTED HERE IS NOT AUTOMATICALLY UNMODELED. An MCP server's tool is
+// AgentMcpToolCall (mcp.go); AgentUnmodeled means "a tool whose schema genuinely
+// cannot be known" — one the vendor added after this schema was written. A recognizable built-in
 // arriving there is a PRODUCER DEFECT, so the table below is what keeps the two
 // apart, and the golden corpus is what keeps the table honest.
 
