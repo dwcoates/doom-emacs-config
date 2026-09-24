@@ -741,9 +741,10 @@ under: `--poll-interval`, from `world_test.go:810`.
 **The poll actually on this path is not only the sidecar's.** The shim
 re-asks the store for a detached run's rows on its own cadence:
 `agent-shim/claude/shim/src/store/reader.ts:262 BASH_ROW_RECHECK_MS = 25ms`
-for shell runs and `:294 AGENT_ROW_RECHECK_MS = 250ms` for agents, with
-`:281 BASH_CONCLUDED_WINDOW_MS = 500ms` as the backstop for a run that retires
-without a terminal row. **The 250 ms agent recheck dominates a 60/150 ms
+for shell runs and `:294 AGENT_ROW_RECHECK_MS = 250ms` for agents, , the shell recheck doubling to
+`BASH_ROW_RECHECK_CEILING_MS = 250ms` while a run's rows are late (an announced
+run is waited for until its rows land; the old 500ms `BASH_CONCLUDED_WINDOW_MS`
+backstop is gone). **The 250 ms agent recheck dominates a 60/150 ms
 budget outright**, so this row is built for the SHELL case (25 ms recheck) and
 the agent case gets its own, larger, separately-derived budget rather than
 being folded in and quietly failing.
@@ -987,7 +988,7 @@ and they are cheap, deterministic, and immune to machine load.
 | sidecar | `shim-sidecar/cycle.go:83` | `recoverTick` | 50 ms — store-recovery heartbeat, reads no files |
 | shim (TS) | `shim/src/store/reader.ts:262` | `BASH_ROW_RECHECK_MS` | **25 ms** — governs row 19's shell case |
 | shim (TS) | `shim/src/store/reader.ts:294` | `AGENT_ROW_RECHECK_MS` | **250 ms** — dominates any sub-250 ms budget on the detached-agent path |
-| shim (TS) | `shim/src/store/reader.ts:281` | `BASH_CONCLUDED_WINDOW_MS` | 500 ms backstop |
+| shim (TS) | `shim/src/store/reader.ts` | `BASH_ROW_RECHECK_CEILING_MS` | 250 ms — the shell recheck's backoff ceiling while rows are late; no give-up window |
 | webapp | `webapp/src/clock.ts` | `DEFAULT_TICK_MS` | 1000 ms — ONE shared page ticker; `sidebar/row.ts:19`, `lifecycle/lifecycle.ts:37`, `feed/ticking.ts:7`, `rpc/context.ts:36` all declare the invariant that components subscribe to it and never call `setInterval` |
 | webapp | `webapp/src/rpc/streams.ts:210` | reconnect backoff | 250 ms → 5000 ms |
 | webapp | `webapp/src/lifecycle/lifecycle.ts:568` | adopt retry | 250 ms → 5000 ms, 60 s budget |

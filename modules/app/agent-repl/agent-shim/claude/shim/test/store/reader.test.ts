@@ -799,6 +799,13 @@ function readerOver(overrides: Partial<StoreClient>) {
   return createReader({ client: stubClient(overrides), sleep: () => Promise.resolve() });
 }
 
+/** A shell run's start frame, exactly as the shared fixture writes it. */
+function bashStartFrame(): conversationv1.AgentBash {
+  const item = bashStartEntry().item;
+  if (item.kind !== "bash_run") throw new Error("the bash start fixture is no longer a run row");
+  return item.frame;
+}
+
 /** One read unit's frame, exactly as the shared fixture writes it. */
 function readFrame(unitValue: string): conversationv1.AgentFrame {
   const item = readEntry(BOOK, unitValue, `/tmp/${unitValue}`).item;
@@ -1547,23 +1554,76 @@ describe("openBashRun against a store that misbehaves", () => {
     });
   });
 
-  it("stops waiting on a concluded run that never wrote a terminal, at the backstop", async () => {
-    // The one path that retires a run without a terminal of its own is bounded
-    // by the backstop rather than by a write, so the WINDOW ITSELF is what is
-    // under test here and the wait is the mechanism, not a synchronization.
-    // Arrange.
-    const reader = readerOver({
-      watchBashRun: () => ({
-        async *[Symbol.asyncIterator]() {
-          throw new ConnectError("no such run", Code.NotFound);
-        },
-      }),
-    });
+  it("keeps waiting on a concluded run whose rows land late, and serves them", async () => {
+    // THE WINDOW THIS REPLACED: a run that had left the live set was refused
+    // 500ms after it concluded, and a loaded host's sidecar wrote the rows 523ms
+    // after -- the daemon, told the run did not exist, never re-opened it.
+    // Arrange: the store refuses the run until well past that old window.
+    vi.useFakeTimers();
+    try {
+      let refusals = 0;
+      const reader = readerOver({
+        watchBashRun: () => ({
+          async *[Symbol.asyncIterator]() {
+            if (refusals < 25) {
+              refusals += 1;
+              throw new ConnectError("no such run", Code.NotFound);
+            }
+            yield create(storev1.WatchBashRunResponseSchema, {
+              row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+            });
+          },
+        }),
+      });
+      const run = await reader.openBashRun(WORK, () => "concluded");
+      const first = run[Symbol.asyncIterator]().next();
 
-    // Act, Assert.
-    await expect(drain(await reader.openBashRun(WORK, () => "concluded"))).rejects.toMatchObject({
-      kind: "unknown_work",
-    });
+      // Act: twenty-five refusals, well past the old 500ms window at any
+      // cadence.
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      // Assert.
+      const got = await first;
+      expect(got.done).toBe(false);
+      expect(refusals).toBe(25);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("backs its recheck off while a run's rows are late", async () => {
+    // Arrange.
+    vi.useFakeTimers();
+    try {
+      let asks = 0;
+      const reader = readerOver({
+        watchBashRun: () => ({
+          async *[Symbol.asyncIterator]() {
+            asks += 1;
+            throw new ConnectError("no such run", Code.NotFound);
+          },
+        }),
+      });
+      let standing: "live" | "unknown" = "live";
+      const run = await reader.openBashRun(WORK, () => standing);
+      const ended = run[Symbol.asyncIterator]().next().catch(() => "ended");
+
+      // Act: 25+50+100+200 = 375ms reaches the 250ms ceiling, then a second
+      // more is four more asks.
+      await vi.advanceTimersByTimeAsync(1_375);
+      const counted = asks;
+      // The announcement withdrawn ends the wait, so nothing keeps asking.
+      standing = "unknown";
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      // Assert: the first ask plus one per recheck (1 + 4 + 4), never forty a
+      // second.
+      expect(counted).toBeLessThanOrEqual(9);
+      expect(counted).toBeGreaterThanOrEqual(8);
+      expect(await ended).toBe("ended");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
