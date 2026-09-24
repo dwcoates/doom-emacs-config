@@ -69,6 +69,35 @@ func TestSetResponseErrorFillsTheArmsOwnField(t *testing.T) {
 	}
 }
 
+// TestSetResponseErrorFillsTheLockHolderUnavailableArm pins that OpenWorkspace
+// answers an unspawnable lock holder on its TYPED arm, evidence and all, so a
+// client never has to read it out of an unlanded-arm sentence.
+func TestSetResponseErrorFillsTheLockHolderUnavailableArm(t *testing.T) {
+	tests := []struct {
+		name string
+		get  func(*agentreplv1.OpenWorkspaceLockHolderUnavailable) string
+		want string
+	}{
+		{name: "binary", get: (*agentreplv1.OpenWorkspaceLockHolderUnavailable).GetBinary, want: "/missing/shim-lock"},
+		{name: "os_error", get: (*agentreplv1.OpenWorkspaceLockHolderUnavailable).GetOsError, want: "spawn ENOENT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			resp := &agentreplv1.OpenWorkspaceResponse{}
+
+			// Act.
+			setResponseError(resp, workspace.ArmLockHolderUnavailable,
+				map[string]any{"binary": "/missing/shim-lock", "os_error": "spawn ENOENT"})
+
+			// Assert.
+			if got := tt.get(resp.GetError().GetLockHolderUnavailable()); got != tt.want {
+				t.Fatalf("%s = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestSetResponseErrorFillsAnInt64Field pins the numeric arm field, which the
 // confirm_required challenge carries.
 func TestSetResponseErrorFillsAnInt64Field(t *testing.T) {
