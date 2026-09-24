@@ -114,14 +114,17 @@ export interface HeldPromptDroppedDetail {
   text: string;
 }
 
+/** The release control's label: what the reader sees it do. */
+export const SEND_NOW_LABEL = "Send now";
+
 /** Why no release button is drawn, per the arm that forbids it. */
 export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
   uninterruptibleTurn:
-    "a context cut is never interrupted for a queued prompt, so there is nothing to release it past — it is delivered the moment that turn ends",
+    "a context cut is never interrupted for a queued prompt, so it cannot be sent ahead of it — it is delivered the moment that turn ends",
   keepAlive:
-    "the keep-alive turn has to finish before this prompt can be submitted, so there is no order in which releasing it works",
+    "the keep-alive turn has to finish before this prompt can be submitted, so there is no order in which sending it now works",
   sessionStarting:
-    "the session is not up yet, so a released prompt would have nowhere to be delivered",
+    "the session is not up yet, so a prompt sent now would have nowhere to be delivered",
 };
 
 /**
@@ -497,7 +500,7 @@ interface ActionSpec {
 export type HeldAction = "release" | "drop" | "accept";
 
 /**
- * The entry's controls: release, drop (labelled "Cancel"), and — on one arm
+ * The entry's controls: release (labelled "Send now"), drop (labelled "Cancel"), and — on one arm
  * only — accept.
  *
  * IN-FLIGHT DISABLES THE ROW, not just the clicked button: the three actions
@@ -524,13 +527,16 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   // which is the contract's own answer to a verb that cannot run. Withholding
   // the button instead hid the reason in a hover and left the reader guessing
   // whether the tray had simply failed to draw it.
-  const release = actionButton("release", "Release", spec);
+  // The release is LABELLED "Send now" (owner ruling, 2026-09-23): to the
+  // reader it sends the held prompt at once. The wire verb is still `release`,
+  // and so are the hooks it is found by.
+  const release = actionButton("release", SEND_NOW_LABEL, spec);
   if (noReleaseTitle !== undefined) {
     release.title = noReleaseTitle;
     release.classList.add("queued-action-unlikely");
   }
   actions.appendChild(release);
-  // EDIT sits between Release and Cancel (owner spec, 2026-09-23).
+  // EDIT sits between Send now and Cancel (owner spec, 2026-09-23).
   actions.appendChild(editButton(spec));
   // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
   // takes back a prompt they sent, and the text comes back to the composer. The
