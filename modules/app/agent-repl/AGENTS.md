@@ -38,10 +38,14 @@ sidecar, Emacs, webview). `bin/background.sh <cmd>` runs a command and its
 whole process tree at the host's background priority, and it is the ONE
 helper every test entry point goes through.
 
-- macOS: `taskpolicy -b` (PRIO_DARWIN_BG), which throttles CPU and disk I/O.
-- Linux: `nice -n 19`, which only the e2e sandbox container ever reaches.
+- macOS and Linux: `nice -n 19` (owner ruling 2026-09-23, "very low").
+  - The run keeps the performance cores but always yields the CPU to the live
+    runtime; disk I/O is not demoted.
+  - `taskpolicy -b` was measured and rejected: it pinned runs to the
+    efficiency cores and the webapp integration suite passed 56-58 of 1765.
+  - Linux is reached only inside the e2e sandbox container.
 - Any other platform: REFUSED with exit 78, never run at normal priority.
-- It is idempotent: a process already at background priority (read with
+- It is idempotent: a process already at niceness 19 or above (read with
   `getpriority`, not from the environment) runs its command straight through.
 - It exports `AGENT_REPL_BACKGROUND_PRIORITY`, and only it sets it.
 
