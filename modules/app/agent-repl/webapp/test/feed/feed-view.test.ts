@@ -227,6 +227,13 @@ describe("createFeedController: painting a page", () => {
     forgetOwnTurns();
   });
 
+  it("drops the turn from a re-pushed row that no longer names one", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
+    controller.upsert(userPromptRow("a", "1"));
+    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-turn")).toBe(false);
+  });
+
   it("stamps no turn on a row that belongs to none", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1")]), "replace");
