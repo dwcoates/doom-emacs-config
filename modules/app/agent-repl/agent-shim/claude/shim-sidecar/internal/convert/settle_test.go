@@ -404,10 +404,11 @@ func TestFailedToolResultLandsOnTheFailureArmWithItsAccount(t *testing.T) {
 
 func TestUnknownToolBecomesUnmodeledNotResidue(t *testing.T) {
 	// Arrange. AgentUnmodeled is for a tool whose schema genuinely cannot be
-	// known — an MCP server's tool. It is NOT a lazy fallback, and a recognizable
-	// built-in reaching it would be a producer defect.
+	// known — one the vendor added after this schema was written. It is NOT a
+	// lazy fallback, and a recognizable built-in reaching it would be a producer
+	// defect. An MCP server's tool is AgentMcpToolCall (mcp_test.go).
 	c := newTestConverter(t)
-	blocks := toolCall("toolu_m", "mcp__claude_ai_Gmail__send_message", `{"to":"x"}`)
+	blocks := toolCall("toolu_m", "StructuredOutput", `{"to":"x"}`)
 
 	// Act.
 	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1, blocks))
@@ -417,8 +418,8 @@ func TestUnknownToolBecomesUnmodeledNotResidue(t *testing.T) {
 	if start == nil {
 		t.Fatal("an unknown tool must be carried as AgentUnmodeled")
 	}
-	if got := start.GetToolName(); got != "mcp__claude_ai_Gmail__send_message" {
-		t.Fatalf("tool_name = %q, want the qualified name unparsed", got)
+	if got := start.GetToolName(); got != "StructuredOutput" {
+		t.Fatalf("tool_name = %q, want the name as the agent gave it", got)
 	}
 	if start.GetArguments() == nil {
 		t.Fatal("the arguments must be carried structured, so a generic view can list fields")
@@ -429,7 +430,7 @@ func TestUnknownToolsResultSettlesAsUnmodeledSuccess(t *testing.T) {
 	// Arrange. The RESULT of an unknown tool goes through settleUnmodeled,
 	// a separate path from the call's own AgentUnmodeled_Start announcement.
 	c := newTestConverter(t)
-	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_m", "mcp__claude_ai_Gmail__send_message", `{"to":"x"}`))
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_m", "StructuredOutput", `{"to":"x"}`))
 	result := toolResultLine("u1", "toolu_m", ts2, `[{"type":"text","text":"sent"}]`, `{}`)
 
 	// Act.
@@ -441,8 +442,8 @@ func TestUnknownToolsResultSettlesAsUnmodeledSuccess(t *testing.T) {
 	if success == nil {
 		t.Fatal("an unknown tool's result must settle AgentUnmodeled_Success")
 	}
-	if got := success.GetToolName(); got != "mcp__claude_ai_Gmail__send_message" {
-		t.Fatalf("tool_name = %q, want the qualified name unparsed", got)
+	if got := success.GetToolName(); got != "StructuredOutput" {
+		t.Fatalf("tool_name = %q, want the name as the agent gave it", got)
 	}
 }
 
