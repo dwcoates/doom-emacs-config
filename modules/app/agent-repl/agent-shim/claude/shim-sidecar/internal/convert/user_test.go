@@ -148,23 +148,6 @@ func TestToolResultCarrierEmitsNoEmptyPrompt(t *testing.T) {
 	}
 }
 
-func TestKeepaliveBitIsReadFromThePromptEvenThoughItIsWithheld(t *testing.T) {
-	// Arrange. The prompt itself is never served, but it still OPENS the
-	// keep-alive turn — the bit must be read before the record is withheld.
-	c := newTestConverter(t)
-
-	// Act.
-	entries := convertLines(t, c, promptLine("u1", KeepaliveMarker+"ping"))
-
-	// Assert.
-	if got := vendorKindOf(entries[0]); got != "user_prompt" {
-		t.Fatalf("kind = %q, want the prompt still withheld", got)
-	}
-	if !c.keepalive {
-		t.Fatal("the keep-alive bit must be set by the marker even though the prompt is withheld")
-	}
-}
-
 func TestPeerMessageIsEmittedAsAPeerPageLine(t *testing.T) {
 	// Arrange. A message another Claude session sent in carries origin.kind
 	// "peer" and isMeta:true. It must be recognized before the isMeta withhold,

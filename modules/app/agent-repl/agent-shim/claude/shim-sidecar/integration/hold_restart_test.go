@@ -7,7 +7,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 )
 
-// CRITIQUE 18 — the hold ACROSS a restart, and the keep-alive bit across a
+// CRITIQUE 18 — the hold ACROSS a restart, and a keep-alive beside a
 // compaction.
 //
 // The hold's whole point is that the cursor advances SHORT of what was read, so
@@ -17,10 +17,12 @@ import (
 // if it is wrong: a cursor parked short and a boot that skipped the frame anyway
 // is a compaction boundary nobody ever sees.
 //
-// The keep-alive bit is the other in-memory state a compaction sits in the middle
-// of. It is ONE REMEMBERED BOOL cleared only by the next non-keepalive user
-// prompt — and a compaction boundary is not one — so a keep-alive turn that spans
-// a compaction keeps withholding everything, the cut included.
+// A keep-alive is the other thing a compaction can sit in the middle of. Which
+// records are the keep-alive's is read off the transcript's links
+// (convert/keepalive.go), and a compaction boundary names NO parent: it is a
+// durable change to the conversation that every later real prompt inherits — the
+// shim clears its rewind anchor on it for exactly that reason — so the cut is
+// served, while the keep-alive's own work on either side of it stays unstored.
 
 // TestAHeldBoundaryIsConvertedOnceAfterARestart stops the sidecar while the
 // boundary is held, writes the summary that settles it, and asserts the restarted
@@ -100,10 +102,10 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 	}
 }
 
-// TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut asserts the cut
-// itself is withheld while the bit is set: a compaction inside a keep-alive turn
-// is not a user-visible separation, because the turn was never the user's.
-func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
+// TestACompactionBesideAKeepAliveIsServed asserts the cut is a page line even
+// when it lands inside a keep-alive's span: the boundary names no parent, so
+// nothing makes it the keep-alive's, and the conversation really was compacted.
+func TestACompactionBesideAKeepAliveIsServed(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -124,11 +126,11 @@ func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
 		t.Fatalf("the compact_boundary fixture carries no uuid")
 	}
 
-	// Act: the marked prompt, then a compaction with its summary, inside one turn.
+	// Act: the marked prompt, then a compaction with its summary.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, prompt))
-	g.AppendLine(encodeRecord(t, boundary))
+	g.AppendLine(encodeRecord(t, withFields(t, boundary, map[string]any{"parentUuid": nil})))
 	g.AppendLine(compactSummaryLine(t, session, cwd,
 		"f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2abcd", boundaryUUID, "Previously: nothing served."))
 	wantKey := "session:context_cut:" + boundaryUUID
@@ -136,21 +138,17 @@ func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
 		return e.GetUpsertKey() == wantKey
 	})
 
-	// Assert: the cut landed on the keepalive arm, never as a page line.
+	// Assert.
 	e := entryByUpsertKey(fake.Entries(), wantKey)
-	if e.GetAgentUpdate().GetServeableFrame() != nil {
-		t.Errorf("the context cut of a keep-alive turn reached a page line of book %q",
-			e.GetAgentUpdate().GetServeableFrame().GetPageAgentId().GetValue())
-	}
-	if e.GetAgentUpdate().GetUnservedItem().GetKeepalive() == nil {
-		t.Errorf("the context cut did not land on the keepalive arm: %v", e.GetAgentUpdate())
+	if e.GetAgentUpdate().GetServeableFrame() == nil {
+		t.Errorf("the context cut beside a keep-alive is not a page line: %v", e.GetAgentUpdate())
 	}
 }
 
-// TestAKeepAliveBitSurvivesACompactionForTheWorkAfterIt asserts the bit is not
-// cleared by the compaction: assistant work written AFTER the cut is still
-// withheld, because only a non-keepalive user prompt closes the turn.
-func TestAKeepAliveBitSurvivesACompactionForTheWorkAfterIt(t *testing.T) {
+// TestAKeepAlivesWorkAfterACompactionStaysUnstored asserts the keep-alive's own
+// work written AFTER a cut is still not stored: it names the keep-alive's
+// records as its parents, whatever was written between.
+func TestAKeepAlivesWorkAfterACompactionStaysUnstored(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -162,32 +160,28 @@ func TestAKeepAliveBitSurvivesACompactionForTheWorkAfterIt(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3"
 
-	prompt := setUserText(t,
-		retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd),
-		keepaliveMarker+"cache ping")
 	boundary := retargetSession(t, decodeRecord(t, corpusLine(t, "transcript-lines/system-compact_boundary.jsonl", 0)), session, cwd)
 	boundaryUUID, _ := boundary["uuid"].(string)
-	thinking := retargetSession(t, decodeRecord(t, captured.Lines[12]), session, cwd)
-	call := retargetSession(t, decodeRecord(t, captured.Lines[13]), session, cwd)
+	turn := chained(t,
+		setUserText(t, retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd), keepaliveMarker+"cache ping"),
+		retargetSession(t, decodeRecord(t, captured.Lines[12]), session, cwd),
+		retargetSession(t, decodeRecord(t, captured.Lines[13]), session, cwd),
+	)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	g.AppendLine(encodeRecord(t, prompt))
-	g.AppendLine(encodeRecord(t, boundary))
+	g.AppendLine(encodeRecord(t, turn[0]))
+	g.AppendLine(encodeRecord(t, withFields(t, boundary, map[string]any{"parentUuid": nil})))
 	g.AppendLine(compactSummaryLine(t, session, cwd,
 		"f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3abcd", boundaryUUID, "Previously: nothing served."))
-	g.AppendLine(encodeRecord(t, thinking))
-	g.AppendLine(encodeRecord(t, call))
+	appendRecords(t, g, turn[1:]...)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
-	if len(keepalivesOf(fake.Entries())) == 0 {
-		t.Fatalf("nothing landed on the keepalive arm at all, so the bit was never set")
-	}
 	for _, line := range linesForBook(fake.Entries(), session) {
 		if a := activityOf(line); a != nil {
-			t.Errorf("unit %q reached a page line after a compaction inside a keep-alive turn; only a non-keepalive user prompt closes it",
+			t.Errorf("unit %q reached a page line after a compaction beside a keep-alive; it names the keep-alive's records as its parents",
 				a.GetActivityId().GetValue())
 		}
 	}

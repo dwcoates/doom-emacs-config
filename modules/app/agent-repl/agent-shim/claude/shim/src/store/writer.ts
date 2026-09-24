@@ -37,7 +37,22 @@
  *     from exactly this row.
  *   - a detached shell run's `AgentBash` frames → the `bash` lifecycle arm;
  *   - a session fact → the `session_update` entry arm;
- *   - anything belonging to a KEEP-ALIVE turn, and all residue → `unserved_item`.
+ *   - all residue → `unserved_item`;
+ *   - anything belonging to a KEEP-ALIVE turn → NOTHING. {@link storedEntries}
+ *     drops it at the door, before a batch is formed (see below).
+ *
+ * # A keep-alive is never stored
+ *
+ * Nothing needs the rows (2026-09-23). The keep-alive's send, its answer and
+ * the rewind anchor all live in the engine's memory (`engine/keepalive.ts`), a
+ * resume reads the vendor's own transcript, and nothing anywhere reads a
+ * stored keep-alive row: the store serves page lines and bash runs only, and
+ * the daemon has no store client. The sidecar skips the same records on the
+ * file plane, so neither plane writes one. The TAG still rides every entry the
+ * fold produces — it is what this door reads — and `write`/`writeDurable` are
+ * the only doors, so a keep-alive entry from any producer (the fold, the
+ * permission gate, a terminal the teardown writes) is dropped here and nowhere
+ * needs to remember to ask.
  */
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
@@ -124,20 +139,19 @@ function agentInfo(entry: PersistEntry): storev1.StoreAgentUpdate["agentInfo"] {
   if (item === undefined) {
     throw new Error(`shim store writer: entry kind ${entry.item.kind} has no servable item`);
   }
-  if (entry.keepalive) {
-    // A KEEP-ALIVE IS RECORDED AND NEVER SERVED. It made a real API call and
-    // cost real tokens, so dropping it would lose accounting; it has no book,
-    // so serving it would put a turn nobody asked for in the feed.
-    return {
-      case: "unservedItem",
-      value: create(storev1.StoreUnservedItemSchema, { unservedItem: { case: "keepalive", value: item } }),
-    };
-  }
   return { case: "serveableFrame", value: pageLine(entry, item) };
 }
 
 /** One `PersistEntry` as the store's own envelope. */
 export function toStoreEntry(producer: string, entry: PersistEntry): storev1.StoreEntry {
+  if (entry.keepalive) {
+    // THE DOOR DROPS EVERY KEEP-ALIVE ENTRY ({@link storedEntries}), so one
+    // reaching the envelope is a writer defect, refused like every other
+    // entry that cannot be carried.
+    throw new Error(
+      `shim store writer: keep-alive entry ${entry.upsertKey} reached the envelope; nothing of a keep-alive is stored`,
+    );
+  }
   if (entry.upsertKey === "") {
     throw new Error("shim store writer: an entry with an empty upsert key would collide with every other");
   }
@@ -221,6 +235,28 @@ const defaultSleep = (ms: number): Promise<void> =>
   });
 
 /**
+ * The entries of `entries` the store is to be given: every one but a
+ * keep-alive's, each of which is stated at DEBUG and dropped.
+ *
+ * IT ANNOUNCES NO ROW: the record names the arm and the book, never an upsert
+ * key, because nothing was stored under one.
+ */
+function storedEntries(entries: readonly PersistEntry[]): PersistEntry[] {
+  const stored: PersistEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.keepalive) {
+      stored.push(entry);
+      continue;
+    }
+    LOGGER.debug(
+      { item_kind: entry.item.kind, discriminator: entry.source.discriminator, agent_id: entry.agentId.value },
+      "a keep-alive turn's entry is never stored; dropped before the batch",
+    );
+  }
+  return stored;
+}
+
+/**
  * Build the whole record plane: this write half, plus the reader and the
  * reconciler, behind the one {@link Persistence} seam.
  */
@@ -231,15 +267,14 @@ const defaultSleep = (ms: number): Promise<void> =>
  * `applyServeableFrameLifecycle` calls `ensureAgent` for a prompt and for a
  * frame, and for nothing else). A session update is a fact about the SESSION
  * that carries the main agent in its envelope purely so it has a book to be
- * filed under, and a keep-alive lands as an unserved item — neither creates the
- * `agent` row, so a watcher woken on one goes straight back into the refusal it
- * was blocked on, and a caller that concluded the absence was over from one
- * would ask the store for a book that still does not exist.
+ * filed under — it does not create the `agent` row, so a watcher woken on one
+ * goes straight back into the refusal it was blocked on, and a caller that
+ * concluded the absence was over from one would ask the store for a book that
+ * still does not exist. (A keep-alive's entries never reach a batch at all.)
  */
 function booksRegisteredBy(entries: readonly PersistEntry[]): Set<string> {
   const books = new Set<string>();
   for (const entry of entries) {
-    if (entry.keepalive) continue;
     if (entry.item.kind !== "prompt" && entry.item.kind !== "frame") continue;
     books.add(entry.agentId.value);
   }
@@ -625,7 +660,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       producer = undefined;
     },
 
-    async writeDurable(entries: PersistEntry[]): Promise<void> {
+    async writeDurable(given: PersistEntry[]): Promise<void> {
+      const entries = storedEntries(given);
       if (entries.length === 0) return;
       wroteUnderProducer = true;
       noteShellRuns(entries);
@@ -653,7 +689,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       }
     },
 
-    write(entries: PersistEntry[]): void {
+    write(given: PersistEntry[]): void {
+      const entries = storedEntries(given);
       if (entries.length === 0) return;
       wroteUnderProducer = true;
       noteShellRuns(entries);

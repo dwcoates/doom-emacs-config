@@ -58,6 +58,11 @@ type Tailer struct {
 	// answer, which is why the boolean exists rather than a zero sentinel.
 	lastSize int64
 	sized    bool
+
+	// primed says a Primer handler has been handed the bytes before the first
+	// frame it was delivered (Primer). Set once; a handler reads every byte
+	// after that point itself.
+	primed bool
 }
 
 // New builds a Tailer over path with the given codec, handler, and attribution
@@ -199,6 +204,9 @@ func (t *Tailer) Poll() (PollResult, error) {
 	// and the handler must convert it whatever the evidence.
 	t.ctx.HoldForced = t.ctx.HeldDeliveries > 0
 	forced := t.ctx.HoldForced
+	if err := t.prime(offset - int64(len(carry))); err != nil {
+		return PollResult{}, err
+	}
 	entries := t.handler.Handle(frames, t.ctx)
 	held := t.ctx.HeldDeliveries > 0
 	newOffset, newCarry, records, err = t.applyHold(frames, forced, offset, newOffset, newCarry, records)
@@ -287,6 +295,32 @@ func (t *Tailer) Commit(r PollResult) {
 	t.records = r.Records
 	t.log.With(logging.Context{Operation: "tailer-commit", Path: t.path, FileID: t.fileID, Offset: logging.Off(t.offset)}).
 		LogVerbose("cursor committed carry_bytes=%d", len(t.carry))
+}
+
+// prime hands a Primer handler the file's bytes before `start`, the offset of
+// the first byte this poll decodes, once per tailer (Primer). A handler that is
+// not a Primer, or a first delivery that starts at byte 0, needs nothing.
+func (t *Tailer) prime(start int64) error {
+	if t.primed {
+		return nil
+	}
+	primer, ok := t.handler.(Primer)
+	if !ok || start <= 0 {
+		t.primed = true
+		return nil
+	}
+	f, err := os.Open(t.path)
+	if err != nil {
+		return fmt.Errorf("tail: opening %s to prime its handler with the %d byte(s) before the first delivered frame: %w", t.path, start, err)
+	}
+	defer f.Close()
+	if err := primer.Prime(io.NewSectionReader(f, 0, start), t.ctx); err != nil {
+		return fmt.Errorf("tail: priming the handler of %s with the %d byte(s) before the first delivered frame: %w", t.path, start, err)
+	}
+	t.primed = true
+	t.log.With(logging.Context{Operation: "tailer-prime", Path: t.path, FileID: t.fileID, Offset: logging.Off(start)}).
+		LogVerbose("handed the handler the %d byte(s) before the first delivered frame", start)
+	return nil
 }
 
 // readAt reads len(buf) bytes at off from path.

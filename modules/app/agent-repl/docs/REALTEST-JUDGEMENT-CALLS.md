@@ -1634,3 +1634,13 @@ status), never a silent revert to idle.
 
 The auto-interrupt classifier already exists end to end (classify.go: judge →
 interject → KillTurn, with the footer's waiting-interrupting state).
+
+## Keep-alive rows are no longer stored (2026-09-23)
+
+| call | chosen | why |
+|---|---|---|
+| whether any purpose needs stored keep-alive rows | none does | The send, the result, the scope close and the rewind anchor are the shim's memory; `resumeSessionAt` reads the vendor's transcript; a refused rewind re-delivers the prompt it holds. The store serves only page lines and bash runs, and the daemon has no store client, so the "accounting" rows had no reader. |
+| the sidecar's structural rule | the prompt marker plus the transcript's own links | A user record with a `promptId` is the keep-alive's when that promptId is a marked prompt's; a user record with none is classified by the marker when it is prose, else by its parent; every other record follows its `parentUuid`. The shim-minted client uuid was not used: the SDK declares its echo on the stream, not that the transcript's user record keeps it. |
+| a compaction beside a keep-alive | served | A `compact_boundary` names no parent, the conversation really was compacted, and the shim clears its rewind anchor on it; the old one-bool rule withheld it, which disagreed with the stream plane's own attribution of the same key. |
+| a restart mid keep-alive | the file prefix is classified before the first delivery (`tail.Primer`) | The boot rewind stops at the last turn start, which is another prompt whenever one landed between the keep-alive's prompt and its reply. A failed prefix read fails the poll and is retried. |
+| a keep-alive turn that spawns a subagent | not addressed | Sidechain files carry no marker; this was equally uncovered by the one-bool rule and is outside the keep-alive path as the task scoped it. |

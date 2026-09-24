@@ -13,6 +13,8 @@ package handler
 // prompt, so only the stream plane owns turn lifecycle.
 
 import (
+	"io"
+
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -61,6 +63,21 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
+}
+
+// Prime implements tail.Primer: the bytes before the first frame this handler
+// will be handed are classified for the keep-alive rule, so a keep-alive whose
+// prompt a restarted reader resumed past still owns the records after it
+// (convert/keepalive.go).
+func (h *SessionTranscriptHandler) Prime(prefix io.Reader, ctx *Context) error {
+	seed, err := h.conv.SeedKeepalive(prefix)
+	if err != nil {
+		return err
+	}
+	h.log.With(handleCtx("keepalive-seed", ctx)).LogVerbose(
+		"classified the %d line(s) before the first delivered frame for the keep-alive rule: %d keep-alive record(s) under %d keep-alive prompt(s)",
+		seed.Lines, seed.KeepaliveRecords, seed.KeepalivePrompts)
+	return nil
 }
 
 // convertFrames runs the converter over a batch, turning an unreadable line into

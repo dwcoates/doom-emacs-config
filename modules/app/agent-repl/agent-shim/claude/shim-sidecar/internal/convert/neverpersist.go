@@ -29,9 +29,9 @@ import (
 // FILE is re-read — the sidecar's sources are the vendor's own files, which is
 // exactly why it holds no retry buffer and spills nothing.
 //
-// KEEPALIVE IS NOT RESIDUE. It rides the same `unserved_item` field, but it is a
-// well-formed conversation fact with no book rather than something the reader
-// could not carry, and it is persisted like any other typed entry.
+// KEEPALIVE IS NOT RESIDUE, and is not withheld here: the converter drops a
+// keep-alive's record itself, before any entry leaves it (keepalive.go), so
+// nothing on the `unserved_item.keepalive` arm reaches this rule at all.
 
 // IsResidue reports whether an entry carries one of the three RESIDUE arms —
 // the ones no reader anywhere consumes.
