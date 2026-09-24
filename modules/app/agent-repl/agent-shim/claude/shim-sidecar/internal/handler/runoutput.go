@@ -22,6 +22,13 @@ package handler
 // can embed it without becoming a converter of the bytes it ingests.
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"unicode/utf8"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -32,13 +39,18 @@ import (
 // how much, and everything past it is reported as omitted rather than silently
 // dropped or unboundedly accumulated.
 //
-// IT IS THE RENDERER'S OWN CAP, AND IT HOLDS THE TAIL. The daemon draws a
-// detached shell's last 16 KiB (`spoolCap`, daemon/internal/resolve/feed) and
-// draws nothing of a terminal's output at all, so holding a megabyte — the old
-// bound, a PREFIX — put up to 1 MiB into every terminal row for nobody to read.
-// The run's most recent bytes are what a reader is shown, so they are what a
-// terminal keeps.
-const maxRememberedOutput = 16 << 10
+// IT IS THE RENDERER'S OWN CAP, READ FROM THE CONTRACT. conversation.v1
+// AgentBashTailCap states it once, and the daemon draws by the same constant,
+// so the bytes this process stores and the bytes a reader is shown cannot
+// drift apart (owner ruling 2026-09-23: output beyond what is rendered is not
+// stored). The run's most recent bytes are what a reader is shown, so they are
+// what this keeps.
+const maxRememberedOutput = int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
+
+// prefixChunk is how much of a spool one reseed read holds at a time. The
+// reseed streams the file rather than reading it whole, so its memory is this
+// and the window, however long the run has been talking.
+const prefixChunk = 64 << 10
 
 // fileCoords is where a handler last read: the cursor's own identity for the
 // file, and how far into it the handler has seen.
@@ -65,6 +77,24 @@ type RunOutput struct {
 	// stated as partial rather than misreported as whole.
 	seen    []byte
 	omitted uint64
+	// omittedNewlines counts the line breaks in the omitted bytes, and
+	// omittedEndsLine says the last omitted byte was one. Together they are
+	// what the rendered tail's `lines_omitted` is computed from without
+	// holding a byte of what was dropped.
+	omittedNewlines uint64
+	omittedEndsLine bool
+	// boundStated reports that the bound's once-per-run record was written.
+	boundStated bool
+	// through is the file offset the window has absorbed through, for a
+	// handler that absorbs by offset (Absorb). A batch that does not begin
+	// here — a restarted process's first batch, a batch re-read after a write
+	// that was never acknowledged, a file reset to zero — RESEEDS the window
+	// from the file, so the tail never double-counts or skips a byte. It is -1
+	// after a reseed that failed, which forces the next batch to reseed.
+	through int64
+	// readPrefix streams a file's first upTo bytes into sink. It is the one
+	// piece of I/O here, injected so the reseed's failure is testable.
+	readPrefix func(path string, upTo int64, sink func([]byte)) error
 	// read reports that this handler has already accumulated a batch of this
 	// run's bytes, which is what a terminal states as `output_observed`.
 	read bool
@@ -86,7 +116,7 @@ type RunOutput struct {
 // NewRunOutput builds the accumulator and the converter its terminals are
 // spelled through.
 func NewRunOutput(log *logging.Bound) *RunOutput {
-	return &RunOutput{conv: convert.New(log), log: log}
+	return &RunOutput{conv: convert.New(log), log: log, readPrefix: readFilePrefix}
 }
 
 // Conv answers the converter this accumulator spells through, so a handler that
@@ -111,25 +141,125 @@ func (r *RunOutput) RememberCoords(ctx *Context) {
 // the earlier bytes it drops.
 func (r *RunOutput) Remember(ctx *Context, raw []byte) {
 	r.read = true
-	crossed := r.omitted == 0
+	r.window(raw)
+	if r.omitted == 0 || r.boundStated {
+		return
+	}
+	r.boundStated = true
+	// THE TAIL AND THE TERMINAL CARRY THE OMITTED COUNT, so the reader is told
+	// what it is looking at and nothing is silently truncated. The bound firing
+	// is the bound doing its job on a talkative run, so the record is
+	// informational, states the counts, and is written ONCE PER RUN: on the
+	// batch that first crosses it.
+	r.log.With(handleCtx("run-output-bound", ctx)).Log(
+		"the run has said more than %d bytes; its tail and terminal state the last %d and report %d omitted rather than claiming to carry the whole",
+		maxRememberedOutput, maxRememberedOutput, r.omitted)
+}
+
+// window appends raw to the bounded tail, folding what falls off its head into
+// the omitted counts.
+func (r *RunOutput) window(raw []byte) {
 	r.seen = append(r.seen, raw...)
 	if len(r.seen) <= maxRememberedOutput {
 		return
 	}
 	drop := len(r.seen) - maxRememberedOutput
+	dropped := r.seen[:drop]
 	r.omitted += uint64(drop)
+	r.omittedNewlines += uint64(bytes.Count(dropped, []byte("\n")))
+	r.omittedEndsLine = dropped[len(dropped)-1] == '\n'
 	r.seen = append(r.seen[:0], r.seen[drop:]...)
-	if !crossed {
-		return
+}
+
+// Absorb folds one batch that BEGINS at file offset `at` into the run's
+// window, reseeding the window from the file whenever the batch does not
+// continue what it holds. It answers an error only when that reseed could not
+// read the file, and then the window is left marked for the next batch to
+// reseed.
+func (r *RunOutput) Absorb(ctx *Context, at int64, raw []byte) error {
+	if at != r.through {
+		if err := r.reseed(ctx, at); err != nil {
+			r.through = -1
+			return err
+		}
 	}
-	// THE TERMINAL ITSELF CARRIES THE OMITTED COUNT, so the reader is told what
-	// it is looking at and nothing is silently truncated. The bound firing is
-	// the bound doing its job on a talkative run, so the record is
-	// informational, states the counts, and is written once: on the batch that
-	// first crosses it.
-	r.log.With(handleCtx("run-output-bound", ctx)).Log(
-		"the run has said more than %d bytes; its terminal states the last %d and reports %d omitted rather than claiming to carry the whole",
-		maxRememberedOutput, maxRememberedOutput, r.omitted)
+	r.Remember(ctx, raw)
+	r.through = at + int64(len(raw))
+	return nil
+}
+
+// reseed rebuilds the window from the file's first `at` bytes: the window is a
+// pure function of the file's prefix, so reading that prefix again is what
+// makes a restarted or re-read tail identical to the one it supersedes.
+func (r *RunOutput) reseed(ctx *Context, at int64) error {
+	r.seen, r.omitted, r.omittedNewlines, r.omittedEndsLine = nil, 0, 0, false
+	if at == 0 {
+		r.log.With(handleCtx("run-output-reseed", ctx)).
+			LogVerbose("the batch begins the file; the window starts empty (held through=%d)", r.through)
+		return nil
+	}
+	if err := r.readPrefix(ctx.Path, at, r.window); err != nil {
+		r.seen, r.omitted, r.omittedNewlines, r.omittedEndsLine = nil, 0, 0, false
+		return fmt.Errorf("reseeding the run's tail from the first %d bytes of %s: %w", at, ctx.Path, err)
+	}
+	r.log.With(handleCtx("run-output-reseed", ctx)).
+		LogVerbose("the batch does not continue the window (held through=%d, batch at=%d); reseeded from the file's first %d bytes omitted=%d",
+			r.through, at, at, r.omitted)
+	return nil
+}
+
+// Rendered answers the run's output AS IT IS DRAWN: the window cut to begin on
+// a line start once anything is omitted, the bytes that precede it, and the
+// lines those bytes held (a line the cut split counts as one).
+//
+// THE CUT IS THE RENDERER'S RULE, made here so nothing past what is drawn is
+// ever stored. It is the daemon's old capSpool, restated over a window: the
+// window's bytes before its first line break are omitted with everything
+// earlier; a window with no line break is kept whole from its first complete
+// character, so the text is never a torn UTF-8 sequence.
+func (r *RunOutput) Rendered() (text string, bytesOmitted, linesOmitted uint64) {
+	if r.omitted == 0 {
+		return string(r.seen), 0, 0
+	}
+	if i := bytes.IndexByte(r.seen, '\n'); i >= 0 {
+		// Everything through the window's first line break is dropped, and
+		// that stretch ends on a line break, so it holds exactly the omitted
+		// line breaks plus this one.
+		return string(r.seen[i+1:]), r.omitted + uint64(i+1), r.omittedNewlines + 1
+	}
+	start := 0
+	for start < len(r.seen) && start < utf8.UTFMax && !utf8.RuneStart(r.seen[start]) {
+		start++
+	}
+	lines := r.omittedNewlines
+	if !r.omittedEndsLine {
+		// The omitted bytes end mid-line, and that line counts.
+		lines++
+	}
+	return string(r.seen[start:]), r.omitted + uint64(start), lines
+}
+
+// readFilePrefix streams the first upTo bytes of path into sink, a bounded
+// chunk at a time.
+func readFilePrefix(path string, upTo int64, sink func([]byte)) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close() //nolint:errcheck // read-only; a failed read already answered
+	buf := make([]byte, prefixChunk)
+	for done := int64(0); done < upTo; {
+		n := int64(len(buf))
+		if rest := upTo - done; rest < n {
+			n = rest
+		}
+		if _, err := io.ReadFull(f, buf[:n]); err != nil {
+			return fmt.Errorf("the file ended or failed %d bytes in: %w", done, err)
+		}
+		sink(buf[:n])
+		done += n
+	}
+	return nil
 }
 
 // TerminalAttribution builds the attribution a seam-minted terminal is written
