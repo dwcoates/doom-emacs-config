@@ -1605,6 +1605,23 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"vendorStartFailed\":{}}"))
                    '(:cause (:arm :vendor-start-failed :value (:detail "")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-open-error-lock-holder-unavailable-arm ()
+  "OpenWorkspaceError's `lock_holder_unavailable' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"lockHolderUnavailable\":{\"binary\":\"/b/shim-lock\",\"osError\":\"spawn ENOENT\"}}"))
+                   '(:cause (:arm :lock-holder-unavailable
+                             :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-lock-holder-unavailable-empty-fields ()
+  "Omitted `binary' and `osError' decode as empty strings, never as missing keys."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"lockHolderUnavailable\":{}}"))
+                   '(:cause (:arm :lock-holder-unavailable :value (:binary "" :os-error "")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-open-error-unset-cause-is-a-breach ()
   "OpenWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -1625,7 +1642,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()

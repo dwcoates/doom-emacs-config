@@ -1927,6 +1927,65 @@ func TestBringUpRelaysTheShimsConversationOwnedRefusal(t *testing.T) {
 	asRefusal(t, err, ArmConversationOwned)
 }
 
+// TestBringUpRelaysTheShimsLockHolderUnavailableRefusal covers a shim that
+// could not spawn its own kernel-lock holder: nobody owns the conversation, so
+// the relay must name the broken helper rather than an ownership conflict.
+func TestBringUpRelaysTheShimsLockHolderUnavailableRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func(t *testing.T, refusal *Refusal)
+	}{
+		{name: "the refusal rides the lock_holder_unavailable arm", check: func(t *testing.T, refusal *Refusal) {
+			if refusal.Arm != ArmLockHolderUnavailable {
+				t.Fatalf("arm = %q, want %q", refusal.Arm, ArmLockHolderUnavailable)
+			}
+		}},
+		{name: "the arm carries the binary", check: func(t *testing.T, refusal *Refusal) {
+			if got := refusal.Fields["binary"]; got != "/missing/shim-lock" {
+				t.Fatalf("binary = %v, want /missing/shim-lock", got)
+			}
+		}},
+		{name: "the arm carries the OS error", check: func(t *testing.T, refusal *Refusal) {
+			if got := refusal.Fields["os_error"]; got != "spawn /missing/shim-lock ENOENT" {
+				t.Fatalf("os_error = %v, want the spawn's own account", got)
+			}
+		}},
+		{name: "the reason never claims another shim owns the conversation", check: func(t *testing.T, refusal *Refusal) {
+			if strings.Contains(refusal.Reason, "another shim") {
+				t.Fatalf("reason = %q, want no ownership claim", refusal.Reason)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.response = &shimv1.StartSessionResponse{
+				Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+					Detail: "this shim's lock helper failed to start",
+					Cause: &shimv1.StartSessionFailure_LockHolderUnavailable{
+						LockHolderUnavailable: &shimv1.StartSessionLockHolderUnavailable{
+							Binary:  "/missing/shim-lock",
+							OsError: "spawn /missing/shim-lock ENOENT",
+						},
+					},
+				}},
+			}
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			refusal, ok := AsRefusal(err)
+			if !ok {
+				t.Fatalf("error = %v, want a refusal", err)
+			}
+			tt.check(t, refusal)
+		})
+	}
+}
+
 // TestAGateParkedBringUpStatesTheLinkItself pins the link restatement: no
 // watcher opens on the gate-parked path, so without this the surfaces keep
 // drawing the DEAD link of the shim that died before this one — which outranks

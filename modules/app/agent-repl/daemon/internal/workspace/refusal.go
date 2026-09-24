@@ -69,6 +69,12 @@ const (
 	// lock first, and two vendor processes on one conversation is what that
 	// lock exists to prevent. OpenWorkspaceError has no arm for it.
 	ArmConversationOwned = "conversation_owned"
+	// ArmLockHolderUnavailable is a StartSession the shim refused because it
+	// could not SPAWN its own kernel-lock holder (`shim-lock`): no claim was
+	// attempted, so NOBODY is known to own the conversation. It is a broken
+	// lock helper, never an ownership conflict, and it is relayed on
+	// OpenWorkspaceError.lock_holder_unavailable{binary, os_error}.
+	ArmLockHolderUnavailable = "lock_holder_unavailable"
 	// ArmAlreadyStarted is a StartSession the shim refused because it ALREADY
 	// serves a session: one shim serves exactly one. The daemon never sends a
 	// second StartSession to a shim it adopted, so reaching this arm means the

@@ -255,6 +255,16 @@ the user as the verb, the word refused, the arm keyword, and the fields."
       (agent-repl--info ws (format "elisp.verbs.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
                         ws keyword (plist-get arm :value))
       (agent-repl-host-handle-refusal ws arm))
+     ((eq keyword :lock-holder-unavailable)
+      ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
+      ;; the conversation: the shim's own lock helper would not start, and
+      ;; the binary plus the OS error are the whole remediation, so they
+      ;; are said in words rather than as a raw plist.
+      (let ((fields (plist-get arm :value)))
+        (agent-repl--warn ws (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
+                          ws keyword fields)
+        (message "%s refused: the shim's lock helper %s failed to start (%s); no other process owns this conversation"
+                 op (plist-get fields :binary) (plist-get fields :os-error))))
      (t
       ;; THE SLUG NAMES THE VERB: `elisp.verbs.<op>-refused'.  A refusal
       ;; reader wants every refusal of ONE verb, and a slug shared by all of

@@ -1725,6 +1725,18 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			return nil, refuse(log, "OpenWorkspace", ArmConversationOwned,
 				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false)
 		}
+		if unavailable := failure.GetLockHolderUnavailable(); unavailable != nil {
+			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetLockHolderUnavailable() != nil"})
+			// THE SHIM'S OWN LOCK HELPER FAILED TO START. No claim was
+			// attempted, so nobody is known to own the conversation: saying
+			// "another shim holds it" here would send the reader hunting for
+			// a process that does not exist. The binary and the OS error ride
+			// the typed arm, because fixing that binary is the remediation.
+			return nil, refuseWith(log, "OpenWorkspace", ArmLockHolderUnavailable,
+				fmt.Sprintf("the shim's lock helper %s failed to start for workspace %q: %s",
+					unavailable.GetBinary(), ws, unavailable.GetOsError()), false,
+				map[string]any{"binary": unavailable.GetBinary(), "os_error": unavailable.GetOsError()})
+		}
 		if failure.GetUnknownSession() != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetUnknownSession() != nil"})
 			// THE RESUME NAMED A CONVERSATION THE SHIM HAS NO TRANSCRIPT FOR.

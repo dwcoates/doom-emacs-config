@@ -1016,8 +1016,8 @@ func (w *World) ServiceBinaries() harness.ServiceBinaries {
 // none of NewWorld's environment, and each site that restated it by hand
 // forgot a different piece: without AGENT_REPL_SHIM_LOCK_BIN the successor's
 // shims resolve the lock holder under an e2e $HOME that has none, the kernel
-// claim dies `spawn ENOENT`, and the start is refused `conversation_owned` for
-// a conversation nobody holds; without the fake spool root they spool where
+// claim dies `spawn ENOENT`, and the start is refused `lock_holder_unavailable`
+// (once `conversation_owned`, for a conversation nobody holds); without the fake spool root they spool where
 // the sidecar never globs.
 func (w *World) SuccessorOpts(t *testing.T) harness.Opts {
 	t.Helper()

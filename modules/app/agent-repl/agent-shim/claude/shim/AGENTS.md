@@ -149,6 +149,14 @@ means the daemon and this build disagree about the contract.
   shim refuse every session on Linux. `shim-lock` exit 3 is the distinct
   "another process holds it" answer, and anything else is a hard failure —
   never `conversation_owned`.
+- **A holder that cannot even be SPAWNED is its own refusal.** A missing or
+  unexecutable `shim-lock` (the synchronous `spawn` throw, or Node's
+  asynchronous `'error'` event before the claim settles) raises
+  `LockHolderUnavailableError`, recorded at ERROR because it is a defect, and
+  `StartSession` answers `lock_holder_unavailable {binary, os_error}`. Nobody
+  owns the conversation in that case, so it must never read as
+  `conversation_owned`; the daemon relays it as
+  `OpenWorkspaceError.lock_holder_unavailable`.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
   query is created, and SIX things settle it: the PROVEN-LIVE SIGNAL (below);
   `init`, for a vendor that still announces one first; a hook that comes back
@@ -1018,6 +1026,13 @@ npm run smoke         # spawn and dial dist/main.js for real (needs a build firs
 # test, coverage and smoke (and their pre-hooks) run through ../../../bin/background.sh;
 # the vitest configs refuse a run without it, so prefix any bare `npx vitest` with it
 ```
+
+Dependencies come from the SELF-HEALING shared node store, exactly as the
+webapp's do: `node_modules` links `~/.cache/agent-repl/node-store/shim-<lockhash>`,
+every `pre*` hook runs `../../../bin/ensure-deps.sh`, and an entry that exists
+but fails `npm ls --depth=0` is repaired in place under its own lock and swapped
+in atomically, never reinstalled through the link. `webapp/AGENTS.md`
+("Dependencies come from a SELF-HEALING shared store") is the full account.
 
 - `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same
   program `tsc` does, and the rules it adds on top are the ones that catch what

@@ -44,16 +44,19 @@ import {
 /**
  * Why a session could not be started.
  *
- * `cold` is the one arm carrying evidence: the daemon needs the context cost
- * and the reason to offer the user a remediation, so a bare "it was cold" is
- * unactionable.
+ * `cold` carries evidence because the daemon needs the context cost and the
+ * reason to offer the user a remediation, so a bare "it was cold" is
+ * unactionable. `lockHolderUnavailable` carries the binary and the OS error,
+ * because "our own lock helper would not start" is fixed by fixing THAT
+ * binary, and the reader must not have to dig it out of prose.
  */
 type StartSessionCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
   | { readonly kind: "vendorStartFailed" }
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
-  | { readonly kind: "conversationOwned" };
+  | { readonly kind: "conversationOwned" }
+  | { readonly kind: "lockHolderUnavailable"; readonly binary: string; readonly osError: string };
 
 /** The base constructor for `shim.v1.StartSessionFailure`. */
 export function startSessionFailure(
@@ -71,7 +74,15 @@ export function startSessionFailure(
             ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
             : cause.kind === "alreadyStarted"
               ? { case: "alreadyStarted", value: create(shimv1.StartSessionAlreadyStartedSchema, {}) }
-              : { case: "conversationOwned", value: create(shimv1.StartSessionConversationOwnedSchema, {}) },
+              : cause.kind === "lockHolderUnavailable"
+                ? {
+                    case: "lockHolderUnavailable",
+                    value: create(shimv1.StartSessionLockHolderUnavailableSchema, {
+                      binary: cause.binary,
+                      osError: cause.osError,
+                    }),
+                  }
+                : { case: "conversationOwned", value: create(shimv1.StartSessionConversationOwnedSchema, {}) },
   });
 }
 

@@ -79,6 +79,7 @@ make_tree() {
              "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
+    cp "$THIS_DIR/lib-node-store.sh" "$root/bin/lib-node-store.sh"
 
     # Sources.
     echo "export const x = 1" > "$root/agent-shim/claude/shim/src/main.ts"
@@ -381,7 +382,10 @@ t_deps_store_shared_across_worktrees() {
     : > "$first/stub.log"; : > "$second/stub.log"
     STORE="$store" run_script "$first" deps >/dev/null
     STORE="$store" run_script "$second" deps >/dev/null
-    if [ -d "$second/webapp/node_modules" ] && ! grep -q "npm" "$second/stub.log"; then
+    # The second worktree CHECKS the entry (`npm ls` inside it: the self-healing
+    # store judges an entry by its lockfile, not by a directory existing) and
+    # installs nothing.
+    if [ -d "$second/webapp/node_modules" ] && ! grep -qE "npm (ci|install)" "$second/stub.log"; then
         pass "deps: second worktree links the populated store, no reinstall"
     else
         fail "deps: second worktree reuses store" "stub.log: $(cat "$second/stub.log")"
@@ -1455,6 +1459,279 @@ t_ensure_deps_fails_when_the_install_fails() {
     fi
     rm -rf "$root"
 }
+
+# --- the self-healing store ---------------------------------------------------
+#
+# A store entry that EXISTS but does not satisfy its lockfile (emptied through a
+# link on 2026-09-23, or left partial) is repaired in place, under a per-entry
+# mkdir lock, into a fresh tree swapped in by rename. The npm stub here judges a
+# tree by its `.ok` marker, records every call with its cwd, and REFUSES to
+# install through a symlinked node_modules, recording the violation.
+
+# make_heal_npm BINDIR — the store-aware npm stub. NPM_FAIL_IN_TREES=1 makes an
+# install inside a store entry's fresh tree fail, so the repair itself fails.
+make_heal_npm() {
+    cat > "$1/npm" <<'NPM'
+#!/usr/bin/env bash
+echo "npm $* @ $PWD" >> "$STUB_LOG"
+case "${1:-}" in
+    ls) [ -f node_modules/.ok ]; exit $? ;;
+    ci|install)
+        if [ -L node_modules ]; then
+            echo "INSTALL-THROUGH-LINK $PWD" >> "$STUB_LOG"
+            exit 70
+        fi
+        case "$PWD" in
+            */.trees/*) [ "${NPM_FAIL_IN_TREES:-0}" = 1 ] && exit 9 ;;
+        esac
+        rm -rf node_modules
+        mkdir -p node_modules && echo ok > node_modules/.ok ;;
+esac
+exit 0
+NPM
+    chmod +x "$1/npm"
+}
+
+# heal_fixture — a tree whose webapp links a store entry that EXISTS, keyed by
+# the webapp's own manifest, with an EMPTY node_modules. Echoes the root.
+heal_fixture() {
+    local root key entry
+    root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_heal_npm "$root/stubs"
+    key="$(store_key_of "$root/webapp/package.json")"
+    entry="$root/store/webapp-$key"
+    mkdir -p "$entry/node_modules"
+    cp "$root/webapp/package.json" "$entry/package.json"
+    rm -rf "$root/webapp/node_modules"
+    ln -s "$entry/node_modules" "$root/webapp/node_modules"
+    : > "$root/stub.log"
+    echo "$root"
+}
+
+# heal_entry ROOT — the store entry heal_fixture's webapp links.
+heal_entry() {
+    echo "$1/store/webapp-$(store_key_of "$1/webapp/package.json")"
+}
+
+# heal_lock ENTRY — the entry's repair lock, as lib-node-store.sh names it.
+heal_lock() {
+    echo "$(dirname "$1")/.$(basename "$1").lock"
+}
+
+t_heal_empty_entry_repaired() {
+    local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    if [ -f "$root/webapp/node_modules/.ok" ] && [ -L "$root/webapp/node_modules" ] &&
+           [ "$(readlink "$root/webapp/node_modules")" = "$entry/node_modules" ] &&
+           grep -q 'REPAIRING' "$root/err"; then
+        pass "heal: an EMPTY store entry is repaired in place, loudly, and the link is kept"
+    else
+        fail "heal: an EMPTY store entry is repaired in place" "err: $(cat "$root/err") log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_partial_entry_repaired() {
+    local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    echo half > "$entry/node_modules/half-installed"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    if [ -f "$entry/node_modules/.ok" ] && [ ! -e "$entry/node_modules/half-installed" ] &&
+           [ -z "$(find "$entry/.trees" -maxdepth 1 -name 'retired-*')" ]; then
+        pass "heal: a PARTIAL store entry is replaced by a whole fresh tree, the broken one retired"
+    else
+        fail "heal: a PARTIAL store entry is repaired" "err: $(cat "$root/err") trees: $(ls -a "$entry/.trees" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_never_installs_through_a_link() {
+    local root; root="$(heal_fixture)"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    if grep -qE 'npm (ci|install)' "$root/stub.log" && ! grep -q 'INSTALL-THROUGH-LINK' "$root/stub.log"; then
+        pass "heal: the repair installs into a fresh tree, never through a symlink"
+    else
+        fail "heal: the repair never installs through a symlink" "log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_repairs_a_tree_it_swapped_in_before() {
+    local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    # The swapped-in tree breaks too; the second repair replaces the LINK.
+    rm "$entry/node_modules/.ok"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    if [ -L "$entry/node_modules" ] && [ -f "$entry/node_modules/.ok" ] &&
+           [ "$(find "$entry/.trees" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1 ]; then
+        pass "heal: a broken tree an earlier repair swapped in is replaced, and the old one removed"
+    else
+        fail "heal: a previously swapped tree is repaired" "err: $(cat "$root/err") trees: $(ls -a "$entry/.trees" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_healthy_entry_untouched() {
+    local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    echo ok > "$entry/node_modules/.ok"
+    echo mine > "$entry/node_modules/sentinel"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    if [ -f "$entry/node_modules/sentinel" ] && [ ! -L "$entry/node_modules" ] &&
+           ! grep -qE 'npm (ci|install)' "$root/stub.log" && ! grep -q 'node-store' "$root/err"; then
+        pass "heal: a HEALTHY store entry is left exactly as it is"
+    else
+        fail "heal: a healthy store entry is untouched" "err: $(cat "$root/err") log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_waits_for_a_concurrent_repair_then_skips() {
+    local root entry lock fifo line pid rc=0 saw=0
+    root="$(heal_fixture)"; entry="$(heal_entry "$root")"; lock="$(heal_lock "$entry")"
+    # A live holder: this harness itself.
+    mkdir -p "$lock"; echo "$$" > "$lock/pid"
+    fifo="$root/err.fifo"; mkfifo "$fifo"
+    run_script "$root" deps >/dev/null 2>"$fifo" &
+    pid=$!
+    exec 3<"$fifo"
+    # The waiter's own announcement is the synchronization point: no sleeps.
+    while IFS= read -r -t 30 -u 3 line; do
+        echo "$line" >> "$root/err"
+        case "$line" in *waiting*) saw=1; break ;; esac
+    done
+    # The holder finishes ITS repair and releases the lock.
+    echo ok > "$entry/node_modules/.ok"
+    rm -rf "$lock"
+    cat <&3 >> "$root/err"
+    exec 3<&-
+    wait "$pid" || rc=$?
+    if [ "$saw" -eq 1 ] && [ "$rc" -eq 0 ] && grep -q 'repaired concurrently; skipping' "$root/err" &&
+           ! grep -qE 'npm (ci|install)' "$root/stub.log"; then
+        pass "heal: a second repairer waits for the holder's lock, re-checks, and skips"
+    else
+        fail "heal: a concurrent repair waits then skips" "saw=$saw rc=$rc err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_breaks_a_dead_holders_lock() {
+    local root entry lock dead
+    root="$(heal_fixture)"; entry="$(heal_entry "$root")"; lock="$(heal_lock "$entry")"
+    true & dead=$!
+    wait "$dead"
+    mkdir -p "$lock"; echo "$dead" > "$lock/pid"
+    run_script "$root" deps >/dev/null 2>"$root/err"
+    if grep -q "breaking .*pid $dead" "$root/err" && [ -f "$entry/node_modules/.ok" ] && [ ! -d "$lock" ]; then
+        pass "heal: a lock whose holder is dead is broken, loudly, and the repair proceeds"
+    else
+        fail "heal: a dead holder's lock is broken" "err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_gives_up_a_wait_that_times_out() {
+    local root entry lock rc=0
+    root="$(heal_fixture)"; entry="$(heal_entry "$root")"; lock="$(heal_lock "$entry")"
+    mkdir -p "$lock"; echo "$$" > "$lock/pid"
+    AGENT_REPL_NODE_STORE_REPAIR_WAIT_SECS=0 run_script "$root" deps >/dev/null 2>"$root/err" || rc=$?
+    if [ "$rc" -ne 0 ] && grep -q 'gave up waiting' "$root/err" && ! grep -qE 'npm (ci|install)' "$root/stub.log"; then
+        pass "heal: a repair that cannot get the lock in time fails loudly and installs nothing"
+    else
+        fail "heal: a timed-out wait fails loudly" "rc=$rc err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_failed_repair_fails_the_build_loudly() {
+    local root entry rc=0
+    root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    echo half > "$entry/node_modules/half-installed"
+    NPM_FAIL_IN_TREES=1 run_script "$root" deps >/dev/null 2>"$root/err" || rc=$?
+    if [ "$rc" -ne 0 ] && grep -q 'FAILED' "$root/err" && grep -q 'could not be repaired' "$root/err" &&
+           [ -f "$entry/node_modules/half-installed" ] && [ -z "$(ls -A "$entry/.trees" 2>/dev/null)" ] &&
+           [ ! -d "$(heal_lock "$entry")" ]; then
+        pass "heal: a failed repair fails deps loudly, leaves the live tree as it was, and releases the lock"
+    else
+        fail "heal: a failed repair fails loudly" "rc=$rc err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+# heal_ensure_deps ROOT — ensure-deps over heal_fixture: the package is the
+# webapp, the store is the fixture's, and npm is the store-aware stub.
+heal_ensure_deps() {
+    local root="$1"
+    STUB_LOG="$root/stub.log" AGENT_REPL_NODE_STORE="$root/store" \
+        PATH="$root/stubs:$PATH" bash "$THIS_DIR/ensure-deps.sh" "$root/webapp" 2>"$root/err"
+}
+
+t_ensure_deps_repairs_a_broken_entry_keeping_the_link() {
+    local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    heal_ensure_deps "$root"
+    if [ -L "$root/webapp/node_modules" ] && [ -f "$entry/node_modules/.ok" ] &&
+           grep -q 'repaired the store entry' "$root/err" && ! grep -q 'INSTALL-THROUGH-LINK' "$root/stub.log"; then
+        pass "ensure-deps: a broken store entry is repaired in place and the link is kept"
+    else
+        fail "ensure-deps: a broken store entry is repaired keeping the link" "err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_falls_back_loudly_when_the_repair_fails() {
+    local root; root="$(heal_fixture)"
+    NPM_FAIL_IN_TREES=1 heal_ensure_deps "$root"
+    if [ -d "$root/webapp/node_modules" ] && [ ! -L "$root/webapp/node_modules" ] &&
+           [ -f "$root/webapp/node_modules/.ok" ] && grep -q 'REPAIRING the store entry .* FAILED' "$root/err" &&
+           grep -q 'removing the LINK only' "$root/err"; then
+        pass "ensure-deps: a failed repair falls back to a private install, loudly"
+    else
+        fail "ensure-deps: a failed repair falls back loudly" "err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_goes_private_for_a_healthy_entry_on_another_lockfile() {
+    local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
+    echo ok > "$entry/node_modules/.ok"
+    echo mine > "$entry/node_modules/sentinel"
+    # The entry is whole, yet this package's `npm ls` fails through the link:
+    # its lockfile moved on. The marker in the package is how the stub says so.
+    touch "$root/webapp/moved-on"
+    cat > "$root/stubs/npm" <<'NPM'
+#!/usr/bin/env bash
+echo "npm $* @ $PWD" >> "$STUB_LOG"
+case "${1:-}" in
+    ls)
+        if [ -f moved-on ]; then [ -f node_modules/.private ]; else [ -f node_modules/.ok ]; fi
+        exit $? ;;
+    ci)
+        if [ -L node_modules ]; then echo "INSTALL-THROUGH-LINK $PWD" >> "$STUB_LOG"; exit 70; fi
+        mkdir -p node_modules && touch node_modules/.private ;;
+esac
+exit 0
+NPM
+    chmod +x "$root/stubs/npm"
+    heal_ensure_deps "$root"
+    if [ -f "$entry/node_modules/sentinel" ] && [ ! -L "$root/webapp/node_modules" ] &&
+           grep -q 'on a different one' "$root/err"; then
+        pass "ensure-deps: a healthy entry on another lockfile is left alone and the package goes private"
+    else
+        fail "ensure-deps: a healthy entry on another lockfile goes private" "err: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
+t_heal_empty_entry_repaired
+t_heal_partial_entry_repaired
+t_heal_never_installs_through_a_link
+t_heal_repairs_a_tree_it_swapped_in_before
+t_heal_healthy_entry_untouched
+t_heal_waits_for_a_concurrent_repair_then_skips
+t_heal_breaks_a_dead_holders_lock
+t_heal_gives_up_a_wait_that_times_out
+t_heal_failed_repair_fails_the_build_loudly
+t_ensure_deps_repairs_a_broken_entry_keeping_the_link
+t_ensure_deps_falls_back_loudly_when_the_repair_fails
+t_ensure_deps_goes_private_for_a_healthy_entry_on_another_lockfile
 
 t_ensure_deps_leaves_a_satisfied_link_alone
 t_ensure_deps_never_empties_the_store_through_a_link

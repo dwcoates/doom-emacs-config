@@ -128,6 +128,35 @@ what the webview URL carries as `&build=`, which is the only thing that defeats
 a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
 `dist/.build-id` is a hard error at webview-mount time, not a degraded mode.
 
+### Dependencies come from a SELF-HEALING shared store
+
+`node_modules` is a symlink into ONE shared store entry per lockfile hash,
+`$AGENT_REPL_NODE_STORE` (default `~/.cache/agent-repl/node-store`)
+`/<name>-<lockhash>/node_modules`, made by `bin/build-frontend.sh deps` (and
+every build target). The `pre*` hook of every test, typecheck, lint and
+coverage script runs `bin/ensure-deps.sh` first. Nobody repairs an entry by
+hand any more:
+
+- An entry is judged by whether it SATISFIES ITS OWN LOCKFILE (`npm ls
+  --depth=0` inside the entry), never by whether its directory exists. The
+  2026-09-23 outage was an entry that existed but had been EMPTIED, which the
+  old existence check linked every checkout to.
+- A broken entry (empty or partial) is REPAIRED IN PLACE, by both
+  `link_node_modules` and `ensure-deps.sh`, through the one repair path in
+  `bin/lib-node-store.sh`:
+  - under an exclusive per-entry lock, `mkdir <store>/.<entry>.lock` (flock is
+    not on macOS); a second repairer waits, re-checks, and skips the entry the
+    first one fixed; a dead holder's lock is broken, loudly;
+  - into a fresh tree `<entry>/.trees/<id>/`, swapped in by renaming
+    `<entry>/node_modules` (a symlink to the tree) atomically, so a concurrent
+    reader of the link never sees a half tree;
+  - announced on stderr with the `[node-store]` prefix.
+- NOTHING EVER RUNS `npm ci` THROUGH A SYMLINK: that is what emptied the entry.
+- `ensure-deps.sh` keeps the link when the repair works. It removes the link
+  (never the entry) and installs a private `node_modules` only when the repair
+  FAILS or the entry is whole but keyed by another lockfile, and says so loudly.
+- `bin/test-build-frontend.sh` pins every one of those cases over a fake `npm`.
+
 ## Standing rules
 
 - **STATELESS RENDERER.** No phase-to-word tables, no state-to-color mapping
