@@ -12,7 +12,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/cold-start-claims-serving` | `~/.config/doom-worktrees/cold-start-claims-serving` | A cold-started daemon never `ClaimServing`s its bring-ups, so `served()` silently skips them at handover and the shims are ORPHANED (live now: pids 43503, 43570, 43666 for c9fac76b, 498b3b65, 9e138edb). Claim at the one bring-up door, ERROR on a live-but-foreign owner, and recover unmanifested live shims at boot. | `a5be0435771b765a7` | 09-24 |
+| `fix/takeover-claims-after-writable` | `~/.config/doom-worktrees/takeover-claims-after-writable` | The takeover's orphan recovery claims serving while the wsm handle is still read-only (live at 15:07: the 3 orphans were adopted but unclaimed, ERROR x3); plus `Fleet.Adopt` dials `NewestLive`. | `a5be0435771b765a7` | 09-24 |
 
 ## Still waiting on the owner
 
@@ -26,6 +26,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Every session the fleet begins holding claims serving; `served()` hands over a live session under a foreign owner at ERROR and reclaims its row; the takeover adopts orphaned shims (`fix/cold-start-claims-serving`, daemon unit+integration green). Deployed 15:07: the orphan claim FAILED on a read-only handle (follow-up running).
 - The revive WARN came from the fake vendor, which replayed an `is_backgrounded` patch for work already in the background; captures show the real vendor never does. A silent lock holder is killed and refused `lock_holder_unavailable` after 5 s: the agent's 250 ms off the bench was widened by the lead, because a false expiry refuses a real session start on a loaded host (`fix/revive-warn-and-lock-bound`; shim 6103 unit + 347 integration).
 - The killed-shim "hang" was a test artifact: the detached announcement could land on the watch's opening page, while the test waited only on the tail. The new `awaitAgentEntry` searches the page, then the tail, with a regression test (`fix/killed-shim-revive-hang`; shim integration 346 on master).
 - Post-bootstrap log defects (`fix/post-bootstrap-log-defects`): a retired keep-alive row is superseded by its real record, with no nuke (the 3 parked subagent transcripts were re-read at 14:26, 3 INFO supersedes, 0 producer-defects); the shim scopes keep-alives by descent; the stand-down manifest is consumed once and a DIED shim with a free lock resolves; the script runner leaves the verdict to its callers and launchctl 113 is not-loaded; a notice-only turn is not a defect; workspace directories are canonical on-disk spellings (the empty case-duplicate is forgotten); the orphan-log sweep spares closed workspaces. Deployed 14:25; all suites green on master except one shim integration hang, now dispatched.
