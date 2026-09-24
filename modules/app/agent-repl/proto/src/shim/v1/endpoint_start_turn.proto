@@ -16,7 +16,9 @@ option go_package = "agentrepl/proto/shim/v1;shimv1";
 
 // The prompt the daemon is handing over NOW. Nothing here is a queue entry:
 // by the time this is sent the daemon has already decided no turn is in
-// flight, and the shim submits it to the agent binary immediately.
+// flight, and the shim submits it to the agent binary immediately — or, when
+// the shim's own cache keep-alive is running, the moment that keep-alive ends.
+// The call simply takes that much longer; nothing about the wait is stated.
 message StartTurnRequest {
   // The turn's identity, MINTED BY THE DAEMON and adopted by the shim: every
   // durable record the turn produces is stamped with it, and the open turn is
@@ -64,14 +66,16 @@ message StartTurnFailure {
   // The shim's account, for a human and for logs; never switched on.
   string detail = 1;
   oneof kind {
-    // A turn is already open. Ordinarily the DAEMON's fault (it is the only
-    // queue) — EXCEPT when the open turn is one of the shim's own keep-alive
-    // pings, which the shim opens internally and no daemon queue can see. That
-    // case is TRANSIENT, not a daemon bug: see `turn_already_open.keepalive`.
+    // A turn is already open, or another StartTurn is still being started.
+    // Always the DAEMON's fault: it is the only queue. The shim's own cache
+    // keep-alive NEVER produces this arm — a StartTurn that arrives while a
+    // keep-alive runs waits inside the shim for the keep-alive to end and then
+    // opens its turn, so no keep-alive is ever visible on this wire.
     StartTurnTurnAlreadyOpen turn_already_open = 2;
     // No session is open on this shim.
     StartTurnNoSession no_session = 3;
-    // The agent binary refused the prompt; `detail` carries its wording.
+    // The agent binary refused the prompt, or never became free to take it
+    // within the shim's bound; `detail` carries the account.
     StartTurnVendorRefused vendor_refused = 4;
     // The vendor query is dead; nothing can accept a prompt until the
     // session is restarted.
@@ -79,14 +83,11 @@ message StartTurnFailure {
   }
 }
 message StartTurnTurnAlreadyOpen {
-  // True when the open turn is one of the shim's OWN keep-alive pings rather
-  // than a daemon turn. A keep-alive collision is TRANSIENT — the ping normally
-  // closes on its own in milliseconds, but a vendor 5xx storm can hold it open
-  // for tens of seconds — so the daemon RE-DRIVES the queued prompt (same
-  // idempotency key) until the keep-alive closes and the turn starts, rather
-  // than surfacing a terminal error. False keeps the historical meaning: a
-  // genuine daemon double-submit, which stays the daemon's own bug.
-  bool keepalive = 1;
+  // Tag 1 and the name `keepalive` are RETIRED and must not be revived: the
+  // keep-alive collision they marked no longer reaches the daemon (see the
+  // `turn_already_open` arm).
+  reserved 1;
+  reserved "keepalive";
 }
 message StartTurnNoSession {}
 message StartTurnVendorRefused {}

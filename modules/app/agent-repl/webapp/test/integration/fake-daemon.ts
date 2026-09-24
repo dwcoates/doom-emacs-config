@@ -270,6 +270,12 @@ export interface FakeDaemon {
    * filed as a bad frame.
    */
   pushMutationProgress(opId: string): void;
+  /**
+   * Push WatchDaemon's `reload_elisp` — an arm the daemon addresses to stale
+   * EMACS streams alone. A webview has no case for it, so a page that ever
+   * meets one skips it quietly, exactly as it skips any arm it cannot draw.
+   */
+  pushReloadElisp(moduleRoot: string, build: string): void;
 
   // --- the login pty -------------------------------------------------------
   /** The buffer WatchLoginTerminal replays before any live byte. */
@@ -1708,6 +1714,16 @@ export function createFakeDaemon(): FakeDaemon {
         undefined,
         create(WatchDaemonResponseSchema, {
           push: { case: "mutationProgress", value: { opId } },
+        }),
+      );
+    },
+    pushReloadElisp(moduleRoot, build) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, {
+          push: { case: "reloadElisp", value: { moduleRoot, build } },
         }),
       );
     },

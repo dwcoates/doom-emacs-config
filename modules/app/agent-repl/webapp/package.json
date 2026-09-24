@@ -5,7 +5,7 @@
   "description": "Connect (protobuf-es) SPA client for claude-repld",
   "type": "module",
   "scripts": {
-    "ensure-deps": "npm ls --depth=0 >/dev/null 2>&1 || npm ci",
+    "ensure-deps": "../bin/ensure-deps.sh",
     "dev": "vite",
     "prebuild": "npm run ensure-deps",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
