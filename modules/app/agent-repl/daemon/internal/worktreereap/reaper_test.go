@@ -767,7 +767,7 @@ func TestASweepHeldByAnotherProcessIsSkippedAtInfo(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("taking the lock = (%v, %v)", ok, err)
 	}
-	t.Cleanup(func() { held.release() })
+	t.Cleanup(func() { held.Release() })
 
 	// Act.
 	report := w.sweep()

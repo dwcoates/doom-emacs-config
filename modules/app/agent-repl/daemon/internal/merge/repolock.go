@@ -4,9 +4,9 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"path/filepath"
-	"syscall"
+
+	"claude-repld/internal/flock"
 )
 
 // This file holds the merge queue's REPO-SCOPED KERNEL LOCK.
@@ -26,46 +26,16 @@ func repoLockName(repo string) string {
 }
 
 // repoLock is one held repository lock.
-type repoLock struct {
-	// Path is the lock file, kept for the log record.
-	Path string
-	file *os.File
-}
-
-// Release drops the lock. Releasing twice is safe, because a merge's teardown
-// runs on both the ordinary and the failing path.
-func (l *repoLock) Release() error {
-	if l == nil || l.file == nil {
-		return nil
-	}
-	f := l.file
-	l.file = nil
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
-		f.Close()
-		return fmt.Errorf("merge: unlocking %s: %w", l.Path, err)
-	}
-	return f.Close()
-}
+type repoLock = flock.Lock
 
 // acquireRepoLock takes the repository's queue lock under dir, without
 // blocking. The bool is false when another daemon holds it — a legal answer
 // this daemon waits out — while an error means the lock could not be TOLD
 // about, which is never read as free.
 func acquireRepoLock(dir, repo string) (*repoLock, bool, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, false, fmt.Errorf("merge: creating the lock directory %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, repoLockName(repo))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	lock, ok, err := flock.TryExclusive(filepath.Join(dir, repoLockName(repo)))
 	if err != nil {
-		return nil, false, fmt.Errorf("merge: opening the repo lock %s: %w", path, err)
+		return nil, false, fmt.Errorf("merge: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if err == syscall.EWOULDBLOCK {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("merge: locking %s: %w", path, err)
-	}
-	return &repoLock{Path: path, file: f}, true, nil
+	return lock, ok, nil
 }
