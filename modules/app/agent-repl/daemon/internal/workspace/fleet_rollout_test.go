@@ -3,6 +3,8 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
@@ -947,5 +950,30 @@ func TestAnAdoptionWhoseClaimIsRefusedLetsTheDialedShimGo(t *testing.T) {
 	}
 	if f.client.detached != 1 || len(f.client.kills) != 0 {
 		t.Fatalf("detaches = %d, kills = %d; want the link let go and the shim left running", f.client.detached, len(f.client.kills))
+	}
+}
+
+func TestAdoptDialsTheNewestLiveSocketGeneration(t *testing.T) {
+	// Arrange: a relaunch moved the running shim onto `<base>.n1.sock`.
+	dir := t.TempDir()
+	f := newFleetFixture(t)
+	f.socketDir = dir
+	ws := f.workspace("w1")
+	base := filepath.Join(dir, "w1.sock")
+	generation := strings.TrimSuffix(base, ".sock") + ".n1.sock"
+	if err := os.WriteFile(generation, nil, 0o600); err != nil {
+		t.Fatalf("writing the generation's socket path: %v", err)
+	}
+	f.socketState = shimsocket.StateAbsent
+	f.socketStates = map[string]shimsocket.State{generation: shimsocket.StateLive}
+
+	// Act.
+	if _, err := f.fleet.Adopt(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.adopts) != 1 || f.supervisor.adopts[0] != generation {
+		t.Fatalf("adoptions = %+v, want exactly one of %q", f.supervisor.adopts, generation)
 	}
 }

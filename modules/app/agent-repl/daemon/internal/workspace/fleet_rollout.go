@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
@@ -437,7 +438,17 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 		return nil, fmt.Errorf("workspace: adopt %q: resolve the workspace log sink: %w", ws, logErr)
 	}
 	log = log.With(dlog.Context{"workspace": string(ws)})
-	socketPath := f.deps.SocketPath(ws)
+	// THE SOCKET IS THE SHIM'S CURRENT GENERATION, not the layout's base
+	// name, exactly as boot's adopt and bringUpClient resolve it: a relaunch
+	// moves the shim onto `<base>.nN.sock` and the counter that minted N lived
+	// in the predecessor's memory, so dialing the base reaches nothing and the
+	// adoption spends its whole bound.
+	// A generation that is not live leaves the base path, which is what was
+	// dialed before, and the adoption bound still covers a shim that is gone.
+	socketPath, socket, socketErr := shimsocket.NewestLive(f.socketProbe, f.deps.SocketPath(ws))
+	log.Debug(opFleetRollout, "resolved the running shim's socket generation", dlog.Context{
+		"socket": socketPath, "socket_state": socket.String(), "cause": errText(socketErr),
+	})
 	client, err := f.adoptBounded(ctx, log, ws, record.Dir, socketPath, "handover")
 	if err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: dial the transferred shim: %w", ws, err)
