@@ -144,9 +144,13 @@ func (r *resolver) replayPorted(s *wsState, ported []PortedPrompt) {
 // as attributed by position.
 func (r *resolver) replayStamped(s *wsState, agent *conversationv1.AgentId, at *conversationv1.HistoryEntryAt) {
 	entry := at.GetEntry()
-	if turn := at.GetTurn().GetValue(); turn != "" {
+	// A PROMPT OPENS ITS OWN TURN, so it is never judged against the turns
+	// already open: drawing it is what makes its turn known.
+	switch turn := at.GetTurn().GetValue(); {
+	case entry.GetUserPrompt() != nil:
+	case turn != "":
 		r.replayStampKnown(s, agent, ids.TurnID(turn))
-	} else if entry.GetUserPrompt() == nil {
+	default:
 		s.replayUnstamped++
 	}
 	defer s.drawingEntry(at.GetTurn())()

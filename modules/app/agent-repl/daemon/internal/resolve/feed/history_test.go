@@ -735,3 +735,19 @@ func TestAFullyStampedReplayWritesNoPositionalRecord(t *testing.T) {
 		t.Fatal("a stamped replay reported a positional fallback")
 	}
 }
+
+func TestAStampedPromptIsNeverJudgedAnUnknownTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: the prompt carries its own turn's stamp, as the producer writes it.
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), completed("")),
+		promptEntry("turn-1", "first"),
+	), "turn-1", "turn-1"))
+
+	// Assert
+	if h.hasRecord("error", "daemon.feed.replayed_turn_unknown") {
+		t.Fatal("a stamped prompt was reported as naming an unknown turn")
+	}
+}
