@@ -45,6 +45,18 @@ type Commit struct {
 	// Paths are the files the commit touched, the answer `diff --name-only`
 	// gives for any range that includes it.
 	Paths []string `json:"paths"`
+	// Tree is the tree the commit records. Empty is a tree of its own,
+	// distinct from every other commit's (TreeOf); a test sets it to script a
+	// squash, whose one commit records exactly what merging a branch would.
+	Tree string `json:"tree,omitempty"`
+}
+
+// TreeOf answers the tree a commit records.
+func (c *Commit) TreeOf() string {
+	if c.Tree != "" {
+		return c.Tree
+	}
+	return "7" + c.SHA[1:]
 }
 
 // Worktree is one checked-out tree of a repository.
@@ -59,6 +71,8 @@ type Worktree struct {
 	// Files are the tracked paths, relative to Dir, that `ls-files` answers.
 	// Emacs's projectile and magit list a worktree the moment it is visited.
 	Files []string `json:"files"`
+	// Locked makes `worktree list` report the tree locked.
+	Locked bool `json:"locked,omitempty"`
 }
 
 // Repo is one fake repository: a common dir every one of its worktrees reports.
