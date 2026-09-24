@@ -57,14 +57,14 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentSendMessage_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Success"})
-		if err := r.restateSend(s, u, unitID, state.Success.GetAddressedTo(), state.Success.GetSummary()); err != nil {
+		if err := r.restateSend(s, act, u, state.Success.GetAddressedTo(), state.Success.GetSummary()); err != nil {
 			return nil, err
 		}
 		u.sendResolved = state.Success.GetRecipientAgentId()
 		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawSendMessage", "branch": "case *conversationv1.AgentSendMessage_Failure"})
-		if err := r.restateSend(s, u, unitID, state.Failure.GetAddressedTo(), state.Failure.GetSummary()); err != nil {
+		if err := r.restateSend(s, act, u, state.Failure.GetAddressedTo(), state.Failure.GetSummary()); err != nil {
 			return nil, err
 		}
 		// A send that could not be delivered still HAPPENED, and its row is
@@ -105,14 +105,15 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 // "Scroll fix landed; merge master in"). Both settle arms therefore restate
 // addressed_to and the optional summary.
 //
-// A settle that restates no address has not restated the send at all: it is an
-// invariant violation, recorded at ERROR, drawn from the held start when this
-// process saw one and drawn NOT AT ALL otherwise (restatedOrHeld). A restated
+// A settle that restates no address has not restated the send at all: graded by
+// its producer's contract (an invariant violation at ERROR, or expected old data
+// at INFO), drawn from the held start when this process saw one and drawn NOT
+// AT ALL otherwise (restatedOrHeld). A restated
 // address makes the settle authoritative for the summary too, whose absence then
 // means the caller supplied none.
-func (r *resolver) restateSend(s *wsState, u *unitState, unitID, addressedTo string, summary *conversationv1.AgentSendMessageSummary) error {
+func (r *resolver) restateSend(s *wsState, act *conversationv1.AgentActivity, u *unitState, addressedTo string, summary *conversationv1.AgentSendMessageSummary) error {
 	if addressedTo == "" {
-		_, err := r.restatedOrHeld(s, u, unitID, "send_message", "", u.sendAddressedTo)
+		_, err := r.restatedOrHeld(s, act, u, "send_message", "", u.sendAddressedTo)
 		return err
 	}
 	u.sendAddressedTo = addressedTo
