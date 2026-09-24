@@ -440,20 +440,16 @@ func TestWebappLayerRefusals(t *testing.T) {
 
 // TestWebappLayerRoster is section F9: tray, sidebar and lifecycle banner.
 //
-// THE TWO DECLARED FAULTS ARE THIS AREA'S OWN SUBJECTS, not incidental noise:
-//
-//   - `daemon.wsm.acquire_lease: refused the write` — the tray tests HOLD a
-//     prompt on purpose, by submitting behind a turn that parks. The refused
-//     lease acquisition IS the hold.
-//   - `daemon.drain.fire` (a workspace's lease is already held) — the drain
-//     test SCHEDULES a real drain through the app's own verb, and the daemon
-//     acts on that standing schedule while a lease is still held.
-//
-// Declaring them is what keeps the area honest: an undeclared warning fails
-// the run, so a NEW fault here cannot hide behind these two.
+// IT DECLARES NO WARNINGS. The tray tests HOLD a prompt by submitting behind a
+// turn that parks, and the drain test fires a real scheduled drain while a
+// lease is held; both are the lease arbitration answering, which the store
+// records at DEBUG and the drain states at INFO. They used to be declared here
+// as `daemon.wsm.acquire_lease` and `daemon.drain.fire`, which also let the
+// drain's own hold being re-acquired at every fire hide behind them; an ERROR
+// or WARN from this area is now always news.
 func TestWebappLayerRoster(t *testing.T) {
 	t.Parallel()
-	wlDriveArea(t, "roster.layer.test.ts", "daemon.wsm.acquire_lease", "daemon.drain.fire")
+	wlDriveArea(t, "roster.layer.test.ts")
 }
 
 // TestWebappLayerMergeTabs is section F7: the merge bubble's tab strip.
