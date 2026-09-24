@@ -1213,20 +1213,22 @@ describe("TailFollow's latest-visible latch", () => {
   it("latches after a detached-work selection that leaves the latest entry in view", () => {
     // Arrange
     const l = withLatest(500);
-    // Act — the card's 150px overhang below the fold brings the box to 650.
+    // Act — centering the card (its middle 200px below the viewport's) brings
+    // the box to 700, its tail, where the latest entry shows.
     l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
     // Assert
-    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 700]);
   });
 
   it("does not latch after a detached-work selection that leaves the latest entry out of view", () => {
     // Arrange
     const l = withLatest(700);
     l.tail.promptSent();
-    // Act — a card above the viewport top brings the box up to 400.
+    // Act — centering a card above the viewport top (its middle 725px above
+    // the viewport's) brings the box from its parked 1000 up to 275.
     l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: -600, nodeHeight: 50 });
     // Assert
-    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 400]);
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 275]);
   });
 
   it("throws and reports at ERROR when the latest entry's geometry is not a real layout", async () => {
