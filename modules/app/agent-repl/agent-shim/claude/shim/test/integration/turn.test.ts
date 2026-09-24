@@ -721,7 +721,15 @@ describe("WatchAgent", () => {
     const during = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest({ knownThrough: pointer(mark) }), options),
     );
-    await untilTerminal(during);
+    // THE TERMINAL IS ON THE CATCH-UP PAGE OR THE TAIL, whichever the writer's
+    // pace put it on: a backlog lands in merged batches, so the whole turn can
+    // be durable before this reattach opens.
+    const caughtUp = watchAgentPage(await during.next());
+    const endedOnPage = caughtUp.entries.some((entry) => {
+      const frame = entryFrame(entry);
+      return frame?.result.case === "success" || frame?.result.case === "failure";
+    });
+    if (!endedOnPage) await untilTerminal(during);
     during.close();
 
     const after = openStream((options) =>

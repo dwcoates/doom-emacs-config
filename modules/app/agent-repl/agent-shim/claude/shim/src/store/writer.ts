@@ -2,20 +2,47 @@
  * store/writer.ts — the WRITE half of the record plane, and the one place a
  * `PersistEntry` becomes a `store.v1` row.
  *
- * # The retry buffer, and why there is no spill
+ * # The retry buffer: it NEVER DROPS, and it is bounded by BACKPRESSURE
  *
- * A store that blips must not cost the conversation a frame, so a failed batch
- * holds in a BOUNDED in-memory buffer and replays. A store that is GONE must not
- * be papered over, so the buffer is bounded and exhaustion is LOUD: every lost
- * upsert key is named in the log, a degraded window records how many
- * observations were lost, and a `store_unreachable` fault stands until a write
- * succeeds again.
+ * Dropping a store write is data loss: the store is the durable record every
+ * consumer reads from, the daemon's turn endings included. So a failed batch is
+ * HELD in its place and replayed — transiently on the retry schedule, then, once
+ * the schedule is exhausted, every `heldRetryMs` for as long as the process lives.
+ * A store that is GONE is not papered over: the first failure opens a degraded
+ * window and raises `store_unreachable`, the exhausted schedule is an ERROR
+ * naming the held keys, and the window stands until a write lands again.
  *
- * There is deliberately NO durable producer-side spill. A persistent inability
- * to reach the store is a lifetime-sequencing defect to fix, not a condition to
- * survive with fallback persistence — and a spill would make the shim a second
- * durable copy of the record, which is exactly the statelessness the
- * architecture rests on not having.
+ * The buffer is bounded by pausing its one unbounded producer, never by
+ * eviction. At the backlog's high-water mark (rows or bytes) the writer opens a
+ * backlog episode — one WARN — and `whenWritable()` holds the vendor message
+ * loop until the backlog drains to its low-water mark — one INFO. Why it had to
+ * be this (2026-09-23, the owner's logs): the store took 1–15s per one-row
+ * write under a host load of 281, the shim enqueued one batch per vendor
+ * message (every streamed delta re-upserts its unit), the drain sent one batch
+ * per round trip, and the 256-batch buffer filled and evicted 2,135 rows.
+ *
+ * There is deliberately NO durable producer-side spill: a spill would make the
+ * shim a second durable copy of the record, which is exactly the statelessness
+ * the architecture rests on not having. Pausing the stream keeps the one copy.
+ *
+ * # Bounded batches, in exactly the order the rows were produced
+ *
+ * The store commits an interactive batch as ONE transaction, so a batch's size
+ * is the store's hold on its one writer (a 494-row interrupt batch held it for
+ * 163s). Queued rows are cut into batches bounded by rows, payload bytes and a
+ * time budget the row bound adapts to — merging a backlog of one-row writes and
+ * splitting one huge write alike — and a batch ENDS at a turn edge (a prompt,
+ * an agent terminal), so an edge's ack never waits on a row produced after it.
+ *
+ * THE ORDER IS NEVER CHANGED. The store receives every row in the order the
+ * shim produced it, across every book: a turn's terminal is the turn's last
+ * word (the fold puts even the calls a stop cut ahead of it), and the daemon's
+ * watchers and the turn's consumers read "the terminal has landed" as "the whole
+ * turn is recorded", subagent books included. A terminal that overtook queued
+ * rows would break exactly that, so the only latency lever is the batch itself.
+ * A batch the store refuses as malformed is re-sent one row at a time, so only
+ * the rows the store will not carry are refused — named at ERROR and raised as
+ * a `converter_defect` fault.
  *
  * # Why replay is safe
  *
@@ -39,7 +66,7 @@
  *   - a session fact → the `session_update` entry arm;
  *   - anything belonging to a KEEP-ALIVE turn, and all residue → `unserved_item`.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, toBinary } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import {
@@ -47,12 +74,14 @@ import {
   writeId,
 } from "./keys.js";
 import {
+  DEFAULT_BATCH_POLICY,
   DEFAULT_RETRY_POLICY,
   PersistenceError,
   type AgentPageSession,
   type FlushOutcome,
   type PersistEntry,
   type Persistence,
+  type PersistenceBatchPolicy,
   type PersistenceOptions,
   type PersistenceRetryPolicy,
 } from "./persistence.js";
@@ -206,10 +235,74 @@ interface BatchFailure {
   readonly converterDefect: boolean;
 }
 
-/** One batch waiting to be acked, and how many attempts it has had. */
-interface PendingBatch {
-  readonly entries: readonly PersistEntry[];
-  attempts: number;
+/**
+ * How a durable write ended, from its caller's point of view.
+ *
+ * A RESOLUTION, NEVER A REJECTION: the writer settles a group from inside its
+ * drain, long after the caller may have stopped listening (it is released the
+ * moment the store is known to be down), and a rejected promise nobody awaits
+ * any more is an unhandled rejection. The caller turns the outcome into its
+ * own typed refusal.
+ */
+type DurableOutcome =
+  | { readonly kind: "durable" }
+  | { readonly kind: "degraded"; readonly reason: string }
+  | { readonly kind: "refused"; readonly detail: string };
+
+/** One durable write's rows, waiting for the last of them to land. */
+interface DurableGroup {
+  /** Rows of the group not yet durable. */
+  pending: number;
+  /** Settle the caller's wait; the FIRST settlement wins and the rest are no-ops. */
+  readonly settle: (outcome: DurableOutcome) => void;
+}
+
+/** One row waiting to be acked. */
+interface QueuedRow {
+  readonly entry: PersistEntry;
+  /** Its payload size, the unit the byte bounds are stated in. */
+  readonly bytes: number;
+  /** The durable write it belongs to, when a caller is waiting on it. */
+  readonly durable?: DurableGroup;
+}
+
+/** The serialized size of what one row SAYS, before the store envelope. */
+function payloadBytes(entry: PersistEntry): number {
+  switch (entry.item.kind) {
+    case "prompt":
+      return toBinary(conversationv1.AgentPromptSchema, entry.item.prompt).length;
+    case "peer":
+      return toBinary(conversationv1.PeerMessageSchema, entry.item.peer).length;
+    case "frame":
+      return toBinary(conversationv1.AgentFrameSchema, entry.item.frame).length;
+    case "session_update":
+      return toBinary(conversationv1.SessionUpdateSchema, entry.item.update).length;
+    case "bash_run":
+      return toBinary(conversationv1.AgentBashSchema, entry.item.frame).length;
+    case "residue":
+      return toBinary(storev1.StoreUnservedItemSchema, entry.item.residue).length;
+    default:
+      // A kind the router does not know is refused when its batch is built,
+      // loudly and as a converter defect; sizing it as nothing here keeps that
+      // one refusal site the only place the defect is judged.
+      return 0;
+  }
+}
+
+/**
+ * Whether a row is a TURN EDGE: the row a consumer is blocked on.
+ *
+ * A turn's prompt (the daemon's StartTurn waits on its ack, R15), and an agent
+ * terminal (`success`/`failure` — the frame the daemon ends a turn on, and the
+ * one an interrupt waits for). A keep-alive's rows are never edges: nobody is
+ * waiting on them.
+ */
+function isTurnEdge(entry: PersistEntry): boolean {
+  if (entry.keepalive) return false;
+  if (entry.item.kind === "prompt") return true;
+  if (entry.item.kind !== "frame") return false;
+  const result = entry.item.frame.result.case;
+  return result === "success" || result === "failure";
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -220,10 +313,6 @@ const defaultSleep = (ms: number): Promise<void> =>
     timer.unref?.();
   });
 
-/**
- * Build the whole record plane: this write half, plus the reader and the
- * reconciler, behind the one {@link Persistence} seam.
- */
 /**
  * The agents a batch REGISTERS a book for — not every agent it NAMES.
  *
@@ -246,8 +335,13 @@ function booksRegisteredBy(entries: readonly PersistEntry[]): Set<string> {
   return books;
 }
 
+/**
+ * Build the whole record plane: this write half, plus the reader and the
+ * reconciler, behind the one {@link Persistence} seam.
+ */
 export function createPersistence(options: PersistenceOptions): Persistence {
   const retry: PersistenceRetryPolicy = options.retry ?? DEFAULT_RETRY_POLICY;
+  const bounds: PersistenceBatchPolicy = options.batching ?? DEFAULT_BATCH_POLICY;
   const sleep = options.sleep ?? defaultSleep;
   /**
    * This writer's name — UNSET until StartSession names the conversation.
@@ -278,16 +372,42 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const faultListeners = new Set<(fault: conversationv1.SessionFault) => void>();
   const windowListeners = new Set<(window: conversationv1.SessionDegradedWindow) => void>();
 
-  /** The queue of batches enqueued by `write()` and not yet settled. */
-  const queue: PendingBatch[] = [];
+  /** Every row enqueued and not yet acked or refused, in produce order. */
+  let queue: QueuedRow[] = [];
+  /** The payload bytes {@link queue} holds. */
+  let queuedBytes = 0;
   /** Set while the drain loop is running, so `write()` never starts a second. */
   let draining: Promise<void> | undefined;
+  /** The row bound the NEXT batch is cut at; adapts to the time budget. */
+  let rowLimit = bounds.maxBatchRows;
   /** Open degraded window: when it opened, and what it has lost so far. */
   let degradedSince: number | undefined;
   let degradedReason = "";
   let droppedWhileDegraded = 0n;
-  /** Every row this writer has lost, over the process's whole life. */
-  let lostRows = 0;
+  /**
+   * Set once a batch has failed through the whole retry schedule, until a
+   * write lands again. While it stands, `flush()` returns at once.
+   */
+  let persistentFailure = false;
+  /** Every row the store refused as malformed, over the process's whole life. */
+  let refusedRows = 0;
+  /** The open backlog episode's start, while the vendor stream is paused. */
+  let backlogSince: number | undefined;
+  /** Durable writes whose caller is still waiting. */
+  const durableWaiting = new Set<DurableGroup>();
+  /** Whoever is waiting for the backlog to drain (the vendor message loop). */
+  let writableWaiters: (() => void)[] = [];
+  /** Whoever is waiting for the drain to make progress (`flush()`). */
+  let progressWaiters: (() => void)[] = [];
+
+  const wake = (waiters: (() => void)[]): void => {
+    for (const resolve of waiters) resolve();
+  };
+  const noteProgress = (): void => {
+    const waiters = progressWaiters;
+    progressWaiters = [];
+    wake(waiters);
+  };
 
   const emitFault = (kind: "store_unreachable" | "converter_defect", detail: string): void => {
     const fault = create(conversationv1.SessionFaultSchema, {
@@ -307,23 +427,6 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     for (const listener of faultListeners) listener(fault);
   };
 
-  /**
-   * Whoever is waiting to learn that the store has GONE degraded.
-   *
-   * The durable path is the only waiter: it must abandon an inline wait the
-   * instant the outage is known rather than sitting out a retry schedule that
-   * is longer than its caller's RPC deadline.
-   */
-  let degradedWaiters: (() => void)[] = [];
-
-  /** Resolves as soon as the writer is in an open degraded window. */
-  const whenDegraded = (): Promise<void> =>
-    degradedSince !== undefined
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          degradedWaiters.push(resolve);
-        });
-
   const openDegraded = (reason: string): void => {
     if (degradedSince !== undefined) return;
     degradedSince = options.nowMs();
@@ -331,8 +434,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     droppedWhileDegraded = 0n;
     // warn: a defect because the record plane is unavailable while writes continue to buffer.
     LOGGER.warn(
-      { reason },
-      "the store is unreachable; writes are buffering and a degraded window is open",
+      { reason, backlog_rows: queue.length },
+      "the store is unreachable; writes are held in order and a degraded window is open",
     );
     // THE WINDOW IS ANNOUNCED BEFORE THE FAULT. A fault restates the session's
     // diagnostics, and a consumer reading the first unhealthy diagnostics has
@@ -348,9 +451,11 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         }),
       );
     }
-    const waiters = degradedWaiters;
-    degradedWaiters = [];
-    for (const wake of waiters) wake();
+    // A DURABLE CALLER IS RELEASED THE INSTANT THE OUTAGE IS KNOWN: it holds an
+    // RPC open, and the retry schedule is longer than that RPC's deadline. Its
+    // rows stay exactly where they are in the buffer.
+    const waiting = [...durableWaiting];
+    for (const group of waiting) group.settle({ kind: "degraded", reason });
     emitFault("store_unreachable", reason);
   };
 
@@ -386,13 +491,114 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   };
 
   /**
+   * Open or close the backlog episode against the high- and low-water marks.
+   *
+   * ONE WARN PER EPISODE, ONE INFO TO CLOSE IT. The episode is the backpressure:
+   * while it stands, {@link Persistence.whenWritable} holds the vendor message
+   * loop, so the backlog is bounded by the marks rather than by eviction.
+   */
+  const noteBacklog = (): void => {
+    if (backlogSince === undefined) {
+      if (queue.length < bounds.backlogHighWaterRows && queuedBytes < bounds.backlogHighWaterBytes) return;
+      backlogSince = options.nowMs();
+      // warn: a defect because the store is taking rows slower than the vendor produces them.
+      LOGGER.warn(
+        {
+          backlog_rows: queue.length,
+          backlog_bytes: queuedBytes,
+          high_water_rows: bounds.backlogHighWaterRows,
+          high_water_bytes: bounds.backlogHighWaterBytes,
+        },
+        "the store writer's backlog reached its high-water mark; pausing the vendor stream until it drains",
+      );
+      return;
+    }
+    if (queue.length > bounds.backlogLowWaterRows || queuedBytes > bounds.backlogLowWaterBytes) return;
+    const since = backlogSince;
+    backlogSince = undefined;
+    LOGGER.info(
+      {
+        backlog_rows: queue.length,
+        backlog_bytes: queuedBytes,
+        low_water_rows: bounds.backlogLowWaterRows,
+        low_water_bytes: bounds.backlogLowWaterBytes,
+        episode_ms: options.nowMs() - since,
+      },
+      "the store writer's backlog drained to its low-water mark; the vendor stream resumes",
+    );
+    const waiters = writableWaiters;
+    writableWaiters = [];
+    wake(waiters);
+  };
+
+  /** Hold these rows at the tail of the buffer, in the order given. */
+  const enqueue = (entries: readonly PersistEntry[], durable?: DurableGroup): void => {
+    for (const entry of entries) {
+      const bytes = payloadBytes(entry);
+      queue.push(durable === undefined ? { entry, bytes } : { entry, bytes, durable });
+      queuedBytes += bytes;
+    }
+    noteBacklog();
+  };
+
+  /**
+   * The next batch: the head of the buffer, in produce order, cut at the row
+   * and byte bounds — and ENDED right after the first turn edge it takes, so
+   * the edge's transaction never carries a row produced after it.
+   */
+  const nextBatch = (): QueuedRow[] => {
+    const batch: QueuedRow[] = [];
+    let bytes = 0;
+    for (const row of queue) {
+      if (batch.length >= rowLimit) break;
+      // AT LEAST ONE ROW, ALWAYS: a single row larger than the byte bound is
+      // still a row that must land, and a batch that could never form would
+      // stall the whole buffer behind it.
+      if (batch.length > 0 && bytes + row.bytes > bounds.maxBatchBytes) break;
+      batch.push(row);
+      bytes += row.bytes;
+      if (isTurnEdge(row.entry)) break;
+    }
+    return batch;
+  };
+
+  /**
+   * Adapt the row bound to how long the last batch took.
+   *
+   * THE TIME BOUND. Rows and bytes predict a batch's cost on a healthy store;
+   * a loaded host, a cold cache or a checkpoint is what they cannot predict, and
+   * it is exactly then that one long transaction holds the store's one writer.
+   * A batch that overran the budget halves the next one's row bound; one that
+   * finished inside a quarter of it doubles the bound back toward its ceiling.
+   */
+  const adaptRowLimit = (rows: number, durationMs: number): void => {
+    if (durationMs > bounds.batchTimeBudgetMs && rows > 1) {
+      // A batch never carries more rows than the bound, so half of it is
+      // always below the bound it was cut at.
+      rowLimit = Math.floor(rows / 2);
+      LOGGER.debug(
+        { rows, duration_ms: durationMs, budget_ms: bounds.batchTimeBudgetMs, row_limit: rowLimit },
+        "a store batch overran its time budget; halving the next batch's row bound",
+      );
+      return;
+    }
+    if (durationMs * 4 <= bounds.batchTimeBudgetMs && rowLimit < bounds.maxBatchRows) {
+      rowLimit = Math.min(bounds.maxBatchRows, rowLimit * 2);
+      LOGGER.debug(
+        { rows, duration_ms: durationMs, budget_ms: bounds.batchTimeBudgetMs, row_limit: rowLimit },
+        "a store batch finished well inside its time budget; raising the next batch's row bound",
+      );
+    }
+  };
+
+  /**
    * Send one batch once.
    *
    * Resolves with the store's own refusal, or null when the batch is durable.
    * `terminal` says the refusal is about the BATCH rather than about the store:
    * an `invalid_request` names a malformed row, and replaying it just re-sends
    * the same malformed row while every later batch waits behind it in the one
-   * ordered drain. It is surfaced ONCE and dropped, so the queue keeps moving.
+   * ordered drain.
    */
   const attempt = async (entries: readonly PersistEntry[]): Promise<BatchFailure | null> => {
     // THE ENVELOPE IS BUILT OUTSIDE THE TRANSPORT'S TRY, so a row this writer
@@ -460,105 +666,154 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     openDegraded(failure.detail);
   };
 
-  /** Announce a batch that will never be written, naming every row it lost. */
-  const dropLoudly = (batch: PendingBatch, detail: string): void => {
-    const lost = batch.entries.map((entry) => entry.upsertKey);
-    droppedWhileDegraded += BigInt(lost.length);
-    lostRows += lost.length;
+  /**
+   * Announce a row the store refused as MALFORMED, which can never be written.
+   *
+   * NOT A DROP FOR AN OUTAGE: the store read the row and said it cannot carry
+   * it, so no schedule can land it. It is named at ERROR, counted, and raised
+   * (by {@link reportFailure}) as a `converter_defect` fault.
+   */
+  const refuseLoudly = (row: QueuedRow, attempts: number, detail: string): void => {
+    droppedWhileDegraded += 1n;
+    refusedRows += 1;
     LOGGER.error(
-      { attempts: batch.attempts, detail, lost_upsert_keys: lost },
-      "DROPPING store writes: the retry schedule is exhausted and there is no spill",
+      { attempts, detail, lost_upsert_keys: [row.entry.upsertKey] },
+      "the store refused a row as malformed; it can never be written and is removed from the buffer",
     );
+    row.durable?.settle({ kind: "refused", detail });
+  };
+
+  /** Everything owed once a batch is durable. */
+  const landed = (batch: readonly QueuedRow[], attempts: number, durationMs: number): void => {
+    // WOKEN ONLY ONCE THE ROWS ARE DURABLE: a `WatchAgent` that opened before
+    // this book existed is blocked on the store holding a row, so waking it on
+    // the enqueue would send it back into the same refusal.
+    reader.noteAgentRows(booksRegisteredBy(batch.map((row) => row.entry)));
+    closeDegraded();
+    if (persistentFailure) {
+      persistentFailure = false;
+      LOGGER.info(
+        { attempts, rows: batch.length, backlog_rows: queue.length },
+        "the store took the held batch; the buffer is draining again and nothing was dropped",
+      );
+    }
+    for (const row of batch) {
+      const group = row.durable;
+      if (group === undefined) continue;
+      group.pending -= 1;
+      if (group.pending === 0) group.settle({ kind: "durable" });
+    }
+    const bytes = batch.reduce((sum, row) => sum + row.bytes, 0);
+    const timing = {
+      rows: batch.length,
+      bytes,
+      attempts,
+      duration_ms: durationMs,
+      row_limit: rowLimit,
+      backlog_rows: queue.length - batch.length,
+    };
+    // THE FLUSH TIMING IS VISIBLE WHILE THE WRITER IS BEHIND. An ordinary batch
+    // is a hot, per-frame event and stays verbose; one landing inside a backlog
+    // episode is the evidence of how fast the backlog is draining.
+    if (backlogSince === undefined) LOGGER.logVerbose(timing, "batch is durable");
+    else LOGGER.debug(timing, "a batch landed while the store writer is behind");
+    adaptRowLimit(batch.length, durationMs);
   };
 
   /**
-   * Send one batch, retrying on the schedule.
+   * Send one batch until it lands or is refused as malformed.
    *
-   * Resolves when the batch is durable, or when it has been dropped loudly. It
-   * never rejects: `write()` is fire-and-forget, and a rejection with no caller
-   * is an unhandled rejection.
+   * NEVER GIVES UP ON A STORE FAILURE. The first failure opens the degraded
+   * window and raises `store_unreachable`; the `maxAttempts`-th declares the
+   * failure PERSISTENT at ERROR and releases `flush()`; after that the batch is
+   * retried every `heldRetryMs` for as long as the process lives, in
+   * its place at the head of the buffer, while the backlog's backpressure
+   * pauses the vendor stream. It never rejects: `write()` is fire-and-forget.
    */
-  const deliver = async (batch: PendingBatch): Promise<boolean> => {
-    for (;;) {
-      batch.attempts += 1;
-      const failure = await attempt(batch.entries);
+  const deliver = async (batch: readonly QueuedRow[]): Promise<void> => {
+    for (let attempts = 1; ; attempts += 1) {
+      const startedAt = options.nowMs();
+      const failure = await attempt(batch.map((row) => row.entry));
       if (failure === null) {
-        // WOKEN ONLY ONCE THE ROWS ARE DURABLE: a `WatchAgent` that opened
-        // before this book existed is blocked on the store holding a row, so
-        // waking it on the enqueue would send it back into the same refusal.
-        reader.noteAgentRows(booksRegisteredBy(batch.entries));
-        closeDegraded();
-        LOGGER.logVerbose(
-          { entries: batch.entries.length, attempts: batch.attempts },
-          "batch is durable",
-        );
-        return true;
+        landed(batch, attempts, options.nowMs() - startedAt);
+        return;
+      }
+      if (failure.terminal) {
+        if (batch.length > 1) {
+          // ONE MALFORMED ROW MUST NOT COST ITS NEIGHBOURS THEIR PLACE. The
+          // store refuses the whole transaction for one row, so the batch is
+          // sent again ONE ROW AT A TIME, in order, and only the rows the store
+          // refuses on their own are refused. Each of those is stated at ERROR
+          // with its own fault, so the narrowing itself is an ordinary step.
+          LOGGER.debug(
+            { rows: batch.length, detail: failure.detail },
+            "the store refused a multi-row batch as malformed; resending its rows one at a time to isolate the refusal",
+          );
+          for (const row of batch) await deliver([row]);
+          return;
+        }
+        reportFailure(failure);
+        // A batch is never empty, so this is its one row.
+        for (const row of batch) refuseLoudly(row, attempts, failure.detail);
+        return;
       }
       reportFailure(failure);
-      // A REFUSED BATCH IS NOT A DEGRADED STORE: the store read this batch and
-      // said it is malformed, so no schedule can make it acceptable. Surface it
-      // once and drop it rather than blocking every later batch behind it.
-      if (failure.terminal) {
-        dropLoudly(batch, failure.detail);
-        return false;
+      const backoff =
+        attempts >= retry.maxAttempts
+          ? retry.heldRetryMs
+          : (retry.backoffMs[Math.min(attempts - 1, retry.backoffMs.length - 1)] ?? 0);
+      if (attempts === retry.maxAttempts) {
+        persistentFailure = true;
+        LOGGER.error(
+          {
+            attempts,
+            detail: failure.detail,
+            held_rows: queue.length,
+            held_upsert_keys: batch.map((row) => row.entry.upsertKey),
+            retry_every_ms: backoff,
+          },
+          "the store has failed this batch through the whole retry schedule; every row is HELD in order and retried, nothing is dropped",
+        );
+        noteProgress();
+      } else if (attempts < retry.maxAttempts) {
+        // warn: a defect because the store rejected a batch that must be replayed from memory.
+        LOGGER.warn(
+          { attempt: attempts, backoff_ms: backoff, detail: failure.detail },
+          "the store refused a batch; replaying it from the retry buffer",
+        );
+      } else {
+        LOGGER.debug(
+          { attempt: attempts, backoff_ms: backoff, detail: failure.detail, held_rows: queue.length },
+          "the store is still failing; retrying the held batch",
+        );
+        // Every confirmation of the persistent failure is progress a waiting
+        // `flush()` answers on: it has seen the store fail once more.
+        noteProgress();
       }
-      if (batch.attempts >= retry.maxAttempts) {
-        dropLoudly(batch, failure.detail);
-        return false;
-      }
-      const backoff = retry.backoffMs[Math.min(batch.attempts - 1, retry.backoffMs.length - 1)] ?? 0;
-      // warn: a defect because the store rejected a batch that must be replayed from memory.
-      LOGGER.warn(
-        { attempt: batch.attempts, backoff_ms: backoff, detail: failure.detail },
-        "the store refused a batch; replaying it from the retry buffer",
-      );
       await sleep(backoff);
     }
   };
 
-  /**
-   * Send one batch ONCE, for a caller that is holding an RPC open.
-   *
-   * THE RETRY SCHEDULE BELONGS TO THE BUFFER, NOT TO A BLOCKED CALLER. The
-   * schedule spans seconds by design, which is longer than the deadline the
-   * daemon holds its `StartTurn` under -- so replaying inline turns a store
-   * outage into a turn the daemon never sees accepted, which is exactly the
-   * outcome the durable write's own contract forbids. One attempt is made; a
-   * non-terminal failure opens the degraded window and is reported to the
-   * caller, whose answer is to re-queue the row on the ordered retry buffer
-   * that owns the outage. The write id is deterministic, so the replay the
-   * buffer performs is absorbed if this attempt half-landed.
-   */
-  const deliverOnce = async (batch: PendingBatch): Promise<boolean> => {
-    batch.attempts += 1;
-    const failure = await attempt(batch.entries);
-    if (failure === null) {
-      reader.noteAgentRows(booksRegisteredBy(batch.entries));
-      closeDegraded();
-      LOGGER.logVerbose({ entries: batch.entries.length, attempts: batch.attempts }, "batch is durable");
-      return true;
-    }
-    reportFailure(failure);
-    if (failure.terminal) dropLoudly(batch, failure.detail);
-    return false;
-  };
-
-  /** Drain the queue in order. One loop, so batches land in the order written. */
+  /** Drain the buffer, one bounded batch at a time. */
   const drain = async (): Promise<void> => {
     while (queue.length > 0) {
-      const batch = queue[0];
-      if (batch === undefined) break;
+      const batch = nextBatch();
       await deliver(batch);
-      queue.shift();
+      const settled = new Set(batch);
+      queue = queue.filter((row) => !settled.has(row));
+      for (const row of batch) queuedBytes -= row.bytes;
+      noteBacklog();
+      noteProgress();
     }
     draining = undefined;
+    noteProgress();
   };
 
   const startDraining = (): void => {
     if (draining !== undefined) return;
     draining = drain();
-    // Nothing awaits the drain except flush(); a rejection here would be
-    // unhandled, and deliver() is written never to reject.
+    // Nothing awaits the drain; `flush()` waits on its progress instead, and
+    // `deliver()` is written never to reject.
     void draining;
   };
 
@@ -629,43 +884,60 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       if (entries.length === 0) return;
       wroteUnderProducer = true;
       noteShellRuns(entries);
-      // ORDERED BEHIND WHATEVER IS BUFFERED: a durable write that jumped the
-      // queue could land a turn's first activity frame before the prompt row
-      // that R15 says precedes it. The wait is abandoned the moment the store
-      // is known to be down, because the drain it is waiting on is then
-      // replaying on a schedule measured in seconds and the caller is holding
-      // an RPC open. Abandoning keeps the order: the caller's answer to the
-      // refusal is to re-queue the row at the TAIL of the same buffer.
-      if (degradedSince === undefined) await Promise.race([this.flush(), whenDegraded()]);
+      // THE ROWS JOIN THE ONE ORDERED BUFFER, whatever the caller learns. A
+      // durable write that jumped the buffer could land a turn's first activity
+      // frame before the prompt row that R15 says precedes it, or the prompt
+      // before the previous turn's own rows; behind them, as a turn edge, it
+      // ends its batch, so its ack waits on nothing produced after it.
       if (degradedSince !== undefined) {
+        // THE OUTAGE IS ALREADY KNOWN, so there is nothing to wait for: the
+        // rows are held, and the caller is told at once.
+        enqueue(entries);
+        startDraining();
         throw new PersistenceError(
           "store_unavailable",
-          `the store is unreachable (${degradedReason}); ${entries.length} durable row(s) belong on the retry buffer`,
+          `the store is unreachable (${degradedReason}); ${entries.length} durable row(s) are held on the retry buffer`,
         );
       }
-      const batch: PendingBatch = { entries, attempts: 0 };
-      const landed = await deliverOnce(batch);
-      if (!landed) {
+      const outcome = await new Promise<DurableOutcome>((resolve) => {
+        const group: DurableGroup = {
+          pending: entries.length,
+          settle: (settled) => {
+            if (!durableWaiting.delete(group)) return;
+            resolve(settled);
+          },
+        };
+        durableWaiting.add(group);
+        enqueue(entries, group);
+        startDraining();
+      });
+      if (outcome.kind === "durable") return;
+      if (outcome.kind === "degraded") {
         throw new PersistenceError(
           "store_unavailable",
-          `the store did not accept ${entries.length} durable row(s) after ${batch.attempts} attempt(s)`,
+          `the store is unreachable (${outcome.reason}); ${entries.length} durable row(s) are held on the retry buffer`,
         );
       }
+      throw new PersistenceError(
+        "invalid_request",
+        `the store refused a durable row as malformed: ${outcome.detail}`,
+      );
     },
 
     write(entries: PersistEntry[]): void {
       if (entries.length === 0) return;
       wroteUnderProducer = true;
       noteShellRuns(entries);
-      if (queue.length >= retry.bufferCapacity) {
-        const evicted = queue.shift();
-        if (evicted !== undefined) {
-          dropLoudly(evicted, `retry buffer is full at ${retry.bufferCapacity} batches`);
-        }
-      }
-      queue.push({ entries, attempts: 0 });
-      LOGGER.logVerbose({ entries: entries.length, queued: queue.length }, "batch enqueued");
+      enqueue(entries);
+      LOGGER.logVerbose({ entries: entries.length, queued: queue.length }, "rows enqueued");
       startDraining();
+    },
+
+    whenWritable(): Promise<void> {
+      if (backlogSince === undefined) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        writableWaiters.push(resolve);
+      });
     },
 
     async flush(): Promise<FlushOutcome> {
@@ -673,9 +945,29 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       // exit code answers "did the writes this flush waited for land", and a
       // lifetime count would report an outage the session already recovered
       // from as a dirty exit.
-      const before = lostRows;
-      while (draining !== undefined) await draining;
-      return { lostRows: lostRows - before };
+      //
+      // A FLUSH ALWAYS WAITS FOR ONE MORE OUTCOME while rows are queued, even
+      // under a standing persistent failure: the next attempt either lands them
+      // (and the flush goes on until the buffer is empty) or confirms the
+      // failure (and the flush returns, counting what is held). Returning at
+      // once would report a store that recovered a moment ago as still down.
+      const before = refusedRows;
+      while (queue.length > 0) {
+        await new Promise<void>((resolve) => {
+          progressWaiters.push(resolve);
+        });
+        if (persistentFailure) break;
+      }
+      const held = persistentFailure ? queue.length : 0;
+      if (held > 0) {
+        // The persistent failure was stated at ERROR where it was declared, and
+        // the caller states what the held count costs it; this is the branch.
+        LOGGER.debug(
+          { held_rows: held, detail: "the store is in a persistent failure" },
+          "a flush returned with rows the store has not acked; they are still held and retried",
+        );
+      }
+      return { lostRows: refusedRows - before + held };
     },
 
     openAgentPage(
