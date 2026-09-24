@@ -258,7 +258,7 @@ export async function boot(): Promise<void> {
         : undefined,
     });
 
-    mountHoldTray(shell.holdTray, ctx);
+    mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) });
 
     // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
     // the hold tray would otherwise navigate the webview away from the

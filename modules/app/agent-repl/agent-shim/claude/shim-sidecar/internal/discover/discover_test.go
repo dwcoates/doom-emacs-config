@@ -880,3 +880,40 @@ func TestAMetaThatWillNeverBecomeReadableIsStillAnError(t *testing.T) {
 		t.Fatalf("reason = %q, want %q: a permission failure is not a deferred read", got, holdMetaUnreadable)
 	}
 }
+
+// TestALinkedAgentSpoolIsDiscoveredOnceAsItsTranscript asserts the vendor's
+// real a* spool shape — a LINK to the subagent's own sidechain transcript — is
+// one target, the transcript, and never a second spool target reading the same
+// bytes again under another path.
+func TestALinkedAgentSpoolIsDiscoveredOnceAsItsTranscript(t *testing.T) {
+	// Arrange.
+	d, base, spool, _ := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/agent-a17.jsonl",
+		"config-a/projects/proj/sess-1/subagents/agent-a17.meta.json",
+	)
+	transcript := filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-a17.jsonl")
+	tasks := filepath.Join(spool, "claude-501/proj/runtime-sess/tasks")
+	if err := os.MkdirAll(tasks, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", tasks, err)
+	}
+	if err := os.Symlink(transcript, filepath.Join(tasks, "a17.output")); err != nil {
+		t.Fatalf("linking the spool: %v", err)
+	}
+
+	// Act.
+	targets := d.Scan()
+
+	// Assert.
+	var matches []Target
+	for _, target := range targets {
+		if strings.HasSuffix(target.Path, "agent-a17.jsonl") || strings.HasSuffix(target.Path, "a17.output") {
+			matches = append(matches, target)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("the linked spool and its transcript were discovered as %d targets, want one: %+v", len(matches), matches)
+	}
+	if matches[0].Path != Normalize(transcript) || matches[0].SessionID == "" {
+		t.Fatalf("target = %+v, want the transcript under its config-root path", matches[0])
+	}
+}
