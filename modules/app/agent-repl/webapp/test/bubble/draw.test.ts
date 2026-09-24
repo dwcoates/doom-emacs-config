@@ -271,11 +271,11 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
   it("leaves a class no spec gave it, the controller's own", () => {
     // Arrange
     const first = drawBubble(spec("response", { hooks: ["final-response"] })).bubble;
-    first.classList.add("response-selected");
+    first.classList.add("entry-selected");
     // Act
     drawBubble(spec("response", { hooks: ["final-response"] }), first);
     // Assert
-    expect(first.classList.contains("response-selected")).toBe(true);
+    expect(first.classList.contains("entry-selected")).toBe(true);
   });
 
   it("drops a state the new spec does not carry", () => {
