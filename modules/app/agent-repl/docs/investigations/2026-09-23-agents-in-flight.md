@@ -13,7 +13,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
 | `fix/post-bootstrap-log-defects` | `~/.config/doom-worktrees/post-bootstrap-log-defects` | Post-bootstrap log defects: legacy `keepalive` rows block sidecar upserts (files parked); a DIED shim stays in the stand-down manifest forever; the script runner WARNs on caller-judged exits (launchctl 113); `final_answer_unresolved` after the stop; the restore_holds orphan. | `af712ab9121aecd4b` | 09-24 |
-| `fix/system-scrollbar-stable-gutter` | `~/.config/doom-worktrees/system-scrollbar-stable-gutter` | System default scrollbars everywhere; `scrollbar-gutter: stable` on the bubble scroll box; the tree budget measures the real gutter. | `a258ca893b04f5160` | 09-24 |
 | `fix/lock-spawn-refusal-and-store-self-heal` | `~/.config/doom-worktrees/lock-spawn-refusal-and-store-self-heal` | A separate refusal for a lock holder that can't be spawned; a broken node-store entry is repaired in place (locked, atomic swap) by `link_node_modules` and `ensure-deps`. | `a9a5534645c1dacfe` | 09-24 |
 
 ## Still waiting on the owner
@@ -24,6 +23,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- The system default scrollbar everywhere (custom `::-webkit-scrollbar` rules and the 8px token gone), `scrollbar-gutter: stable` on the bubble scroll box, and the tree budget measures the real gutter (`fix/system-scrollbar-stable-gutter`, webapp 5679 unit + 1773 integration). Supersedes the 09-14 always-visible bar. NOT DEPLOYED yet (the realtest 7 run was in flight).
 - 09-24: the BOOTSTRAP onto daemon-owned deploys is done (lead, owner-authorized: stop, Emacs restart, deploy restarted store+sidecar, a second deploy all up-to-date); the ONE-TIME AGENTS.md section is deleted. The daily landed-worktree reaper landed (`feat/daemon-reaps-landed-worktrees`, daemon unit+integration green on master). Owner rulings: no terminal overtake; no successor-retraction arm.
 - 09-24 lead: the webapp node-store entry `webapp-4153e127492d6543` was repopulated (owner approved); 86 landed worktrees pruned (clean, and `merge-tree` into master was a no-op); 37 dirty or unlanded ones kept. Stray reaping by argv path is kept (owner ruling).
 - e2e load flakes fixed at their sources: the sidecar holds a rotated transcript until a record names its book; registry reads are ordered against Close; worktree log sinks detach inside `RemoveWorktree` and re-attach in `CreateWorktree` (master's `Surfaces.Retire` removed as the duplicate); one adoption per rendezvous; the restarting notice waits for a dropped stream to read again; `WatchBash` waits for an announced run's rows; store `unknown_run` at INFO (`fix/e2e-load-flakes`, e2e 3x green on the branch). Open: `forkSession` rotations aren't held; a `/clear` outside the shim in a shared directory is held forever (INFO once).
