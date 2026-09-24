@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"claude-repld/internal/clock"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/worktreereap"
@@ -64,7 +65,7 @@ func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, l
 		Git:          git,
 		Registry:     registry,
 		LiveSessions: live,
-		Clock:        worktreereap.SystemClock{},
+		Clock:        clock.System{},
 		LockPath:     filepath.Join(lockDir(), worktreeReapLockName),
 		IdleAfter:    idle,
 		StartDelay:   start,
