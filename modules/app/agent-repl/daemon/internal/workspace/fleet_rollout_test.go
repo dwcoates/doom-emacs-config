@@ -908,3 +908,44 @@ func TestPrelaunchRefusesAnUnresolvableBundle(t *testing.T) {
 		t.Fatalf("spawn attempts = %d, want none", f.supervisor.spawnAttempts)
 	}
 }
+
+// A REFUSED SERVING CLAIM LEAVES NO HALF-ADOPTION. The live deploy of
+// 2026-09-24 15:07 claimed after Install's map write on a read-only handle:
+// the claim was refused and the fleet was left holding three clients with no
+// watches that their callers believed were given up.
+
+func TestAnInstallWhoseClaimIsRefusedHoldsNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.claimErr = errFake
+
+	// Act.
+	err := f.fleet.Install(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Install() = nil error, want the refused claim surfaced")
+	}
+	if _, held := f.fleet.Client(ws.ID); held {
+		t.Fatal("the fleet holds the client of a refused install")
+	}
+}
+
+func TestAnAdoptionWhoseClaimIsRefusedLetsTheDialedShimGo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.claimErr = errFake
+
+	// Act.
+	_, err := f.fleet.Adopt(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Adopt() = nil error, want the refused claim surfaced")
+	}
+	if f.client.detached != 1 || len(f.client.kills) != 0 {
+		t.Fatalf("detaches = %d, kills = %d; want the link let go and the shim left running", f.client.detached, len(f.client.kills))
+	}
+}

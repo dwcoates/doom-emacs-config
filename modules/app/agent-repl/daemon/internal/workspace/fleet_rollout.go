@@ -322,6 +322,21 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	if c == nil {
 		return fmt.Errorf("workspace: install a shim for %q: no client", ws)
 	}
+	// AN INSTALLED CLIENT IS SERVED BY THIS DAEMON: the boot's adoption of a
+	// survivor, the handover's adoption, the takeover's orphan recovery and a
+	// relaunch's rotation all arrive here, and none may leave the serving row
+	// naming a daemon that is gone. See claimServing.
+	//
+	// THE CLAIM COMES BEFORE THE MAP WRITE. Every caller of Install still owns
+	// the client it passed -- the adoption detaches it, the relaunch retires
+	// its prelaunch, the boot fails -- so a refused claim must leave the fleet
+	// exactly as it was. Claimed after the write, a refusal left the fleet
+	// holding a client with no watches and no started session that its caller
+	// believed it had given up (live deploy 2026-09-24 15:07, three orphans on
+	// a successor whose handle was still read-only).
+	if err := f.claimServing(ctx, f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}), ws); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	previous := f.sessions[ws]
 	// An INSTALL rotates the process, never the session: the adopted client
@@ -370,12 +385,6 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// without recording any either. Retiring here is what keeps a workspace
 	// whose shim is serving from reading killed to every surface that composes
 	// off the record. See retireTerminalRecord.
-	// AN INSTALLED CLIENT IS SERVED BY THIS DAEMON: the boot's adoption of a
-	// survivor and the handover's adoption both arrive here, and neither may
-	// leave the serving row naming a daemon that is gone. See claimServing.
-	if err := f.claimServing(ctx, f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}), ws); err != nil {
-		return err
-	}
 	if err := f.retireTerminal(ctx, ws); err != nil {
 		return err
 	}
@@ -428,7 +437,8 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 		return nil, fmt.Errorf("workspace: adopt %q: resolve the workspace log sink: %w", ws, logErr)
 	}
 	log = log.With(dlog.Context{"workspace": string(ws)})
-	client, err := f.adoptBounded(ctx, log, ws, record.Dir, f.deps.SocketPath(ws), "handover")
+	socketPath := f.deps.SocketPath(ws)
+	client, err := f.adoptBounded(ctx, log, ws, record.Dir, socketPath, "handover")
 	if err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: dial the transferred shim: %w", ws, err)
 	}
@@ -438,6 +448,24 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 	// The session facts come from the shim's re-announcement on the watch this
 	// install opens (landing 7), never from the durable record.
 	if err := f.Install(ctx, ws, client); err != nil {
+		// A REFUSED INSTALL LEAVES NO HALF-ADOPTION. The fleet does not hold
+		// this client (Install refuses before its map write when the claim
+		// fails), so the link this call dialed is let go -- DETACHED, never
+		// killed: the shim is someone's live conversation, and this daemon
+		// ordering its teardown to tidy a failed adoption is the forced kill
+		// nobody asked for.
+		// A failure AFTER the map write (the terminal retirement, the
+		// watches) leaves the client held, and a held client is the fleet's
+		// to stop or hand over; only an unheld one is let go here.
+		f.mu.RLock()
+		entry := f.sessions[ws]
+		f.mu.RUnlock()
+		if entry == nil || entry.client != client {
+			client.Detach()
+			log.Info(opFleetRollout, "let go of the dialed shim after a refused install; the process keeps running", dlog.Context{
+				"shim_pid": client.PID(), "socket": socketPath,
+			})
+		}
 		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
 	// THE TRANSFERRED SHIM'S SESSION IS ALREADY STARTED, as the comment above
