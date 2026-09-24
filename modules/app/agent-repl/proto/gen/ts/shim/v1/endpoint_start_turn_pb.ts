@@ -23,12 +23,14 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi8wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQFCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQibAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQSKgoEcGFnZRgCIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZSKLAgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPgoRdHVybl9hbHJlYWR5X29wZW4YAiABKAsyIS5zaGltLnYxLlN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkgAEjEKCm5vX3Nlc3Npb24YAyABKAsyGy5zaGltLnYxLlN0YXJ0VHVybk5vU2Vzc2lvbkgAEjkKDnZlbmRvcl9yZWZ1c2VkGAQgASgLMh8uc2hpbS52MS5TdGFydFR1cm5WZW5kb3JSZWZ1c2VkSAASMQoKcXVlcnlfZGVhZBgFIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuUXVlcnlEZWFkSABCBgoEa2luZCItChhTdGFydFR1cm5UdXJuQWxyZWFkeU9wZW4SEQoJa2VlcGFsaXZlGAEgASgIIhQKElN0YXJ0VHVybk5vU2Vzc2lvbiIYChZTdGFydFR1cm5WZW5kb3JSZWZ1c2VkIhQKElN0YXJ0VHVyblF1ZXJ5RGVhZEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi8wEKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEhEKCXBhZ2Vfc2l6ZRgEIAEoDRI7Cg1rbm93bl90aHJvdWdoGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVySACIAQFCEAoOX2tub3duX3Rocm91Z2gieQoRU3RhcnRUdXJuUmVzcG9uc2USLAoHc3VjY2VzcxgBIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuU3VjY2Vzc0gAEiwKB2ZhaWx1cmUYAiABKAsyGS5zaGltLnYxLlN0YXJ0VHVybkZhaWx1cmVIAEIICgZyZXN1bHQibAoQU3RhcnRUdXJuU3VjY2VzcxIsCgZwcm9tcHQYASABKAsyHC5jb252ZXJzYXRpb24udjEuQWdlbnRQcm9tcHQSKgoEcGFnZRgCIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UGFnZSKLAgoQU3RhcnRUdXJuRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSPgoRdHVybl9hbHJlYWR5X29wZW4YAiABKAsyIS5zaGltLnYxLlN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkgAEjEKCm5vX3Nlc3Npb24YAyABKAsyGy5zaGltLnYxLlN0YXJ0VHVybk5vU2Vzc2lvbkgAEjkKDnZlbmRvcl9yZWZ1c2VkGAQgASgLMh8uc2hpbS52MS5TdGFydFR1cm5WZW5kb3JSZWZ1c2VkSAASMQoKcXVlcnlfZGVhZBgFIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuUXVlcnlEZWFkSABCBgoEa2luZCIrChhTdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5KBAgBEAJSCWtlZXBhbGl2ZSIUChJTdGFydFR1cm5Ob1Nlc3Npb24iGAoWU3RhcnRUdXJuVmVuZG9yUmVmdXNlZCIUChJTdGFydFR1cm5RdWVyeURlYWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
  * by the time this is sent the daemon has already decided no turn is in
- * flight, and the shim submits it to the agent binary immediately.
+ * flight, and the shim submits it to the agent binary immediately — or, when
+ * the shim's own cache keep-alive is running, the moment that keep-alive ends.
+ * The call simply takes that much longer; nothing about the wait is stated.
  *
  * @generated from message shim.v1.StartTurnRequest
  */
@@ -166,10 +168,11 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
    */
   kind: {
     /**
-     * A turn is already open. Ordinarily the DAEMON's fault (it is the only
-     * queue) — EXCEPT when the open turn is one of the shim's own keep-alive
-     * pings, which the shim opens internally and no daemon queue can see. That
-     * case is TRANSIENT, not a daemon bug: see `turn_already_open.keepalive`.
+     * A turn is already open, or another StartTurn is still being started.
+     * Always the DAEMON's fault: it is the only queue. The shim's own cache
+     * keep-alive NEVER produces this arm — a StartTurn that arrives while a
+     * keep-alive runs waits inside the shim for the keep-alive to end and then
+     * opens its turn, so no keep-alive is ever visible on this wire.
      *
      * @generated from field: shim.v1.StartTurnTurnAlreadyOpen turn_already_open = 2;
      */
@@ -185,7 +188,8 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
     case: "noSession";
   } | {
     /**
-     * The agent binary refused the prompt; `detail` carries its wording.
+     * The agent binary refused the prompt, or never became free to take it
+     * within the shim's bound; `detail` carries the account.
      *
      * @generated from field: shim.v1.StartTurnVendorRefused vendor_refused = 4;
      */
@@ -214,18 +218,6 @@ export const StartTurnFailureSchema: GenMessage<StartTurnFailure> = /*@__PURE__*
  * @generated from message shim.v1.StartTurnTurnAlreadyOpen
  */
 export type StartTurnTurnAlreadyOpen = Message<"shim.v1.StartTurnTurnAlreadyOpen"> & {
-  /**
-   * True when the open turn is one of the shim's OWN keep-alive pings rather
-   * than a daemon turn. A keep-alive collision is TRANSIENT — the ping normally
-   * closes on its own in milliseconds, but a vendor 5xx storm can hold it open
-   * for tens of seconds — so the daemon RE-DRIVES the queued prompt (same
-   * idempotency key) until the keep-alive closes and the turn starts, rather
-   * than surfacing a terminal error. False keeps the historical meaning: a
-   * genuine daemon double-submit, which stays the daemon's own bug.
-   *
-   * @generated from field: bool keepalive = 1;
-   */
-  keepalive: boolean;
 };
 
 /**
