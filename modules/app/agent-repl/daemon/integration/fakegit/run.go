@@ -294,6 +294,17 @@ func gitDir(repo *Repo, wt *Worktree) string {
 	return filepath.Join(repo.CommonDir, "worktrees", filepath.Base(Canon(wt.Dir)))
 }
 
+// GitDirOf answers the absolute git directory `rev-parse --absolute-git-dir`
+// reports for a worktree directory, without recording an invocation: a test
+// that needs to write a worktree's admin files asks here.
+func (s *State) GitDirOf(dir string) (string, bool) {
+	repo, wt := s.FindWorktree(dir)
+	if repo == nil || wt == nil {
+		return "", false
+	}
+	return gitDir(repo, wt), true
+}
+
 // cdup is `--show-cdup`: the relative path back up to the top of the worktree,
 // with a trailing separator, and empty at the top.
 func cdup(top, dir string) string {
@@ -427,6 +438,12 @@ func (s *State) resolve(repo *Repo, wt *Worktree, ref string) (string, bool) {
 	}
 	if sha, ok := repo.BranchHeads[ref]; ok {
 		return sha, true
+	}
+	// A FULL branch ref names the same branch its short name does.
+	if name, full := strings.CutPrefix(ref, "refs/heads/"); full {
+		if sha, ok := repo.BranchHeads[name]; ok {
+			return sha, true
+		}
 	}
 	if len(ref) == 40 {
 		return ref, true

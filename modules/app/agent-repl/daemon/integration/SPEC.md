@@ -31,7 +31,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   changed paths and cleanliness are all fixture data. No `git init` and no real
   git binary anywhere. Helpers: `Commit(file, content)`, `Branch(name)`,
   `Checkout(name)`, `Head()`, `Worktrees()`, `Branches()`, `HasBranch`,
-  `HasWorktree`, `AddWorktree(name)`, `CommitIn`, and the
+  `HasWorktree`, `AddWorktree(name)`, `CommitIn`, `IdleWorktree(dir, at)`, and the
   scripting verbs `ScriptConflict(worktreeDir, branch, paths...)`,
   `ScriptFailure(dir, exit, stderr, match...)`, `SetPaths`.
 - `Register(t, d, repo) WorkspaceRef` via RegisterWorkspace.
@@ -456,6 +456,15 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - a `question_asked` host notification carries its `header` and sets the
   workspace's attention marker; `agent_addressed` carries its text (skipped —
   no production route, see the settled-behaviors section)
+
+### worktree_reaper_test.go
+- the landed-worktree reaper, on a compressed schedule
+  (`AGENT_REPL_WORKTREE_REAP_START_DELAY`, `AGENT_REPL_WORKTREE_REAP_EVERY`)
+  and the production 24h idle threshold, removes a worktree whose branch is
+  already on `main` (aged with `Repo.IdleWorktree`) and deletes its branch,
+  and keeps an unlanded worktree and an open workspace's checkout, the sweep
+  summary naming each one's gate; every other edge case is the
+  `internal/worktreereap` unit suite's
 
 ### Coverage the second adversarial audit added
 
