@@ -27,8 +27,11 @@ import {
   TURN_ERROR_HEADLINES,
   WORKSPACE_ID,
   clientFailure,
+  feedId,
   feedPageError,
+  turnEndedConcludedRow,
   turnEndedErroredRow,
+  turnEndedInterruptedRow,
   type ClientFailureArm,
 } from "./fixtures";
 
@@ -152,6 +155,42 @@ describe("turn error arms", () => {
     await harness.settle();
     // Assert
     expect(harness.row("row-1")?.textContent).toContain(`it broke: ${arm}`);
+  });
+});
+
+describe("the ended-turn bubble (owner ruling 2026-09-24)", () => {
+  it.each(TURN_ERROR_ARMS)("draws a red-bordered response bubble stating the %s ending", async (arm) => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedErroredRow(arm));
+    await harness.settle();
+    // Assert
+    const bubble = harness.row("row-1")?.querySelector('.bubble[data-role="response"][data-variant="turn-ended"]');
+    expect(bubble?.textContent).toBe(TURN_ERROR_HEADLINES[arm]);
+  });
+
+  it("draws one for an interrupted turn", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedInterruptedRow());
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.querySelector('.bubble[data-variant="turn-ended"]')).not.toBeNull();
+  });
+
+  it("draws none for a normal completed turn", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, turnEndedConcludedRow(feedId("r1")));
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".bubble")).toBeNull();
   });
 });
 
