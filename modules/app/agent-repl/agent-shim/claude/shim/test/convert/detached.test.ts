@@ -1205,3 +1205,60 @@ describe("convertDetached: the owner of task-stream work", () => {
     expect(announced(entries)?.owner).toBeUndefined();
   });
 });
+
+describe("convertDetached: the call's handoff", () => {
+  /** A call registry holding one spawning call. */
+  function holding(toolUseId: string): CallRegistry {
+    const calls = createCallRegistry();
+    calls.remember({ toolUseId, toolName: "Agent", input: {}, startedAtMs: 1, agentId: MAIN_AGENT });
+    return calls;
+  }
+
+  it("hands the call off when a task says it started in the background", () => {
+    // Arrange
+    const calls = holding("toolu_1");
+
+    // Act
+    convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "local_agent", is_backgrounded: true },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert
+    expect(calls.isDetached("toolu_1")).toBe(true);
+  });
+
+  it("does not hand the call off when the task states no background flag", () => {
+    // Arrange: an older vendor's foreground work states no flag either.
+    const calls = holding("toolu_1");
+
+    // Act
+    convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "local_agent" },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert
+    expect(calls.isDetached("toolu_1")).toBe(false);
+  });
+
+  it("hands the call off when a person backgrounds the work by hand", () => {
+    // Arrange
+    const calls = holding("toolu_1");
+
+    // Act
+    convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert
+    expect(calls.isDetached("toolu_1")).toBe(true);
+  });
+});

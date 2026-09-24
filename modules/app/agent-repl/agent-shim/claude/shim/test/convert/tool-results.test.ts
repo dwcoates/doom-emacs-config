@@ -425,3 +425,42 @@ describe("convertToolProgressMessage", () => {
     expect(entries).toEqual([]);
   });
 });
+
+describe("a subagent's tool result", () => {
+  it("settles the call its own stream announced", () => {
+    // Arrange: the spawn and the subagent's read, each on the stream it rode.
+    const registry = createCallRegistry();
+    registry.remember({ ...call("Agent"), toolUseId: "toolu_spawn" });
+    registry.remember({ ...call("Read", { file_path: "/tmp/a" }), spawningCall: "toolu_spawn" });
+
+    // Act
+    const entries = convert(
+      resultRecord([{ type: "tool_result", tool_use_id: "toolu_1", content: "hi" }], {
+        parent_tool_use_id: "toolu_spawn",
+        tool_use_result: READ_OUTPUT,
+      }),
+      registry,
+    );
+
+    // Assert
+    expect(entries.map((entry) => entry.source.discriminator)).toEqual(["activity.read.success"]);
+  });
+
+  it("releases the call even when it carries no typed output", () => {
+    // Arrange: the SDK forwards a subagent's results with no `tool_use_result`.
+    const registry = createCallRegistry();
+    registry.remember({ ...call("Agent"), toolUseId: "toolu_spawn" });
+    registry.remember({ ...call("Read", { file_path: "/tmp/a" }), spawningCall: "toolu_spawn" });
+
+    // Act
+    convert(
+      resultRecord([{ type: "tool_result", tool_use_id: "toolu_1", content: "hi" }], {
+        parent_tool_use_id: "toolu_spawn",
+      }),
+      registry,
+    );
+
+    // Assert
+    expect(registry.peek("toolu_1")).toBeUndefined();
+  });
+});
