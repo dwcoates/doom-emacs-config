@@ -369,8 +369,7 @@ type HeldPrompt struct {
 }
 
 // HoldKind is a DAEMON-SIDE condition holding a prompt, independent of any
-// classification verdict. Keep-alive is not an arm: the keep-alive window is
-// the shim's, and the daemon never holds a prompt for it.
+// classification verdict.
 type HoldKind int
 
 // The hold kinds.

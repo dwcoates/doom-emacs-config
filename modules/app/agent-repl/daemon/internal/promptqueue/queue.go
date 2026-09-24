@@ -103,21 +103,9 @@ type queue struct {
 	// rather than a sleep so a test can join them.
 	reviving sync.WaitGroup
 
-	// redriving tracks the in-flight background re-drives of a prompt refused
-	// behind a keep-alive turn. It is a WaitGroup rather than a sleep so a test
-	// can join them, and so Drain waits them out before the state client closes.
-	redriving sync.WaitGroup
-
 	// bouncing tracks the bounces running on their own goroutines, so Drain
 	// joins them rather than closing the state client under one.
 	bouncing sync.WaitGroup
-
-	// redrives holds a per-workspace handle to the in-flight keep-alive
-	// re-drive so an INTERRUPT can cancel the queued turn before it ever starts.
-	// A workspace has exactly one turn re-driving at a time, so the workspace
-	// id keys it; it is guarded by mu, and every re-drive registers on entry
-	// and consumes its own handle on exit.
-	redrives map[ids.WorkspaceID]*redriveHandle
 
 	// editSeq mints each edit's identity; guarded by mu.
 	editSeq uint64
@@ -152,16 +140,12 @@ func newQueue(deps Deps) (*queue, error) {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	if deps.After == nil {
-		deps.After = time.After
-	}
 	if deps.StripSentinels == nil {
 		deps.StripSentinels = func(s string) string { return s }
 	}
 	q := &queue{
-		deps:     deps,
-		states:   make(map[ids.WorkspaceID]*wsState),
-		redrives: make(map[ids.WorkspaceID]*redriveHandle),
+		deps:   deps,
+		states: make(map[ids.WorkspaceID]*wsState),
 	}
 	deps.Log.Global().Debug(opNew, "the prompt queue is wired", nil)
 	return q, nil
@@ -233,17 +217,15 @@ func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.T
 func (q *queue) waitForClassifications() { q.classifying.Wait() }
 
 // Drain implements Queue: a BOUNDED join of the classification verdicts, the
-// background revivals, the background keep-alive re-drives, and the bounces
-// the registry is running. It reports
-// whether they all left, so the caller decides
-// what an overrun means rather than this package guessing — and it is bounded
-// because an unbounded wait is a daemon that does not exit.
+// background revivals, and the bounces the registry is running. It reports
+// whether they all left, so the caller decides what an overrun means rather
+// than this package guessing — and it is bounded because an unbounded wait is
+// a daemon that does not exit.
 func (q *queue) Drain(bound time.Duration) bool {
 	left := make(chan struct{})
 	go func() {
 		q.classifying.Wait()
 		q.reviving.Wait()
-		q.redriving.Wait()
 		q.bouncing.Wait()
 		close(left)
 	}()

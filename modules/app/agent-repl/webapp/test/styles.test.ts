@@ -1321,7 +1321,6 @@ describe("the prompt borders", () => {
   it.each([
     ["a prompt held behind the turn", ["held-right"]],
     ["a prompt held by a bounce", ["held-right", "lease-card"]],
-    ["a prompt held by a keep-alive", ["held-right", "keep-alive-card"]],
   ] as const)("gives %s no border", (_label, hooks) => {
     // Arrange / Act
     const borders = bordersOn(prompt("held", false), hooks);

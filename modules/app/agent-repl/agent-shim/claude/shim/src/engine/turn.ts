@@ -3,10 +3,21 @@
  * the agent-, detached- and history-addressed verbs that hang off it.
  *
  * ONE TURN IN FLIGHT. The DAEMON is the only queue, so a second `StartTurn`
- * while one is open is the daemon's bug and is refused with
- * `StartTurnTurnAlreadyOpen` rather than queued. Queuing it here would create a
- * second queue nobody can see, and the daemon's model of what is pending would
- * silently stop being true.
+ * while one is open — or while another is still being started — is the
+ * daemon's bug and is refused with `StartTurnTurnAlreadyOpen` rather than
+ * queued. Queuing it here would create a second queue nobody can see, and the
+ * daemon's model of what is pending would silently stop being true.
+ *
+ * THE ONE WAIT IS BEHIND THE SHIM'S OWN KEEP-ALIVE (2026-09-23). A keep-alive
+ * is this process's housekeeping, invisible outside it, so a `StartTurn` that
+ * lands while one runs is not refused: it WAITS for the keep-alive to leave the
+ * turn slot (its own result, its abandonment, or the query's death) and then
+ * opens its turn exactly as it would have on an idle session. The daemon sees
+ * only a `StartTurn` that took that much longer. The keep-alive is never
+ * interrupted: the SDK declares no attribution for an interrupted send's
+ * result, and a keep-alive result the scope cannot recognize would hold the
+ * slot forever. See {@link TurnEngine.waitOutKeepalive} for the bound and the
+ * caller's abort, which are what keep the wait from losing or doubling a prompt.
  *
  * R15: THE PROMPT ROW IS WRITTEN AND ACKED FIRST. `StartTurn` writes its
  * `AgentPrompt` row and has the store's DURABLE ACK before the prompt is
@@ -76,6 +87,17 @@ export interface SessionContext {
   readonly nowMs: () => number;
   openTurn(): OpenTurn | undefined;
   /**
+   * Settles when the shim's own keep-alive leaves the turn slot, however it
+   * leaves; absence when no keep-alive holds the slot.
+   *
+   * THE SLOT IS RELEASED SYNCHRONOUSLY with the keep-alive's leaving, before
+   * anything the leaving path awaits, so a start waiting on this runs ahead of
+   * any cadence beat that could take the slot again.
+   */
+  keepaliveEnded(): Promise<void> | undefined;
+  /** How long a `StartTurn` waits behind a keep-alive before refusing, loudly. */
+  readonly keepaliveYieldBudgetMs: number;
+  /**
    * Deliver a prompt to the vendor.
    *
    * The session owns this because the yield obligation may have to REPLACE the
@@ -85,16 +107,6 @@ export interface SessionContext {
   submit(said: conversationv1.UserSaid, keepalive: boolean): Promise<void>;
   /** Adopt (or clear) the open turn. */
   setOpenTurn(turn: OpenTurn | undefined): void;
-  /**
-   * Hold the keep-alive beat while a `StartTurn` is being opened, answering
-   * the release.
-   *
-   * A START IN FLIGHT OWNS THE SUBMITTER SLOT. It checks for an open turn
-   * first and adopts its own only after two store round trips, and a beat
-   * landing between the two saw "no turn open", submitted, and was then
-   * overwritten by the start's own turn -- two submitters for one query.
-   */
-  holdKeepalive(): () => void;
   /**
    * Register an open `WatchAgent` tail so the teardown can conclude it.
    *
@@ -270,6 +282,20 @@ export function promptEntry(
  */
 const KILL_AWAITS_START_BUDGET_MS = 1_000;
 
+/**
+ * How long a `StartTurn` waits behind the shim's own keep-alive.
+ *
+ * A LAST RESORT, NOT THE MECHANISM: the wait ends on the keep-alive's own
+ * leaving. A keep-alive normally answers "." in well under a second; through a
+ * vendor 5xx storm it stays open across the vendor's own retries, each
+ * `retry_after` measured at ~35-39s. Two minutes is ~3x one such retry, and
+ * roughly the bound the daemon's retired re-drive held (24 attempts, ~103s).
+ */
+export const KEEPALIVE_YIELD_BUDGET_MS = 120_000;
+
+/** How a wait behind the shim's own keep-alive ended. */
+type KeepaliveWait = "free" | "expired" | "abandoned";
+
 /** The turn verbs, over one session. */
 export class TurnEngine {
   constructor(private readonly session: SessionContext) {}
@@ -295,11 +321,36 @@ export class TurnEngine {
    * start succeeded, and the same `no_turn_open` it would have given anyway if
    * the start was refused.
    */
-  private starting: { turn: string; settled: Promise<void> } | undefined;
+  private starting: { turn: string; settled: Promise<void>; behindKeepalive: boolean } | undefined;
+
+  /**
+   * Whether a `StartTurn` is being processed right now.
+   *
+   * The keep-alive cadence reads it: a beat taken while a real start is in
+   * flight would claim the turn slot the start is about to open, and the real
+   * prompt would then be pushed into the keep-alive's turn.
+   */
+  startInFlight(): boolean {
+    return this.starting !== undefined;
+  }
 
   // -- StartTurn ------------------------------------------------------------
 
-  async startTurn(request: shimv1.StartTurnRequest): Promise<shimv1.StartTurnResponse> {
+  async startTurn(request: shimv1.StartTurnRequest, signal?: AbortSignal): Promise<shimv1.StartTurnResponse> {
+    // A START WHILE ANOTHER IS BEING STARTED IS A DOUBLE-SUBMIT. The first may
+    // be waiting behind a keep-alive with no turn open yet, so without this
+    // refusal both would pass the open-turn check below and both be delivered.
+    const already = this.starting;
+    if (already !== undefined) {
+      LOGGER.debug(
+        { starting_turn: already.turn, requested_turn: request.turn?.value ?? "" },
+        "refused a StartTurn because another StartTurn is still being started",
+      );
+      return startTurnRefused(
+        { kind: "turnAlreadyOpen" },
+        `turn ${already.turn} is still being started; the daemon holds the queue and the shim never does`,
+      );
+    }
     // THE MARK GOES DOWN BEFORE ANY AWAIT, so no kill can slip between the
     // call arriving and the turn being claimed. See `starting`.
     let settle = (): void => {};
@@ -308,20 +359,42 @@ export class TurnEngine {
       settled: new Promise<void>((resolve) => {
         settle = resolve;
       }),
+      // Read NOW, synchronously: once the mark is down no beat can open a
+      // keep-alive, so the answer cannot change under a kill that reads it.
+      behindKeepalive: this.session.openTurn()?.keepalive === true,
     };
     this.starting = starting;
-    const releaseKeepalive = this.session.holdKeepalive();
     try {
-      return await this.openTurnForStart(request);
+      return await this.openTurnForStart(request, signal);
     } finally {
-      releaseKeepalive();
       if (this.starting === starting) this.starting = undefined;
       settle();
     }
   }
 
   /** `startTurn`'s body; the mark around it is what makes a kill wait. */
-  private async openTurnForStart(request: shimv1.StartTurnRequest): Promise<shimv1.StartTurnResponse> {
+  private async openTurnForStart(
+    request: shimv1.StartTurnRequest,
+    signal: AbortSignal | undefined,
+  ): Promise<shimv1.StartTurnResponse> {
+    const requested = request.turn?.value ?? "";
+    // FIRST, BEFORE ANY OTHER CHECK: a keep-alive in the slot is waited out,
+    // and everything below then judges the session as the keep-alive left it
+    // (a query that died under it answers `query_dead`, exactly as it would
+    // have with no keep-alive in the story).
+    const waited = await this.waitOutKeepalive(requested, signal);
+    if (waited === "expired") {
+      return startTurnRefused(
+        { kind: "vendorRefused" },
+        `the session did not become free to take turn ${requested} within ${this.session.keepaliveYieldBudgetMs}ms`,
+      );
+    }
+    if (waited === "abandoned") {
+      return startTurnRefused(
+        { kind: "vendorRefused" },
+        `the caller abandoned turn ${requested} before the session was free to take it; nothing was delivered`,
+      );
+    }
     const identity = this.session.identity();
     if (identity === undefined) {
       return startTurnRefused({ kind: "noSession" }, "no session has been started on this shim");
@@ -329,17 +402,11 @@ export class TurnEngine {
     const open = this.session.openTurn();
     if (open !== undefined) {
       LOGGER.debug(
-        { open_turn: open.id.value, requested_turn: request.turn?.value ?? "", keepalive: open.keepalive },
+        { open_turn: open.id.value, requested_turn: requested },
         "refused a second StartTurn because one turn is already in flight",
       );
-      // A KEEP-ALIVE COLLISION IS TRANSIENT, NOT THE DAEMON'S BUG. The shim
-      // opens keep-alive turns internally and no daemon queue can see them, so
-      // a user StartTurn that lands during one is refused through no fault of
-      // the daemon's. The `keepalive` flag tells the daemon to re-drive the
-      // prompt (same idempotency key) until the ping closes, rather than
-      // surfacing a terminal turn_already_open.
       return startTurnRefused(
-        { kind: "turnAlreadyOpen", keepalive: open.keepalive },
+        { kind: "turnAlreadyOpen" },
         `turn ${open.id.value} is already in flight; the daemon holds the queue and the shim never does`,
       );
     }
@@ -406,6 +473,63 @@ export class TurnEngine {
       "opened a turn, delivered its prompt, and painted the opening page",
     );
     return startTurnAccepted(prompt, page);
+  }
+
+  /**
+   * Wait for the shim's own keep-alive to leave the turn slot, when one holds it.
+   *
+   * NO PROMPT IS LOST OR DOUBLED BY THE WAIT. Nothing of the turn exists until
+   * the wait is over — no prompt row, no open turn, no send — so every way out
+   * of it that is not "free" leaves nothing behind:
+   *   - `expired`: the bound ran out with the keep-alive still open. Refused
+   *     LOUDLY (ERROR): a keep-alive the vendor never answers is a wedged
+   *     session, and the daemon surfaces the refusal as the turn's failure.
+   *   - `abandoned`: the caller's signal aborted — the daemon gave up on the
+   *     call — so the turn is never delivered behind its back. INFO: the
+   *     caller left; nothing is wrong with the session.
+   */
+  private async waitOutKeepalive(turn: string, signal: AbortSignal | undefined): Promise<KeepaliveWait> {
+    const ended = this.session.keepaliveEnded();
+    if (ended === undefined) return "free";
+    const budgetMs = this.session.keepaliveYieldBudgetMs;
+    LOGGER.info(
+      { turn_id: turn, budget_ms: budgetMs },
+      "a StartTurn arrived while the shim's own keep-alive runs; it waits for the keep-alive to end, then opens its turn",
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    const expired = new Promise<KeepaliveWait>((resolve) => {
+      timer = setTimeout(() => resolve("expired"), budgetMs);
+    });
+    const abandoned = new Promise<KeepaliveWait>((resolve) => {
+      if (signal === undefined) return;
+      if (signal.aborted) {
+        resolve("abandoned");
+        return;
+      }
+      onAbort = () => resolve("abandoned");
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      const outcome = await Promise.race([ended.then((): KeepaliveWait => "free"), expired, abandoned]);
+      if (outcome === "expired") {
+        LOGGER.error(
+          { turn_id: turn, budget_ms: budgetMs, detail: "the keep-alive never left the turn slot" },
+          "a StartTurn waited out its budget behind the shim's own keep-alive; refusing the turn undelivered",
+        );
+      } else if (outcome === "abandoned") {
+        LOGGER.info(
+          { turn_id: turn },
+          "the caller abandoned a StartTurn while it waited behind the shim's own keep-alive; nothing was delivered",
+        );
+      } else {
+        LOGGER.debug({ turn_id: turn }, "the keep-alive left the turn slot; the waiting StartTurn opens its turn");
+      }
+      return outcome;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   /**
@@ -489,7 +613,7 @@ export class TurnEngine {
       return updateAgentRefused({ kind: "nothingRunning" }, "the vendor query is dead; nothing is running");
     }
     if (isMain) {
-      if (this.session.openTurn() === undefined) {
+      if (this.servedTurn() === undefined) {
         return updateAgentRefused({ kind: "nothingRunning" }, "the main agent has no turn in flight");
       }
       // Callback liveness FIRST: an unresolved canUseTool promise survives an
@@ -659,7 +783,7 @@ export class TurnEngine {
     }
     const requested = request.turn?.value ?? "";
     await this.awaitStartOf(requested);
-    const open = this.session.openTurn();
+    const open = this.servedTurn();
     // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN. Detached work — background
     // subagents, shells, monitors, workflows — outlives the turn that spawned
     // it by design, and it ends only through its own per-task stop or a
@@ -726,29 +850,53 @@ export class TurnEngine {
   }
 
   /**
+   * The open turn as a consumer may address it: never the shim's own keep-alive.
+   *
+   * A KEEP-ALIVE IS NOBODY'S TURN TO STOP. A consumer's stop or kill that lands
+   * while only a keep-alive holds the slot (the consumer's own turn already
+   * ended) finds nothing running, exactly as on an idle session. Interrupting
+   * the keep-alive instead would end a send whose result the SDK declares no
+   * attribution for, and naming it `not_the_open_turn` would tell the daemon a
+   * keep-alive exists.
+   */
+  private servedTurn(): OpenTurn | undefined {
+    const slot = this.session.openTurn();
+    return slot?.keepalive === true ? undefined : slot;
+  }
+
+  /**
    * Wait for the named turn's own `StartTurn` to settle, when one is in
    * flight. See `starting` for the race this closes and the run that found it.
    *
    * Bounded, and the bound expiring is SAID OUT LOUD rather than swallowed: a
    * start that never settles is a fault, and the kill then proceeds on what
    * the session actually holds, which is never worse than not having waited.
+   *
+   * A START WAITING BEHIND THE SHIM'S KEEP-ALIVE IS STILL JUST A START. The
+   * kill waits for it exactly as for any other, over the start's own bound
+   * plus the ordinary one, so the daemon sees what it always sees: the turn
+   * opens, and the kill then interrupts it. Cutting the wait short here would
+   * leave the start to open a turn the kill had already answered for.
    */
   private async awaitStartOf(turn: string): Promise<void> {
     const starting = this.starting;
     if (starting === undefined || starting.turn !== turn || turn === "") return;
+    const budgetMs = starting.behindKeepalive
+      ? this.session.keepaliveYieldBudgetMs + KILL_AWAITS_START_BUDGET_MS
+      : KILL_AWAITS_START_BUDGET_MS;
     LOGGER.debug(
-      { turn_id: turn },
+      { turn_id: turn, budget_ms: budgetMs },
       "KillTurn names the turn whose StartTurn is still being processed; waiting for the start to settle",
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<"expired">((resolve) => {
-      timer = setTimeout(() => resolve("expired"), KILL_AWAITS_START_BUDGET_MS);
+      timer = setTimeout(() => resolve("expired"), budgetMs);
     });
     try {
       const outcome = await Promise.race([starting.settled.then(() => "settled" as const), expired]);
       if (outcome === "expired") {
         LOGGER.error(
-          { turn_id: turn, budget_ms: KILL_AWAITS_START_BUDGET_MS, detail: "StartTurn did not settle before the kill budget expired" },
+          { turn_id: turn, budget_ms: budgetMs, detail: "StartTurn did not settle before the kill budget expired" },
           "a KillTurn waited out its budget for a StartTurn that never settled; killing against the session as it stands",
         );
       }
