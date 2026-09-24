@@ -146,20 +146,6 @@ function darkThemeBlock(): string {
   return stylesheet.slice(openBrace + 1, i);
 }
 
-/** Every scroll box the ruling names, by the selector the sheet caps it with. */
-const SCROLL_BOXES: readonly string[] = [
-  ".bubble > .bubble-scroll",
-  ".tool-input",
-  ".tool-output",
-  ".tool-read-output",
-  ".bash-input",
-  ".bash-output",
-  ".diff-output",
-  ".skill-input",
-  ".skill-content",
-  ".fold-fixed > .agent-panel",
-];
-
 /**
  * The boxes that CLIP while collapsed (owner ruling, 2026-09-15: "remove the
  * scroll from the collapsed bubble views"). Every click-to-expand capped section
@@ -360,45 +346,35 @@ describe("the bubble geometry: a scrollbar that is there whenever it can scroll"
     expect(capping?.declarations).toMatch(/overflow-y:\s*auto\s*;/);
   });
 
-  it.each(SCROLL_BOXES)("paints a persistent bar on %s by sizing its scrollbar", (selector) => {
-    // Arrange / Act
-    const sized = rulesOf(stylesheet).find((rule) =>
-      rule.selectors.includes(`${selector}::-webkit-scrollbar`),
+  it("styles no ::-webkit-scrollbar anywhere, so every box wears the system bar", () => {
+    // Arrange / Act — owner ruling 2026-09-24: the system default bar everywhere.
+    const custom = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((selector) => selector.includes("::-webkit-scrollbar")),
     );
 
-    // Assert — sized by the one gutter token the tree budget also reads.
-    expect(sized?.declarations).toMatch(/width:\s*var\(--scrollbar-gutter-width\)/);
+    // Assert
+    expect(custom).toEqual([]);
   });
 
-  it("declares the scrollbar gutter token once, in px", () => {
-    // Arrange / Act — every declaration of the token, on the column the
-    // bubbles hang in or anywhere else.
+  it("declares no --scrollbar-gutter-width token", () => {
+    // Arrange / Act
     const declared = rulesOf(stylesheet).flatMap(
-      (rule) => rule.declarations.match(/--scrollbar-gutter-width:[^;]*/g) ?? [],
-    );
-
-    // Assert — px, because body.ts measures it and refuses anything else.
-    expect(declared).toEqual(["--scrollbar-gutter-width: 8px"]);
-  });
-
-  it.each(SCROLL_BOXES)("gives %s a track in the existing border token", (selector) => {
-    // Arrange / Act
-    const track = rulesOf(stylesheet).find((rule) =>
-      rule.selectors.includes(`${selector}::-webkit-scrollbar-track`),
+      (rule) => rule.declarations.match(/--scrollbar-gutter-width[^;]*/g) ?? [],
     );
 
     // Assert
-    expect(track?.declarations).toMatch(/background:\s*var\(--border\)/);
+    expect(declared).toEqual([]);
   });
 
-  it.each(SCROLL_BOXES)("gives %s a thumb in the existing muted token", (selector) => {
+  it("reserves a stable gutter on the bubble scroll box", () => {
     // Arrange / Act
-    const thumb = rulesOf(stylesheet).find((rule) =>
-      rule.selectors.includes(`${selector}::-webkit-scrollbar-thumb`),
+    const box = rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".bubble > .bubble-scroll") && /scrollbar-gutter/.test(rule.declarations),
     );
 
     // Assert
-    expect(thumb?.declarations).toMatch(/background:\s*var\(--muted\)/);
+    expect(box?.declarations).toMatch(/scrollbar-gutter:\s*stable\s*;/);
   });
 
   it("never parks a dead channel on a box that fits, which overflow-y: scroll would", () => {

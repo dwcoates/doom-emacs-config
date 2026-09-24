@@ -177,25 +177,33 @@ export function measureTreeCols(body: HTMLElement): number {
   return cols;
 }
 
-/** The token the scrollbar's gutter is declared by (styles.css), read by the stylesheet's bar too. */
-export const SCROLLBAR_GUTTER_TOKEN = "--scrollbar-gutter-width";
-
 /**
- * The width an EXPANDED bubble's scrollbar takes from its content, in px: the
- * stylesheet's own `--scrollbar-gutter-width` token, which is what sizes the
- * bar, resolved on the body it would narrow. The bubble's other insets
- * (`--bubble-scroll-gap` in the bubble's right padding and the body's) are
- * the same collapsed and expanded and are already counted from computed
- * styles; the gutter is the one thing the expanded, scrolling geometry adds.
- * A token that does not read as px is unmeasurable, never a guessed width.
+ * The width the bubble scroll box's scrollbar gutter takes from its content,
+ * in px, MEASURED off the `.bubble-scroll` ancestor of BODY:
+ * `offsetWidth - clientWidth - borderLeft - borderRight`. The box declares
+ * `scrollbar-gutter: stable` and styles no bar of its own (owner ruling,
+ * 2026-09-24), so this is the SYSTEM bar's width -- 0px overlay, about 14px
+ * classic -- reserved identically collapsed and expanded. A body with no scroll
+ * box, or a measurement that is negative or not finite, is unmeasurable, never
+ * a clamped or guessed width.
  */
 function scrollbarGutterPx(body: HTMLElement, view: Window): number {
-  const value = view.getComputedStyle(body).getPropertyValue(SCROLLBAR_GUTTER_TOKEN).trim();
-  const px = /^(\d+(?:\.\d+)?)px$/.exec(value);
-  if (px === null) {
-    unmeasurable("the scrollbar gutter token is not in px", { token: SCROLLBAR_GUTTER_TOKEN, value });
+  const scroll = body.closest<HTMLElement>(".bubble-scroll");
+  if (scroll === null) unmeasurable("the bubble body has no scroll box", {});
+  const s = view.getComputedStyle(scroll);
+  const borderPx = computedPx(scroll, s, "borderLeftWidth") + computedPx(scroll, s, "borderRightWidth");
+  const offsetPx = scroll.offsetWidth;
+  const clientPx = scroll.clientWidth;
+  const gutterPx = offsetPx - clientPx - borderPx;
+  if (!Number.isFinite(gutterPx) || gutterPx < 0) {
+    unmeasurable("the scroll box's scrollbar gutter measured negative or not finite", {
+      offset_px: offsetPx,
+      client_px: clientPx,
+      border_px: borderPx,
+      gutter_px: gutterPx,
+    });
   }
-  return Number.parseFloat(px[1]);
+  return gutterPx;
 }
 
 /** The block the bubble's percentage cap resolves against: its parent. */
