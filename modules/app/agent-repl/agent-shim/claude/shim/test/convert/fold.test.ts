@@ -2391,6 +2391,17 @@ describe("the calls in flight", () => {
     // Assert
     expect(heldIds(fold)).toEqual([]);
   });
+
+  it("releases every call when the query ends", () => {
+    // Arrange
+    const fold = foldEach([assistant("msg-4", [toolUse("toolu_fg", "Bash", { command: "sleep 600" })])]);
+
+    // Act
+    fold.endQuery("the vendor query died");
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
 });
 
 describe("the calls in flight across every capture", () => {
