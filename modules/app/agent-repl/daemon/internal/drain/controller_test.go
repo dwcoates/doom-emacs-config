@@ -1043,3 +1043,106 @@ func TestDefaultIdleCutoffIsTwelveHours(t *testing.T) {
 		t.Fatalf("DefaultIdleCutoff = %v, want %v", got, want)
 	}
 }
+
+// warnOrErrorFrom answers the WARN and ERROR records of the named operations.
+func warnOrErrorFrom(records []dlog.Record, operations ...string) []dlog.Record {
+	named := map[string]bool{}
+	for _, op := range operations {
+		named[op] = true
+	}
+	var out []dlog.Record
+	for _, rec := range records {
+		if named[rec.Operation] && (rec.Level == "warn" || rec.Level == "error") {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// TestFireDoesNotReacquireTheSchedulesOwnHolds: the schedule took the drain
+// hold when it was put in force, so the fire asking the arbitration for it
+// again came back refused — a WARN here and an ERROR in the store — on every
+// workspace of every drain.
+func TestFireDoesNotReacquireTheSchedulesOwnHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t, instant)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+	if err := h.c.Schedule(context.Background(), schedule); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Act
+	if err := h.c.fire(context.Background(), schedule); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	if bad := warnOrErrorFrom(h.log.Records(), opFire, "daemon.wsm.acquire_lease"); len(bad) != 0 {
+		t.Fatalf("firing a schedule over its own holds recorded %d warning(s)/error(s): %+v", len(bad), bad)
+	}
+}
+
+// TestFireStatesAnotherHoldersLeaseAtInfo: a lease another holder has is the
+// arbitration answering, and the drain waiting on it is its ordinary course.
+func TestFireStatesAnotherHoldersLeaseAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyRefuse); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+
+	// Act
+	if err := h.c.fire(context.Background(), schedule); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	if bad := warnOrErrorFrom(h.log.Records(), opFire); len(bad) != 0 {
+		t.Fatalf("another holder's lease was recorded as %d warning(s)/error(s): %+v", len(bad), bad)
+	}
+	stated := false
+	for _, rec := range h.log.Records() {
+		if rec.Operation == opFire && rec.Level == "info" && rec.Context["holder"] == wsm.HolderMerge.String() {
+			stated = true
+		}
+	}
+	if !stated {
+		t.Fatal("the fire did not state, at INFO, which holder it waits on")
+	}
+}
+
+// failingAcquireDB is a state client whose every lease acquisition fails for a
+// reason that is not arbitration.
+type failingAcquireDB struct{ wsm.DB }
+
+func (failingAcquireDB) AcquireLease(context.Context, wsm.WorkspaceID, wsm.LeaseHolder, wsm.LeasePolicy) (wsm.Lease, error) {
+	return wsm.Lease{}, errFake
+}
+
+// TestFireRecordsAFailedAcquisitionAtError: a lease the store could not grant
+// for any reason but another holder is a real failure, and stays loud.
+func TestFireRecordsAFailedAcquisitionAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.DB = failingAcquireDB{DB: d.DB} })
+	h.workspace(t, instant)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+
+	// Act
+	if err := h.c.fire(context.Background(), schedule); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	errs := 0
+	for _, rec := range h.log.Records() {
+		if rec.Operation == opFire && rec.Level == "error" {
+			errs++
+		}
+	}
+	if errs != 1 {
+		t.Fatalf("a failed acquisition was recorded %d time(s) at error, want once", errs)
+	}
+}
