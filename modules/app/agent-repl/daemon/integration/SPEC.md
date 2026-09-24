@@ -416,6 +416,15 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   rewriting index.html on disk is served on the next request without
   restart; /assets/* is served without no-store
 
+### cold_start_handover_test.go
+- a daemon COLD-STARTED on a state root whose workspace rows name a dead
+  daemon's serving instance, with nothing re-registering the workspace,
+  hands over the session it brought up: whether its boot bring-up spawned
+  the shim or its boot reconciliation adopted the survivor, the handover
+  pushes `transferred`, the successor's AdoptHostWorkspace succeeds on the
+  running shim (new WatchSession, no second StartSession), and the cold
+  daemon exits 0
+
 ### health_clientlog_login_test.go
 - DaemonHealth healthy; with an open fault record unhealthy{faults}
 - SessionHealth for a live session healthy; with the fake pushing
