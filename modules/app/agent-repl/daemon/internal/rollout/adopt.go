@@ -106,11 +106,19 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	c.recordForcedTakeover(m.Forced)
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
 	// here by construction, so the no-manifest accounting cannot apply.
-	if _, err := c.Reconcile(ctx, nil); err != nil {
+	_, _, landed, err := c.reconcile(ctx, nil)
+	if err != nil {
 		return false, err
 	}
 
 	armed := c.armSessions(m.Daemon, m.Sessions)
+	// RETIRED ONLY ONCE IT IS ARMED FROM, so a participant's own re-read
+	// (armFromManifest) can never find the file gone before the rendezvous
+	// it states exists. A read-only handle defers the accounting, and then
+	// flushDispositions retires it once the deferred records are written.
+	if landed {
+		c.retireManifest("the joining daemon armed from it and recorded every disposition it names")
+	}
 	// THE HEADLESS SET IS TAKEN FROM THE LEDGER, NOT FROM THIS READ. Arming is
 	// additive, so a workspace armed by an EARLIER read — a participant's own
 	// adopt call re-reads the manifest before this poll gets to it — adds

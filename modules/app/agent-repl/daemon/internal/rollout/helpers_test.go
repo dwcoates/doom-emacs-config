@@ -163,6 +163,10 @@ type fakeSpawner struct {
 	startedThenFailed bool
 	// stopErr is what every successor's Stop answers.
 	stopErr error
+	// onSpawn, when set, runs at the instant of each spawn, before the
+	// successor is answered, so a test observes what a booting successor
+	// would find.
+	onSpawn func()
 	mu      sync.Mutex
 	told    []string
 	spawned []*fakeSuccessor
@@ -172,6 +176,9 @@ func (s *fakeSpawner) Spawn(_ context.Context, incumbent string) (Successor, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.told = append(s.told, incumbent)
+	if s.onSpawn != nil {
+		s.onSpawn()
+	}
 	if s.err != nil && !s.startedThenFailed {
 		return nil, s.err
 	}
