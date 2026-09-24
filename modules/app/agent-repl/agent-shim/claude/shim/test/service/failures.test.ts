@@ -236,26 +236,19 @@ describe("startTurnFailure", () => {
 
   it("states the turnAlreadyOpen arm", () => {
     // Arrange, Act.
-    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen", keepalive: false }, "why");
+    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen" }, "why");
 
     // Assert.
     expect(failure.kind.case).toBe("turnAlreadyOpen");
   });
 
-  it("carries keepalive=true on a keep-alive collision", () => {
-    // Arrange, Act.
-    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen", keepalive: true }, "why");
+  it("states no keep-alive fact on turnAlreadyOpen: the arm carries no field at all", () => {
+    // Arrange, Act: the retired `keepalive` flag (tag 1, reserved) is gone, so
+    // a keep-alive can never reach the daemon through this refusal.
+    const fields = shimv1.StartTurnTurnAlreadyOpenSchema.fields.map((field) => field.name);
 
     // Assert.
-    expect(failure.kind.case === "turnAlreadyOpen" && failure.kind.value.keepalive).toBe(true);
-  });
-
-  it("carries keepalive=false on a genuine daemon double-submit", () => {
-    // Arrange, Act.
-    const failure = failures.startTurnFailure({ kind: "turnAlreadyOpen", keepalive: false }, "why");
-
-    // Assert.
-    expect(failure.kind.case === "turnAlreadyOpen" && failure.kind.value.keepalive).toBe(false);
+    expect(fields).toEqual([]);
   });
 });
 
