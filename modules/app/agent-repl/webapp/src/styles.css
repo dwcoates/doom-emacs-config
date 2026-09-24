@@ -463,13 +463,6 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
-  /* THE SCROLLBAR'S GUTTER: the classic bar's width (see "bubble scrollbars"
-     below), which an expanded bubble lays out inside its scroll box whenever
-     its content passes the 50vh ceiling. A metaprompt tree's column budget
-     (src/bubble/body.ts `measureTreeCols`) always takes it off, collapsed or
-     not, so a tree is wrapped as if expanded and never re-wraps on a click
-     (owner ruling, 2026-09-23). One token, read by both. */
-  --scrollbar-gutter-width: 8px;
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -1439,6 +1432,10 @@ pre {
      expanded box's `overflow-y: auto`. Wide inner code/tables/mp-trees wrap
      rather than scroll, so nothing inside the clipped box is cut off. */
   overflow-x: clip;
+  /* THE GUTTER IS THE SYSTEM BAR (owner ruling, 2026-09-24): reserved in the
+     collapsed `overflow-y: hidden` state too, so prose never re-flows when an
+     expanded bubble's bar appears (see "bubble scrollbars"). */
+  scrollbar-gutter: stable;
 }
 /* THE CONTENT WRAPPER, inside the scroll box, holding the horizontal inset the
    bubble's right padding gave up. A scrollbar is laid out between the scroll
@@ -6557,58 +6554,19 @@ bubble-body.bubble-body { display: block; }
 
 /* ---- bubble scrollbars (src/styles.css) --------------------------------- */
 
-/* A SCROLLBAR THAT IS THERE WHENEVER THERE IS SOMETHING TO SCROLL (owner
-   addition to the 2026-09-14 bubble-geometry ruling). WebKit's default on this
-   platform is the OVERLAY bar: it fades in on a wheel event and fades out
-   again, so a capped bubble at rest looks exactly like an uncapped one and a
-   reader has no way to tell that the answer continues below the fold.
-   Styling `::-webkit-scrollbar` at all opts the element out of the overlay
-   behaviour and into a CLASSIC bar, which WebKit paints for as long as the box
-   overflows and lays out in its own gutter — so the content is never underneath
-   it either.
-   `overflow-y` STAYS `auto`, never `scroll`: `auto` is what makes the bar
-   ABSENT when the content fits, and `scroll` would park a dead grey channel
-   down the side of every short bubble in the feed.
-   The colors are the two the sheet already has — the border grey for the
-   channel, the muted grey for the thumb — so this adds a shape, not a hue. */
-.bubble > .bubble-scroll::-webkit-scrollbar,
-.tool-input::-webkit-scrollbar,
-.tool-output::-webkit-scrollbar,
-.tool-read-output::-webkit-scrollbar,
-.bash-input::-webkit-scrollbar,
-.bash-output::-webkit-scrollbar,
-.diff-output::-webkit-scrollbar,
-.skill-input::-webkit-scrollbar,
-.skill-content::-webkit-scrollbar,
-.fold-fixed > .agent-panel::-webkit-scrollbar {
-  width: var(--scrollbar-gutter-width);
-}
-.bubble > .bubble-scroll::-webkit-scrollbar-track,
-.tool-input::-webkit-scrollbar-track,
-.tool-output::-webkit-scrollbar-track,
-.tool-read-output::-webkit-scrollbar-track,
-.bash-input::-webkit-scrollbar-track,
-.bash-output::-webkit-scrollbar-track,
-.diff-output::-webkit-scrollbar-track,
-.skill-input::-webkit-scrollbar-track,
-.skill-content::-webkit-scrollbar-track,
-.fold-fixed > .agent-panel::-webkit-scrollbar-track {
-  background: var(--border);
-  border-radius: 4px;
-}
-.bubble > .bubble-scroll::-webkit-scrollbar-thumb,
-.tool-input::-webkit-scrollbar-thumb,
-.tool-output::-webkit-scrollbar-thumb,
-.tool-read-output::-webkit-scrollbar-thumb,
-.bash-input::-webkit-scrollbar-thumb,
-.bash-output::-webkit-scrollbar-thumb,
-.diff-output::-webkit-scrollbar-thumb,
-.skill-input::-webkit-scrollbar-thumb,
-.skill-content::-webkit-scrollbar-thumb,
-.fold-fixed > .agent-panel::-webkit-scrollbar-thumb {
-  background: var(--muted);
-  border-radius: 4px;
-}
+/* THE SYSTEM DEFAULT BAR, EVERYWHERE (owner ruling, 2026-09-24; supersedes
+   the 2026-09-14 "always-visible classic bar" ruling). The sheet styles no
+   `::-webkit-scrollbar` at all, so every scroll box wears WebKit's own bar:
+   the overlay bar with the system's default, the classic one with "Show scroll
+   bars: always". The bubble scroll box declares `scrollbar-gutter: stable`
+   (see THE SCROLL BOX), which reserves exactly the SYSTEM bar's width -- 0px
+   overlay, about 14px classic -- collapsed and expanded alike, so an expanded
+   bubble's prose no longer re-flows when its bar appears. A custom bar could
+   never match that reservation (ours was 8px), which is why it is gone.
+   `src/bubble/body.ts` `measureTreeCols` MEASURES the same gutter off the
+   scroll box, so a tree wraps the same in both states.
+   "More below" is signalled by the `.has-more` fade, not by the bar.
+   `overflow-y` STAYS `auto`, never `scroll`. */
 
 /* ────────────────────────────────────────────────────────────────────────
    THE TABBED TOOL GROUP (tool-group.ts). A maximal run of >=2 consecutive

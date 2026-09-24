@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { installTreeLayout, stagedCols, useTreeLayout } from "./tree-layout.js";
-import { SCROLLBAR_GUTTER_TOKEN } from "../src/bubble/body.js";
 
 /** A column holding a bubble holding a body and a tree probe. */
 function stage(attached: boolean): { column: HTMLElement; bubble: HTMLElement; body: HTMLElement; probe: HTMLElement } {
@@ -65,31 +64,21 @@ describe("installTreeLayout", () => {
   });
 
   it.each([
-    ["an attached", true, "6px"],
-    ["a detached", false, ""],
-  ] as const)("answers %s body's scrollbar gutter token as a real engine does", (_label, attached, want) => {
+    ["an attached", true, [700, 694]],
+    ["a detached", false, [0, 0]],
+  ] as const)("answers %s scroll box's widths as a real engine does", (_label, attached, want) => {
     // Arrange
     const { uninstall } = installTreeLayout({ scrollbarPx: 6 });
-    const { body } = stage(attached);
+    const { bubble, body } = stage(attached);
+    const scroll = document.createElement("div");
+    scroll.className = "bubble-scroll";
+    bubble.append(scroll);
+    scroll.append(body);
     try {
       // Act
-      const read = getComputedStyle(body).getPropertyValue(SCROLLBAR_GUTTER_TOKEN);
+      const read = [scroll.offsetWidth, scroll.clientWidth];
       // Assert
-      expect(read).toBe(want);
-    } finally {
-      uninstall();
-    }
-  });
-
-  it("answers a staged unreadable gutter token verbatim", () => {
-    // Arrange
-    const { uninstall } = installTreeLayout({ scrollbarToken: "0.5rem" });
-    const { body } = stage(true);
-    try {
-      // Act
-      const read = getComputedStyle(body).getPropertyValue(SCROLLBAR_GUTTER_TOKEN);
-      // Assert
-      expect(read).toBe("0.5rem");
+      expect(read).toEqual(want);
     } finally {
       uninstall();
     }
@@ -113,7 +102,7 @@ describe("stagedCols", () => {
     { name: "a cap with no gutter", maxWidth: "77%", scrollbarPx: 0, want: 93 },
   ])("computes the budget of $name", ({ maxWidth, scrollbarPx, want }) => {
     // Act + Assert
-    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx })).toBe(want);
+    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx, scrollBoxPx: 700 })).toBe(want);
   });
 });
 
