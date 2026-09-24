@@ -3,6 +3,7 @@ package sessionwatcher
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -2012,5 +2013,28 @@ func TestMainKnownThroughIsTheNewestMainEntry(t *testing.T) {
 				t.Fatalf("MainKnownThrough() = %q, want %q", got.GetValue(), tt.want)
 			}
 		})
+	}
+}
+
+// TestStartTurnsNamingRenamesTheViewsMainAgentLoudly pins the one path that
+// may rename the root's owner: the authoritative naming. A rename is an
+// anomaly, so it is recorded at WARN with both identities.
+func TestStartTurnsNamingRenamesTheViewsMainAgentLoudly(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	// NO quiet(): the harness's sentinel rides the main watch as its own
+	// agent, and would itself be the first row to name the main agent.
+	h.route(h.main, entryFrame(frameSuccess("main-1", backgrounded())))
+
+	// Act.
+	h.w.SetMainAgent(agentID("main-2"))
+
+	// Assert.
+	want := []string{"feed:main-1", "feed:main-2"}
+	if got := h.rec.mainNamings(); !slices.Equal(got, want) {
+		t.Fatalf("main namings = %v, want %v", got, want)
+	}
+	if !h.hasRecord("warn", "daemon.sessionwatcher.views_main_agent_changed") {
+		t.Fatalf("records = %+v, want a WARN naming the rename", h.log.Records())
 	}
 }

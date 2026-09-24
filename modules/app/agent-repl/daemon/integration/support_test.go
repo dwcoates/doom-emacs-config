@@ -651,9 +651,14 @@ func answeredPermission(id, gated string) *conversationv1.AgentPermission {
 }
 
 // detachedShell announces a detached bash unit.
+//
+// THE MAIN AGENT OWNS IT, as the producer states: detached work is drawn only
+// in its owner's feed, at its spawning call's row — so a fixture whose head
+// must draw pushes that call first (pushDetachedShell).
 func detachedShell(work, command string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: work},
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Owner: &conversationv1.AgentId{Value: mainAgent},
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Bash{Bash: &conversationv1.AgentBash{
 				Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
@@ -681,9 +686,12 @@ func movedShell(unit string) *conversationv1.AgentDetachedWork {
 }
 
 // detachedSubagent announces a detached subagent unit.
+//
+// The main agent spawned it, as the producer states.
 func detachedSubagent(work, agent, label string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: work},
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Owner: &conversationv1.AgentId{Value: mainAgent},
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
 				Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
@@ -697,3 +705,24 @@ func detachedSubagent(work, agent, label string) *conversationv1.AgentDetachedWo
 }
 
 func strPtr(s string) *string { return &s }
+
+// shellCallFrame is the main agent's Bash call that a detached shell's work
+// left: the card its head is drawn in place of.
+func shellCallFrame(work, command string) *conversationv1.AgentFrame {
+	return activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID(work),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{
+			Start: &conversationv1.AgentBashStart{
+				Command:   &conversationv1.AgentBashCommand{Line: command},
+				StartedAt: startedAt(1_700_000_000_000),
+			},
+		}}},
+	})
+}
+
+// pushDetachedShell pushes a main-agent shell the way a producer states one:
+// the call that launched it, then the announcement that its work left.
+func pushDetachedShell(shim *harness.ShimControl, work, command string) {
+	shim.PushAgentFrame(mainAgent, shellCallFrame(work, command))
+	shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell(work, command)))
+}
