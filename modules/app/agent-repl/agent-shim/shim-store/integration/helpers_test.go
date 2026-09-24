@@ -340,7 +340,14 @@ func (s *storeProcess) awaitReady() {
 			if err := conn.Close(); err != nil {
 				s.t.Fatalf("closing the readiness probe: %v", err)
 			}
-			return
+			// THE SOCKET ACCEPTS BEFORE STARTUP HAS FINISHED LOGGING: it is
+			// bound, then `store.server.new` and `store.serve` are written. A
+			// test that takes its log mark on the dial alone can count those
+			// startup records as its own rpc's under load, so ready means this
+			// process has also logged `store.serve`.
+			if s.loggedServe() {
+				return
+			}
 		}
 		select {
 		case <-s.done:
@@ -350,6 +357,19 @@ func (s *storeProcess) awaitReady() {
 		case <-ticker.C:
 		}
 	}
+}
+
+// loggedServe reports whether the running process has written its
+// `store.serve` record, the last one startup writes.
+func (s *storeProcess) loggedServe() bool {
+	s.t.Helper()
+	pid := s.cmd.Process.Pid
+	for _, rec := range s.logRecords() {
+		if rec.Operation == "store.serve" && rec.PID == pid {
+			return true
+		}
+	}
+	return false
 }
 
 // signal delivers one signal to the running store.
