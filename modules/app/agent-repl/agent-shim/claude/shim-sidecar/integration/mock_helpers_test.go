@@ -1397,15 +1397,10 @@ func requireContextBudgetWarning(t *testing.T, scenario string, entries []*store
 }
 
 // requireKeepAliveStoresNothing: a keep-alive turn's records are read and
-// converted, and not one of them becomes a page line — nor an entry on the
-// retired keepalive arm, which no producer mints any longer.
+// converted, and not one of them becomes a page line. The keepalive arm is
+// retired from the contract, so no entry can carry one.
 func requireKeepAliveStoresNothing(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
 	t.Helper()
-	for _, e := range entries {
-		if e.GetAgentUpdate().GetUnservedItem().GetKeepalive() != nil {
-			t.Errorf("%s: entry %q landed on the keepalive arm; a keep-alive stores nothing", scenario, e.GetUpsertKey())
-		}
-	}
 	for _, line := range pageLinesOf(entries) {
 		t.Errorf("%s: a keep-alive turn produced a page line of book %q; a keep-alive stores nothing",
 			scenario, line.GetPageAgentId().GetValue())

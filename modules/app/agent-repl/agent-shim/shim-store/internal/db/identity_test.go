@@ -263,9 +263,7 @@ func TestAKeepaliveIsRefusedAsRetired(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1", &storev1.StoreUnservedItem{
-		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")},
-	})), nil)
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1", retiredKeepaliveItem(t, promptItem("agent-1")))), nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) || RefusalSite(err) != SiteKeepaliveRetired {
@@ -278,9 +276,7 @@ func TestARefusedKeepaliveWritesNoRow(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1", &storev1.StoreUnservedItem{
-		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")},
-	})), nil)
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1", retiredKeepaliveItem(t, promptItem("agent-1")))), nil)
 
 	// Assert
 	if err == nil {

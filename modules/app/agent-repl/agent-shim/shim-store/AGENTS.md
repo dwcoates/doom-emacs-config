@@ -557,7 +557,9 @@ and not something this change touches.
   `unserved_item` (vendor_specific / unknown / unparsed) is durable and never
   served; `bash` and `workflow` are structurally not page lines.
 - **THE `keepalive` ARM IS REFUSED** (`keepalive_retired`, on
-  `entries[i].agent_update.unserved_item.keepalive`). Nothing of a keep-alive is
+  `entries[i].agent_update.unserved_item.keepalive`). The proto reserves its
+  tag, so a stale producer's arm arrives as an unknown field
+  (`carriesRetiredKeepalive`) and an old row's frame blob still decodes. Nothing of a keep-alive is
   stored on either plane (2026-09-23), and the rows written before it were not
   harmless: the shim that predated the rule tagged a backgrounded subagent's
   frames arriving during a keep-alive turn, so held keep-alive rows sat under

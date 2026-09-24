@@ -7,6 +7,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -248,7 +250,7 @@ func TestClassifyRefusesEachUnsetRequiredField(t *testing.T) {
 		},
 		{
 			name:  "the retired keepalive arm",
-			entry: unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")}}),
+			entry: unservedEntry("w", "u", retiredKeepaliveItem(t, promptItem("agent-1"))),
 		},
 		{
 			name:  "bash frame with no run identity",
@@ -367,6 +369,21 @@ func withoutPlane(entry *storev1.StoreEntry) *storev1.StoreEntry {
 func withEmptyTopLevel(entry *storev1.StoreEntry) *storev1.StoreEntry {
 	entry.GetAgentUpdate().TopLevel = &conversationv1.AgentId{}
 	return entry
+}
+
+// retiredKeepaliveItem is an unserved item carrying the RETIRED `keepalive`
+// arm the way a stale producer's bytes arrive: the tag is reserved, so the arm
+// can only ride as an unknown field.
+func retiredKeepaliveItem(t *testing.T, held *storev1.StoreAgentItem) *storev1.StoreUnservedItem {
+	t.Helper()
+	body, err := proto.Marshal(held)
+	if err != nil {
+		t.Fatalf("marshaling the keep-alive's held item: %v", err)
+	}
+	item := &storev1.StoreUnservedItem{}
+	unknown := protowire.AppendTag(nil, retiredKeepaliveField, protowire.BytesType)
+	item.ProtoReflect().SetUnknown(protowire.AppendBytes(unknown, body))
+	return item
 }
 
 func unservedEntry(writeID, upsertKey string, item *storev1.StoreUnservedItem) *storev1.StoreEntry {
@@ -717,4 +734,80 @@ func TestClassifyRefusesAWorkflowMissingItsIdentityOrResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---- the retired keep-alive arm ----
+
+func TestCarriesRetiredKeepaliveReadsTheReservedTag(t *testing.T) {
+	// Arrange: the tag is reserved, so only an unknown field can carry it.
+	otherField := protowire.AppendTag(nil, 9, protowire.VarintType)
+	otherField = protowire.AppendVarint(otherField, 1)
+	varintAtTagOne := protowire.AppendTag(nil, retiredKeepaliveField, protowire.VarintType)
+	varintAtTagOne = protowire.AppendVarint(varintAtTagOne, 1)
+	tests := []struct {
+		name    string
+		unknown []byte
+		want    bool
+	}{
+		{name: "no unknown bytes", unknown: nil, want: false},
+		{name: "the retired arm", unknown: rawUnknown(t, retiredKeepaliveItem(t, promptItem("agent-1"))), want: true},
+		{name: "the retired arm after another unknown field", unknown: append(append([]byte{}, otherField...), rawUnknown(t, retiredKeepaliveItem(t, promptItem("agent-1")))...), want: true},
+		{name: "another unknown field only", unknown: otherField, want: false},
+		{name: "tag one with a non-message wire type", unknown: varintAtTagOne, want: false},
+		{name: "bytes that are no field sequence", unknown: []byte{0xff}, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			item := &storev1.StoreUnservedItem{}
+			item.ProtoReflect().SetUnknown(test.unknown)
+
+			// Act
+			got := carriesRetiredKeepalive(item)
+
+			// Assert
+			if got != test.want {
+				t.Fatalf("carriesRetiredKeepalive = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestClassifyRefusesTheRetiredKeepaliveArmAtItsOwnSite(t *testing.T) {
+	// Arrange: a stale producer's keep-alive, which must not read as "no arm".
+	entry := unservedEntry("w", "u", retiredKeepaliveItem(t, promptItem("agent-1")))
+
+	// Act
+	_, err := classify(entry, 0)
+
+	// Assert
+	if got := RefusalSite(err); got != SiteKeepaliveRetired {
+		t.Fatalf("site = %q (error: %v), want %q", got, err, SiteKeepaliveRetired)
+	}
+}
+
+func TestAnOldKeepaliveFrameBlobDecodesWithItsArmAsAnUnknownField(t *testing.T) {
+	// Arrange: a frame blob written before the arm was reserved.
+	blob, err := proto.Marshal(unservedEntry("w", "u", retiredKeepaliveItem(t, promptItem("agent-1"))))
+	if err != nil {
+		t.Fatalf("marshaling the old frame: %v", err)
+	}
+	decoded := &storev1.StoreEntry{}
+
+	// Act
+	err = proto.Unmarshal(blob, decoded)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Unmarshal = %v, want an old keep-alive frame to decode", err)
+	}
+	if !carriesRetiredKeepalive(decoded.GetAgentUpdate().GetUnservedItem()) {
+		t.Fatal("the decoded frame lost its retired arm; want it kept as an unknown field")
+	}
+}
+
+// rawUnknown answers the unknown bytes an item carries.
+func rawUnknown(t *testing.T, item *storev1.StoreUnservedItem) []byte {
+	t.Helper()
+	return item.ProtoReflect().GetUnknown()
 }
