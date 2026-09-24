@@ -794,9 +794,11 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"lifecycle.OnSessionDiagnostics", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
 		},
 		{
-			name:   "context usage is the topbar's",
+			// The footer's tokens cell is the turn's growth of this same
+			// reading, so both surfaces take the one update.
+			name:   "context usage is the topbar's and the footer's",
 			update: contextUsageUpdate(),
-			want:   []string{"topbar.OnSessionUpdate"},
+			want:   []string{"topbar.OnSessionUpdate", "footer.OnSessionUpdate"},
 		},
 		{
 			name:   "identity rotation is the topbar's",

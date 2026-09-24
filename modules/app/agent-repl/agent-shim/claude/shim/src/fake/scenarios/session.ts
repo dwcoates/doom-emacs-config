@@ -137,8 +137,9 @@ const CONTEXT_USAGE_DRIFT = scenario({
     "prose only. It switches `getContextUsage()` to a GROWING answer, so the `context_usage` the shim pushes at " +
     "this turn's end differs from the one it pushed at session start — total tokens, percentage, the message " +
     "category and the whole `messageBreakdown` all move, and the answer stays a full " +
-    "`SDKControlGetContextUsageResponse`. CADENCE IS THE ENGINE'S: context_usage is pushed at session start and " +
-    "at EVERY turn end regardless of scenario, so this one changes what is sampled and never when",
+    "`SDKControlGetContextUsageResponse`. CADENCE IS THE ENGINE'S: context_usage is pushed at session start, " +
+    "after every main-agent API response that carries usage, and at EVERY turn end regardless of scenario, so " +
+    "this one changes what is sampled and never when",
   writes: "the assistant line, the prompt line and the turn record",
   arms: "SessionContextUsage — the same arm twice with DIFFERENT figures, which is what a re-render tests",
   run(ctx) {

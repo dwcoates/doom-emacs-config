@@ -261,7 +261,7 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView
 		Strip: &frontendv1.FooterStrip{
 			Status:   r.status(s, r.logOf(ws, s)),
 			Clock:    r.clockCell(s),
-			Tokens:   s.tok.cell(),
+			Tokens:   s.tok.cell(s.turn != nil),
 			LiveWork: r.chips(s),
 		},
 		Expanded: r.expanded(ws, s),
@@ -340,7 +340,7 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 // liveDetachedAgents is the set of created-agent ids for the subagents that are
 // live AND detached right now — the runs still burning tokens in the background
 // as this turn opens. It is what the token accounting carries across the turn
-// reset so a detached agent's uncached input stays in the figure while it runs;
+// reset so a detached agent's spend stays in the tokens panel while it runs;
 // an in-turn subagent (no work handle) is the turn's own progress and resets
 // with it. The key is the created-agent id, because that is the id an agent's
 // own-book usage frames arrive under (chips.go OnActivity).
@@ -625,7 +625,13 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 	case *conversationv1.SessionUpdate_McpServer:
 		return "mcp_server", func(s *wsState) { r.logSessionArm(ws, s, "mcp_server") }
 	case *conversationv1.SessionUpdate_ContextUsage:
-		return "context_usage", func(s *wsState) { r.logSessionArm(ws, s, "context_usage") }
+		// THE CELL'S SOURCE. The same reading the topbar's context chip draws,
+		// delivered to both by one route, so the chip and the cell's growth
+		// are two drawings of one fact.
+		return "context_usage", func(s *wsState) {
+			r.logSessionArm(ws, s, "context_usage")
+			r.observeContextUsage(ws, s, u.ContextUsage)
+		}
 	default:
 		return "unset", func(s *wsState) { r.logSessionArm(ws, s, "unset") }
 	}
