@@ -43,6 +43,12 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		if turn.GetValue() != "" {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "turn.GetValue() != \"\""})
 			running := ids.TurnID(turn.GetValue())
+			// THE REPLAY LEAVES THE TURN IT STOOD IN, and a turn its page never
+			// ended is ended from its durable close BEFORE this prompt's row, so
+			// the ending lands under the turn it ends.
+			if s.plane == planeHistory {
+				r.endReplayedTurn(s, running)
+			}
 			s.turnInFlight = &running
 			s.turnStamp = &running
 			s.knowTurn(running)
