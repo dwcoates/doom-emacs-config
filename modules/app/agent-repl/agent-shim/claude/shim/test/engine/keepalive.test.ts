@@ -369,8 +369,30 @@ const result = (stamp: Record<string, unknown> = {}): SdkMessage =>
   ({ ...other("result", "result-uuid", "success"), ...stamp });
 
 /** A subagent's frame inside whatever turn is running: never stamped. */
-const subagentReply = (): SdkMessage =>
-  ({ ...assistant("subagent-uuid"), parent_tool_use_id: "toolu_spawn" }) as unknown as SdkMessage;
+const subagentReply = (parent = "toolu_spawn", opens: readonly string[] = []): SdkMessage =>
+  ({
+    ...assistant("subagent-uuid"),
+    parent_tool_use_id: parent,
+    message: { role: "assistant", content: opens.map((id) => ({ type: "tool_use", id, name: "Agent", input: {} })) },
+  }) as unknown as SdkMessage;
+
+/** A top-level reply that opens `toolu_spawn`, optionally naming the send it answers. */
+const spawningReply = (stamp: Record<string, unknown> = {}): SdkMessage =>
+  ({
+    ...reply(stamp),
+    message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_spawn", name: "Agent", input: {} }] },
+  }) as unknown as SdkMessage;
+
+/** A vendor task's lifecycle message, naming the call that opened it when `toolUseId` is given. */
+const taskMessage = (subtype: string, taskId: string, toolUseId?: string): SdkMessage =>
+  ({
+    type: "system",
+    subtype,
+    task_id: taskId,
+    ...(toolUseId === undefined ? {} : { tool_use_id: toolUseId }),
+    uuid: `${subtype}-uuid`,
+    session_id: "vendor-1",
+  }) as unknown as SdkMessage;
 
 /** A scope with the keep-alive send pending. */
 function pendingScope(): KeepaliveScope {
@@ -451,8 +473,21 @@ describe("the keep-alive turn scope", () => {
     expect(tagged.keepalive).toBe(true);
   });
 
-  it("carries the tag to a subagent frame inside the keep-alive turn", () => {
-    // Arrange
+  it("carries the tag to the frame of a subagent the keep-alive spawned", () => {
+    // Arrange: the subagent is the keep-alive's only because its reply opened it.
+    const scope = pendingScope();
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+
+    // Act
+    const tagged = scope.attribute(subagentReply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(true);
+  });
+
+  it("does not tag a backgrounded subagent's frame arriving during the keep-alive's turn", () => {
+    // Arrange: THE 2026-09-15 SEQUENCE — a real turn launched the subagent in
+    // the background, and its frames keep arriving while the keep-alive runs.
     const scope = pendingScope();
     scope.attribute(reply(stampedWith(KEEPALIVE_SEND)));
 
@@ -460,7 +495,115 @@ describe("the keep-alive turn scope", () => {
     const tagged = scope.attribute(subagentReply());
 
     // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("carries the tag to a subagent the keep-alive's own subagent spawned", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+    scope.attribute(subagentReply("toolu_spawn", ["toolu_nested"]));
+
+    // Act
+    const tagged = scope.attribute(subagentReply("toolu_nested"));
+
+    // Assert
     expect(tagged.keepalive).toBe(true);
+  });
+
+  it("does not tag a task notification for work the keep-alive did not start", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute(reply(stampedWith(KEEPALIVE_SEND)));
+
+    // Act
+    const tagged = scope.attribute(taskMessage("task_notification", "task-bg", "toolu_background"));
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("tags the start of a task the keep-alive's own call opened", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+
+    // Act
+    const tagged = scope.attribute(taskMessage("task_started", "task-ka", "toolu_spawn"));
+
+    // Assert
+    expect(tagged.keepalive).toBe(true);
+  });
+
+  it("tags an update of a task the keep-alive started", () => {
+    // Arrange: an update names only the task, which the start bound to the call.
+    const scope = pendingScope();
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+    scope.attribute(taskMessage("task_started", "task-ka", "toolu_spawn"));
+
+    // Act
+    const tagged = scope.attribute(taskMessage("task_updated", "task-ka"));
+
+    // Assert
+    expect(tagged.keepalive).toBe(true);
+  });
+
+  it("does not tag an update of a task the keep-alive did not start", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute(reply(stampedWith(KEEPALIVE_SEND)));
+
+    // Act
+    const tagged = scope.attribute(taskMessage("task_updated", "task-bg"));
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("answers spawned() for a call the keep-alive's turn opened", () => {
+    // Arrange
+    const scope = pendingScope();
+
+    // Act
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+
+    // Assert
+    expect(scope.spawned("toolu_spawn")).toBe(true);
+  });
+
+  it("does not remember a call a turn it did not tag opened", () => {
+    // Arrange
+    const scope = pendingScope();
+
+    // Act: a real turn's reply opens the call.
+    scope.attribute(spawningReply(stampedWith(OTHER_SEND)));
+
+    // Assert
+    expect(scope.spawned("toolu_spawn")).toBe(false);
+  });
+
+  it("forgets its spawns once its own result closes the scope", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+
+    // Act
+    scope.attribute(result(stampedWith(KEEPALIVE_SEND)));
+
+    // Assert
+    expect(scope.spawned("toolu_spawn")).toBe(false);
+  });
+
+  it("forgets its spawns when abandoned", () => {
+    // Arrange
+    const scope = pendingScope();
+    scope.attribute(spawningReply(stampedWith(KEEPALIVE_SEND)));
+
+    // Act
+    scope.abandon("the vendor query died");
+
+    // Assert
+    expect(scope.spawned("toolu_spawn")).toBe(false);
   });
 
   it("ignores a stamp on a subagent frame", () => {

@@ -311,6 +311,18 @@ function isTopLevelReply(message: SdkMessage): boolean {
  * NEVER FROM THE TEXT. A reply is never classified by what it says — the
  * model's "." is evidence of nothing — only by the send it answers.
  *
+ * WORK IS THE KEEP-ALIVE'S ONLY WHEN THE KEEP-ALIVE STARTED IT. A frame that
+ * names the work it belongs to — a subagent's frame (`parent_tool_use_id`), a
+ * tool's progress, a task's lifecycle — belongs to whoever opened that work,
+ * never to the vendor turn running when it arrives. A BACKGROUNDED subagent
+ * keeps streaming across the turns after the one that launched it, and its
+ * frames used to inherit the running turn: on 2026-09-15 and 2026-09-23 three
+ * of them landed during a keep-alive turn and were stored as keep-alive rows
+ * under real subagent upsert_keys, and the sidecar's page line for each was
+ * later refused as an identity change, parking the subagent's whole
+ * transcript. So the scope remembers the tool_use ids the keep-alive's own
+ * frames opened ({@link spawns}), and only work under one of those is tagged.
+ *
  * WHAT IT DOES NOT CLAIM. The frames a vendor turn emits BEFORE its first
  * reply — its `init`, a `UserPromptSubmit` hook, a status line — carry no
  * stamp, and there a task-notification turn's preamble is indistinguishable
@@ -332,6 +344,14 @@ export class KeepaliveScope {
    * other send's (or nobody's), or the pending keep-alive's own.
    */
   private running: "unstated" | "other" | PendingKeepalive = "unstated";
+  /**
+   * The tool_use ids the keep-alive's own frames opened, nested subagents'
+   * included: the only work whose frames are the keep-alive's. Emptied when the
+   * scope closes, so it is bounded by one keep-alive turn's calls.
+   */
+  private readonly spawns = new Set<string>();
+  /** The vendor task ids a `task_started` bound to one of {@link spawns}. */
+  private readonly spawnedTasks = new Set<string>();
 
   /** A keep-alive send is about to be pushed under `uuid`. */
   begin(uuid: string, turnId: string): void {
@@ -359,6 +379,7 @@ export class KeepaliveScope {
     const held = this.send;
     this.send = undefined;
     this.running = "unstated";
+    this.forgetSpawns();
     if (held === undefined) return;
     LOGGER.info(
       { turn: held.turnId, client_uuid: held.uuid, reason },
@@ -378,6 +399,14 @@ export class KeepaliveScope {
   /** Whether the vendor turn now running is the keep-alive's. For callbacks between messages. */
   producing(): boolean {
     return typeof this.running === "object";
+  }
+
+  /**
+   * Whether the work opened by `toolUseId` is the keep-alive's: the subagent
+   * form of {@link producing}, for a callback raised inside that work.
+   */
+  spawned(toolUseId: string): boolean {
+    return this.spawns.has(toolUseId);
   }
 
   /**
@@ -407,7 +436,10 @@ export class KeepaliveScope {
     }
     const running = this.running;
     if (message.type !== "result") {
-      return typeof running === "object" ? { keepalive: true, endsKeepalive: false } : NOT_KEEPALIVE;
+      const work = workOf(message);
+      const keepalive = work === undefined ? typeof running === "object" : this.ownsWork(work);
+      if (keepalive) this.noteSpawns(message);
+      return keepalive ? { keepalive: true, endsKeepalive: false } : NOT_KEEPALIVE;
     }
     // A RESULT ENDS THE VENDOR TURN, whoever's it was.
     this.running = "unstated";
@@ -421,11 +453,73 @@ export class KeepaliveScope {
       return NOT_KEEPALIVE;
     }
     this.send = undefined;
+    this.forgetSpawns();
     LOGGER.debug(
       { turn: running.turnId, client_uuid: running.uuid },
       "the keep-alive's own result closed its turn scope",
     );
     return { keepalive: true, endsKeepalive: true };
+  }
+
+  /** Whether the named work was opened by the keep-alive. */
+  private ownsWork(work: WorkRef): boolean {
+    return work.kind === "tool_use" ? this.spawns.has(work.id) : this.spawnedTasks.has(work.id);
+  }
+
+  /** Remember the work a keep-alive-tagged message opens. */
+  private noteSpawns(message: SdkMessage): void {
+    if (message.type === "assistant") {
+      const content = (message.message as { content?: unknown }).content;
+      if (!Array.isArray(content)) return;
+      for (const block of content as readonly { type?: unknown; id?: unknown }[]) {
+        if (block.type === "tool_use" && typeof block.id === "string" && block.id !== "") this.spawns.add(block.id);
+      }
+      return;
+    }
+    if (message.type === "system" && message.subtype === "task_started") this.spawnedTasks.add(message.task_id);
+  }
+
+  /** The scope closed: nothing it opened can still be running as its own. */
+  private forgetSpawns(): void {
+    this.spawns.clear();
+    this.spawnedTasks.clear();
+  }
+}
+
+/** The work a frame names itself part of: the call that opened it, or the vendor task. */
+type WorkRef = { readonly kind: "tool_use"; readonly id: string } | { readonly kind: "task"; readonly id: string };
+
+/**
+ * The work one message names as its own, or absence for a frame that names
+ * none (it then belongs to the vendor turn running).
+ *
+ * Read off the SDK's DECLARED fields: `parent_tool_use_id` on a subagent's
+ * assistant, stream, user and tool-progress frames; `tool_use_id` on a task's
+ * start, progress and notification; the bare `task_id` on a task update, which
+ * names no call.
+ */
+function workOf(message: SdkMessage): WorkRef | undefined {
+  switch (message.type) {
+    case "assistant":
+    case "stream_event":
+    case "user":
+    case "tool_progress":
+      return message.parent_tool_use_id === null ? undefined : { kind: "tool_use", id: message.parent_tool_use_id };
+    case "system":
+      switch (message.subtype) {
+        case "task_started":
+        case "task_progress":
+        case "task_notification":
+          return message.tool_use_id === undefined || message.tool_use_id === ""
+            ? { kind: "task", id: message.task_id }
+            : { kind: "tool_use", id: message.tool_use_id };
+        case "task_updated":
+          return { kind: "task", id: message.task_id };
+        default:
+          return undefined;
+      }
+    default:
+      return undefined;
   }
 }
 
