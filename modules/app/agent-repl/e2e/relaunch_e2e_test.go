@@ -78,8 +78,8 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 
 	// THE LOCK DIRECTORY AND THE LOCK BINARY ARE RESTATED by SuccessorOpts:
 	// without the binary the revived shim's kernel claim dies `spawn ENOENT`
-	// and the resume is refused `conversation_owned` for a conversation nobody
-	// holds.
+	// and the resume is refused `lock_holder_unavailable`: nobody holds the
+	// conversation, the shim's own lock helper is missing.
 	opts := w.SuccessorOpts(t)
 	// THE ACCOUNT ROOTS ARE THE ONES THE CONVERSATION WAS FILED UNDER. A
 	// resume is filed against the vendor transcript, and a successor that
