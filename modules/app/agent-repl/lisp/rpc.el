@@ -87,6 +87,8 @@
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-select-response-request "wire-verbs" (request))
+(declare-function agent-repl-wire-encode-edit-held-prompt-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-edit-held-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-select-response-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-adjust-feed-text-scale-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-adjust-feed-text-scale-response "wire-verbs" (alist))
@@ -356,6 +358,17 @@ The request carries the `UserSaid' content, an idempotency key and the
 REQUIRED origin naming the send site.  There is no precondition: the
 daemon starts or revives the session implicitly and answers with its own
 refusal arms when it will not run the prompt.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-edit-held-prompt
+  "EditHeldPrompt"
+  agent-repl-wire-encode-edit-held-prompt-request
+  agent-repl-wire-decode-edit-held-prompt-response
+  "Commit or cancel the edit of a held prompt this composer is editing.
+The request names the held prompt by the TurnId the host view's standing
+edit carried, and its `action' arm is the step: `commit' replaces the
+prompt's content whole (it keeps its queue place and is reclassified),
+`cancel' ends the edit with the content unchanged.  The begin is the
+webapp tray card's own; the resulting state arrives on the host stream.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-select-response
   "SelectResponse"

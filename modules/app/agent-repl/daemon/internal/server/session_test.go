@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -340,5 +341,161 @@ func TestSelectAccountRefusesABlankRoot(t *testing.T) {
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+}
+
+// editRequest is one step of a held-prompt edit on turn-1.
+func editRequest(step string) *agentreplv1.EditHeldPromptRequest {
+	req := &agentreplv1.EditHeldPromptRequest{
+		Workspace: ref(),
+		Turn:      &conversationv1.TurnId{Value: "turn-1"},
+	}
+	switch step {
+	case "begin":
+		req.Action = &agentreplv1.EditHeldPromptRequest_Begin{Begin: &agentreplv1.EditHeldPromptBegin{}}
+	case "commit":
+		req.Action = &agentreplv1.EditHeldPromptRequest_Commit{Commit: &agentreplv1.EditHeldPromptCommit{
+			Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+				Blocks: []*conversationv1.UserContentBlock{{
+					Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "the edited words"}},
+				}},
+			}},
+		}}
+	case "cancel":
+		req.Action = &agentreplv1.EditHeldPromptRequest_Cancel{Cancel: &agentreplv1.EditHeldPromptCancel{}}
+	}
+	return req
+}
+
+func TestEditHeldPromptBeginWithNoHostStreamProbesNoEditor(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest("begin")))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("EditHeldPrompt = (%v, %v), want success", resp, err)
+	}
+	if len(h.Queue.editorLive) != 1 || h.Queue.editorLive[0] {
+		t.Fatalf("editor probe = %v, want one probe answering no editor", h.Queue.editorLive)
+	}
+}
+
+func TestEditHeldPromptBeginProbesTheStandingHostStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+
+	// Act.
+	if _, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest("begin"))); err != nil {
+		t.Fatalf("EditHeldPrompt: %v", err)
+	}
+
+	// Assert.
+	if len(h.Queue.editorLive) != 1 || !h.Queue.editorLive[0] {
+		t.Fatalf("editor probe = %v, want the held host stream seen", h.Queue.editorLive)
+	}
+}
+
+func TestEditHeldPromptCommitCarriesTheNewContent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest("commit")))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("EditHeldPrompt = (%v, %v), want success", resp, err)
+	}
+	if len(h.Queue.committed) != 1 ||
+		h.Queue.committed[0].GetContent().GetBlocks()[0].GetText().GetText() != "the edited words" {
+		t.Fatalf("committed = %v, want the edited words", h.Queue.committed)
+	}
+}
+
+func TestEditHeldPromptCancelReachesTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest("cancel")))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("EditHeldPrompt = (%v, %v), want success", resp, err)
+	}
+	if len(h.Queue.cancelled) != 1 || h.Queue.cancelled[0] != "turn-1" {
+		t.Fatalf("cancelled = %v, want turn-1", h.Queue.cancelled)
+	}
+}
+
+func TestEditHeldPromptMapsEveryRefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		step    string
+		err     error
+		arrange func(q *fakeQueue, err error)
+		armOf   func(*agentreplv1.EditHeldPromptError) bool
+	}{
+		{"no such hold", "begin", promptqueue.ErrNoSuchHold, func(q *fakeQueue, err error) { q.beginErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetNoSuchHold() != nil }},
+		{"not held", "begin", promptqueue.ErrNotHeld, func(q *fakeQueue, err error) { q.beginErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetNotHeld() != nil }},
+		{"already delivered", "begin", promptqueue.ErrAlreadyDelivered, func(q *fakeQueue, err error) { q.beginErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetAlreadyDelivered() != nil }},
+		{"being edited", "begin", &promptqueue.BeingEditedError{Turn: "turn-0"}, func(q *fakeQueue, err error) { q.beginErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool {
+				return e.GetBeingEdited().GetEditingTurn().GetValue() == "turn-0"
+			}},
+		{"no editor", "begin", promptqueue.ErrNoEditor, func(q *fakeQueue, err error) { q.beginErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetNoEditor() != nil }},
+		{"not editing on commit", "commit", promptqueue.ErrNotEditing, func(q *fakeQueue, err error) { q.commitErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetNotEditing() != nil }},
+		{"not editing on cancel", "cancel", promptqueue.ErrNotEditing, func(q *fakeQueue, err error) { q.cancelErr = err },
+			func(e *agentreplv1.EditHeldPromptError) bool { return e.GetNotEditing() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h.Queue, tt.err)
+
+			// Act.
+			resp, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest(tt.step)))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("EditHeldPrompt: %v", err)
+			}
+			if !tt.armOf(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.name)
+			}
+		})
+	}
+}
+
+func TestEditHeldPromptSurfacesAnOrdinaryFailureAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Queue.commitErr = errors.New("disk full")
+
+	// Act.
+	_, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest("commit")))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("EditHeldPrompt succeeded, want the failure surfaced")
 	}
 }

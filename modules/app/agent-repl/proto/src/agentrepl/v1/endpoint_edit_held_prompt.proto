@@ -1,0 +1,124 @@
+// endpoint_edit_held_prompt.proto — EditHeldPrompt: EDITING a held prompt.
+// DAEMON-HOLD TRAY section. Owner spec, 2026-09-23.
+//
+// The tray card's Edit button BEGINS an edit; the editor's composer COMMITS
+// or CANCELS it. THE ARM IS THE STEP.
+//
+//   begin  — the daemon CLAIMS the held prompt as being edited. While the
+//            claim stands, that prompt AND EVERY PROMPT QUEUED AFTER IT stay
+//            held: none is delivered, not by a turn's end, not by a verdict,
+//            not by a release. The claim is published two ways: the tray entry
+//            carries HeldPrompt.editing, and the workspace's host view carries
+//            HostWorkspace.held_prompt_edit, which is what puts the prompt's
+//            content into the editor's input.
+//   commit — the prompt's content is REPLACED with `said`. It keeps its place
+//            in the queue, its old classification is discarded, and it is
+//            reclassified through the ordinary classifier path; an interject
+//            verdict then interjects exactly as any interject does. The claim
+//            is retired.
+//   cancel — the claim is retired with the content unchanged, and the queue
+//            resumes.
+//
+// ONE CLAIM PER WORKSPACE. The claim is scoped to the workspace's HOST stream
+// (WatchHostWorkspace): the editor that holds the input is the claimant, so
+// the moment no host stream stands for the workspace the claim is retired as
+// a cancel would retire it. A daemon restart retires it the same way — the
+// claim is in-memory, and the host stream it was scoped to died with the
+// process. No timer ever retires a claim.
+//
+// The prompt is identified by its TurnId — the TYPED ECHO TOKEN loop, exactly
+// as UpdateHeldPrompt names one.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message EditHeldPromptRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH held prompt — the daemon-minted turn it is held under, echoed from
+  // the tray entry (begin) or from the host view's edit (commit, cancel).
+  conversation.v1.TurnId turn = 2;
+  // THE ARM IS THE STEP.
+  oneof action {
+    // Claim the prompt as being edited and hand its content to the editor.
+    EditHeldPromptBegin begin = 3;
+    // Replace the prompt's content and reclassify it; retires the claim.
+    EditHeldPromptCommit commit = 4;
+    // Retire the claim with the content unchanged.
+    EditHeldPromptCancel cancel = 5;
+  }
+}
+message EditHeldPromptBegin {}
+message EditHeldPromptCommit {
+  // The prompt's NEW content, WHOLE — composed exactly as a submission's
+  // `said` is, and it replaces the held one outright.
+  conversation.v1.UserSaid said = 1;
+}
+message EditHeldPromptCancel {}
+
+// THE ARM IS THE OUTCOME.
+message EditHeldPromptResponse {
+  oneof result {
+    EditHeldPromptSuccess success = 1;
+    EditHeldPromptError error = 2;
+  }
+}
+
+// Done; the tray's and the host view's new state arrive on their streams.
+message EditHeldPromptSuccess {}
+
+// Validation failures (unset field, UNSPECIFIED enum, blank string, a commit
+// with no `said`) are Connect InvalidArgument, never an arm.
+message EditHeldPromptError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    EditHeldPromptUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    EditHeldPromptWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    EditHeldPromptTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    EditHeldPromptNotYetAdopted not_yet_adopted = 4;
+    // UNKNOWN: no hold was ever recorded under that turn.
+    EditHeldPromptNoSuchHold no_such_hold = 5;
+    // NOT HELD: the prompt was held once and is no longer — it was dropped.
+    EditHeldPromptNotHeld not_held = 6;
+    // The prompt was already delivered to the agent.
+    EditHeldPromptAlreadyDelivered already_delivered = 7;
+    // BEING EDITED ELSEWHERE: a begin while an edit already stands on this
+    // workspace — on this prompt or on another one. One claim per workspace.
+    EditHeldPromptBeingEdited being_edited = 8;
+    // A commit or cancel naming a prompt no edit stands on (the claim was
+    // retired — by a cancel, a drop, or the editor's host stream ending).
+    EditHeldPromptNotEditing not_editing = 9;
+    // A begin with no editor to edit in: no host stream stands for this
+    // workspace, so there is no input the content could be put into and no
+    // claimant the claim could be scoped to.
+    EditHeldPromptNoEditor no_editor = 10;
+  }
+}
+message EditHeldPromptUnknownWorkspace {}
+message EditHeldPromptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message EditHeldPromptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message EditHeldPromptNotYetAdopted {}
+message EditHeldPromptNoSuchHold {}
+message EditHeldPromptNotHeld {}
+message EditHeldPromptAlreadyDelivered {}
+message EditHeldPromptBeingEdited {
+  // The prompt the standing edit is on.
+  conversation.v1.TurnId editing_turn = 1;
+}
+message EditHeldPromptNotEditing {}
+message EditHeldPromptNoEditor {}

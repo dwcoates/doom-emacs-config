@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	// The daemon's SQLite driver. Registered here because wsm is the sole
 	// owner of the database handle; nothing else opens it.
 	_ "modernc.org/sqlite"
@@ -124,6 +126,15 @@ type DB interface {
 	SetHeldPromptAccepted(ctx context.Context, turn TurnID) error
 	// TombstoneHeldPrompt retires a held prompt with its reason.
 	TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombstone) error
+	// ReplaceHeldPromptSaid replaces a STANDING hold's content (an edit's
+	// commit) and discards its verdict: the classification and the acceptance
+	// are cleared in the same transaction, so the new content is never read
+	// beside the old content's verdict. Its queue position is unchanged.
+	ReplaceHeldPromptSaid(ctx context.Context, turn TurnID, said *conversationv1.UserSaid) error
+	// HeldPromptByTurn loads ONE hold by its turn, retired or not, reporting
+	// false when no hold was ever recorded under the turn. It is what tells an
+	// unknown turn from a delivered or a dropped one.
+	HeldPromptByTurn(ctx context.Context, turn TurnID) (HeldPrompt, bool, error)
 	// HeldPrompts loads one workspace's standing holds, all-or-nothing.
 	HeldPrompts(ctx context.Context, id WorkspaceID) ([]HeldPrompt, error)
 	// AllHeldPrompts loads every standing hold for the boot restore,

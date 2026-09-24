@@ -50,6 +50,7 @@ import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
+import "agentrepl/v1/endpoint_edit_held_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
 import "agentrepl/v1/endpoint_roll_out_build.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
@@ -205,6 +206,11 @@ service AgentRepl {
   // Act on a held prompt: deliver now, or discard. See
   // endpoint_update_held_prompt.proto.
   rpc UpdateHeldPrompt(UpdateHeldPromptRequest) returns (UpdateHeldPromptResponse);
+
+  // Edit a held prompt: begin (claim it and hand its content to the editor),
+  // commit (replace and reclassify), or cancel. See
+  // endpoint_edit_held_prompt.proto.
+  rpc EditHeldPrompt(EditHeldPromptRequest) returns (EditHeldPromptResponse);
 
   // Answer a question the daemon parked in the tray. See
   // endpoint_answer_held_offer.proto.

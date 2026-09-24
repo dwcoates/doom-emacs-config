@@ -40,6 +40,12 @@ import (
 //	ErrAlreadyDelivered  → UpdateHeldPromptError.already_delivered
 //	ErrAcceptNotApplicable → UpdateHeldPromptError.accept_not_applicable
 //	ErrReleaseRefused    → UpdateHeldPromptError.release_refused
+//	ErrNoSuchHold        → EditHeldPromptError.no_such_hold
+//	ErrNotHeld           → EditHeldPromptError.not_held
+//	ErrAlreadyDelivered  → EditHeldPromptError.already_delivered
+//	ErrBeingEdited       → EditHeldPromptError.being_edited
+//	ErrNotEditing        → EditHeldPromptError.not_editing
+//	ErrNoEditor          → EditHeldPromptError.no_editor
 var (
 	// ErrMerging is a submission that arrived AFTER a merge began. It is
 	// refused outright rather than held: a merged workspace closes, so work a
@@ -64,6 +70,16 @@ var (
 	// ErrReleaseRefused is a force-through on an uninterruptible verdict or a
 	// session_starting hold: there is nothing delivery could do yet.
 	ErrReleaseRefused = errors.New("promptqueue: this hold cannot be released through")
+	// ErrNotHeld is an edit of a prompt that WAS held and no longer is: it
+	// was dropped.
+	ErrNotHeld = errors.New("promptqueue: that prompt is no longer held")
+	// ErrBeingEdited is a begin while an edit already stands on the
+	// workspace. BeingEditedError carries it with the turn being edited.
+	ErrBeingEdited = errors.New("promptqueue: a held prompt is already being edited on this workspace")
+	// ErrNotEditing is a commit or cancel naming a prompt no edit stands on.
+	ErrNotEditing = errors.New("promptqueue: no edit stands on that prompt")
+	// ErrNoEditor is a begin with no editor's host stream to edit in.
+	ErrNoEditor = errors.New("promptqueue: no editor is attached to this workspace")
 )
 
 // The session-act kinds the one delivery path carries. They are constants
@@ -165,6 +181,26 @@ type Queue interface {
 	// tray (UpdateHeldPrompt.accept). It is LEGAL ONLY on a hold_for_turn_end
 	// verdict; every other hold refuses.
 	Accept(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
+	// BeginEdit claims a held prompt as being edited (EditHeldPrompt.begin).
+	// While the claim stands, the prompt and every prompt queued after it are
+	// withheld from delivery. It refuses a turn nothing was held under
+	// (ErrNoSuchHold), a dropped prompt (ErrNotHeld), a delivered one
+	// (ErrAlreadyDelivered), a second edit on the workspace (ErrBeingEdited)
+	// and a workspace whose editor probe answers false (ErrNoEditor).
+	BeginEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, editor EditorProbe) error
+	// CommitEdit replaces the edited prompt's content, discards its verdict,
+	// retires the claim and reclassifies the prompt through the ordinary
+	// classifier path (EditHeldPrompt.commit).
+	CommitEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error
+	// CancelEdit retires the claim with the content unchanged and resumes the
+	// queue (EditHeldPrompt.cancel).
+	CancelEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
+	// EditorGone retires the workspace's claim, as a cancel would, because no
+	// editor's host stream stands for it any more. The server calls it on the
+	// last host stream's close; a workspace with no claim is a no-op.
+	EditorGone(ws ids.WorkspaceID)
+	// Editing answers the workspace's standing edit, false when none stands.
+	Editing(ws ids.WorkspaceID) (Edit, bool)
 	// SubmitSessionAct sends a session act down the same path.
 	SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Act) error
 	// CancelKeepaliveRedrive cancels a turn that is re-driving behind an
@@ -263,6 +299,9 @@ type Deps struct {
 	// time.After. It is injected so a test drives the re-drive cadence without
 	// waiting on a real clock.
 	After func(d time.Duration) <-chan time.Time
+	// PublishHost republishes a workspace's host view, which carries the
+	// standing edit the editor fills its input from. REQUIRED.
+	PublishHost func(ws ids.WorkspaceID)
 	// Log is the queue's logger.
 	Log dlog.Surfaces
 }

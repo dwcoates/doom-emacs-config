@@ -159,6 +159,10 @@ func (s *fakeServer) UpdateHeldPrompt(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse](ctx, s, "UpdateHeldPrompt", req.Msg)
 }
 
+func (s *fakeServer) EditHeldPrompt(ctx context.Context, req *connect.Request[v1.EditHeldPromptRequest]) (*connect.Response[v1.EditHeldPromptResponse], error) {
+	return handleUnary[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse](ctx, s, "EditHeldPrompt", req.Msg)
+}
+
 func (s *fakeServer) AnswerHeldOffer(ctx context.Context, req *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error) {
 	return handleUnary[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse](ctx, s, "AnswerHeldOffer", req.Msg)
 }

@@ -7,9 +7,11 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
 )
 
@@ -1129,5 +1131,35 @@ func TestAnUnresolvedFinalAnswerReachesTheHostView(t *testing.T) {
 	}
 	if arm.GetTurn() != "turn-7" || arm.GetUnit() != "msg_01:0" || arm.GetWhy() != "stalled" {
 		t.Fatalf("arm = %+v, want the recorded turn, unit and why", arm)
+	}
+}
+
+// ---- the standing held-prompt edit ------------------------------------------
+
+func TestTheHostViewCarriesTheStandingEdit(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Queue.edit = &promptqueue.Edit{Turn: "turn-1", Said: &conversationv1.UserSaid{}, ID: 7}
+
+	// Act.
+	view := composeHost(t, h)
+
+	// Assert.
+	edit := view.GetHeldPromptEdit()
+	if edit.GetTurn().GetValue() != "turn-1" || edit.GetEdit() != 7 || edit.GetSaid() == nil {
+		t.Fatalf("held_prompt_edit = %v, want turn-1's edit 7 with its content", edit)
+	}
+}
+
+func TestTheHostViewCarriesNoEditWhenNoneStands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	view := composeHost(t, h)
+
+	// Assert.
+	if view.GetHeldPromptEdit() != nil {
+		t.Fatalf("held_prompt_edit = %v, want absent", view.GetHeldPromptEdit())
 	}
 }

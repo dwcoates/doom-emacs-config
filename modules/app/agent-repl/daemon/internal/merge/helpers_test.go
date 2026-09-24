@@ -594,6 +594,17 @@ func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promp
 func (q *fakeQueue) Release(context.Context, ids.WorkspaceID, ids.TurnID) error { return nil }
 func (q *fakeQueue) Drop(context.Context, ids.WorkspaceID, ids.TurnID) error    { return nil }
 func (q *fakeQueue) Accept(context.Context, ids.WorkspaceID, ids.TurnID) error  { return nil }
+func (q *fakeQueue) BeginEdit(context.Context, ids.WorkspaceID, ids.TurnID, promptqueue.EditorProbe) error {
+	return nil
+}
+func (q *fakeQueue) CommitEdit(context.Context, ids.WorkspaceID, ids.TurnID, *conversationv1.UserSaid) error {
+	return nil
+}
+func (q *fakeQueue) CancelEdit(context.Context, ids.WorkspaceID, ids.TurnID) error { return nil }
+func (q *fakeQueue) EditorGone(ids.WorkspaceID)                                    {}
+func (q *fakeQueue) Editing(ids.WorkspaceID) (promptqueue.Edit, bool) {
+	return promptqueue.Edit{}, false
+}
 func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
 	return nil
 }
