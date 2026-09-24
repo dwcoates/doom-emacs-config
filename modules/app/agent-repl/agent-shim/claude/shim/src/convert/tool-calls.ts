@@ -56,6 +56,13 @@ export interface PendingCall {
   /** Whose work it is: a subagent's own id for a subagent's call. */
   readonly agentId: conversationv1.AgentId;
   /**
+   * The spawning call of the STREAM the call rode — its message's
+   * `parent_tool_use_id`, read through `spawningCallOf` — or UNSET for the
+   * main agent's own stream. What the registry holds a call under, so an
+   * agent's end and a detached handoff can release exactly its calls.
+   */
+  readonly spawningCall?: string | undefined;
+  /**
    * The tool allowances a DECLINED result stated, kept for the frame that does
    * settle the unit.
    *
@@ -100,11 +107,15 @@ export interface ToolEnvironment {
 /**
  * One tool kind's mapping.
  *
- * `settle` may answer `undefined`, which means THIS RESULT IS NOT THE UNIT'S
- * CONCLUSION — the skill unit settles on the document that arrives after the
- * acknowledgement, and a backgrounded shell command settles on its detached-work
- * frame rather than on the launch receipt. Emitting a terminal in either case
- * would say the work ended when it had not.
+ * `settle` may answer `undefined`, which means THIS RESULT WRITES NO TERMINAL
+ * — the skill unit settles on the document that arrives after the
+ * acknowledgement, a backgrounded shell command settles on its detached-work
+ * frame rather than on the launch receipt, and a result too thin to restate
+ * the call writes nothing rather than a partial frame. Emitting a terminal in
+ * the first two cases would say the work ended when it had not.
+ *
+ * Whether the CALL stays held is a separate answer, {@link retain}'s: the
+ * result is the call's return, so without a `retain` the call is released.
  */
 export interface ToolConverter {
   /** The unit kind's name, used in the write's discriminator and in logs. */
@@ -149,12 +160,16 @@ export interface ToolConverter {
    */
   cut?(call: PendingCall, atMs: number): conversationv1.AgentActivity["item"] | undefined;
   /**
-   * What to keep remembered when {@link settle} DECLINED to conclude the unit.
+   * The call to KEEP HELD when {@link settle} declined, for the one shape that
+   * needs it: a unit whose conclusion is a LATER RECORD ON THIS STREAM (the
+   * skill's document, joined back to the call).
    *
-   * The declining result is the last time its own fields are seen, so a kind
-   * whose terminal frame restates something only that result carried answers
-   * the call to re-remember here. Kinds with nothing to carry omit this and the
-   * call is re-remembered unchanged.
+   * The declining result is the last time its own fields are seen, so the
+   * answer may carry something only that result stated. A kind that omits
+   * this has its call RELEASED at every declined settle: its work was handed
+   * off (a detached shell, an async spawn, an armed monitor — each concluded by
+   * the task stream or the file plane, never by a record naming this call), or
+   * the result simply could not be restated. Holding those is what leaked.
    */
   retain?(call: PendingCall, outcome: ToolOutcome): PendingCall;
 }
@@ -229,48 +244,136 @@ export const ENGINE_OWNED_TOOLS: ReadonlySet<string> = new Set(["AskUserQuestion
  */
 export const CALL_REGISTRY_CAPACITY = 512;
 
-/** The calls in flight, oldest first. */
+/**
+ * The calls in flight, oldest first.
+ *
+ * # Whose calls it holds: the STREAMS this plane can settle
+ *
+ * A call rides the stream its message named (`parent_tool_use_id`, resolved
+ * by `spawningCallOf` — the same rule as the book and the block state),
+ * and it is held only while that stream is: the main agent's always, a
+ * subagent's while its spawning call is itself held and has not been handed
+ * off. A BACKGROUNDED agent's calls are never held: its `tool_use` blocks are
+ * forwarded onto this stream but its `tool_result` records are not (the
+ * `subagent-detached` capture carries the one and never the other), so its
+ * units are the file plane's to settle, from the sidechain transcript that
+ * does carry them. Holding them anyway is what filled the registry.
+ *
+ * # When a call leaves
+ *
+ *   - its RESULT settles it ({@link take}) — unless the converter says the
+ *     unit awaits a later record on this stream, and re-remembers it;
+ *   - its work is HANDED OFF ({@link detach}): the work left the turn, and
+ *     its conclusion is the task stream's or the file plane's, not this call's;
+ *   - its AGENT ENDS: a spawning call's own settle releases every call its
+ *     stream still held, since no record for them can follow;
+ *   - the TURN ENDS ({@link drain}): whatever the turn left open is released,
+ *     and a stop cuts it first.
+ */
 export interface CallRegistry {
-  /** Remember a call that was just announced. */
-  remember(call: PendingCall): void;
-  /** Take a call out because it has settled. */
-  take(toolUseId: string): PendingCall | undefined;
-  /** Look at a call without settling it (a progress beat). */
-  peek(toolUseId: string): PendingCall | undefined;
   /**
-   * Every call still in flight, oldest first, without settling any of them.
+   * Hold a call that was just announced, answering whether it is held.
    *
-   * The turn's END is the one moment the SET matters rather than one call: a
-   * stop cuts whatever was open, and nothing else can ask which calls those
-   * were. Answers a snapshot, so a caller may settle what it iterates.
+   * A call on a stream this plane does not hold is REFUSED rather than held:
+   * nothing on this stream will ever settle it.
    */
+  remember(call: PendingCall): boolean;
+  /**
+   * Take a call out because it has settled, releasing every call its own
+   * stream still held (its agent is over).
+   */
+  take(toolUseId: string): PendingCall | undefined;
+  /** Look at a call without settling it (a progress beat, an owner join). */
+  peek(toolUseId: string): PendingCall | undefined;
+  /** Whether the stream `spawningCall` names is one this plane holds calls for. */
+  holds(spawningCall: string | undefined): boolean;
+  /**
+   * The call's work LEFT THE TURN while the call stays unsettled (a spawn or a
+   * shell the vendor backgrounded): its stream's calls are released and no
+   * further call on it is held, and the stop that ends the turn does not cut
+   * it. The call itself stays held until its own result arrives.
+   */
+  detach(toolUseId: string): void;
+  /** Whether the call's work was handed off ({@link detach}). */
+  isDetached(toolUseId: string): boolean;
+  /** Every call still held, oldest first, as a snapshot; nothing is settled. */
   open(): readonly PendingCall[];
+  /**
+   * Release EVERY call, oldest first, and answer them — the turn's end, the
+   * moment nothing still held can settle on this stream.
+   * Each answered call carries whether its work was handed off.
+   */
+  drain(): readonly { readonly call: PendingCall; readonly detached: boolean }[];
 }
 
 export function createCallRegistry(): CallRegistry {
   const calls = new Map<string, PendingCall>();
+  const detached = new Set<string>();
+
+  const holds = (spawningCall: string | undefined): boolean =>
+    spawningCall === undefined || (calls.has(spawningCall) && !detached.has(spawningCall));
+
+  /** Drop every call riding the stream `spawningCall` names, and theirs in turn. */
+  const releaseStream = (spawningCall: string, why: string): void => {
+    const riding = [...calls.values()].filter((call) => call.spawningCall === spawningCall);
+    if (riding.length === 0) return;
+    for (const call of riding) {
+      calls.delete(call.toolUseId);
+      detached.delete(call.toolUseId);
+      releaseStream(call.toolUseId, why);
+    }
+    LOGGER.info(
+      {
+        spawning_call: spawningCall,
+        released: riding.length,
+        tool_use_ids: riding.map((call) => call.toolUseId),
+        why,
+      },
+      "an agent's stream is no longer this plane's; the calls it still held are released and the file plane settles their units",
+    );
+  };
+
   return {
     remember(call) {
-      if (calls.size >= CALL_REGISTRY_CAPACITY) {
-        const oldest = calls.keys().next();
-        if (oldest.done !== true) {
-    // warn: a defect because bounded call bookkeeping discarded a live tool call.
-    LOGGER.warn(
-      { tool_use_id: oldest.value, capacity: CALL_REGISTRY_CAPACITY },
+      if (!holds(call.spawningCall)) return false;
+      if (calls.size >= CALL_REGISTRY_CAPACITY && !calls.has(call.toolUseId)) {
+        const [oldest] = calls.values();
+        if (oldest !== undefined) {
+          // warn: a defect because bounded call bookkeeping discarded a live tool call.
+          LOGGER.warn(
+            { tool_use_id: oldest.toolUseId, capacity: CALL_REGISTRY_CAPACITY },
             "forgetting the oldest unsettled tool call: the in-flight registry is full",
           );
-          calls.delete(oldest.value);
+          calls.delete(oldest.toolUseId);
+          detached.delete(oldest.toolUseId);
         }
       }
       calls.set(call.toolUseId, call);
+      return true;
     },
     take(toolUseId) {
       const call = calls.get(toolUseId);
-      if (call !== undefined) calls.delete(toolUseId);
+      if (call === undefined) return undefined;
+      calls.delete(toolUseId);
+      detached.delete(toolUseId);
+      releaseStream(toolUseId, "its spawning call settled");
       return call;
     },
     peek: (toolUseId) => calls.get(toolUseId),
+    holds,
+    detach(toolUseId) {
+      if (!calls.has(toolUseId) || detached.has(toolUseId)) return;
+      detached.add(toolUseId);
+      releaseStream(toolUseId, "its work was handed off");
+    },
+    isDetached: (toolUseId) => detached.has(toolUseId),
     open: () => [...calls.values()],
+    drain() {
+      const drained = [...calls.values()].map((call) => ({ call, detached: detached.has(call.toolUseId) }));
+      calls.clear();
+      detached.clear();
+      return drained;
+    },
   };
 }
 
@@ -324,7 +427,10 @@ function toolActivity(
  * A tool call's `start` row.
  *
  * The call is REMEMBERED whatever its disposition, so an exempt tool's result
- * can be recognized and dropped rather than landing as residue.
+ * can be recognized and dropped rather than landing as residue — on every
+ * stream this plane holds. A call a BACKGROUNDED agent made is announced and
+ * NOT remembered: its result never reaches this stream, so the file plane,
+ * which reads the agent's own transcript, is what settles its unit.
  */
 export function convertToolUse(
   converters: ReadonlyMap<string, ToolConverter>,
@@ -334,7 +440,12 @@ export function convertToolUse(
   origin: Omit<FrameOrigin, "discriminator">,
   envelope: Parameters<typeof agentActivity>[2] = {},
 ): readonly PersistEntry[] {
-  registry.remember(call);
+  if (!registry.remember(call)) {
+    LOGGER.logVerbose(
+      { tool: call.toolName, tool_use_id: call.toolUseId, spawning_call: call.spawningCall },
+      "a call on a stream this plane does not hold (a backgrounded agent's): announced, never held; the file plane settles it",
+    );
+  }
   const disposition = dispositionOf(converters, call.toolName);
   switch (disposition.case) {
     case "exempt":
@@ -410,8 +521,22 @@ export const UNMODELED_KEY = " unmodeled";
  * A tool result's terminal row.
  *
  * Answers NOTHING when the call is unknown (a result for a call this shim never
- * saw announced — a resumed session's tail), when the tool is exempt, or when
- * the converter says this result does not settle the unit.
+ * saw announced — a resumed session's tail — or one a backgrounded agent made,
+ * which this plane never holds), when the tool is exempt, or when the converter
+ * produces no terminal from this result.
+ *
+ * THE RESULT ALWAYS TAKES THE CALL OUT. A result that produced no terminal is
+ * still the call's return, and nothing later on this stream can settle it — so
+ * the call is re-remembered only when its converter says the unit awaits a
+ * later record on this stream ({@link ToolConverter.retain}). Re-remembering
+ * every declined settle is what let the registry fill: a subagent's results
+ * carry no typed output on this stream, a backgrounded shell's receipt and an
+ * async spawn's receipt hand the work off, and a monitor's arming receipt is
+ * not its end — none of which any later record here settles.
+ *
+ * `spawningCall` is the stream the RESULT rode. It is the same identity the
+ * call was registered under, and a result on another stream than its call's is
+ * an invariant violation, raised at error and still settled by the vendor's id.
  */
 export function convertToolResult(
   converters: ReadonlyMap<string, ToolConverter>,
@@ -420,15 +545,35 @@ export function convertToolResult(
   toolUseId: string,
   outcome: ToolOutcome,
   origin: Omit<FrameOrigin, "discriminator" | "agentId">,
+  spawningCall?: string,
 ): readonly PersistEntry[] {
   const call = registry.take(toolUseId);
   if (call === undefined) {
+    if (!registry.holds(spawningCall)) {
+      LOGGER.debug(
+        { tool_use_id: toolUseId, spawning_call: spawningCall },
+        "a tool result on a stream this plane does not hold (a backgrounded agent's); the file plane settles its unit",
+      );
+      return [];
+    }
     // warn: a defect because an unannounced tool result cannot settle a unit.
     LOGGER.warn(
       { tool_use_id: toolUseId },
       "a tool result arrived for a call this shim never saw announced; no terminal is produced",
     );
     return [];
+  }
+  if (call.spawningCall !== spawningCall) {
+    LOGGER.error(
+      {
+        tool_use_id: toolUseId,
+        tool: call.toolName,
+        registered_on: call.spawningCall ?? "main",
+        settled_on: spawningCall ?? "main",
+        detail: "a call's result rode a different stream from the call's announcement",
+      },
+      "invariant violated: a tool result's stream is not its call's; settling by the vendor's call id",
+    );
   }
   const disposition = dispositionOf(converters, call.toolName);
   if (disposition.case !== "modelled" && disposition.case !== "unmodeled") {
@@ -445,13 +590,19 @@ export function convertToolResult(
   }
   const item = converter.settle(call, outcome, environmentOf(context));
   if (item === undefined) {
+    const retained = converter.retain?.(call, outcome);
+    if (retained !== undefined) {
+      LOGGER.logVerbose(
+        { tool: call.toolName, kind: converter.kind, tool_use_id: toolUseId },
+        "this result does not conclude the unit; it awaits a later record on this stream and stays held",
+      );
+      registry.remember(retained);
+      return [];
+    }
     LOGGER.logVerbose(
       { tool: call.toolName, kind: converter.kind, tool_use_id: toolUseId },
-      "this result does not conclude the unit; the unit stays open",
+      "this result produced no terminal and nothing later on this stream settles the unit; the call is released",
     );
-    // The unit is NOT settled, so the call must stay remembered: a skill's
-    // document and a backgrounded shell's detachment both still need it.
-    registry.remember(converter.retain?.(call, outcome) ?? call);
     return [];
   }
   LOGGER.logVerbose(
@@ -518,36 +669,49 @@ export function convertProgressBeat(
 }
 
 // ---------------------------------------------------------------------------
-// The stop
+// The turn's end
 // ---------------------------------------------------------------------------
 
 /**
- * Terminal frames for every call the turn's STOP left open.
+ * Release every call the turn left held, and cut the ones a STOP left open.
  *
- * Each cut call is TAKEN out of the registry, so a late result cannot settle a
- * unit twice, and each entry is written under its OWN block ordinal: the
- * deterministic write id is minted from the source coordinates, so several
- * frames derived from one vendor record must differ somewhere or the store
- * absorbs all but the first as duplicates of it.
+ * NO CALL OUTLIVES ITS TURN ON THIS PLANE. By the terminal, every call this
+ * stream could settle has settled, been handed off or been retained for a
+ * record that did not come; a backgrounded agent's calls were never held. So
+ * the registry is DRAINED here, at every terminal, and is empty afterwards.
  *
- * A kind that states no {@link ToolConverter.cut} is LEFT ALONE and left
- * remembered: its unit stays open, which is the shape it had before, rather
- * than being retired into silence where nothing could ever settle it.
+ * ON A STOP (`stopped`), a call still genuinely open is one the stop landed
+ * inside, and the vendor returns no `tool_result` for it — so its terminal is
+ * owed here or nowhere, and a unit left on its running arm draws a live tool
+ * inside a turn that has ended. Each kind that states a {@link ToolConverter.cut}
+ * gets that frame, under its OWN block ordinal: the deterministic write id is
+ * minted from the source coordinates, so several frames derived from one vendor
+ * record must differ somewhere or the store absorbs all but the first as
+ * duplicates of it. A call whose work was HANDED OFF is not open — it is still
+ * running, elsewhere — and is never cut; nor is a kind with no vocabulary for
+ * being cut short, whose unit keeps the shape it had.
+ *
+ * ON ANY OTHER TERMINAL nothing is cut: the turn ended on its own, and a call
+ * still held is one whose settle this stream will not carry (a skill whose
+ * document rode only the transcript), so the file plane's row is the unit's.
  */
-export function cutOpenCalls(
+export function endTurnCalls(
   converters: ReadonlyMap<string, ToolConverter>,
   context: FoldContext,
   registry: CallRegistry,
   origin: Omit<FrameOrigin, "discriminator" | "agentId" | "blockIndex">,
+  stopped: boolean,
 ): readonly PersistEntry[] {
   const entries: PersistEntry[] = [];
-  for (const call of registry.open()) {
+  const released: string[] = [];
+  for (const { call, detached } of registry.drain()) {
     const disposition = dispositionOf(converters, call.toolName);
-    if (disposition.case !== "modelled" || disposition.converter.cut === undefined) continue;
-    const converter = disposition.converter;
-    const item = converter.cut?.(call, context.nowMs());
-    if (item === undefined) continue;
-    registry.take(call.toolUseId);
+    const converter = disposition.case === "modelled" ? disposition.converter : undefined;
+    const item = stopped && !detached ? converter?.cut?.(call, context.nowMs()) : undefined;
+    if (converter === undefined || item === undefined) {
+      released.push(call.toolUseId);
+      continue;
+    }
     LOGGER.debug(
       { tool: call.toolName, kind: converter.kind, tool_use_id: call.toolUseId },
       "the turn was stopped with this call still open; its unit is settled as cut short",
@@ -563,6 +727,12 @@ export function cutOpenCalls(
         },
         toolActivity(call, item),
       ),
+    );
+  }
+  if (released.length > 0) {
+    LOGGER.info(
+      { stopped, cut: entries.length, released: released.length, tool_use_ids: released },
+      "the turn ended with calls held that no record on this stream will settle; they are released",
     );
   }
   return entries;

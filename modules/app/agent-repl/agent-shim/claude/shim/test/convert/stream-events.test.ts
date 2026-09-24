@@ -14,10 +14,12 @@ import { create } from "@bufbuild/protobuf";
 import { writeSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createFold } from "../../src/convert/fold.js";
-import { StreamBlocks } from "../../src/convert/stream-events.js";
+import { convertAssistantMessage, StreamBlocks } from "../../src/convert/stream-events.js";
+import { createCallRegistry } from "../../src/convert/tool-calls.js";
+import { TOOL_CONVERTERS } from "../../src/convert/tools/registry.js";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
-import { activityOf, foldContext } from "./fold-harness.js";
+import { activityOf, foldContext, MAIN_AGENT } from "./fold-harness.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
 
 const MESSAGE_ID = "msg_streamed";
@@ -1118,5 +1120,44 @@ describe("the warnings a stream with no identity still raises", () => {
         .filter((r) => r.message === "a content block opened with no message_start seen on its stream; skipped")
         .map((r) => ({ level: r.level, stream: r.context.stream })),
     ).toEqual([{ level: "warn", stream: SPAWN }]);
+  });
+});
+
+type AssistantMessage = Extract<SdkMessage, { type: "assistant" }>;
+
+describe("a tool call's stream", () => {
+  it("is recorded on the call as the spawning call its line named", () => {
+    // Arrange: the spawn is held, so its agent's calls are too.
+    const registry = createCallRegistry();
+    registry.remember({ toolUseId: SPAWN, toolName: "Agent", input: {}, startedAtMs: 1, agentId: MAIN_AGENT });
+
+    // Act
+    convertAssistantMessage(
+      lineOn(SPAWN, SUB_ID, { type: "tool_use", id: "toolu_sub", name: "Read", input: { file_path: "/a" } }, "u-sub") as AssistantMessage,
+      foldContext(),
+      new StreamBlocks(),
+      registry,
+      TOOL_CONVERTERS,
+    );
+
+    // Assert
+    expect(registry.peek("toolu_sub")?.spawningCall).toBe(SPAWN);
+  });
+
+  it("is unset on a call the main agent made", () => {
+    // Arrange
+    const registry = createCallRegistry();
+
+    // Act
+    convertAssistantMessage(
+      lineOn(null, MAIN_ID, { type: "tool_use", id: "toolu_main", name: "Read", input: { file_path: "/a" } }, "u-main") as AssistantMessage,
+      foldContext(),
+      new StreamBlocks(),
+      registry,
+      TOOL_CONVERTERS,
+    );
+
+    // Assert
+    expect(registry.peek("toolu_main")?.spawningCall).toBeUndefined();
   });
 });
