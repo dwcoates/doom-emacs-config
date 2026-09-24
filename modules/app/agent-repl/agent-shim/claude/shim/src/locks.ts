@@ -414,7 +414,7 @@ function holderSilent(
   // error: a defect, because a healthy holder answers in milliseconds and this
   // one neither answered nor exited, so no session can start on it.
   LOGGER.error(
-    { ...claim.context, lock_path: file, lock_binary: binary, os_error: osError, timeout_ms: HOLDER_ANSWER_TIMEOUT_MS },
+    { ...claim.context, lock_path: file, lock_binary: binary, os_error: osError, cause: osError, timeout_ms: HOLDER_ANSWER_TIMEOUT_MS },
     `the ${claim.kind} lock holder ${binary} timed out: ${osError}`,
   );
   return new LockHolderUnavailableError(
