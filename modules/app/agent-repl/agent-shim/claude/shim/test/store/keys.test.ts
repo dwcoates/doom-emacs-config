@@ -150,22 +150,10 @@ describe("bashUpsertKey", () => {
     expect(keys.bashUpsertKey(run)).not.toBe(keys.activityUpsertKey(run));
   });
 
-  it("keys each output delta by WHERE IT STARTS", () => {
-    // Arrange, Act, Assert. The offset is the delta's identity: a re-read from
-    // the same offset upserts in place, and the next stretch is a new row.
-    expect(keys.bashDeltaUpsertKey(activityId("toolu_bash1"), 4096n)).toBe(
-      "bash:toolu_bash1:4096",
-    );
-  });
-
-  it("keys the first delta at offset zero", () => {
-    // Arrange, Act, Assert.
-    expect(keys.bashDeltaUpsertKey(activityId("toolu_bash1"), 0)).toBe("bash:toolu_bash1:0");
-  });
-
-  it("refuses a negative from_offset rather than minting a key nothing can hold", () => {
-    // Arrange, Act, Assert.
-    expect(() => keys.bashDeltaUpsertKey(activityId("toolu_bash1"), -1n)).toThrow();
+  it("keys the run's rendered tail as ONE row every write supersedes", () => {
+    // Arrange, Act, Assert. Output beyond what is rendered is not stored, so
+    // the tail has one key however often it grows.
+    expect(keys.bashTailUpsertKey(activityId("toolu_bash1"))).toBe("bash:toolu_bash1:tail");
   });
 
   it("keys the terminal so it SUPERSEDES NOTHING the run produced", () => {
@@ -175,14 +163,14 @@ describe("bashUpsertKey", () => {
     );
   });
 
-  it("gives the start, a delta and the terminal three distinct keys", () => {
+  it("gives the start, the tail and the terminal three distinct keys", () => {
     // Arrange.
     const run = activityId("toolu_bash1");
 
     // Act.
     const minted = new Set([
       keys.bashUpsertKey(run),
-      keys.bashDeltaUpsertKey(run, 0),
+      keys.bashTailUpsertKey(run),
       keys.bashTerminalUpsertKey(run),
     ]);
 
