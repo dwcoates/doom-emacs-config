@@ -1337,6 +1337,57 @@ describe("the vendor's own facts", () => {
   });
 });
 
+/** Let pending microtasks and I/O settle, up to a bound, until `done` holds. */
+async function settledUntil(done: () => boolean): Promise<void> {
+  for (let index = 0; index < 1_000 && !done(); index++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+describe("the store writer's backpressure", () => {
+  it("does not read the next vendor message while the writer's backlog is past its mark", async () => {
+    // Arrange. The writer reports a backlog episode that has not drained.
+    const h = harness();
+    await started(h);
+    let drained: () => void = () => undefined;
+    h.persistence.backlog = new Promise<void>((resolve) => {
+      drained = resolve;
+    });
+    const query = (await untilQuery(h, 0)).query;
+
+    // Act.
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000a" }));
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000b" }));
+    await settledUntil(() => h.fold.seen.length >= 2);
+    await settledUntil(() => false);
+
+    // Assert. The first was folded; the second waits for the backlog.
+    expect(h.fold.seen).toHaveLength(2);
+    drained();
+  });
+
+  it("reads the next vendor message once the backlog drains", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    let drained: () => void = () => undefined;
+    h.persistence.backlog = new Promise<void>((resolve) => {
+      drained = resolve;
+    });
+    const query = (await untilQuery(h, 0)).query;
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000a" }));
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000b" }));
+    await settledUntil(() => h.fold.seen.length >= 2);
+
+    // Act.
+    drained();
+    await settledUntil(() => h.fold.seen.length >= 3);
+
+    // Assert.
+    expect(h.fold.seen).toHaveLength(3);
+  });
+});
+
 describe("the turn loop", () => {
   it("hands the fold every SDK message", async () => {
     const h = harness();

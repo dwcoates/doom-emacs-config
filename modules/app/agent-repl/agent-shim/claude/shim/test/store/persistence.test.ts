@@ -58,6 +58,10 @@ describe("unavailablePersistence", () => {
     });
   });
 
+  it("whenWritable resolves at once: nothing is ever buffered to wait out", async () => {
+    await expect(persistence.whenWritable()).resolves.toBeUndefined();
+  });
+
   it("flush resolves with zero lost rows rather than refusing", async () => {
     await expect(persistence.flush()).resolves.toEqual({ lostRows: 0 });
   });
