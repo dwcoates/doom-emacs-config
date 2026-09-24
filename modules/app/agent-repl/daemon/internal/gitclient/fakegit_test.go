@@ -57,6 +57,9 @@ type gitCall struct {
 	Args []string `json:"args"`
 	// Env is the child's complete environment, as the scrub left it.
 	Env []string `json:"env"`
+	// Pid is the fake's own process id. The PATH script execs this binary,
+	// so it is the pid the client spawned.
+	Pid int `json:"pid"`
 }
 
 // subject is the argument vector with the leading `-C dir` removed: the
@@ -311,7 +314,7 @@ func fakeGitMain() {
 		os.Exit(120)
 	}
 
-	record, err := json.Marshal(gitCall{Cwd: cwd, Args: args, Env: os.Environ()})
+	record, err := json.Marshal(gitCall{Cwd: cwd, Args: args, Env: os.Environ(), Pid: os.Getpid()})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fake git: encoding the call: %v\n", err)
 		os.Exit(120)

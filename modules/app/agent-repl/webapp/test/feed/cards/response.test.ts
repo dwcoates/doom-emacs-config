@@ -2133,7 +2133,7 @@ describe("the data-driven final-answer green", () => {
       response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
       rowContext(),
     );
-    el.classList.add("response-selected");
+    el.classList.add("entry-selected");
     // Act, Assert — the drawn bubble matches BOTH the green rule and the
     // higher-specificity blue rule, and the blue rule is declared AFTER the green
     // one in the stylesheet, so the cascade paints it blue while selected and
@@ -2141,9 +2141,9 @@ describe("the data-driven final-answer green", () => {
     // colours are not observable under jsdom; selector + order is the
     // deterministic proof, mirrored from styles.test.ts.)
     expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
-    expect(el.matches(".bubble.final-response.response-selected")).toBe(true);
+    expect(el.matches(".bubble.final-response.entry-selected")).toBe(true);
     const green = stylesheet.indexOf('.bubble.final-response:not([data-variant="thinking"])');
-    const blue = stylesheet.indexOf(".bubble.final-response.response-selected");
+    const blue = stylesheet.indexOf(".bubble.final-response.entry-selected");
     expect(green).toBeGreaterThanOrEqual(0);
     expect(blue).toBeGreaterThan(green);
   });
@@ -2238,11 +2238,11 @@ describe("a re-push updates the bubble in place", () => {
     // Arrange
     const before = drawFeedResponse(arriving("hello"), rowContext());
     mount(before);
-    before.classList.add("response-selected");
+    before.classList.add("entry-selected");
     // Act
     drawFeedResponse(arriving("hello world"), rowContext(before));
     // Assert
-    expect(before.classList.contains("response-selected")).toBe(true);
+    expect(before.classList.contains("entry-selected")).toBe(true);
   });
 
   it("keeps the usage corner when its figure did not change", () => {

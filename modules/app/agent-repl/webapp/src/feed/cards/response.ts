@@ -123,8 +123,8 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // bubble can lose it. A THINKING BUBBLE IS EXCLUDED: it is never the answer,
   // so it never greens — the guard here matches the stylesheet's own
   // `.final-response:not(.thinking-bubble)` rule. The BLUE selected-response
-  // border still wins over the green: the controller toggles
-  // `.response-selected` on this same bubble.
+  // border still wins over the green: the controller toggles the one
+  // selected-entry class (`.entry-selected`, selected-entry.ts) on this bubble.
   if (u.finalAnswer && !u.thinking) hooks.push(FINAL_RESPONSE_CLASS);
 
   // The heading is the header strip, outside the body: the body is rewritten
