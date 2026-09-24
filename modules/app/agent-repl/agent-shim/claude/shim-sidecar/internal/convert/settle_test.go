@@ -786,3 +786,43 @@ func TestASendSettledFromTheTranscriptRestatesItsAddressAndSummary(t *testing.T)
 		})
 	}
 }
+
+func TestAnAgentStopRestatesTheCommissionItsLaunchRecorded(t *testing.T) {
+	tests := []struct {
+		name     string
+		restated func(*conversationv1.AgentSubagentFailure) string
+		want     string
+	}{
+		{
+			name:     "the description",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetPrompt().GetDescription() },
+			want:     "d",
+		},
+		{
+			name:     "the created agent",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetCreatedAgentId().GetValue() },
+			want:     "toolu_spawn",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a detached launch, then the stop that settles it.
+			c := newTestConverter(t)
+			launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+			launched := toolResultLine("u0", "toolu_spawn", ts1, `[{"type":"text","text":"launched"}]`,
+				`{"isAsync":true,"agentId":"a9","outputFile":"/tmp/a9.output"}`)
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
+			result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+				`{"command":"stop","task_type":"agent","task_id":"a9","message":"stopped"}`)
+
+			// Act
+			entries := convertLines(t, c, launch, launched, call, result)
+
+			// Assert
+			failure := activityOf(lastEntryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetFailure()
+			if got := tt.restated(failure); got != tt.want {
+				t.Fatalf("restated = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

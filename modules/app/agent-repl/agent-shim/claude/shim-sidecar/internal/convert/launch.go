@@ -62,6 +62,9 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	// Remembered for THIS file's own conversions: a TaskStop result names only
 	// the task, and the run it cancels is the call recorded here.
 	c.spawnedRuns[taskID] = call.activityID
+	if backgrounded {
+		c.spawns[call.activityID] = spawnRecord{prompt: subagentPrompt(call, result)}
+	}
 	// THE THIRD FACT IS THE SPAWNER, NOT THE SPAWNED. A created agent's id is
 	// the spawning call's id and needs no separate report; what the reader
 	// genuinely cannot derive is WHOSE book the spawn happened in, which is what
