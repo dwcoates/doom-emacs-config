@@ -550,6 +550,7 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 				"workspace_id": string(c.ws), "uds": c.udsPath, "actor": attr.Actor,
 			})
 			c.publishExit(ExitInfo{
+				PID:      c.PID(),
 				Code:     -1,
 				Inferred: true,
 				Stderr:   "adopted shim: the socket was already gone when the daemon went to stop it",
@@ -1107,6 +1108,7 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 			c.log.Debug("daemon.shimclient.redial", "the liveness stream ended after a stand-down was asked of this shim; not redialing", c.standDownFields(dlog.Context{
 				"uds": c.udsPath, "error": errText(broke),
 			}))
+			c.awaitAdoptedExit(ctx)
 			return
 		}
 		c.log.Warn("daemon.shimclient.redial", "shim link broke; redialing", c.standDownFields(dlog.Context{
@@ -1124,6 +1126,7 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 				c.log.Debug("daemon.shimclient.redial", "the redial ladder ended after a stand-down was asked of this shim", c.standDownFields(dlog.Context{
 					"uds": c.udsPath, "error": err.Error(),
 				}))
+				c.awaitAdoptedExit(ctx)
 				return
 			}
 			c.log.Warn("daemon.shimclient.redial", "redial stopped", c.standDownFields(dlog.Context{
@@ -1133,6 +1136,71 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 		}
 		stream = next
 		frames, errs = recvLoop(stream, ctx.Done())
+	}
+}
+
+// awaitAdoptedExit decides an ADOPTED shim's exit once it has been asked to
+// stand down: it polls the shim's process until the kernel says it is gone,
+// then publishes the exit. A spawned client returns at once, because its reap
+// decides its exit.
+//
+// WITHOUT IT AN ADOPTED SHIM'S EXIT WAS NEVER SEEN. The daemon is not its
+// parent, so nothing waits on it, and once a stand-down was asked the monitor
+// stopped redialing -- the only other path that could witness the death. The
+// relaunch engine's reap gate then read `Exited` for the whole stand-down
+// window and force-killed a shim that had left 29 seconds earlier (live
+// handover 2026-09-24T18:06: 30s of held prompts for three workspaces).
+//
+// THE EVIDENCE IS THE PROCESS, not the lock. The shim releases its kernel
+// locks as its session ends, before the process leaves, and the gate this
+// serves promises the old process is gone. By the spawn contract the shim
+// leads its own process group, so the GROUP being empty also covers its
+// `shim-lock` holders; a peer that leads no group is watched by its pid alone.
+// A recycled pid can only make a dead shim look alive, never the reverse, so
+// the error is on the side of waiting, and the caller's window still bounds it.
+//
+// It ends with ctx (the client's supervision lifetime: a detach, or an exit
+// decided elsewhere, such as the relaunch's force-kill).
+func (c *client) awaitAdoptedExit(ctx context.Context) {
+	c.mu.Lock()
+	spawned := c.cmd != nil
+	pid := c.pid
+	c.mu.Unlock()
+	if spawned {
+		return
+	}
+	if pid <= 0 {
+		c.log.Info("daemon.shimclient.exit", "the adopted shim's pid is unknown; its exit is decided by the socket or a kill", dlog.Context{
+			"workspace_id": string(c.ws), "uds": c.udsPath,
+		})
+		return
+	}
+	target := pid
+	if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
+		target = -pid
+	}
+	poll := time.NewTicker(adoptedGonePoll)
+	defer poll.Stop()
+	for {
+		if err := syscall.Kill(target, 0); errors.Is(err, syscall.ESRCH) {
+			c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
+				"workspace_id": string(c.ws), "pid": pid, "group": target < 0,
+			})
+			c.publishExit(ExitInfo{
+				PID:      pid,
+				Code:     -1,
+				Inferred: true,
+				Stderr:   "adopted shim: its process is gone; no wait status, the process was never this daemon's child",
+			})
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			return
+		case <-c.dead:
+			return
+		}
 	}
 }
 
