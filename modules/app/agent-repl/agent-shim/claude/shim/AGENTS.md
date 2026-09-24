@@ -726,7 +726,9 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
   A second `StartTurn` while one is being started is refused
   `turn_already_open`, a beat is skipped while a start is in flight, and a
   `KillTurn` naming the waiting turn waits for the start and then interrupts
-  the opened turn, as it would for any start.
+  the opened turn, as it would for any start. A `KillTurn` or main-agent
+  stop that finds ONLY a keep-alive open answers `no_turn_open` /
+  `nothing_running` and never interrupts it (`TurnEngine.servedTurn`).
 - **NOTHING IS STORED, ON EITHER PLANE (2026-09-23).** No purpose needs a
   row. The send, the answer and the scope's close are this process's memory;
   the rewind anchor is taken from the SDK messages as they pass
