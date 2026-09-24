@@ -713,6 +713,16 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
   background task's notification turn between the keep-alive's send and its
   answer, that turn's `result` closed the keep-alive, and the keep-alive's `.`
   arrived untagged and was drawn as a green final answer.
+- **WORK IS THE KEEP-ALIVE'S ONLY WHEN THE KEEP-ALIVE OPENED IT.** A frame that
+  names its work — a subagent's frame (`parent_tool_use_id`), tool progress, a
+  task's start, progress, notification or update — is tagged only when that
+  work descends from a call the keep-alive's own frames opened
+  (`KeepaliveScope.spawned`, forgotten when the scope closes); it never inherits
+  the running vendor turn. A permission or question ask is attributed the same
+  way, by the book it lands on. Paid for on 2026-09-15 and 2026-09-23: a
+  BACKGROUNDED subagent's frames arriving during a keep-alive turn were stored
+  as keep-alive rows under real subagent upsert_keys, and the sidecar's page
+  line for each was refused as an identity change, parking the transcript.
 - **ONE TAG, TAKEN ONCE.** `onSdkMessage` asks the scope once per message; the
   answer is the fold context's `keepalive`, so every row the fold produces
   carries it. The store writer DROPS a tagged entry at its door (`write` and
