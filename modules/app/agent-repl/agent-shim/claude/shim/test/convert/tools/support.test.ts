@@ -7,7 +7,31 @@
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../../src/proto.js";
-import { diffHunks, hunksOf, resultText, uint } from "../../../src/convert/tools/support.js";
+import {
+  diffHunks,
+  failureOf,
+  hunksOf,
+  resultText,
+  settle,
+  uint,
+} from "../../../src/convert/tools/support.js";
+import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
+
+/** A call announced at a known instant. */
+function call(startedAtMs: number): PendingCall {
+  return {
+    toolUseId: "toolu_s",
+    toolName: "Read",
+    input: {},
+    startedAtMs,
+    agentId: create(conversationv1.AgentIdSchema, { value: "main" }),
+  };
+}
+
+/** A result settled at a known instant. */
+function outcome(settledAtMs: number): ToolOutcome {
+  return { content: undefined, isError: true, structured: undefined, settledAtMs };
+}
 
 /** A tool result carrying the given blocks, in order. */
 function content(
@@ -122,5 +146,31 @@ describe("diffHunks", () => {
 
     // Assert.
     expect(hunks[0]?.lines).toEqual(["+one", "+"]);
+  });
+});
+
+describe("settle", () => {
+  it("restates the call's own start beside the settle instant", () => {
+    // Arrange
+    const announced = call(1_000);
+
+    // Act
+    const instant = settle(announced, outcome(4_000));
+
+    // Assert
+    expect(instant.startedAt?.atMs).toBe(1_000n);
+  });
+});
+
+describe("failureOf", () => {
+  it("restates the failed call's own start beside the settle instant", () => {
+    // Arrange
+    const announced = call(2_000);
+
+    // Act
+    const failure = failureOf(announced, outcome(5_000));
+
+    // Assert
+    expect(failure.settledAt?.startedAt?.atMs).toBe(2_000n);
   });
 });

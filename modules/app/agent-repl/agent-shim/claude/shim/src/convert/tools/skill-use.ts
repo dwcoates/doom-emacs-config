@@ -85,7 +85,7 @@ export function skillDocumentSettle(
         allowedTools === undefined
           ? undefined
           : create(conversationv1.AgentSkillAllowedToolsSchema, { toolNames: [...allowedTools] }),
-      settledAt: settledAt(settledAtMs),
+      settledAt: settledAt(settledAtMs, call.startedAtMs),
     }),
   });
 }
@@ -125,7 +125,7 @@ export const skillUseConverter: ToolConverter = {
       if (skill === undefined) return undefined;
       return skillItem({
         case: "failure",
-        value: create(conversationv1.AgentSkillUseFailureSchema, { error: failureOf(outcome), skill }),
+        value: create(conversationv1.AgentSkillUseFailureSchema, { error: failureOf(call, outcome), skill }),
       });
     }
     LOGGER.debug(

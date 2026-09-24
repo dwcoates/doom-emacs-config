@@ -38,7 +38,8 @@ import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { detachedWorkId, subagentId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
-import type { CallRegistry } from "./tool-calls.js";
+import { subagentPrompt } from "./tools/subagent.js";
+import type { CallRegistry, PendingCall } from "./tool-calls.js";
 import { activityEntry, agentActivity } from "./entries.js";
 
 const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
@@ -391,6 +392,19 @@ export interface TaskKindRegistry {
   /** The owner remembered for a task, or `undefined` if the fold never saw its call. */
   ownerOf(taskId: string): conversationv1.AgentId | undefined;
   /**
+   * Remember the SPAWNING CALL itself: what it was asked and when it started.
+   *
+   * LEARNED ONCE, while the call is still open, exactly as the owner is. A
+   * `task_notification` states neither the spawn's prompt nor its start
+   * instant, yet the terminal it produces is a SETTLED FRAME, and a settled
+   * frame stands alone: a replay serves it with no start beside it, so it must
+   * restate both. The call is the one authority for them, and this table is
+   * where it survives the call registry forgetting it.
+   */
+  rememberCall(taskId: string, call: PendingCall): void;
+  /** The spawning call remembered for a task, or `undefined` if the fold never saw it open. */
+  callOf(taskId: string): PendingCall | undefined;
+  /**
    * Whether a settling task is an AGENT run, and so owns a subagent terminal.
    *
    * A task whose kind was never stated answers `true`: the subagent terminal is
@@ -425,6 +439,7 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       toolUseId?: string;
       foreground?: boolean;
       owner?: conversationv1.AgentId;
+      call?: PendingCall;
     }
   >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
@@ -464,6 +479,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     },
     ownerOf(taskId) {
       return facts.get(taskId)?.owner;
+    },
+    rememberCall(taskId, call) {
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), call });
+    },
+    callOf(taskId) {
+      return facts.get(taskId)?.call;
     },
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
@@ -535,8 +557,13 @@ export function convertDetached(
   // backgrounded subagent's own calls never reach this stream — leaves it
   // UNDEFINED, and the announcement says so rather than naming the main agent.
   const openCall = toolUseId === undefined || toolUseId === "" ? undefined : calls.peek(toolUseId);
-  if (openCall !== undefined) taskKinds.rememberOwner(taskId, openCall.agentId);
+  if (openCall !== undefined) {
+    taskKinds.rememberOwner(taskId, openCall.agentId);
+    taskKinds.rememberCall(taskId, openCall);
+  }
   const owner = openCall?.agentId ?? taskKinds.ownerOf(taskId);
+  // Read NOW, before a settling notification forgets the task's facts.
+  const spawnCall = openCall ?? taskKinds.callOf(taskId);
 
   switch (raw.subtype) {
     case "task_started": {
@@ -658,7 +685,7 @@ export function convertDetached(
         { uuid, task_id: taskId, tool_use_id: toolUseId, total_tokens: raw.usage?.total_tokens ?? 0 },
         "a running beat advances the subagent unit's spend",
       );
-      return subagentProgressEntries(context, agentId, uuid, toolUseId, raw);
+      return subagentProgressEntries(context, agentId, uuid, toolUseId, raw, spawnCall);
     }
 
     case "task_notification": {
@@ -707,7 +734,7 @@ export function convertDetached(
         );
         return entries;
       }
-      entries.push(...subagentTerminalEntries(context, agentId, uuid, toolUseId, raw));
+      entries.push(...subagentTerminalEntries(context, agentId, uuid, toolUseId, raw, spawnCall));
       return entries;
     }
 
@@ -732,11 +759,13 @@ export function convertDetached(
  * each successive beat UPSERTS one row rather than appending, and the terminal
  * upserts the same row.
  *
- * THE PROMPT IS NOT RESTATED. `AgentSubagentUpdate.prompt` is repeated on every
- * frame so a frame can stand alone, but a `task_progress` message carries no
- * prompt and the ASYNC terminal likewise emits an empty one; a consumer reads
- * the spawn's own start frame for the label, so an empty prompt here is
- * consistent rather than a loss.
+ * THE PROMPT IS RESTATED FROM THE SPAWNING CALL. `AgentSubagentUpdate.prompt` is
+ * repeated on every frame so a frame can stand alone, and a `task_progress`
+ * message carries no prompt of its own — so the task table's remembered call
+ * is its source. The beat UPSERTS the spawn's row, so a beat with an empty
+ * prompt erased the commission the start had put there, and a replay of a run
+ * still going drew no description. Empty only when the fold never saw the
+ * spawning call open.
  */
 function subagentProgressEntries(
   context: FoldContext,
@@ -744,6 +773,7 @@ function subagentProgressEntries(
   vendorUuid: string,
   toolUseId: string,
   raw: RawTask,
+  spawnCall: PendingCall | undefined,
 ): readonly PersistEntry[] {
   const activityId = toolCallActivityId(toolUseId);
   const totalTokens = raw.usage?.total_tokens;
@@ -759,7 +789,7 @@ function subagentProgressEntries(
           result: {
             case: "update",
             value: create(conversationv1.AgentSubagentUpdateSchema, {
-              prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "" }),
+              prompt: spawnPrompt(spawnCall),
               progress: create(conversationv1.AgentSubagentProgressSchema, {
                 totalTokens: nonNegativeBigInt(totalTokens),
                 toolUseCount: nonNegativeInt(toolUses),
@@ -786,6 +816,19 @@ function nonNegativeInt(value: number | undefined): number {
 }
 
 /**
+ * What a detached spawn was asked, restated from its spawning call.
+ *
+ * The call is the one authority — {@link subagentPrompt} reads it exactly as
+ * the start did, so the two cannot disagree. A call the fold never saw open
+ * leaves an EMPTY prompt, never an invented one.
+ */
+function spawnPrompt(spawnCall: PendingCall | undefined): conversationv1.AgentSubagentPrompt {
+  return spawnCall === undefined
+    ? create(conversationv1.AgentSubagentPromptSchema, { text: "" })
+    : subagentPrompt(spawnCall);
+}
+
+/**
  * The spawn unit's terminal, from the task's own notification.
  *
  * AN ASYNC RUN'S SETTLED USAGE IS AS THIN AS THE VENDOR REPORTS IT: a
@@ -799,9 +842,18 @@ function subagentTerminalEntries(
   vendorUuid: string,
   toolUseId: string,
   raw: RawTask,
+  spawnCall: PendingCall | undefined,
 ): readonly PersistEntry[] {
   const activityId = toolCallActivityId(toolUseId);
-  const settled = settledAt(context.nowMs());
+  if (spawnCall === undefined) {
+    LOGGER.debug(
+      { task_id: raw.task_id, tool_use_id: toolUseId },
+      "the fold never saw this task's spawning call open; its terminal restates no start",
+    );
+  }
+  // THE SPAWN'S OWN START, restated on the settle so a replayed bubble states
+  // how long the run took.
+  const settled = settledAt(context.nowMs(), spawnCall?.startedAtMs);
   const totalTokens = raw.usage?.total_tokens;
   if (raw.status === "stopped") {
     LOGGER.info({ task_id: raw.task_id }, "a person stopped the detached run");
@@ -819,6 +871,11 @@ function subagentTerminalEntries(
                   case: "stoppedByUser",
                   value: create(conversationv1.AgentSubagentStoppedByUserSchema, {}),
                 },
+                // RESTATED, so the stopped spawn a replay serves alone still
+                // draws its label and addresses its sub-feed: the spawning
+                // call's prompt, and the created agent the minting rule names.
+                prompt: spawnPrompt(spawnCall),
+                createdAgentId: subagentId(toolUseId),
               }),
             },
           }),
@@ -854,6 +911,8 @@ function subagentTerminalEntries(
                         }),
                   settledAt: settled,
                 }),
+                prompt: spawnPrompt(spawnCall),
+                createdAgentId: subagentId(toolUseId),
               }),
             },
           }),
@@ -861,10 +920,9 @@ function subagentTerminalEntries(
       ),
     ];
   }
-  // `completed`. THE PROMPT IS NOT RESTATED HERE: a settled frame is supposed to
-  // describe itself, and this message carries no prompt — so the spawn's own
-  // success frame (from its tool result) is the self-describing one, and this is
-  // the ASYNC path, where the vendor gives a summary and a token total.
+  // `completed`: the ASYNC path, where the vendor gives a summary and a token
+  // total. This message carries no prompt, so the one the spawn was given is
+  // restated from its spawning call — a settled frame describes itself.
   LOGGER.info({ task_id: raw.task_id }, "a detached run completed");
   return [
     activityEntry(
@@ -882,7 +940,7 @@ function subagentTerminalEntries(
               // this one need not share — so the id is restated here from the
               // spawning call, which the minting rule makes the same value.
               createdAgentId: subagentId(toolUseId),
-              prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "" }),
+              prompt: spawnPrompt(spawnCall),
               report: create(conversationv1.AgentSubagentReportSchema, {
                 prose: prose(raw.summary ?? ""),
               }),
@@ -996,13 +1054,19 @@ export function lostBashEntry(
   };
 }
 
-/** A detached SPAWN unit the engine concluded went silent. */
+/**
+ * A detached SPAWN unit the engine concluded went silent.
+ *
+ * The spawning call is passed in because the lost failure is a settled frame
+ * and restates what the spawn was asked and which agent it created.
+ */
 export function lostSubagentEntry(
   context: FoldContext,
   agentId: conversationv1.AgentId,
-  spawn: conversationv1.AgentActivityId,
+  spawnCall: PendingCall,
   how: conversationv1.DetachedLost,
 ): PersistEntry {
+  const spawn = toolCallActivityId(spawnCall.toolUseId);
   // warn: a defect because a detached spawn reached teardown without a success or failure outcome.
   LOGGER.warn(
     { spawn: spawn.value, how: how.how.case },
@@ -1030,6 +1094,8 @@ export function lostSubagentEntry(
                   case: "failure",
                   value: create(conversationv1.AgentSubagentFailureSchema, {
                     cause: { case: "lost", value: how },
+                    prompt: subagentPrompt(spawnCall),
+                    createdAgentId: subagentId(spawnCall.toolUseId),
                   }),
                 },
               }),

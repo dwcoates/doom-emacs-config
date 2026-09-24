@@ -202,7 +202,7 @@ function settleCreate(
       taskId(id),
       {
         case: "rejected",
-        value: create(conversationv1.AgentTaskRejectedSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentTaskRejectedSchema, { error: failureOf(call, outcome) }),
       },
       state,
     );
@@ -238,7 +238,7 @@ function settleUpdate(
       taskId(id),
       {
         case: "rejected",
-        value: create(conversationv1.AgentTaskRejectedSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentTaskRejectedSchema, { error: failureOf(call, outcome) }),
       },
       stateOf(call, { case: undefined }),
     );

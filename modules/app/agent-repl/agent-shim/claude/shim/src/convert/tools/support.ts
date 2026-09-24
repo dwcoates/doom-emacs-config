@@ -22,7 +22,7 @@
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../proto.js";
 import { settledAt, toolFailure } from "../entries.js";
-import type { ToolOutcome } from "../tool-calls.js";
+import type { PendingCall, ToolOutcome } from "../tool-calls.js";
 
 // ---------------------------------------------------------------------------
 // Reading loosely-typed vendor objects
@@ -108,14 +108,20 @@ export function resultText(content: conversationv1.ToolResultContent | undefined
 // The shared failure shape
 // ---------------------------------------------------------------------------
 
-/** The shared account of a failed call, from the outcome the vendor gave. */
-export function failureOf(outcome: ToolOutcome): conversationv1.AgentToolFailure {
-  return toolFailure(outcome.content, outcome.settledAtMs);
+/**
+ * The shared account of a failed call, from the outcome the vendor gave, with
+ * the call's own start restated beside the settle instant.
+ */
+export function failureOf(call: PendingCall, outcome: ToolOutcome): conversationv1.AgentToolFailure {
+  return toolFailure(outcome.content, outcome.settledAtMs, call.startedAtMs);
 }
 
-/** When the call settled, as every terminal arm carries it. */
-export function settle(outcome: ToolOutcome): conversationv1.AgentActivitySettledAt {
-  return settledAt(outcome.settledAtMs);
+/**
+ * When the call settled, as every terminal arm carries it, with the call's own
+ * start restated so the settled frame alone states its runtime.
+ */
+export function settle(call: PendingCall, outcome: ToolOutcome): conversationv1.AgentActivitySettledAt {
+  return settledAt(outcome.settledAtMs, call.startedAtMs);
 }
 
 // ---------------------------------------------------------------------------
