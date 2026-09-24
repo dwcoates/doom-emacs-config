@@ -793,7 +793,7 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 			workID = row.spawnUnit
 		}
 		entry := s.entryFor(row.spawnUnit, row.work)
-		jump := jumpTo(entry, false)
+		jump := jumpTo(entry)
 		s.noteJump(&row.jump, "agent", workID, jump, dlog.Context{
 			"provenance":      string(row.provenance),
 			"spawned_on":      row.spawnedOn,
@@ -861,7 +861,7 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 	for _, row := range rows {
 		// The jump lands on the shell bubble's HEAD, the row a reader expands —
 		// not the spool BODY on the sub-feed. The feed announces the head.
-		jump := jumpTo(s.entryFor(row.work), false)
+		jump := jumpTo(s.entryFor(row.work))
 		s.noteJump(&row.jump, "shell", row.work, jump, dlog.Context{
 			"retired_before": retiredAny(s, row.work),
 		})
@@ -875,8 +875,7 @@ func (r *resolver) shellsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 	return out
 }
 
-// monitorsPanel renders the 👁 panel. Monitors draw no feed entry, so every
-// row's jump is unresolved(no_feed_entry): a click says so and records why.
+// monitorsPanel renders the 👁 panel: one jump-target row per live monitor.
 func (r *resolver) monitorsPanel(s *wsState) *frontendv1.FooterExpandedMonitors {
 	rows := make([]*monitorRow, 0, len(s.monitors))
 	for _, row := range s.monitors {
@@ -885,8 +884,12 @@ func (r *resolver) monitorsPanel(s *wsState) *frontendv1.FooterExpandedMonitors 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].order < rows[j].order })
 	out := &frontendv1.FooterExpandedMonitors{}
 	for _, row := range rows {
-		jump := jumpTo(nil, true)
-		s.noteJump(&row.jump, "monitor", row.unit, jump, dlog.Context{})
+		// The jump lands on the Monitor call's tool-call card, which the feed
+		// announces by the monitor's id — the same bytes the row is keyed by.
+		jump := jumpTo(s.entryFor(row.unit))
+		s.noteJump(&row.jump, "monitor", row.unit, jump, dlog.Context{
+			"retired_before": retiredAny(s, row.unit),
+		})
 		drawn := &frontendv1.FooterMonitorRow{
 			Work:        &frontendv1.FooterWorkId{Value: row.unit},
 			Jump:        jump,
@@ -971,21 +974,16 @@ func (s *wsState) entryFor(keys ...string) *frontendv1.FeedId {
 	return nil
 }
 
-// jumpTo states a row's jump: the entry when it is known, otherwise WHY it is
-// not. NOENTRY marks a kind that draws no feed entry at all.
-func jumpTo(entry *frontendv1.FeedId, noEntry bool) *frontendv1.FooterJump {
-	switch {
-	case noEntry:
-		return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Unresolved{Unresolved: &frontendv1.FooterJumpUnresolved{
-			Reason: &frontendv1.FooterJumpUnresolved_NoFeedEntry{NoFeedEntry: &frontendv1.FooterJumpNoFeedEntry{}},
-		}}}
-	case entry != nil:
+// jumpTo states a row's jump: the entry when the feed has announced it,
+// otherwise that it is not drawn (yet). Every detached-work kind draws an
+// entry, so there is no other reason.
+func jumpTo(entry *frontendv1.FeedId) *frontendv1.FooterJump {
+	if entry != nil {
 		return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Entry{Entry: entry}}
-	default:
-		return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Unresolved{Unresolved: &frontendv1.FooterJumpUnresolved{
-			Reason: &frontendv1.FooterJumpUnresolved_NotDrawn{NotDrawn: &frontendv1.FooterJumpNotDrawn{}},
-		}}}
 	}
+	return &frontendv1.FooterJump{Target: &frontendv1.FooterJump_Unresolved{Unresolved: &frontendv1.FooterJumpUnresolved{
+		Reason: &frontendv1.FooterJumpUnresolved_NotDrawn{NotDrawn: &frontendv1.FooterJumpNotDrawn{}},
+	}}}
 }
 
 // jumpResolution names a jump for the record: the entry's FeedId, or the
@@ -998,8 +996,6 @@ func jumpResolution(jump *frontendv1.FooterJump) (resolution, entry string) {
 		switch target.Unresolved.GetReason().(type) {
 		case *frontendv1.FooterJumpUnresolved_NotDrawn:
 			return "not_drawn", ""
-		case *frontendv1.FooterJumpUnresolved_NoFeedEntry:
-			return "no_feed_entry", ""
 		}
 	}
 	return "unset", ""

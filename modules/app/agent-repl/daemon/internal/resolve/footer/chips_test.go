@@ -1,6 +1,8 @@
 package footer
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1193,7 +1195,19 @@ func TestEveryDetachedWorkRowStatesExactlyOneJumpArm(t *testing.T) {
 			want: "not_drawn", wantID: "work-1",
 		},
 		{
-			name: "a monitor row is always unresolved(no_feed_entry)",
+			name: "a monitor row the feed drew names its tool-call card",
+			arrange: func(h *harness) {
+				h.r.OnEntryPlaced(testWS, "mon-1", &frontendv1.FeedId{Value: "r|activity|mon-1"})
+				h.r.OnActivity(testWS, mainAgent, monitorStart("mon-1", "watch the build", false))
+			},
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetMonitors().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "entry", wantID: "mon-1",
+		},
+		{
+			name: "a monitor row the feed has not drawn is unresolved(not_drawn)",
 			arrange: func(h *harness) {
 				h.r.OnActivity(testWS, mainAgent, monitorStart("mon-1", "watch the build", false))
 			},
@@ -1201,7 +1215,26 @@ func TestEveryDetachedWorkRowStatesExactlyOneJumpArm(t *testing.T) {
 				row := v.GetExpanded().GetMonitors().GetRows()[0]
 				return row.GetJump(), row.GetWork().GetValue()
 			},
-			want: "no_feed_entry", wantID: "mon-1",
+			want: "not_drawn", wantID: "mon-1",
+		},
+		{
+			name: "a created monitor row the feed drew names its tool-call card",
+			arrange: func(h *harness) {
+				h.r.OnEntryPlaced(testWS, "mon-1", &frontendv1.FeedId{Value: "r|activity|mon-1"})
+				h.r.OnDetachedWork(testWS, mainAgent, &conversationv1.AgentDetachedWork{
+					Work: &conversationv1.DetachedWorkId{Value: "mon-1"},
+					Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+						WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Monitor{
+							Monitor: monitorStart("mon-1", "watch the build", false).GetMonitor(),
+						}},
+					}},
+				})
+			},
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetMonitors().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "entry", wantID: "mon-1",
 		},
 	}
 	for _, tt := range tests {
@@ -1222,6 +1255,43 @@ func TestEveryDetachedWorkRowStatesExactlyOneJumpArm(t *testing.T) {
 				t.Fatalf("work = %q, want %q", id, tt.wantID)
 			}
 		})
+	}
+}
+
+func TestAMonitorRowNamesTheExactCardTheFeedAnnounced(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, monitorStart("mon-1", "watch the build", false))
+
+	// Act: the feed draws the Monitor call's card.
+	h.r.OnEntryPlaced(testWS, "mon-1", &frontendv1.FeedId{Value: "a|sub|activity|mon-1"})
+
+	// Assert
+	row := h.view(t).GetExpanded().GetMonitors().GetRows()[0]
+	if got := row.GetJump().GetEntry().GetValue(); got != "a|sub|activity|mon-1" {
+		t.Fatalf("jump entry = %q, want the card the feed announced", got)
+	}
+}
+
+func TestAMonitorRowsResolutionChangeIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, monitorStart("mon-1", "watch the build", false))
+
+	// Act
+	h.r.OnEntryPlaced(testWS, "mon-1", &frontendv1.FeedId{Value: "r|activity|mon-1"})
+
+	// Assert
+	var kinds []string
+	for _, note := range recordsOf(h.log.Records(), "daemon.footer.jump_resolution") {
+		if note.Context["kind"] == "monitor" {
+			kinds = append(kinds, fmt.Sprint(note.Context["resolution"]))
+		}
+	}
+	if strings.Join(kinds, ",") != "not_drawn,entry" {
+		t.Fatalf("monitor jump records = %v, want not_drawn then entry", kinds)
 	}
 }
 

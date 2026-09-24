@@ -293,8 +293,8 @@ type shellRow struct {
 	jump jumpMemo
 }
 
-// monitorRow is one live background monitor. Monitors draw NO feed entry, so
-// the row's jump is always unresolved(no_feed_entry).
+// monitorRow is one live background monitor. Its jump names the Monitor
+// call's tool-call card, which the feed announces by the monitor's unit.
 type monitorRow struct {
 	// unit is the monitor's activity id, which keys the row.
 	unit string
@@ -552,8 +552,8 @@ type wsState struct {
 	// read as a launch. See markAdopted.
 	adoptedWork map[string]struct{}
 	// entries are the FeedIds the feed drew each detached-work-capable entry
-	// under, keyed by unit (a subagent's spawn unit, a shell's work id), as
-	// the feed resolver announced them (OnEntryPlaced). They are what a jump
+	// under, keyed by unit (a subagent's spawn unit, a shell's work id, a
+	// monitor's unit), as the feed resolver announced them (OnEntryPlaced). They are what a jump
 	// row names: the address ON THE FEED THAT DRAWS THE ENTRY, never a guess.
 	entries map[string]*frontendv1.FeedId
 	// jumpNotes are the jump-resolution records a render produced, written

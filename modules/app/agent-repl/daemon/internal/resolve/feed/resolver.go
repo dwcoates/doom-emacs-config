@@ -107,6 +107,10 @@ type wsState struct {
 	// its last publication, keyed by work id. A shell that leaves it without
 	// having settled is settled lost (settleShellsLeftLive).
 	liveShells map[string]struct{}
+	// liveMonitors is the monitors the live set held at its last publication,
+	// keyed by unit. A monitor that leaves it with its card still running has
+	// that card settled (settleMonitorsLeftLive).
+	liveMonitors map[string]struct{}
 	// heldDetachments are what a held detachment's announcement said about
 	// whose work it is, by unit, kept so the claim can check it against the
 	// agent that turns out to carry the unit, and so a detachment that never
@@ -507,6 +511,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		planUnits:            map[string]*planState{},
 		shells:               map[string]*shellState{},
 		liveShells:           map[string]struct{}{},
+		liveMonitors:         map[string]struct{}{},
 		detachedUnits:        map[string]string{},
 		heldDetachments:      map[string]heldDetachment{},
 		subagents:            map[string]*subagentState{},

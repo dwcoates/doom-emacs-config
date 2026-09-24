@@ -480,8 +480,9 @@ func TestASubagentCreatedDetachedDrawsThroughTheWrapperAtOnce(t *testing.T) {
 	}
 }
 
-func TestAMonitorDrawsNoFeedRow(t *testing.T) {
-	// Arrange, Act: a monitor is FOOTER-ONLY.
+func TestACreatedMonitorsAnnouncementDrawsNoRowOfItsOwn(t *testing.T) {
+	// Arrange, Act: a monitor's entry is its call's own card, drawn from the
+	// call's frames; the announcement describes the watch for the footer.
 	h := newHarness(t)
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
 		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
@@ -495,10 +496,10 @@ func TestAMonitorDrawsNoFeedRow(t *testing.T) {
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 for a monitor", len(rows))
+		t.Fatalf("rows = %d, want 0 from a monitor's announcement", len(rows))
 	}
-	if !h.hasRecord("debug", "daemon.feed.detached_draws_nothing") {
-		t.Fatalf("records = %+v, want the not-a-row branch recorded", h.records())
+	if !h.hasRecord("debug", "daemon.feed.detached_monitor_card_is_entry") {
+		t.Fatalf("records = %+v, want the card-is-entry branch recorded", h.records())
 	}
 }
 
@@ -1694,11 +1695,21 @@ func monitorActivity(unit string) *conversationv1.AgentActivity {
 	}
 }
 
+// wakeupActivity is a self-wakeup's start: a kind that draws no feed row.
+func wakeupActivity(unit string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_ScheduleWakeup{ScheduleWakeup: &conversationv1.AgentScheduleWakeup{
+			Result: &conversationv1.AgentScheduleWakeup_Start{Start: &conversationv1.AgentScheduleWakeupStart{}},
+		}},
+	}
+}
+
 func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T) {
-	// Arrange: the monitor's own unit arrives first, then its detachment.
+	// Arrange: the footer-only unit arrives first, then a detachment naming it.
 	h := newHarness(t)
-	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("monitor-1"), noAddress())
-	h.detachWork("work-1", "monitor-1")
+	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), noAddress())
+	h.detachWork("work-1", "wakeup-1")
 
 	// Act.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
@@ -1715,10 +1726,10 @@ func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T
 func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 	// Arrange: the announcement beats the unit, so it is held first.
 	h := newHarness(t)
-	h.detachWork("work-1", "monitor-1")
+	h.detachWork("work-1", "wakeup-1")
 
 	// Act: the unit arrives, and its kind draws no row.
-	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("monitor-1"), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), noAddress())
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
 	}, nil)
@@ -2798,25 +2809,26 @@ func TestTheUnplaceableRecordNamesTheWorkKindOwnerAnnouncerAndReason(t *testing.
 	t.Fatalf("records = %+v, want the ERROR record", h.records())
 }
 
-func TestASubagentsMonitorDrawsNothingInAnyFeed(t *testing.T) {
-	// Arrange: a monitor is footer-only, whoever arms it.
+func TestASubagentsMonitorDrawsItsCardInTheSubagentsFeed(t *testing.T) {
+	// Arrange: the monitor's card is drawn where its owner's call stands.
 	h := newHarness(t)
 	sub := &conversationv1.AgentId{Value: "agent-sub"}
 	h.send(spawnCall("toolu_spawn", sub))
 	h.sendAs(sub, monitorActivity("toolu_monitor"))
 
-	// Act.
+	// Act: the task stream announces it on the MAIN book.
 	h.announceDetachment(mainAgent(), nil, "toolu_monitor", "toolu_monitor")
 
-	// Assert.
+	// Assert: the card stays a card in the subagent's feed, and the root holds
+	// only the spawn.
 	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"subagent"}) {
 		t.Fatalf("root rows = %v, want the spawn's bubble alone", got)
 	}
-	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt"}) {
-		t.Fatalf("subagent rows = %v, want the commission alone", got)
+	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt", "tool_card"}) {
+		t.Fatalf("subagent rows = %v, want the commission then the monitor's card", got)
 	}
 	if len(h.warnings.keys()) != 0 {
-		t.Fatalf("raised = %v, want nothing: a monitor drawing no row is its design", h.warnings.keys())
+		t.Fatalf("raised = %v, want nothing", h.warnings.keys())
 	}
 }
 
