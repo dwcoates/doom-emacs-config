@@ -411,16 +411,34 @@ describe("a plain bounce", () => {
   });
 
   it("clears the restarting notice once the streams are back", async () => {
-    // Arrange
+    // Arrange: the announcement, then the bounce itself -- the link drops.
     harness = await startHarness();
     await harness.fake.awaitStream("watchFooter");
     harness.fake.announceShutdown({ expectedOutageMs: 1_000n, mintedAtMs: BigInt(Date.now()) });
+    await harness.settle();
+    harness.fake.endPageStream();
+    await harness.settle();
+    // Act: the page re-attaches and a view reads again.
+    await harness.tick(60_000);
+    await harness.fake.awaitStream("watchFooter");
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" }));
+    await harness.settle();
+    // Assert
+    expect(harness.$("[data-restarting]")).toBeNull();
+  });
+
+  it("keeps the restarting notice while the announcing daemon's streams still push", async () => {
+    // Arrange: the outgoing daemon goes on pushing until it exits, and a frame
+    // on a link that never dropped is that daemon, not the one coming back.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFooter");
+    harness.fake.announceShutdown({ expectedOutageMs: 4_000n, mintedAtMs: BigInt(Date.now()) });
     await harness.settle();
     // Act
     harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" }));
     await harness.settle();
     // Assert
-    expect(harness.$("[data-restarting]")).toBeNull();
+    expect(harness.$("[data-restarting]")).not.toBeNull();
   });
 });
 
