@@ -130,7 +130,9 @@ overwrites their real `shim-store.build.json`.
   row — the keep-alive/residue index), `run_id` (a bash row's run; NULL
   otherwise — the `WatchBashRun` index, and the bash equivalent of
   `book_agent_id`), `top_level`, and `frame`, the serialized `StoreEntry` the
-  store never opens beyond routing.
+  store never opens beyond routing — and beyond its `turn`, which is the row's
+  FIRST stamp: a later write that omits or contradicts it is rewritten to carry
+  it (`carryStoredTurn`), so no plane can move a row between turns.
 - `write_ledger` — one row per write APPLIED AND STILL RE-READABLE (`write_id`
   PK, `upsert_key`, `write_seq`, `applied_at_ms`, `source_file_id`,
   `source_offset`), written in the same transaction as the row it applied and
