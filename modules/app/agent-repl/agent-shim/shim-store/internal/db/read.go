@@ -206,13 +206,13 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 		if err := rows.Scan(&position, &seq, &frame); err != nil {
 			return nil, d.refuse(base, storagef(err, "scanning a replayed line of book %q", agentID))
 		}
-		line, err := decodePageLine(frame, position)
+		line, err := decodeLineAt(frame, position)
 		if err != nil {
 			return nil, d.refuse(base, err)
 		}
 		out = append(out, LineWritten{
 			AgentID:  agentID,
-			Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: line},
+			Line:     line,
 			WriteSeq: seq,
 		})
 	}
@@ -307,11 +307,11 @@ func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize
 		if err := rows.Scan(&position, &frame); err != nil {
 			return nil, false, storagef(err, "scanning a page row of book %q", agentID)
 		}
-		line, err := decodePageLine(frame, position)
+		line, err := decodeLineAt(frame, position)
 		if err != nil {
 			return nil, false, err
 		}
-		lines = append(lines, &storev1.StoreLineAt{At: encodePointer(position), Line: line})
+		lines = append(lines, line)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, storagef(err, "iterating a page of book %q", agentID)
@@ -319,14 +319,19 @@ func (d *DB) pageLines(ctx context.Context, tx *sql.Tx, agentID string, pageSize
 	return lines, more, nil
 }
 
-// decodePageLine recovers the served line from a stored frame.
+// decodeLineAt recovers the served line, at its position and with the turn its
+// row is stamped with, from a stored frame.
 //
 // A ROW THAT CANNOT BE DECODED IS A LOUD FAILURE, never a skipped line. The
 // blob was written by this very package from a message it had already
 // validated, so failing to read one back means the file is damaged — and
 // serving the page with a hole in it would report that damage as an agent that
 // simply said less than it did.
-func decodePageLine(frame []byte, position int64) (*storev1.StorePageLine, error) {
+//
+// THE TURN IS THE STORED ENVELOPE'S, which is the row's first stamp: the write
+// path carries it forward into every later write of the row
+// (carryStoredTurn), so the blob is the one place it lives.
+func decodeLineAt(frame []byte, position int64) (*storev1.StoreLineAt, error) {
 	entry := &storev1.StoreEntry{}
 	if err := proto.Unmarshal(frame, entry); err != nil {
 		return nil, storagef(err, "stored frame at position %d cannot be decoded", position)
@@ -335,5 +340,5 @@ func decodePageLine(frame []byte, position int64) (*storev1.StorePageLine, error
 	if line == nil {
 		return nil, storagef(errNotAPageLine, "stored frame at position %d is indexed as a page line but carries none", position)
 	}
-	return line, nil
+	return &storev1.StoreLineAt{At: encodePointer(position), Line: line, Turn: entry.GetTurn()}, nil
 }
