@@ -158,9 +158,16 @@ func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, w
 // and only a directory that is STILL THERE afterwards is reported as a
 // failure. This is the exact shape the old merge teardown had to be corrected
 // into after it logged loud failures for directories that were already gone.
+//
+// --force is what a tree parked mid-merge needs: it has a paused operation in
+// it and git refuses a plain remove.
 func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error {
-	const operation = "daemon.gitclient.remove_worktree"
+	return c.removeWorktree(ctx, "daemon.gitclient.remove_worktree", repoDir, worktreeDir, true)
+}
 
+// removeWorktree is the one removal door; force is the only thing a caller
+// chooses.
+func (c *client) removeWorktree(ctx context.Context, operation, repoDir, worktreeDir string, force bool) error {
 	// THE LOG SINKS LET GO OF THE DIRECTORY BEFORE ANYTHING REMOVES IT. A
 	// workspace sink opened mid-removal re-created `<worktree>/.claude/emacs`
 	// with its canonical link, and the postcondition below then found the
@@ -178,11 +185,13 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 		return err
 	}
 
+	command := []string{"worktree", "remove", worktreeDir}
+	if force {
+		command = []string{"worktree", "remove", "--force", worktreeDir}
+	}
 	var removeFailure error
 	if present {
-		// --force is what a tree parked mid-merge needs: it has a paused
-		// operation in it and git refuses a plain remove.
-		in, invokeErr := c.runRaw(ctx, operation, repoDir, "worktree", "remove", "--force", worktreeDir)
+		in, invokeErr := c.runRaw(ctx, operation, repoDir, command...)
 		if invokeErr != nil {
 			return invokeErr
 		}
@@ -191,14 +200,8 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 		}
 	}
 
-	pruned, err := c.runRaw(ctx, operation, repoDir, "worktree", "prune")
-	if err != nil {
+	if err := c.prune(ctx, operation, repoDir); err != nil {
 		return err
-	}
-	if pruned.exitCode != 0 {
-		failure := pruned.fail()
-		c.log.Global().Error(operation, "git exited nonzero", pruned.logContext())
-		return failure
 	}
 
 	stillThere, err := pathPresent(worktreeDir)
@@ -209,9 +212,10 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 		return nil
 	}
 	if removeFailure != nil {
-		c.log.Global().Error(operation, "the worktree survived `worktree remove --force`", dlog.Context{
+		c.log.Global().Error(operation, "the worktree survived `git "+strings.Join(command[:len(command)-1], " ")+"`", dlog.Context{
 			"dir":          repoDir,
 			"worktree_dir": worktreeDir,
+			"force":        force,
 			"cause":        removeFailure.Error(),
 		})
 		return removeFailure
@@ -219,8 +223,23 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 	c.log.Global().Error(operation, "the worktree is still present after removal", dlog.Context{
 		"dir":          repoDir,
 		"worktree_dir": worktreeDir,
+		"force":        force,
 	})
-	return fmt.Errorf("gitclient: the worktree %s is still present after `git worktree remove --force`", worktreeDir)
+	return fmt.Errorf("gitclient: the worktree %s is still present after `git %s`", worktreeDir, strings.Join(command, " "))
+}
+
+// prune runs `git worktree prune`, recording a nonzero exit at ERROR.
+func (c *client) prune(ctx context.Context, operation, repoDir string) error {
+	pruned, err := c.runRaw(ctx, operation, repoDir, "worktree", "prune")
+	if err != nil {
+		return err
+	}
+	if pruned.exitCode != 0 {
+		failure := pruned.fail()
+		c.log.Global().Error(operation, "git exited nonzero", pruned.logContext())
+		return failure
+	}
+	return nil
 }
 
 // Nuke force-removes both the worktree and the branch. This is data
