@@ -443,6 +443,95 @@ func TestARefusedStandDownWaitsOutTheWindowRatherThanGivingUp(t *testing.T) {
 	}
 }
 
+// TestADeadReplacementStopsTheBounceBeforeTheStandDown covers a replacement
+// that died before the point of no return: the old shim keeps serving.
+func TestADeadReplacementStopsTheBounceBeforeTheStandDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	fresh := newFakeShim(9999, h.order)
+	fresh.Die()
+	h.fleet.prelaunched[ws] = fresh
+
+	// Act
+	err := bounceAndWait(t, h, ws, ReasonBuildStale, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("the bounce succeeded over a dead replacement")
+	}
+	taken := h.order.Taken()
+	if indexOf(taken, "kill_session") >= 0 || indexOf(taken, "install") >= 0 {
+		t.Fatalf("steps = %v, want neither a stand-down nor an install", taken)
+	}
+}
+
+// TestAReplacementThatDiesDuringTheStandDownIsNeverInstalled is the 18:27:44
+// deploy: the replacement exited while the old shim stood down, and the
+// relaunch installed it anyway. A fresh prelaunch is installed instead.
+func TestAReplacementThatDiesDuringTheStandDownIsNeverInstalled(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	dying := newFakeShim(9999, h.order)
+	h.fleet.prelaunched[ws] = dying
+	second := newFakeShim(9998, h.order)
+	old.onKillSession = func() {
+		dying.Die()
+		h.fleet.mu.Lock()
+		h.fleet.prelaunched[ws] = second
+		h.fleet.mu.Unlock()
+		old.Reap()
+	}
+
+	// Act
+	err := bounceAndWait(t, h, ws, ReasonBuildStale, false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+	h.fleet.mu.Lock()
+	installed := h.fleet.live[ws]
+	h.fleet.mu.Unlock()
+	if installed != second {
+		t.Fatalf("installed pid %d, want the second prelaunch's 9998 and never the dead replacement", installed.pid)
+	}
+}
+
+// TestAFailedSecondPrelaunchFailsTheBounceWithNothingInstalled covers the
+// replacement for the dead replacement refusing too.
+func TestAFailedSecondPrelaunchFailsTheBounceWithNothingInstalled(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	dying := newFakeShim(9999, h.order)
+	h.fleet.prelaunched[ws] = dying
+	old.onKillSession = func() {
+		dying.Die()
+		h.fleet.mu.Lock()
+		h.fleet.prelaunchErr[ws] = errFake
+		h.fleet.mu.Unlock()
+		old.Reap()
+	}
+
+	// Act
+	err := bounceAndWait(t, h, ws, ReasonBuildStale, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("the bounce succeeded with no live replacement")
+	}
+	if indexOf(h.order.Taken(), "install") >= 0 {
+		t.Fatalf("steps = %v, want nothing installed", h.order.Taken())
+	}
+	if !loggedError(h.log, opRelaunch, "the second prelaunch failed") {
+		t.Fatalf("records = %+v, want the failed second prelaunch at ERROR", h.log.Records())
+	}
+}
+
 func TestAWorkspaceWithNoShimIsBroughtUpWithoutAStandDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

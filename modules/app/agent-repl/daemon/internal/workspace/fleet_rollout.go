@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -317,6 +318,9 @@ func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
 	return path
 }
 
+// ErrInstallDeadShim is Install's refusal of a client whose process is gone.
+var ErrInstallDeadShim = errors.New("the shim to install has already exited")
+
 // Install makes c the workspace's shim client, retiring whatever was there.
 // The OLD PROCESS IS NOT KILLED HERE: the relaunch engine stood it down and
 // passed the reap gate before calling, and the handover deliberately leaves it
@@ -324,6 +328,14 @@ func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
 func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) error {
 	if c == nil {
 		return fmt.Errorf("workspace: install a shim for %q: no client", ws)
+	}
+	// A DEAD CLIENT IS NEVER INSTALLED. A relaunch installed a replacement
+	// that had died thirty seconds earlier, and its watches then dialed a
+	// socket nobody served, leaving the workspace linked to nothing (deploy
+	// 2026-09-24T18:27:44). Refused here, before the claim, the fleet is left
+	// exactly as it was.
+	if info, reaped := c.Reaped(); reaped {
+		return fmt.Errorf("workspace: install a shim for %q: %w (pid %d, code %d, signal %q)", ws, ErrInstallDeadShim, info.PID, info.Code, info.Signal)
 	}
 	// AN INSTALLED CLIENT IS SERVED BY THIS DAEMON: the boot's adoption of a
 	// survivor, the handover's adoption, the takeover's orphan recovery and a

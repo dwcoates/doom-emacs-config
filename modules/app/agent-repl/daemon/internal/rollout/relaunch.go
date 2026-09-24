@@ -126,6 +126,13 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
 
 		if hasOld {
+			// THE STAND-DOWN IS THE POINT OF NO RETURN, so a replacement that
+			// is already dead stops the bounce here, with the old shim still
+			// serving.
+			if err := c.replacementAlive(fresh, ws, "before the old shim was stood down; the old shim keeps serving", fields); err != nil {
+				c.release(ctx, ws, lease.ID, fields)
+				return err
+			}
 			if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
 				c.retirePrelaunch(ctx, fresh, reason, fields)
 				c.release(ctx, ws, lease.ID, fields)
@@ -138,6 +145,20 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		// passed, so whatever build is on record was the stood-down shim's;
 		// the replacement's own report is the one judged, whenever it arrives.
 		c.forgetReported(ws)
+
+		// A REPLACEMENT THAT DIED DURING THE STAND-DOWN IS REPLACED, never
+		// installed: the old shim is gone, so the workspace is otherwise left
+		// linked to nothing. One more prelaunch, and a refusal of that one is
+		// the bounce's failure; the workspace then has no live client, which
+		// sends its next prompt down the revival path.
+		if err := c.replacementAlive(fresh, ws, "while the old shim stood down; prelaunching another", fields); err != nil {
+			fresh, err = c.deps.Shims.Prelaunch(ctx, ws)
+			if err != nil {
+				c.log.Error(opRelaunch, "the second prelaunch failed; the workspace has no shim until it is revived", withCause(fields, err))
+				c.release(ctx, ws, lease.ID, fields)
+				return fmt.Errorf("rollout: relaunch %q: prelaunch after the replacement died: %w", ws, err)
+			}
+		}
 
 		// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
 		// and the prelaunched one takes them at its StartSession.
@@ -175,6 +196,19 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
 		return nil
 	}
+}
+
+// replacementAlive answers an error when the prelaunched replacement has
+// already exited, recording it at ERROR with `when`.
+func (c *controller) replacementAlive(fresh shimclient.Client, ws ids.WorkspaceID, when string, fields dlog.Context) error {
+	info, dead := fresh.Reaped()
+	if !dead {
+		return nil
+	}
+	c.log.Error(opRelaunch, "the prelaunched replacement shim died "+when, merge(fields, dlog.Context{
+		"pid": info.PID, "exit_code": info.Code, "signal": info.Signal,
+	}))
+	return fmt.Errorf("rollout: relaunch %q: the prelaunched replacement (pid %d) exited with code %d", ws, info.PID, info.Code)
 }
 
 // retirePrelaunch stops an inert prelaunched shim a failed bounce will never
