@@ -310,11 +310,26 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 		}}
 	case *conversationv1.AgentArtifact_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "case *conversationv1.AgentArtifact_Failure"})
-		if u.input == "" {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.input == \"\""})
-			// The failure of a call that never announced a publish is not a
-			// publish's failure; there is nothing to draw.
+		// THE FAILURE RESTATES THE ACT, so a replay serving it with no start
+		// beside it still draws the failed publish's card. A failed LIST is a
+		// quiet read and draws nothing, exactly as its start does.
+		switch restated := frame.Failure.GetAct().(type) {
+		case *conversationv1.AgentArtifactFailure_List:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "case *conversationv1.AgentArtifactFailure_List"})
 			return nil, errNotARow
+		case *conversationv1.AgentArtifactFailure_Publish:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "case *conversationv1.AgentArtifactFailure_Publish"})
+			if u.input == "" {
+				u.artifactFavicon = restated.Publish.GetFavicon()
+				u.input = artifactHeading(u.artifactFavicon, restated.Publish.GetTitle(), restated.Publish.GetFilePath())
+			}
+		default:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawArtifact", "branch": "default (the failure restates no act)"})
+			if u.input == "" {
+				// Neither restated nor held: nothing names the publish.
+				return nil, unrestatedErr(act, "artifact")
+			}
+			r.unrestated(s, act, "artifact", "act", "the start this process held")
 		}
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: u.input}
 		bubble.State = &frontendv1.FeedArtifact_Failed{Failed: &frontendv1.FeedArtifactFailed{
