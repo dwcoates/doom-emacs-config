@@ -48,10 +48,10 @@
 //
 // A SPOOL'S KIND IS ITS TASK-ID PREFIX: b* shell output, a* an agent
 // transcript, w* a workflow spool (declared residue — workflow is kicked this
-// wave). Any other prefix is a TOTAL-INGESTION
-// VIOLATION — logged at error, and still discovered as KindResidueSpool so its
-// bytes land whole as residue. Dropping the file from discovery, which is what
-// this package used to do, is the one outcome the mandate forbids.
+// wave). Any other prefix is a vendor kind nothing maps — logged at error, once,
+// and still discovered as KindResidueSpool so the reader states its decision
+// about the file: it is never read, because nothing could render it (the root
+// package's held.go).
 //
 // EVERY DISCOVERED PATH IS SYMLINK-RESOLVED. On macOS /tmp is a symlink to
 // /private/tmp, so the same spool reaches this package under two spellings; a
@@ -605,9 +605,10 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 		target.Raw = true
 	default:
 		// THE PREFIX IS HOW A SPOOL'S CONVERSION IS SELECTED, so one we do not
-		// recognize means the bytes cannot be converted. They are still
-		// ingested — whole, as residue — because a file dropped from discovery
-		// is the one thing total ingestion forbids.
+		// recognize means the bytes cannot be converted — and nothing could
+		// render them, so the reader never reads them. It is still discovered,
+		// so that decision is stated, and it is loud because a new vendor task
+		// kind is a mapping this reader is missing.
 		target.Kind = tail.KindResidueSpool
 		target.Raw = true
 		bound := d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID})
@@ -617,7 +618,7 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 		}
 		d.statedUnclassifiable[path] = true
 		bound.With(logging.Context{Level: "error"}).
-			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so its bytes are ingested as unparsed residue rather than dropped")
+			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so nothing renders it and it is not read; a new vendor task kind needs a mapping")
 	}
 	return target, true
 }
