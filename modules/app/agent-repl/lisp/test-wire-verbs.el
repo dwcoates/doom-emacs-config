@@ -2771,6 +2771,123 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached'."
                  '("notYetAdopted" "transferringAway"
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
+;;;; ---- EditHeldPrompt ------------------------------------------------------
+
+(defconst agent-repl-test-wire-verbs--edit-said '(:text "fixed")
+  "A held prompt's new content, in the shape this suite's fake UserSaid
+encoder reads: the common codec owns the real encoding.")
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-commit-request-shape ()
+  "A commit carries the echoed ref, the echoed turn and the new content."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((encoded (agent-repl-wire-encode-edit-held-prompt-request
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :turn '(:value "t-1")
+                          :action (list :arm :commit
+                                        :value (list :said agent-repl-test-wire-verbs--edit-said))))))
+      (should (equal (json-serialize encoded)
+                     "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{\"value\":\"t-1\"},\"commit\":{\"said\":{\"said\":\"fixed\"}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-cancel-request-shape ()
+  "A cancel carries the empty cancel step."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-edit-held-prompt-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :turn '(:value "t-1")
+                           :action '(:arm :cancel :value nil))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{\"value\":\"t-1\"},\"cancel\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-begin-request-shape ()
+  "A begin carries the empty begin step."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-edit-held-prompt-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :turn '(:value "t-1")
+                           :action '(:arm :begin :value nil))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"turn\":{\"value\":\"t-1\"},\"begin\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-missing-turn-refused ()
+  "The turn is REQUIRED: it names which held prompt."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-edit-held-prompt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :action '(:arm :cancel :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-commit-without-content-refused ()
+  "A commit replaces the content whole, so it carries one."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-edit-held-prompt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :turn '(:value "t-1")
+                         :action '(:arm :commit :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-unknown-step-refused ()
+  "The step vocabulary is closed."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-edit-held-prompt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :turn '(:value "t-1")
+                         :action '(:arm :release :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-success ()
+  "The success is empty: the new state arrives on the streams."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-edit-held-prompt-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-empty-refusal-arms ()
+  "Every empty refusal arm decodes by its own keyword (one table, one contract)."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '(("unknownWorkspace" . :unknown-workspace)
+                    ("notYetAdopted" . :not-yet-adopted)
+                    ("noSuchHold" . :no-such-hold)
+                    ("notHeld" . :not-held)
+                    ("alreadyDelivered" . :already-delivered)
+                    ("notEditing" . :not-editing)
+                    ("noEditor" . :no-editor)))
+      (should (equal (agent-repl-wire-decode-edit-held-prompt-response
+                      (agent-repl-test-wire-verbs--parse
+                       (format "{\"error\":{\"%s\":{}}}" (car case))))
+                     (list :arm :error :value (list :cause (list :arm (cdr case) :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-being-edited-names-the-turn ()
+  "The being-edited refusal names the prompt the standing edit is on."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-edit-held-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"beingEdited\":{\"editingTurn\":{\"value\":\"t-0\"}}}}"))
+                   '(:arm :error :value (:cause (:arm :being-edited
+                                                 :value (:editing-turn (:value "t-0")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-being-edited-without-a-turn-refused ()
+  "The being-edited refusal's turn is REQUIRED."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-edit-held-prompt-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{\"beingEdited\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-transferring-away ()
+  "The transferring-away refusal carries the successor's address."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-edit-held-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}"))
+                   '(:arm :error :value (:cause (:arm :transferring-away
+                                                 :value (:address "127.0.0.1:9"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-edit-held-prompt-unknown-refusal-refused ()
+  "A refusal arm this codec does not hold is refused, never defaulted."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-edit-held-prompt-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{\"lockedOut\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
 (provide 'test-wire-verbs)
 
 ;;; test-wire-verbs.el ends here

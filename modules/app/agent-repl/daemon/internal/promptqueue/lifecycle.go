@@ -79,11 +79,19 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
 		return false, nil
 	}
-	next, ok, err := q.nextDeliverable(ctx, ws)
+	next, ok, withheld, err := q.nextDeliverable(ctx, ws)
 	if err != nil {
 		return false, err
 	}
 	if !ok {
+		if withheld > 0 {
+			// AN EDIT IS WHY NOTHING WENT. Said at INFO, because "the turn
+			// ended and my prompt did not go" is exactly the question it
+			// answers.
+			log.Info(opTurnEnded, "a held prompt is being edited; it and every prompt after it stay held",
+				dlog.Context{"withheld": withheld})
+			return false, nil
+		}
 		log.Debug(opTurnEnded, "nothing is waiting to be delivered", nil)
 		return false, nil
 	}
@@ -94,20 +102,31 @@ func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.
 	return true, nil
 }
 
-// nextDeliverable picks the hold a turn end delivers.
-func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID) (wsm.HeldPrompt, bool, error) {
+// nextDeliverable picks the hold a turn end delivers, and counts the holds a
+// standing edit withheld. The caller holds the delivery lock, which is what
+// keeps the edit it reads from moving under the pick.
+func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID) (wsm.HeldPrompt, bool, int, error) {
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
-		return wsm.HeldPrompt{}, false, fmt.Errorf("read the holds for %q: %w", ws, err)
+		return wsm.HeldPrompt{}, false, 0, fmt.Errorf("read the holds for %q: %w", ws, err)
 	}
 	free := make([]wsm.HeldPrompt, 0, len(standing))
+	withheld := 0
 	for _, h := range standing {
-		if h.Tombstone == nil && h.Hold == nil {
-			free = append(free, h)
+		if h.Tombstone != nil || h.Hold != nil {
+			continue
 		}
+		// AN EDIT WITHHOLDS ITS PROMPT AND EVERYTHING AFTER IT, the semantic
+		// head included: a jump an interjection earned does not carry a
+		// prompt past an edit standing ahead of it.
+		if q.withheldByEdit(ws, h) {
+			withheld++
+			continue
+		}
+		free = append(free, h)
 	}
 	if len(free) == 0 {
-		return wsm.HeldPrompt{}, false, nil
+		return wsm.HeldPrompt{}, false, withheld, nil
 	}
 
 	q.mu.Lock()
@@ -119,13 +138,13 @@ func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID) (wsm.He
 	if head != nil {
 		for _, h := range free {
 			if h.Turn == *head {
-				return h, true, nil
+				return h, true, withheld, nil
 			}
 		}
 	}
 
 	sort.SliceStable(free, func(i, j int) bool { return free[i].QueuedAt.Before(free[j].QueuedAt) })
-	return free[0], true, nil
+	return free[0], true, withheld, nil
 }
 
 // OnLeaseChanged re-evaluates every standing hold against the workspace's new

@@ -79,23 +79,26 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	// THE VERDICT IS ASYNCHRONOUS. The tray's `classifying` arm exists exactly
 	// so the submission is answered now and the judge's round trip does not sit
 	// inside the rpc.
+	epoch := q.contentEpoch(sub.WS, sub.Turn)
 	q.classifying.Add(1)
 	go func() {
 		defer q.classifying.Done()
-		q.judge(context.WithoutCancel(ctx), sub, running, log)
+		q.judge(context.WithoutCancel(ctx), sub, running, epoch, log)
 	}()
 	return disposition, nil
 }
 
-// judge asks the classifier about one held prompt and records what it said.
-// NO FAILURE ON THE WAY IS EVER STAMPED classification_error: the tray draws
-// that arm as "unclassified", which is a failure leaking into the UI rather
-// than a state. Each failure is resolved to the prompt's true state — held
-// for the running turn's end — and logged where the daemon can see it.
-func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
-	// AN UNINTERRUPTIBLE RUNNING TURN is decided before the model is asked: a
-	// context cut cannot be interrupted, so there is nothing to judge.
+// classifyHeld re-enters a STANDING hold into the classifier path against the
+// running turn — an edit's commit is its caller. It is the same decision hold
+// takes for a fresh submission: a context cut is stamped uninterruptible and
+// judged by nobody, anything else is stamped classifying and judged
+// asynchronously, and the verdict's own mechanics (an interject included) are
+// the ordinary ones.
+func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
 	if command := q.state(sub.WS).uninterruptible; command != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		log.Info(opClassify, "the running turn is a context cut; the prompt is stamped uninterruptible and no classifier runs", dlog.Context{
+			"command": command.String(),
+		})
 		q.record(ctx, sub, wsm.Classification{
 			Arm:     wsm.ArmUninterruptibleTurn,
 			Reason:  "the running turn is a context cut and cannot be interrupted",
@@ -103,6 +106,38 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, l
 			At:      q.deps.Now(),
 		}, log)
 		return
+	}
+	q.record(ctx, sub, wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}, log)
+	epoch := q.contentEpoch(sub.WS, sub.Turn)
+	q.classifying.Add(1)
+	go func() {
+		defer q.classifying.Done()
+		q.judge(context.WithoutCancel(ctx), sub, running, epoch, log)
+	}()
+}
+
+// judge asks the classifier about one held prompt and records what it said.
+// NO FAILURE ON THE WAY IS EVER STAMPED classification_error: the tray draws
+// that arm as "unclassified", which is a failure leaking into the UI rather
+// than a state. Each failure is resolved to the prompt's true state — held
+// for the running turn's end — and logged where the daemon can see it.
+func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, log dlog.Logger) {
+	c, interject := q.verdictFor(ctx, sub, running, log)
+	q.settle(ctx, sub, running, epoch, c, interject, log)
+}
+
+// verdictFor reaches the verdict judge settles: the classification to record,
+// and whether it interjects.
+func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) (wsm.Classification, bool) {
+	// AN UNINTERRUPTIBLE RUNNING TURN is decided before the model is asked: a
+	// context cut cannot be interrupted, so there is nothing to judge.
+	if command := q.state(sub.WS).uninterruptible; command != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		return wsm.Classification{
+			Arm:     wsm.ArmUninterruptibleTurn,
+			Reason:  "the running turn is a context cut and cannot be interrupted",
+			Command: command,
+			At:      q.deps.Now(),
+		}, false
 	}
 
 	// THE QUEUE'S RUNNING TURN IS THE AUTHORITY on whether the session is
@@ -118,22 +153,20 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, l
 	if err != nil {
 		log.Error(opClassify, "could not read the open turns to judge against; the prompt waits for the running turn to end",
 			dlog.Context{"running_turn": string(running), "cause": err.Error()})
-		q.record(ctx, sub, wsm.Classification{
+		return wsm.Classification{
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the running turn could not be read, so the prompt waits for it to end",
 			At:     q.deps.Now(),
-		}, log)
-		return
+		}, false
 	}
 	if !found {
 		log.Error(opClassify, "the queue's running turn is not open in the store; the prompt waits for the running turn to end",
 			dlog.Context{"running_turn": string(running), "store_open_turns": storeOpen})
-		q.record(ctx, sub, wsm.Classification{
+		return wsm.Classification{
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the running turn has no open record to compare against, so the prompt waits for it to end",
 			At:     q.deps.Now(),
-		}, log)
-		return
+		}, false
 	}
 
 	// A FAILED CLASSIFIER IS NOT A VERDICT, but the prompt still has a true
@@ -147,26 +180,68 @@ func (q *queue) judge(ctx context.Context, sub Submission, running ids.TurnID, l
 	if err != nil {
 		log.Error(opClassify, "the classifier failed; the prompt waits for the running turn to end",
 			dlog.Context{"running_turn": string(running), "cause": err.Error()})
-		q.record(ctx, sub, wsm.Classification{
+		return wsm.Classification{
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the classifier could not decide, so the prompt waits for the running turn to end",
 			At:     q.deps.Now(),
-		}, log)
-		return
+		}, false
 	}
 	if !verdict.Interject {
 		log.Debug(opClassify, "the prompt waits for the running turn to end",
 			dlog.Context{"reason": verdict.Reason})
-		q.record(ctx, sub, wsm.Classification{
+		return wsm.Classification{
 			Arm: wsm.ArmHoldForTurnEnd, Reason: verdict.Reason, At: q.deps.Now(),
-		}, log)
-		return
+		}, false
 	}
 
-	q.record(ctx, sub, wsm.Classification{
+	return wsm.Classification{
 		Arm: wsm.ArmInterject, Reason: verdict.Reason, At: q.deps.Now(),
-	}, log)
-	q.interject(ctx, sub, running, log)
+	}, true
+}
+
+// settle records a verdict and, on an interject, runs the interjection — but
+// only while the content it judged still stands. An edit's commit replacing
+// the content bumps the turn's epoch under the same verdict lock, so a verdict
+// about the replaced words is discarded rather than stamped on the new ones.
+func (q *queue) settle(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, interject bool, log dlog.Logger) {
+	state := q.state(sub.WS)
+	state.verdicts.Lock()
+	defer state.verdicts.Unlock()
+	if now := state.epochs[sub.Turn]; now != epoch {
+		log.Info(opClassify, "the verdict is about content an edit has since replaced; it is discarded", dlog.Context{
+			"turn": string(sub.Turn), "arm": armName(c.Arm), "judged_epoch": epoch, "content_epoch": now,
+		})
+		return
+	}
+	q.record(ctx, sub, c, log)
+	if interject {
+		q.interject(ctx, sub, running, log)
+	}
+}
+
+// contentEpoch answers how many times a held prompt's content was replaced.
+func (q *queue) contentEpoch(ws ids.WorkspaceID, turn ids.TurnID) uint64 {
+	state := q.state(ws)
+	state.verdicts.Lock()
+	defer state.verdicts.Unlock()
+	return state.epochs[turn]
+}
+
+// replaceContent replaces a held prompt's content and bumps its epoch in one
+// step under the verdict lock, so no verdict about the old content can settle
+// after it. The caller holds the delivery lock.
+func (q *queue) replaceContent(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) error {
+	state := q.state(ws)
+	state.verdicts.Lock()
+	defer state.verdicts.Unlock()
+	if err := q.deps.DB.ReplaceHeldPromptSaid(ctx, turn, said); err != nil {
+		return err
+	}
+	if state.epochs == nil {
+		state.epochs = map[ids.TurnID]uint64{}
+	}
+	state.epochs[turn]++
+	return nil
 }
 
 // runningText reads the running turn's text, which is half of what the judge

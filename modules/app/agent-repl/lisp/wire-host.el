@@ -28,7 +28,11 @@
 (declare-function agent-repl-wire--decode-int64 "wire-common")
 (declare-function agent-repl-wire--decode-message "wire-common")
 (declare-function agent-repl-wire--decode-oneof "wire-common")
+(declare-function agent-repl-wire--decode-optional-message "wire-common")
 (declare-function agent-repl-wire--decode-optional-string "wire-common")
+(declare-function agent-repl-wire--decode-uint64 "wire-common")
+(declare-function agent-repl-wire-decode-turn-id "wire-common")
+(declare-function agent-repl-wire-decode-user-said "wire-common")
 (declare-function agent-repl-wire--decode-optional-uint32 "wire-common")
 (declare-function agent-repl-wire--decode-repeated "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
@@ -394,18 +398,47 @@ THE ARM IS WHETHER A SESSION EXISTS."
    '((none :none agent-repl-wire-decode-host-session-none)
      (existing :existing agent-repl-wire-decode-host-session-existing))))
 
+(defun agent-repl-wire-decode-host-held-prompt-edit-turn (value)
+  "Decode HostHeldPromptEdit's `turn' field VALUE as a TurnId."
+  (agent-repl-wire-decode-turn-id value))
+
+(defun agent-repl-wire-decode-host-held-prompt-edit-said (value)
+  "Decode HostHeldPromptEdit's `said' field VALUE as a UserSaid."
+  (agent-repl-wire-decode-user-said value))
+
+(defun agent-repl-wire-decode-host-held-prompt-edit (value)
+  "Decode VALUE as `HostHeldPromptEdit', a plist `(:turn :said :edit)'.
+The held prompt this workspace's editor is editing: the turn a commit or
+cancel names, the content as the edit began, and the daemon-minted EDIT id
+that tells a new edit from the one the composer already took."
+  (let ((object (agent-repl-wire--object "HostHeldPromptEdit" value)))
+    (agent-repl-wire--check-keys "HostHeldPromptEdit" object '(turn said edit))
+    (agent-repl-wire--decoded
+     "HostHeldPromptEdit"
+     (list :turn (agent-repl-wire--decode-message
+                  "HostHeldPromptEdit" 'turn object
+                  #'agent-repl-wire-decode-host-held-prompt-edit-turn)
+           :said (agent-repl-wire--decode-message
+                  "HostHeldPromptEdit" 'said object
+                  #'agent-repl-wire-decode-host-held-prompt-edit-said)
+           :edit (agent-repl-wire--decode-uint64 "HostHeldPromptEdit" 'edit object)))))
+
 (defun agent-repl-wire-decode-host-workspace (value)
-  "Decode VALUE as `HostWorkspace', a plist `(:session :naming)'.
+  "Decode VALUE as `HostWorkspace', a plist `(:session :naming :held-prompt-edit)'.
 `naming' is a REQUIRED message sitting beside the session oneof; its two
-fields are the optional halves, not the message."
+fields are the optional halves, not the message.  `held_prompt_edit' is
+absent when no held-prompt edit stands, and its absence is that fact."
   (let ((object (agent-repl-wire--object "HostWorkspace" value)))
-    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming))
+    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit))
     (agent-repl-wire--decoded
      "HostWorkspace"
      (list :session (agent-repl-wire-decode-host-workspace-session object)
            :naming (agent-repl-wire--decode-message
                     "HostWorkspace" 'naming object
-                    #'agent-repl-wire-decode-host-workspace-naming)))))
+                    #'agent-repl-wire-decode-host-workspace-naming)
+           :held-prompt-edit (agent-repl-wire--decode-optional-message
+                              "HostWorkspace" 'heldPromptEdit object
+                              #'agent-repl-wire-decode-host-held-prompt-edit)))))
 
 ;;;; ---- The notification push ----
 

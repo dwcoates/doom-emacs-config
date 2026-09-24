@@ -361,6 +361,15 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("find-file-workspace.el" agent-repl--ffw-acquire
      "agent-repl: could not open the workspace for %s; opening the file here"
      "warns the user that file placement differs from the request")
+    ("held-edit.el" agent-repl--held-edit-enter
+     "agent-repl: no composer is open to edit the held prompt in; the edit is cancelled"
+     "tells the user why the held-prompt edit they began did not reach a composer")
+    ("held-edit.el" agent-repl--held-edit-enter
+     "agent-repl: the held prompt carries content the composer cannot hold; the edit is cancelled"
+     "tells the user why the held-prompt edit they began was cancelled")
+    ("held-edit.el" agent-repl--held-edit-on-refusal
+     "agent-repl: editing the held prompt was refused -- %s"
+     "reports why the user's held-prompt edit step was not taken")
     ("history.el" agent-repl-history-search
      "[agent-repl] input history is empty"
      "answers the interactive history search")
@@ -382,6 +391,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("input.el" agent-repl--input-on-error
      "agent-repl: %s%s"
      "tells the user their prompt met the cold gate and where to answer it")
+    ("input.el" agent-repl--input-on-error
+     "agent-repl: model change refused%s"
+     "tells the user their model change was refused, in the refusal's own words")
     ("input.el" agent-repl--input-on-error
      "agent-repl: %s"
      "tells the user the workspace has no session yet and the daemon is starting one")

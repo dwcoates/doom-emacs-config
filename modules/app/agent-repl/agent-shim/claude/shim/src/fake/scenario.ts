@@ -370,8 +370,9 @@ export interface ScenarioContext {
   /**
    * Make `getContextUsage()` answer a GROWING occupancy from now on.
    *
-   * The shim samples context usage on its own cadence — at session start and at
-   * every turn end — so a scenario cannot push a `context_usage` update. What it
+   * The shim samples context usage on its own cadence — at session start, after
+   * every main-agent API response that carries usage, and at every turn end —
+   * so a scenario cannot push a `context_usage` update. What it
    * CAN do is make the next sample differ from the last, which is the only way
    * to tell a consumer that re-renders on change from one that renders once and
    * never again.

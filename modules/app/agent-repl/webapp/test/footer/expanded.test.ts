@@ -262,6 +262,8 @@ describe("the tokens panel", () => {
   it("draws a line's figure verbatim", () => {
     const { panel } = drawPanel("tokens", {
       tokens: {
+        contextGrowth: {},
+
         input: { value: "18.2k" },
         cacheRead: {},
         cacheWrite: {},
@@ -301,6 +303,8 @@ describe("the tokens panel", () => {
   it("draws the alarm's composed sentence when it did", () => {
     const { panel } = drawPanel("tokens", {
       tokens: {
+        contextGrowth: {},
+
         input: {},
         cacheRead: {},
         cacheWrite: {},
@@ -318,6 +322,8 @@ describe("the tokens panel", () => {
   it("draws the clean verdict with no evidence to show", () => {
     const { panel } = drawPanel("tokens", {
       tokens: {
+        contextGrowth: {},
+
         input: {},
         cacheRead: {},
         cacheWrite: {},
@@ -336,6 +342,8 @@ describe("the tokens panel", () => {
   ])("draws the %s verdict's evidence verbatim", (arm, text) => {
     const { panel } = drawPanel("tokens", {
       tokens: {
+        contextGrowth: {},
+
         input: {},
         cacheRead: {},
         cacheWrite: {},
@@ -352,6 +360,8 @@ describe("the tokens panel", () => {
     expect(() =>
       drawPanel("tokens", {
         tokens: {
+          contextGrowth: {},
+
           input: {},
           cacheRead: {},
           cacheWrite: {},
@@ -367,9 +377,133 @@ describe("the tokens panel", () => {
   it("refuses a panel missing one of its always-set lines", () => {
     expect(() =>
       drawPanel("tokens", {
-        tokens: { input: {}, cacheRead: {}, cacheWrite: {}, output: {}, thinking: {} },
+        tokens: { contextGrowth: {}, input: {}, cacheRead: {}, cacheWrite: {}, output: {}, thinking: {} },
       }),
     ).toThrow(MalformedView);
+  });
+});
+
+// ---- the tokens panel: context growth and per-agent spend -------------------
+
+/** The token lines every panel carries, with nothing reported yet. */
+const EMPTY_TOKEN_LINES = {
+  contextGrowth: {},
+  input: {},
+  cacheRead: {},
+  cacheWrite: {},
+  output: {},
+  thinking: {},
+  firstToken: {},
+};
+
+/** One agent's share, as the daemon ships it. */
+function agentShare(label: string, input: string) {
+  return {
+    label,
+    input: { value: input },
+    cacheRead: { value: "90k" },
+    cacheWrite: { value: "18k" },
+    output: { value: "1.5k" },
+  };
+}
+
+describe("the tokens panel's context growth", () => {
+  it("draws the growth line first", () => {
+    const { panel } = drawPanel("tokens");
+    expect(panel.firstElementChild?.getAttribute("data-token-line")).toBe("contextGrowth");
+  });
+
+  it("names the growth line 'context growth'", () => {
+    const { panel } = drawPanel("tokens");
+    expect(panel.querySelector('[data-token-line="contextGrowth"] .footer-token-name')?.textContent).toBe(
+      "context growth",
+    );
+  });
+
+  it("draws the growth figure verbatim", () => {
+    const { panel } = drawPanel("tokens", {
+      tokens: { ...EMPTY_TOKEN_LINES, contextGrowth: { value: "18.2k" } },
+    });
+    expect(panel.querySelector('[data-token-line="contextGrowth"] .footer-token-value')?.textContent).toBe(
+      "18.2k",
+    );
+  });
+
+  it("draws an EMPTY SLOT when no growth is known", () => {
+    const { panel } = drawPanel("tokens");
+    expect(
+      panel.querySelector('[data-token-line="contextGrowth"] .footer-token-value')?.hasAttribute("data-empty-slot"),
+    ).toBe(true);
+  });
+
+  it("names the line as measured since the cut when the daemon marks one", () => {
+    const { panel } = drawPanel("tokens", {
+      tokens: { ...EMPTY_TOKEN_LINES, contextGrowth: { value: "5k", sinceCut: {} } },
+    });
+    const line = panel.querySelector("[data-since-cut]");
+    expect(line?.querySelector(".footer-token-name")?.textContent).toBe("context growth (since cut)");
+  });
+
+  it("refuses a panel with no growth line", () => {
+    const { contextGrowth: _omitted, ...withoutGrowth } = EMPTY_TOKEN_LINES;
+    expect(() => drawPanel("tokens", { tokens: withoutGrowth })).toThrow(MalformedView);
+  });
+});
+
+describe("the tokens panel's per-agent spend", () => {
+  it("heads the summed lines 'all agents'", () => {
+    const { panel } = drawPanel("tokens");
+    const header = panel.querySelector(".footer-token-header");
+    expect(header?.textContent).toBe("all agents");
+    expect(header?.nextElementSibling?.getAttribute("data-token-line")).toBe("input");
+  });
+
+  it("draws no agent entry when the daemon lists none", () => {
+    const { panel } = drawPanel("tokens");
+    expect(panel.querySelector("[data-token-agent]")).toBeNull();
+  });
+
+  it("draws each agent's name verbatim, in the daemon's order", () => {
+    const { panel } = drawPanel("tokens", {
+      tokens: { ...EMPTY_TOKEN_LINES, agents: [agentShare("main", "18.2k"), agentShare("Explore · find", "2k")] },
+    });
+    expect([...panel.querySelectorAll("[data-token-agent]")].map((el) => el.textContent)).toEqual([
+      "main",
+      "Explore · find",
+    ]);
+  });
+
+  it.each([
+    ["input", "2k"],
+    ["cacheRead", "90k"],
+    ["cacheWrite", "18k"],
+    ["output", "1.5k"],
+  ])("draws an agent's %s line verbatim", (line, value) => {
+    const { panel } = drawPanel("tokens", {
+      tokens: { ...EMPTY_TOKEN_LINES, agents: [agentShare("Explore", "2k")] },
+    });
+    expect(
+      panel.querySelector(`[data-token-agent-row="Explore"][data-token-line="${line}"] .footer-token-value`)
+        ?.textContent,
+    ).toBe(value);
+  });
+
+  it("draws the agent entries after the turn's verdict", () => {
+    const { panel } = drawPanel("tokens", {
+      tokens: {
+        ...EMPTY_TOKEN_LINES,
+        verdict: { verdict: { case: "complete", value: {} } },
+        agents: [agentShare("main", "1k")],
+      },
+    });
+    expect(panel.querySelector("[data-verdict]")?.nextElementSibling?.getAttribute("data-token-agent")).toBe("main");
+  });
+
+  it("refuses an agent entry missing one of its lines", () => {
+    const { output: _omitted, ...partial } = agentShare("main", "1k");
+    expect(() => drawPanel("tokens", { tokens: { ...EMPTY_TOKEN_LINES, agents: [partial] } })).toThrow(
+      MalformedView,
+    );
   });
 });
 
@@ -723,6 +857,8 @@ describe("an arm this build has no case for", () => {
     // ARRANGE — legal, then poked: `create` drops an unknown case.
     const view = expanded({
       tokens: {
+        contextGrowth: {},
+
         input: {},
         cacheRead: {},
         cacheWrite: {},

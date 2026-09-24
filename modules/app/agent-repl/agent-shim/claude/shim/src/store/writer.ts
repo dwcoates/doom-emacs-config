@@ -174,6 +174,12 @@ export function toWriteBatchRequest(
 ): storev1.WriteBatchRequest {
   return create(storev1.WriteBatchRequestSchema, {
     producer,
+    // EVERY SHIM WRITE IS INTERACTIVE: it is live turn content somebody is
+    // waiting to see, and the store takes it ahead of any queued bulk copy.
+    // The store refuses a write that states no class, so this is not optional.
+    writeClass: create(storev1.WriteClassSchema, {
+      writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+    }),
     batch: create(storev1.EntryBatchSchema, {
       entries: entries.map((entry) => toStoreEntry(producer, entry)),
       // A STREAM-PLANE PRODUCER HAS NO FILE to be positioned in, so no cursor

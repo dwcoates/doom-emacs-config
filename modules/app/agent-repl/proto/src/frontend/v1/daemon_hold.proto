@@ -128,18 +128,22 @@ message HeldPrompt {
     // more work.
     HeldPromptBuildRefreshHold build_refresh = 12;
   }
-  // Tag 13 is left to the held-prompt edit's field; this one follows it.
-  //
+  // PRESENT WHILE THIS PROMPT IS BEING EDITED (EditHeldPrompt.begin), absent
+  // otherwise. Daemon-stated: the card draws its editing badge off this
+  // field alone. While it stands, this prompt and every prompt queued after
+  // it stay held.
+  HeldPromptEditing editing = 13;
   // THE CARD'S STATUS BADGES, DAEMON-COMPOSED: one per standing fact, in this
   // order, and no others —
   //
   //   1. the classification arm's badge, ALWAYS (the arm is never unset);
-  //   2. the confirmation's badge, iff the arm is hold_for_turn_end and its
+  //   2. the editing badge, iff `editing` is present;
+  //   3. the confirmation's badge, iff the arm is hold_for_turn_end and its
   //      acceptance is true;
-  //   3. the hold arm's badge, iff a hold arm is set.
+  //   4. the hold arm's badge, iff a hold arm is set.
   //
   // A frontend draws each label verbatim and keys the badge's COLOR by the fact
-  // it stands for (the arm, or the confirmation), never by its words; the words
+  // it stands for (the arm, the confirmation, the edit), never by its words; the words
   // are the daemon's, decided in the one place held-status wording is decided.
   // A list whose length disagrees with the facts above is a malformed frame and
   // is rejected loudly rather than drawn with a missing or surplus badge.
@@ -157,6 +161,10 @@ message HeldPromptBadge {
   // would only repeat the label.
   optional string detail = 2;
 }
+
+// The prompt is being edited in the editor's input. DELIBERATELY EMPTY: the
+// field's presence is the whole fact.
+message HeldPromptEditing {}
 
 // When a held prompt was queued.
 message HeldPromptQueuedAt {
