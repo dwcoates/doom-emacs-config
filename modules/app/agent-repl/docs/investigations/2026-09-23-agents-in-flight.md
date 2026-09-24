@@ -19,10 +19,9 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 - The shim reports "another process owns this conversation" when it can't even spawn its lock holder. A new refusal arm?
 - Ordering contract: a turn's ending still waits behind every row produced before it (the store gets rows in exact production order, which subagent consumers rely on). Should a terminal ever overtake? That's an ordering-contract change.
 - Harness stray reaping still selects by argv path, not a kernel mark (a session id would break handover successors and Emacs-launched e2e daemons). Keep it as is?
-- `DaemonFault.deploy_script_failed` removal is folded into the deploy branch's finishing agent.
-- `SPC TAB f` retry: needs a deploy, and the owner must OK the bounce.
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
-- A retry of `SPC TAB f`, which now logs.
+- A successor announcement can't be retracted after a manifest-write failure (clients see the successor stop and stay on the incumbent). A retraction arm is a contract change.
+- The one-time bootstrap onto daemon-owned deploys (AGENTS.md "ONE-TIME"), then the `SPC TAB f` retry.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
