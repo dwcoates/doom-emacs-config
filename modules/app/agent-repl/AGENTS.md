@@ -467,6 +467,10 @@ How the daemon puts each component into service:
    - each stale SHIM goes to the prompt queue's BOUNCE REGISTRY: bounced now
      when it has no turn and no detached work, otherwise registered and
      bounced on its freeness edge (a turn or the last detached item ending).
+     A shim that DIES under a registered bounce is itself that edge: its work
+     ended with it, so the bounce relaunches it at once, or is unregistered
+     when this daemon ended the session, the workspace is closed, or a newer
+     shim already serves it — never waiting for a revival.
      Queued prompts never block a bounce; the workspace drains and they are
      delivered to the new shim. Monitors, background shells and background
      subagents DO block it, because they die with the shim's vendor child;

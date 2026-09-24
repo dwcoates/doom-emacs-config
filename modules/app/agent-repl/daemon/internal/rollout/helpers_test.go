@@ -629,6 +629,18 @@ func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
 	}()
 }
 
+// unregister drops a workspace's registered bounce unrun, as the queue does
+// when the shim it would replace departs with nothing left to replace.
+func (r *fakeRegistry) unregister(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	req, ok := r.pending[ws]
+	delete(r.pending, ws)
+	r.mu.Unlock()
+	if ok && req.Done != nil {
+		req.Done(bounce.ErrUnregistered)
+	}
+}
+
 // free marks a workspace free and takes its registered bounce, as the queue
 // does on a freeness edge. It reports whether a bounce was registered.
 func (r *fakeRegistry) free(ws ids.WorkspaceID) bool {

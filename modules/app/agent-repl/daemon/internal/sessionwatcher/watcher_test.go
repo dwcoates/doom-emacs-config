@@ -2038,3 +2038,116 @@ func TestStartTurnsNamingRenamesTheViewsMainAgentLoudly(t *testing.T) {
 		t.Fatalf("records = %+v, want a WARN naming the rename", h.log.Records())
 	}
 }
+
+// ---- the shim's departure resolves its in-flight work ----
+
+// TestADepartureIsToldOnceWithHowTheShimWent covers every edge a watcher
+// establishes its shim's departure on, and how each is classified: a
+// departure is what the bounce registry takes a dead shim's bounce on, since
+// a dead shim produces no other freeness edge.
+func TestADepartureIsToldOnceWithHowTheShimWent(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange puts the client in the state the edge meets.
+		arrange func(h *harness)
+		// act drives the edge.
+		act  func(t *testing.T, h *harness)
+		want Departure
+	}{
+		{
+			name:    "the link going dead on its own is an unordered departure",
+			arrange: func(*harness) {},
+			act:     func(_ *testing.T, h *harness) { h.client.links <- shimclient.LinkDead },
+			want:    Departure{Ordered: false, Cause: DepartureLinkDead},
+		},
+		{
+			name:    "the link going dead inside an asked stand-down is ordered",
+			arrange: func(h *harness) { h.client.StandDown() },
+			act:     func(_ *testing.T, h *harness) { h.client.links <- shimclient.LinkDead },
+			want:    Departure{Ordered: true, Cause: DepartureLinkDead},
+		},
+		{
+			name:    "a close on a session the daemon is ending is ordered",
+			arrange: func(h *harness) { h.w.SessionEnding("a test ends the session") },
+			act:     closeWatcher,
+			want:    Departure{Ordered: true, Cause: DepartureClosed},
+		},
+		{
+			name:    "a close on a stand-down is ordered",
+			arrange: func(h *harness) { h.client.StandDown() },
+			act:     closeWatcher,
+			want:    Departure{Ordered: true, Cause: DepartureClosed},
+		},
+		{
+			name:    "a close on an already reaped shim is an unordered departure",
+			arrange: func(h *harness) { h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1}) },
+			act:     closeWatcher,
+			want:    Departure{Ordered: false, Cause: DepartureClosed},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			tc.arrange(h)
+
+			// Act.
+			tc.act(t, h)
+
+			// Assert.
+			got := h.awaitDeparture(t)
+			if got.departure != tc.want {
+				t.Fatalf("departure = %+v, want %+v", got.departure, tc.want)
+			}
+			if got.departed != h.w {
+				t.Fatalf("the departure named another watcher")
+			}
+			if held, ok := h.w.Departed(); !ok || held != tc.want {
+				t.Fatalf("Departed() = %+v, %v; want %+v", held, ok, tc.want)
+			}
+		})
+	}
+}
+
+// closeWatcher closes the harness's watcher, failing the test on an error.
+func closeWatcher(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestClosingTheWatchOfARunningShimIsNoDeparture(t *testing.T) {
+	// Arrange: the daemon's own exit stops WATCHING shims it leaves running
+	// for the next daemon to adopt.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	closeWatcher(t, h)
+
+	// Assert.
+	h.noMoreDepartures(t)
+	if _, departed := h.w.Departed(); departed {
+		t.Fatalf("a watcher closed on a running shim reports it departed")
+	}
+}
+
+func TestADepartureIsToldOnlyOnceAcrossItsEdges(t *testing.T) {
+	// Arrange: the link dies, and the dead session is then retired.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+	h.client.links <- shimclient.LinkDead
+	first := h.awaitDeparture(t)
+
+	// Act.
+	closeWatcher(t, h)
+
+	// Assert.
+	if first.departure.Cause != DepartureLinkDead {
+		t.Fatalf("first departure cause = %q, want the dead link", first.departure.Cause)
+	}
+	h.noMoreDepartures(t)
+}

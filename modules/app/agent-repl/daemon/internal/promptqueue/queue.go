@@ -107,6 +107,10 @@ type queue struct {
 	// joins them rather than closing the state client under one.
 	bouncing sync.WaitGroup
 
+	// departing tracks the departure decisions (OnDeparted) running on their
+	// own goroutines, so Drain joins them too.
+	departing sync.WaitGroup
+
 	// editSeq mints each edit's identity; guarded by mu.
 	editSeq uint64
 }
@@ -226,6 +230,8 @@ func (q *queue) Drain(bound time.Duration) bool {
 	go func() {
 		q.classifying.Wait()
 		q.reviving.Wait()
+		// A departure decision can START a bounce, so it is joined first.
+		q.departing.Wait()
 		q.bouncing.Wait()
 		close(left)
 	}()

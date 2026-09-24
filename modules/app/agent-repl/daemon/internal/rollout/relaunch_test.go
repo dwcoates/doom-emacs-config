@@ -2,12 +2,16 @@ package rollout
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/bounce"
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -730,5 +734,60 @@ func TestReloadWebappPushesTheEmptyArm(t *testing.T) {
 	}
 	if calls[0].Address != "" {
 		t.Fatalf("reload_webapp carried address %q, want none: the daemon is not changing", calls[0].Address)
+	}
+}
+
+func TestAShimBounceAsksToReplaceTheShim(t *testing.T) {
+	// Arrange: the registry decides a departed shim's bounce by whether it
+	// replaces the shim, so every shim bounce must say it does.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+
+	// Assert
+	h.registry.mu.Lock()
+	req := h.registry.pending[ws]
+	h.registry.mu.Unlock()
+	if !req.ReplacesShim {
+		t.Fatalf("the shim bounce's request does not say it replaces the shim")
+	}
+}
+
+func TestAnUnregisteredShimBounceIsAnOutcomeNotAFailure(t *testing.T) {
+	// Arrange: a bounce registered behind work, whose shim then departs with
+	// nothing left to replace.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	done := make(chan error, 1)
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+
+	// Act
+	h.registry.unregister(ws)
+
+	// Assert
+	if err := <-done; !errors.Is(err, bounce.ErrUnregistered) {
+		t.Fatalf("done = %v, want ErrUnregistered handed on to the caller", err)
+	}
+	for _, rec := range records(h.log, opBounce) {
+		if rec.Level == dlog.LevelError || rec.Level == dlog.LevelWarn {
+			t.Fatalf("an unregistered bounce was recorded at %s: %q", rec.Level, rec.Message)
+		}
+	}
+	found := false
+	for _, rec := range records(h.log, opBounce) {
+		if rec.Level == dlog.LevelInfo && strings.Contains(rec.Message, "unregistered") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want the unregistration at INFO", h.log.Records())
 	}
 }

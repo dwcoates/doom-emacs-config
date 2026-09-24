@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"claude-repld/internal/bounce"
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/wsm"
 )
@@ -122,6 +124,40 @@ func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	awaitRecord(t, f, "error", opRestart)
 	if got := f.rollout.reloadCalls(); len(got) != 0 {
 		t.Fatalf("webapp reloads = %v, want none after a failed relaunch", got)
+	}
+}
+
+func TestAnUnregisteredRestartIsRecordedAsAnOutcome(t *testing.T) {
+	// Arrange: the shim departs before the registered restart is taken.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrUnregistered
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert: the fake signals only once the completion has run.
+	f.rollout.awaitRelaunch(t)
+	const want = "the restart was unregistered: the shim it would replace departed and nothing is left to replace"
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation != opRestart {
+			continue
+		}
+		if r.Level == dlog.LevelError || r.Level == dlog.LevelWarn {
+			t.Fatalf("an unregistered restart was recorded at %s: %q", r.Level, r.Message)
+		}
+		if r.Level == dlog.LevelInfo && r.Message == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want %q at INFO", f.log.logger.Records(), want)
+	}
+	if got := f.rollout.reloadCalls(); len(got) != 0 {
+		t.Fatalf("webapp reloads = %v, want none for a restart that replaced nothing", got)
 	}
 }
 

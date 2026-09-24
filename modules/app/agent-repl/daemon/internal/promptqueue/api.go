@@ -220,6 +220,14 @@ type Queue interface {
 	// OnFree is the watcher's freeness edge: the last turn or detached item
 	// ended. It takes a registered bounce.
 	OnFree(ws ids.WorkspaceID)
+	// OnDeparted is the watcher's DEPARTURE edge: the shim it watched is gone,
+	// and all of that shim's in-flight work ended with it. A bounce registered
+	// behind that work is decided at once -- taken, or unregistered when it
+	// would replace a shim nothing is left to replace (bounce.Request's
+	// ReplacesShim) -- under the same delivery lock OnFree decides under, so
+	// the two can never both take it. It never blocks: the decision runs on a
+	// goroutine of its own, which Drain joins.
+	OnDeparted(ws ids.WorkspaceID, departed Watcher, departure sessionwatcher.Departure)
 	// Reviving reports whether a background revival this queue started for
 	// the workspace is still in flight: from before its bring-up spawns a shim
 	// until the prompt it holds has been handed to that shim. The idle sweep
@@ -370,6 +378,9 @@ type WatcherFunc func(ws ids.WorkspaceID) (Watcher, bool)
 type Watcher interface {
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
+	// Departed reports that the watched shim is gone. A departed watcher's
+	// turn and live work ended with the shim, so a bounce never waits on them.
+	Departed() (sessionwatcher.Departure, bool)
 	// LiveWork is the live detached work: what a bounce registered on the
 	// workspace waits on besides the turn.
 	LiveWork() sessionwatcher.LiveWorkSet
