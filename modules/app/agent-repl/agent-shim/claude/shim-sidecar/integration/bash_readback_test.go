@@ -13,8 +13,8 @@ const exitMarker = "EXIT=0\n"
 // Every other bash subject reads the fake store's own re-implementation of the
 // endpoint, which proves what the SIDECAR wrote and nothing about what a
 // consumer can get out of the store. These two drive the real endpoint: the
-// sidecar writes `bash:<run>:<from_offset>` rows and finally `bash:<run>:terminal`
-// under the spawning call's identity, and the store must hand them back over ONE
+// sidecar supersedes its one `bash:<run>:tail` row and finally writes
+// `bash:<run>:terminal` under the spawning call's identity, and the store must hand them back over ONE
 // stream — the stored rows replayed first, then the rows that land afterwards
 // followed live, the terminal LAST, and the stream ending after it.
 
