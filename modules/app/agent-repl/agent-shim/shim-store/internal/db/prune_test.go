@@ -480,7 +480,7 @@ func TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt(t *testing.T) {
 	d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
 
 	// Act
-	plan := queryPlan(t, d, ledgerPruneDeleteSQL, DefaultLedgerRetentionBytes, ledgerPruneBatch)
+	plan := queryPlan(t, d, ledgerPruneDeleteSQL, "", ledgerSweepCursorsPerBatch, DefaultLedgerRetentionBytes, ledgerPruneBatch)
 
 	// Assert: `cursor` is the one table the sweep may walk — it is the small
 	// side, and the window is a per-file question so every file must be asked.
@@ -496,3 +496,165 @@ func TestTheSweepsDeleteSeeksTheLedgerRatherThanScanningIt(t *testing.T) {
 	}
 }
 
+// TestTheSweepsCursorPageSeeksTheCursorKey pins that a batch reaches its page
+// of cursors by a seek past the previous page, in both statements that read
+// the page — a scan would ask about every file again, which is the unbounded
+// batch the page exists to remove.
+func TestTheSweepsCursorPageSeeksTheCursorKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		statement string
+		args      []any
+	}{
+		{name: "the delete", statement: ledgerPruneDeleteSQL,
+			args: []any{"", ledgerSweepCursorsPerBatch, DefaultLedgerRetentionBytes, ledgerPruneBatch}},
+		{name: "the page read", statement: ledgerSweepPageSQL,
+			args: []any{"", ledgerSweepCursorsPerBatch}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newPruningStore(t, DefaultLedgerRetentionBytes)
+
+			// Act
+			plan := queryPlan(t, d, test.statement, test.args...)
+
+			// Assert
+			if !strings.Contains(plan, "SEARCH cursor USING") || !strings.Contains(plan, "(file_id>?)") {
+				t.Fatalf("the sweep's page does not seek cursor past the previous page:\n%s", plan)
+			}
+		})
+	}
+}
+
+// ---- the sweep is bounded in work, and timed like any write ----
+
+// seedCursorFiles inserts `files` cursor rows, each with one ledger row far
+// enough behind its cursor to be prunable, directly — the case is about how the
+// sweep walks the cursor table, not about how the rows got there.
+func seedCursorFiles(t *testing.T, d *DB, files int) {
+	t.Helper()
+	tx, err := d.sql.Begin()
+	if err != nil {
+		t.Fatalf("seeding cursors: %v", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	for i := 0; i < files; i++ {
+		fileID := fmt.Sprintf("file-%04d", i)
+		if _, err := tx.Exec(`INSERT INTO cursor (file_id, path, offset, updated_at_ms) VALUES (?,?,?,?)`,
+			fileID, "/t/"+fileID+".jsonl", 5_000_000, testNow); err != nil {
+			t.Fatalf("seeding cursors: %v", err)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms, source_file_id, source_offset) VALUES (?,?,?,?,?,?)`,
+			"seed-"+fileID, "seed-"+fileID, i+1, testNow, fileID, 5_000); err != nil {
+			t.Fatalf("seeding the ledger: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("seeding cursors: %v", err)
+	}
+}
+
+// TestTheSweepWalksTheCursorsAPageAtATime pins the bound on a batch's WORK: no
+// transaction asks about more than one page of cursors, however many files the
+// store tracks, and every page is still visited.
+func TestTheSweepWalksTheCursorsAPageAtATime(t *testing.T) {
+	tests := []struct {
+		name        string
+		files       int
+		wantBatches int
+	}{
+		{name: "one file is one page", files: 1, wantBatches: 1},
+		{name: "exactly one full page needs a second to learn it was the last", files: ledgerSweepCursorsPerBatch, wantBatches: 2},
+		{name: "one file past a page is a second page", files: ledgerSweepCursorsPerBatch + 1, wantBatches: 2},
+		{name: "two pages and one file is three", files: 2*ledgerSweepCursorsPerBatch + 1, wantBatches: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newPruningStore(t, 1000)
+			seedCursorFiles(t, d, test.files)
+
+			// Act
+			result, err := d.PruneWriteLedger(ctx())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PruneWriteLedger: %v", err)
+			}
+			if result.Deleted != int64(test.files) {
+				t.Fatalf("sweep removed %d rows, want %d (one per file)", result.Deleted, test.files)
+			}
+			if result.Batches != test.wantBatches {
+				t.Fatalf("sweep took %d batches over %d files, want %d", result.Batches, test.files, test.wantBatches)
+			}
+		})
+	}
+}
+
+// TestASweepBatchIsTimedAsABulkWrite pins that a sweep batch leaves the same
+// per-class record a producer's batch does. A sweep that removed nothing used to
+// leave no normal-level trace at all, so a sweep holding the writer for minutes
+// was invisible except as other writers' queue wait.
+func TestASweepBatchIsTimedAsABulkWrite(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+	}{
+		{name: "the slow-query record names the class", operation: SlowQueryOperation},
+		{name: "the per-write timing record names the class", operation: WriteTimingOperation},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			s, log := newSink(t)
+			d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{
+				Now:                  func() int64 { return testNow },
+				Clock:                clock.Now,
+				SlowQuery:            time.Nanosecond,
+				LedgerRetentionBytes: 1000,
+			})
+			if err != nil {
+				t.Fatalf("OpenWithOptions: %v", err)
+			}
+			t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+			seedCursorFiles(t, d, 1)
+			queued := make(chan struct{})
+			d.queuedForWrite = func(WriteClass) {
+				clock.advance(40 * time.Millisecond)
+				close(queued)
+			}
+			release, err := d.acquireWrite(ctx(), WriteInteractive)
+			if err != nil {
+				t.Fatalf("acquireWrite: %v", err)
+			}
+
+			// Act: the sweep queues behind the held slot, then runs.
+			done := make(chan error, 1)
+			go func() {
+				_, err := d.PruneWriteLedger(ctx())
+				done <- err
+			}()
+			<-queued
+			release()
+			if err := <-done; err != nil {
+				t.Fatalf("PruneWriteLedger: %v", err)
+			}
+
+			// Assert
+			for _, record := range s.records(t) {
+				context, _ := record["context"].(map[string]any)
+				if record["operation"] == test.operation && context["statement"] == StatementLedgerSweep {
+					if context["write_class"] != "bulk" || context["lock_wait_ms"] != float64(40) {
+						t.Fatalf("sweep record write_class=%v lock_wait_ms=%v, want bulk and 40: %v",
+							context["write_class"], context["lock_wait_ms"], record)
+					}
+					return
+				}
+			}
+			t.Fatalf("no %s record for statement %s; log was:\n%s", test.operation, StatementLedgerSweep, s.file.String())
+		})
+	}
+}

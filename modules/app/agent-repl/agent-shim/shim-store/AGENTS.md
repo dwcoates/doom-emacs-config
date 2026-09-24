@@ -371,9 +371,14 @@ caused by a sibling.
   leave leading entries committed but never the advance past them; the re-read
   replays them into ledger absorption, and the server still publishes the lines
   that did commit. An interactive batch is one transaction, as before.
+- **THE SWEEP IS BOUNDED IN WORK, NOT ONLY IN ROWS REMOVED.** One sweep
+  transaction asks about at most `ledgerSweepCursorsPerBatch` (256) cursors,
+  paged by `file_id`. Before that, a batch that removed little still walked
+  every cursor, and on 2026-09-23 two sweeps held the writer for 137s and 848s
+  on the owner's loaded host with no record of their own.
 - **EVERY WRITE IS TIMED BY CLASS.** `store.db.write-timing` (verbose) records
   each write transaction's `write_class`, `lock_wait_ms` (the queue) and
-  `exec_ms` (the rest); the
+  `exec_ms` (the rest), for `write_batch` and `ledger_sweep` alike; the
   slow-query record carries the same three and names the class in its message,
   and its budget window is kept per class so a bulk backlog cannot make an
   interactive spike read as persistent.
