@@ -64,6 +64,10 @@ func (f *fakeSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (f *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+func (f *fakeSurfaces) DetachDir(string) error { return nil }
+
+func (f *fakeSurfaces) AttachDir(string) error { return nil }
+
 // ClientLog implements dlog.Surfaces.
 func (f *fakeSurfaces) ClientLog(dir string, record dlog.ClientRecord) error { return nil }
 

@@ -1432,3 +1432,212 @@ func TestARetainedWorkspaceLoggerLandsCentrallyWhenTheDirectoryIsGone(t *testing
 		t.Fatalf("central_fallback notices = %d, want 1", fallbacks)
 	}
 }
+
+// detachFixture is a workspace whose daemon sink is already open, then detached
+// and removed — the state a landed merge's teardown leaves behind.
+func detachFixture(t *testing.T) (*surfaces, string) {
+	t.Helper()
+	s, _ := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := s.DetachDir(dir); err != nil {
+		t.Fatalf("DetachDir: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	return s, dir
+}
+
+// sidecarRecord is the late forwarded record a merged workspace's sidecar sends.
+func sidecarRecord() ClientRecord {
+	return ClientRecord{ClientKind: RuntimeSidecar, Level: LevelInfo, Operation: "tail-pickup", Message: "picked up"}
+}
+
+// TestALateClientLogNeverRecreatesADetachedDirectory is the forced interleaving
+// TestHandoverTransfersAtFreeness lost at random: a record opens a NEW sink of a
+// workspace whose worktree the daemon has just removed.
+func TestALateClientLogNeverRecreatesADetachedDirectory(t *testing.T) {
+	// Arrange.
+	s, dir := detachFixture(t)
+
+	// Act.
+	err := s.ClientLog(dir, sidecarRecord())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog on a detached workspace = %v, want the record persisted", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("the removed worktree %s exists again after a late record (stat = %v)", dir, statErr)
+	}
+}
+
+// TestALateClientLogOnADetachedDirectoryLandsInItsTarget: the record is not lost,
+// it is written to the workspace's own daemon-owned target under logsDir.
+func TestALateClientLogOnADetachedDirectoryLandsInItsTarget(t *testing.T) {
+	// Arrange.
+	s, dir := detachFixture(t)
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	target := s.targets[mintedTestID(dir)+"/sidecar"]
+	if target == "" {
+		t.Fatal("no sidecar target was minted for the detached workspace")
+	}
+	if filepath.Dir(target) != s.logsDir {
+		t.Fatalf("the target %s is not under the logs directory %s", target, s.logsDir)
+	}
+	if !hasOperation(readRecords(t, target), "tail-pickup") {
+		t.Fatal("the late record is not in the workspace's sidecar target")
+	}
+}
+
+// TestADetachedDirectoryIsNotCreatedWhileItStillExists: the mark holds from the
+// moment DetachDir returns, before the removal has even begun.
+func TestADetachedDirectoryIsNotCreatedWhileItStillExists(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := s.DetachDir(dir); err != nil {
+		t.Fatalf("DetachDir: %v", err)
+	}
+
+	// Act.
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Lstat(filepath.Join(dir, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("a sink of a detached directory created %s/.claude (lstat = %v)", dir, err)
+	}
+}
+
+// TestAnOpenSinkRollsWithoutItsLinkOnceDetached: a detached sink that reaches
+// its cap rotates its target and neither verifies nor re-creates the link.
+func TestAnOpenSinkRollsWithoutItsLinkOnceDetached(t *testing.T) {
+	// Arrange.
+	dir := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	sk, err := openSinkSized(t.TempDir(), dir, mintedTestID(dir), "daemon", "", true, 8, 2)
+	if err != nil {
+		t.Fatalf("openSinkSized: %v", err)
+	}
+	t.Cleanup(func() { sk.close() })
+	if err := sk.write([]byte("0123456\n")); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	sk.detach()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act: this write crosses the cap and rolls.
+	err = sk.write([]byte("89abcde\n"))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("a rolling write on a detached sink = %v, want it accepted", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("the roll re-created the removed directory (stat = %v)", statErr)
+	}
+}
+
+// TestAttachDirRestoresTheCanonicalLink: a worktree created again at a detached
+// path is a new workspace, and its sinks link into it.
+func TestAttachDirRestoresTheCanonicalLink(t *testing.T) {
+	// Arrange.
+	s, dir := detachFixture(t)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act.
+	if err := s.AttachDir(dir); err != nil {
+		t.Fatalf("AttachDir: %v", err)
+	}
+	if err := s.ClientLog(dir, sidecarRecord()); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	if !hasOperation(workspaceRecords(t, dir, "sidecar"), "tail-pickup") {
+		t.Fatal("the re-attached workspace's sidecar.log link does not carry the record")
+	}
+}
+
+// TestAttachingADirectoryNeverDetachedChangesNothing: AttachDir runs after every
+// worktree creation, and most paths were never detached.
+func TestAttachingADirectoryNeverDetachedChangesNothing(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	err := s.AttachDir(dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AttachDir = %v, want success", err)
+	}
+	if _, open := s.workspaces[dir]; !open {
+		t.Fatal("attaching a never-detached directory dropped its open sinks")
+	}
+}
+
+// TestDetachDirRefusesAnEmptyDirectory: an empty path names no workspace.
+func TestDetachDirRefusesAnEmptyDirectory(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+
+	// Act.
+	err := s.DetachDir("")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("DetachDir(\"\") = nil, want a refusal")
+	}
+}
+
+// TestDetachDirIsRecordedAtDebug: the detachment is the daemon's own teardown
+// step, stated where someone reading the run log will look for it.
+func TestDetachDirIsRecordedAtDebug(t *testing.T) {
+	// Arrange.
+	s, runLog := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if err := s.DetachDir(dir); err != nil {
+		t.Fatalf("DetachDir: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range readRecords(t, runLog) {
+		if rec["operation"] == "daemon.dlog.dir_detached" {
+			if rec["level"] != LevelDebug {
+				t.Fatalf("dir_detached level = %v, want debug", rec["level"])
+			}
+			return
+		}
+	}
+	t.Fatal("the run log carries no daemon.dlog.dir_detached record")
+}

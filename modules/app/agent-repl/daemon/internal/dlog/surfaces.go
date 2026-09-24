@@ -53,6 +53,11 @@ type surfaces struct {
 	// record that met it, and a per-record report is the error flood this set
 	// exists to prevent.
 	centralFallbacks map[string]struct{}
+	// detached are the workspace directories the daemon is REMOVING (or has
+	// removed), by clean path: DetachDir adds one before the removal starts
+	// and AttachDir drops it once a worktree is created there again. A sink
+	// of a detached directory creates nothing inside it -- see DetachDir.
+	detached map[string]struct{}
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -72,6 +77,9 @@ type workspaceSinks struct {
 	// as ordinary evidence under workspace_dir_hash.
 	dirHash string
 	sinks   map[string]*sink
+	// detached says the directory is being removed, so every sink this entry
+	// opens from here on writes its target with no canonical link.
+	detached bool
 }
 
 // OpenSurfaces opens the daemon's log surfaces under the state root's logs
@@ -105,6 +113,7 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 		now:        time.Now,
 		workspaces: make(map[string]*workspaceSinks),
 		targets:    make(map[string]string),
+		detached:   make(map[string]struct{}),
 		scanEvery:  scanInterval,
 		stop:       make(chan struct{}),
 		scanDone:   make(chan struct{}),
@@ -381,6 +390,74 @@ func (s *surfaces) Evict(dir string) error {
 	return closeWorkspace(ws)
 }
 
+// DetachDir tells the surfaces that the daemon is about to REMOVE a workspace
+// directory. From the moment it returns, no sink of that directory creates,
+// re-points or reads anything inside it: the sinks already open forget their
+// canonical links, and every sink opened later writes its daemon-owned target
+// under logsDir with no link at all. Records keep flowing to the same targets.
+//
+// IT EXISTS BECAUSE A SINK OPEN RE-CREATED A REMOVED WORKTREE. A merge's
+// teardown ran `git worktree remove --force`, a late sidecar record for the
+// merged workspace opened its first `sidecar.log` one instant later, and the
+// open's MkdirAll of `<worktree>/.claude/emacs` brought the directory back:
+// the teardown's own check then found the worktree "still present after
+// removal" and recorded two ERRORs (TestHandoverTransfersAtFreeness,
+// 2026-09-23, 7ms apart). The mark is taken under the same mutex every sink
+// open holds, so a link is either created before the removal starts — and is
+// removed with the directory — or never.
+func (s *surfaces) DetachDir(dir string) error {
+	clean, err := cleanDir(dir)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.detached[clean] = struct{}{}
+	ws, open := s.workspaces[clean]
+	sinks := 0
+	if open {
+		ws.detached = true
+		for _, sk := range ws.sinks {
+			sk.detach()
+			sinks++
+		}
+	}
+	s.mu.Unlock()
+	s.Global().Debug("daemon.dlog.dir_detached",
+		"a workspace directory the daemon is removing was detached from its log sinks; nothing is created inside it from here on",
+		Context{KeyWorkspaceDir: clean, "open_sinks": sinks})
+	return nil
+}
+
+// AttachDir lifts a DetachDir once a worktree has been created at the same
+// path again, so the new workspace's sinks carry their canonical links. An
+// entry left from the removed workspace is dropped with its descriptors: the
+// directory now belongs to a workspace that must resolve afresh.
+func (s *surfaces) AttachDir(dir string) error {
+	clean, err := cleanDir(dir)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	_, was := s.detached[clean]
+	delete(s.detached, clean)
+	var stale *workspaceSinks
+	if ws, ok := s.workspaces[clean]; ok && ws.detached {
+		stale = ws
+		delete(s.workspaces, clean)
+	}
+	s.mu.Unlock()
+	if !was {
+		return nil
+	}
+	s.Global().Debug("daemon.dlog.dir_attached",
+		"a worktree was created at a detached workspace directory; its sinks link into it again",
+		Context{KeyWorkspaceDir: clean, "dropped_entry": stale != nil})
+	if stale != nil {
+		return closeWorkspace(stale)
+	}
+	return nil
+}
+
 // Close flushes and closes every sink the daemon opened.
 func (s *surfaces) Close() error {
 	s.mu.Lock()
@@ -424,6 +501,23 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		return nil, nil, errSurfacesClosed
 	}
 	ws, ok := s.workspaces[clean]
+	_, detached := s.detached[clean]
+	if !ok && detached {
+		// A DETACHED DIRECTORY IS NOT STAT-ED: the daemon is removing it, so
+		// its absence is the expected answer and not a reason to refuse. Its
+		// records still reach the workspace's own targets under logsDir.
+		id, err := s.mintedIDLocked(clean)
+		if err != nil {
+			return nil, nil, err
+		}
+		hash, err := WorkspaceDirHash(clean)
+		if err != nil {
+			return nil, nil, err
+		}
+		ws = &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames)), detached: true}
+		s.workspaces[clean] = ws
+		ok = true
+	}
 	if !ok {
 		// THE DIRECTORY IS STAT-ED ONCE, ON THE FIRST RESOLVE, AND NEVER
 		// AGAIN. A workspace already carrying open sinks keeps them: the
@@ -457,7 +551,7 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	}
 	key := ws.id + "/" + name
 	remembered := s.targets[key] != ""
-	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key])
+	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key], !ws.detached)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
 	}
