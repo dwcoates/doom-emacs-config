@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -899,5 +900,140 @@ func TestADepartureAfterTheExitsDrainDecidesNothing(t *testing.T) {
 	}
 	if !recordWith(h.log.Records(), "debug", opBounce, "the daemon is exiting; a shim departure at the exit decides nothing") {
 		t.Fatalf("records = %+v, want the exit's no-op recorded", h.log.Records())
+	}
+}
+
+// ---- a shim that died on its own is brought back ----
+
+// dieAndRevive tells the queue its shim departed and joins every revival the
+// departure started.
+func dieAndRevive(h *harness, d sessionwatcher.Departure) {
+	depart(h, h.watcher, d)
+	h.waitRevivals()
+}
+
+func TestADeathWithNoBounceBringsTheSessionBack(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange shapes the workspace before its shim departs.
+		arrange   func(h *harness)
+		departure sessionwatcher.Departure
+		want      int
+	}{
+		{
+			name:      "a shim that died on its own is brought back",
+			arrange:   func(*harness) {},
+			departure: departedUnasked,
+			want:      1,
+		},
+		{
+			name:      "a shim this daemon ended is not",
+			arrange:   func(*harness) {},
+			departure: departedOrdered,
+		},
+		{
+			name: "a closed workspace's shim is not",
+			arrange: func(h *harness) {
+				h.db.workspaces[theWorkspace] = wsm.Workspace{ID: theWorkspace, Dir: "/tmp/ws-1", Closed: true}
+			},
+			departure: departedUnasked,
+		},
+		{
+			name:      "a forgotten workspace's shim is not",
+			arrange:   func(h *harness) { h.db.workspaceErr = wsm.ErrNotFound },
+			departure: departedUnasked,
+		},
+		{
+			name:      "a shim whose workspace directory is gone is not",
+			arrange:   func(h *harness) { h.statErr = fs.ErrNotExist },
+			departure: departedUnasked,
+		},
+		{
+			name:      "a directory that cannot be stat-ed is never read as gone",
+			arrange:   func(h *harness) { h.statErr = fs.ErrPermission },
+			departure: departedUnasked,
+			want:      1,
+		},
+		{
+			name:      "an unreadable workspace's shim is not",
+			arrange:   func(h *harness) { h.db.workspaceErr = errors.New("the state client is gone") },
+			departure: departedUnasked,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			dieAndRevive(h, tc.departure)
+
+			// Assert
+			if h.revivals != tc.want {
+				t.Fatalf("revivals = %d, want %d", h.revivals, tc.want)
+			}
+		})
+	}
+}
+
+func TestADeathWithNoBounceIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	dieAndRevive(h, departedUnasked)
+
+	// Assert
+	if !recordWith(h.log.Records(), "info", opRevive, "the shim died on its own; its session is brought back now") {
+		t.Fatalf("records = %+v, want the INFO revival record", h.log.Records())
+	}
+}
+
+func TestADeathWhoseWorkspaceCannotBeReadIsRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.workspaceErr = errors.New("the state client is gone")
+
+	// Act
+	dieAndRevive(h, departedUnasked)
+
+	// Assert
+	if !recordWith(h.log.Records(), "error", opRevive, "the shim died and its workspace could not be read; its session is not brought back") {
+		t.Fatalf("records = %+v, want the ERROR record", h.log.Records())
+	}
+}
+
+func TestASecondDeathBeforeAnyTurnEndedIsLeftDown(t *testing.T) {
+	// Arrange: the daemon already brought the session back once.
+	h := newHarness(t)
+	dieAndRevive(h, departedUnasked)
+
+	// Act
+	dieAndRevive(h, departedUnasked)
+
+	// Assert
+	if h.revivals != 1 {
+		t.Fatalf("revivals = %d, want only the first", h.revivals)
+	}
+	if !recordWith(h.log.Records(), "warn", opRevive, "the shim died again before any turn ended since the daemon last brought it back; it is left down until the next prompt") {
+		t.Fatalf("records = %+v, want the WARN naming the loop", h.log.Records())
+	}
+}
+
+func TestADeathAfterATurnEndedIsBroughtBackAgain(t *testing.T) {
+	// Arrange: brought back once, and a turn has ended since.
+	h := newHarness(t)
+	dieAndRevive(h, departedUnasked)
+	running(t, h, "running-turn", "the running work")
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Act
+	dieAndRevive(h, departedUnasked)
+
+	// Assert
+	if h.revivals != 2 {
+		t.Fatalf("revivals = %d, want both deaths brought back", h.revivals)
 	}
 }

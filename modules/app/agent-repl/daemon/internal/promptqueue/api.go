@@ -9,6 +9,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -311,6 +312,10 @@ type Deps struct {
 	Lifetime context.Context
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
+	// Stat reads a workspace directory before a dead shim's session is
+	// brought back: a workspace whose directory is gone has nothing to serve.
+	// nil means os.Stat.
+	Stat func(name string) (fs.FileInfo, error)
 	// PublishHost republishes a workspace's host view, which carries the
 	// standing edit the editor fills its input from. REQUIRED.
 	PublishHost func(ws ids.WorkspaceID)
