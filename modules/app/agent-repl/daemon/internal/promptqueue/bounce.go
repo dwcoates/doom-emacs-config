@@ -305,14 +305,11 @@ func (q *queue) isDraining(ws ids.WorkspaceID) bool {
 }
 
 // inFlight answers what a bounce would have to wait on: the turn in flight
-// (a keep-alive re-drive of an accepted prompt counts — it is a turn the queue
-// has already committed to), and the live detached items. free is the
-// conjunction.
+// and the live detached items. free is the conjunction. A prompt the shim is
+// holding behind its own keep-alive is a StartTurn still in flight, and the
+// bounce is decided under the same delivery lock that call is made under, so
+// it can never be judged free past one.
 func (q *queue) inFlight(ws ids.WorkspaceID) (turn bool, detached int, free bool) {
-	q.mu.Lock()
-	_, redriving := q.redrives[ws]
-	q.mu.Unlock()
-	turn = redriving
 	if watcher, ok := q.deps.Watcher(ws); ok {
 		if watcher.TurnInFlight() != nil {
 			turn = true

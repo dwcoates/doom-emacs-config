@@ -9030,9 +9030,7 @@ func (x *FooterTokensLineFirstToken) GetValue() string {
 type FooterTokensLineAlarm struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The daemon-composed sentence ("expensive turn — 41k over 20k"). Drawn
-	// verbatim; the sentence also states WHY the turn ran when that changes
-	// the reading (an ordinary prompt vs a cache keep-alive that came back
-	// cold — its own alarm, phrased as such by the daemon).
+	// verbatim.
 	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
