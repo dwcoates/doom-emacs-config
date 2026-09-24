@@ -20,7 +20,8 @@ import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
-import { BUBBLE_CAP_LINES } from "../src/bubble/draw.js";
+import { BUBBLE_CAP_LINES, BUBBLE_EXPAND_ONLY_CLASS } from "../src/bubble/draw.js";
+import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 
 /**
  * Selectors permitted to suppress selection, each with the one reason that
@@ -2267,11 +2268,21 @@ describe("the one bubble rule set", () => {
         (sel) => onBubble(sel) && sel !== ".bubble" && !/^\.bubble\[data-(?:role|cap-lines)=/.test(sel) && !sel.includes("[hidden]"),
       ),
     );
+    // The held variant's HALVED cap (owner spec, 2026-09-23) is the one width a
+    // variant sets, and only as the one token halved: its own test below pins
+    // the value, so here it is the one sanctioned property beyond the border.
+    const held = '.bubble[data-variant="held"]';
     const beyondBorder = keyed.filter((rule) =>
       rule.declarations
         .split(";")
         .map((decl) => decl.split(":")[0]?.trim() ?? "")
-        .some((prop) => prop !== "" && !prop.startsWith("border") && prop !== "--bubble-bg"),
+        .some(
+          (prop) =>
+            prop !== "" &&
+            !prop.startsWith("border") &&
+            prop !== "--bubble-bg" &&
+            !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held),
+        ),
     );
     // Assert — the working wave's own animation is the one other thing a
     // prompt state draws (ruling f), and it lives on its own rule.
@@ -2339,6 +2350,13 @@ describe("the held prompt's fill: much more grey than blue", () => {
     expect(held * 3).toBeLessThanOrEqual(prompt);
   });
 
+  it("caps the held variant at half the one bubble width token", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    // Assert
+    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
+  });
+
   it("is the one background the held variant sets", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
@@ -2362,5 +2380,88 @@ describe("the compaction summary's border is the compaction divider bar's", () =
   it("gives the summary no fill of its own: it is a response bubble", () => {
     // Arrange / Act / Assert
     expect(stylesheet.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/--compact-summary-bg/);
+  });
+});
+
+/**
+ * THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
+ * bubble's scroll box that shows only while the one toggle has that box open.
+ */
+describe("the bubble's expand-only region", () => {
+  /** Every rule whose selector names the expand-only class. */
+  const regionRules = (): Rule[] =>
+    rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_EXPAND_ONLY_CLASS}`)));
+
+  it("hides the region only behind a scroll box that is not expanded", () => {
+    // Arrange / Act
+    const selectors = regionRules().flatMap((rule) => rule.selectors);
+    // Assert
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) ~ .${BUBBLE_EXPAND_ONLY_CLASS}`]);
+  });
+
+  it("takes the hidden region out of layout", () => {
+    // Arrange / Act
+    const declarations = regionRules().map((rule) => rule.declarations.trim());
+    // Assert
+    expect(declarations).toEqual(["display: none;"]);
+  });
+});
+
+/**
+ * THE HELD STATUS BADGES' COLORS (owner spec, 2026-09-23): each tone the one
+ * table (src/tray/held-prompt.ts) assigns resolves to its semantic token, on the
+ * tool cards' own `.badge`. WAITING red and INTERRUPTING green are the owner's.
+ */
+describe("the held status badges' colors", () => {
+  const TOKENS: Readonly<Record<string, string>> = {
+    ok: "--ok",
+    err: "--err",
+    run: "--thinking",
+    muted: "--muted",
+    amber: "--merge-border",
+    teal: "--hibernated",
+  };
+
+  /**
+   * The color a `.badge` of TONE is painted: the held card's own rule's when it
+   * sets one, else the shared `.badge` rule's (a held rule may add only motion).
+   */
+  function toneColor(tone: string): string | undefined {
+    const colorOf = (rule: string | undefined): string | undefined =>
+      /(?:^|;)\s*color:\s*([^;]+);/.exec(rule ?? "")?.[1]?.trim();
+    return colorOf(declarationsOf(`.badge.held-badge.${tone}`)) ?? colorOf(declarationsOf(`.badge.${tone}`));
+  }
+
+  it.each(Object.entries(TOKENS))("paints the %s tone in %s", (tone, token) => {
+    // Arrange / Act
+    const color = toneColor(tone);
+    // Assert
+    expect(color).toBe(`var(${token})`);
+  });
+
+  it("assigns only tones the stylesheet paints", () => {
+    // Arrange / Act
+    const unpainted = [...new Set(Object.values(HELD_STATUS_BADGES))].filter((tone) => toneColor(tone) === undefined);
+    // Assert
+    expect(unpainted).toEqual([]);
+  });
+
+  it("paints a prompt waiting for the turn's end red", () => {
+    // Arrange / Act / Assert
+    expect(toneColor(HELD_STATUS_BADGES.holdForTurnEnd)).toBe("var(--err)");
+  });
+
+  it("paints an interrupting prompt green", () => {
+    // Arrange / Act / Assert
+    expect(toneColor(HELD_STATUS_BADGES.interject)).toBe("var(--ok)");
+  });
+
+  it("leaves no rule for the retired queued badge classes", () => {
+    // Arrange / Act
+    const retired = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /\.queued-(?:badge|accepted)\b/.test(sel)),
+    );
+    // Assert
+    expect(retired.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 });

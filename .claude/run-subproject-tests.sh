@@ -11,6 +11,10 @@
 # Exit codes (PostToolUse semantics):
 #   0 — not applicable, or tests passed
 #   2 — tests failed; stderr is fed back to Claude to drive a fix
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -u
 
 payload=$(cat)
