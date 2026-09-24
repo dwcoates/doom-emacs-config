@@ -467,6 +467,29 @@ describe("subagentConverter.settle", () => {
     expect(failure.cause.case).toBeUndefined();
   });
 
+  it("restates the commission on the failure, so a replayed failed spawn draws its description", () => {
+    // Arrange, Act.
+    const item = subagentConverter.settle(
+      call({ prompt: "p", description: "tidy the docs" }),
+      outcome(undefined, true),
+    )!;
+
+    // Assert.
+    const failure = (item?.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentFailure;
+    expect(failure.prompt?.description).toBe("tidy the docs");
+  });
+
+  it("restates the created agent on the failure, so a replayed failed spawn addresses its sub-feed", () => {
+    // Arrange, Act.
+    const item = subagentConverter.settle(call({ prompt: "p" }), outcome(undefined, true))!;
+
+    // Assert.
+    const failure = (item?.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentFailure;
+    expect(failure.createdAgentId?.value).toBe("toolu_spawn");
+  });
+
   it("produces NO frame for a completion that stated no report content", () => {
     // Arrange.
     const structured = { ...toolUseResult("agent") };

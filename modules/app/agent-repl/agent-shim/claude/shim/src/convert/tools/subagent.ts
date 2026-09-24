@@ -302,6 +302,12 @@ export const subagentConverter: ToolConverter = {
               // `cause` stays UNSET: no vendor field states a user stop, and an
               // arm claiming one would say a person did what nothing observed.
               error: failureOf(call, outcome),
+              // RESTATED FROM THE CALL, exactly as the success arm restates
+              // them: a replay serves this failure with no start beside it,
+              // and it must still draw the spawn's label and address its
+              // sub-feed.
+              prompt: subagentPrompt(call),
+              createdAgentId: subagentId(call.toolUseId),
             }),
           },
         }),
