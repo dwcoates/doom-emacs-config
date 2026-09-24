@@ -429,14 +429,24 @@ func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspa
 	// rpc through the shutdown grace. Such a request is the daemon going
 	// away, and it says so as UNAVAILABLE rather than surfacing whatever the
 	// half-closed state client happens to return.
-	if err := s.life.Err(); err != nil {
+	//
+	// ORDERED, NOT CHECKED. A lifetime check followed by the read left a
+	// window in which Close and the state client's close both ran between the
+	// two, and the read met "sql: database is closed" at ERROR — the webapp
+	// layer's roster area lost a run to a ClientLog landing in it during the
+	// drain's exit. readRegistry holds Close off for the read's duration.
+	var record wsm.Workspace
+	ended, err := s.readRegistry(func() error {
+		var readErr error
+		record, readErr = s.deps.DB.Workspace(ctx, id)
+		return readErr
+	})
+	if ended {
 		s.log.Info(rpc, "refused a request that arrived while the daemon was shutting down",
 			dlog.Context{"workspace": string(id)})
 		return resolved{}, nil, connect.NewError(connect.CodeUnavailable,
-			fmt.Errorf("%s: workspace %q: the daemon is shutting down", rpc, id))
+			fmt.Errorf("%s: workspace %q: %w", rpc, id, errServingEnded))
 	}
-
-	record, err := s.deps.DB.Workspace(ctx, id)
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
 			r := s.fill(refusal{
@@ -472,6 +482,43 @@ func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspa
 	// the handler's own typed answer.
 	log := s.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(id)})
 	return resolved{Record: record, Log: log}, nil, nil
+}
+
+// errServingEnded is the shutdown refusal a resolution answers once the
+// surface's lifetime has ended. It is recorded at INFO where it is decided,
+// and failResolution recognises it so it is not restated as a failure.
+var errServingEnded = errors.New("the daemon is shutting down")
+
+// readRegistry runs one registry read of a request's resolution, unless the
+// surface has closed. `ended` reports that Close has begun, in which case the
+// read was never made: the state client may already be closed beneath it.
+//
+// The read holds the registry gate shared, so Close -- which takes it
+// exclusively -- cannot complete while a read is in flight, and the daemon
+// closes the state client only after Close has returned.
+func (s *server) readRegistry(read func() error) (ended bool, err error) {
+	s.registry.RLock()
+	defer s.registry.RUnlock()
+	if s.registryClosed {
+		return true, nil
+	}
+	return false, read()
+}
+
+// failResolution renders a failed workspace RESOLUTION. The two endings that
+// are not failures -- the daemon shutting down under the request, and the
+// request's own context ending -- were already recorded at INFO where they
+// were decided, so they keep their Connect code and add no ERROR. Everything
+// else is a failure and goes through fail.
+func failResolution(log dlog.Logger, rpc string, err error) *connect.Error {
+	if errors.Is(err, errServingEnded) || endedOnCancel(err) {
+		var coded *connect.Error
+		if errors.As(err, &coded) {
+			return coded
+		}
+		return connect.NewError(connect.CodeCanceled, err)
+	}
+	return fail(log, rpc, err)
 }
 
 // fail renders an ordinary (non-refusal) failure as a Connect internal error,

@@ -128,6 +128,11 @@ type fakeDB struct {
 	// workspaceErr fails every registry read, standing in for the closed
 	// state client an exiting daemon leaves behind.
 	workspaceErr error
+	// workspaceEntered, when set, is closed as the first registry read
+	// begins, and that read then waits for workspaceRelease: the seam a test
+	// holds a read in flight on.
+	workspaceEntered chan struct{}
+	workspaceRelease chan struct{}
 }
 
 func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
@@ -147,6 +152,11 @@ func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, 
 }
 
 func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+	if f.workspaceEntered != nil {
+		close(f.workspaceEntered)
+		f.workspaceEntered = nil
+		<-f.workspaceRelease
+	}
 	if f.workspaceErr != nil {
 		return wsm.Workspace{}, f.workspaceErr
 	}
