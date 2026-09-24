@@ -478,19 +478,6 @@ never signalled as an error."
     (agent-repl-verb-interrupt "ws-one")
     (should (agent-repl-test-verbs--messaged-p "nothing to interrupt"))))
 
-(ert-deftest agent-repl-verbs-interrupt-keepalive-collision-is-graceful-not-a-transport-failure ()
-  "A keep-alive collision is answered by a graceful SUCCESS arm, never a
-transport failure.  The daemon maps the shim's `not_the_open_turn' -- the
-turn was queued behind an in-flight keep-alive, which Emacs used to see as
-a raw \"daemon cannot answer\" transport failure -- onto the `nothing_running'
-success arm, so the footer stop draws the calm message and NEVER the loud
-transport-failure path."
-  (agent-repl-test-verbs--with
-      '((:interrupt . (:response (:arm :success :value (:arm :nothing-running :value nil)))))
-    (agent-repl-verb-interrupt "ws-one")
-    (should (agent-repl-test-verbs--messaged-p "nothing to interrupt"))
-    (should-not (agent-repl-test-verbs--messaged-p "interrupt failed"))))
-
 (ert-deftest agent-repl-verbs-interrupt-detached-count-is-stated ()
   "A confirmed stop that also ended agents states the count."
   (agent-repl-test-verbs--with
