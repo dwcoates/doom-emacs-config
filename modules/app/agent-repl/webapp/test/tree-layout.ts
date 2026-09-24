@@ -22,14 +22,15 @@
  *     `clientWidth` (the bubble's containing block);
  *   - `getComputedStyle` answers the bubble's `max-width` as MAXWIDTH, the
  *     body's horizontal padding as BODYPADDINGPX a side, every other
- *     horizontal padding, border and margin as `0px`, and the
- *     `--scrollbar-gutter-width` token as SCROLLBARPX (in px), or as
- *     SCROLLBARTOKEN verbatim when a test stages an unreadable one.
+ *     horizontal padding, border and margin as `0px`;
+ *   - a `.bubble-scroll` element reports SCROLLBOXPX as its `offsetWidth` and
+ *     SCROLLBOXPX less SCROLLBARPX as its `clientWidth`, so the measured
+ *     scrollbar gutter is SCROLLBARPX (a negative one stages an impossible
+ *     measurement).
  * Every other read passes through to jsdom untouched.
  */
 import { afterEach, beforeEach } from "vitest";
 import { visibleWidth } from "../src/metaprompt-tree.js";
-import { SCROLLBAR_GUTTER_TOKEN } from "../src/bubble/body.js";
 
 /** The geometry a staged tree measurement reads. */
 export interface TreeLayout {
@@ -41,10 +42,10 @@ export interface TreeLayout {
   maxWidth: string;
   /** The bubble body's padding on each side, in px. */
   bodyPaddingPx: number;
-  /** The scrollbar gutter token's width, in px (the stylesheet's 8px). */
+  /** The scroll box's measured scrollbar gutter, in px (offsetWidth - clientWidth). */
   scrollbarPx: number;
-  /** The gutter token's raw value, when a test stages one that is not px. */
-  scrollbarToken?: string;
+  /** The scroll box's `offsetWidth`, in px. */
+  scrollBoxPx: number;
 }
 
 /** A layout with the stylesheet's real 77% cap and round numbers. */
@@ -54,6 +55,7 @@ export const DEFAULT_TEST_LAYOUT: TreeLayout = {
   maxWidth: "77%",
   bodyPaddingPx: 10,
   scrollbarPx: 8,
+  scrollBoxPx: 700,
 };
 
 /** The horizontal lengths the measure reads off computed styles. */
@@ -103,7 +105,17 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
     configurable: true,
     get(this: HTMLElement): number {
       if (this.isConnected && this.querySelector(":scope > .bubble") !== null) return layout.containingPx;
+      if (this.isConnected && this.classList.contains("bubble-scroll")) return layout.scrollBoxPx - layout.scrollbarPx;
       return (clientWidth?.get?.call(this) as number | undefined) ?? 0;
+    },
+  });
+
+  const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement): number {
+      if (this.isConnected && this.classList.contains("bubble-scroll")) return layout.scrollBoxPx;
+      return (offsetWidth?.get?.call(this) as number | undefined) ?? 0;
     },
   });
 
@@ -116,13 +128,6 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
       get(target, property): unknown {
         if (property === "maxWidth" && el.classList.contains("bubble")) {
           return el.isConnected ? layout.maxWidth : "";
-        }
-        if (property === "getPropertyValue") {
-          return (name: string): string => {
-            if (name !== SCROLLBAR_GUTTER_TOKEN) return real.getPropertyValue(name);
-            if (!el.isConnected) return "";
-            return layout.scrollbarToken ?? `${String(layout.scrollbarPx)}px`;
-          };
         }
         if (typeof property === "string" && LENGTHS.has(property)) {
           if (!el.isConnected) return "";
@@ -141,6 +146,7 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
       Element.prototype.getBoundingClientRect = originalRect;
       Element.prototype.getClientRects = originalRects;
       delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+      if (offsetWidth !== undefined) Object.defineProperty(HTMLElement.prototype, "offsetWidth", offsetWidth);
       window.getComputedStyle = originalStyle;
     },
   };

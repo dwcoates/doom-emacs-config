@@ -80,15 +80,17 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     expect(cols).toBe(92);
   });
 
-  it("takes the expanded scrollbar's gutter token off the budget", () => {
-    // Arrange — a 24px gutter is three columns of the 8px tree font.
+  it.each([
+    ["an overlay bar's 0px", 0, 93],
+    ["a classic bar's 14px", 14, 92],
+  ] as const)("takes %s measured gutter off the budget", (_label, gutterPx, want) => {
+    // Arrange — 770px cap less 20px body padding less the gutter.
+    staged.layout.scrollbarPx = gutterPx;
     const body = stageBody();
-    const narrow = measureTreeCols(body);
     // Act
-    staged.layout.scrollbarPx = 0;
-    const gutterless = measureTreeCols(body);
-    // Assert — 742/8 against 750/8: the gutter is one column here.
-    expect([narrow, gutterless]).toEqual([92, 93]);
+    const cols = measureTreeCols(body);
+    // Assert — floor(750 / 8) and floor(736 / 8).
+    expect(cols).toBe(want);
   });
 
   it("wraps a collapsed bubble to the same budget as the expanded one", () => {
@@ -235,12 +237,22 @@ describe("an unmeasurable tree width is an invariant violation", () => {
     vi.restoreAllMocks();
   });
 
-  it("refuses a scrollbar gutter token that is not in px", async () => {
-    // Arrange
-    staged.layout.scrollbarToken = "0.5rem";
+  it("refuses a scroll box whose gutter measures negative", async () => {
+    // Arrange — a clientWidth wider than the offsetWidth.
+    staged.layout.scrollbarPx = -4;
     const body = stageBody();
     // Act + Assert
-    expect(await violation(body)).toBe("the scrollbar gutter token is not in px");
+    expect(await violation(body)).toBe("the scroll box's scrollbar gutter measured negative or not finite");
+  });
+
+  it("refuses a body with no scroll box", async () => {
+    // Arrange — the body hangs straight off the bubble.
+    const body = stageBody();
+    const scroll = body.parentElement;
+    if (scroll === null) throw new Error("no scroll box");
+    scroll.replaceWith(body);
+    // Act + Assert
+    expect(await violation(body)).toBe("the bubble body has no scroll box");
   });
 
   it("refuses a cap whose content width holds no column", async () => {
