@@ -21,7 +21,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
 	// Verbose records are exercised too: a verbose-only branch that panicked
 	// would otherwise stay invisible until production enabled it.
 	os.Exit(m.Run())

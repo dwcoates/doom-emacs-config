@@ -35,7 +35,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
-			paths: []string{"modules/app/agent-repl/bin/deploy-all.sh"},
+			paths: []string{"modules/app/agent-repl/bin/build-frontend.sh"},
 			want:  scriptHarnessSuites,
 		},
 		{

@@ -28,6 +28,9 @@ type lifecycleSink struct {
 	verbs  *verbsForwarder
 	relay  *relayForwarder
 	health *healthForwarder
+	// builds is the rollout's staleness judge: every diagnostics frame carries
+	// the build its shim runs.
+	builds *rolloutForwarder
 	log    dlog.Logger
 }
 
@@ -186,6 +189,24 @@ func (s *lifecycleSink) retractLinkFaults(ctx context.Context, ws ids.WorkspaceI
 	}
 }
 
+// reportBuild hands one shim's reported build to the rollout, which bounces a
+// stale shim through the prompt queue's bounce registry.
+func (s *lifecycleSink) reportBuild(ws ids.WorkspaceID, build string) {
+	controller, ok := s.builds.controller()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "a shim reported its build before the rollout controller existed", dlog.Context{
+			"workspace": string(ws), "build": build,
+		})
+		return
+	}
+	controller.ShimReported(ws, build)
+}
+
+// OnFree is the freeness edge: the queue bounces a shim registered for it.
+func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
+	s.queue.OnFree(ws)
+}
+
 // OnTurnEnded pops the queue and releases a hold-for-turn-end.
 func (s *lifecycleSink) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose) {
 	s.queue.OnTurnEnded(ws, turn, how)
@@ -246,6 +267,9 @@ func (s *lifecycleSink) OnAsksSettled(ws ids.WorkspaceID) {
 // closed first and the pushed ones opened afresh: a healthy verdict is a
 // retraction, exactly as the topbar's warning strip treats it.
 func (s *lifecycleSink) OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *conversationv1.SessionDiagnostics) {
+	// EVERY FRAME STATES THE SHIM'S BUILD, and the rollout judges it against
+	// the installed bundle before anything else here can return early.
+	s.reportBuild(ws, diagnostics.GetShimBuild())
 	reporter, ok := s.health.reporter()
 	if !ok {
 		s.log.Error("daemon.cmd.lifecycle", "a diagnostics push arrived before the health reporter existed", dlog.Context{

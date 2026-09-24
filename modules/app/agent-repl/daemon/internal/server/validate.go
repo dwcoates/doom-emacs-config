@@ -568,15 +568,6 @@ func validateUpdateShutdownScheduleRequest(req *agentreplv1.UpdateShutdownSchedu
 	return nil
 }
 
-// validateRollOutBuildRequest is RollOutBuildRequest's base function. A request
-// naming nothing rebuilt is malformed: there is nothing to roll out.
-func validateRollOutBuildRequest(req *agentreplv1.RollOutBuildRequest) *connect.Error {
-	if req.GetDaemon() == nil && req.GetShim() == nil && req.GetWebapp() == nil {
-		return invalid("daemon", "at least one rebuilt subsystem (daemon, shim, webapp) is required")
-	}
-	return nil
-}
-
 // validateClientLogRequest is ClientLogRequest's base function.
 func validateClientLogRequest(req *agentreplv1.ClientLogRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

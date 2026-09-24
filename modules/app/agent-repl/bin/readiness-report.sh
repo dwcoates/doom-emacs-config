@@ -33,7 +33,7 @@
 #      cannot reach opposite answers.
 #
 #   1. DEPLOYED revision — read from the `.built-sha` stamp written beside the
-#      artifact by build-frontend.sh / deploy-all.sh. A missing stamp reports
+#      artifact by build-frontend.sh. A missing stamp reports
 #      "unknown"; it is never inferred from mtimes or from repo HEAD, because a
 #      guess is indistinguishable from a fact once it is in the JSON.
 #
@@ -383,7 +383,7 @@ emit_system() { # NAME
             if [ -n "$started_epoch" ]; then started_at="$(iso8601 "$started_epoch")"; fi
             case "$name" in
                 daemon)
-                    # No kickstart stamp exists for the daemon (Emacs owns its
+                    # No build report exists for the daemon (Emacs owns its
                     # lifecycle), so staleness is the direct question: was the
                     # binary written after this process began executing it?
                     if [ -n "$started_epoch" ] \
@@ -392,10 +392,11 @@ emit_system() { # NAME
                     fi
                     ;;
                 *)
-                    # The launchd services DO have a kickstart stamp, and it is
-                    # the authority deploy-all.sh already bounces on. Reusing
-                    # service_needs_bounce keeps the report and the deploy from
-                    # ever disagreeing about what "already deployed" means.
+                    # The launchd services report the build they run
+                    # themselves (a pid + binary hash file written at boot),
+                    # the same report the daemon's deploy bounces on. Reading
+                    # it through service_needs_bounce keeps this report and
+                    # the deploy from disagreeing about "already deployed".
                     if service_needs_bounce "$CACHE_BIN" "$name"; then stale=1; fi
                     ;;
             esac

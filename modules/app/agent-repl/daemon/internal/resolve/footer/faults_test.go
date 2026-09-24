@@ -71,7 +71,6 @@ func TestEveryFaultKindReachesTheStrip(t *testing.T) {
 		{"an absent prompts directory", health.KindPromptsDirMissing, true, "blocked", "daemon_impaired"},
 		{"a state client that opened read-only", health.KindWsmReadOnly, true, "blocked", "daemon_impaired"},
 		{"a durable sink that cannot be written", health.KindLogSinkPoisoned, true, "blocked", "daemon_impaired"},
-		{"a deploy script that failed", health.KindDeployScriptFailed, true, "blocked", "daemon_impaired"},
 		{"a successor that would not start", health.KindSuccessorSpawnFailed, true, "blocked", "daemon_impaired"},
 		{"a fault the shim reported about itself", health.KindShimReported, false, "idle", ""},
 		{"a headless classifier run that failed", health.KindClassifierFailed, false, "idle", ""},

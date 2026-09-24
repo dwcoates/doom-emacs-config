@@ -73,8 +73,13 @@ export interface Engine {
 
   // ---- Agent: start a turn, watch any agent, speak to it, end the turn ----
 
-  /** Deliver the session's turn. Unary: returns once the prompt is accepted. */
-  startTurn(request: shimv1.StartTurnRequest): Promise<shimv1.StartTurnResponse>;
+  /**
+   * Deliver the session's turn. Unary: returns once the prompt is accepted.
+   *
+   * `signal` is the caller's: while the start waits behind the shim's own
+   * keep-alive, its abort ends the wait with the prompt undelivered.
+   */
+  startTurn(request: shimv1.StartTurnRequest, signal?: AbortSignal): Promise<shimv1.StartTurnResponse>;
 
   /**
    * One agent's page then its tail, served FROM THE STORE and never from

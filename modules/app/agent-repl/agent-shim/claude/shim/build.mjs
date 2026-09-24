@@ -64,11 +64,14 @@ await build({
   // spawned the process would be silently ignored and every shim would report
   // the sha of whichever build happened to be bundled.
   //
-  // bin/build-frontend.sh still computes the revision once and writes it to
-  // dist/.built-sha; the daemon exports that same stamp into the shim's
-  // environment, so bundle stamp and reported identity agree by construction.
-  // src/main.ts REFUSES TO START without it, so an unset value is a loud
-  // startup failure rather than a fabricated identity.
+  // bin/build-frontend.sh still computes the content hash (lowercase hex
+  // SHA-256) of this bundle's bytes once and writes it to dist/.built-sha; the
+  // daemon exports that same hash into the shim's environment, so bundle
+  // stamp and reported identity agree by construction, and the daemon's
+  // deploy compares it against a freshly built bundle's own hash to decide
+  // whether a running shim is stale. src/main.ts REFUSES TO START without it,
+  // so an unset value is a loud startup failure rather than a fabricated
+  // identity.
   banner: {
     js: "// AUTO-GENERATED single-file bundle (esbuild); edit src/ and rebuild via `npm run build`.",
   },

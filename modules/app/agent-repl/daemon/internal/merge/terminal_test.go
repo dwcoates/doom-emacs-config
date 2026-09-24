@@ -131,6 +131,68 @@ func TestFailedSessionStopKeepsTheMergedWorktree(t *testing.T) {
 	}
 }
 
+// TestMergedWorkspaceLogSinksRetireBeforeWorktreeRemoval covers the log side of
+// the same boundary: a record reaching the workspace mid-removal must not
+// recreate the tree, so its sinks are retired after the reap and before git
+// removes the directory.
+func TestMergedWorkspaceLogSinksRetireBeforeWorktreeRemoval(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.mu.Lock()
+	retired := append([]string(nil), h.retired...)
+	stopAt, retireAt := h.stopAt, h.retireAt
+	h.mu.Unlock()
+	h.git.mu.Lock()
+	removeAt := h.git.at["remove_worktree"]
+	h.git.mu.Unlock()
+	if len(retired) != 1 || retired[0] != h.sourceD {
+		t.Fatalf("retired directories = %v, want the merged source alone", retired)
+	}
+	if stopAt >= retireAt || retireAt >= removeAt {
+		t.Fatalf("stop=%d retire=%d remove=%d, want the reap, then the retirement, then the removal", stopAt, retireAt, removeAt)
+	}
+}
+
+// TestFailedLogRetirementKeepsTheMergedWorktree covers that boundary's failure
+// edge: a directory whose sinks could still link into it is not removed, and
+// the teardown records why.
+func TestFailedLogRetirementKeepsTheMergedWorktree(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	h.retireErr = errors.New("the surfaces refused the directory")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if h.git.seen("remove_worktree") {
+		t.Fatal("the merged worktree was removed after its log sinks failed to retire")
+	}
+	record, found := recordWith(h, "error", "daemon.merge.teardown")
+	if !found || record.Context["error"] != "the surfaces refused the directory" {
+		t.Fatalf("teardown record = %+v found=%v, want the retirement failure", record, found)
+	}
+}
+
 // TestFailedMergeKeepsItsWorktree covers the other half: a failed merge's branch
 // still holds work, so its tree is not destroyed.
 func TestFailedMergeKeepsItsWorktree(t *testing.T) {

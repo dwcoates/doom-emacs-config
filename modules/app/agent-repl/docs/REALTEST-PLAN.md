@@ -162,9 +162,10 @@ this; the runner is what gets out of their way.
   changes the sweep's verdict. A run that quit the owner's editor and then
   ENDED WITHOUT ONE ANSWERING — a preflight decline after the quit, most of all
   — still cold-starts a guard-free editor: "nothing answering, nothing to hand
-  back" applies only to a run that never quit one. `bin/deploy-all.sh` holds the other half: it
-  REFUSES to restart the daemon through a guarded Emacs (the incoming daemon
-  would inherit the guard) unless `AGENT_REPL_REALTEST_TAKEOVER=1` says to.
+  back" applies only to a run that never quit one. A deploy cannot carry the
+  guard across either: the daemon's own deploy hands over to a successor
+  spawned with the INCUMBENT's environment, so a guarded daemon is replaced by
+  a guarded one and the owner's daemon by an unguarded one.
 - **The leftovers.** A realtest that registers, creates or forks a workspace
   puts a row in the OWNER'S registry naming a directory under the run
   directory, and the row outlives the directory. A sweep therefore DECLINES at
@@ -259,8 +260,8 @@ Daemon lifecycle
     and selection survive.
 18. Schedule a drain; shut down now. The banner, the held prompts, the
     handover to a new daemon.
-19. Deploy from master while Emacs runs (`bin/deploy-all.sh`). What the user
-    sees during the bounce.
+19. Deploy from master while Emacs runs (`daemon/bin/claude-repld deploy`, or
+    `M-x agent-repl-deploy`). What the user sees during the bounce.
 
 Failure
 20. Kill the shim under a workspace; the link severs and recovers on the next
