@@ -701,18 +701,25 @@ thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
   arrived untagged and was drawn as a green final answer.
 - **ONE TAG, TAKEN ONCE.** `onSdkMessage` asks the scope once per message; the
   answer is the fold context's `keepalive`, so every row the fold produces
-  carries it. The store writer lands a tagged row on `unserved_item.keepalive`
-  (recorded, never paged, never streamed); `serveSessionUpdates` never pushes
-  a tagged session fact. Only the keep-alive's own result closes it, and that
-  close pushes nothing (no context usage, title or account re-probe).
+  carries it. The store writer DROPS a tagged entry at its door (`write` and
+  `writeDurable`, one DEBUG record each, naming no upsert key), and
+  `toStoreEntry` refuses one that got past it; `serveSessionUpdates` never
+  pushes a tagged session fact. Only the keep-alive's own result closes it, and
+  that close pushes nothing (no context usage, title or account re-probe).
 - **THE DAEMON NEVER SEES ONE.** No verb names a keep-alive as the turn in
   flight (`servedOpenTurn`): not `SessionStarted`, not `SessionLive`, not
   `KillSession`, not `Hibernate`. The one keep-alive fact on the wire is the
   ruled `turn_already_open.keepalive` refusal the daemon re-drives past.
-- **PERSISTED, NOT DROPPED.** The rows are kept (unserved) because the
-  keep-alive made a real, billed API call and the file plane writes the same
-  keys; dropping them would lose accounting and let the sidecar's copy be the
-  only one.
+- **NOTHING IS STORED, ON EITHER PLANE (2026-09-23).** No purpose needs a
+  row. The send, the answer and the scope's close are this process's memory;
+  the rewind anchor is taken from the SDK messages as they pass
+  (`KeepaliveRewind.noteRecord`), `resumeSessionAt` reads the vendor's own
+  transcript, and a refused rewind re-delivers the prompt it still holds. The
+  "accounting" the rows were kept for had no reader: the store serves only page
+  lines and bash runs, and the daemon has no store client. The sidecar skips the
+  same turn's transcript records by the marker plus the transcript's promptId
+  and parentUuid links (its AGENTS.md, "Keep-alive"), so no plane writes a key
+  the other must be guarded against. Rows written before stand as they are.
 - **WHAT IT DOES NOT CLAIM.** A vendor turn's preamble (`init`, a
   `UserPromptSubmit` hook, a status line) carries no stamp and stays untagged.
 - **THE FILE PLANE is the marker, not the stamp**: the title digest and the

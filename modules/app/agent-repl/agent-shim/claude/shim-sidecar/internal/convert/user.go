@@ -79,10 +79,7 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		return append(out, VendorSpecificEntry(at, "user/meta", record))
 	default:
 		// A GENUINE HUMAN PROMPT — not a summary, clear, skill, tool-result
-		// carrier, or meta record. The keep-alive bit is read from it either
-		// way, before the withhold/emit decision, because the marker is the
-		// prompt's own and opens the turn whose records are never served.
-		c.noteKeepalive(message, at)
+		// carrier, or meta record.
 		return append(out, c.humanPrompt(record, message, at, env, agent))
 	}
 }

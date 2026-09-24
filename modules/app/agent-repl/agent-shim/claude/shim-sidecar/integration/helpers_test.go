@@ -577,6 +577,37 @@ func withFields(t *testing.T, obj map[string]any, kv map[string]any) map[string]
 	return out
 }
 
+// chained re-points each record at the one before it in the vendor's
+// parentUuid chain. A subject that writes a SUBSET of a capture's lines has
+// broken the capture's own chain, and the chain is what the keep-alive rule
+// reads (convert/keepalive.go), so every such subject re-links what it writes.
+func chained(t *testing.T, records ...map[string]any) []map[string]any {
+	t.Helper()
+	out := make([]map[string]any, len(records))
+	for i, record := range records {
+		if i > 0 {
+			record = withFields(t, record, map[string]any{"parentUuid": out[i-1]["uuid"]})
+		}
+		out[i] = record
+	}
+	return out
+}
+
+// asOwnPrompt gives a user record its own uuid and promptId, so two prompts
+// made from ONE captured record open two turns rather than restating one.
+func asOwnPrompt(t *testing.T, obj map[string]any, uuid, promptID string) map[string]any {
+	t.Helper()
+	return withFields(t, obj, map[string]any{"uuid": uuid, "promptId": promptID})
+}
+
+// appendRecords writes each record to g, in order.
+func appendRecords(t *testing.T, g *growingFile, records ...map[string]any) {
+	t.Helper()
+	for _, record := range records {
+		g.AppendLine(encodeRecord(t, record))
+	}
+}
+
 // retargetSession re-points a fixture line at this test's session and cwd, so a
 // corpus line taken from another capture belongs to the file it is written into.
 func retargetSession(t *testing.T, obj map[string]any, session, cwd string) map[string]any {
@@ -2171,16 +2202,6 @@ func unparsedOf(entries []*storev1.StoreEntry) []*storev1.StoreUnparsed {
 	for _, u := range unservedOf(entries) {
 		if p := u.GetUnparsed(); p != nil {
 			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func keepalivesOf(entries []*storev1.StoreEntry) []*storev1.StoreAgentItem {
-	var out []*storev1.StoreAgentItem
-	for _, u := range unservedOf(entries) {
-		if k := u.GetKeepalive(); k != nil {
-			out = append(out, k)
 		}
 	}
 	return out

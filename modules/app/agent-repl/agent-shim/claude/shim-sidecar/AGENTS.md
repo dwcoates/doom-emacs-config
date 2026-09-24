@@ -846,8 +846,7 @@ record MEANS.
   copies of one unconvertible line — and `residue:file:<normalized path>:<byte
   offset>` where it has none (an unparsed line, a spool's raw bytes), which is a
   deliberately separate space so no path can collide with a uuid. A KEEP-ALIVE
-  is not residue: it is a well-formed fact with no book and keeps the key of the
-  unit it would have been.
+  record has no key at all: nothing of one is stored (see "Keep-alive" below).
 - `write_id` is DETERMINISTIC: hex sha256 of
   `"shim-claude-sidecar|" + file_id + "|" + offset + "|" + discriminator`, where
   `file_id` is the file's `dev:inode` identity and the discriminator
@@ -1139,7 +1138,7 @@ subtest **0.87s**.
 
 | Bound | Where | Old | New | Basis |
 | --- | --- | --- | --- | --- |
-| `waitBudget` | `integration/helpers_test.go` | 50s | **10s** | ~3x the slowest whole subject (2.82s, `TestMockKeepAliveTurnsNeverReachAPage`; 0.92s alone). A subject's own wall time bounds every wait inside it. The old 50s cited a ~16.6s max for `TestMockScenarios/!subagent`, which measures **0.33s** — the number was ~50x its own premise. Costs nothing on green. |
+| `waitBudget` | `integration/helpers_test.go` | 50s | **10s** | ~3x the slowest whole subject (2.82s, `TestMockKeepAliveTurnsStoreNothing`; 0.92s alone). A subject's own wall time bounds every wait inside it. The old 50s cited a ~16.6s max for `TestMockScenarios/!subagent`, which measures **0.33s** — the number was ~50x its own premise. Costs nothing on green. |
 | `snapshotBudget` | `integration/helpers_test.go` | 1s | 1s, **no longer paid** | Unchanged as a number and no longer reached: `watchBashRun` ends on the row count its caller read off the wire, and cancels its context BEFORE closing the stream (closing first waits for the server, which is how the whole budget used to be paid on the way out of a healthy call). Three subjects paid 1s each on every green run; they now pay ~0. |
 | `standDownGrace` | `integration/mock_helpers_test.go` | 3s | 3s | Unchanged. The mocked vendor writes every file synchronously and exits promptly on SIGTERM; "did not leave within" has never appeared in a green run. Costs nothing on green. |
 | `growthSilence` | `integration/lost_policy_test.go` | (was `shortSilence`, 150ms) | **750ms** | ~5x the worst observed iteration (~150ms under this package's parallelism; ~10ms quiet) of the one subject that must KEEP a file alive across a silence window. INHERENT: the policy under test IS a silence window. Every other short-window subject keeps `shortSilence` (150ms). |
@@ -1214,20 +1213,21 @@ crosses `tail.Handler`, `tail.Context`, and the two optional methods in
 
 ### The four outcomes a record can have
 
-A page line, a detached run's frame, an unserved item, or — for the exempt set
-alone — a drop. There is no fifth, and nothing on disk is ever silently lost.
+A page line, a detached run's frame, an unserved item, or a drop. There is no
+fifth, and nothing on disk is ever silently lost.
 
 - A **page line** names its book (`StorePageLine.page_agent_id`). A subagent's
   constituents form ITS OWN book; the SPAWN that created it is a line in the
   parent's.
 - A **run frame** (`StoreAgentBash`) wraps the spawning call's unit id and is
   structurally unpaginatable.
-- An **unserved item** is a keep-alive turn's item (no book), `vendor_specific`
+- An **unserved item** is `vendor_specific`
   (understood, deliberately not carried — the follow-up is a CONVERTER),
   `unknown` (parsed, not modeled — the follow-up is a MODEL), or `unparsed`
   (unreadable — a FAILURE, carrying source, offset, parse_error and bounded raw).
-- A **drop** is the exempt set, or one of the RESIDUE KINDS NEVER PERSISTED
-  (below). Never residue, never `AgentUnmodeled`.
+- A **drop** is the exempt set, one of the RESIDUE KINDS NEVER PERSISTED
+  (below), or a KEEP-ALIVE TURN'S RECORD (below). Never residue, never
+  `AgentUnmodeled`.
 
 A recognizable modeled kind reaching `unknown` is a PRODUCER DEFECT. The
 golden-corpus test asserts the `unknown` set is EMPTY and the `vendor_specific`
@@ -1478,9 +1478,11 @@ for nothing.
   golden-corpus census still pins the vendor_specific kinds the converter mints —
   a new kind appearing there is still a mapping regression. Only the write is
   skipped.
-- KEEPALIVE IS NOT RESIDUE. It rides the same `unserved_item` field, but it is a
-  well-formed conversation fact with no book rather than something the reader
-  could not carry, and it is persisted like any other typed entry.
+- KEEPALIVE IS NOT RESIDUE, and it is not withheld here. A keep-alive's record
+  is dropped by the converter itself, per RECORD, before any entry leaves it
+  (see "Keep-alive"), so no entry on the `unserved_item.keepalive` arm is minted
+  at all; rows on that arm written before 2026-09-23 stand in the store as they
+  are.
 - THE FORWARD-COMPAT ARGUMENT MOVES TO THE COUNTS. `unknown` used to be kept on
   the grounds that its stored row IS the coverage for a vendor behavior nobody
   has modelled. The classification, the per-record `residue-drop` label and the
@@ -1574,11 +1576,42 @@ batch still rides the wire (the store's count must rise) but is not news.
 
 ### Keep-alive
 
-A user prompt whose first text block BEGINS with
-`<!--agent-repl:keepalive-->` marks the turn keep-alive until the next
-non-keepalive prompt (one remembered bool per file). Every record converted while
-the bit is set lands on `unserved_item.keepalive` — structurally unable to appear
-in any page, so no read filters them out and no activity routes onward.
+NOTHING OF A KEEP-ALIVE IS STORED, ON EITHER PLANE (2026-09-23). No purpose
+needs the rows: the keep-alive's send, its answer and the rewind anchor are the
+shim's in-memory state, a resume reads the vendor's own file, and nothing reads
+a stored keep-alive row (the store serves only page lines and bash runs, and the
+daemon has no store client). So the shim writes nothing for one, and the
+converter drops every entry a keep-alive's record converts to — one DEBUG
+`keepalive-skip` record per record, carrying no `upsert_key`. The record is
+still read and converted in full, so every join it opens or settles stays warm.
+
+THE RULE READS THE TRANSCRIPT'S LINKS, NEVER ARRIVAL ORDER (`internal/convert/
+keepalive.go`). The vendor's file is a tree whose records interleave: a real
+prompt after a rewind parents onto the anchor while the keep-alive's late
+records still parent onto the keep-alive, a compaction's summary query runs
+beside one, a task notification opens a turn while one is pending. The old
+one-bool rule served the keep-alive's `.` whenever another prompt landed first,
+and lost the bit across a restart. Now:
+
+- a USER record with a `promptId` is the keep-alive's when that promptId is a
+  keep-alive prompt's; a prompt (prose, not meta, not a compaction summary)
+  whose first text block BEGINS with `<!--agent-repl:keepalive-->` makes its
+  promptId one. A different promptId is a different turn, whatever its parent —
+  a task notification or a peer message chained onto a keep-alive stays served;
+- a USER record with no `promptId` (an older CLI) is classified by the marker
+  when it is a prompt, and follows its parent otherwise;
+- EVERY OTHER RECORD FOLLOWS ITS PARENT (`parentUuid`). A record with none — a
+  compaction boundary, the CLI's unchained bookkeeping — is no keep-alive's, so
+  a compaction beside a keep-alive is served: the conversation really was
+  compacted, and the shim clears its rewind anchor on it for that reason.
+
+A RESTART LOSES NOTHING. A tailer hands a `tail.Primer` handler the file's
+bytes before the first frame it delivers, once, before the first `Handle`; the
+session transcript handler seeds the converter from them with the same rule
+(`SeedKeepalive`, DEBUG `keepalive-seed`). The boot rewind alone is not enough:
+it stops at the LAST turn start, which is another prompt whenever one landed
+between the keep-alive's prompt and its reply. A failed prefix read fails the
+poll, which commits nothing and primes again next time.
 
 ### Context lifecycle, and the one legitimate hold
 

@@ -64,9 +64,9 @@ export interface PersistEntry {
   /** Where in the vendor's record this came from, and which arm it is. */
   readonly source: SourceCoordinates;
   /**
-   * Whether this belongs to a KEEP-ALIVE turn. A keep-alive is real vendor
-   * traffic with real cost, so it is recorded — but it has no book, so it lands
-   * as `unserved_item.keepalive` and no page ever returns it.
+   * Whether this belongs to a KEEP-ALIVE turn. Nothing of a keep-alive is
+   * stored: the writer drops a tagged entry at its door (`store/writer.ts`),
+   * so the tag is the whole decision and no producer has to ask.
    */
   readonly keepalive: boolean;
   /** What this row says. The arm decides the store arm it lands in. */
@@ -230,7 +230,8 @@ export interface Persistence {
    *
    * Rejects with a {@link PersistenceError} when the batch could not be landed
    * after the retry schedule. Nothing is committed on a failure, so a caller
-   * that retries duplicates nothing.
+   * that retries duplicates nothing. A keep-alive entry is never stored: it is
+   * dropped at the door, and a batch of nothing else resolves at once.
    */
   writeDurable(entries: PersistEntry[]): Promise<void>;
   /**
@@ -239,7 +240,8 @@ export interface Persistence {
    * Transient store failures replay silently from the BOUNDED in-memory retry
    * buffer; an exhausted retry is a LOUD logged drop naming every lost upsert
    * key, a degraded window, and a `store_unreachable` fault. There is NO spill
-   * to disk, ever.
+   * to disk, ever. A keep-alive entry is never stored: it is dropped at the
+   * door, before any batch is formed.
    */
   write(entries: PersistEntry[]): void;
   /**

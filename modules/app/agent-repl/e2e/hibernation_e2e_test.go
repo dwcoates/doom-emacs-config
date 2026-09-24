@@ -54,6 +54,7 @@ package e2e
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,6 +71,8 @@ import (
 	"connectrpc.com/connect"
 
 	"claude-repld/integration/harness"
+
+	_ "modernc.org/sqlite"
 )
 
 // ---------------------------------------------------------------------------
@@ -491,6 +494,70 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	}
 	if !vendorTurnDrawn {
 		t.Errorf("feed drew no row for the vendor's own turn, want it served beside the hidden keep-alive")
+	}
+}
+
+// TestKeepAliveStoresNothingOnEitherPlane — nothing of a keep-alive is stored
+// (2026-09-23). The shim drops every keep-alive-tagged entry at its writer's
+// door, and the sidecar skips the turn's transcript records by the marker plus
+// the transcript's promptId and parentUuid links, so the real store holds no
+// row of the keep-alive and neither plane ever meets the other's copy of a key
+// under a different kind.
+//
+// SYNCHRONIZATION: the shim's "closed a turn" record with keepalive=true proves
+// a keep-alive ran to its answer; a real prompt submitted after it, seen to end
+// in the feed, proves the shim's ordered writer delivered everything before it;
+// and a sidecar cursor advancing past the real turn's baseline proves the file
+// plane read the keep-alive's transcript bytes, which precede it. Only then is
+// absence asserted — in the store's own database, where an unserved row would
+// be, since no read verb ever returns one.
+func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
+	// Arrange
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+	}})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+
+	// Act: a keep-alive runs to its answer, then a real turn follows it.
+	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive turn to close",
+		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
+	driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "after the keep-alive")
+
+	// Assert: no row of the keep-alive, on either arm it could have taken.
+	db, err := sql.Open("sqlite", "file:"+w.Store.DBPath+"?mode=ro")
+	if err != nil {
+		t.Fatalf("e2e: opening the store database read-only: %v", err)
+	}
+	defer db.Close()
+	var keepaliveKind, carryingMarker int
+	if err := db.QueryRowContext(w.Ctx(), `SELECT COUNT(*) FROM entry WHERE kind = 'keepalive'`).Scan(&keepaliveKind); err != nil {
+		t.Fatalf("e2e: counting keepalive-kind rows: %v", err)
+	}
+	if err := db.QueryRowContext(w.Ctx(),
+		`SELECT COUNT(*) FROM entry WHERE instr(frame, CAST('agent-repl:keepalive' AS BLOB)) > 0`).Scan(&carryingMarker); err != nil {
+		t.Fatalf("e2e: counting rows carrying the keep-alive marker: %v", err)
+	}
+	if keepaliveKind != 0 || carryingMarker != 0 {
+		t.Errorf("the store holds %d keepalive-kind row(s) and %d row(s) carrying the keep-alive marker under %s, want none",
+			keepaliveKind, carryingMarker, projectDir)
+	}
+
+	// Assert: neither plane was refused a kind change on any key.
+	for _, source := range []struct {
+		name    string
+		records []harness.LogRecord
+	}{
+		{"store", harness.ReadLog(t, w.Store.LogPath)},
+		{"sidecar", w.Sidecar.Log(t)},
+	} {
+		for _, r := range source.records {
+			if strings.Contains(r.Message, "would change the row's kind") || strings.Contains(fmt.Sprint(r.Context), "upsert_changes_identity") {
+				t.Errorf("the %s logged a kind-change refusal: %s %v", source.name, r.Message, r.Context)
+			}
+		}
 	}
 }
 
