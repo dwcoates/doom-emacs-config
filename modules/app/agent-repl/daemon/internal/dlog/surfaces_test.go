@@ -1678,3 +1678,25 @@ func TestEveryWorkspaceEntryIsBuiltByTheOneConstructor(t *testing.T) {
 		t.Fatalf("surfaces.go builds a workspace entry %d times, want once, in newWorkspaceEntryLocked", built)
 	}
 }
+
+// TestADetachmentSurvivesTheWorkspacesEviction: a merged workspace is closed
+// (evicted) after its worktree is removed, and a record still in flight for it
+// must not re-create the tree. The retirement this replaced ended at Evict.
+func TestADetachmentSurvivesTheWorkspacesEviction(t *testing.T) {
+	// Arrange.
+	s, dir := detachFixture(t)
+	if err := s.Evict(dir); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Act.
+	err := s.ClientLog(dir, sidecarRecord())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog after eviction = %v, want the record persisted", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("an evicted, detached worktree %s exists again (stat = %v)", dir, statErr)
+	}
+}
