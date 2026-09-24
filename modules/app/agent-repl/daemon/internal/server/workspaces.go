@@ -648,7 +648,7 @@ func (s *server) subjectFor(
 	}
 	subject, r, err := s.resolveRef(ctx, rpc, ref)
 	if err != nil {
-		return resolved{}, fail(s.log, rpc, err), true
+		return resolved{}, failResolution(s.log, rpc, err), true
 	}
 	if r != nil {
 		return resolved{}, s.refuse(s.log, rpc, resp, *r), true

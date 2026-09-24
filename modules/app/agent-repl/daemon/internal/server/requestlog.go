@@ -55,11 +55,23 @@ func (s *server) beginRequest(
 			s.log.Error("daemon.server.request_boundary", "could not resolve the request's serving standing",
 				dlog.Context{"rpc": rpc, "workspace_id": workspaceIDText, "cause": err.Error()})
 			return requestBoundary{}, err
-		case standing != workspace.StandingOwned || s.life.Err() != nil:
+		case standing != workspace.StandingOwned:
 			log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_owned": false})
 		default:
-			record, err := s.deps.DB.Workspace(ctx, workspaceID)
+			// THE BOUNDARY'S READ IS ORDERED AGAINST CLOSE, as every
+			// resolution read is (readRegistry): a lifetime check before it
+			// left the state client free to close in between, and a ClientLog
+			// arriving during a drain's exit met "sql: database is closed" at
+			// ERROR here.
+			var record wsm.Workspace
+			ended, err := s.readRegistry(func() error {
+				var readErr error
+				record, readErr = s.deps.DB.Workspace(ctx, workspaceID)
+				return readErr
+			})
 			switch {
+			case ended:
+				log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_owned": false})
 			case err == nil:
 				// THE BOUNDARY NEVER FAILS A REQUEST OVER ITS OWN LOGGING. A
 				// workspace whose directory is a scratch path or has been
@@ -71,6 +83,12 @@ func (s *server) beginRequest(
 					With(dlog.Context{dlog.KeyWorkspaceID: workspaceIDText, dlog.KeyWorkspaceDir: record.Dir})
 			case errors.Is(err, wsm.ErrNotFound):
 				log = log.With(dlog.Context{"workspace_id": workspaceIDText, "workspace_known": false})
+			case endedOnCancel(err):
+				// The caller went away before its workspace was read: the
+				// request is over, and that is not a fault of the daemon's.
+				s.log.Info("daemon.server.request_boundary", "the request's workspace was not read; the request's context ended",
+					dlog.Context{"rpc": rpc, "workspace_id": workspaceIDText, "cause": err.Error()})
+				return requestBoundary{}, err
 			default:
 				s.log.Error("daemon.server.request_boundary", "could not resolve the request's workspace",
 					dlog.Context{"rpc": rpc, "workspace_id": workspaceIDText, "cause": err.Error()})

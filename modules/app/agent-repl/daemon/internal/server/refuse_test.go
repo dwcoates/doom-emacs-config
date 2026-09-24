@@ -566,3 +566,109 @@ func TestSetResponseErrorFillsTheCreateSpawnFailedDetail(t *testing.T) {
 		t.Fatalf("setResponseError = %v, resp = %v, want spawn_failed carrying the spawn's account", ok, resp)
 	}
 }
+
+// TestAResolutionReadInFlightHoldsCloseOff is the forced interleaving the
+// webapp layer's roster area lost at random: a ClientLog's registry read is in
+// flight when the daemon's exit closes the surface. Close must not be able to
+// complete — and so the state client must not be closed — until that read has.
+func TestAResolutionReadInFlightHoldsCloseOff(t *testing.T) {
+	// Arrange: the read parks inside the registry.
+	h := newHarness(t)
+	h.DB.workspaceEntered = make(chan struct{})
+	h.DB.workspaceRelease = make(chan struct{})
+	entered := h.DB.workspaceEntered
+	answered := make(chan error, 1)
+	go func() { answered <- clientLogOnce(h) }()
+	<-entered
+
+	// Act: the exit tries to take the gate Close takes.
+	gate := &h.Server.(*server).registry
+	closable := gate.TryLock()
+	if closable {
+		gate.Unlock()
+	}
+	close(h.DB.workspaceRelease)
+
+	// Assert.
+	if closable {
+		t.Fatal("Close could have completed while a resolution read was in flight; the state client would close beneath it")
+	}
+	if err := <-answered; err != nil {
+		t.Fatalf("the in-flight ClientLog = %v, want it persisted", err)
+	}
+}
+
+// TestReadRegistryAfterCloseMakesNoRead: once Close has begun, no read reaches
+// a state client the exit may already have closed.
+func TestReadRegistryAfterCloseMakesNoRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	if err := s.Close(); err != nil {
+		t.Fatalf("close the surface: %v", err)
+	}
+	read := false
+
+	// Act.
+	ended, err := s.readRegistry(func() error { read = true; return nil })
+
+	// Assert.
+	if !ended || err != nil || read {
+		t.Fatalf("readRegistry after Close = (ended %v, err %v, read %v), want ended with no read", ended, err, read)
+	}
+}
+
+// TestFailResolutionRecordsNoErrorForTheShutdownRefusal: the refusal was
+// already stated at INFO where it was decided.
+func TestFailResolutionRecordsNoErrorForTheShutdownRefusal(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	refusal := connect.NewError(connect.CodeUnavailable, fmt.Errorf("ClientLog: %w", errServingEnded))
+
+	// Act.
+	got := failResolution(log, "ClientLog", refusal)
+
+	// Assert.
+	if got.Code() != connect.CodeUnavailable {
+		t.Fatalf("failResolution code = %v, want unavailable", got.Code())
+	}
+	if len(log.at("ERROR")) != 0 {
+		t.Fatalf("the shutdown refusal was recorded at ERROR: %+v", log.at("ERROR"))
+	}
+}
+
+// TestFailResolutionRecordsNoErrorForAnEndedRequest: the caller leaving is not
+// a failure of the daemon's.
+func TestFailResolutionRecordsNoErrorForAnEndedRequest(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	got := failResolution(log, "ClientLog", fmt.Errorf("ClientLog: %w", context.Canceled))
+
+	// Assert.
+	if got.Code() != connect.CodeCanceled {
+		t.Fatalf("failResolution code = %v, want canceled", got.Code())
+	}
+	if len(log.at("ERROR")) != 0 {
+		t.Fatalf("an ended request was recorded at ERROR: %+v", log.at("ERROR"))
+	}
+}
+
+// TestFailResolutionRecordsAGenuineFailureAtError: everything else still fails
+// loudly.
+func TestFailResolutionRecordsAGenuineFailureAtError(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	got := failResolution(log, "ClientLog", errors.New("sql: database is closed"))
+
+	// Assert.
+	if got.Code() != connect.CodeInternal {
+		t.Fatalf("failResolution code = %v, want internal", got.Code())
+	}
+	if len(log.at("ERROR")) != 1 {
+		t.Fatalf("a genuine failure was recorded %d time(s) at ERROR, want once", len(log.at("ERROR")))
+	}
+}
