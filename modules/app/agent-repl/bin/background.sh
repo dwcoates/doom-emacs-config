@@ -15,27 +15,30 @@
 # WHAT IT DOES, per platform. There is no silent path: every platform either
 # demotes the command or refuses to run it.
 #
-#   Darwin  `taskpolicy -b` (setpriority PRIO_DARWIN_BG): CPU scheduling AND
-#           disk I/O are throttled, and on Apple Silicon the work is kept to
-#           the efficiency cores. getpriority(PRIO_DARWIN_PROCESS) reads 1.
-#   Linux   `nice -n 19`. The only non-macOS place a suite runs is the e2e
-#           sandbox container (e2e/sandbox/bin/entrypoint.sh routes every
-#           `run` command through here). CPU priority only: a container's
-#           disk is its own tmpfs, and the host-side cost is the Docker VM's.
+#   Darwin  `nice -n 19`: the lowest CPU priority. Owner ruling 2026-09-23,
+#   Linux   "very low" priority. The run keeps the performance cores and
+#           runs at full speed on an idle host, but it always yields the CPU
+#           to the live runtime. `taskpolicy -b` was measured and rejected:
+#           it held a run to the efficiency cores and throttled its I/O, and
+#           the webapp integration suite then passed 56-58 of 1765, its
+#           files failing their 1800ms boot-hook bound. On Linux the only
+#           place a suite runs is the e2e sandbox container
+#           (e2e/sandbox/bin/entrypoint.sh routes every `run` command here).
+#           Disk I/O is NOT demoted on either platform.
 #   other   REFUSED, exit 78. No suite here has ever run anywhere else, and
 #           a run at normal priority is exactly what this exists to prevent.
 #
-# Children inherit the policy, so wrapping the ROOT of a run is enough: every
-# go test binary, daemon, shim, vitest worker and Emacs a suite starts is
-# background too. `taskpolicy` and `nice` both EXEC the command, so the pid a
-# caller holds (make, npm, a Go harness killing a process group) is the
-# command's own.
+# Children inherit the niceness, so wrapping the ROOT of a run is enough:
+# every go test binary, daemon, shim, vitest worker and Emacs a suite starts
+# is demoted too. `nice` EXECs the command, so the pid a caller holds (make,
+# npm, a Go harness killing a process group) is the command's own.
 #
-# IT IS IDEMPOTENT. A process that is already at background priority -- an
+# IT IS IDEMPOTENT. A process that is already at niceness 19 or above -- an
 # entry point called from another entry point, `make test` under
 # bin/test-all.sh, `npm run test:webapp-layer` under the Go e2e suite -- runs
-# its command straight through. What decides that is the process's ACTUAL
-# priority, read with getpriority/`nice`, never a variable it inherited.
+# its command straight through (on macOS a second `nice -n 19` would push it
+# to 20). What decides that is the process's ACTUAL niceness, read with
+# getpriority, never a variable it inherited.
 #
 # THE MARKER. Before it runs the command, this exports
 # AGENT_REPL_BACKGROUND_PRIORITY=<mechanism>. The runners that cannot be
@@ -76,34 +79,21 @@ refuse() {
 
 os=$(uname -s) || refuse "could not read the platform with uname"
 
+# read_niceness -- this process's niceness. macOS's nice(1) cannot print it
+# (it demands a utility), so there it is getpriority(PRIO_PROCESS, self) from
+# perl, which ships with macOS; the perl child inherits this process's value.
+# Linux's coreutils nice prints it, and the sandbox image may lack perl.
+read_niceness() {
+    case $os in
+        Darwin) perl -e 'print getpriority(0, 0)' ;;
+        Linux) nice ;;
+    esac
+}
+
 case $os in
-    Darwin)
-        # getpriority(PRIO_DARWIN_PROCESS = 4, self) answers 1 under
-        # PRIO_DARWIN_BG and 0 otherwise, and it is inherited, so the perl
-        # child reads this process's own state. NOT `ps -o pri`: that is the
-        # live scheduling priority, which decays under load (a background
-        # process was measured reading 3, and a busy normal one can sink as
-        # low). perl ships with macOS; its getpriority is the plain syscall.
-        darwin_bg=$(perl -e 'print getpriority(4, 0)') ||
-            refuse "could not read this process's background state with perl"
-        export AGENT_REPL_BACKGROUND_PRIORITY=darwin-bg
-        case $darwin_bg in
-            1) exec "$@" ;;
-            0) ;;
-            *) refuse "getpriority(PRIO_DARWIN_PROCESS) answered '$darwin_bg', which is neither 0 nor 1" ;;
-        esac
-        # An absolute path, not a PATH lookup: taskpolicy lives in /usr/sbin,
-        # which the stub-PATH harnesses here (and many launch contexts) leave
-        # out. AGENT_REPL_TASKPOLICY is the test seam, as AGENT_REPL_LAUNCHCTL
-        # is for bin/store-reset.sh.
-        taskpolicy=${AGENT_REPL_TASKPOLICY:-/usr/sbin/taskpolicy}
-        [[ -x $taskpolicy ]] ||
-            refuse "$taskpolicy is missing or not executable, so this macOS host cannot demote the run"
-        exec "$taskpolicy" -b "$@"
-        ;;
-    Linux)
-        niceness=$(nice) || refuse "could not read this process's niceness with nice"
-        [[ $niceness =~ ^-?[0-9]+$ ]] || refuse "nice reported a niceness that is not a number: '$niceness'"
+    Darwin|Linux)
+        niceness=$(read_niceness) || refuse "could not read this process's niceness"
+        [[ $niceness =~ ^-?[0-9]+$ ]] || refuse "the niceness read back is not a number: '$niceness'"
         export AGENT_REPL_BACKGROUND_PRIORITY=nice-19
         if (( niceness >= 19 )); then
             exec "$@"

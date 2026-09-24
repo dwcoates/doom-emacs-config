@@ -13,11 +13,11 @@
 # fails when any test entry point does not route through it.
 #
 # Three parts:
-#   1. The helper, HERMETICALLY: uname, perl, nice and taskpolicy are stubs, so
-#      every platform branch (macOS wrap, macOS pass-through, Linux, refusal)
-#      is exercised on any host.
-#   2. The helper on THIS host, for real: a process started at normal priority
-#      and wrapped reads back as background, and so does its grandchild.
+#   1. The helper, HERMETICALLY: uname, perl and nice are stubs, so every
+#      platform branch (wrap, pass-through, unreadable niceness, refusal) is
+#      exercised on any host.
+#   2. The helper on THIS host, for real: a wrapped command's grandchild reads
+#      niceness 19, and a nested wrap does not push it further.
 #   3. The source scan over the real repository, and over fixture trees that
 #      each carry exactly one violation, so the scan is shown to catch it.
 #
@@ -54,8 +54,8 @@ printf '%s\n' "${STUB_UNAME:?}"
 STUB
 cat >"$STUBS/perl" <<'STUB'
 #!/bin/bash
-[ "${STUB_PERL_FAIL:-0}" = 1 ] && exit 1
-printf '%s' "${STUB_DARWIN_BG:?}"
+[ "${STUB_NICE_FAIL:-0}" = 1 ] && exit 1
+printf '%s' "${STUB_NICENESS:?}"
 STUB
 cat >"$STUBS/nice" <<'STUB'
 #!/bin/bash
@@ -68,13 +68,7 @@ printf 'nice %s\n' "$*" >>"$STUB_LOG"
 shift 2
 exec "$@"
 STUB
-cat >"$STUBS/taskpolicy" <<'STUB'
-#!/bin/bash
-printf 'taskpolicy %s\n' "$*" >>"$STUB_LOG"
-shift
-exec "$@"
-STUB
-chmod +x "$STUBS/uname" "$STUBS/perl" "$STUBS/nice" "$STUBS/taskpolicy"
+chmod +x "$STUBS/uname" "$STUBS/perl" "$STUBS/nice"
 
 # run_helper DIR [ENV=VALUE...] -- <command...>
 # Runs the helper under the stubs with a CLEAN marker, the way a fresh entry
@@ -90,7 +84,6 @@ run_helper() {
     env -u AGENT_REPL_BACKGROUND_PRIORITY \
         PATH="$STUBS:/usr/bin:/bin" \
         STUB_LOG="$dir/log" \
-        AGENT_REPL_TASKPOLICY="$STUBS/taskpolicy" \
         "${env_args[@]}" \
         bash "$HELPER" "$@" >"$dir/out" 2>"$dir/err"
     RC=$?
@@ -100,91 +93,68 @@ run_helper() {
 # The subject every wrap case runs: it reports the marker it was handed.
 MARKER_CMD=(bash -c 'printf "marker=%s\n" "${AGENT_REPL_BACKGROUND_PRIORITY:-}"')
 
-# --- 1a. macOS at normal priority: wrapped in taskpolicy -b ------------------
-d="$TMP/h1a"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=0 -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 0 ] && grep -q '^taskpolicy -b bash -c' "$d/log"; then
-    pass "macOS: a normal-priority run is executed under taskpolicy -b"
-else
-    fail "macOS: a normal-priority run is executed under taskpolicy -b" "rc=$RC log: $(cat "$d/log") err: $(cat "$d/err")"
-fi
+# Both supported platforms demote the same way; only how the niceness is read
+# differs (perl's getpriority on macOS, nice(1) on Linux), and the stubs
+# answer both from STUB_NICENESS.
+for platform in Darwin Linux; do
+    # --- 1a. a normal-priority run: wrapped in nice -n 19 with the marker ------
+    d="$TMP/h1a-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=0 -- "${MARKER_CMD[@]}"
+    if [ "$RC" -eq 0 ] && grep -q '^nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=nice-19" ]; then
+        pass "$platform: a normal-priority run is executed under nice -n 19 with the nice-19 marker"
+    else
+        fail "$platform: a normal-priority run is executed under nice -n 19 with the nice-19 marker" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
+    fi
 
-# --- 1b. macOS wrap exports the darwin marker --------------------------------
-d="$TMP/h1b"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=0 -- "${MARKER_CMD[@]}"
-if [ "$(cat "$d/out")" = "marker=darwin-bg" ]; then
-    pass "macOS: the wrapped command is handed AGENT_REPL_BACKGROUND_PRIORITY=darwin-bg"
-else
-    fail "macOS: the wrapped command is handed AGENT_REPL_BACKGROUND_PRIORITY=darwin-bg" "out: $(cat "$d/out")"
-fi
+    # --- 1b. already at niceness 19: passes through --------------------------
+    d="$TMP/h1b-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=19 -- "${MARKER_CMD[@]}"
+    if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=nice-19" ]; then
+        pass "$platform: a run already at niceness 19 passes through without re-wrapping"
+    else
+        fail "$platform: a run already at niceness 19 passes through without re-wrapping" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out")"
+    fi
 
-# --- 1c. macOS already at background priority: passes through ---------------
-d="$TMP/h1c"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=1 -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=darwin-bg" ]; then
-    pass "macOS: a run already at background priority passes through without re-wrapping"
-else
-    fail "macOS: a run already at background priority passes through without re-wrapping" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out")"
-fi
+    # --- 1c. a niceness above 19 (macOS reaches 20): passes through ----------
+    d="$TMP/h1c-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=20 -- "${MARKER_CMD[@]}"
+    if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ]; then
+        pass "$platform: a run already above niceness 19 passes through without re-wrapping"
+    else
+        fail "$platform: a run already above niceness 19 passes through without re-wrapping" "rc=$RC log: $(cat "$d/log")"
+    fi
 
-# --- 1d. macOS with no taskpolicy: refused loudly, command not run -----------
-d="$TMP/h1d"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=0 AGENT_REPL_TASKPOLICY="$TMP/absent/taskpolicy" -- \
-    bash -c 'echo ran >"$0"' "$d/ran"
-if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q 'REFUSING TO RUN' "$d/err"; then
-    pass "macOS: a missing taskpolicy refuses the run loudly (exit 78) and never runs it"
-else
-    fail "macOS: a missing taskpolicy refuses the run loudly (exit 78) and never runs it" "rc=$RC err: $(cat "$d/err")"
-fi
+    # --- 1d. a niceness below 19 but not 0: still demoted --------------------
+    d="$TMP/h1d-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=10 -- "${MARKER_CMD[@]}"
+    if [ "$RC" -eq 0 ] && grep -q '^nice -n 19 bash -c' "$d/log"; then
+        pass "$platform: a run at niceness 10 is still demoted"
+    else
+        fail "$platform: a run at niceness 10 is still demoted" "rc=$RC log: $(cat "$d/log")"
+    fi
 
-# --- 1e. macOS whose priority cannot be read: refused ------------------------
-d="$TMP/h1e"
-run_helper "$d" STUB_UNAME=Darwin STUB_PERL_FAIL=1 STUB_DARWIN_BG=0 -- \
-    bash -c 'echo ran >"$0"' "$d/ran"
-if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q 'REFUSING TO RUN' "$d/err"; then
-    pass "macOS: an unreadable priority refuses the run loudly"
-else
-    fail "macOS: an unreadable priority refuses the run loudly" "rc=$RC err: $(cat "$d/err")"
-fi
+    # --- 1e. the niceness cannot be read: refused, command not run -----------
+    d="$TMP/h1e-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICE_FAIL=1 STUB_NICENESS=0 -- \
+        bash -c 'echo ran >"$0"' "$d/ran"
+    if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q 'REFUSING TO RUN' "$d/err"; then
+        pass "$platform: an unreadable niceness refuses the run loudly (exit 78) and never runs it"
+    else
+        fail "$platform: an unreadable niceness refuses the run loudly (exit 78) and never runs it" "rc=$RC err: $(cat "$d/err")"
+    fi
 
-# --- 1e2. macOS with a nonsense background state: refused ---------------------
-d="$TMP/h1e2"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=-1 -- bash -c 'echo ran >"$0"' "$d/ran"
-if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q "answered '-1'" "$d/err"; then
-    pass "macOS: a background state that is neither 0 nor 1 refuses the run loudly"
-else
-    fail "macOS: a background state that is neither 0 nor 1 refuses the run loudly" "rc=$RC err: $(cat "$d/err")"
-fi
+    # --- 1f. the niceness is not a number: refused ---------------------------
+    d="$TMP/h1f-$platform"
+    run_helper "$d" STUB_UNAME="$platform" STUB_NICENESS=high -- bash -c 'echo ran >"$0"' "$d/ran"
+    if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q "not a number: 'high'" "$d/err"; then
+        pass "$platform: a niceness that is not a number refuses the run loudly"
+    else
+        fail "$platform: a niceness that is not a number refuses the run loudly" "rc=$RC err: $(cat "$d/err")"
+    fi
+done
 
-# --- 1f. Linux at niceness 0: wrapped in nice -n 19 --------------------------
-d="$TMP/h1f"
-run_helper "$d" STUB_UNAME=Linux STUB_NICENESS=0 -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 0 ] && grep -q '^nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=nice-19" ]; then
-    pass "Linux: a normal-priority run is executed under nice -n 19 with the nice-19 marker"
-else
-    fail "Linux: a normal-priority run is executed under nice -n 19 with the nice-19 marker" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out")"
-fi
-
-# --- 1g. Linux already at niceness 19: passes through ------------------------
+# --- 1g. any other platform: refused, never run at normal priority -----------
 d="$TMP/h1g"
-run_helper "$d" STUB_UNAME=Linux STUB_NICENESS=19 -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=nice-19" ]; then
-    pass "Linux: a run already at niceness 19 passes through without re-wrapping"
-else
-    fail "Linux: a run already at niceness 19 passes through without re-wrapping" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out")"
-fi
-
-# --- 1h. Linux whose niceness is not a number: refused -----------------------
-d="$TMP/h1h"
-run_helper "$d" STUB_UNAME=Linux STUB_NICENESS=high -- bash -c 'echo ran >"$0"' "$d/ran"
-if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q 'REFUSING TO RUN' "$d/err"; then
-    pass "Linux: an unreadable niceness refuses the run loudly"
-else
-    fail "Linux: an unreadable niceness refuses the run loudly" "rc=$RC err: $(cat "$d/err")"
-fi
-
-# --- 1i. any other platform: refused, never run at normal priority -----------
-d="$TMP/h1i"
 run_helper "$d" STUB_UNAME=FreeBSD -- bash -c 'echo ran >"$0"' "$d/ran"
 if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q "platform 'FreeBSD'" "$d/err"; then
     pass "an unknown platform refuses the run loudly, naming the platform"
@@ -192,26 +162,26 @@ else
     fail "an unknown platform refuses the run loudly, naming the platform" "rc=$RC err: $(cat "$d/err")"
 fi
 
-# --- 1j. no command: refused -------------------------------------------------
-d="$TMP/h1j"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=0 --
+# --- 1h. no command: refused -------------------------------------------------
+d="$TMP/h1h"
+run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 --
 if [ "$RC" -eq 78 ] && grep -q 'no command given' "$d/err"; then
     pass "no command is a loud refusal"
 else
     fail "no command is a loud refusal" "rc=$RC err: $(cat "$d/err")"
 fi
 
-# --- 1k. the command's exit status is the helper's ---------------------------
-d="$TMP/h1k"
-run_helper "$d" STUB_UNAME=Darwin STUB_DARWIN_BG=0 -- bash -c 'exit 7'
+# --- 1i. the command's exit status is the helper's ---------------------------
+d="$TMP/h1i"
+run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 -- bash -c 'exit 7'
 if [ "$RC" -eq 7 ]; then
     pass "a failing command's exit status passes through the helper"
 else
     fail "a failing command's exit status passes through the helper" "rc=$RC"
 fi
 
-# --- 1l. the prologue re-execs an unmarked script through the helper ---------
-d="$TMP/h1l"
+# --- 1j. the prologue re-execs an unmarked script through the helper ---------
+d="$TMP/h1j"
 mkdir -p "$d/bin"
 cp "$HELPER" "$d/bin/background.sh"
 cat >"$d/bin/test-subject.sh" <<'SUBJECT'
@@ -222,27 +192,27 @@ SUBJECT
 : >"$d/log"
 set +e
 env -u AGENT_REPL_BACKGROUND_PRIORITY PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" \
-    AGENT_REPL_TASKPOLICY="$STUBS/taskpolicy" STUB_UNAME=Darwin STUB_DARWIN_BG=0 \
+    STUB_UNAME=Darwin STUB_NICENESS=0 \
     bash "$d/bin/test-subject.sh" one two >"$d/out" 2>"$d/err"
 RC=$?
 set -e
-if [ "$RC" -eq 0 ] && [ "$(cat "$d/out")" = "marker=darwin-bg args=one two" ] &&
-    [ "$(grep -c '^taskpolicy -b bash ' "$d/log")" -eq 1 ]; then
+if [ "$RC" -eq 0 ] && [ "$(cat "$d/out")" = "marker=nice-19 args=one two" ] &&
+    [ "$(grep -c '^nice -n 19 bash ' "$d/log")" -eq 1 ]; then
     pass "the prologue re-execs an unmarked script through the helper exactly once, arguments intact"
 else
     fail "the prologue re-execs an unmarked script through the helper exactly once, arguments intact" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log") err: $(cat "$d/err")"
 fi
 
-# --- 1m. the prologue leaves an already-marked script alone ------------------
-d="$TMP/h1m"
+# --- 1k. the prologue leaves an already-marked script alone ------------------
+d="$TMP/h1k"
 mkdir -p "$d"
 : >"$d/log"
 set +e
-env PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" AGENT_REPL_BACKGROUND_PRIORITY=darwin-bg \
-    bash "$TMP/h1l/bin/test-subject.sh" >"$d/out" 2>"$d/err"
+env PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" AGENT_REPL_BACKGROUND_PRIORITY=nice-19 \
+    bash "$TMP/h1j/bin/test-subject.sh" >"$d/out" 2>"$d/err"
 RC=$?
 set -e
-if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=darwin-bg args=" ]; then
+if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=nice-19 args=" ]; then
     pass "the prologue runs an already-marked script directly"
 else
     fail "the prologue runs an already-marked script directly" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log")"
@@ -252,73 +222,54 @@ fi
 # 2. The helper on this host, for real.
 # ============================================================================
 #
-# This harness itself runs at background priority (its prologue saw to that),
-# so a child starts out demoted. On macOS each case first puts ITS OWN process
-# back at normal priority -- `setpriority(PRIO_DARWIN_PROCESS, self, 0)` from
-# perl, which then execs the case -- and only then goes through the real
-# helper. Linux cannot lower a niceness unprivileged, so there the case
-# asserts from the demoted side only.
+# This harness itself runs at niceness 19 (its prologue saw to that), and an
+# unprivileged process can never lower its niceness again, so the wrap from
+# normal priority is pinned hermetically above. Here the real kernel answers
+# what inheritance and idempotency depend on.
 
 HOST_OS="$(uname -s)"
-# PROMOTE <command...> -- run a command at NORMAL priority (macOS).
-PROMOTE=(perl -e 'setpriority(4, 0, 0) or die "setpriority: $!\n"; exec @ARGV or die "exec: $!\n"')
-# The query every macOS case reads back: 1 under PRIO_DARWIN_BG, 0 otherwise.
-QUERY='perl -e "print getpriority(4, 0)"'
+# The niceness query every case reads back, the same one the helper uses.
+case $HOST_OS in
+    Darwin) QUERY='perl -e "print getpriority(0, 0)"' ;;
+    Linux) QUERY='nice' ;;
+    *) QUERY='' ;;
+esac
 
-if [ "$HOST_OS" = Darwin ]; then
-    # --- 2a. the premise: a promoted process really is at normal priority ---
-    out="$("${PROMOTE[@]}" bash -c "$QUERY" 2>&1)" || true
-    if [ "$out" = 0 ]; then
-        pass "macOS (real): the promoted starting point is at normal priority"
+if [ -n "$QUERY" ]; then
+    # --- 2a. this harness runs at niceness 19 ---------------------------------
+    out="$(bash -c "$QUERY" 2>&1)" || true
+    if [ "$out" = 19 ]; then
+        pass "$HOST_OS (real): a test entry point runs at niceness 19"
     else
-        fail "macOS (real): the promoted starting point is at normal priority" "getpriority=$out"
+        fail "$HOST_OS (real): a test entry point runs at niceness 19" "niceness=$out"
     fi
 
-    # --- 2b. a wrapped command is at background priority ---------------------
-    out="$("${PROMOTE[@]}" env -u AGENT_REPL_BACKGROUND_PRIORITY \
-        bash "$HELPER" bash -c "$QUERY" 2>&1)" || true
-    if [ "$out" = 1 ]; then
-        pass "macOS (real): a command wrapped from normal priority runs under PRIO_DARWIN_BG"
+    # --- 2b. a wrapped command's grandchild inherits niceness 19 --------------
+    out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c "bash -c '$QUERY'" 2>&1)" || true
+    if [ "$out" = 19 ]; then
+        pass "$HOST_OS (real): a grandchild of a wrapped command runs at niceness 19"
     else
-        fail "macOS (real): a command wrapped from normal priority runs under PRIO_DARWIN_BG" "getpriority=$out"
+        fail "$HOST_OS (real): a grandchild of a wrapped command runs at niceness 19" "niceness=$out"
     fi
 
-    # --- 2c. the wrapped command's grandchild inherits it --------------------
-    out="$("${PROMOTE[@]}" env -u AGENT_REPL_BACKGROUND_PRIORITY \
-        bash "$HELPER" bash -c "bash -c '$QUERY'" 2>&1)" || true
-    if [ "$out" = 1 ]; then
-        pass "macOS (real): a grandchild of a wrapped command inherits PRIO_DARWIN_BG"
+    # --- 2c. a nested wrap does not demote further ----------------------------
+    # macOS lets niceness climb to 20, so a second `nice -n 19` would show here.
+    out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" \
+        env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c "$QUERY" 2>&1)" || true
+    if [ "$out" = 19 ]; then
+        pass "$HOST_OS (real): a helper nested in a helper leaves the niceness at 19"
     else
-        fail "macOS (real): a grandchild of a wrapped command inherits PRIO_DARWIN_BG" "getpriority=$out"
+        fail "$HOST_OS (real): a helper nested in a helper leaves the niceness at 19" "niceness=$out"
     fi
 
-    # --- 2d. the scheduler agrees: ps reads a background priority band -------
-    # ps's pri is the LIVE priority and decays under load (3 was measured), so
-    # the band, not an exact value: at or under 4 (MAXPRI_THROTTLE).
-    out="$("${PROMOTE[@]}" env -u AGENT_REPL_BACKGROUND_PRIORITY \
-        bash "$HELPER" bash -c 'bash -c "ps -o pri= -p \$\$"' 2>&1 | tr -d ' ')" || true
-    if [[ $out =~ ^[0-9]+$ ]] && [ "$out" -le 4 ]; then
-        pass "macOS (real): ps reports a wrapped command's child in the background priority band"
-    else
-        fail "macOS (real): ps reports a wrapped command's child in the background priority band" "pri=$out"
-    fi
-
-    # --- 2e. the wrap EXECs: the caller's pid is the command's ---------------
-    out="$("${PROMOTE[@]}" env -u AGENT_REPL_BACKGROUND_PRIORITY \
+    # --- 2d. the wrap EXECs: the caller's pid is the command's ----------------
+    out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY \
         bash -c 'echo "$$"; exec bash "$0" bash -c "echo \$\$"' "$HELPER" 2>&1)" || true
     if [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 2 ] &&
         [ "$(printf '%s\n' "$out" | sort -u | wc -l | tr -d ' ')" = 1 ]; then
-        pass "macOS (real): the wrap execs, so a caller's pid (and process group) is the command's"
+        pass "$HOST_OS (real): the wrap execs, so a caller's pid (and process group) is the command's"
     else
-        fail "macOS (real): the wrap execs, so a caller's pid (and process group) is the command's" "pids: $out"
-    fi
-elif [ "$HOST_OS" = Linux ]; then
-    # --- 2f. a wrapped command's grandchild is at niceness 19 ----------------
-    out="$(env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c 'bash -c nice' 2>&1)" || true
-    if [ "$out" = 19 ]; then
-        pass "Linux (real): a grandchild of a wrapped command runs at niceness 19"
-    else
-        fail "Linux (real): a grandchild of a wrapped command runs at niceness 19" "niceness=$out"
+        fail "$HOST_OS (real): the wrap execs, so a caller's pid (and process group) is the command's" "pids: $out"
     fi
 else
     fail "this platform ($HOST_OS) has no background-priority mechanism; the helper should have refused this harness"
@@ -475,7 +426,7 @@ scan() {
         "$module"/launchd/* "$module"/lisp/*.el; do
         [ -f "$file" ] || continue
         case "$(basename "$file")" in test-*.el) continue ;; esac
-        if grep -Eq 'background\.sh|taskpolicy|require-background' "$file"; then
+        if grep -Eq 'background\.sh|nice -n|"nice"|taskpolicy|require-background' "$file"; then
             printf '%s: live runtime or deploy path references the test background helper\n' "$file"
         fi
     done
@@ -639,9 +590,9 @@ d="$TMP/s-deploy"; make_fixture "$d"
 printf '#!/usr/bin/env bash\nbin/background.sh npm run build\n' >"$d/modules/app/agent-repl/bin/deploy-all.sh"
 expect_violation "the deploy path demoting its build" "$d" "deploy-all.sh: live runtime or deploy path references the test background helper"
 
-# --- 3o. the live runtime's spawn referencing taskpolicy -------------------------
+# --- 3o. the live runtime's spawn demoting with nice ----------------------------
 d="$TMP/s-runtime"; make_fixture "$d"
-printf '(list "taskpolicy" "-b" daemon)\n' >"$d/modules/app/agent-repl/lisp/daemon.el"
+printf '(list "nice" "-n" "19" daemon)\n' >"$d/modules/app/agent-repl/lisp/daemon.el"
 expect_violation "a live-runtime spawn demoting the daemon" "$d" "daemon.el: live runtime or deploy path references the test background helper"
 
 # --- 3p. the sandbox entrypoint exec'ing its command bare ------------------------
