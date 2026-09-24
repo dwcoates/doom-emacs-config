@@ -1884,3 +1884,25 @@ func TestAMainWatchPageReachesTheFeedWithItsAgentBeforeStartTurnNamesIt(t *testi
 		t.Fatalf("the feed replayed the main page as %q, want main-1", e.agent)
 	}
 }
+
+// TestAnAdoptedTurnEndsOnItsMainWatchTerminal covers the turn a PURE ATTACH
+// finds running: no StartTurn of this watcher's will ever name the main agent
+// for it, so the main watch's terminal names it, and the adopted turn ends
+// rather than waiting forever for a name.
+func TestAnAdoptedTurnEndsOnItsMainWatchTerminal(t *testing.T) {
+	// Arrange: a pure attach whose shim re-announces a running turn.
+	h := newHarnessAttachingPurely(t)
+	h.sendSessionStarted(t, sessionStarted("turn-1"))
+	open := h.client.nextAgentOpen(t)
+	h.main, h.mainReq = open.stream, open.req
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != ids.TurnID("turn-1") {
+		t.Fatalf("turn ended = %v, want the adopted turn-1", ended.turn)
+	}
+}

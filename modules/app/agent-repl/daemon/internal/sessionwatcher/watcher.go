@@ -131,7 +131,12 @@ type watcher struct {
 	linkNow atomic.Int32
 	addr    OutputAddress
 
-	turn      *ids.TurnID
+	turn *ids.TurnID
+	// factsTurn is the turn a PURE ATTACH's re-announced facts stood in
+	// flight: one the shim was already running when this watcher attached. No StartTurn of this
+	// watcher's will ever name the main agent for it, so its main-watch
+	// terminal is attributed from the watch itself (routeTerminalLocked).
+	factsTurn ids.TurnID
 	mainAgent *conversationv1.AgentId
 	// viewsMain is the main agent the FEED was last told
 	// (nameMainForViewsLocked). It is learned from StartTurn's naming AND from
@@ -1318,6 +1323,11 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted) {
 			"live_work":         len(started.GetLiveWork()),
 		})
 	w.applySessionStartedLocked(started)
+	// A PURE ATTACH'S TURN IN FLIGHT was started by no StartTurn of this
+	// watcher's, so none will ever name the main agent for it.
+	if t := started.GetTurnInFlight(); t != nil && w.turn != nil && *w.turn == ids.TurnID(t.GetValue()) {
+		w.factsTurn = *w.turn
+	}
 	// THE FACTS ARE THE OCCASION FOR THE AGENT WATCH. A pure attach deferred
 	// it precisely until now: the shim has just named the session, so the main
 	// agent it resolves an unset target to exists.
