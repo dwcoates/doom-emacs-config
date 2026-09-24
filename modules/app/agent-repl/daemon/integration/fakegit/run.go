@@ -119,6 +119,10 @@ func answer(s *State, cwd string, args []string) Result {
 		return updateIndex(wt, subject)
 	case "log":
 		return gitLog(s, repo, wt, subject)
+	case "merge-tree":
+		return mergeTree(s, repo, wt, subject)
+	case "update-ref":
+		return updateRef(repo, subject)
 	}
 	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
 }
@@ -355,6 +359,13 @@ func revParse(s *State, repo *Repo, wt *Worktree, dir string, subject []string) 
 		}
 		return Result{Stdout: wt.Branch + "\n"}
 	}
+	if ref, ok := strings.CutSuffix(subject[len(subject)-1], "^{tree}"); ok {
+		sha, found := s.resolve(repo, wt, ref)
+		if c := s.Commits[sha]; found && c != nil {
+			return Result{Stdout: c.TreeOf() + "\n"}
+		}
+		return Result{Stderr: "fatal: Needed a single revision\n", Exit: 128}
+	}
 	ref := strings.TrimSuffix(subject[len(subject)-1], "^{commit}")
 	sha, ok := s.resolve(repo, wt, ref)
 	if !ok {
@@ -480,8 +491,14 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 
 	case len(subject) >= 2 && subject[1] == "remove":
 		dir := subject[len(subject)-1]
-		if repo.Worktree(dir) == nil {
+		target := repo.Worktree(dir)
+		if target == nil {
 			return Result{Stderr: fmt.Sprintf("fatal: '%s' is not a working tree\n", dir), Exit: 128}
+		}
+		// Real git refuses a tree with modified or untracked content unless
+		// it is forced.
+		if target.Dirty && !contains(subject, "--force") {
+			return Result{Stderr: fmt.Sprintf("fatal: '%s' contains modified or untracked files, use --force to delete it\n", dir), Exit: 128}
 		}
 		if err := os.RemoveAll(dir); err != nil {
 			return Result{Stderr: err.Error() + "\n", Exit: 128}
@@ -492,11 +509,24 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 	case len(subject) >= 2 && subject[1] == "list":
 		// git lists the MAIN worktree first, and the daemon reads exactly
 		// that order, so the fixture keeps it: Worktrees[0] is the main one.
+		// `-z` ends every attribute with NUL instead of a newline.
+		sep := "\n"
+		if contains(subject, "-z") {
+			sep = "\x00"
+		}
 		var b strings.Builder
 		for _, wt := range repo.Worktrees {
-			b.WriteString("worktree " + wt.Dir + "\n")
-			b.WriteString("HEAD " + wt.Head + "\n")
-			b.WriteString("branch refs/heads/" + wt.Branch + "\n\n")
+			b.WriteString("worktree " + wt.Dir + sep)
+			b.WriteString("HEAD " + wt.Head + sep)
+			if wt.Branch == "" {
+				b.WriteString("detached" + sep)
+			} else {
+				b.WriteString("branch refs/heads/" + wt.Branch + sep)
+			}
+			if wt.Locked {
+				b.WriteString("locked" + sep)
+			}
+			b.WriteString(sep)
 		}
 		return Result{Stdout: b.String()}
 
@@ -1139,4 +1169,52 @@ func splitGlobalOptions(cwd string, args []string) (string, []string) {
 		}
 	}
 	return dir, nil
+}
+
+// mergeTree answers `merge-tree --write-tree [--no-messages] <base> <other>`:
+// the tree merging other into base would record. An other already reachable
+// from base changes nothing, so the answer is base's own tree; a base
+// reachable from other is a fast-forward to other's tree; anything else is a
+// merge of two lines, whose tree is neither side's.
+func mergeTree(s *State, repo *Repo, wt *Worktree, subject []string) Result {
+	var revs []string
+	for _, a := range subject[1:] {
+		if !strings.HasPrefix(a, "--") {
+			revs = append(revs, a)
+		}
+	}
+	if !contains(subject, "--write-tree") || len(revs) != 2 {
+		return Result{Stderr: "fatal: fakegit: `merge-tree` needs --write-tree <base> <other>\n", Exit: 128}
+	}
+	base, okBase := s.resolve(repo, wt, revs[0])
+	other, okOther := s.resolve(repo, wt, revs[1])
+	baseCommit, otherCommit := s.Commits[base], s.Commits[other]
+	if !okBase || !okOther || baseCommit == nil || otherCommit == nil {
+		return Result{Stderr: "fatal: fakegit: merge-tree of an unknown commit\n", Exit: 128}
+	}
+	switch {
+	case s.reachable(base)[other]:
+		return Result{Stdout: baseCommit.TreeOf() + "\n"}
+	case s.reachable(other)[base]:
+		return Result{Stdout: otherCommit.TreeOf() + "\n"}
+	}
+	return Result{Stdout: "6" + base[1:20] + other[20:] + "\n"}
+}
+
+// updateRef answers `update-ref -d refs/heads/<branch> <old>`: git's
+// compare-and-delete, refused when the branch no longer points at old.
+func updateRef(repo *Repo, subject []string) Result {
+	if len(subject) != 4 || subject[1] != "-d" || !strings.HasPrefix(subject[2], "refs/heads/") {
+		return Result{Stderr: "fatal: fakegit: only `update-ref -d refs/heads/<branch> <old>` is modeled\n", Exit: 128}
+	}
+	name := strings.TrimPrefix(subject[2], "refs/heads/")
+	head, ok := repo.BranchHeads[name]
+	if !ok || !repo.HasBranch(name) {
+		return Result{Stderr: fmt.Sprintf("error: cannot lock ref '%s': unable to resolve reference '%s'\n", subject[2], subject[2]), Exit: 128}
+	}
+	if head != subject[3] {
+		return Result{Stderr: fmt.Sprintf("error: cannot lock ref '%s': is at %s but expected %s\n", subject[2], head, subject[3]), Exit: 128}
+	}
+	repo.RemoveBranch(name)
+	return Result{}
 }
