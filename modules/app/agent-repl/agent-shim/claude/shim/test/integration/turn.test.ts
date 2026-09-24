@@ -1334,23 +1334,75 @@ describe("keep-alives", () => {
     );
   };
 
-  test("a keep-alive's rows land UNSERVED rather than in the book", async () => {
+  /**
+   * Every entry the store was handed that carries `needle` anywhere, on any arm.
+   *
+   * The mocked vendor ECHOES a prompt into its reply, so every row a keep-alive
+   * could produce — its prompt, its answer — carries the keep-alive marker.
+   */
+  const storedCarrying = (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    needle: string,
+  ): storev1.StoreEntry[] =>
+    (shim.store?.writes() ?? [])
+      .flatMap((request) => request.batch?.entries ?? [])
+      .filter((entry) => toJsonString(storev1.StoreEntrySchema, entry).includes(needle));
+
+  /**
+   * Resolves once a served row carrying `needle` has reached the store.
+   *
+   * THE SHIM WRITES IN ORDER, one drain: a row of a real turn submitted AFTER
+   * a keep-alive closed landing means every row the shim wrote before it — the
+   * keep-alive's included, had it written any — already reached the store. That
+   * is what makes an absence assertable.
+   */
+  const servedLanded = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    needle: string,
+  ): Promise<storev1.StoreEntry> =>
+    shim.store?.entryLanded((entry) => {
+      if (entry.entry.case !== "agentUpdate") return false;
+      const info = entry.entry.value.agentInfo;
+      if (info.case !== "serveableFrame") return false;
+      const item = info.value.agentItem;
+      if (item?.item.case !== "agentFrame") return false;
+      return toJsonString(conversationv1.AgentFrameSchema, item.item.value).includes(needle);
+    }) ?? Promise.reject(new Error("this shim has no store"));
+
+  test("a keep-alive turn works end to end and stores nothing", async () => {
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
+    await keepaliveTurnClosed(shim);
 
-    await keepaliveSubmitted(shim);
-    // THE SUBMISSION AND THE ROW ARE TWO INSTANTS. The shim's own record says
-    // it submitted; the row reaches the store on the writer's next batch. Wait
-    // for the row itself, never for the log line that precedes it.
-    const arrived = await (shim.store?.unservedArrived("keepalive") ??
-      Promise.reject(new Error("this shim has no store")));
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "after the keep-alive" })));
+    await servedLanded(shim, "after the keep-alive");
 
-    expect(arrived.unservedItem.case).toBe("keepalive");
+    expect(storedCarrying(shim, KEEPALIVE_MARKER)).toEqual([]);
+  });
+
+  test("a rewind past a keep-alive lands with nothing of the keep-alive stored", async () => {
+    // THE REWIND NEEDS NO ROW: its anchor is an assistant record of the real
+    // turn the engine saw go by, and the rewound query reads the vendor's own
+    // transcript. So the rewind lands exactly as before while the store holds
+    // nothing of what it discarded.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
+    await keepaliveTurnClosed(shim);
+    const landed = shim.log.record(
+      (record) =>
+        record.message === "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
+    );
+
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" })));
+    await landed;
+    await servedLanded(shim, "and again");
+
+    expect(storedCarrying(shim, KEEPALIVE_MARKER)).toEqual([]);
   });
 
   test("no keep-alive prompt appears in any page", async () => {
-    // The keep-alive made a real API call, so it is RECORDED; it has no book,
-    // so serving it would put a turn nobody asked for in the feed.
+    // Nothing of a keep-alive is stored, so no page can return one.
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
     await keepaliveSubmitted(shim);
@@ -1425,48 +1477,18 @@ describe("keep-alives", () => {
     expect(named?.type).toBe("assistant");
   });
 
-  /**
-   * The first row to land whose content carries `needle`, other than a prompt.
-   *
-   * The mocked vendor ECHOES the prompt into its reply, so the keep-alive's
-   * answer is the one non-prompt row that carries the keep-alive marker.
-   */
-  const answerLanded = async (
-    shim: Awaited<ReturnType<typeof spawnShim>>,
-    needle: string,
-  ): Promise<storev1.StoreEntry> =>
-    shim.store?.entryLanded((entry) => {
-      if (entry.entry.case !== "agentUpdate") return false;
-      const info = entry.entry.value.agentInfo;
-      const item =
-        info.case === "serveableFrame"
-          ? info.value.agentItem
-          : info.case === "unservedItem" && info.value.unservedItem.case === "keepalive"
-            ? info.value.unservedItem.value
-            : undefined;
-      if (item?.item.case !== "agentFrame") return false;
-      return toJsonString(conversationv1.AgentFrameSchema, item.item.value).includes(needle);
-    }) ?? Promise.reject(new Error("this shim has no store"));
-
-  test("a keep-alive's answer lands unserved", async () => {
-    const shim = await spawnBeating();
-    await shim.clients.h1.startSession(freshSession());
-
-    const answer = await answerLanded(shim, KEEPALIVE_MARKER);
-
-    expect(answer.entry.case === "agentUpdate" ? answer.entry.value.agentInfo.case : undefined).toBe("unservedItem");
-  });
-
-  test("a keep-alive's answer lands unserved when the vendor runs a turn of its own first", async () => {
+  test("a keep-alive stores nothing when the vendor runs a turn of its own first", async () => {
     // THE 2026-09-23 LEAK: a turn the vendor ran by itself ended first, its
     // result closed the keep-alive, and the keep-alive's answer was served.
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+    await keepaliveTurnClosed(shim);
 
-    const answer = await answerLanded(shim, KEEPALIVE_MARKER);
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the keep-alive" })));
+    await servedLanded(shim, "after the keep-alive");
 
-    expect(answer.entry.case === "agentUpdate" ? answer.entry.value.agentInfo.case : undefined).toBe("unservedItem");
+    expect(storedCarrying(shim, KEEPALIVE_MARKER)).toEqual([]);
   });
 
   test("the vendor's own turn ahead of a keep-alive is still served", async () => {
@@ -1476,9 +1498,9 @@ describe("keep-alives", () => {
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
 
-    const answer = await answerLanded(shim, "A background task finished.");
+    const answer = await servedLanded(shim, "A background task finished.");
 
-    expect(answer.entry.case === "agentUpdate" ? answer.entry.value.agentInfo.case : undefined).toBe("serveableFrame");
+    expect(answer.upsertKey).not.toBe("");
   });
 
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {
