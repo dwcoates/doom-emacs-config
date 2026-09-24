@@ -563,8 +563,19 @@ and not something this change touches.
   frames arriving during a keep-alive turn, so held keep-alive rows sat under
   real subagent upsert_keys, and the sidecar's page line for each was refused as
   an identity change (`keepalive` → `page_line`), parking the subagent's whole
-  transcript. SchemaVersion 8 exists to nuke a database holding such rows; the
-  `kind` vocabulary no longer names `keepalive`.
+  transcript.
+- **A RETIRED `keepalive` ROW MAY BE SUPERSEDED BY A REAL RECORD OF ANY KIND**
+  (`applyIdentityPolicy`), the one kind change that is not
+  `upsert_changes_identity`: the real record takes the key and its book, and
+  the store records it ONCE per key at INFO with `old_kind` and `new_kind`
+  (once by construction — the row then holds a real kind). Every other kind
+  change is still refused.
+- **THE OTHER HELD KEEP-ALIVE ROWS STAY, AND THEY ARE INERT.** They carry no
+  book, so no page, replay or watch can reach them; nothing reads them; and
+  nothing can add to them, because the arm is refused. They are not deleted:
+  the store is never migrated, and nuking `events.db` would also throw away the
+  stream-plane rows the shim wrote live (asks, stream-only frames), which no
+  producer can rebuild.
 - One transaction per batch, and **failure commits nothing**. Per entry, in
   producer order: absorb by `write_id` against the **write ledger** (a hit is
   success), else check that the upsert does not change the row's IDENTITY, then

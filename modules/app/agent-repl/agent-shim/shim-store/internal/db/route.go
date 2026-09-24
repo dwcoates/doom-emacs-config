@@ -17,14 +17,18 @@ import (
 // reach it — and the arm is WHY it cannot be served, which is the only thing
 // an investigator needs from the column.
 const (
-	kindPageLine       = "page_line"
-	kindVendorSpecific = "vendor_specific"
-	kindUnknown        = "unknown"
-	kindUnparsed       = "unparsed"
-	kindBash           = "bash"
-	kindWorkflow       = "workflow"
-	kindSessionUpdate  = "session_update"
-	kindDetachedWork   = "detached_work"
+	kindPageLine = "page_line"
+	// kindKeepaliveRetired is NO LONGER WRITTEN: the arm is refused
+	// (SiteKeepaliveRetired). It names the rows stored before the rule, which
+	// are inert and which a real record may supersede (applyIdentityPolicy).
+	kindKeepaliveRetired = "keepalive"
+	kindVendorSpecific   = "vendor_specific"
+	kindUnknown          = "unknown"
+	kindUnparsed         = "unparsed"
+	kindBash             = "bash"
+	kindWorkflow         = "workflow"
+	kindSessionUpdate    = "session_update"
+	kindDetachedWork     = "detached_work"
 )
 
 // Plane column values. The observing plane is a producer-side fact the store is

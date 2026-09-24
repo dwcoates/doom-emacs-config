@@ -341,7 +341,7 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 		return nil
 	}
 
-	skip, err := d.applyIdentityPolicy(ctx, tx, r)
+	skip, retiredFrom, err := d.applyIdentityPolicy(ctx, tx, r)
 	if err != nil {
 		return d.refuse(fields, err)
 	}
@@ -383,6 +383,14 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 	}
 	if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
 		return d.refuse(fields, err)
+	}
+	if retiredFrom != "" {
+		// ONCE PER KEY by construction: the row now holds a real kind, so no
+		// later write to it takes this branch again.
+		info := fields
+		info.Level = "info"
+		d.log.Log(info, "a retired keep-alive row was superseded by a real record old_kind=%s new_kind=%s entries_index=%d",
+			retiredFrom, r.kind, r.index)
 	}
 	result.Written++
 	switch r.kind {
@@ -546,19 +554,30 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *st
 //     reported to the caller (never swallowed), but not fatal to the batch. A
 //     first insert has no identity to change, and a same-book supersede keeps
 //     it, so both return (nil, nil) and the caller applies the upsert.
-func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (*SkippedEntry, error) {
+//
+// THE ONE KIND CHANGE THAT IS A SUPERSESSION: a row stored under the RETIRED
+// `keepalive` kind. The shim that predated "nothing of a keep-alive is stored"
+// tagged a backgrounded subagent's frames arriving during a keep-alive turn,
+// so such a row can sit under a real record's upsert_key; refusing the real
+// record parked its producer's whole file. No keep-alive row is ever served or
+// written again, so the retired row names nothing a pointer could hold, and
+// the real record takes the key. The caller is told through `retiredFrom`.
+func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (skip *SkippedEntry, retiredFrom string, err error) {
 	var book sql.NullString
 	var kind string
 	switch err := tx.QueryRowContext(ctx,
 		`SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind); {
 	case errors.Is(err, sql.ErrNoRows):
 		// A first insert has no identity to change.
-		return nil, nil
+		return nil, "", nil
 	case err != nil:
-		return nil, storagef(err, "reading the identity of row %q", r.upsertKey)
+		return nil, "", storagef(err, "reading the identity of row %q", r.upsertKey)
+	}
+	if kind == kindKeepaliveRetired && r.kind != kindKeepaliveRetired {
+		return nil, kind, nil
 	}
 	if kind != r.kind {
-		return nil, invalidSitef(SiteUpsertChangesIdentity,
+		return nil, "", invalidSitef(SiteUpsertChangesIdentity,
 			entryField(r.index, "agent_update"),
 			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
 			r.index, r.upsertKey, kind, r.kind)
@@ -568,9 +587,9 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, r routed) (*Sk
 			UpsertKey: r.upsertKey,
 			FromBook:  nullableBook(book),
 			ToBook:    nullableBook(r.book),
-		}, nil
+		}, "", nil
 	}
-	return nil, nil
+	return nil, "", nil
 }
 
 // nullableBook renders a book column for a human, distinguishing the never-served
