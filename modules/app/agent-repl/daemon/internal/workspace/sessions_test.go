@@ -356,6 +356,9 @@ func coldResponse() *shimv1.StartSessionResponse {
 	}
 }
 
+// fixtureInstance is the daemon instance every fixture fleet serves as.
+const fixtureInstance = ids.InstanceID("fleet-fixture-instance")
+
 // fleetFixture is one arranged Fleet plus the fakes behind it.
 type fleetFixture struct {
 	// bundle is the installed shim bundle every spawn holds.
@@ -499,7 +502,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
-		DB: f.db, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
+		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Footer:  footerLinkSink{rec: f.links},
@@ -555,23 +558,24 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		deps FleetDeps
 	}{
 		{name: "no state client", deps: FleetDeps{}},
-		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB()}},
-		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), Accounts: &fakeAccounts{}}},
+		{name: "no instance id", deps: FleetDeps{DB: newFakeDB()}},
+		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance}},
+		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}}},
 		{
 			name: "no socket path",
-			deps: FleetDeps{DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
+			deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
 		},
 		{
 			name: "no shim bundle",
 			deps: FleetDeps{
-				DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" },
 			},
 		},
 		{
 			name: "no log surfaces",
 			deps: FleetDeps{
-				DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 			},
 		},
