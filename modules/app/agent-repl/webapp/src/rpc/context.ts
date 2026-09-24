@@ -83,6 +83,13 @@ export interface AppContext {
   notePush(): void;
   /** Run FN on every frame any stream reads. Returns its unsubscriber. */
   onPush(fn: () => void): () => void;
+  /**
+   * Announce that a stream which had dropped is reading frames again: the link
+   * came back. See StreamContext.noteLinkRestored.
+   */
+  noteLinkRestored(): void;
+  /** Run FN every time the link comes back. Returns its unsubscriber. */
+  onLinkRestored(fn: () => void): () => void;
 }
 
 export interface AppContextInit {
@@ -121,6 +128,7 @@ export function createAppContext(init: AppContextInit): AppContext {
   let quiesced = false;
   const quietListeners = new Set<() => void>();
   const pushListeners = new Set<() => void>();
+  const restoredListeners = new Set<() => void>();
   const base = {
     client: init.client,
     workspace: init.workspace,
@@ -150,6 +158,16 @@ export function createAppContext(init: AppContextInit): AppContext {
       pushListeners.add(fn);
       return () => {
         pushListeners.delete(fn);
+      };
+    },
+    noteLinkRestored(): void {
+      // A copy: a listener may unsubscribe itself as it runs.
+      for (const fn of [...restoredListeners]) fn();
+    },
+    onLinkRestored(fn: () => void): () => void {
+      restoredListeners.add(fn);
+      return () => {
+        restoredListeners.delete(fn);
       };
     },
     onQuiesced(fn: () => void): () => void {
