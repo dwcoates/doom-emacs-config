@@ -378,11 +378,11 @@ because neither spelling may make a spool invisible.
   once filed one task under two ids. A spool `Target` therefore carries NO
   `SessionID`.
 - A SPOOL'S KIND IS ITS TASK-ID PREFIX: `b*` shell output, `a*` an agent
-  transcript, `w*` a workflow journal. ANY OTHER PREFIX IS A LOUD
-  TOTAL-INGESTION VIOLATION (ERROR record) and is still discovered as
-  `tail.KindResidueSpool` so its bytes land whole as residue. Dropping the
-  file from discovery, which this package used to do, is the one outcome the
-  mandate forbids.
+  transcript, `w*` a workflow journal. ANY OTHER PREFIX IS A MAPPING THIS
+  READER IS MISSING (ERROR record, once per path). It is still discovered as
+  `tail.KindResidueSpool` so the reader states its decision, and it is NEVER
+  READ: no conversion can be selected, so nothing could render it (see "Only
+  what is rendered is read").
 - A TRANSCRIPT THAT IS GONE BEFORE ITS FIRST BYTE IS AN ORDINARY END, NOT A
   HELD ATTRIBUTION (owner ruling, 2026-09-13). Workspace attribution is the
   FIRST thing done to a discovered transcript, and a vendor session directory
@@ -476,9 +476,8 @@ is a different thing:
   declared kind reachable sooner. The integration suite asserts what is actually
   guaranteed — the bytes land, and nothing workflow-shaped is ever converted or
   paged — and deliberately does not assert the arm.
-- anything else — a TOTAL-INGESTION VIOLATION. Logged at ERROR and ingested
-  whole as `unparsed` residue, because a file dropped from discovery is the one
-  thing total ingestion forbids.
+- anything else — an unmapped vendor task kind. Logged at ERROR once, stated as
+  `spool-skip` `reason=unrecognized_prefix`, and never read.
 
 ## Owner resolution and the held spool
 
@@ -489,16 +488,43 @@ evidence and is never consulted. A task two different calls claim resolves to
 NOTHING (ERROR record): guessing between two claims is how one run's output
 lands in another run's card.
 
-- An unclaimed spool is HELD: discovered, re-checked every rescan, not tailed.
-- AN AGED UNOWNED SPOOL IS NEVER DROPPED. Past the hold window
-  (`UnownedSpoolWindow`, replaceable with `--unowned-spool-window`) its bytes
-  are INGESTED as unparsed residue naming the spool as their source, and IT
-  KEEPS BEING TAILED so nothing appended later is lost either. The demotion is
-  stated per file (INFO, owner ruling 4 of 2026-09-13 — the aged unowned spool
-  is this mandate WORKING, not a fault, so the record states a fact and never
-  raises a warning) only for a spool that appeared while the sidecar was
-  already running; a spool that was ALREADY on disk when the reader first
+- An unclaimed spool is HELD: discovered, re-checked every rescan, not read.
+- AN AGED UNOWNED SPOOL IS STILL NOT READ. Past the hold window
+  (`UnownedSpoolWindow`, replaceable with `--unowned-spool-window`) its lapse is
+  stated ONCE (`hold-expired`, INFO, `reason=spool_unclaimed`) and it stays
+  held: re-checked every rescan and read FROM ITS START the moment a launch
+  claims it. It used to be read whole, tailed forever and dropped at the write
+  path as residue — large growing test logs costing a read and a cursor write
+  per poll for rows nobody stored. A spool ALREADY on disk when the reader first
   scanned is startup backlog and is summarized instead (see "Startup catch-up").
+- A CLAIM IS STATED: `spool-claim` (INFO, path, task, activity) names the kind
+  the spool is read as. A refusal (two claims, a path mismatch) is stated at
+  ERROR once per path and verbose on every later rescan.
+- A RENAMED CLAIMED SPOOL IS FOLLOWED by its `dev:inode` identity
+  (`followRename`), never by its name: the same identity as the watched old
+  path re-points the claim, anything else is resolved as a new spool.
+
+### Only what is rendered is read
+
+Owner rule, 2026-09-23: "store output files efficiently; anything not needed
+for rendering isn't needed at all". `held.go unrenderedSpool` is the one place a
+spool is decided never-read, each decision stated once per path as
+`spool-skip` (INFO, `path`, `task_id`, `reason`; repeats verbose):
+
+- `unrecognized_prefix` — no a/b/w prefix, so nothing could render it.
+- `transcript_symlink` — an `a*` spool that is a LINK to the subagent's own
+  `subagents/agent-<id>.jsonl`. Discovery normally resolves the link onto that
+  transcript (one target, `discover.Normalize`); a link whose transcript does
+  not exist yet is still seen under its own spelling and is skipped here, so the
+  transcript is never copied twice.
+- `spool_vanished` — gone before it could be examined.
+- An `a*` spool whose link-ness cannot be established (`Lstat` fails for any
+  reason but absence) is not read this pass, stated at WARN, and examined again
+  next rescan.
+
+A claimed `b*` spool is read for its `bash:<run>` deltas and terminal, which the
+daemon's detached-shell bubble renders. Residue rows are unchanged: none is
+written, and none already stored is touched.
 
 ## Startup catch-up summarizes the backlog
 
@@ -854,10 +880,10 @@ filtering — curation is a downstream concern, never an ingestion concern.
   carries source, offset, parse error and the bytes verbatim;
   `unserved_item.unknown` carries a discriminator we parsed but do not model.
   A RECOGNIZABLE MODELED KIND REACHING RESIDUE IS A PRODUCER DEFECT.
-- `residue.go` is the reader's own envelope-level last resort, reached only
-  AFTER the failure to classify has already been stated at error or warning
-  level. It reads nothing out of the bytes and models nothing about them, which
-  is why it can never be mistaken for a converter.
+- `residue.go` holds only the declared-residue handler for a CLAIMED `w*`
+  spool. A spool no call claimed, or whose prefix is unmapped, is never read
+  (see "Only what is rendered is read"), so there is no envelope-level
+  last-resort handler any more.
 - The EXEMPT SET is different: known built-ins deliberately not carried are
   DROPPED entirely — never `AgentUnmodeled`, never residue.
 - The RESIDUE KINDS NEVER PERSISTED are the second such drop, and the ONLY place
@@ -1054,8 +1080,11 @@ vendor equivalent in turn.
 From this directory:
 
 ```bash
-go build ./... && go vet ./... && go test -race ./...
+go build ./... && go vet ./... && ../../../bin/background.sh go test -race ./...
 ```
+
+Every test run goes through `../../../bin/background.sh`, at background
+priority; the bare `go test` lines below are the arguments to prefix with it.
 
 THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
 unit packages and `integration/`, run once each — it is not a third suite. The
@@ -1429,7 +1458,7 @@ and a subagent's commission rides `AgentSubagentStart.prompt`.
 
 Owner ruling 2026-09-13 (`docs/STORE-VOLUME-PROPOSAL.md` item 1). ONLY TYPED
 ENTRIES ARE PERSISTED. Every residue outcome — `vendor_specific` of any kind,
-`unknown`, and the `unparsed` bytes an unowned or unclassifiable spool ingests —
+`unknown`, and `unparsed` —
 is classified, counted, and NOT WRITTEN.
 
 WHY: NOBODY READS IT. Those three arms have zero readers anywhere downstream —
@@ -1584,7 +1613,7 @@ identity a detached command is announced under on BOTH planes, and equal to the
 `DetachedWorkId` a consumer addresses the run by. The reader resolves it from the
 launch it observed and hands it over as `tail.Context.RunActivityID`; a spool
 that reaches the handler without one is a reader defect (an unclaimed spool is
-HELD, not tailed), refused loudly with its bytes still landing as residue.
+HELD, not read), refused loudly.
 
 ONE ROW PER WRITE, never one row superseded:
 
@@ -1611,9 +1640,23 @@ whether a batch BEGINS a line is answered from whether the previous batch ended
 on a newline — which the handler alone knows, and without which a marker
 arriving on its own poll (the ordinary case) was never detected at all.
 
-A TERMINAL CARRIES THE RUN'S OUTPUT, not the batch's: the handler holds what the
-run has said, bounded, and states `partial{bytes_omitted}` past the bound rather
-than claiming `whole` over a prefix a consumer cannot detect.
+A TERMINAL CARRIES THE RUN'S OUTPUT, not the batch's: the handler holds the
+run's TAIL, bounded at 16 KiB (`maxRememberedOutput`, the daemon's own
+`spoolCap`), and states `partial{bytes_omitted}` past the bound rather than
+claiming `whole`. The daemon draws a detached run's ending from the terminal
+(exit, cancel, lost) and its body from the deltas' tail, never the terminal's
+output, so a larger bound stored bytes for nobody.
+
+### Bounded writes
+
+Every batch is one store transaction, so a batch sized by the file was a write
+sized by the file (one held the store 163s on 2026-09-23). `internal/tail`
+bounds each Poll at `MaxBatchBytes` (1 MiB) and `MaxBatchFrames` (128); the
+cursor stops at the first frame past the bound. A bounded batch reports
+`PollResult.More` (never for a batch holding a frame) and `pollAll` re-polls
+that file at the head of the pass, inside the same slice deadline. Deltas stay
+CONTIGUOUS: `from_offset` is the renderer's gap detector, so a claimed spool's
+deltas join to the whole file.
 
 LOST (`file_vanished` | `went_silent` | `swept_up`) →
 `AgentBash.success.interrupted` with `cause.lost` naming the arm (landing 3).
