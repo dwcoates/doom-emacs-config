@@ -137,27 +137,25 @@ Name the reason for what provoked it; it lands in the sweep's own records.
    are owned by "Clear the observation logs first" in
    `iterative-fix-verify-loop.md` step 1 and apply here unchanged.
 
-2. Kickstart the two backend services, store first:
-
-   ```sh
-   launchctl kickstart -k gui/$(id -u)/com.agentrepl.shim-store
-   launchctl kickstart -k gui/$(id -u)/com.agentrepl.shim-claude-sidecar
-   ```
-
-   In this harness `launchctl kickstart` requires the sandbox override to run
-   at all; expect to pass it, and never work around a refusal by editing the
-   plists.
-
-3. Bounce the daemon through Emacs and wait for its terminal result:
+2. Bounce the whole backend through Emacs: the build, the store then the
+   sidecar in the recorded safe order (the sidecar only once `store.sock` is
+   serving), then the daemon, asked to exit and replaced:
 
    ```sh
    /Applications/Emacs.app/Contents/MacOS/bin/emacsclient \
-     -e '(agent-repl-frontend-daemon-restart-await)'
+     -e '(agent-repl-runtime-restart)'
    ```
 
-   This blocks for the whole coordinated restart and records itself as
-   deploy-driven, which is what separates "the deploy is driving" from a frame
-   that has stopped responding.
+   It returns at once and runs the restart asynchronously. Its terminal
+   record is `elisp.services.runtime-complete` (naming the old and the new
+   daemon pid and instance), or `elisp.services.runtime-failed` with the
+   first stage that failed; wait on that record, never on elapsed time. The
+   daemon's stop is `UpdateShutdownSchedule{now}`, so this ENDS RUNNING
+   TURNS: it is the forced bounce this loop is about, never a deploy (a
+   deploy is `daemon/bin/claude-repld deploy`, which bounces nothing that is
+   current). Never kickstart the store and the sidecar back to back by hand:
+   the sidecar's cursor recovery then fails against a socket not yet
+   listening and re-reads every transcript from offset zero.
 
 ## 4. Render the verdict
 
@@ -241,8 +239,8 @@ met; it is unmeasured.
    - **A deploy that reloads the webviews cannot measure this criterion
      cleanly.** The deploy's own `reload_webapp` lands inside the window and the affected
      workspaces come back `not-measured reason=deploy_refresh`, correctly.
-     Measure criterion 6 across a `launchctl kickstart` /
-     `agent-repl-frontend-daemon-restart-await` bounce — the same restriction
+     Measure criterion 6 across an `agent-repl-runtime-restart` bounce (step
+     3), which reloads no webview — the same restriction
      criterion 7 already carries.
    - **`emacs_ms` is not comparable across single bounces.** It has been seen
      at 5ms and at 2320ms on identical code, because the anchor differed: an
