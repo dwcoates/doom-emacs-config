@@ -41,6 +41,20 @@ describe("startSessionFailure", () => {
     expect(failure.cause).toEqual({ case: "cold", value: cold });
   });
 
+  it("carries the unavailable lock holder's binary and OS error", () => {
+    // Arrange, Act.
+    const failure = failures.startSessionFailure(
+      { kind: "lockHolderUnavailable", binary: "/bin/shim-lock", osError: "spawn ENOENT" },
+      "helper would not start",
+    );
+
+    // Assert.
+    expect(failure.cause).toEqual({
+      case: "lockHolderUnavailable",
+      value: containing({ binary: "/bin/shim-lock", osError: "spawn ENOENT" }),
+    });
+  });
+
   it("carries the human detail alongside the machine-readable arm", () => {
     // Arrange, Act.
     const failure = failures.startSessionFailure({ kind: "alreadyStarted" }, "already up");
