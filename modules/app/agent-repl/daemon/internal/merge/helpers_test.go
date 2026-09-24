@@ -614,6 +614,8 @@ func (g *fakeGit) seen(call string) bool {
 // fakeQueue records what the merge submitted down the one delivery path.
 type fakeQueue struct {
 	mu sync.Mutex
+	// db is the harness's store, which the door's displaced claim is taken on.
+	db *fakeDB
 
 	submissions []promptqueue.Submission
 	disposition promptqueue.Disposition
@@ -654,6 +656,19 @@ func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
 	q.mu.Unlock()
 }
 func (q *fakeQueue) RestoreHolds(context.Context) error { return nil }
+
+// ClaimDisplacedTurn is the queue's door claim, taken on the harness's store
+// exactly as the real queue takes it on the durable one.
+func (q *fakeQueue) ClaimDisplacedTurn(ctx context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	claim, err := q.db.ClaimDisplacedTurn(ctx, turn, time.Time{})
+	return claim.Claimed, err
+}
+
+// CloseOrphans is never reached by the merge orchestrator; answering it
+// loudly keeps a new caller from passing silently.
+func (q *fakeQueue) CloseOrphans(context.Context, ids.WorkspaceID, time.Time) (wsm.OrphanReport, error) {
+	return wsm.OrphanReport{}, errors.New("fakeQueue: the merge orchestrator never closes orphans")
+}
 
 // RequestBounce is never reached by the merge orchestrator; answering it
 // loudly keeps a new caller from passing silently.
@@ -1140,7 +1155,6 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		t:         t,
 		db:        newFakeDB(),
-		queue:     &fakeQueue{},
 		footer:    &fakeFooter{},
 		sidebar:   &fakeSidebar{},
 		holds:     &fakeHolds{},
@@ -1153,6 +1167,7 @@ func newHarness(t *testing.T) *harness {
 		policyErr: map[string]error{},
 		freeness:  &fakeFreeness{},
 	}
+	h.queue = &fakeQueue{db: h.db}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db}
