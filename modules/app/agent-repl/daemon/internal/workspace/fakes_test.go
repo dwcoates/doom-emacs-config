@@ -1827,6 +1827,9 @@ func (s *fakeSurfaces) Evict(dir string) error {
 	return nil
 }
 
+// Retire implements dlog.Surfaces; no workspace verb retires a directory.
+func (s *fakeSurfaces) Retire(dir string) error { return nil }
+
 // FixtureMintedName is the name the fixture's naming call answers. It is the
 // SHAPE a real answer has — at most three lowercase hyphenated words — and it
 // is deliberately not derivable from any prompt, so a test asserting on it is

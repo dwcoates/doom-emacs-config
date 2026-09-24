@@ -321,6 +321,9 @@ func alive(pid int) bool { return syscall.Kill(pid, syscall.Signal(0)) == nil }
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s testSurfaces) Evict(_ string) error { return nil }
 
+// Retire satisfies dlog.Surfaces; the supervisor never retires a directory.
+func (s testSurfaces) Retire(_ string) error { return nil }
+
 // bringUpProbeWindow is the NEGATIVE bound: how long a test waits to be
 // satisfied that bring-up has NOT returned. The fake shim is in-process and
 // every measured bring-up in this package answers in single-digit
