@@ -271,8 +271,12 @@ type Daemon struct {
 	waitBound  time.Duration
 	cmd        *exec.Cmd
 	stderrPath string
-	client     agentreplv1connect.AgentReplClient
-	http       *http.Client
+	// afterFreeze, when set, runs inside Kill between the confirmed freeze and
+	// the SIGKILL: the one instant at which the harness's own tests can read
+	// the kernel's state of a group that is frozen and not yet killed.
+	afterFreeze func()
+	client      agentreplv1connect.AgentReplClient
+	http        *http.Client
 
 	mu       sync.Mutex
 	exited   bool
@@ -965,6 +969,22 @@ func (d *Daemon) standDownStraysForCoverage() {
 
 // Kill ends the process group without warning, for crash simulation and for
 // the cleanup every test gets.
+//
+// THE GROUP IS FROZEN BEFORE ANY OF IT IS KILLED, so the daemon can never
+// observe a death this harness caused. Every git the daemon runs, and every
+// shim in the instant between its fork and its own setpgid, is a member of the
+// daemon's group, and kill(-pgid, SIGKILL) is not one atomic event: the kernel
+// walks the group, newest member first, and the walk can be preempted between
+// members. Under load the daemon was still running when its git or its
+// just-forked shim had already died, and it recorded exactly that at ERROR —
+// "git was killed by a signal", "shim died during bring-up" — before its own
+// SIGKILL landed; the warning sweep then failed the test on records its own
+// teardown manufactured. MEASURED with a stand-in for the daemon (a Go parent
+// running short-lived children back to back, killed as a group at nice 19 on
+// a loaded host): 8 of 3000 group kills let the parent record a signalled
+// child, and 0 of 3000 once the group was stopped and the stop confirmed
+// first. A stopped daemon runs no instruction, so whatever order the kill
+// then reaches its members in, nothing is left to observe it.
 func (d *Daemon) Kill() {
 	d.t.Helper()
 	if d.cmd == nil || d.cmd.Process == nil {
@@ -975,26 +995,54 @@ func (d *Daemon) Kill() {
 	// of ours any more, and signaling it can only reach whatever process the
 	// pid was recycled into. This is the ordinary state of every test that
 	// waits for its daemon to leave on its own (a refused second daemon, a
-	// joining daemon) before the cleanup kill runs.
+	// joining daemon) before the cleanup kill runs. Until the reap below, the
+	// leader is ours and unreaped, so both signals name our group exactly.
 	if d.reaped() {
 		return
 	}
-	// ESRCH is the benign race: the group left on its own between the caller's
-	// decision and this signal. EPERM is the same race after a recycle — the
-	// pid now belongs to someone else — and is accepted ONLY once the reap
-	// confirms our own process is in fact gone. Every other error is a real
-	// fault.
-	if err := syscall.Kill(-d.cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		if !errors.Is(err, syscall.EPERM) {
-			d.t.Errorf("harness: SIGKILL process group %d: %v", d.cmd.Process.Pid, err)
-		} else if !d.awaitReapWithin(reapGrace) {
-			d.t.Errorf("harness: SIGKILL process group %d: %v, and it was still unreaped %s later",
-				d.cmd.Process.Pid, err, reapGrace)
-		}
+	pgid := d.cmd.Process.Pid
+	if !d.signalGroup(pgid, syscall.SIGSTOP) {
+		return
+	}
+	// A freeze the kernel will not confirm is REPORTED, and the kill still
+	// goes ahead: a daemon left running is worse than one that might have
+	// seen its group go.
+	if err := awaitFrozen(pgid, freezeBound); err != nil {
+		d.t.Errorf("harness: the daemon's group was not frozen before the kill: %v", err)
+	}
+	if d.afterFreeze != nil {
+		d.afterFreeze()
+	}
+	if !d.signalGroup(pgid, syscall.SIGKILL) {
 		return
 	}
 	if !d.awaitReapWithin(reapGrace) {
 		d.t.Errorf("harness: the daemon was still unreaped %s after SIGKILL", reapGrace)
+	}
+}
+
+// signalGroup sends sig to the daemon's process group and reports whether the
+// kill should go on.
+//
+// ESRCH is the benign race: the group left on its own between the caller's
+// decision and this signal, and the reap that follows confirms it. EPERM is
+// the same race after a recycle — the pid now belongs to someone else — and is
+// accepted ONLY once the reap confirms our own process is in fact gone, which
+// ends the kill. Every other error is a real fault, reported, and ends it too.
+func (d *Daemon) signalGroup(pgid int, sig syscall.Signal) bool {
+	d.t.Helper()
+	err := syscall.Kill(-pgid, sig)
+	switch {
+	case err == nil, errors.Is(err, syscall.ESRCH):
+		return true
+	case errors.Is(err, syscall.EPERM):
+		if !d.awaitReapWithin(reapGrace) {
+			d.t.Errorf("harness: %v process group %d: %v, and it was still unreaped %s later", sig, pgid, err, reapGrace)
+		}
+		return false
+	default:
+		d.t.Errorf("harness: %v process group %d: %v", sig, pgid, err)
+		return false
 	}
 }
 
