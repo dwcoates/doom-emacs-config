@@ -192,6 +192,71 @@ describe("writeDurable", () => {
   });
 });
 
+/** The upsert keys of every WriteBatch the fake store received, in order. */
+function writtenKeys(fake: FakeStore): string[] {
+  return fake.writes().flatMap((request) => (request.batch?.entries ?? []).map((entry) => entry.upsertKey));
+}
+
+describe("writeDurable's place in the buffer", () => {
+  it("lands behind every batch buffered before it", async () => {
+    // Arrange
+    const { store: fake, persistence: plane } = await persistence("durable-behind-buffered");
+    const first = readEntry(BOOK, "unit-1", "/tmp/a");
+    const second = readEntry(BOOK, "unit-2", "/tmp/b");
+    const prompt = promptEntry(BOOK, "turn-1", "hello");
+    plane.write([first]);
+    plane.write([second]);
+
+    // Act
+    await plane.writeDurable([prompt]);
+
+    // Assert
+    expect(writtenKeys(fake)).toEqual([first.upsertKey, second.upsertKey, prompt.upsertKey]);
+  });
+
+  it("is not starved by batches enqueued after it while it waits", async () => {
+    // Arrange: a producer that enqueues a fresh batch each time a store call
+    // answers, for as long as the durable write is outstanding, so the buffer
+    // never goes idle -- a keep-alive's rows, a detached shell's spool.
+    const started = await startFakeStore(socketPathForTest("durable-busy-buffer"));
+    store = started;
+    const real = createStoreClient(started.socketPath);
+    const cap = 200;
+    let durable = false;
+    let fed = 0;
+    // The client is built before the writer it feeds, so the writer is reached
+    // through this slot.
+    const target: { plane?: Persistence } = {};
+    const client: StoreClient = {
+      ...real,
+      writeBatch: async (request) => {
+        const response = await real.writeBatch(request);
+        if (!durable && fed < cap) {
+          fed += 1;
+          target.plane?.write([readEntry(BOOK, `fed-${fed}`, "/tmp/fed")]);
+        }
+        return response;
+      },
+    };
+    const plane = createPersistence({
+      client,
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+      retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
+    });
+    target.plane = plane;
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+
+    // Act
+    await plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")]);
+    durable = true;
+
+    // Assert: it waited out the one batch ahead of it, not the producer.
+    expect(fed).toBeLessThan(cap);
+  });
+});
+
 describe("the bounded retry buffer", () => {
   it("replays a transient failure silently and lands the row", async () => {
     const { store: fake, persistence: plane } = await persistence("replay");
@@ -377,6 +442,47 @@ describe("the bounded retry buffer", () => {
     // Nothing landed — the point is that the buffer stayed bounded rather than
     // growing to hold every batch a dead store never accepted.
     expect(started.book("book-1")).toHaveLength(0);
+  });
+});
+
+describe("a full buffer evicting the batch being delivered", () => {
+  it("still delivers the batch behind it", async () => {
+    // Arrange: the head's delivery is held in flight while two more batches
+    // arrive at a buffer of two, so the head is evicted from under the drain.
+    const started = await startFakeStore(socketPathForTest("evict-in-flight"));
+    store = started;
+    const real = createStoreClient(started.socketPath);
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const client: StoreClient = {
+      ...real,
+      writeBatch: async (request) => {
+        calls += 1;
+        if (calls === 1) await held;
+        return real.writeBatch(request);
+      },
+    };
+    const plane = createPersistence({
+      client,
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+      retry: { ...DEFAULT_RETRY_POLICY, bufferCapacity: 2, backoffMs: [0, 0, 0, 0] },
+    });
+    const behind = readEntry(BOOK, "unit-2", "/tmp/b");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    plane.write([behind]);
+    plane.write([readEntry(BOOK, "unit-3", "/tmp/c")]);
+
+    // Act
+    release();
+    await plane.flush();
+
+    // Assert
+    expect(writtenKeys(started)).toContain(behind.upsertKey);
   });
 });
 
