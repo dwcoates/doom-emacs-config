@@ -1007,6 +1007,30 @@ func (w *World) ServiceBinaries() harness.ServiceBinaries {
 	return harness.ServiceBinaries{Store: w.Store.bin, Sidecar: w.Sidecar.bin}
 }
 
+// SuccessorOpts is the harness.Opts for a daemon started BY HAND over this
+// world's roots — a crash restart, a cold boot, a relaunch — restating every
+// root and every piece of environment the world's own daemon handed its shims.
+// A caller adds only what is its own (a timeout, a self repo, account roots).
+//
+// ONE DEFINITION, BECAUSE EVERY HAND-ROLLED COPY DRIFTED. A successor inherits
+// none of NewWorld's environment, and each site that restated it by hand
+// forgot a different piece: without AGENT_REPL_SHIM_LOCK_BIN the successor's
+// shims resolve the lock holder under an e2e $HOME that has none, the kernel
+// claim dies `spawn ENOENT`, and the start is refused `conversation_owned` for
+// a conversation nobody holds; without the fake spool root they spool where
+// the sidecar never globs.
+func (w *World) SuccessorOpts(t *testing.T) harness.Opts {
+	t.Helper()
+	return harness.Opts{
+		StateDir:        w.StateDir,
+		ShimNode:        requireNode(t),
+		ShimMain:        requireShimBundle(t),
+		StoreSocket:     w.Store.Socket,
+		ServiceBinaries: w.ServiceBinaries(),
+		ExtraEnv:        worldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
+	}
+}
+
 // awaitBuildReport waits until service's build report in lockDir names pid —
 // the process's own statement of its build, written at boot — bounded by
 // ctx, never a fixed sleep.
