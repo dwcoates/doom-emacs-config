@@ -2333,3 +2333,75 @@ func TestATurnStillInFlightAtAttachIsRecordedAtInfo(t *testing.T) {
 		t.Fatalf("the INFO record names turn %v, want turn-1", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A shim that dies on its own ends the turn it was running
+// ---------------------------------------------------------------------------
+
+// TestAShimDeathEndsTheTurnItCut covers what a death does to the turn in
+// flight: an unordered death ends it truthfully (the feed draws the query's
+// death, the queue hears a failed close) BEFORE the departure is told; a death
+// this daemon ordered, or one with nothing running, ends nothing here.
+func TestAShimDeathEndsTheTurnItCut(t *testing.T) {
+	tests := []struct {
+		name      string
+		turn      string
+		standDown bool
+		wantCut   bool
+	}{
+		{name: "a death under a running turn ends it", turn: "turn-1", wantCut: true},
+		{name: "a death this daemon ordered ends nothing here", turn: "turn-1", standDown: true},
+		{name: "a death with no turn running ends nothing", turn: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted(tt.turn)})
+			h.quiet()
+			if tt.standDown {
+				h.client.StandDown()
+			}
+			h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+
+			// Act.
+			h.client.links <- shimclient.LinkDead
+			h.awaitDeparture(t)
+
+			// Assert: everything the death told was told before its departure.
+			seen := h.rec.drain()
+			ended, cut := find(seen, "lifecycle.OnTurnEnded")
+			if cut != tt.wantCut {
+				t.Fatalf("turn end told = %v, want %v; saw %v", cut, tt.wantCut, names(seen))
+			}
+			if hasEvent(seen, "feed.OnSessionUpdate") != tt.wantCut {
+				t.Fatalf("the feed's query-death account drawn = %v, want %v", !tt.wantCut, tt.wantCut)
+			}
+			if !tt.wantCut {
+				return
+			}
+			if ended.turn == nil || *ended.turn != ids.TurnID(tt.turn) || ended.close != wsm.CloseFailed {
+				t.Fatalf("turn end = (%v, %v), want %s failed", ended.turn, ended.close, tt.turn)
+			}
+			if h.w.TurnInFlight() != nil {
+				t.Fatal("the cut turn still stands in flight")
+			}
+		})
+	}
+}
+
+// TestACutTurnIsRecordedAtInfo covers the watcher's record of the cut.
+func TestACutTurnIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+	h.awaitDeparture(t)
+
+	// Assert.
+	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_cut")["turn_id"]; got != "turn-1" {
+		t.Fatalf("the INFO record names turn %v, want turn-1", got)
+	}
+}
