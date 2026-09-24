@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
@@ -31,6 +33,8 @@ import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
   EDIT_REQUEST,
+  NO_RELEASE_TITLES,
+  SEND_NOW_LABEL,
   HELD_BADGE_DETAIL_CLASS,
   HELD_STATUS_BADGES,
   drawHeldPrompt,
@@ -437,6 +441,25 @@ describe("drawHeldPrompt release availability", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     expect(card.querySelector('[data-held-action="release"]')).not.toBeNull();
   });
+
+  it("labels the release control Send now", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    expect(card.querySelector('[data-held-action="release"]')?.textContent).toBe("Send now");
+  });
+
+  it("gives the release control the accessible name Send now", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    const button = card.querySelector<HTMLButtonElement>('[data-held-action="release"]');
+    expect([button?.getAttribute("aria-label"), button?.textContent]).toEqual([null, SEND_NOW_LABEL]);
+  });
+
+  for (const [arm, title] of Object.entries(NO_RELEASE_TITLES)) {
+    it(`words the ${arm} tooltip without the retired Release name`, () => {
+      expect(/releas/i.test(title)).toBe(false);
+    });
+  }
 
   const forbidden: Array<{ name: string; prompt: HeldPrompt }> = [
     {
@@ -1232,7 +1255,7 @@ describe("a held prompt collapsed and expanded", () => {
   const EXPAND_ONLY: Array<[string, string]> = [
     ["the queued age", "[data-queued]"],
     ["the rationale", ".queued-reason"],
-    ["the Release button", '[data-held-action="release"]'],
+    ["the Send now button", '[data-held-action="release"]'],
     ["the Cancel button", '[data-held-action="drop"]'],
     ["the Accept button", '[data-held-action="accept"]'],
   ];
@@ -1375,14 +1398,14 @@ function filed(kind: FailureKind | undefined): [string, string] | undefined {
 }
 
 describe("the Edit control", () => {
-  it("sits between Release and Cancel", () => {
+  it("sits between Send now and Cancel", () => {
     // Arrange
     const { tc } = editContext();
     // Act
     const card = drawHeldPrompt(heldPrompt(), tc);
     // Assert
     const labels = [...card.querySelectorAll(".queued-actions button")].map((b) => b.textContent);
-    expect(labels.slice(0, 3)).toEqual(["Release", "Edit", "Cancel"]);
+    expect(labels.slice(0, 3)).toEqual(["Send now", "Edit", "Cancel"]);
   });
 
   it("begins an edit of this card's turn", async () => {
@@ -1524,5 +1547,38 @@ describe("the editing badge", () => {
     const second = drawHeldPrompt(heldPrompt(), tc, first);
     // Assert
     expect([second.hasAttribute("data-editing"), second.querySelector('[data-held-status="editing"]')]).toEqual([false, null]);
+  });
+});
+
+describe("the retired Release label", () => {
+  /** Every file under DIR whose name ends with SUFFIX, recursively. */
+  function filesUnder(dir: string, suffix: string): string[] {
+    return readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) return filesUnder(path, suffix);
+      return path.endsWith(suffix) ? [path] : [];
+    });
+  }
+
+  /** The files among PATHS holding a string literal that is exactly "Release". */
+  function holdingTheLabel(paths: string[]): string[] {
+    return paths.filter((path) => /(["'`])Release\1/.test(readFileSync(path, "utf8")));
+  }
+
+  it("is drawn by no webapp source", () => {
+    // Arrange
+    const sources = filesUnder(join(process.cwd(), "src"), ".ts");
+    // Act, Assert
+    expect(holdingTheLabel(sources)).toEqual([]);
+  });
+
+  it("is labelled by no Emacs source", () => {
+    // Arrange — the suites are excluded: they are not labels.
+    const lisp = join(process.cwd(), "..", "lisp");
+    const sources = readdirSync(lisp)
+      .filter((name) => name.endsWith(".el") && !name.startsWith("test-"))
+      .map((name) => join(lisp, name));
+    // Act, Assert
+    expect([sources.length > 0, holdingTheLabel(sources)]).toEqual([true, []]);
   });
 });

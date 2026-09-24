@@ -319,10 +319,10 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
 
   it("never keeps an element that states nothing, however equal it looks", () => {
     // Arrange — chrome like a held prompt's actions, whose listeners belong to their push.
-    const first = drawBubble(spec("held", { footer: [el("queued-actions", "Release")] })).bubble;
+    const first = drawBubble(spec("held", { footer: [el("queued-actions", "Send now")] })).bubble;
     const actions = first.querySelector(".queued-actions");
     // Act
-    drawBubble(spec("held", { footer: [el("queued-actions", "Release")] }), first);
+    drawBubble(spec("held", { footer: [el("queued-actions", "Send now")] }), first);
     // Assert
     expect(first.querySelector(".queued-actions")).not.toBe(actions);
   });
