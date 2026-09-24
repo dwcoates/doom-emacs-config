@@ -401,6 +401,9 @@ type recorder struct {
 	// is not fixed, and folding it into ch would make every sequence
 	// assertion depend on scheduling.
 	frees chan ids.WorkspaceID
+	// departures carries every OnDeparted edge, on a channel of its own for
+	// the same reason.
+	departures chan departedEdge
 
 	// mu guards mains.
 	mu sync.Mutex
@@ -410,7 +413,11 @@ type recorder struct {
 }
 
 func newRecorder() *recorder {
-	return &recorder{ch: make(chan event, 512), frees: make(chan ids.WorkspaceID, 64)}
+	return &recorder{
+		ch:         make(chan event, 512),
+		frees:      make(chan ids.WorkspaceID, 64),
+		departures: make(chan departedEdge, 64),
+	}
 }
 
 func (r *recorder) emit(e event) { r.ch <- e }
@@ -698,6 +705,17 @@ func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 }
 
 func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) { s.rec.frees <- ws }
+
+// departedEdge is one OnDeparted call.
+type departedEdge struct {
+	ws        ids.WorkspaceID
+	departed  Watcher
+	departure Departure
+}
+
+func (s *lifecycleSink) OnDeparted(ws ids.WorkspaceID, departed Watcher, departure Departure) {
+	s.rec.departures <- departedEdge{ws: ws, departed: departed, departure: departure}
+}
 
 func (s *lifecycleSink) OnLinkChanged(_ ids.WorkspaceID, attached bool) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnLinkChanged", attached: &attached})
@@ -1766,4 +1784,28 @@ func cutEntryAt(pointer string, cut *conversationv1.ContextCut) *conversationv1.
 // liveCutAt is the main agent's context cut served as a live entry.
 func liveCutAt(pointer string, cut *conversationv1.ContextCut) *shimv1.WatchAgentResponse {
 	return entryFrameAt(frameUpdate("main-1", cutUpdate(cut)), pointer)
+}
+
+// awaitDeparture waits for the lifecycle sink's departure edge.
+func (h *harness) awaitDeparture(t *testing.T) departedEdge {
+	t.Helper()
+	select {
+	case d := <-h.rec.departures:
+		return d
+	case <-time.After(waitDeadline):
+		t.Fatalf("no departure was told to the lifecycle sink")
+		return departedEdge{}
+	}
+}
+
+// noMoreDepartures fails if a departure is already standing. Every caller asks
+// after a synchronous Close, which tells its departure before it returns, so
+// the check waits on nothing.
+func (h *harness) noMoreDepartures(t *testing.T) {
+	t.Helper()
+	select {
+	case d := <-h.rec.departures:
+		t.Fatalf("an unexpected departure was told: %+v", d.departure)
+	default:
+	}
 }

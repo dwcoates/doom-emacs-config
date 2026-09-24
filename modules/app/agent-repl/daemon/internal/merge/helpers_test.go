@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -625,6 +626,8 @@ func (q *fakeQueue) RequestBounce(context.Context, ids.WorkspaceID, bounce.Reque
 }
 
 func (q *fakeQueue) OnFree(ids.WorkspaceID) {}
+func (q *fakeQueue) OnDeparted(ids.WorkspaceID, promptqueue.Watcher, sessionwatcher.Departure) {
+}
 
 // Drain: this fake runs nothing in the background, so its work is always
 // already done.
