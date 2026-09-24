@@ -740,6 +740,15 @@ through `reviveIfParked` and inherits this; nothing in the verbs calls
 N callers, exactly one Start), and the request-order landing by
 `TestARevivalFinishingNeverRestampsTheSelection`.
 
+## A held-prompt edit is a claim the queue owns under its delivery lock
+
+`EditHeldPrompt` (owner spec, 2026-09-23; `internal/promptqueue/edit.go`).
+
+- **THE CLAIM IS WRITTEN AND READ UNDER `wsState.drain`**, the mutex every delivery of a standing hold is decided under: a turn end, a lease change, a revival's release, a Release, and a Submit that would go straight to the shim. So "delivered mid-edit" cannot be scheduled: a begin that lands during a delivery waits for it and then finds the prompt delivered.
+- **ONE CLAIM PER WORKSPACE.** While it stands the edited prompt and every prompt queued after it (the tray's order: queued_at, then the turn id) are withheld from `nextDeliverable`, the semantic head included; a Release of one is `release_refused`; a submission with nothing running is held behind it. `deliverHeld` refuses a withheld hold at ERROR as the backstop.
+- **A COMMIT REPLACES IN PLACE** (`ReplaceHeldPromptSaid` keeps `queued_at`, clears the verdict and the acceptance), retires the claim and reclassifies through `classifyHeld`, so an interject then runs the ordinary interject. A content EPOCH bumped under `wsState.verdicts` makes a verdict judged about the replaced words settle as a discard; lock order is `drain`, then `verdicts`.
+- **THE CLAIM IS SCOPED TO THE EDITOR'S HOST STREAM, never a timer.** A begin with no `WatchHostWorkspace` stream is `no_editor`; the last one closing calls `Queue.EditorGone`, which retires the claim as a cancel would. The claim is in-memory, so a restart retires it with the stream.
+
 ## A BROWSER page holds ONE stream; Emacs holds its own
 
 Every standing watch a webview holds is a SUBSCRIPTION on that page's single
