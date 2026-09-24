@@ -299,6 +299,14 @@ func (c *controller) reconcile(ctx context.Context, adopted []AdoptedSession) ([
 			Kind:      disposition(intent, state),
 		}
 		out = append(out, d)
+		if gone, why := c.workspaceGone(ctx, session.Workspace); gone {
+			c.log.Info(opReconcile, "the manifest names a workspace nothing can serve any more; its disposition is recorded here only", dlog.Context{
+				"workspace": string(session.Workspace), "intent": string(d.Intent), "lock": d.Lock.String(),
+				"disposition": string(d.Kind), "shim_pid": session.ShimPID,
+				"vendor_session_id": session.VendorSessionID, "why": why,
+			})
+			continue
+		}
 		if !c.recordDisposition(ctx, session, d) {
 			landed = false
 		}
@@ -306,6 +314,31 @@ func (c *controller) reconcile(ctx context.Context, adopted []AdoptedSession) ([
 	c.log.Info(opReconcile, "reconciled the stand-down intent manifest against the kernel locks",
 		dlog.Context{"outgoing_daemon": string(m.Daemon), "sessions": len(out), "recorded": landed})
 	return out, true, landed, nil
+}
+
+// workspaceGone reports whether a manifest entry names a workspace no view can
+// ever be served for: one the registry no longer holds, or one whose worktree
+// is gone (the boot closes those first, and their views are never bound,
+// because the workspace's log sink lives inside the directory). A fault
+// recorded for one reaches a footer with no bound directory, which is an
+// invariant violation, and reaches nobody who could read it; so its
+// disposition is logged and nothing is opened.
+//
+// A LOOKUP THAT DOES NOT SAY "NOT FOUND" IS NEVER READ AS GONE, and neither is
+// a stat that does not say "not exist": the entry is then recorded as usual,
+// where a failure is its own ERROR.
+func (c *controller) workspaceGone(ctx context.Context, ws ids.WorkspaceID) (bool, string) {
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if errors.Is(err, wsm.ErrNotFound) {
+		return true, "the registry no longer holds the workspace"
+	}
+	if err != nil {
+		return false, ""
+	}
+	if _, err := os.Stat(record.Dir); errors.Is(err, os.ErrNotExist) {
+		return true, "the workspace's directory is gone"
+	}
+	return false, ""
 }
 
 // retireManifest removes the intent manifest once what it states is recorded.

@@ -561,25 +561,88 @@ func TestWritingTheDeferredDispositionsRetiresTheManifest(t *testing.T) {
 	}
 }
 
+// refusingFaultsDB refuses every fault write, as a failing state client would.
+type refusingFaultsDB struct{ wsm.DB }
+
+func (refusingFaultsDB) OpenFault(context.Context, wsm.Fault) (ids.FaultID, error) {
+	return "", errors.New("disk I/O error")
+}
+
 func TestAManifestWhoseRecordFailedIsKept(t *testing.T) {
-	// Arrange: a workspace the registry does not hold refuses its fault.
+	// Arrange
 	h := newHarness(t)
-	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
-		Sessions: []ManifestSession{{
-			Workspace: ids.WorkspaceID("0000000000000000"), Dir: t.TempDir(), ShimPID: 4242, Intent: IntentPreserve,
-		}},
-	}); err != nil {
-		t.Fatalf("writeManifest: %v", err)
-	}
+	h.c.deps.DB = refusingFaultsDB{DB: h.c.deps.DB}
 
 	// Act
-	if _, err := h.c.Reconcile(context.Background(), nil); err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
 
 	// Assert
 	if !manifestExists(t, h) {
 		t.Fatalf("the intent manifest was retired although a disposition it names was never recorded")
+	}
+}
+
+// reconcileGone reconciles a one-entry manifest for a workspace nothing can
+// serve, recording which faults the reconciliation opened.
+func reconcileGone(t *testing.T, h *harness, ws ids.WorkspaceID, dir string) *recordingDB {
+	t.Helper()
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	h.c.deps.DB = recorder
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Sessions: []ManifestSession{{Workspace: ws, Dir: dir, ShimPID: 4242, Intent: IntentPreserve}},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+	if _, err := h.c.Reconcile(context.Background(), nil); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	return recorder
+}
+
+// TestAWorkspaceWhoseDirectoryIsGoneGetsNoFault pins that the reconciliation
+// publishes nothing for a workspace no view is bound for: the fault reached a
+// footer with no bound directory, an invariant violation, and nobody could
+// ever read it.
+func TestAWorkspaceWhoseDirectoryIsGoneGetsNoFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	if err := os.Remove(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act
+	recorder := reconcileGone(t, h, ws, dir)
+
+	// Assert
+	if len(recorder.opened) != 0 {
+		t.Fatalf("faults opened = %d, want none for a workspace whose directory is gone", len(recorder.opened))
+	}
+}
+
+func TestAWorkspaceTheRegistryNoLongerHoldsGetsNoFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	recorder := reconcileGone(t, h, ids.WorkspaceID("0000000000000000"), t.TempDir())
+
+	// Assert
+	if len(recorder.opened) != 0 {
+		t.Fatalf("faults opened = %d, want none for a workspace the registry does not hold", len(recorder.opened))
+	}
+}
+
+func TestAManifestNamingOnlyAGoneWorkspaceIsRetired(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	reconcileGone(t, h, ids.WorkspaceID("0000000000000000"), t.TempDir())
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after its only entry named a workspace nothing serves")
 	}
 }
