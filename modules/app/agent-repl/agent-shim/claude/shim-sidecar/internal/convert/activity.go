@@ -373,14 +373,25 @@ func wakeupStart(input map[string]any, ts int64) *conversationv1.AgentScheduleWa
 // and ignores the other's, which is why the arms are exclusive.
 func artifactStart(input map[string]any, ts int64) *conversationv1.AgentArtifactStart {
 	start := &conversationv1.AgentArtifactStart{StartedAtMs: ts}
+	if publish, list := artifactAct(input); list != nil {
+		start.Act = &conversationv1.AgentArtifactStart_List{List: list}
+	} else {
+		start.Act = &conversationv1.AgentArtifactStart_Publish{Publish: publish}
+	}
+	return start
+}
+
+// artifactAct is the ONE reader of which act an artifact call asked for, shared
+// by the start and the failure that restates it so the two cannot disagree.
+// Exactly one of the two is non-nil.
+func artifactAct(input map[string]any) (*conversationv1.AgentArtifactPublish, *conversationv1.AgentArtifactList) {
 	if action := str(input["action"]); action == "list" {
-		start.Act = &conversationv1.AgentArtifactStart_List{List: &conversationv1.AgentArtifactList{
+		return nil, &conversationv1.AgentArtifactList{
 			Limit: optionalUint32(input, "limit"),
 			Scope: optionalString(input["scope"]),
-		}}
-		return start
+		}
 	}
-	start.Act = &conversationv1.AgentArtifactStart_Publish{Publish: &conversationv1.AgentArtifactPublish{
+	return &conversationv1.AgentArtifactPublish{
 		FilePath:    str(pick(input, "file_path", "filePath")),
 		Favicon:     optionalString(input["favicon"]),
 		Title:       optionalString(input["title"]),
@@ -388,8 +399,20 @@ func artifactStart(input map[string]any, ts int64) *conversationv1.AgentArtifact
 		Label:       optionalString(input["label"]),
 		Description: optionalString(input["description"]),
 		Force:       boolean(input["force"]),
-	}}
-	return start
+	}, nil
+}
+
+// artifactFailure restates the act a failed artifact call asked for, read
+// through the start's own reader, so a replay serving the failure alone still
+// draws a failed publish's card.
+func artifactFailure(input map[string]any, failure *conversationv1.AgentToolFailure) *conversationv1.AgentArtifactFailure {
+	f := &conversationv1.AgentArtifactFailure{Failure: failure}
+	if publish, list := artifactAct(input); list != nil {
+		f.Act = &conversationv1.AgentArtifactFailure_List{List: list}
+	} else {
+		f.Act = &conversationv1.AgentArtifactFailure_Publish{Publish: publish}
+	}
+	return f
 }
 
 // planModeStart states WHICH act the call is. An exit with no enter is legal: a
