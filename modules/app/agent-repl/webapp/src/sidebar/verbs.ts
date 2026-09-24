@@ -617,6 +617,15 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
       return cause.value.detail
         ? `the vendor failed to start the session (${cause.value.detail})`
         : "the vendor failed to start the session";
+    case "lockHolderUnavailable":
+      // NOBODY OWNS THE CONVERSATION. The shim's own lock helper would not
+      // spawn, and the binary plus the OS error are the whole remediation, so
+      // both are said; an ownership wording would send the reader hunting for
+      // a second process that does not exist.
+      return (
+        `the shim's lock helper ${cause.value.binary} failed to start (${cause.value.osError}); ` +
+        "no other process owns this conversation"
+      );
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }

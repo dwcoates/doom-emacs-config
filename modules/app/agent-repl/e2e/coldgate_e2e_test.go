@@ -74,7 +74,8 @@
 //   - THIS FILE'S OWN ARRANGEMENT. The hand-rolled successor daemon below
 //     inherited none of NewWorld's env, so its shim looked for `shim-lock` at
 //     the deploy location under $HOME, found nothing, and its kernel claim died
-//     `spawn ENOENT` — which the shim reports as `conversation_owned`. The
+//     `spawn ENOENT` — which the shim then reported as `conversation_owned`
+//     (it is `lock_holder_unavailable` now). The
 //     symptom was an AnswerColdGate refused "another process already owns
 //     vendor session ...", and it hit ONLY the remediated re-open because the
 //     cold refusal returns before either lock is taken. AGENT_REPL_SHIM_LOCK_BIN
@@ -273,7 +274,7 @@ func raiseColdGate(t *testing.T) *coldGate {
 	// SuccessorOpts. The first StartSession never reaches the kernel claim (the
 	// cold refusal returns before either lock is taken), so a successor missing
 	// the lock binary stands the whole arrangement up and fails only the
-	// REMEDIATED re-open, as `conversation_owned`.
+	// REMEDIATED re-open, as `lock_holder_unavailable`.
 	opts := first.SuccessorOpts(t)
 	// THE SUCCESSOR MUST ROUTE THROUGH THE FIRST DAEMON'S ACCOUNT ROOT, or the
 	// resume it performs looks at an empty projects tree, the source classifier

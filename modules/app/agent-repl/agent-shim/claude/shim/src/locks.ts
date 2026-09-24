@@ -42,7 +42,8 @@
  * Both locks are taken, in a fixed order — session lock first, then workspace
  * lock — so no two shims can ever take them in opposite orders. Failing to take
  * either is a refusal to START THE SESSION: `StartSession` answers
- * `conversation_owned` and the process stays inert and serving.
+ * `conversation_owned` (or `lock_holder_unavailable`, when this shim could not
+ * spawn its own holder) and the process stays inert and serving.
  *
  * # Mechanism
  *
@@ -172,6 +173,29 @@ export function workspaceLockPath(cwd: string): string {
 }
 
 /**
+ * THIS shim could not start its own lock holder, so no claim was attempted.
+ *
+ * It is its own error class because it is its own refusal: a held lock means a
+ * live shim owns the conversation (`conversation_owned`), while an unspawnable
+ * holder means NOBODY is known to own it and this shim's deployment is broken
+ * (a missing or unexecutable `shim-lock`). `StartSession` answers
+ * `lock_holder_unavailable` carrying both fields, and nothing else does.
+ */
+export class LockHolderUnavailableError extends Error {
+  /** The holder binary the spawn was asked to run. */
+  readonly binary: string;
+  /** The operating system's account of why the spawn failed. */
+  readonly osError: string;
+
+  constructor(binary: string, osError: string, message: string) {
+    super(message);
+    this.name = "LockHolderUnavailableError";
+    this.binary = binary;
+    this.osError = osError;
+  }
+}
+
+/**
  * The teardown half of a claim: drop the lock and wait for the holder to be
  * gone. Awaiting matters — a caller that re-acquires immediately (the daemon
  * retiring a shim and starting its replacement) must not race the holder's
@@ -244,10 +268,7 @@ function acquireExclusiveLock(claim: {
     child = spawn(binary, [file], { stdio: ["pipe", "pipe", "pipe"] });
   } catch (err) {
     return Promise.reject(
-      new Error(
-        `${COMPONENT}: cannot spawn the lock holder ${binary} for the ${claim.kind} lock ${file}: ` +
-          `${(err as Error).message}`,
-      ),
+      holderUnavailable(claim, binary, file, err),
     );
   }
 
@@ -280,15 +301,21 @@ function acquireExclusiveLock(claim: {
       );
     });
 
+    // Before the claim settles, an 'error' event is Node reporting that the
+    // holder could not be SPAWNED (ENOENT, EACCES): the asynchronous twin of
+    // the synchronous throw above, and the same refusal. After it settles it
+    // is a failed kill of a live holder, recorded as that and never misread
+    // as a spawn failure.
     child.on("error", (err: Error) => {
-      settle(() =>
-        reject(
-          new Error(
-            `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} could not run: ` +
-              `${err.message}`,
-          ),
-        ),
-      );
+      if (settled) {
+        // warn: a defect because a settled claim's holder raised an error (a failed kill).
+        LOGGER.warn(
+          { ...claim.context, lock_path: file, lock_binary: binary, cause: err.message },
+          `the ${claim.kind} lock holder raised an error after its claim settled`,
+        );
+        return;
+      }
+      settle(() => reject(holderUnavailable(claim, binary, file, err)));
     });
 
     // THE HOLDER'S OWN DIAGNOSTICS, folded into this component's records rather
@@ -347,4 +374,30 @@ function acquireExclusiveLock(claim: {
       });
     });
   });
+}
+
+/**
+ * The one spelling of "this shim's lock holder would not start", recorded at
+ * ERROR and returned as the typed error `StartSession` maps onto
+ * `lock_holder_unavailable`. Both spawn-failure branches come through here, so
+ * the record and the refusal cannot drift apart.
+ */
+function holderUnavailable(
+  claim: { kind: string; context: Record<string, unknown> },
+  binary: string,
+  file: string,
+  err: unknown,
+): LockHolderUnavailableError {
+  const osError = err instanceof Error ? err.message : String(err);
+  // error: a defect, because the shim's own lock helper is missing or cannot
+  // be executed, so no session can start in this deployment at all.
+  LOGGER.error(
+    { ...claim.context, lock_path: file, lock_binary: binary, os_error: osError, cause: osError },
+    `the ${claim.kind} lock holder ${binary} could not be spawned: ${osError}`,
+  );
+  return new LockHolderUnavailableError(
+    binary,
+    osError,
+    `${COMPONENT}: cannot spawn the lock holder ${binary} for the ${claim.kind} lock ${file}: ${osError}`,
+  );
 }

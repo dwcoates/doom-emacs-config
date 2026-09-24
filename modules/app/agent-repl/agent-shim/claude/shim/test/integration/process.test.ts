@@ -16,6 +16,7 @@
  * process, and the only channel that always exists is stderr.
  */
 import { existsSync, readdirSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { workspaceLockKey } from "../../src/locks.js";
@@ -183,6 +184,33 @@ describe("the spawn contract's argv", () => {
 
     expect(run.exit.code).not.toBe(0);
     expect(run.stderr).toContain("--log-fd");
+  });
+});
+
+describe("an unspawnable lock holder", () => {
+  test("StartSession is refused lock_holder_unavailable, never conversation_owned", async () => {
+    // Arrange: nobody owns the conversation; the shim's own helper is missing.
+    const missing = path.join(os.tmpdir(), "no-such-shim-lock-for-itest");
+    const shim = await spawnShim({ env: { AGENT_REPL_SHIM_LOCK_BIN: missing } });
+
+    // Act.
+    const refused = await shim.clients.h1.startSession(freshSession());
+
+    // Assert.
+    expect(startSessionCause(refused)).toBe("lockHolderUnavailable");
+  });
+
+  test("the refusal names the binary the shim could not spawn", async () => {
+    // Arrange.
+    const missing = path.join(os.tmpdir(), "no-such-shim-lock-for-itest");
+    const shim = await spawnShim({ env: { AGENT_REPL_SHIM_LOCK_BIN: missing } });
+
+    // Act.
+    const refused = await shim.clients.h1.startSession(freshSession());
+
+    // Assert.
+    const cause = refused.result.case === "failure" ? refused.result.value.cause : undefined;
+    expect(cause?.case === "lockHolderUnavailable" ? cause.value.binary : undefined).toBe(missing);
   });
 });
 
