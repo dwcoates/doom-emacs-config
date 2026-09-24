@@ -1523,7 +1523,7 @@ func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
 	successor.ExpectWarnings("daemon.rollout.reconcile")
 }
 
-func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
+func TestCrashBootWithADeadManifestPidTakesTheOrdinaryDeadShimPath(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose shim will be gone before restart.
 	f := newOpened(t, harness.Opts{})
@@ -1546,8 +1546,7 @@ func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
 	harness.AwaitProcessGone(t, f.d.Ctx(), oldPID)
 
 	// A manifest naming this session as one the outgoing daemon meant to
-	// PRESERVE, whose pid is now gone: disposition(preserve, free) = DIED,
-	// which health.KindBounceDied ("bounce_died") is meant to report.
+	// PRESERVE, whose pid is now gone: disposition(preserve, free) = DIED.
 	writeIntentManifest(t, f.d, rollout.ManifestSession{
 		Workspace:       ids.WorkspaceID(f.ws.GetId()),
 		Dir:             f.repo.Dir,
@@ -1558,14 +1557,13 @@ func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
 
 	// Act: restart on the same state root.
 	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
-	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
-	successor.ExpectWarnings("daemon.rollout.reconcile")
 
-	// Assert: the successor's host stream carries a bounce_died fault for
-	// this workspace.
-	host := successor.WatchHost(f.ws)
-	awaitHostFault(t, successor, host, "a bounce_died fault", func(hf *agentreplv1.HostFault) bool {
-		return hf.GetBounceDied() != nil
+	// Assert: the death is recorded, resolved, and says it is the ordinary
+	// dead-shim path -- no WARN, and nothing left standing on the strip that
+	// no verb could ever close. The successor's cleanup sweep fails on any
+	// undeclared warning, which is the no-WARN half.
+	successor.AwaitLogRecord(successor.RunLogPath(), "the resolved DIED disposition", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.reconcile" && r.Level == "info" && r.Context["disposition"] == "DIED"
 	})
 }
 

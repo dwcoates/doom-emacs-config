@@ -181,6 +181,12 @@ type Deps struct {
 	// neither the manifest reconciliation nor the joining path can be run
 	// without one.
 	Rollout rollout.Controller
+	// BindViews binds every registered workspace whose directory exists on the
+	// per-workspace resolvers, writing nothing (workspace.Verbs.BindViews). It
+	// runs FIRST: every later step can raise or close a fault, a fault reaches
+	// the footer, and a footer record for an unbound workspace is an invariant
+	// violation. Required.
+	BindViews func(ctx context.Context) error
 	// RunDir is the kernel-lock directory the workspace locks are probed in.
 	RunDir string
 	// JoiningAddress is the incumbent's address when this daemon is a joining
@@ -288,6 +294,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("an adoption installer")
 	case deps.StartSession == nil:
 		return nil, missing("a session starter")
+	case deps.BindViews == nil:
+		return nil, missing("a view binder")
 	case deps.RunDir == "":
 		return nil, missing("a kernel-lock run directory")
 	case deps.Log == nil:

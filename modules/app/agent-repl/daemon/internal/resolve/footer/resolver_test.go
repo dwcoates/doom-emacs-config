@@ -1025,3 +1025,53 @@ func TestTheTurnOpenEdgeKeepsTheActivityAFrameAlreadyShowed(t *testing.T) {
 		t.Fatalf("status = %v, want the activity the frame showed kept, not thinking.submitting", h.view(t).GetStrip().GetStatus())
 	}
 }
+
+// unboundErrors counts the ERROR records stating an unbound-workspace
+// invariant violation.
+func unboundErrors(log *dlog.TestSurfaces, operation string) int {
+	n := 0
+	for _, rec := range log.Records() {
+		if rec.Level == "error" && rec.Operation == operation {
+			n++
+		}
+	}
+	return n
+}
+
+// TestAFrameForAnUnboundWorkspaceStatesTheViolationAtError pins that the
+// record's level matches what it claims: the violation used to ride as context
+// on INFO and DEBUG records only, where no level sweep could see it.
+func TestAFrameForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestSurfaces()
+	r, err := newResolver(testColors(), log, WithClock(newFakeClock()))
+	if err != nil {
+		t.Fatalf("newResolver: %v", err)
+	}
+
+	// Act
+	r.OnLink("ws-unbound", shimclient.LinkConnected)
+
+	// Assert
+	if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != 1 {
+		t.Fatalf("unbound-workspace ERROR records = %d, want 1", got)
+	}
+}
+
+func TestTheUnboundViolationIsStatedOncePerWorkspace(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestSurfaces()
+	r, err := newResolver(testColors(), log, WithClock(newFakeClock()))
+	if err != nil {
+		t.Fatalf("newResolver: %v", err)
+	}
+	r.OnLink("ws-unbound", shimclient.LinkConnected)
+
+	// Act
+	r.OnLink("ws-unbound", shimclient.LinkDialing)
+
+	// Assert
+	if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != 1 {
+		t.Fatalf("unbound-workspace ERROR records = %d, want 1 across two frames", got)
+	}
+}
