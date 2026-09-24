@@ -1211,8 +1211,6 @@ does not gate whether the user gets to see it."
                          . ((workspace . ((id . "ws-1") (dir . "/tmp/ws-1"))))))
                  (cons "log-sink-poisoned"
                        '(logSinkPoisoned . ((sink . "emacs.jsonl"))))
-                 (cons "deploy-script-failed"
-                       '(deployScriptFailed . ((detail . "deploy script exited 1"))))
                  (cons "successor-spawn-failed"
                        '(successorSpawnFailed . ((detail . "spawn refused: address in use"))))
                  (cons "prompts-dir-missing"

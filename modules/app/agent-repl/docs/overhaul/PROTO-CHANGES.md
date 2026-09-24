@@ -1012,3 +1012,29 @@ activity least.
   (`docs/FOOTER-TOPOLOGY-AUDIT.md` section 4, rows N1 4 and N1 5).
 
 Claude-Session: https://claude.ai/code/session_01GEXRT62v8zC9WXtBtZBjp4
+
+## Landing — the daemon owns deploys (2026-09-23)
+
+USER-RULED (owner design, 2026-09-23: no deploy script; the daemon builds,
+decides staleness by content hash, and restarts what is out of date, when it
+may):
+- `RollOutBuild` is REPLACED by `Deploy{force}` (endpoint_deploy.proto). The
+  caller no longer states what it rebuilt: the daemon builds every component
+  into staging and answers one `DeployComponentOutcome` per component
+  (up_to_date | restarted | handing_over | shims{bounced_now | registered} |
+  reload_pushed | deferred_to_successor), or a `DeployError`
+  (build_failed | already_deploying | already_rolling_out | joining |
+  service_restart_failed | install_failed). BREAKING, owner-approved.
+- `WatchDaemonRequest` names its client: a REQUIRED `oneof client {emacs
+  {elisp_build} | webview {}}` (the stream is held by Emacs and every
+  webview). `WatchDaemonEmacs.elisp_build` (REQUIRED) is the connecting
+  Emacs's loaded elisp as a content hash, by the algorithm the field states.
+- `WatchDaemonResponse.reload_elisp` (`DaemonReloadElisp{module_root, build}`):
+  the deploy's push that has Emacs hot-load the module set, sent only on an
+  Emacs stream whose elisp_build is not the checkout's.
+- `WatchWebWorkspaceRequest.webapp_build` (REQUIRED): the page's own entry
+  bundle hash.
+- `SessionDiagnostics.shim_build` (REQUIRED): the shim bundle's content hash,
+  on every diagnostics frame, so an inert or adopted shim reports its build
+  the moment it is attached. `SessionRuntime.shim_build_sha` now carries the
+  same content hash rather than a commit.

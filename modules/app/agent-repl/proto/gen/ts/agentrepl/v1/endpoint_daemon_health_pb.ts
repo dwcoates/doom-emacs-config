@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_daemon_health.proto.
  */
 export const file_agentrepl_v1_endpoint_daemon_health: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IrMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIABIuCghpZGVudGl0eRgDIAEoCzIcLmFnZW50cmVwbC52MS5EYWVtb25JZGVudGl0eUIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSJFCg5EYWVtb25JZGVudGl0eRITCgtpbnN0YW5jZV9pZBgBIAEoCRILCgNwaWQYAiABKAMSEQoJYnVpbGRfc2hhGAMgASgJIjwKD0RhZW1vblVuaGVhbHRoeRIpCgZmYXVsdHMYASADKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQiugQKC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJRChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAEkUKEWxvZ19zaW5rX3BvaXNvbmVkGAMgASgLMiguYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkSAASSwoUZGVwbG95X3NjcmlwdF9mYWlsZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHREZXBsb3lTY3JpcHRGYWlsZWRIABJPChZzdWNjZXNzb3Jfc3Bhd25fZmFpbGVkGAUgASgLMi0uYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0U3VjY2Vzc29yU3Bhd25GYWlsZWRIABJJChNwcm9tcHRzX2Rpcl9taXNzaW5nGAYgASgLMiouYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0UHJvbXB0c0Rpck1pc3NpbmdIABI9Cg13c21fcmVhZF9vbmx5GAcgASgLMiQuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0V3NtUmVhZE9ubHlIABJRChdkYWVtb25fc3RhdGVfdW5yZWFkYWJsZRgIIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZUgAQgYKBGtpbmQiUQogRGFlbW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiIxCiBEYWVtb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZRINCgVjYXVzZRgBIAEoCSIqChpEYWVtb25GYXVsdExvZ1NpbmtQb2lzb25lZBIMCgRzaW5rGAEgASgJIi8KHURhZW1vbkZhdWx0RGVwbG95U2NyaXB0RmFpbGVkEg4KBmRldGFpbBgBIAEoCSIxCh9EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkEg4KBmRldGFpbBgBIAEoCSIsChxEYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nEgwKBHBhdGgYASABKAkiGAoWRGFlbW9uRmF1bHRXc21SZWFkT25seSITChFEYWVtb25IZWFsdGhFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IrMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIABIuCghpZGVudGl0eRgDIAEoCzIcLmFnZW50cmVwbC52MS5EYWVtb25JZGVudGl0eUIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSJFCg5EYWVtb25JZGVudGl0eRITCgtpbnN0YW5jZV9pZBgBIAEoCRILCgNwaWQYAiABKAMSEQoJYnVpbGRfc2hhGAMgASgJIjwKD0RhZW1vblVuaGVhbHRoeRIpCgZmYXVsdHMYASADKAsyGS5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHQiiQQKC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCRJRChdhZG9wdGlvbl93aW5kb3dfZXhwaXJlZBgCIAEoCzIuLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAEkUKEWxvZ19zaW5rX3BvaXNvbmVkGAMgASgLMiguYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkSAASTwoWc3VjY2Vzc29yX3NwYXduX2ZhaWxlZBgFIAEoCzItLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkSAASSQoTcHJvbXB0c19kaXJfbWlzc2luZxgGIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nSAASPQoNd3NtX3JlYWRfb25seRgHIAEoCzIkLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFdzbVJlYWRPbmx5SAASUQoXZGFlbW9uX3N0YXRlX3VucmVhZGFibGUYCCABKAsyLi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHREYWVtb25TdGF0ZVVucmVhZGFibGVIAEIGCgRraW5kSgQIBBAFUhRkZXBsb3lfc2NyaXB0X2ZhaWxlZCJRCiBEYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIjEKIERhZW1vbkZhdWx0RGFlbW9uU3RhdGVVbnJlYWRhYmxlEg0KBWNhdXNlGAEgASgJIioKGkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkEgwKBHNpbmsYASABKAkiMQofRGFlbW9uRmF1bHRTdWNjZXNzb3JTcGF3bkZhaWxlZBIOCgZkZXRhaWwYASABKAkiLAocRGFlbW9uRmF1bHRQcm9tcHRzRGlyTWlzc2luZxIMCgRwYXRoGAEgASgJIhgKFkRhZW1vbkZhdWx0V3NtUmVhZE9ubHkiEwoRRGFlbW9uSGVhbHRoRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * Nothing to ask beyond "you?".
@@ -212,14 +212,6 @@ export type DaemonFault = Message<"agentrepl.v1.DaemonFault"> & {
     case: "logSinkPoisoned";
   } | {
     /**
-     * The deploy script failed.
-     *
-     * @generated from field: agentrepl.v1.DaemonFaultDeployScriptFailed deploy_script_failed = 4;
-     */
-    value: DaemonFaultDeployScriptFailed;
-    case: "deployScriptFailed";
-  } | {
-    /**
      * Spawning the successor daemon failed.
      *
      * @generated from field: agentrepl.v1.DaemonFaultSuccessorSpawnFailed successor_spawn_failed = 5;
@@ -325,25 +317,6 @@ export const DaemonFaultLogSinkPoisonedSchema: GenMessage<DaemonFaultLogSinkPois
   messageDesc(file_agentrepl_v1_endpoint_daemon_health, 9);
 
 /**
- * @generated from message agentrepl.v1.DaemonFaultDeployScriptFailed
- */
-export type DaemonFaultDeployScriptFailed = Message<"agentrepl.v1.DaemonFaultDeployScriptFailed"> & {
-  /**
-   * The script's own account of the failure.
-   *
-   * @generated from field: string detail = 1;
-   */
-  detail: string;
-};
-
-/**
- * Describes the message agentrepl.v1.DaemonFaultDeployScriptFailed.
- * Use `create(DaemonFaultDeployScriptFailedSchema)` to create a new message.
- */
-export const DaemonFaultDeployScriptFailedSchema: GenMessage<DaemonFaultDeployScriptFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 10);
-
-/**
  * @generated from message agentrepl.v1.DaemonFaultSuccessorSpawnFailed
  */
 export type DaemonFaultSuccessorSpawnFailed = Message<"agentrepl.v1.DaemonFaultSuccessorSpawnFailed"> & {
@@ -360,7 +333,7 @@ export type DaemonFaultSuccessorSpawnFailed = Message<"agentrepl.v1.DaemonFaultS
  * Use `create(DaemonFaultSuccessorSpawnFailedSchema)` to create a new message.
  */
 export const DaemonFaultSuccessorSpawnFailedSchema: GenMessage<DaemonFaultSuccessorSpawnFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 11);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 10);
 
 /**
  * @generated from message agentrepl.v1.DaemonFaultPromptsDirMissing
@@ -379,7 +352,7 @@ export type DaemonFaultPromptsDirMissing = Message<"agentrepl.v1.DaemonFaultProm
  * Use `create(DaemonFaultPromptsDirMissingSchema)` to create a new message.
  */
 export const DaemonFaultPromptsDirMissingSchema: GenMessage<DaemonFaultPromptsDirMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 12);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 11);
 
 /**
  * @generated from message agentrepl.v1.DaemonFaultWsmReadOnly
@@ -392,7 +365,7 @@ export type DaemonFaultWsmReadOnly = Message<"agentrepl.v1.DaemonFaultWsmReadOnl
  * Use `create(DaemonFaultWsmReadOnlySchema)` to create a new message.
  */
 export const DaemonFaultWsmReadOnlySchema: GenMessage<DaemonFaultWsmReadOnly> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 13);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 12);
 
 /**
  * No arms: DaemonHealth has no refusal site (landing 4).
@@ -407,5 +380,5 @@ export type DaemonHealthError = Message<"agentrepl.v1.DaemonHealthError"> & {
  * Use `create(DaemonHealthErrorSchema)` to create a new message.
  */
 export const DaemonHealthErrorSchema: GenMessage<DaemonHealthError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 14);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 13);
 

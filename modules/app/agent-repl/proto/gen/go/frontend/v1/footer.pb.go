@@ -276,7 +276,6 @@ func (x *FooterStrip) GetLiveWork() *FooterLiveWorkChips {
 //	| disconnected | severed           | link_severed, watch_open_refused   |
 //	| blocked      | daemon_impaired   | prompts_dir_missing, wsm_read_only,|
 //	|              |                   | log_sink_poisoned,                 |
-//	|              |                   | deploy_script_failed,              |
 //	|              |                   | successor_spawn_failed,            |
 //	|              |                   | daemon_state_unreadable,           |
 //	|              |                   | adoption_window_expired (daemon)   |
@@ -9031,9 +9030,7 @@ func (x *FooterTokensLineFirstToken) GetValue() string {
 type FooterTokensLineAlarm struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The daemon-composed sentence ("expensive turn — 41k over 20k"). Drawn
-	// verbatim; the sentence also states WHY the turn ran when that changes
-	// the reading (an ordinary prompt vs a cache keep-alive that came back
-	// cold — its own alarm, phrased as such by the daemon).
+	// verbatim.
 	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

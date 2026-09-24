@@ -52,17 +52,6 @@ func runSuite(m *testing.M) int {
 		return 1
 	}
 
-	sha, err := resolveBuildIdentity(l.repoDir)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: resolve the shim build identity:", err)
-		return 1
-	}
-	buildIdentity = sha
-	if err := checkBuildIdentityAgrees(); err != nil {
-		fmt.Fprintln(os.Stderr, "e2e:", err)
-		return 1
-	}
-
 	code := harness.MainAt(m, l.daemonDir)
 	// The perf phase's final summary block (PERF-SPEC.md §D4), after every
 	// test has reported. A no-op in the default build, where the perf files
@@ -178,101 +167,18 @@ func requireNode(t *testing.T) string {
 	return nodeBin
 }
 
-// shimBuildSHA is the build identity this suite WANTS on both sides:
-// src/main.ts refuses to start without SHIM_BUILD_SHA in its spawn
-// environment, and a fixed constant means no test races the daemon's
-// stale-shim rollout check.
-//
-// It is only the FALLBACK, never the whole answer — see
-// resolveBuildIdentity: the daemon prefers the shim bundle's own build stamp
-// in the checkout over this variable, so a checkout that has ever run
-// bin/build-frontend.sh makes the daemon export a real git sha instead and
-// this constant would be a lie.
-const shimBuildSHA = "e2e-fixed-build-sha"
-
-// buildIdentity is the ONE sha every daemon in this run is started with, in
-// BOTH roles: the identity it stamps onto every shim spawn (SHIM_BUILD_SHA)
-// and the deployed build it compares that runtime identity against
-// (AGENT_REPL_DEPLOY_STAMP). Resolved once by runSuite; read by
-// buildIdentityEnv.
-var buildIdentity string
-
-// resolveBuildIdentity answers what the daemon will report as the shim's
-// build identity when its checkout is repoDir, replicating the daemon's own
-// resolution (claude-repld's resolveShimBuildSHA): the shim bundle's build
-// stamp at agent-shim/claude/shim/dist/.built-sha wins, because that is the
-// bundle a deployed daemon launches, and SHIM_BUILD_SHA answers only when
-// that stamp is absent.
-//
-// The harness must resolve it the daemon's way rather than assert its own
-// constant, because the two are DIFFERENT SOURCES otherwise: the deploy
-// stamp the daemon reads (daemon/bin/.built-sha) and the shim stamp it
-// exports are two real, independently written git shas, and a stale-shim
-// bounce on every OpenWorkspace is what their disagreement looks like.
-func resolveBuildIdentity(repoDir string) (string, error) {
-	stamp := filepath.Join(repoDir, "agent-shim", "claude", "shim", "dist", ".built-sha")
-	raw, err := os.ReadFile(stamp)
-	switch {
-	case err == nil:
-		sha := strings.TrimSpace(string(raw))
-		if sha == "" {
-			return "", fmt.Errorf("the shim build stamp %s is empty: the daemon refuses to boot on it", stamp)
-		}
-		return sha, nil
-	case os.IsNotExist(err):
-		return shimBuildSHA, nil
-	default:
-		return "", fmt.Errorf("read the shim build stamp %s: %w", stamp, err)
-	}
-}
-
-// buildIdentityEnv is the build-identity environment EVERY daemon this suite
-// starts must carry, and the only place the three variables are named:
-//
-//   - AGENT_REPL_CHECKOUT pins the checkout the daemon resolves its stamps
-//     from to this worktree, so the sha the harness read is the sha the
-//     daemon reads (unpinned, a binary built into a temp dir can resolve a
-//     DIFFERENT worktree's module root and its stamps).
-//   - SHIM_BUILD_SHA is the identity every shim spawn reports, honored by the
-//     shim's build-identity.ts (a live read of its spawn env, never baked
-//     into the bundle) and by the daemon when no shim build stamp exists.
-//   - AGENT_REPL_DEPLOY_STAMP is the deployed build the daemon's rollout
-//     staleness check compares that report against. Setting it to the SAME
-//     string is the whole point: any other value makes the daemon judge every
-//     freshly spawned shim stale, bounce it, fail the bounce's resume ("no
-//     transcript exists for vendor session") and answer every prompt
-//     no_session.
-func buildIdentityEnv() []string {
-	return []string{
-		checkoutEnv + "=" + repo.repoDir,
-		"SHIM_BUILD_SHA=" + buildIdentity,
-		"AGENT_REPL_DEPLOY_STAMP=" + buildIdentity,
-	}
-}
-
 // checkoutEnv is claude-repld's checkout-root override (checkout.Env).
+//
+// THE CHECKOUT IS WHERE A DEPLOY INSTALLS. The daemon's own deploy judges and
+// installs against it: the daemon binary lands at <checkout>/daemon/bin, and
+// the fresh elisp build is hashed from <checkout>/lisp. A Go world therefore
+// never names this worktree — harness.StartDaemon pins its own throwaway
+// checkout (harness.BuildIdentityEnv), whose elisp is the build every harness
+// WatchDaemon stream reports — or a landing's deploy would install a test
+// daemon over this worktree's daemon/bin. Only the Emacs layer names the
+// module root, because a real Emacs loads the elisp beneath it and the
+// sandbox's working copy is a throwaway tmpfs.
 const checkoutEnv = "AGENT_REPL_CHECKOUT"
-
-// checkBuildIdentityAgrees is this harness's self-check for the invariant
-// buildIdentityEnv exists to hold: the sha the daemon will EXPORT to each
-// shim and the sha it will read as its DEPLOYED build are one string. It runs
-// before any test, because their disagreement does not fail visibly — it
-// fails as a stale-shim bounce on every OpenWorkspace and a whole suite of
-// no_session prompts.
-func checkBuildIdentityAgrees() error {
-	env := buildIdentityEnv()
-	reported, deployed := valueOf(env, "SHIM_BUILD_SHA"), valueOf(env, "AGENT_REPL_DEPLOY_STAMP")
-	if reported == "" || deployed == "" {
-		return fmt.Errorf("build identity is unset: SHIM_BUILD_SHA=%q AGENT_REPL_DEPLOY_STAMP=%q", reported, deployed)
-	}
-	if reported != deployed {
-		return fmt.Errorf("build identity disagrees: the shim will report SHIM_BUILD_SHA=%q "+
-			"while the daemon reads AGENT_REPL_DEPLOY_STAMP=%q as its deployed build; "+
-			"the daemon would judge every shim stale and bounce it on every OpenWorkspace",
-			reported, deployed)
-	}
-	return nil
-}
 
 // valueOf answers the value of name in a KEY=VALUE list, or "" when absent.
 func valueOf(env []string, name string) string {
