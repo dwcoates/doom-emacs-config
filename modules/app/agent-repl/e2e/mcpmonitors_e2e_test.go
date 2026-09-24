@@ -299,9 +299,10 @@ func assertFeedRowsMentionNoneOf(t *testing.T, w *World, ws *workspacev1.Workspa
 // monitor-persistent.
 //
 // Contract: proto/src/conversation/v1/agent_activity.proto's AgentMonitor
-// family, explicitly "FOOTER-ONLY: no feed bubble exists — the daemon tracks
-// liveness for the footer's monitors chip and panel, and the events
-// themselves are drawn nowhere special." proto/src/frontend/v1/footer.proto:
+// family: the call draws the ordinary tool-call card in its owner's feed,
+// which is the footer monitor row's jump target (owner ruling, 2026-09-23),
+// and the daemon tracks liveness for the footer's monitors chip and panel.
+// proto/src/frontend/v1/footer.proto:
 // FooterChipMonitors (the (eye) chip, "set iff at least one is live") and
 // FooterExpandedMonitors/FooterMonitorRow (description, runtime, and an
 // optional persistent marker — "Present iff the watch is persistent").
@@ -355,6 +356,33 @@ func TestMonitorPersistent(t *testing.T) {
 
 	// Assert
 	assertOneMonitorRow(t, view, "echo watch", true /* persistent */)
+}
+
+// A MONITOR ROW JUMPS TO ITS CALL'S CARD: the Monitor call draws the ordinary
+// tool-call card on the root feed, and the footer's row names exactly that
+// FeedId, so a click centers the card.
+func TestMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "monitor-persistent")
+
+	// Assert
+	card := awaitFeedRow(t, w, ws, "the monitor's tool-call card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Monitor"
+	})
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	harness.AwaitView(t, ctx, footer.Stream, "the monitor row naming the card", func(v *frontendv1.FooterView) bool {
+		rows := v.GetExpanded().GetMonitors().GetRows()
+		return len(rows) == 1 && rows[0].GetJump().GetEntry().GetValue() == card.GetId().GetValue()
+	})
 }
 
 // assertOneMonitorRow asserts the footer carries exactly one live monitor,

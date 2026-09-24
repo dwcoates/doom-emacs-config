@@ -262,7 +262,8 @@ const (
 	kindSubagent
 	// kindBash is a detached shell, watched with WatchBash.
 	kindBash
-	// kindMonitor is a background watcher. FOOTER-ONLY: no stream exists.
+	// kindMonitor is a background watcher. No stream exists; its feed entry
+	// is its call's tool-call card.
 	kindMonitor
 	// kindWorkflow is a workflow run. KICKED, never watched.
 	kindWorkflow

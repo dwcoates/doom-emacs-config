@@ -170,8 +170,9 @@ message DetachableWork {
     // the announcement carries the run's START DESCRIPTION alone: the run's
     // frames arrive only on its own stream, never here.
     AgentWorkflowStart workflow = 3;
-    // A background watcher. FOOTER-ONLY: no feed bubble exists — the daemon
-    // tracks liveness for the footer's monitors chip and panel.
+    // A background watcher. Its feed entry is the Monitor call's tool-call
+    // card, already drawn from the call's own frames; the daemon tracks
+    // liveness for the footer's monitors chip and panel.
     AgentMonitor monitor = 4;
   }
 }

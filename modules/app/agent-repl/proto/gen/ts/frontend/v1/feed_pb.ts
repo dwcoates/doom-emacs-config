@@ -857,7 +857,8 @@ export type FeedTurnActivity = Message<"frontend.v1.FeedTurnActivity"> & {
     /**
      * The grey tool-call bubble: one shared shell (headline, badge,
      * arguments, output), with a per-tool arm inside for what only that
-     * tool draws. Read, write, edit, grep, glob, and a FOREGROUND shell.
+     * tool draws. Read, write, edit, grep, glob, a FOREGROUND shell, and a
+     * monitor (its card is the footer monitor row's jump target).
      *
      * @generated from field: frontend.v1.FeedSimpleToolCall simple_tool_call = 2;
      */
