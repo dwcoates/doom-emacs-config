@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/wsm"
 )
 
 // openingPageSize is the budget every watch's opening catch-up page is opened
@@ -750,6 +751,32 @@ func (w *watcher) Close() error {
 	return nil
 }
 
+// endCutTurnLocked ends the turn a shim that DIED ON ITS OWN was running. The
+// turn ran inside the shim's vendor query, which is gone with it, and no
+// terminal will ever arrive for it: left standing, its prompt row spun as
+// working forever and its durable row stayed open until the next boot closed
+// it as an orphan. The feed draws the truthful account, the query's death
+// under the turn it cut, and the turn's end reaches the queue as a failure,
+// which closes its row. The footer and the roster are told nothing here:
+// they draw the link, and the bring-up that follows is what they show.
+func (w *watcher) endCutTurnLocked() {
+	if w.turn == nil {
+		return
+	}
+	turn := *w.turn
+	w.log.Info("daemon.sessionwatcher.turn_cut", "the shim died with a turn in flight; the turn ended with it", dlog.Context{
+		"turn_id": string(turn),
+	})
+	w.flushHeldTerminalLocked()
+	w.sinks.Feed.OnTurnOpened(w.ws, turn)
+	w.sinks.Feed.OnSessionUpdate(w.ws, &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_QueryDied{
+		QueryDied: &conversationv1.SessionQueryDied{Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
+			UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
+		}},
+	}})
+	w.turnEndedLocked(turn, wsm.CloseFailed)
+}
+
 // Departed implements Watcher.
 func (w *watcher) Departed() (Departure, bool) {
 	w.mu.Lock()
@@ -901,8 +928,14 @@ func (w *watcher) runLink() {
 		var departed *Departure
 		if w.link == shimclient.LinkDead {
 			departed = w.departLocked(DepartureLinkDead)
+			if departed != nil && !departed.Ordered {
+				w.endCutTurnLocked()
+			}
 		}
 		w.mu.Unlock()
+		// The cut turn's end reaches the queue BEFORE the departure does, so
+		// its row is closed before anything brings the session back.
+		w.flushTurnEnds()
 		w.tellDeparted(departed)
 	}
 	w.log.Debug("daemon.sessionwatcher.link_feed_ended", "the shim client stopped publishing connectivity", nil)
