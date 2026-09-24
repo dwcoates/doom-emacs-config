@@ -281,6 +281,13 @@ type LifecycleSink interface {
 	// OnTurnEnded is what pops the prompt queue and releases a
 	// hold-for-turn-end.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how TurnClose)
+	// OnTurnsEndedUnobserved hands over the turns an adoption found open that
+	// the adopted shim's own facts say are no longer in flight: each ended
+	// while no daemon was watching. They were never this watcher's turn in
+	// flight, so no turn end is told for them and nothing is delivered on
+	// their account; their durable rows are closed. It is told off the lock,
+	// like OnTurnEnded, and at most once per watcher.
+	OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID)
 	// OnLiveWorkChanged republishes the live-work set; combined with the
 	// in-flight turn it is the freeness answer every lease holder waits on.
 	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)
@@ -535,6 +542,14 @@ type Session struct {
 	Started *conversationv1.SessionStarted
 	// Opening is REQUIRED: Start refuses the zero value.
 	Opening Opening
+	// OpenAtAttach is the workspace's turn rows that were OPEN when this
+	// watcher attached to an already-running shim: the adoption's snapshot,
+	// taken before the adopted client could be served. When the session facts
+	// arrive, every one the shim does not name as its turn in flight ended
+	// while no daemon was watching, and is handed to
+	// LifecycleSink.OnTurnsEndedUnobserved. A turn delivered after the snapshot
+	// is never in it, so a turn this daemon opens is never closed this way.
+	OpenAtAttach []ids.TurnID
 }
 
 // Start builds and starts one workspace's watcher against its shim client.

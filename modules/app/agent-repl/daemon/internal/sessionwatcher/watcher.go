@@ -161,6 +161,13 @@ type watcher struct {
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
 	// to the lifecycle sink, which is told only once mu is released.
 	pendingTurnEnds []endedTurn
+	// openAtAttach is Session.OpenAtAttach, held until the session facts
+	// arrive and then consumed ONCE: see reconcileOpenAtAttachLocked.
+	openAtAttach []ids.TurnID
+	// pendingUnobserved are the turns the facts showed ended unobserved, not
+	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
+	// the turn ends.
+	pendingUnobserved []ids.TurnID
 
 	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
 	// can join it. It is a WaitGroup rather than a sleep.
@@ -337,6 +344,8 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		seenClosings: map[string]struct{}{},
 		retiredWork:  map[string]struct{}{},
 		unseenAsks:   map[string]struct{}{},
+
+		openAtAttach: session.OpenAtAttach,
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	// A RESUME STARTS FROM ITS PREDECESSOR'S POINTERS, so every watch it opens
@@ -362,6 +371,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		// says whether its opening pages are first pages or catch-ups.
 		"opening":          session.Opening.String(),
 		"resumed_pointers": len(w.known),
+		"open_at_attach":   len(session.OpenAtAttach),
 	})
 
 	if session.Started != nil {
@@ -376,6 +386,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	}
 	w.publishLiveWorkLocked()
 	w.mu.Unlock()
+	// Facts handed to Start may already have closed turns the adoption found
+	// open; they are handed over now, off the lock, as every turn end is.
+	w.flushTurnEnds()
 
 	go w.runLink()
 	return w, nil
@@ -1354,6 +1367,34 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	if t := started.GetTurnInFlight(); t != nil {
 		w.standTurnLocked(ids.TurnID(t.GetValue()), "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight")
 	}
+	w.reconcileOpenAtAttachLocked(started)
+}
+
+// reconcileOpenAtAttachLocked compares the turns the adoption found open with
+// the shim's own answer, the facts' turn_in_flight. The shim is the authority
+// on its own session: a turn it no longer names ended while no daemon was
+// watching, and is queued for the lifecycle sink; the one it names is running
+// and stays open, to be closed by its own terminal. It runs ONCE, on the first
+// facts this watcher takes up, because the snapshot describes the moment of
+// attaching and nothing after it.
+func (w *watcher) reconcileOpenAtAttachLocked(started *conversationv1.SessionStarted) {
+	if len(w.openAtAttach) == 0 {
+		return
+	}
+	inFlight := ids.TurnID(started.GetTurnInFlight().GetValue())
+	for _, turn := range w.openAtAttach {
+		if turn == inFlight {
+			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached is still in flight on the shim; it stays open", dlog.Context{
+				"turn_id": string(turn),
+			})
+			continue
+		}
+		w.log.Info("daemon.sessionwatcher.turn_ended_unobserved", "a turn open when this daemon attached had ended while no daemon was watching; it is closed", dlog.Context{
+			"turn_id": string(turn), "turn_in_flight": string(inFlight),
+		})
+		w.pendingUnobserved = append(w.pendingUnobserved, turn)
+	}
+	w.openAtAttach = nil
 }
 
 // adoptLiveWorkLocked opens a watch for every item the session says is already
@@ -1415,7 +1456,9 @@ func (w *watcher) flushTurnEnds() {
 	w.mu.Lock()
 	pending := w.pendingTurnEnds
 	w.pendingTurnEnds = nil
-	if len(pending) > 0 {
+	unobserved := w.pendingUnobserved
+	w.pendingUnobserved = nil
+	if len(pending) > 0 || len(unobserved) > 0 {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -1425,6 +1468,9 @@ func (w *watcher) flushTurnEnds() {
 		defer w.dispatching.Done()
 	}
 	w.mu.Unlock()
+	if len(unobserved) > 0 {
+		w.sinks.Lifecycle.OnTurnsEndedUnobserved(w.ws, unobserved)
+	}
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 		// A COMPLETED TURN means a new prompt was processed, so the title
