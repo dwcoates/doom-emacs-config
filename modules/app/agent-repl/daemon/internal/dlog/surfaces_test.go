@@ -1641,3 +1641,40 @@ func TestDetachDirIsRecordedAtDebug(t *testing.T) {
 	}
 	t.Fatal("the run log carries no daemon.dlog.dir_detached record")
 }
+
+// TestNewWorkspaceEntryRecordsTheMintedEntry pins the one entry constructor.
+func TestNewWorkspaceEntryRecordsTheMintedEntry(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := filepath.Clean(t.TempDir())
+
+	// Act.
+	s.mu.Lock()
+	ws, err := s.newWorkspaceEntryLocked(dir, true)
+	s.mu.Unlock()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("newWorkspaceEntryLocked: %v", err)
+	}
+	if ws.id != mintedTestID(dir) || !ws.detached || s.workspaces[dir] != ws {
+		t.Fatalf("entry = %+v, want the minted, detached entry recorded under its directory", ws)
+	}
+}
+
+// TestEveryWorkspaceEntryIsBuiltByTheOneConstructor fails a hand-built entry.
+func TestEveryWorkspaceEntryIsBuiltByTheOneConstructor(t *testing.T) {
+	// Arrange.
+	raw, err := os.ReadFile("surfaces.go")
+	if err != nil {
+		t.Fatalf("read surfaces.go: %v", err)
+	}
+
+	// Act.
+	built := strings.Count(string(raw), "&workspaceSinks{")
+
+	// Assert.
+	if built != 1 {
+		t.Fatalf("surfaces.go builds a workspace entry %d times, want once, in newWorkspaceEntryLocked", built)
+	}
+}
