@@ -72,16 +72,26 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// that still retires the hold rather than joining it — a start held against
 	// itself would wait for a frame that has already arrived.
 	namesAgent := isStart || namedCreatedAgent(spawn).GetValue() != ""
+	settle := subagentSettled(spawn)
 	if !namesAgent && state.created.GetValue() == "" {
 		if !subagentArmDraws(spawn) {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!subagentArmDraws(spawn)"})
 			return nil, errNotARow
+		}
+		// A SETTLE FROM A PRODUCER BOUND BY THE STANDS-ALONE CONTRACT ALWAYS
+		// NAMES ITS AGENT, so one that does not, with nothing yet naming it,
+		// has violated the contract: it draws no row and is recorded at ERROR
+		// rather than waiting on a start a replay will never serve. A
+		// pre-contract settle is old data and waits as it always has.
+		if settle && standsAlone(act) {
+			return nil, unrestatedErr(act, "subagent")
 		}
 		// THE PLACEMENT IS RECORDED WITH THE HOLD: the frames were carried on
 		// this feed, and the retirement that draws them has no frame of its
 		// own to place them from.
 		state.feed = at
 		state.held = append(state.held, spawn)
+		state.heldBound = state.heldBound || standsAlone(act)
 		r.logger(s.id).Debug("daemon.feed.subagent_held",
 			"a spawn's frame arrived before any frame named the created agent; it is held until one does",
 			dlog.Context{"unit": unitID, "held": len(state.held)})
@@ -94,8 +104,12 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// other naming frame is later than everything held, so it folds after. Fold
 	// a settled terminal before a held update and the update would draw the
 	// finished bubble live again.
+	if settle {
+		r.gradeSubagentSettle(s, act, state, spawn)
+	}
 	held := state.held
 	state.held = nil
+	state.heldBound = false
 	if !isStart {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!isStart"})
 		r.foldHeldSubagentFrames(s, unitID, state, held, "when a later frame named the created agent")
@@ -115,16 +129,72 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 }
 
 // namedCreatedAgent answers the created agent this frame states, if its arm
-// states one at all. The start always does; a success does when its producer
-// knew the id, which is what makes a settled-only delivery addressable.
+// states one at all. The start always does; a settle (success or failure) does
+// when its producer knew the id, which is what makes a settled-only delivery
+// addressable.
 func namedCreatedAgent(spawn *conversationv1.AgentSubagent) *conversationv1.AgentId {
 	switch frame := spawn.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
 		return frame.Start.GetCreatedAgentId()
 	case *conversationv1.AgentSubagent_Success:
 		return frame.Success.GetCreatedAgentId()
+	case *conversationv1.AgentSubagent_Failure:
+		return frame.Failure.GetCreatedAgentId()
 	}
 	return nil
+}
+
+// subagentSettled reports whether a spawn frame is one of its settles.
+func subagentSettled(spawn *conversationv1.AgentSubagent) bool {
+	switch spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Success, *conversationv1.AgentSubagent_Failure:
+		return true
+	}
+	return false
+}
+
+// settleInstantOf answers the settle instant a spawn's settle carries, nil when
+// it carries none (a person's stop, a loss: neither observed an instant).
+func settleInstantOf(spawn *conversationv1.AgentSubagent) *conversationv1.AgentActivitySettledAt {
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Success:
+		return frame.Success.GetSettledAt()
+	case *conversationv1.AgentSubagent_Failure:
+		return frame.Failure.GetError().GetSettledAt()
+	}
+	return nil
+}
+
+// gradeSubagentSettle records what a spawn's settle failed to restate, graded
+// by its producer's contract (unrestated). The settle is still drawn: what it
+// names — the created agent — is already in hand, so a missing commission
+// costs the bubble its description and a missing start costs it the
+// authoritative clock, and nothing more.
+func (r *resolver) gradeSubagentSettle(s *wsState, act *conversationv1.AgentActivity, state *subagentState, spawn *conversationv1.AgentSubagent) {
+	if namedCreatedAgent(spawn).GetValue() == "" {
+		r.unrestated(s, act, "subagent", "created_agent_id", "the agent a start this process held named")
+	}
+	if commissionOf(spawn) == nil {
+		r.unrestated(s, act, "subagent", "prompt", "the commission already drawn")
+	}
+	if instant := settleInstantOf(spawn); instant != nil && instant.GetStartedAt() == nil {
+		drawn := "a clock with no restated start"
+		if state.bubble.GetRuntime().GetStartedAtMs() != 0 {
+			drawn = "the start this process held"
+		}
+		r.unrestated(s, act, "subagent", "started_at", drawn)
+	}
+}
+
+// applyRestatedStart takes a settle's restated start as the bubble's clock
+// when no start has drawn one: a replay serves the settle alone, and the start
+// it restates is the run's own instant.
+func applyRestatedStart(bubble *frontendv1.FeedSubagent, spawn *conversationv1.AgentSubagent) {
+	start := settleInstantOf(spawn).GetStartedAt()
+	if start == nil || bubble.GetRuntime().GetStartedAtMs() != 0 {
+		return
+	}
+	bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: start.GetAtMs()}
 }
 
 // foldHeldSubagentFrames folds frames released from the hold, reporting any
@@ -199,6 +269,7 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		}
 		applyPrompt(bubble, frame.Success.GetPrompt())
 		applyTotals(bubble, frame.Success.GetTotals())
+		applyRestatedStart(bubble, spawn)
 		// THE SETTLED SPAN, kept so a settled-only replay (no start frame) can
 		// reconstruct the clock's start as end − duration. See subagentStart.
 		state.durationMs = frame.Success.GetTotals().GetDurationMs()
@@ -208,6 +279,15 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		}}
 	case *conversationv1.AgentSubagent_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Failure"})
+		// The failure NAMES ITS AGENT and restates its commission, so a
+		// settled-only replay draws the same bubble a live run would have.
+		// Neither ever OVERWRITES with nothing: a pre-contract failure restates
+		// neither, and whatever the start told us stands.
+		if created := frame.Failure.GetCreatedAgentId(); created.GetValue() != "" {
+			state.created = created
+		}
+		applyPrompt(bubble, frame.Failure.GetPrompt())
+		applyRestatedStart(bubble, spawn)
 		settled := &frontendv1.FeedSubagentSettled{EndedAtMs: failureSettledMs(frame.Failure.GetError())}
 		subagentFailureOutcome(r.logger(s.id), unitID, frame.Failure)(settled)
 		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: settled}
@@ -299,11 +379,13 @@ func (r *resolver) announceEntry(s *wsState, unit string, previous, current *fro
 // that names the created agent, and empties the hold.
 //
 // AN IDENTITY THAT NEVER CAME IS A PRODUCER FAULT, not a reason to lose the
-// spawn. A settled-only delivery is no longer such a fault — the success arm
+// spawn. A settled-only delivery is no longer such a fault — either settle arm
 // can name the agent itself — so what reaches here is a spawn where neither a
 // start nor a naming terminal ever arrived:
 // the bubble is drawn from what did arrive, and it is warned, because its row
-// carries no created agent and so addresses no sub-feed. Nothing is left held
+// carries no created agent and so addresses no sub-feed. A hold of nothing but
+// rows that PREDATE the stands-alone contract is not a fault but old data, and
+// is recorded at INFO instead. Nothing is left held
 // afterwards — a hold that outlived the delivery it was waiting on would sit
 // in this workspace's state for the rest of the daemon's life.
 func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
@@ -314,10 +396,21 @@ func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
 			continue
 		}
 		held := state.held
+		bound := state.heldBound
 		state.held = nil
-		log.Warn("daemon.feed.subagent_without_start",
-			"a spawn's frames arrived with none of them naming the created agent; its bubble is drawn but addresses no sub-feed",
-			dlog.Context{"unit": unitID, "frames": len(held), "occasion": occasion})
+		state.heldBound = false
+		if bound {
+			log.Warn("daemon.feed.subagent_without_start",
+				"a spawn's frames arrived with none of them naming the created agent; its bubble is drawn but addresses no sub-feed",
+				dlog.Context{"unit": unitID, "frames": len(held), "occasion": occasion})
+		} else {
+			// EVERY HELD FRAME PREDATES THE STANDS-ALONE CONTRACT: rows the
+			// store kept from before a settle named its agent, replayed with no
+			// start beside them. Expected old data, drawn as before.
+			log.Info("daemon.feed.settle_predates_contract",
+				"a spawn's pre-contract frames name no created agent and no start was held; its bubble is drawn but addresses no sub-feed",
+				dlog.Context{"unit": unitID, "kind": "subagent", "field": "created_agent_id", "frames": len(held), "occasion": occasion})
+		}
 		var commission *conversationv1.AgentSubagentPrompt
 		for _, frame := range held {
 			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
@@ -364,6 +457,8 @@ func commissionOf(spawn *conversationv1.AgentSubagent) *conversationv1.AgentSuba
 		return frame.Update.GetPrompt()
 	case *conversationv1.AgentSubagent_Success:
 		return frame.Success.GetPrompt()
+	case *conversationv1.AgentSubagent_Failure:
+		return frame.Failure.GetPrompt()
 	}
 	return nil
 }

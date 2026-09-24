@@ -1927,9 +1927,18 @@ func TestNoSpawnFrameIsStillHeldOnceTheTurnEnds(t *testing.T) {
 }
 
 func TestASpawnWhoseStartNeverArrivedIsWarnedWhenTheTurnEnds(t *testing.T) {
-	// Arrange.
+	// Arrange: a bound producer's running beat, which names no agent and is
+	// held for a start that never comes.
 	h := newHarness(t)
-	h.settleSubagent("spawn-1", &conversationv1.AgentId{Value: "agent-explore"}, nil)
+	h.send(bound(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Prompt:   &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 12_400},
+			}},
+		}},
+	}))
 
 	// Act.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
@@ -1939,6 +1948,23 @@ func TestASpawnWhoseStartNeverArrivedIsWarnedWhenTheTurnEnds(t *testing.T) {
 	// Assert.
 	if !h.hasRecord("warn", "daemon.feed.subagent_without_start") {
 		t.Fatalf("records = %+v, want a WARN daemon.feed.subagent_without_start", h.records())
+	}
+}
+
+func TestAPreContractSpawnWhoseStartNeverArrivedIsRecordedAtInfoWhenTheTurnEnds(t *testing.T) {
+	// Arrange: a settle written before the contract, which names no agent.
+	h := newHarness(t)
+	h.settleSubagent("spawn-1", nil, nil)
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: expected old data, neither warned nor an error.
+	if !h.hasRecord("info", "daemon.feed.settle_predates_contract") ||
+		h.hasRecord("warn", "daemon.feed.subagent_without_start") || len(h.anyErrors()) != 0 {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no WARN or ERROR", h.records())
 	}
 }
 
@@ -3188,5 +3214,141 @@ func TestADetachedShellsHeadIsAnnouncedOnItsOwnersFeed(t *testing.T) {
 				t.Fatalf("toolu_bash announced at %q, want %q (placed = %+v)", got, want, h.placed)
 			}
 		})
+	}
+}
+
+// ---- A SETTLE STANDS ALONE: the failure restates the spawn ----
+
+// failedSpawn is a bound producer's failed spawn, restating the commission and
+// the created agent, settled at 9000 and restating its start at 1000.
+func failedSpawn(created *conversationv1.AgentId) *conversationv1.AgentActivity {
+	description := "map the daemon"
+	subagentType := "Explore"
+	return bound(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
+				Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{
+					AtMs:      9_000,
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+				Prompt: &conversationv1.AgentSubagentPrompt{
+					Text: "go and look", Description: &description, SubagentType: &subagentType,
+				},
+				CreatedAgentId: created,
+			}},
+		}},
+	})
+}
+
+func TestAReplayedFailedSpawnDrawsItsDescription(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act: the failure alone, as a replay serves it.
+	h.send(failedSpawn(created))
+
+	// Assert.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetDescription().GetText(); got != "map the daemon" {
+		t.Fatalf("description = %q, want the restated commission's", got)
+	}
+}
+
+func TestAReplayedFailedSpawnAddressesItsSubFeed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act.
+	h.send(failedSpawn(created))
+
+	// Assert: the commission is drawn on the created agent's own feed.
+	if row := h.commissionRow("spawn-1", created); row == nil {
+		t.Fatalf("sub-feed rows = %+v, want the commission on the restated agent's feed", h.rows(feedid.Feed{Agent: created}))
+	}
+}
+
+func TestAReplayedFailedSpawnIsNotHeld(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.send(failedSpawn(&conversationv1.AgentId{Value: "agent-explore"}))
+
+	// Assert.
+	if held := h.heldSpawnFrames("spawn-1"); held != 0 {
+		t.Fatalf("held frames = %d, want none for a failure that names its agent", held)
+	}
+}
+
+func TestAReplayedSettledSpawnShowsItsRuntimeFromTheRestatedStart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act.
+	h.send(failedSpawn(created))
+
+	// Assert.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetRuntime().GetStartedAtMs(); got != 1_000 {
+		t.Fatalf("runtime start = %d, want the restated start", got)
+	}
+}
+
+func TestABoundFailedSpawnNamingNoAgentIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act: a bound producer's failure that restated no created agent.
+	h.send(failedSpawn(nil))
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.activity_undrawable", h.records())
+	}
+}
+
+func TestABoundFailedSpawnNamingNoAgentDrawsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.send(failedSpawn(nil))
+
+	// Assert: neither drawn nor held for a start a replay will never serve.
+	if rows := h.rows(rootFeed()); len(rows) != 0 || h.heldSpawnFrames("spawn-1") != 0 {
+		t.Fatalf("rows = %d, held = %d, want neither", len(rows), h.heldSpawnFrames("spawn-1"))
+	}
+}
+
+func TestABoundFailedSpawnRestatingNoCommissionIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	act := failedSpawn(created)
+	act.GetSubagent().GetFailure().Prompt = nil
+
+	// Act.
+	h.send(act)
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+	}
+}
+
+func TestABoundSettledSpawnRestatingNoStartIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	act := failedSpawn(&conversationv1.AgentId{Value: "agent-explore"})
+	act.GetSubagent().GetFailure().GetError().GetSettledAt().StartedAt = nil
+
+	// Act.
+	h.send(act)
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
 	}
 }
