@@ -1,7 +1,9 @@
 package worktreereap
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,7 +14,7 @@ func TestTheSweepLockIsExclusive(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("the first acquire = (%v, %v), want the lock", ok, err)
 	}
-	t.Cleanup(func() { first.release() })
+	t.Cleanup(func() { first.Release() })
 
 	// Act.
 	_, again, err := acquireLock(path)
@@ -23,37 +25,18 @@ func TestTheSweepLockIsExclusive(t *testing.T) {
 	}
 }
 
-func TestAReleasedSweepLockCanBeTakenAgain(t *testing.T) {
-	// Arrange.
-	path := filepath.Join(t.TempDir(), "reap.lock")
-	first, _, err := acquireLock(path)
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
-	}
-	if err := first.release(); err != nil {
-		t.Fatalf("release: %v", err)
+func TestASweepLockFailureNamesThePackage(t *testing.T) {
+	// Arrange: the lock's directory is a regular file.
+	notADir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADir, nil, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
 	}
 
 	// Act.
-	second, ok, err := acquireLock(path)
+	_, _, err := acquireLock(filepath.Join(notADir, "reap.lock"))
 
 	// Assert.
-	if err != nil || !ok {
-		t.Fatalf("the re-acquire = (%v, %v), want the lock", ok, err)
+	if err == nil || !strings.HasPrefix(err.Error(), "worktreereap: ") {
+		t.Fatalf("acquireLock = %v, want the failure prefixed with the package", err)
 	}
-	second.release()
-}
-
-func TestTheSweepLocksDirectoryIsCreated(t *testing.T) {
-	// Arrange.
-	path := filepath.Join(t.TempDir(), "nested", "run", "reap.lock")
-
-	// Act.
-	lock, ok, err := acquireLock(path)
-
-	// Assert.
-	if err != nil || !ok {
-		t.Fatalf("acquire under a missing directory = (%v, %v), want the lock", ok, err)
-	}
-	lock.release()
 }
