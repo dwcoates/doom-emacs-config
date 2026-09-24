@@ -160,7 +160,7 @@ clean; BODY runs after the load with the same bindings still active."
 (ert-deftest agent-repl-test-helpers-background-gate-admits-marked-batch-run ()
   "A batch run carrying the marker bin/background.sh exports is admitted."
   ;; Arrange / Act / Assert
-  (should-not (agent-repl-test--require-background-priority "darwin-bg" t)))
+  (should-not (agent-repl-test--require-background-priority "nice-19" t)))
 
 (ert-deftest agent-repl-test-helpers-background-gate-ignores-interactive-load ()
   "An interactive load is already inert, so it is never refused."
