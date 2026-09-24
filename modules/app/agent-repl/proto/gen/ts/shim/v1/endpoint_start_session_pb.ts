@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_session.proto.
  */
 export const file_shim_v1_endpoint_start_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCLJAQoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBEjAKBnJlYmluZBgDIAEoCzIbLnNoaW0udjEuU3RhcnRTZXNzaW9uUmViaW5kSAGIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb25CCQoHX3JlYmluZCIUChJTdGFydFNlc3Npb25SZWJpbmQiggEKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLlN0YXJ0U2Vzc2lvblN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0IkcKE1N0YXJ0U2Vzc2lvblN1Y2Nlc3MSMAoHc2Vzc2lvbhgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uU3RhcnRlZCLpAgoTU3RhcnRTZXNzaW9uRmFpbHVyZRIsCgRjb2xkGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkSAASRQoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgDIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWRIABI+Cg91bmtub3duX3Nlc3Npb24YBCABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uSAASPgoPYWxyZWFkeV9zdGFydGVkGAUgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZEgAEkQKEmNvbnZlcnNhdGlvbl9vd25lZBgGIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2UiHwodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWQiHAoaU3RhcnRTZXNzaW9uVW5rbm93blNlc3Npb24iHAoaU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWQiHwodU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCLJAQoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBEjAKBnJlYmluZBgDIAEoCzIbLnNoaW0udjEuU3RhcnRTZXNzaW9uUmViaW5kSAGIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb25CCQoHX3JlYmluZCIUChJTdGFydFNlc3Npb25SZWJpbmQiggEKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLlN0YXJ0U2Vzc2lvblN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0IkcKE1N0YXJ0U2Vzc2lvblN1Y2Nlc3MSMAoHc2Vzc2lvbhgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uU3RhcnRlZCK4AwoTU3RhcnRTZXNzaW9uRmFpbHVyZRIsCgRjb2xkGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkSAASRQoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgDIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWRIABI+Cg91bmtub3duX3Nlc3Npb24YBCABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uSAASPgoPYWxyZWFkeV9zdGFydGVkGAUgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZEgAEkQKEmNvbnZlcnNhdGlvbl9vd25lZBgGIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRIABJNChdsb2NrX2hvbGRlcl91bmF2YWlsYWJsZRgHIAEoCzIqLnNoaW0udjEuU3RhcnRTZXNzaW9uTG9ja0hvbGRlclVuYXZhaWxhYmxlSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlIh8KHVN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkIhwKGlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uIhwKGlN0YXJ0U2Vzc2lvbkFscmVhZHlTdGFydGVkIh8KHVN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkIkUKIVN0YXJ0U2Vzc2lvbkxvY2tIb2xkZXJVbmF2YWlsYWJsZRIOCgZiaW5hcnkYASABKAkSEAoIb3NfZXJyb3IYAiABKAlCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session]);
 
 /**
  * What the daemon wants driven, and how. UNARY: the daemon persists the
@@ -288,6 +288,19 @@ export type StartSessionFailure = Message<"shim.v1.StartSessionFailure"> & {
      */
     value: StartSessionConversationOwned;
     case: "conversationOwned";
+  } | {
+    /**
+     * THIS shim could not spawn its own kernel-lock holder (`shim-lock`), so
+     * no claim was ever attempted and NOBODY is known to own the
+     * conversation. Distinct from conversation_owned, which is a real
+     * ownership conflict: this one is a defect in this shim's deployment (a
+     * missing or unexecutable binary), and naming it as an ownership conflict
+     * sends the reader hunting for a second process that does not exist.
+     *
+     * @generated from field: shim.v1.StartSessionLockHolderUnavailable lock_holder_unavailable = 7;
+     */
+    value: StartSessionLockHolderUnavailable;
+    case: "lockHolderUnavailable";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -356,4 +369,31 @@ export type StartSessionConversationOwned = Message<"shim.v1.StartSessionConvers
  */
 export const StartSessionConversationOwnedSchema: GenMessage<StartSessionConversationOwned> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_session, 10);
+
+/**
+ * @generated from message shim.v1.StartSessionLockHolderUnavailable
+ */
+export type StartSessionLockHolderUnavailable = Message<"shim.v1.StartSessionLockHolderUnavailable"> & {
+  /**
+   * The lock-holder binary the shim tried to spawn.
+   *
+   * @generated from field: string binary = 1;
+   */
+  binary: string;
+
+  /**
+   * The operating system's account of why the spawn failed (e.g.
+   * `spawn /path/shim-lock ENOENT`).
+   *
+   * @generated from field: string os_error = 2;
+   */
+  osError: string;
+};
+
+/**
+ * Describes the message shim.v1.StartSessionLockHolderUnavailable.
+ * Use `create(StartSessionLockHolderUnavailableSchema)` to create a new message.
+ */
+export const StartSessionLockHolderUnavailableSchema: GenMessage<StartSessionLockHolderUnavailable> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 11);
 

@@ -121,6 +121,13 @@ message StartSessionFailure {
     StartSessionAlreadyStarted already_started = 5;
     // Another shim holds this conversation's kernel lock.
     StartSessionConversationOwned conversation_owned = 6;
+    // THIS shim could not spawn its own kernel-lock holder (`shim-lock`), so
+    // no claim was ever attempted and NOBODY is known to own the
+    // conversation. Distinct from conversation_owned, which is a real
+    // ownership conflict: this one is a defect in this shim's deployment (a
+    // missing or unexecutable binary), and naming it as an ownership conflict
+    // sends the reader hunting for a second process that does not exist.
+    StartSessionLockHolderUnavailable lock_holder_unavailable = 7;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
@@ -129,3 +136,10 @@ message StartSessionVendorStartFailed {}
 message StartSessionUnknownSession {}
 message StartSessionAlreadyStarted {}
 message StartSessionConversationOwned {}
+message StartSessionLockHolderUnavailable {
+  // The lock-holder binary the shim tried to spawn.
+  string binary = 1;
+  // The operating system's account of why the spawn failed (e.g.
+  // `spawn /path/shim-lock ENOENT`).
+  string os_error = 2;
+}
