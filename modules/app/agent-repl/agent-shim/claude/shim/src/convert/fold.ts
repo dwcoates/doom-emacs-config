@@ -21,7 +21,9 @@
  *     streams interleave; each dropped at its `message_stop`, at the turn's
  *     end (main) or at its agent's end (a subagent);
  *   - the CALLS IN FLIGHT, so a tool result can restate its call's own facts —
- *     each entry dropped the moment its unit settles, and the table capped;
+ *     held only on the streams this plane can settle (a backgrounded agent's
+ *     calls never), each entry dropped at its result, its handoff or its
+ *     agent's end, the whole table drained at every turn terminal, and capped;
  *   - the HOOK FIRINGS in flight, for the same reason and on the same terms;
  *   - the KINDS OF THE TASKS in flight, on the same terms again: `task_started`
  *     is the only message that says whether a detached task is an agent run or
@@ -102,7 +104,12 @@ import {
   type VendorApiError,
 } from "./terminals.js";
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
-import { createCallRegistry, cutOpenCalls, type CallRegistry } from "./tool-calls.js";
+import {
+  createCallRegistry,
+  endTurnCalls,
+  type CallRegistry,
+  type PendingCall,
+} from "./tool-calls.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
 import { isLaunchReceipt } from "./tools/subagent.js";
 
@@ -153,6 +160,14 @@ interface Fold {
    * session down over one bad vendor line.
    */
   onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput;
+  /**
+   * The calls in flight right now, oldest first — a snapshot, never a handle.
+   *
+   * The registry's invariant is that it holds only what is genuinely open, and
+   * this is how that invariant is checked from outside: the suites assert it
+   * drains, and a diagnostic can say which calls it holds and why.
+   */
+  inFlightCalls(): readonly PendingCall[];
 }
 
 /** Everything the fold remembers. Each field is named in this file's header. */
@@ -210,6 +225,7 @@ export function createFold(): Fold {
         };
       }
     },
+    inFlightCalls: () => state.calls.open(),
   };
 }
 
@@ -294,13 +310,19 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // stays the turn's last word.
       const released = releaseCompaction(context, state, "the turn ended");
       const output = convertResult(message, context, state.lastAnswer, vendorApiError);
-      // A STOP CUTS WHAT WAS OPEN, and the calls it cut get no `tool_result` of
-      // their own — so their terminals are owed here or nowhere, and a unit left
-      // on its running arm draws a live tool inside a turn that has ended. The
-      // cut frames come FIRST so the terminal is still the turn's last word.
-      const cut = isUserStop(message)
-        ? cutOpenCalls(TOOL_CONVERTERS, context, state.calls, { vendorUuid: message.uuid })
-        : [];
+      // NO CALL OUTLIVES ITS TURN: the registry drains at every terminal. A
+      // STOP CUTS WHAT WAS GENUINELY OPEN, and the calls it cut get no
+      // `tool_result` of their own — so their terminals are owed here or
+      // nowhere, and a unit left on its running arm draws a live tool inside a
+      // turn that has ended. The cut frames come FIRST so the terminal is still
+      // the turn's last word.
+      const cut = endTurnCalls(
+        TOOL_CONVERTERS,
+        context,
+        state.calls,
+        { vendorUuid: message.uuid },
+        isUserStop(message),
+      );
       const before = [...released, ...cut];
       return before.length === 0 ? output : { ...output, entries: [...before, ...output.entries] };
     }

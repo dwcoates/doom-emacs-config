@@ -14,6 +14,8 @@ import { EMPTY_FOLD_OUTPUT, createFold } from "../../src/convert/fold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
 import { activityOf, foldContext, residueOf, streamMessage } from "./fold-harness.js";
+import { goldenContext, scenarioNames as captureNames, sdkMessages } from "./goldens/harness.js";
+import { driveScenario, expectDroveCleanly } from "../fake/harness.js";
 
 const mockedWriteSync = vi.mocked(writeSync);
 
@@ -2168,5 +2170,271 @@ describe("a second compaction boundary before the first one's summary", () => {
 
     // Assert.
     expect(compactedOf(output.entries[0])?.summary?.markdown).toBe("the second summary");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the calls in flight: held only while this stream can settle them
+// ---------------------------------------------------------------------------
+
+/** An assistant message on a SUBAGENT's stream: the spawning call it names. */
+function assistantOn(spawningCall: string, messageId: string, content: unknown[]): SdkMessage {
+  return {
+    ...(assistant(messageId, content) as unknown as Record<string, unknown>),
+    parent_tool_use_id: spawningCall,
+  } as unknown as SdkMessage;
+}
+
+/** A subagent's tool result: on its stream, and with no typed output, as the SDK forwards it. */
+function toolResultOn(spawningCall: string, toolUseId: string): SdkMessage {
+  return {
+    ...(toolResult(toolUseId, undefined) as unknown as Record<string, unknown>),
+    parent_tool_use_id: spawningCall,
+    tool_use_result: undefined,
+  } as unknown as SdkMessage;
+}
+
+/** One `tool_use` content block. */
+function toolUse(id: string, name: string, input: Record<string, unknown>): Record<string, unknown> {
+  return { type: "tool_use", id, name, input };
+}
+
+/** The turn's terminal: `stopped` is a user stop, anything else ended on its own. */
+function turnEnd(stopped: boolean): SdkMessage {
+  const result = streamMessage("result_success") as unknown as Record<string, unknown>;
+  return (stopped ? { ...result, terminal_reason: "aborted_streaming" } : result) as unknown as SdkMessage;
+}
+
+/** An async spawn's launch receipt. */
+const LAUNCH_RECEIPT = { isAsync: true, status: "async_launched", agentId: "a-bg", description: "sweep" };
+
+/** A backgrounded shell's receipt. */
+const SHELL_RECEIPT = { stdout: "", stderr: "", interrupted: false, backgroundTaskId: "b-bg" };
+
+/** Fold every message, in order, through one fold. */
+function foldEach(messages: readonly SdkMessage[]): ReturnType<typeof createFold> {
+  const fold = createFold();
+  for (const message of messages) fold.onSdkMessage(message, foldContext());
+  return fold;
+}
+
+/** The ids the fold still holds. */
+function heldIds(fold: ReturnType<typeof createFold>): string[] {
+  return fold.inFlightCalls().map((call) => call.toolUseId);
+}
+
+describe("the calls in flight", () => {
+  it("releases an awaited subagent's call when its untyped result arrives", () => {
+    // Arrange, Act: a subagent's result reaches this stream with no
+    // `tool_use_result`, so no terminal is written — and before the fix the
+    // call was re-remembered forever.
+    const fold = foldEach([
+      assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "read" })]),
+      assistantOn("toolu_spawn", "msg-sub", [toolUse("toolu_read", "Read", { file_path: "/a" })]),
+      toolResultOn("toolu_spawn", "toolu_read"),
+    ]);
+
+    // Assert
+    expect(heldIds(fold)).toEqual(["toolu_spawn"]);
+  });
+
+  it("never holds a backgrounded agent's call, whose result never reaches this stream", () => {
+    // Arrange, Act
+    const fold = foldEach([
+      assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "sweep", run_in_background: true })]),
+      toolResult("toolu_spawn", LAUNCH_RECEIPT),
+      assistantOn("toolu_spawn", "msg-sub", [toolUse("toolu_sub_bash", "Bash", { command: "ls" })]),
+    ]);
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
+
+  it("still announces a backgrounded agent's call it does not hold", () => {
+    // Arrange
+    const fold = foldEach([
+      assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "sweep", run_in_background: true })]),
+      toolResult("toolu_spawn", LAUNCH_RECEIPT),
+    ]);
+
+    // Act
+    const output = fold.onSdkMessage(
+      assistantOn("toolu_spawn", "msg-sub", [toolUse("toolu_sub_bash", "Bash", { command: "ls" })]),
+      foldContext(),
+    );
+
+    // Assert
+    expect(output.entries.map((entry) => entry.upsertKey)).toContain("activity:toolu_sub_bash");
+  });
+
+  it("releases a backgrounded shell's call at its receipt", () => {
+    // Arrange, Act
+    const fold = foldEach([
+      assistant("msg-bash", [toolUse("toolu_bg", "Bash", { command: "sleep 600", run_in_background: true })]),
+      toolResult("toolu_bg", SHELL_RECEIPT),
+    ]);
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
+
+  it("releases a monitor's call at its arming receipt", () => {
+    // Arrange, Act
+    const fold = foldEach([
+      assistant("msg-mon", [toolUse("toolu_mon", "Monitor", { command: "tail -f log", description: "watch" })]),
+      toolResult("toolu_mon", { taskId: "m1", timeoutMs: 600000, persistent: false }),
+    ]);
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
+
+  it("releases a hand-backgrounded agent's calls at the patch that moves it", () => {
+    // Arrange
+    const fold = foldEach([
+      assistant("msg-spawn", [toolUse("toolu_spawn", "Agent", { prompt: "count" })]),
+      assistantOn("toolu_spawn", "msg-sub", [toolUse("toolu_sub_bash", "Bash", { command: "sleep 90" })]),
+    ]);
+
+    // Act
+    fold.onSdkMessage(
+      {
+        type: "system",
+        subtype: "task_updated",
+        uuid: "uuid-patch",
+        session_id: "session-1",
+        task_id: "a-hand",
+        tool_use_id: "toolu_spawn",
+        patch: { is_backgrounded: true },
+      } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    // Assert
+    expect(heldIds(fold)).toEqual(["toolu_spawn"]);
+  });
+
+  it("holds nothing after a turn that ended on its own", () => {
+    // Arrange: a skill whose document never reaches this stream.
+    const fold = foldEach([
+      assistant("msg-skill", [toolUse("toolu_skill", "Skill", { skill: "debug-logs" })]),
+      toolResult("toolu_skill", { success: true, commandName: "debug-logs" }),
+    ]);
+
+    // Act
+    fold.onSdkMessage(turnEnd(false), foldContext());
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
+
+  it("returns to zero after a mixed workload of every leak path", () => {
+    // Arrange, Act: interleaved main and subagent traffic, a sync and an
+    // async spawn, a backgrounded shell, a monitor and a skill, in one turn.
+    const fold = foldEach([
+      assistant("msg-1", [toolUse("toolu_sync", "Agent", { prompt: "read" })]),
+      assistant("msg-2", [toolUse("toolu_async", "Agent", { prompt: "sweep", run_in_background: true })]),
+      assistantOn("toolu_sync", "msg-s1", [toolUse("toolu_s_read", "Read", { file_path: "/a" })]),
+      toolResult("toolu_async", LAUNCH_RECEIPT),
+      assistantOn("toolu_async", "msg-a1", [toolUse("toolu_a_bash", "Bash", { command: "ls" })]),
+      toolResultOn("toolu_sync", "toolu_s_read"),
+      assistant("msg-3", [toolUse("toolu_bg", "Bash", { command: "sleep 600", run_in_background: true })]),
+      toolResult("toolu_bg", SHELL_RECEIPT),
+      assistant("msg-4", [toolUse("toolu_mon", "Monitor", { command: "tail -f log", description: "watch" })]),
+      toolResult("toolu_mon", { taskId: "m1", timeoutMs: 600000, persistent: false }),
+      assistant("msg-5", [toolUse("toolu_skill", "Skill", { skill: "debug-logs" })]),
+      toolResult("toolu_skill", { success: true, commandName: "debug-logs" }),
+      assistantOn("toolu_async", "msg-a2", [toolUse("toolu_a_read", "Read", { file_path: "/b" })]),
+      toolResult("toolu_sync", { status: "completed", prompt: "read", content: [], totalDurationMs: 1 }),
+      turnEnd(false),
+    ]);
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
+
+  it("cuts only the genuinely open call when a stop lands after a mixed workload", () => {
+    // Arrange: every leak path first, then one foreground shell and one read
+    // the stop lands inside.
+    const fold = foldEach([
+      assistant("msg-1", [toolUse("toolu_async", "Agent", { prompt: "sweep", run_in_background: true })]),
+      toolResult("toolu_async", LAUNCH_RECEIPT),
+      assistantOn("toolu_async", "msg-a1", [toolUse("toolu_a_bash", "Bash", { command: "ls" })]),
+      assistant("msg-2", [toolUse("toolu_bg", "Bash", { command: "sleep 600", run_in_background: true })]),
+      toolResult("toolu_bg", SHELL_RECEIPT),
+      assistant("msg-3", [toolUse("toolu_sync", "Agent", { prompt: "read" })]),
+      assistantOn("toolu_sync", "msg-s1", [toolUse("toolu_s_bash", "Bash", { command: "ls" })]),
+      toolResultOn("toolu_sync", "toolu_s_bash"),
+      toolResult("toolu_sync", { status: "completed", prompt: "read", content: [], totalDurationMs: 1 }),
+      assistant("msg-4", [toolUse("toolu_fg", "Bash", { command: "sleep 600" })]),
+      assistant("msg-5", [toolUse("toolu_open_read", "Read", { file_path: "/c" })]),
+    ]);
+
+    // Act
+    const output = fold.onSdkMessage(turnEnd(true), foldContext());
+
+    // Assert
+    const cut = output.entries.filter((entry) => entry.source.discriminator.endsWith(".interrupted"));
+    expect(cut.map((entry) => entry.upsertKey)).toEqual(["activity:toolu_fg"]);
+  });
+
+  it("holds nothing after a stop", () => {
+    // Arrange
+    const fold = foldEach([
+      assistant("msg-4", [toolUse("toolu_fg", "Bash", { command: "sleep 600" })]),
+      assistant("msg-5", [toolUse("toolu_open_read", "Read", { file_path: "/c" })]),
+    ]);
+
+    // Act
+    fold.onSdkMessage(turnEnd(true), foldContext());
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
+  });
+});
+
+describe("the calls in flight across every capture", () => {
+  it.each(captureNames())("holds nothing at any turn terminal of %s", (scenario) => {
+    // Arrange
+    const fold = createFold();
+    const context = goldenContext(scenario);
+    const heldAtTerminals: string[] = [];
+
+    // Act
+    for (const message of sdkMessages(scenario)) {
+      fold.onSdkMessage(message, context);
+      if (message.type === "result") heldAtTerminals.push(...heldIds(fold));
+    }
+
+    // Assert
+    expect(heldAtTerminals).toEqual([]);
+  });
+});
+
+describe("the calls in flight under the mocked vendor", () => {
+  it("returns to zero after a mixed workload driven through the fake SDK", async () => {
+    // Arrange: sync and async spawns, interleaved subagent streams, background
+    // shells, a monitor and a skill, each a turn of its own.
+    const driven = expectDroveCleanly(
+      await driveScenario([
+        "!subagent",
+        "!subagent-detached",
+        "!subagent-interleaved",
+        "!subagent-failed",
+        "!bash-detach",
+        "!bash-timeout",
+        "!monitor-persistent",
+        "!skill",
+        "!send-message",
+        "!bash",
+      ]),
+    );
+
+    // Act
+    const fold = createFold();
+    for (const message of driven.messages) fold.onSdkMessage(message, foldContext());
+
+    // Assert
+    expect(heldIds(fold)).toEqual([]);
   });
 });
