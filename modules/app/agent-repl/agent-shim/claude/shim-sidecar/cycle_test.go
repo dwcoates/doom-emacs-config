@@ -2692,13 +2692,13 @@ func boundedSpool(t *testing.T) (*fakeStore, string) {
 	return store, content
 }
 
-// deltasOf answers the bash deltas a store was handed, in write order.
-func deltasOf(store *fakeStore) []*conversationv1.AgentBashUpdate {
-	var out []*conversationv1.AgentBashUpdate
+// tailsOf answers the bash tails a store was handed, in write order.
+func tailsOf(store *fakeStore) []*conversationv1.AgentBashTail {
+	var out []*conversationv1.AgentBashTail
 	for _, batch := range store.writes {
 		for _, e := range batch.GetEntries() {
-			if up := e.GetAgentUpdate().GetBash().GetFrame().GetUpdate(); up != nil {
-				out = append(out, up)
+			if tail := e.GetAgentUpdate().GetBash().GetFrame().GetTail(); tail != nil {
+				out = append(out, tail)
 			}
 		}
 	}
@@ -2709,32 +2709,51 @@ func TestAClaimedSpoolLongerThanOneBatchIsWrittenInBoundedBatches(t *testing.T) 
 	// Arrange, Act.
 	store, _ := boundedSpool(t)
 
-	// Assert: no single write carries more than one batch's bytes.
+	// Assert: the file reached the store across several bounded batches.
 	if len(store.writes) < 3 {
 		t.Fatalf("the spool reached the store in %d write(s), want it split across at least 3 bounded batches", len(store.writes))
 	}
-	for i, up := range deltasOf(store) {
-		if n := len(up.GetNewOutput()); n > tail.MaxBatchBytes {
-			t.Fatalf("delta %d carries %d bytes, past the %d-byte batch bound", i, n, tail.MaxBatchBytes)
+}
+
+func TestNoWriteOfALongSpoolStoresMoreThanTheRenderedTail(t *testing.T) {
+	// Arrange, Act: a spool of more than two batches' bytes.
+	store, _ := boundedSpool(t)
+
+	// Assert: output beyond what is rendered is never stored, so no bash row
+	// in any write carries more than the renderer's cap.
+	limit := int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
+	for i, batch := range store.writes {
+		for _, e := range batch.GetEntries() {
+			frame := e.GetAgentUpdate().GetBash().GetFrame()
+			if n := len(frame.GetTail().GetText()); n > limit {
+				t.Fatalf("write %d stores a %d-byte tail, past the %d-byte cap", i, n, limit)
+			}
+			if n := len(frame.GetSuccess().GetCompleted().GetOutput().GetText().GetStdout()); n > limit {
+				t.Fatalf("write %d stores a %d-byte terminal output, past the %d-byte cap", i, n, limit)
+			}
 		}
 	}
 }
 
-func TestAClaimedSpoolsBoundedDeltasJoinToTheWholeFile(t *testing.T) {
+func TestAClaimedSpoolsLastTailIsTheFilesRenderedTail(t *testing.T) {
 	// Arrange, Act.
 	store, content := boundedSpool(t)
 
-	// Assert: the renderer accumulates deltas contiguously, so every one must
-	// continue exactly where the last ended and together they must be the file.
-	var joined strings.Builder
-	for i, up := range deltasOf(store) {
-		if got := up.GetFromOffset(); got != uint64(joined.Len()) {
-			t.Fatalf("delta %d starts at %d, want %d: the renderer refuses a frame across a hole", i, got, joined.Len())
-		}
-		joined.WriteString(up.GetNewOutput())
+	// Assert: the newest tail accounts for every byte of the file and holds
+	// its end, cut on a line start.
+	tails := tailsOf(store)
+	if len(tails) == 0 {
+		t.Fatal("the spool produced no tail")
 	}
-	if joined.String() != content {
-		t.Fatalf("the deltas join to %d bytes, want the spool's %d", joined.Len(), len(content))
+	last := tails[len(tails)-1]
+	if last.GetBytesOmitted()+uint64(len(last.GetText())) != uint64(len(content)) {
+		t.Fatalf("the last tail accounts for %d+%d bytes, want the spool's %d", last.GetBytesOmitted(), len(last.GetText()), len(content))
+	}
+	if !strings.HasSuffix(content, last.GetText()) || !strings.HasPrefix(last.GetText(), "line of test output\n") {
+		t.Fatalf("the last tail is not the file's end cut on a line start: %q", last.GetText()[:40])
+	}
+	if want := uint64(strings.Count(content[:last.GetBytesOmitted()], "\n")); last.GetLinesOmitted() != want {
+		t.Fatalf("lines_omitted = %d, want %d", last.GetLinesOmitted(), want)
 	}
 }
 
