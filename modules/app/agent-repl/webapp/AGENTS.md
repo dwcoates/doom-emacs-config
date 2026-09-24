@@ -100,6 +100,7 @@ and are contract on the same terms:
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
 | `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId) and `data-jump-unresolved` (`notDrawn` \| `noFeedEntry`) | footer-rows-and-work-ids, 2026-09-23 |
+| `data-held-action="edit"` / `data-editing` / `.queued-badge.editing` | the held card's Edit control (between Release and Cancel), the card while its entry carries `HeldPrompt.editing`, and that entry's editing badge in the header strip | `edit`; `true` — absent when the daemon states no edit; the badge text is `editing` | edit-held-prompt, 2026-09-23 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 
 ## Commands
