@@ -246,10 +246,10 @@ type HeldPrompt struct {
 	// order, and no others —
 	//
 	//  1. the classification arm's badge, ALWAYS (the arm is never unset);
-	//  2. the confirmation's badge, iff the arm is hold_for_turn_end and its
+	//  2. the editing badge, iff `editing` is present;
+	//  3. the confirmation's badge, iff the arm is hold_for_turn_end and its
 	//     acceptance is true;
-	//  3. the hold arm's badge, iff a hold arm is set;
-	//  4. the editing badge, iff `editing` is present.
+	//  4. the hold arm's badge, iff a hold arm is set.
 	//
 	// A frontend draws each label verbatim and keys the badge's COLOR by the fact
 	// it stands for (the arm, the confirmation, the edit), never by its words; the words
