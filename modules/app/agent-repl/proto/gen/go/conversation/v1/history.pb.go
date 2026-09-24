@@ -129,15 +129,31 @@ func (*HistoryPage_More) isHistoryPage_Boundary() {}
 
 func (*HistoryPage_Floor) isHistoryPage_Boundary() {}
 
-// One entry and its position, so the caller always holds a pointer for the
-// newest thing it has seen — the reconnect mark and the older-pages walk key.
+// One entry, its position, and the turn it belongs to, so the caller always
+// holds a pointer for the newest thing it has seen — the reconnect mark and the
+// older-pages walk key — and never has to infer a turn from where an entry sits.
 type HistoryEntryAt struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// This entry's position in the agent's order. Stable across upserts:
 	// order is by the entry's FIRST appearance, never its last write.
 	At *HistoryPointer `protobuf:"bytes,1,opt,name=at,proto3" json:"at,omitempty"`
 	// The entry itself.
-	Entry         *HistoryEntry `protobuf:"bytes,2,opt,name=entry,proto3" json:"entry,omitempty"`
+	Entry *HistoryEntry `protobuf:"bytes,2,opt,name=entry,proto3" json:"entry,omitempty"`
+	// THE TURN THIS ENTRY WAS PRODUCED WITHIN — the one door every entry rides,
+	// prompts, activities, asks and terminals alike, so a consumer attributes an
+	// entry by identity and never by its position among prompts.
+	//
+	// SET: the producing session had this turn open when the entry was produced
+	// (a keep-alive's entries carry the keep-alive's own id). For an upsert it is
+	// the turn of the row's FIRST stamped write: a later write never moves an
+	// entry into another turn.
+	//
+	// UNSET: the entry was produced outside any turn, the producer could not
+	// name the turn from what it observed (a transcript record whose turn the
+	// vendor's own records do not identify), or the entry predates this field.
+	// Never guessed: an unset turn is the producer's honest "not known", and a
+	// consumer falls back to whatever it did before stamps existed.
+	Turn          *TurnId `protobuf:"bytes,3,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +198,13 @@ func (x *HistoryEntryAt) GetAt() *HistoryPointer {
 func (x *HistoryEntryAt) GetEntry() *HistoryEntry {
 	if x != nil {
 		return x.Entry
+	}
+	return nil
+}
+
+func (x *HistoryEntryAt) GetTurn() *TurnId {
+	if x != nil {
+		return x.Turn
 	}
 	return nil
 }
@@ -434,10 +457,12 @@ const file_conversation_v1_history_proto_rawDesc = "" +
 	"\x04more\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryMoreH\x00R\x04more\x125\n" +
 	"\x05floor\x18\x03 \x01(\v2\x1d.conversation.v1.HistoryFloorH\x00R\x05floorB\n" +
 	"\n" +
-	"\bboundary\"v\n" +
+	"\bboundary\"\xb1\x01\n" +
 	"\x0eHistoryEntryAt\x12/\n" +
 	"\x02at\x18\x01 \x01(\v2\x1f.conversation.v1.HistoryPointerR\x02at\x123\n" +
-	"\x05entry\x18\x02 \x01(\v2\x1d.conversation.v1.HistoryEntryR\x05entry\"\xdb\x01\n" +
+	"\x05entry\x18\x02 \x01(\v2\x1d.conversation.v1.HistoryEntryR\x05entry\x120\n" +
+	"\x04turn\x18\x03 \x01(\v2\x17.conversation.v1.TurnIdH\x00R\x04turn\x88\x01\x01B\a\n" +
+	"\x05_turn\"\xdb\x01\n" +
 	"\fHistoryEntry\x12?\n" +
 	"\vuser_prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptH\x00R\n" +
 	"userPrompt\x12>\n" +
@@ -472,25 +497,27 @@ var file_conversation_v1_history_proto_goTypes = []any{
 	(*HistoryMore)(nil),    // 3: conversation.v1.HistoryMore
 	(*HistoryFloor)(nil),   // 4: conversation.v1.HistoryFloor
 	(*HistoryPointer)(nil), // 5: conversation.v1.HistoryPointer
-	(*AgentPrompt)(nil),    // 6: conversation.v1.AgentPrompt
-	(*AgentFrame)(nil),     // 7: conversation.v1.AgentFrame
-	(*PeerMessage)(nil),    // 8: conversation.v1.PeerMessage
+	(*TurnId)(nil),         // 6: conversation.v1.TurnId
+	(*AgentPrompt)(nil),    // 7: conversation.v1.AgentPrompt
+	(*AgentFrame)(nil),     // 8: conversation.v1.AgentFrame
+	(*PeerMessage)(nil),    // 9: conversation.v1.PeerMessage
 }
 var file_conversation_v1_history_proto_depIdxs = []int32{
-	1, // 0: conversation.v1.HistoryPage.entries:type_name -> conversation.v1.HistoryEntryAt
-	3, // 1: conversation.v1.HistoryPage.more:type_name -> conversation.v1.HistoryMore
-	4, // 2: conversation.v1.HistoryPage.floor:type_name -> conversation.v1.HistoryFloor
-	5, // 3: conversation.v1.HistoryEntryAt.at:type_name -> conversation.v1.HistoryPointer
-	2, // 4: conversation.v1.HistoryEntryAt.entry:type_name -> conversation.v1.HistoryEntry
-	6, // 5: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
-	7, // 6: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
-	8, // 7: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
-	5, // 8: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	1,  // 0: conversation.v1.HistoryPage.entries:type_name -> conversation.v1.HistoryEntryAt
+	3,  // 1: conversation.v1.HistoryPage.more:type_name -> conversation.v1.HistoryMore
+	4,  // 2: conversation.v1.HistoryPage.floor:type_name -> conversation.v1.HistoryFloor
+	5,  // 3: conversation.v1.HistoryEntryAt.at:type_name -> conversation.v1.HistoryPointer
+	2,  // 4: conversation.v1.HistoryEntryAt.entry:type_name -> conversation.v1.HistoryEntry
+	6,  // 5: conversation.v1.HistoryEntryAt.turn:type_name -> conversation.v1.TurnId
+	7,  // 6: conversation.v1.HistoryEntry.user_prompt:type_name -> conversation.v1.AgentPrompt
+	8,  // 7: conversation.v1.HistoryEntry.agent_frame:type_name -> conversation.v1.AgentFrame
+	9,  // 8: conversation.v1.HistoryEntry.peer_message:type_name -> conversation.v1.PeerMessage
+	5,  // 9: conversation.v1.HistoryMore.last_entry:type_name -> conversation.v1.HistoryPointer
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_history_proto_init() }
@@ -505,6 +532,7 @@ func file_conversation_v1_history_proto_init() {
 		(*HistoryPage_More)(nil),
 		(*HistoryPage_Floor)(nil),
 	}
+	file_conversation_v1_history_proto_msgTypes[1].OneofWrappers = []any{}
 	file_conversation_v1_history_proto_msgTypes[2].OneofWrappers = []any{
 		(*HistoryEntry_UserPrompt)(nil),
 		(*HistoryEntry_AgentFrame)(nil),

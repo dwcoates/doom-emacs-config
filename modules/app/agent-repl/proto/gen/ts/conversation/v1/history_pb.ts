@@ -15,7 +15,7 @@ import type { AgentFrame } from "./agent_pb";
 import { file_conversation_v1_agent } from "./agent_pb";
 import type { PeerMessage } from "./peer_pb";
 import { file_conversation_v1_peer } from "./peer_pb";
-import type { AgentPrompt } from "./turn_pb";
+import type { AgentPrompt, TurnId } from "./turn_pb";
 import { file_conversation_v1_turn } from "./turn_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/history.proto.
  */
 export const file_conversation_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSJrCg5IaXN0b3J5RW50cnlBdBIrCgJhdBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5UG9pbnRlchIsCgVlbnRyeRgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5RW50cnkitgEKDEhpc3RvcnlFbnRyeRIzCgt1c2VyX3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIHCgVlbnRyeSJCCgtIaXN0b3J5TW9yZRIzCgpsYXN0X2VudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyIg4KDEhpc3RvcnlGbG9vciIfCg5IaXN0b3J5UG9pbnRlchINCgV2YWx1ZRgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvaGlzdG9yeS5wcm90bxIPY29udmVyc2F0aW9uLnYxIqkBCgtIaXN0b3J5UGFnZRIwCgdlbnRyaWVzGAEgAygLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlFbnRyeUF0EiwKBG1vcmUYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeU1vcmVIABIuCgVmbG9vchgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5IaXN0b3J5Rmxvb3JIAEIKCghib3VuZGFyeSKgAQoOSGlzdG9yeUVudHJ5QXQSKwoCYXQYASABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXISLAoFZW50cnkYAiABKAsyHS5jb252ZXJzYXRpb24udjEuSGlzdG9yeUVudHJ5EioKBHR1cm4YAyABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQFCBwoFX3R1cm4itgEKDEhpc3RvcnlFbnRyeRIzCgt1c2VyX3Byb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdEgAEjIKC2FnZW50X2ZyYW1lGAIgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50RnJhbWVIABI0CgxwZWVyX21lc3NhZ2UYAyABKAsyHC5jb252ZXJzYXRpb24udjEuUGVlck1lc3NhZ2VIAEIHCgVlbnRyeSJCCgtIaXN0b3J5TW9yZRIzCgpsYXN0X2VudHJ5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQb2ludGVyIg4KDEhpc3RvcnlGbG9vciIfCg5IaXN0b3J5UG9pbnRlchINCgV2YWx1ZRgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_peer, file_conversation_v1_turn]);
 
 /**
  * One page: a contiguous run of an agent's history, NEWEST FIRST, and
@@ -75,8 +75,9 @@ export const HistoryPageSchema: GenMessage<HistoryPage> = /*@__PURE__*/
   messageDesc(file_conversation_v1_history, 0);
 
 /**
- * One entry and its position, so the caller always holds a pointer for the
- * newest thing it has seen — the reconnect mark and the older-pages walk key.
+ * One entry, its position, and the turn it belongs to, so the caller always
+ * holds a pointer for the newest thing it has seen — the reconnect mark and the
+ * older-pages walk key — and never has to infer a turn from where an entry sits.
  *
  * @generated from message conversation.v1.HistoryEntryAt
  */
@@ -95,6 +96,26 @@ export type HistoryEntryAt = Message<"conversation.v1.HistoryEntryAt"> & {
    * @generated from field: conversation.v1.HistoryEntry entry = 2;
    */
   entry?: HistoryEntry | undefined;
+
+  /**
+   * THE TURN THIS ENTRY WAS PRODUCED WITHIN — the one door every entry rides,
+   * prompts, activities, asks and terminals alike, so a consumer attributes an
+   * entry by identity and never by its position among prompts.
+   *
+   * SET: the producing session had this turn open when the entry was produced
+   * (a keep-alive's entries carry the keep-alive's own id). For an upsert it is
+   * the turn of the row's FIRST stamped write: a later write never moves an
+   * entry into another turn.
+   *
+   * UNSET: the entry was produced outside any turn, the producer could not
+   * name the turn from what it observed (a transcript record whose turn the
+   * vendor's own records do not identify), or the entry predates this field.
+   * Never guessed: an unset turn is the producer's honest "not known", and a
+   * consumer falls back to whatever it did before stamps existed.
+   *
+   * @generated from field: optional conversation.v1.TurnId turn = 3;
+   */
+  turn?: TurnId | undefined;
 };
 
 /**
