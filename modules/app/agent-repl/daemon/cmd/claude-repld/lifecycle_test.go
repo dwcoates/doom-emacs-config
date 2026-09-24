@@ -78,10 +78,25 @@ func (f *fakeBuildJudge) ShimReported(ws ids.WorkspaceID, build string) {
 // fakeFreeQueue records the freeness edges the lifecycle sink hands on.
 type fakeFreeQueue struct {
 	promptqueue.Queue
-	frees []ids.WorkspaceID
+	frees      []ids.WorkspaceID
+	departures []departedAt
 }
 
 func (f *fakeFreeQueue) OnFree(ws ids.WorkspaceID) { f.frees = append(f.frees, ws) }
+
+func (f *fakeFreeQueue) OnDeparted(ws ids.WorkspaceID, departed promptqueue.Watcher, departure sessionwatcher.Departure) {
+	f.departures = append(f.departures, departedAt{ws: ws, departed: departed, departure: departure})
+}
+
+// departedAt is one departure edge the queue was handed.
+type departedAt struct {
+	ws        ids.WorkspaceID
+	departed  promptqueue.Watcher
+	departure sessionwatcher.Departure
+}
+
+// departingWatcher is a stand-in for the watcher a departure names.
+type departingWatcher struct{ sessionwatcher.Watcher }
 
 func unhealthyDiagnostics(faults ...*conversationv1.SessionFault) *conversationv1.SessionDiagnostics {
 	return &conversationv1.SessionDiagnostics{
@@ -283,5 +298,25 @@ func TestTheFreenessEdgeReachesTheQueue(t *testing.T) {
 	// Assert
 	if len(queue.frees) != 1 || queue.frees[0] != "ws-1" {
 		t.Fatalf("frees = %v, want [ws-1]", queue.frees)
+	}
+}
+
+func TestTheDepartureEdgeReachesTheQueueNamingItsWatcher(t *testing.T) {
+	// Arrange
+	queue := &fakeFreeQueue{}
+	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+	watcher := &departingWatcher{}
+	departure := sessionwatcher.Departure{Ordered: false, Cause: sessionwatcher.DepartureLinkDead}
+
+	// Act
+	sink.OnDeparted("ws-1", watcher, departure)
+
+	// Assert
+	if len(queue.departures) != 1 {
+		t.Fatalf("departures = %d, want exactly one", len(queue.departures))
+	}
+	got := queue.departures[0]
+	if got.ws != "ws-1" || got.departure != departure || got.departed != promptqueue.Watcher(watcher) {
+		t.Fatalf("departure = %+v, want ws-1's, naming the watcher that departed", got)
 	}
 }

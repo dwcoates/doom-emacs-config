@@ -153,25 +153,85 @@ func (c *fakeClock) armedSignal(d time.Duration) <-chan struct{} {
 	return ready
 }
 
-// fakeSpawner is the successor spawner.
+// fakeSpawner is the successor spawner. Every successor it answers is a
+// fakeSuccessor it keeps, so a test counts how many are still standing.
 type fakeSpawner struct {
 	address string
 	err     error
+	// startedThenFailed makes a failing Spawn still answer a successor: the
+	// process started and never reported.
+	startedThenFailed bool
+	// stopErr is what every successor's Stop answers.
+	stopErr error
 	mu      sync.Mutex
 	told    []string
+	spawned []*fakeSuccessor
 }
 
-func (s *fakeSpawner) Spawn(_ context.Context, incumbent string) (string, error) {
+func (s *fakeSpawner) Spawn(_ context.Context, incumbent string) (Successor, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.told = append(s.told, incumbent)
-	s.mu.Unlock()
-	return s.address, s.err
+	if s.err != nil && !s.startedThenFailed {
+		return nil, s.err
+	}
+	child := &fakeSuccessor{spawner: s}
+	if s.err == nil {
+		child.address = s.address
+	}
+	s.spawned = append(s.spawned, child)
+	return child, s.err
 }
 
 func (s *fakeSpawner) Told() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.told...)
+}
+
+// Live counts the successors spawned and not confirmed stopped.
+func (s *fakeSpawner) Live() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, child := range s.spawned {
+		if !child.stopped {
+			n++
+		}
+	}
+	return n
+}
+
+// Stops counts every Stop asked of any successor, answered or refused.
+func (s *fakeSpawner) Stops() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, child := range s.spawned {
+		n += child.stops
+	}
+	return n
+}
+
+// fakeSuccessor is one spawned successor.
+type fakeSuccessor struct {
+	spawner *fakeSpawner
+	address string
+	stops   int
+	stopped bool
+}
+
+func (c *fakeSuccessor) Address() string { return c.address }
+
+func (c *fakeSuccessor) Stop(context.Context) error {
+	c.spawner.mu.Lock()
+	defer c.spawner.mu.Unlock()
+	c.stops++
+	if c.spawner.stopErr != nil {
+		return c.spawner.stopErr
+	}
+	c.stopped = true
+	return nil
 }
 
 // fakeAnnouncer captures the WatchDaemon shutdown announcement.
@@ -567,6 +627,18 @@ func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
 			req.Done(err)
 		}
 	}()
+}
+
+// unregister drops a workspace's registered bounce unrun, as the queue does
+// when the shim it would replace departs with nothing left to replace.
+func (r *fakeRegistry) unregister(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	req, ok := r.pending[ws]
+	delete(r.pending, ws)
+	r.mu.Unlock()
+	if ok && req.Done != nil {
+		req.Done(bounce.ErrUnregistered)
+	}
 }
 
 // free marks a workspace free and takes its registered bounce, as the queue

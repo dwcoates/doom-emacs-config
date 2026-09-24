@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -560,5 +561,343 @@ func TestOnFreeWithNoBounceRegisteredDispatchesNothing(t *testing.T) {
 	}
 	if h.q.isDraining(theWorkspace) {
 		t.Fatalf("a freeness edge with nothing registered drained the workspace")
+	}
+}
+
+// ---- a departed shim resolves the work its registered bounce waited on ----
+
+// departedUnasked is a shim that died on its own; departedOrdered is one this
+// daemon ended itself.
+var (
+	departedUnasked = sessionwatcher.Departure{Ordered: false, Cause: sessionwatcher.DepartureLinkDead}
+	departedOrdered = sessionwatcher.Departure{Ordered: true, Cause: sessionwatcher.DepartureClosed}
+)
+
+// relaunching is a gate's request marked as replacing the shim, which is what
+// every rollout shim bounce asks.
+func (g *gate) relaunching(reason string) bounce.Request {
+	req := g.request(reason, false)
+	req.ReplacesShim = true
+	return req
+}
+
+// registerBehindWork registers req on a workspace whose shim has a turn and a
+// monitor in flight, failing the test unless it was registered rather than
+// started.
+func registerBehindWork(t *testing.T, h *harness, req bounce.Request) {
+	t.Helper()
+	running(t, h, "running-turn", "the running work")
+	h.watcher.detached(monitors(1))
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, req)
+	if err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	if decision.Now {
+		t.Fatalf("decision = %+v, want the bounce registered behind the work", decision)
+	}
+}
+
+// depart tells the queue the watcher's shim is gone and joins the decision.
+func depart(h *harness, w *fakeWatcher, d sessionwatcher.Departure) {
+	w.depart(d)
+	h.q.OnDeparted(theWorkspace, w, d)
+	h.q.departing.Wait()
+}
+
+// awaitDone answers the gate's Done, failing the test if it never came.
+func (g *gate) awaitDone(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-g.done:
+		return err
+	case <-time.After(bounceStartBound):
+		t.Fatalf("the bounce's requester was never told how it ended")
+		return nil
+	}
+}
+
+func TestADepartureDecidesTheRegisteredBounceAtOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		// relaunch marks the request as replacing the shim.
+		relaunch bool
+		// closed records the workspace as closed before the departure.
+		closed bool
+		// forgotten makes the workspace read answer not-found.
+		forgotten bool
+		departure sessionwatcher.Departure
+		wantRun   bool
+		wantMsg   string
+	}{
+		{
+			name:      "a shim that died under a relaunch is relaunched now",
+			relaunch:  true,
+			departure: departedUnasked,
+			wantRun:   true,
+			wantMsg:   "the shim died with work recorded in flight; that work ended with it, so its registered bounce relaunches it now",
+		},
+		{
+			name:      "a shim this daemon ended under a relaunch is unregistered",
+			relaunch:  true,
+			departure: departedOrdered,
+			wantMsg:   "the shim departed under a registered bounce with nothing left to replace; unregistered it",
+		},
+		{
+			name:      "a shim that died in a closed workspace is unregistered",
+			relaunch:  true,
+			closed:    true,
+			departure: departedUnasked,
+			wantMsg:   "the shim departed under a registered bounce with nothing left to replace; unregistered it",
+		},
+		{
+			name:      "a shim that died in a forgotten workspace is unregistered",
+			relaunch:  true,
+			forgotten: true,
+			departure: departedUnasked,
+			wantMsg:   "the shim departed under a registered bounce with nothing left to replace; unregistered it",
+		},
+		{
+			name:      "a transfer is taken whoever ended the shim",
+			relaunch:  false,
+			departure: departedOrdered,
+			wantRun:   true,
+			wantMsg:   "the shim departed; the work its registered bounce waited on ended with it, so the bounce is taken now",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			g := newGate()
+			req := g.request("build_stale", false)
+			if tc.relaunch {
+				req = g.relaunching("build_stale")
+			}
+			registerBehindWork(t, h, req)
+			if tc.closed {
+				h.db.workspaces[theWorkspace] = wsm.Workspace{ID: theWorkspace, Dir: "/tmp/ws-1", Closed: true}
+			}
+			if tc.forgotten {
+				h.db.workspaceErr = wsm.ErrNotFound
+			}
+
+			// Act
+			depart(h, h.watcher, tc.departure)
+
+			// Assert
+			if tc.wantRun {
+				g.awaitStart(t)
+				g.finish(h, nil)
+				if err := g.awaitDone(t); err != nil {
+					t.Fatalf("done = %v, want the bounce to finish cleanly", err)
+				}
+			} else {
+				if err := g.awaitDone(t); !errors.Is(err, bounce.ErrUnregistered) {
+					t.Fatalf("done = %v, want ErrUnregistered", err)
+				}
+				if runs := g.runs.Load(); runs != 0 {
+					t.Fatalf("an unregistered bounce ran %d times", runs)
+				}
+			}
+			if !recordWith(h.log.Records(), "info", opBounce, tc.wantMsg) {
+				t.Fatalf("records = %+v, want %q", h.log.Records(), tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestADepartureWhoseWorkspaceCannotBeReadFailsTheBounceLoudly(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	registerBehindWork(t, h, g.relaunching("build_stale"))
+	h.db.workspaceErr = errors.New("the state client is gone")
+
+	// Act
+	depart(h, h.watcher, departedUnasked)
+
+	// Assert
+	err := g.awaitDone(t)
+	if err == nil || errors.Is(err, bounce.ErrUnregistered) {
+		t.Fatalf("done = %v, want the read failure", err)
+	}
+	if runs := g.runs.Load(); runs != 0 {
+		t.Fatalf("the bounce ran %d times on a workspace that could not be read", runs)
+	}
+	const want = "the shim departed under a registered bounce and its workspace could not be read; the bounce is failed rather than left waiting"
+	if !recordWith(h.log.Records(), "error", opBounce, want) {
+		t.Fatalf("records = %+v, want %q at ERROR", h.log.Records(), want)
+	}
+}
+
+func TestADepartureAfterANewerShimServesDoesNotBounceIt(t *testing.T) {
+	tests := []struct {
+		name     string
+		relaunch bool
+		// newerBusy leaves the newer shim with a turn in flight.
+		newerBusy bool
+		wantRun   bool
+		wantDone  error
+	}{
+		{name: "a relaunch is unregistered: the newer shim runs the installed build", relaunch: true, wantDone: bounce.ErrUnregistered},
+		{name: "a transfer waits on the newer shim's own work", relaunch: false, newerBusy: true},
+		{name: "a transfer is taken when the newer shim is free", relaunch: false, wantRun: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the bounce registers behind the old shim's work, the old
+			// shim dies, and a revival brings a newer one up before the
+			// departure is decided.
+			h := newHarness(t)
+			g := newGate()
+			req := g.request("handover_transfer", false)
+			if tc.relaunch {
+				req = g.relaunching("build_stale")
+			}
+			registerBehindWork(t, h, req)
+			old := h.watcher
+			newer := &fakeWatcher{}
+			if tc.newerBusy {
+				newer.detached(monitors(1))
+			}
+			h.watcher = newer
+
+			// Act
+			depart(h, old, departedUnasked)
+
+			// Assert
+			switch {
+			case tc.wantRun:
+				g.awaitStart(t)
+				g.finish(h, nil)
+			case tc.wantDone != nil:
+				if err := g.awaitDone(t); !errors.Is(err, tc.wantDone) {
+					t.Fatalf("done = %v, want %v", err, tc.wantDone)
+				}
+			default:
+				h.q.mu.Lock()
+				pending := h.q.states[theWorkspace].bounce
+				h.q.mu.Unlock()
+				if pending == nil || pending.draining {
+					t.Fatalf("pending = %+v, want the bounce still registered behind the newer shim's work", pending)
+				}
+			}
+			if !tc.wantRun && g.runs.Load() != 0 {
+				t.Fatalf("the bounce ran over the newer shim")
+			}
+		})
+	}
+}
+
+func TestALateDepartureOfAShimTheBounceDoesNotWaitOnJudgesTheCurrentShim(t *testing.T) {
+	// Arrange: the bounce registers behind the CURRENT shim's work; an edge
+	// then arrives for a shim that was replaced before the registration.
+	h := newHarness(t)
+	g := newGate()
+	earlier := &fakeWatcher{}
+	registerBehindWork(t, h, g.relaunching("build_stale"))
+
+	// Act
+	depart(h, earlier, departedUnasked)
+
+	// Assert
+	h.q.mu.Lock()
+	pending := h.q.states[theWorkspace].bounce
+	h.q.mu.Unlock()
+	if pending == nil || pending.draining {
+		t.Fatalf("pending = %+v, want the bounce still waiting on the current shim's work", pending)
+	}
+	if runs := g.runs.Load(); runs != 0 {
+		t.Fatalf("a late edge for another shim ran the bounce %d times", runs)
+	}
+}
+
+func TestADepartureAndAFreeEdgeTakeTheBounceOnce(t *testing.T) {
+	// Arrange: the shim dies with its recorded work, and a freeness edge
+	// races the departure for the same registered bounce.
+	h := newHarness(t)
+	g := newGate()
+	registerBehindWork(t, h, g.relaunching("build_stale"))
+	h.watcher.depart(departedUnasked)
+	var edges sync.WaitGroup
+	edges.Add(2)
+
+	// Act
+	go func() {
+		defer edges.Done()
+		h.q.OnDeparted(theWorkspace, h.watcher, departedUnasked)
+		h.q.departing.Wait()
+	}()
+	go func() {
+		defer edges.Done()
+		h.q.OnFree(theWorkspace)
+	}()
+	edges.Wait()
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if runs := g.runs.Load(); runs != 1 {
+		t.Fatalf("the bounce ran %d times, want exactly once", runs)
+	}
+}
+
+func TestABounceAskedOfADepartedShimDoesNotWaitOnItsRecordedWork(t *testing.T) {
+	// Arrange: the dead shim's watcher still records a turn and a monitor.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.watcher.detached(monitors(1))
+	h.watcher.depart(departedUnasked)
+	g := newGate()
+
+	// Act
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	if !decision.Now || decision.Forced {
+		t.Fatalf("decision = %+v, want an unforced bounce now: the recorded work ended with the shim", decision)
+	}
+	g.awaitStart(t)
+	g.finish(h, nil)
+}
+
+func TestADepartureWithNoBounceRegisteredDecidesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	depart(h, h.watcher, departedUnasked)
+
+	// Assert
+	if !recordWith(h.log.Records(), "debug", opBounce, "the shim departed with no bounce registered") {
+		t.Fatalf("records = %+v, want the no-op recorded", h.log.Records())
+	}
+	if h.q.isDraining(theWorkspace) {
+		t.Fatalf("a departure with nothing registered drained the workspace")
+	}
+}
+
+func TestADepartureAfterTheExitsDrainDecidesNothing(t *testing.T) {
+	// Arrange: the exit has joined the queue's work; a watcher closed by the
+	// exit then reports its shim departed.
+	h := newHarness(t)
+	g := newGate()
+	registerBehindWork(t, h, g.relaunching("build_stale"))
+	if !h.q.Drain(bounceStartBound) {
+		t.Fatalf("Drain did not join the queue's work")
+	}
+
+	// Act
+	depart(h, h.watcher, departedOrdered)
+
+	// Assert
+	if runs := g.runs.Load(); runs != 0 {
+		t.Fatalf("a departure at the exit ran the bounce %d times", runs)
+	}
+	if !recordWith(h.log.Records(), "debug", opBounce, "the daemon is exiting; a shim departure at the exit decides nothing") {
+		t.Fatalf("records = %+v, want the exit's no-op recorded", h.log.Records())
 	}
 }

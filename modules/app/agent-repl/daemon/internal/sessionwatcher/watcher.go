@@ -108,6 +108,9 @@ type watcher struct {
 	// exits silently instead of reporting a transport failure.
 	gen    uint64
 	closed bool
+	// departure is set once the watched shim is GONE (see Departed), and it
+	// is set ONCE: the lifecycle sink hears one departure per watcher.
+	departure *Departure
 	// sessionEnded records that the session itself is over — the vendor query
 	// died, or the daemon is deliberately ending it (SessionEnding) — which is
 	// the one way a stream may legally end without a terminal.
@@ -706,7 +709,19 @@ func (w *watcher) Close() error {
 	w.log.Info("daemon.sessionwatcher.close", "closing the session's watch fleet", dlog.Context{
 		"streams": len(closing),
 	})
+	// A CLOSE IS A DEPARTURE ONLY WHEN THE SHIM IS GOING. A session this
+	// daemon is ending (a stop, a kill, a stand-down) or one whose process is
+	// already reaped is gone with its work; a close that merely stops
+	// WATCHING a shim that keeps running -- the daemon's own exit, leaving its
+	// shims for the next daemon to adopt -- resolves nothing, and telling the
+	// bounce registry otherwise would take a bounce over live work.
+	var departed *Departure
+	_, reaped := w.client.Reaped()
+	if w.endingLocked() || reaped {
+		departed = w.departLocked(DepartureClosed)
+	}
 	w.mu.Unlock()
+	w.tellDeparted(departed)
 
 	w.cancel()
 	closeStreams(closing)
@@ -715,6 +730,43 @@ func (w *watcher) Close() error {
 	// watcher is closed.
 	w.dispatching.Wait()
 	return nil
+}
+
+// Departed implements Watcher.
+func (w *watcher) Departed() (Departure, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.departure == nil {
+		return Departure{}, false
+	}
+	return *w.departure, true
+}
+
+// departLocked records the shim's departure, answering it the FIRST time only
+// (nil after), so the sink is told once per watcher whichever edge came first.
+// The caller holds mu, and tells the sink once it is released.
+func (w *watcher) departLocked(cause DepartureCause) *Departure {
+	if w.departure != nil {
+		return nil
+	}
+	d := Departure{Ordered: w.endingLocked(), Cause: cause}
+	w.departure = &d
+	w.log.Debug("daemon.sessionwatcher.state_transition", "the watched shim departed", dlog.Context{
+		"state": "departed", "before": false, "after": true,
+	})
+	w.log.Info("daemon.sessionwatcher.departed", "the watched shim is gone; its in-flight work ended with it", dlog.Context{
+		"cause": string(cause), "ordered": d.Ordered,
+	})
+	return &d
+}
+
+// tellDeparted hands a just-recorded departure to the lifecycle sink, OFF mu:
+// the sink's bounce registry reads this watcher under its own lock.
+func (w *watcher) tellDeparted(d *Departure) {
+	if d == nil {
+		return
+	}
+	w.sinks.Lifecycle.OnDeparted(w.ws, w, *d)
 }
 
 // closeStreams runs a taken set of stream closers. It is a function of its own
@@ -828,7 +880,12 @@ func (w *watcher) runLink() {
 		if state == shimclient.LinkConnected && previous != shimclient.LinkConnected && degraded {
 			w.reopenLocked("the link came back")
 		}
+		var departed *Departure
+		if w.link == shimclient.LinkDead {
+			departed = w.departLocked(DepartureLinkDead)
+		}
 		w.mu.Unlock()
+		w.tellDeparted(departed)
 	}
 	w.log.Debug("daemon.sessionwatcher.link_feed_ended", "the shim client stopped publishing connectivity", nil)
 }

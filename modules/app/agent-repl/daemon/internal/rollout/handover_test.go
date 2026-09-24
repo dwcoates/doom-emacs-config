@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -721,4 +723,213 @@ func loggedError(log *dlog.TestSurfaces, operation, substr string) bool {
 		}
 	}
 	return false
+}
+
+// listFailingDB is the state client with its workspace listing refusable, so
+// the handover's `served` step fails AFTER the successor is up.
+type listFailingDB struct {
+	wsm.DB
+	fail *atomic.Bool
+}
+
+func (d listFailingDB) ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error) {
+	if d.fail.Load() {
+		return nil, errFake
+	}
+	return d.DB.ListWorkspaces(ctx)
+}
+
+// failureAfterSpawn is one way a handover fails once its successor exists:
+// how to cause it, how to heal it, and the ERROR that names it.
+type failureAfterSpawn struct {
+	name string
+	// deps wires the failure into the controller's collaborators.
+	deps func(t *testing.T, fail *atomic.Bool) func(*Deps)
+	// arm causes the failure on the harness before the handover.
+	arm func(t *testing.T, h *harness, fail *atomic.Bool)
+	// heal undoes it, so the next handover can succeed.
+	heal func(t *testing.T, h *harness, fail *atomic.Bool)
+	// logged is the handover's own ERROR for the failure.
+	logged string
+}
+
+// failuresAfterSpawn is every failure path between the spawn and the
+// acceptance.
+func failuresAfterSpawn() []failureAfterSpawn {
+	noDeps := func(*testing.T, *atomic.Bool) func(*Deps) { return func(*Deps) {} }
+	return []failureAfterSpawn{
+		{
+			name: "the successor started and never reported",
+			deps: noDeps,
+			arm: func(_ *testing.T, h *harness, _ *atomic.Bool) {
+				h.spawner.err = errFake
+				h.spawner.startedThenFailed = true
+			},
+			heal: func(_ *testing.T, h *harness, _ *atomic.Bool) {
+				h.spawner.err = nil
+				h.spawner.startedThenFailed = false
+			},
+			logged: "the successor did not come up",
+		},
+		{
+			name: "listing what is served failed",
+			deps: func(_ *testing.T, fail *atomic.Bool) func(*Deps) {
+				return func(d *Deps) { d.DB = listFailingDB{DB: d.DB, fail: fail} }
+			},
+			arm:    func(_ *testing.T, _ *harness, fail *atomic.Bool) { fail.Store(true) },
+			heal:   func(_ *testing.T, _ *harness, fail *atomic.Bool) { fail.Store(false) },
+			logged: "could not list what this daemon serves",
+		},
+		{
+			name: "the manifest could not be written after the announcement",
+			deps: noDeps,
+			arm: func(t *testing.T, h *harness, _ *atomic.Bool) {
+				// A regular file where the manifest's directory should be makes
+				// the write fail at its MkdirAll.
+				blocker := filepath.Join(t.TempDir(), "not-a-dir")
+				if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+					t.Fatalf("write the blocker: %v", err)
+				}
+				h.c.deps.IntentManifest = filepath.Join(blocker, "manifest.json")
+			},
+			heal: func(t *testing.T, h *harness, _ *atomic.Bool) {
+				h.c.deps.IntentManifest = filepath.Join(t.TempDir(), "intent", "manifest.json")
+			},
+			logged: "the intent manifest could not be written after the announcement",
+		},
+	}
+}
+
+func TestAHandoverThatFailsAfterTheSpawnStopsItsSuccessorAndReleasesTheSlot(t *testing.T) {
+	for _, tc := range failuresAfterSpawn() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			fail := &atomic.Bool{}
+			h := newHarness(t, tc.deps(t, fail))
+			h.workspace(t)
+			tc.arm(t, h, fail)
+
+			// Act
+			_, err := h.c.HandOver(context.Background(), false)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("HandOver succeeded through the failure")
+			}
+			if live := h.spawner.Live(); live != 0 {
+				t.Fatalf("successors still standing = %d, want the abandoned one stopped", live)
+			}
+			if _, rolling := h.c.RollingOut(); rolling {
+				t.Fatalf("the handover is still in flight after it was abandoned")
+			}
+			if !loggedError(h.log, opHandover, tc.logged) {
+				t.Fatalf("records = %+v, want %q at ERROR", h.log.Records(), tc.logged)
+			}
+		})
+	}
+}
+
+func TestTheDeployAfterAFailedHandoverNeverHasTwoSuccessors(t *testing.T) {
+	for _, tc := range failuresAfterSpawn() {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			fail := &atomic.Bool{}
+			h := newHarness(t, tc.deps(t, fail))
+			ws, _ := h.workspace(t)
+			h.freeness.SetFree(ws, false)
+			tc.arm(t, h, fail)
+			if _, err := h.c.HandOver(context.Background(), false); err == nil {
+				t.Fatalf("the first HandOver succeeded through the failure")
+			}
+			tc.heal(t, h, fail)
+
+			// Act
+			_, err := h.c.HandOver(context.Background(), false)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("second HandOver: %v, want it accepted", err)
+			}
+			if told := h.spawner.Told(); len(told) != 2 {
+				t.Fatalf("spawns = %d, want the failed one and its replacement", len(told))
+			}
+			if live := h.spawner.Live(); live != 1 {
+				t.Fatalf("successors standing = %d, want exactly the second handover's", live)
+			}
+		})
+	}
+}
+
+func TestAnAbandonedHandoverDisarmsTheRendezvousItsAnnouncementArmed(t *testing.T) {
+	// Arrange: the manifest fails after the announcement armed the rendezvous.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	manifestFailure := failuresAfterSpawn()[2]
+	manifestFailure.arm(t, h, &atomic.Bool{})
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+		t.Fatalf("HandOver succeeded with an unwritable manifest")
+	}
+
+	// Assert
+	if n := h.c.ExpectedParticipants(ws); n != 0 {
+		t.Fatalf("expected participants = %d after the abandon, want the rendezvous disarmed", n)
+	}
+	h.c.mu.Lock()
+	_, armed := h.c.rendezvous[ws]
+	h.c.mu.Unlock()
+	if armed {
+		t.Fatalf("the abandoned handover left its rendezvous armed")
+	}
+}
+
+func TestAHandoverWhoseSuccessorWillNotStopStaysInFlight(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.spawner.err = errFake
+	h.spawner.startedThenFailed = true
+	h.spawner.stopErr = errors.New("the successor was killed but not reaped")
+	if _, err := h.c.HandOver(context.Background(), false); err == nil {
+		t.Fatalf("the first HandOver succeeded with a successor that never reported")
+	}
+	h.spawner.err = nil
+	h.spawner.startedThenFailed = false
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), false)
+
+	// Assert
+	var inFlight *ErrAlreadyRollingOut
+	if !errors.As(err, &inFlight) {
+		t.Fatalf("err = %v, want *ErrAlreadyRollingOut while the unstopped successor may still run", err)
+	}
+	if told := h.spawner.Told(); len(told) != 1 {
+		t.Fatalf("spawns = %d, want no second successor beside the one that would not stop", len(told))
+	}
+	if !loggedError(h.log, opHandover, "could not be stopped") {
+		t.Fatalf("records = %+v, want the unstoppable successor at ERROR", h.log.Records())
+	}
+}
+
+func TestASpawnThatStartedNothingIsNotStopped(t *testing.T) {
+	// Arrange: the binary would not start, so there is no process to own.
+	h := newHarness(t)
+	h.workspace(t)
+	h.spawner.err = errFake
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("HandOver succeeded with no successor")
+	}
+	if stops := h.spawner.Stops(); stops != 0 {
+		t.Fatalf("stops = %d, want none: nothing was started", stops)
+	}
+	if _, rolling := h.c.RollingOut(); rolling {
+		t.Fatalf("a handover that started nothing still holds the slot")
+	}
 }

@@ -207,6 +207,12 @@ func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
 	s.queue.OnFree(ws)
 }
 
+// OnDeparted is the departure edge: a dead shim's registered bounce is decided
+// by the queue at once rather than waiting for a revival.
+func (s *lifecycleSink) OnDeparted(ws ids.WorkspaceID, departed sessionwatcher.Watcher, departure sessionwatcher.Departure) {
+	s.queue.OnDeparted(ws, departed, departure)
+}
+
 // OnTurnEnded pops the queue and releases a hold-for-turn-end.
 func (s *lifecycleSink) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose) {
 	s.queue.OnTurnEnded(ws, turn, how)
