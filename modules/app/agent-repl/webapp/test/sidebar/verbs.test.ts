@@ -250,6 +250,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
   spawnFailed: { detail: "exec format error" },
   vendorStartFailed: { detail: "the sdk threw before its first message" },
+  lockHolderUnavailable: { binary: "/b/shim-lock", osError: "spawn /b/shim-lock ENOENT" },
   gitFailed: { detail: "worktree is dirty" },
 };
 
@@ -482,6 +483,21 @@ describe("the per-rpc causes, worded at their own site", () => {
     } as never);
     // Assert
     expect(text).toBe("the vendor failed to start the session");
+  });
+
+  it("says the shim's lock helper failed to start, naming the binary", async () => {
+    const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
+    expect(refusal?.textContent).toContain("the shim's lock helper /b/shim-lock failed to start");
+  });
+
+  it("carries the OS error of a lock helper that failed to start", async () => {
+    const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
+    expect(refusal?.textContent).toContain("(spawn /b/shim-lock ENOENT)");
+  });
+
+  it("never words an unavailable lock helper as another owner", async () => {
+    const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
+    expect(refusal?.textContent).toContain("no other process owns this conversation");
   });
 
   it("carries git's own detail when a nuke fails", async () => {
