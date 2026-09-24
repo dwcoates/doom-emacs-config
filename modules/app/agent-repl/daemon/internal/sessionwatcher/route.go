@@ -121,8 +121,9 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 	// BEFORE StartTurn is called, and a query that dies while that call is
 	// still in flight beats Feed.OnTurnOpened -- the feed's only other source
 	// for which turn is running. Handing it over here is what makes the
-	// death's terminal reach the turn it killed; without it the feed drew
-	// nothing and the shim's own execution_error stand-in became the account.
+	// death's terminal reach the turn it killed; without it the push drew
+	// nothing and the turn's ending waited on the shim's own query_died
+	// terminal, which reaches the feed by the store in no fixed order.
 	if w.turn != nil {
 		w.sinks.Feed.OnTurnOpened(w.ws, *w.turn)
 	}
