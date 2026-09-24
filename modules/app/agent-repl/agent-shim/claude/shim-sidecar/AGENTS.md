@@ -1270,6 +1270,20 @@ the suite rather than quietly shrinking what the feed can show.
   was that very book move — the one refusal that stops being true. Nothing is
   duplicated, because `write_id` and `upsert_key` are digested from a file
   position that did not move.
+- A ROTATION'S TRANSCRIPT IS HELD UNREAD UNTIL A RECORD NAMES ITS BOOK
+  (`rotation.go`). Re-keying moves only the records read AFTER the link lands;
+  the ones already committed under the file's own id stay there, and the store
+  then SKIPS the shim's stream-plane writes of the same keys as book moves, so
+  the daemon's watch on the conversation's real book never sees the cleared
+  cut or the turn's answer (e2e `TestSecondRotateUnderRotatedIdentity`,
+  2026-09-23: read at .322, link at .323, `final_answer_unresolved`). So a MAIN
+  transcript that no record names, that OPENS WITH A CLEAR (or has not yet
+  written the user record that says), in a project directory where another
+  transcript IS named by a shim record, is not read at all: stated once at INFO
+  (`rotation-hold`), re-examined on every poll after `rekeyRotations`, and read
+  from its start the moment the link lands. Evidence only, no timer. A
+  conversation the shim never recorded keeps R9's own-id default; a clear run
+  outside the shim in a directory a shim conversation shares stays held.
 - A FIRST ATTRIBUTION IS NOT A BOOK MOVE. A spool aged into residue before its
   launch line was read is watched with NO book, and the same pass is what
   finally gives it one. That arm is INFO and names its resolution source; only
