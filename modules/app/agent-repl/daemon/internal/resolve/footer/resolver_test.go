@@ -983,3 +983,45 @@ func TestADaemonScopedFaultRecordsTheActivityLineItStands(t *testing.T) {
 		t.Fatalf("record = %+v, want the fault's line caused by open_fault", last.Context)
 	}
 }
+
+// TestTheTurnOpenEdgeKeepsTheUsageOfFramesThatBeatIt is the forced
+// interleaving the daemon integration suite lost at random: the shim streams
+// the turn's first API response before StartTurn's answer is back, so its
+// usage-carrying unit is folded in between SetTurn and the turn-open edge.
+func TestTheTurnOpenEdgeKeepsTheUsageOfFramesThatBeatIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, thinkingFrame("unit-0", usage(0, 100, 0, 0, 0)))
+
+	// Act
+	h.r.OnTurnOpened(testWS, turn)
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", nil))
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if h.view(t).GetStrip().GetTokens().GetVerdict().GetComplete() == nil {
+		t.Fatalf("verdict = %+v, want complete: the edge wiped the usage a frame that beat it had carried",
+			h.view(t).GetStrip().GetTokens().GetVerdict())
+	}
+}
+
+// TestTheTurnOpenEdgeKeepsTheActivityAFrameAlreadyShowed: the status does not
+// fall back to `submitting` for a turn whose first frame has already landed.
+func TestTheTurnOpenEdgeKeepsTheActivityAFrameAlreadyShowed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, thinkingFrame("unit-0", nil))
+
+	// Act
+	h.r.OnTurnOpened(testWS, testTurnID)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetThinking().GetSubmitting() != nil {
+		t.Fatalf("status = %v, want the activity the frame showed kept, not thinking.submitting", h.view(t).GetStrip().GetStatus())
+	}
+}
