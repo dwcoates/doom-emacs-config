@@ -603,7 +603,7 @@ async function mountApp(
   handles.push(login);
   topbar.watch(ctx, { openLogin: (control) => login.open(control) });
   handles.push(mountSidebar(shell.sidebar, ctx));
-  handles.push(mountHoldTray(shell.holdTray, ctx));
+  handles.push(mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) }));
 
   if (composerEnabled) {
     shell.composer.hidden = false;

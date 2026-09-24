@@ -6,10 +6,22 @@
  * it IS the prompt it will become, so it is drawn by the one bubble
  * (src/bubble/draw.ts, owner rulings 2026-09-23): a prompt-role bubble on the
  * prompt rail whose fill is the held grey with only a subtle blue hue — the
- * reader sees their words have NOT reached the agent — whose header strip is
- * its badges and queued age, whose content is what the user said, painted by
- * the one body pipeline, and which collapses at TWO lines behind the one
- * has-more fade, opened by the one toggle (expand.ts, armed on the tray).
+ * reader sees their words have NOT reached the agent — at HALF the one bubble
+ * width, whose header strip is its status BADGES, whose content is what the
+ * user said, painted by the one body pipeline, and which collapses at TWO lines
+ * behind the one has-more fade, opened by the one toggle (expand.ts, armed on
+ * the tray).
+ *
+ * COLLAPSED IT IS TWO LINES AND ITS BADGES (owner spec, 2026-09-23). The rest —
+ * the queued age, the classifier's rationale or failure detail, and the
+ * actions — is the bubble's EXPAND-ONLY region (`expandOnly`,
+ * src/bubble/draw.ts), shown once the same click that opens the text opens it.
+ *
+ * EVERY STATUS IS A BADGE, and `HELD_STATUS_BADGES` is the ONE table from a
+ * status to the badge's color class. The proto carries no status sentence for
+ * a held prompt, only the arm and its fields, so a badge's words are the ones
+ * this card already said for that arm, unchanged, with the arm's own fields (a
+ * schedule id, a session command) drawn verbatim inside them.
  *
  * TWO INDEPENDENT AXES, TWO INDEPENDENT ARMS. `classification` says WHEN the
  * prompt runs relative to the turn in front of it; `hold` says WHAT ELSE is
@@ -120,21 +132,25 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
     },
   });
 
+  // THE STRIP IS THE BADGES, and only the badges: the card's headline, the one
+  // thing besides the first two lines a collapsed card shows.
   const head = document.createElement("div");
   head.className = "queued-head";
-
   const verdict = drawClassification(classification, `${path}.classification`);
   head.appendChild(verdict.badge);
   if (verdict.accepted !== null) head.appendChild(verdict.accepted);
-  head.appendChild(
-    drawHeldPromptQueuedAt(requireMessage(u.queuedAt, `${path}.queued_at`), tc, `${path}.queued_at`),
-  );
+  if (hold !== null) head.appendChild(drawHold(hold, `${path}.hold`));
   const content = drawUserSaid(said, `${path}.said`);
 
-  const footer: HTMLElement[] = [];
-  if (verdict.detail !== null) footer.push(verdict.detail);
-  if (hold !== null) footer.push(drawHold(hold, `${path}.hold`));
-  footer.push(
+  // EVERYTHING ELSE IS EXPAND-ONLY, in ONE element, so a refusal an action
+  // draws beside its row lands inside the region and folds away with it.
+  const details = document.createElement("div");
+  details.className = "queued-details";
+  details.appendChild(
+    drawHeldPromptQueuedAt(requireMessage(u.queuedAt, `${path}.queued_at`), tc, `${path}.queued_at`),
+  );
+  if (verdict.detail !== null) details.appendChild(verdict.detail);
+  details.appendChild(
     drawHeldPromptActions({
       tc,
       turn,
@@ -155,7 +171,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
       working: false,
       strip: [head],
       content,
-      footer,
+      expandOnly: [details],
       capLines: 2,
     },
     previous,
@@ -259,7 +275,7 @@ function drawClassification(
 }
 
 /**
- * Still deciding: a breathing badge and nothing else.
+ * Still deciding: a breathing in-flight badge and nothing else.
  *
  * No rationale, because none exists yet, and no accept, because there is no
  * verdict to confirm. The pulse is what says the state is transient.
@@ -270,7 +286,7 @@ export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: strin
     context: { path },
   });
   return {
-    badge: badge("queued — classifying", "queued-badge classifying"),
+    badge: badge("queued — classifying", "classifying"),
     acceptedState: null,
     accepted: null,
     detail: null,
@@ -278,14 +294,14 @@ export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: strin
   };
 }
 
-/** Interjects: the in-flight orange, because this verdict preempts the turn. */
+/** Interjects: the green the owner named for a prompt that interrupts. */
 export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): Verdict {
   log.debug("drawing an interjecting held prompt", {
     operation: "tray.held-prompt.interject",
     context: { path },
   });
   return {
-    badge: badge("interjects", "queued-badge interrupt"),
+    badge: badge("interjects", "interject"),
     acceptedState: null,
     accepted: null,
     detail: rationale(u.rationale),
@@ -309,13 +325,11 @@ export function drawHeldPromptHoldForTurnEnd(u: HeldPromptHoldForTurnEnd, path: 
   });
   let accepted: HTMLElement | null = null;
   if (confirmed) {
-    accepted = document.createElement("span");
-    accepted.className = "queued-accepted";
+    accepted = badge("confirmed", "accepted");
     accepted.setAttribute("data-accepted", "true");
-    accepted.textContent = "confirmed";
   }
   return {
-    badge: badge("after this turn", "queued-badge"),
+    badge: badge("after this turn", "holdForTurnEnd"),
     acceptedState: confirmed,
     accepted,
     detail: rationale(u.rationale),
@@ -348,7 +362,7 @@ export function drawHeldPromptUninterruptibleTurn(
   };
 }
 
-/** Nothing decided this: the warning tone, and the failure said out loud. */
+/** Nothing decided this: the error red, and the failure said out loud. */
 export function drawHeldPromptClassificationError(
   u: HeldPromptClassificationError,
   path: string,
@@ -361,7 +375,7 @@ export function drawHeldPromptClassificationError(
   detail.className = "queued-reason queued-unclassified";
   detail.textContent = u.detail;
   return {
-    badge: badge("unclassified", "queued-badge unclassified"),
+    badge: badge("unclassified", "classificationError"),
     acceptedState: null,
     accepted: null,
     detail,
@@ -397,7 +411,7 @@ export function sessionCommandLiteral(command: SessionCommand, path: string): st
  * carries in the feed.
  */
 function uninterruptibleBadge(literal: string): HTMLElement {
-  const element = badge("waits for ", "queued-badge uninterruptible");
+  const element = badge("waits for ", "uninterruptibleTurn");
   const command = document.createElement("code");
   command.className = "queued-command";
   command.setAttribute("data-command", "");
@@ -407,7 +421,11 @@ function uninterruptibleBadge(literal: string): HTMLElement {
   return element;
 }
 
-/** The hold's own standing explanation, per arm. */
+/**
+ * The hold's badge, per arm. Its words are the hold's standing sentence as the
+ * card has always said it, unchanged: the badge is where that sentence now
+ * stands, so it gains no second, shorter name.
+ */
 function drawHold(
   hold: NonNullable<HeldPrompt["hold"]> & { case: string },
   path: string,
@@ -428,12 +446,7 @@ function drawHold(
   }
 }
 
-/**
- * Held for the scheduled restart.
- *
- * The schedule id rides a `title` rather than the sentence: it joins the entry
- * to the shutdown it should explain, and it is a token, not prose.
- */
+/** Held for the scheduled restart, the schedule named on the badge. */
 export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: string): HTMLElement {
   log.debug("drawing a shutdown hold", {
     operation: "tray.held-prompt.shutdown-hold",
@@ -441,9 +454,9 @@ export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: stri
   });
   // The schedule id is DRAWN, not only titled: it is the token that joins this
   // card to the shutdown it should explain, and a hover cannot be read back.
-  const line = holdLine(`held for the scheduled restart (${u.scheduleId})`);
-  line.setAttribute("data-schedule-id", u.scheduleId);
-  return line;
+  const pill = badge(`held for the scheduled restart (${u.scheduleId})`, "shutdown");
+  pill.setAttribute("data-schedule-id", u.scheduleId);
+  return pill;
 }
 
 /** Held behind a keep-alive turn; the turn it waits on rides a title. */
@@ -453,9 +466,9 @@ export function drawHeldPromptKeepAliveHold(u: HeldPromptKeepAliveHold, path: st
     operation: "tray.held-prompt.keep-alive-hold",
     context: { path, turn: turn.value },
   });
-  const line = holdLine("held behind a keep-alive");
-  line.title = `waiting on turn ${turn.value}`;
-  return line;
+  const pill = badge("held behind a keep-alive", "keepAlive");
+  pill.title = `waiting on turn ${turn.value}`;
+  return pill;
 }
 
 /** Held until the session is up. Empty on the wire: presence is the fact. */
@@ -467,7 +480,7 @@ export function drawHeldPromptSessionStartingHold(
     operation: "tray.held-prompt.session-starting-hold",
     context: { path },
   });
-  return holdLine("held until the session is up");
+  return badge("held until the session is up", "sessionStarting");
 }
 
 /** Held for the build refresh. Empty on the wire: presence is the fact. */
@@ -479,7 +492,7 @@ export function drawHeldPromptBuildRefreshHold(
     operation: "tray.held-prompt.build-refresh-hold",
     context: { path },
   });
-  return holdLine("held for the build refresh");
+  return badge("held for the build refresh", "buildRefresh");
 }
 
 /** What the actions row needs to know about the entry it acts on. */
@@ -687,10 +700,72 @@ function clearRowRefusal(row: Element | null): void {
   row?.parentElement?.querySelectorAll(".queued-refusal").forEach((node) => node.remove());
 }
 
-/** The status pill. */
-function badge(label: string, className: string): HTMLElement {
+/**
+ * Every status a held card can show, each drawn as a badge.
+ *
+ * The classification arms and the hold arms by their generated case names, plus
+ * `accepted` — the confirmation a hold-for-turn-end verdict carries once the
+ * user gave it. A prompt the daemon REFUSED to interrupt for is no status of its
+ * own: the daemon returns it to `holdForTurnEnd` (daemon_hold.proto).
+ */
+export type HeldStatus =
+  | NonNullable<HeldPrompt["classification"]["case"]>
+  | NonNullable<HeldPrompt["hold"]["case"]>
+  | "accepted";
+
+/** The semantic color a held badge takes: a class on the shared `.badge`. */
+export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
+
+/**
+ * THE ONE TABLE FROM A HELD STATUS TO ITS BADGE (owner spec, 2026-09-23). The
+ * two anchors are the owner's: WAITING for the turn's end is red, INTERRUPTING
+ * is green. The rest take the existing token that says the same thing:
+ *
+ *   - classifying: a model is running, the tool card's in-flight orange;
+ *   - an uninterruptible turn: the prompt WAITS for the cut's end, so red;
+ *   - a classification error: a failure, the error red;
+ *   - accepted: a quiet acknowledgement that changes nothing about delivery;
+ *   - a shutdown or build-refresh hold: coordinated daemon work, the merge amber;
+ *   - a keep-alive or session-starting hold: the machinery keeping a session
+ *     up, the hibernation teal.
+ */
+export const HELD_STATUS_BADGES = {
+  classifying: "run",
+  interject: "ok",
+  holdForTurnEnd: "err",
+  uninterruptibleTurn: "err",
+  classificationError: "err",
+  accepted: "muted",
+  shutdown: "amber",
+  buildRefresh: "amber",
+  keepAlive: "teal",
+  sessionStarting: "teal",
+} as const satisfies Record<HeldStatus, HeldBadgeTone>;
+
+/** The class every held badge wears beside the shared `.badge`. */
+export const HELD_BADGE_CLASS = "held-badge";
+
+/**
+ * The classes a badge for STATUS wears. A status the table does not name is a
+ * malformed view, logged here and thrown, never a badge in some default color.
+ */
+export function heldBadgeClasses(status: string): string {
+  if (!Object.hasOwn(HELD_STATUS_BADGES, status)) {
+    log.error(`a held prompt status has no badge: ${status}`, {
+      operation: "tray.held-prompt.badge-unknown-status",
+      context: { status },
+    });
+    throw new MalformedView("HeldPrompt.status", `status '${status}' has no badge`);
+  }
+  const tone: HeldBadgeTone = HELD_STATUS_BADGES[status as HeldStatus];
+  return `badge ${HELD_BADGE_CLASS} ${tone}`;
+}
+
+/** The status badge: its words, and the table's color for STATUS. */
+function badge(label: string, status: HeldStatus): HTMLElement {
   const pill = document.createElement("span");
-  pill.className = className;
+  pill.className = heldBadgeClasses(status);
+  pill.setAttribute("data-held-status", status);
   pill.textContent = label;
   return pill;
 }
@@ -702,14 +777,6 @@ function rationale(text: string): HTMLElement | null {
   reason.className = "queued-reason";
   reason.textContent = text;
   return reason;
-}
-
-/** The app stating a rule, which is a different voice from the classifier's. */
-function holdLine(text: string): HTMLElement {
-  const line = document.createElement("div");
-  line.className = "lease-reason";
-  line.textContent = text;
-  return line;
 }
 
 /**

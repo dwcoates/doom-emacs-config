@@ -1469,8 +1469,13 @@ pre {
 /* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
    in the tray is "much more grey than blue", with only a subtle blue hue, so it
    reads as the prompt it will become that has not been sent yet. */
+/* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
+   derived from the same token rather than a copied number. The body measures
+   a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
+   a tree in a held prompt wraps at the halved cap. */
 .bubble[data-variant="held"] {
   --bubble-bg: var(--held-prompt-bg);
+  max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
@@ -2229,6 +2234,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   overflow-y: auto;
   cursor: zoom-out;
 }
+/* THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
+   bubble's scroll box that the reader sees only once the bubble is opened (a
+   held prompt's details and actions). It is keyed on the one toggle's own
+   `.expanded` on the sibling scroll box, so the click that opens the text
+   opens this too, and no second fold exists. */
+.bubble-scroll:not(.expanded) ~ .bubble-expand-only { display: none; }
 
 /* THE CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool-call and a skill card
    are ONE click-to-expand unit: `.tool-fold` is the whole card, the feed-wide
@@ -2575,28 +2586,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
    frame, the lease hold's amber and the keep-alive hold's teal are gone; the
    hold's badge alone says what holds it. */
-.queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
-/* The status pill: "queued — classifying…" → "queued — waiting" or
-   "interrupting…". An interrupt lights up in the in-flight orange the rest
-   of the app uses for "the model is about to act", since that verdict is
-   the one that preempts the running turn. */
-.queued-badge {
-  font-size: calc(0.7rem * var(--feed-text-scale));
-  padding: 0.05rem 0.5rem;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-}
-.queued-badge.interrupt { color: var(--thinking); border-color: var(--thinking); }
-/* A prompt queued behind a CONTEXT CUT, which no classifier judged and no
-   force can jump. Bolded and muted rather than tinted: it borrows neither the
-   interrupt's orange (nothing is preempting anything) nor a hold vocabulary's
-   color (nothing but the running turn is holding it) — the badge's job is to
-   say that the turn in front of it is one the queue never interrupts. */
-.queued-badge.uninterruptible {
-  color: var(--muted);
-  border-color: var(--muted);
-  font-weight: 700;
-}
+.queued-head { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-bottom: 0.3rem; }
 /* The classifier's one-line reason reads as an aside: muted and italic. */
 .queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
@@ -2614,16 +2604,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    it sits in the feed as one more parked prompt. Its `.lease-card` hook once
    selected a solid merge-amber frame; a held prompt has no border now (owner
    ruling, 2026-09-23), so the badge carries the distinction. */
-/* The badge says WHY, in the merge/bounce amber — it is never the
-   classifier's grey, because no classification happened. */
-.queued-badge.lease {
-  color: var(--merge-border);
-  border-color: var(--merge-border);
-  font-weight: 700;
-}
-/* The standing explanation of the hold. Not italic like `.queued-reason`:
-   that is the classifier quoting itself, this is the app stating a rule. */
-.lease-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); color: var(--fg); }
 
 /* --- The keep-alive hold bubble (render.ts `KeepAliveHeldCard`) ----------
    A prompt parked behind an in-flight cache keep-alive ping. It borrows the
@@ -2635,19 +2615,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    wrong. The amber is spent on coordinated daemon work (merges, bounces),
    which this is not. Its `.keep-alive-card` hook once selected a teal frame;
    a held prompt has no border now (owner ruling, 2026-09-23). */
-/* The badge takes the hibernation teal. Never the classifier's grey: no
-   classification happened, and none will. */
-.queued-badge.keep-alive {
-  color: var(--hibernated);
-  border-color: var(--hibernated);
-  font-weight: 700;
-}
-
-.queued-badge.revival {
-  color: var(--hibernated);
-  border-color: var(--hibernated);
-  font-weight: 700;
-}
 
 #composer {
   display: flex;
@@ -4665,44 +4632,31 @@ bubble-body.bubble-body { display: block; }
 .hold-tray-items > * + * { padding-top: 0.5rem; }
 .hold-tray-items > * { padding-bottom: 0.5rem; }
 
-/* The ticking queued-at age, trailing the badge. Tabular so the number does
-   not shuffle the badge sideways once a second. */
+/* The ticking queued-at age, first in the expand-only details (a badge row no
+   longer holds it). Tabular so the number does not shuffle once a second. */
 .queued-age {
-  margin-left: auto;
   font-size: 0.7rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-/* The classifier is still deciding: a slow breath, which is how every other
+/* THE HELD STATUS BADGES (src/tray/held-prompt.ts `HELD_STATUS_BADGES`, owner
+   spec 2026-09-23). Every status a held prompt shows is the tool cards' own
+   `.badge`, colored by the ONE table's tone class: `ok` (interrupting, green),
+   `err` (waiting, red), `run` (classifying, the in-flight orange) come from the
+   shared `.badge` rules, as does `muted` (acceptance); the two below are the held
+   card's own. The badges are
+   the card's headline, so `.queued-head` wraps a row of them rather than
+   widening the card. */
+.badge.held-badge.amber { color: var(--merge-border); }
+.badge.held-badge.teal { color: var(--hibernated); }
+/* A classifier still deciding: a slow breath, which is how every other
    transient state in this app says "not settled". */
-.queued-badge.classifying {
-  color: var(--muted);
-  border-color: var(--muted);
-  animation: hold-breathe 2.6s ease-in-out infinite;
-}
+.badge.held-badge.run { animation: hold-breathe 2.6s ease-in-out infinite; }
 @keyframes hold-breathe {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-/* NOTHING classified this entry, and that is a warning rather than a state:
-   the orange the app spends on "something did not work as intended". */
-.queued-badge.unclassified {
-  color: var(--thinking);
-  border-color: var(--thinking);
-  font-weight: 700;
-}
 .queued-reason.queued-unclassified { font-style: normal; color: var(--muted); }
-/* The hold the user has seen and confirmed. A quiet mark, never a second
-   button: accepting changes nothing about delivery. */
-.queued-accepted {
-  margin-left: 0.4rem;
-  font-size: 0.7rem;
-  color: var(--muted);
-}
-.queued-accepted::before {
-  content: "✓";
-  margin-right: 0.2rem;
-}
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */

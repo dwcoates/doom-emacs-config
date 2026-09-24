@@ -237,17 +237,16 @@ func TestASpoolConverterReportingNoLaunchesIsNotADefect(t *testing.T) {
 }
 
 func TestAResidueSpoolConcludedLostNeedsNoTerminal(t *testing.T) {
-	// Arrange. A residue spool's task-id prefix failed classification, or nobody
-	// ever claimed it, so its bytes went to residue and NO unit was opened for
-	// it. Concluding it LOST is a fair statement about the file; demanding a
-	// terminal for it reports a hole that does not exist, because there is no
-	// run row downstream holding anything open.
+	// Arrange. A residue spool's task-id prefix failed classification, so it is
+	// never read, never watched, and NO unit was opened for it. Concluding it
+	// LOST is a fair statement about the file; demanding a terminal for it —
+	// or calling it an unwatched run — reports a hole that does not exist,
+	// because there is no run row downstream holding anything open.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "z0uncla551f1able", "bytes nobody can classify\n")
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
-	h.sc.pollAll()
 
 	// Act.
 	entries := h.sc.lostEntries([]stale.Lost{{
@@ -260,6 +259,7 @@ func TestAResidueSpoolConcludedLostNeedsNoTerminal(t *testing.T) {
 		t.Fatalf("entries = %d, want 0: a residue spool names no run to settle", len(entries))
 	}
 	h.requireNone(t, "lost-terminal-unsupported", "error")
+	h.requireNone(t, "lost-terminal-unwatched", "warn")
 	rec := h.requireOnce(t, "lost-terminal-residue", "info")
 	if got := ctxString(t, rec, "reason"); got != string(stale.ReasonSweptUp) {
 		t.Fatalf("reason = %q, want the conclusion the sweep reached", got)
