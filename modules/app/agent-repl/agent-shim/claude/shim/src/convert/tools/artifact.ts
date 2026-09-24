@@ -88,7 +88,13 @@ export const artifactConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the artifact call never ran");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentArtifactFailureSchema, { failure: failureOf(call, outcome) }),
+        value: create(conversationv1.AgentArtifactFailureSchema, {
+          failure: failureOf(call, outcome),
+          // THE ACT THAT FAILED, restated whole from the call: a replay serves
+          // this failure with no start beside it, and a failed publish's card
+          // is its favicon, title and file, which only the call states.
+          act: actOf(call),
+        }),
       });
     }
     const output = asRecord(outcome.structured);
