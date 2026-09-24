@@ -815,7 +815,8 @@ func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string)
 }
 
 // wlChildEnv is the environment one vitest child is handed: the gate, the
-// daemon's own published address, and the workspace the page is addressed to.
+// daemon's own published address, the workspace the page is addressed to, and
+// the webapp build the daemon serves.
 func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
 	t.Helper()
 	if w.Addr == "" {
@@ -826,6 +827,10 @@ func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
 		"AGENT_REPL_E2E_DAEMON_URL=http://"+w.Addr,
 		"AGENT_REPL_E2E_WORKSPACE_ID="+ws.GetId(),
 		"AGENT_REPL_E2E_WORKSPACE_DIR="+ws.GetDir(),
+		// The build the daemon's served dist names, which the page states as
+		// its own through its entry tag: a page stating any other build is
+		// one a deploy would push a reload.
+		"AGENT_REPL_E2E_WEBAPP_BUILD="+harness.FakeWebappEntry,
 		// The same standing tripwire the vitest config sets, in case the child
 		// is ever run through a different script: the vendor in this chain is
 		// the fake SDK inside the real shim, never a network one.
