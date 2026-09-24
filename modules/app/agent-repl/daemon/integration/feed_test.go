@@ -1918,7 +1918,7 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 // Detached bash.
 // ==========================================================================
 
-func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
+func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashTail(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -1934,16 +1934,16 @@ func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
 	}
 
 	// Act
-	f.shim.PushBash("work-shell-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n", FromOffset: 0},
+	f.shim.PushBash("work-shell-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "building...\n"},
 	}})
 
 	// Assert: the spool rides the BODY row, on the sub-feed the head addresses.
-	spool := awaitShellSpool(t, f, head, "the spool body growing from the bash delta", func(sh *frontendv1.FeedShell) bool {
+	spool := awaitShellSpool(t, f, head, "the spool body drawn from the bash tail", func(sh *frontendv1.FeedShell) bool {
 		return sh.GetSpool() != nil
 	})
 	if spool.GetSpool().GetText() != "building...\n" {
-		t.Fatalf("the spool tail = %q, want the delta's text", spool.GetSpool().GetText())
+		t.Fatalf("the spool tail = %q, want the tail's text", spool.GetSpool().GetText())
 	}
 }
 
@@ -2020,28 +2020,26 @@ func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testin
 	expectNoShellSpool(t, f, head, "a shell whose output was never observed draws no spool body")
 }
 
-func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
+func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-spoolgap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.submit("go", "k-spoolovercap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-gap-1", "long-build")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-overcap-1", "long-build")))
 	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
-	// Act: a delta whose from_offset does not match what has accumulated
-	// (nothing has accumulated yet, so any nonzero offset is a gap).
-	f.shim.PushBash("work-gap-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "mid-stream\n", FromOffset: 999},
+	// Act: a tail longer than the contract's cap — a producer that no longer
+	// agrees with the renderer on what is drawn.
+	f.shim.PushBash("work-overcap-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: strings.Repeat("y", int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)+1)},
 	}})
 
-	// Assert: the gap is refused — the spool does not silently jump ahead, so
-	// the BODY row it would have drawn on the sub-feed never appears.
-	expectNoShellSpool(t, f, head, "a spool gap must not draw the shell's spool body")
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a spool gap must not upsert the shell's head")
-	// subagent.go logs daemon.feed.spool_gap at ERROR precisely on a refused
-	// gap ("a detached shell's output frame did not continue the spool").
-	f.d.ExpectWarnings("daemon.feed.spool_gap")
+	// Assert: refused — the BODY row it would have drawn never appears.
+	expectNoShellSpool(t, f, head, "an over-cap tail must not draw the shell's spool body")
+	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "an over-cap tail must not upsert the shell's head")
+	// subagent.go logs daemon.feed.spool_over_cap at ERROR on the refusal.
+	f.d.ExpectWarnings("daemon.feed.spool_over_cap")
 }
 
 // ==========================================================================
