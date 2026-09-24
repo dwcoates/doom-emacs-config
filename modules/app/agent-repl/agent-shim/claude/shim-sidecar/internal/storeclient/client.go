@@ -46,6 +46,9 @@ import (
 // Producer is the sidecar's fixed WriteBatchRequest producer identity.
 const Producer = "shim-claude-sidecar"
 
+// bulkWriteClass is the class every sidecar write states.
+var bulkWriteClass = &storev1.WriteClass{WriteClass: &storev1.WriteClass_Bulk{Bulk: &storev1.WriteClassBulk{}}}
+
 // SkippedEntry is one entry the store left UNCHANGED because its upsert_key
 // already names a row under a different book — the store's re-ingest idempotency
 // answer, carried on the WriteBatch success arm. It is NOT a refusal: the batch
@@ -258,7 +261,12 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch, shap
 	bound.LogVerbose("write requested entries=%d shapes=%d cursor_advance=%t", len(batch.GetEntries()), len(shapes), batch.GetCursorAdvance() != nil)
 	response, err := c.rpc.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
 		Producer: Producer,
-		Batch:    batch,
+		// EVERY SIDECAR WRITE IS BULK: it copies what the vendor already wrote
+		// to disk, so the store takes any queued interactive write ahead of it
+		// and splits it into bounded transactions. The store refuses a write
+		// that states no class.
+		WriteClass: bulkWriteClass,
+		Batch:      batch,
 		// THE SHAPE CATALOG RIDES THE SAME REQUEST as the records and the cursor
 		// advance, so an observation taken from bytes this advance consumes
 		// becomes durable with it or not at all.
