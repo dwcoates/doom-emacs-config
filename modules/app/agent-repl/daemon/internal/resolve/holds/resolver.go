@@ -182,13 +182,9 @@ func (r *resolver) SetOffer(ws ids.WorkspaceID, offer *frontendv1.HeldOffer) {
 func (r *resolver) render(s *wsState, log dlog.Logger) *frontendv1.DaemonHoldTray {
 	items := make([]*frontendv1.DaemonHoldItem, 0, len(s.held)+1)
 	for _, h := range orderedHolds(s.held) {
-		prompt := heldPrompt(h, log)
+		prompt := heldPrompt(h, s.editing != "" && h.Turn == s.editing, log)
 		if prompt == nil {
 			continue
-		}
-		if s.editing != "" && h.Turn == s.editing {
-			log.Debug("daemon.holds.editing", "the hold is being edited", dlog.Context{"turn_id": string(h.Turn)})
-			prompt.Editing = &frontendv1.HeldPromptEditing{}
 		}
 		items = append(items, &frontendv1.DaemonHoldItem{
 			Item: &frontendv1.DaemonHoldItem_Prompt{Prompt: prompt},
