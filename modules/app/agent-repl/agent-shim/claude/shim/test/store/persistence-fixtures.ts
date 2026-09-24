@@ -260,19 +260,16 @@ export function bashStartEntry(book = agent("book-1")): PersistEntry {
   );
 }
 
-/** One delta of the run's output — the rows only the sidecar can write. */
-export function bashDeltaEntry(book = agent("book-1")): PersistEntry {
+/** The run's rendered tail — the row only the sidecar can write. */
+export function bashTailEntry(book = agent("book-1")): PersistEntry {
   return bashRow(
     create(conversationv1.AgentBashSchema, {
       result: {
-        case: "update",
-        value: create(conversationv1.AgentBashUpdateSchema, {
-          newOutput: "working\n",
-          fromOffset: 0n,
-        }),
+        case: "tail",
+        value: create(conversationv1.AgentBashTailSchema, { text: "working\n" }),
       },
     }),
-    "agent_bash.update",
+    "agent_bash.tail",
     book,
   );
 }

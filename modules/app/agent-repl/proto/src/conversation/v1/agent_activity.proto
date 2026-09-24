@@ -1754,8 +1754,10 @@ message AgentBash {
     // and AGAIN on the work's own stream if the command detaches, because a
     // stream's first frame can never presume a frame delivered on another one.
     AgentBashStart start = 1;
-    // New output since the last frame on this stream.
-    AgentBashUpdate update = 2;
+    // The run's RENDERED OUTPUT so far: the most recent bytes, bounded by
+    // AgentBashTailCap, and how much came before them. A SNAPSHOT that
+    // supersedes the previous one whole, never a delta.
+    AgentBashTail tail = 6;
     // The vendor's liveness beat while the call runs. NOT an update — no
     // growth is reported — and consumed by the daemon into the drawn
     // last-progress facts; a frame like any other, upserting the unit.
@@ -1765,6 +1767,13 @@ message AgentBash {
     // The call could not be performed at all.
     AgentBashFailure failure = 4;
   }
+  // RETIRED 2026-09-23 (owner ruling: output beyond what is rendered is not
+  // stored): `update` carried the contiguous-delta model, one AgentBashUpdate
+  // per chunk with a `from_offset` gap detector, which stored a spool's whole
+  // file. `tail` replaces it. A row stored under it decodes to NO arm and is
+  // outmoded; the number and name are never reused.
+  reserved 2;
+  reserved "update";
 }
 
 // The command the agent ran.
@@ -1814,29 +1823,52 @@ message AgentBashStart {
   AgentActivityStartedAt started_at = 2;
 }
 
-// Output that accumulated since the last frame on this stream.
+// How much of a detached run's output is ever stored or carried: THE
+// RENDERER'S CAP, stated once here so the producer that writes the tail and the
+// consumer that draws it read one number.
+//
+// It is an enum because protobuf has no constants, and the value is the fact:
+// `AGENT_BASH_TAIL_CAP_BYTES` is the number of bytes, never an index.
+enum AgentBashTailCap {
+  AGENT_BASH_TAIL_CAP_UNSPECIFIED = 0;
+  // 16 KiB. Owner ruling 2026-09-23: output beyond what is rendered is not
+  // stored, so the renderer's cap IS the storage bound.
+  AGENT_BASH_TAIL_CAP_BYTES = 16384;
+}
+
+// A detached run's output as it is DRAWN: its most recent bytes and an account
+// of the bytes before them.
 //
 // EXPECT THIS ARM ONLY ONCE THE COMMAND HAS DETACHED. A foreground command's
-// output is observable NOWHERE while it runs — no producer writes it anywhere a
-// reader can reach until the call returns — so an in-turn shell item goes
+// output is observable NOWHERE while it runs, so an in-turn shell item goes
 // straight from `start` to a terminal arm. Incremental output exists only for a
-// command that became background work, whose accumulating output is read from
-// the file written for it.
-message AgentBashUpdate {
-  // The bytes added since the previous frame. A DELTA, not the whole spool: the
-  // whole spool re-sent per frame is how watching a long command costs more than
-  // running it. Deliberately UNPARSED and NOT line-split — a delta can begin and
-  // end mid-line, so imposing lines here would impose a structure the output
-  // does not have.
-  string new_output = 1;
+// command that became background work, whose output is read from the file
+// written for it.
+//
+// A SNAPSHOT, NOT A DELTA (owner ruling 2026-09-23: output beyond what is
+// rendered is not stored). Each frame supersedes the last WHOLE, so a consumer
+// draws the newest frame it holds and never concatenates two. There is no
+// offset and NO GAP DETECTOR: contiguity was the delta model's requirement,
+// and a snapshot that states its own omitted count cannot have a hole.
+//
+// THE PRODUCER CUTS, THE CONSUMER DRAWS VERBATIM. Once anything is omitted the
+// text begins on a LINE START (the bytes before the first line break of the
+// window are omitted too), so a drawn tail never opens mid-line; a window that
+// holds no line break at all is kept whole from its first complete character.
+message AgentBashTail {
+  // The most recent output, at most AGENT_BASH_TAIL_CAP_BYTES bytes.
+  // Deliberately UNPARSED: a consumer draws it and never interprets it.
+  string text = 1;
 
-  // The offset these bytes START at, as a GAP DETECTOR rather than addressing.
-  //
-  // It MUST equal the number of bytes the consumer has already accumulated for
-  // this unit. Anything else means bytes were lost, and the consumer REFUSES the
-  // frame rather than concatenating across a hole and drawing output that never
-  // existed. Never seeked to: this is an append-only sequence.
-  uint64 from_offset = 2;
+  // How many bytes of output came BEFORE `text` and are not carried. Zero when
+  // `text` is the whole output so far. `bytes_omitted + len(text)` is every
+  // byte the run has written.
+  uint64 bytes_omitted = 2;
+
+  // How many LINES those omitted bytes held, counting a line the cut split as
+  // one — the count a reader is told was not shown. Zero exactly when
+  // `bytes_omitted` is.
+  uint64 lines_omitted = 3;
 }
 
 // A command that reached the shell, and what became of it.
