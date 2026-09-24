@@ -66,7 +66,7 @@ How each kind of entry point routes through it:
   - So a bare `npx vitest`, `emacs -batch -l lisp/test-*.el` or
     `go test -tags integration` fails loudly; prefix it with `bin/background.sh`.
 - The e2e sandbox entrypoint execs every command through the helper.
-- The live runtime and the deploy builds (`deploy-all.sh`, `build-frontend.sh`,
+- The live runtime and the deploy builds (the daemon's deploy, `build-frontend.sh`,
   `launchd/`, the non-test `lisp/*.el`, npm `build`/`dev`) are NEVER demoted.
 
 `bin/test-background.sh` (the `background-harness` suite) scans the repository
