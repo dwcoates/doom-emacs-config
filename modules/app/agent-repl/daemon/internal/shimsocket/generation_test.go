@@ -161,3 +161,39 @@ func TestNewestLiveIgnoresAGenerationOfAnotherWorkspace(t *testing.T) {
 		t.Fatalf("NewestLive = %q, want the base path %q: %q belongs to another workspace", got, base, other)
 	}
 }
+
+// TestNextGenerationMintsPastEveryGenerationOnDisk is the relaunch of an
+// already-relaunched adopted shim: the running one holds `.n1.sock`, the
+// adopting daemon's counter is zero, and the replacement must get `.n2.sock`.
+func TestNextGenerationMintsPastEveryGenerationOnDisk(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []string
+		after    int
+		want     string
+		wantN    int
+	}{
+		{name: "no generation exists", after: 0, want: "ws.n1.sock", wantN: 1},
+		{name: "a predecessor's generation exists", existing: []string{"ws.n1.sock"}, after: 0, want: "ws.n2.sock", wantN: 2},
+		{name: "the counter is already past the disk", existing: []string{"ws.n1.sock"}, after: 3, want: "ws.n4.sock", wantN: 4},
+		{name: "the newest of several generations decides", existing: []string{"ws.n2.sock", "ws.n7.sock"}, after: 1, want: "ws.n8.sock", wantN: 8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			dir := t.TempDir()
+			base := filepath.Join(dir, "ws.sock")
+			for _, name := range tt.existing {
+				touch(t, filepath.Join(dir, name))
+			}
+
+			// Act.
+			got, n := NextGeneration(base, tt.after)
+
+			// Assert.
+			if got != filepath.Join(dir, tt.want) || n != tt.wantN {
+				t.Fatalf("NextGeneration = (%q, %d), want (%q, %d)", got, n, filepath.Join(dir, tt.want), tt.wantN)
+			}
+		})
+	}
+}

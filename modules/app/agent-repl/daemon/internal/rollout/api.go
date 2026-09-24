@@ -159,7 +159,9 @@ type StaleCheck struct {
 	// Bounce is the registry's decision when Stale; zero otherwise.
 	Bounce bounce.Decision
 	// Skipped names why a stale shim was not bounced again: its bounce for this
-	// very build already ran and the relaunched shim still reports it.
+	// very build already ran and the relaunched shim still reports it
+	// (SkippedAlreadyBounced), or that bounce is still registered or running
+	// (SkippedBounceInFlight).
 	Skipped string
 }
 
@@ -408,6 +410,9 @@ type ShimFleet interface {
 	// marks the link degraded, and reopens watches at a shim the next line is
 	// about to stop.
 	StandDown(ctx context.Context, ws ids.WorkspaceID) error
+	// HandOver closes the workspace's watches and detaches its shim, leaving
+	// the process running for the successor; false when there is no session.
+	HandOver(ws ids.WorkspaceID) (bool, error)
 	// Resume runs StartSession(resume) on c. A cold context is an ANSWER, not
 	// an error: it comes back on Resumed.Cold for the ordinary cold gate.
 	Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) (Resumed, error)
@@ -471,11 +476,12 @@ func New(deps Deps) (Controller, error) {
 		deps.StandDownWindow = DefaultStandDownWindow
 	}
 	c := &controller{
-		deps:         deps,
-		log:          deps.Log.Global(),
-		rendezvous:   make(map[ids.WorkspaceID]*entry),
-		bouncedStamp: make(map[ids.WorkspaceID]string),
-		reported:     make(map[ids.WorkspaceID]string),
+		deps:          deps,
+		log:           deps.Log.Global(),
+		rendezvous:    make(map[ids.WorkspaceID]*entry),
+		bouncedStamp:  make(map[ids.WorkspaceID]string),
+		staleInFlight: make(map[ids.WorkspaceID]bool),
+		reported:      make(map[ids.WorkspaceID]string),
 	}
 	c.log.Debug(opNew, "the rollout controller is up", dlog.Context{
 		"adoption_window":    deps.AdoptionWindow.String(),

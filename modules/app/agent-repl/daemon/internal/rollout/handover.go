@@ -365,11 +365,17 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 
 	// DETACH, NEVER KILL. The shim keeps running and KEEPS its kernel lock
 	// through the whole handover; the lock is the shim's, and the successor
-	// dials the still-locked process.
-	if client, ok := c.deps.Shims.Client(ws.ID); ok {
-		client.Detach()
+	// dials the still-locked process. The watches close WITH the detach: the
+	// shim is the successor's from here, and its streams ending later are the
+	// successor's business, never this daemon's fault.
+	handed, err := c.deps.Shims.HandOver(ws.ID)
+	switch {
+	case err != nil:
+		c.log.Error(opTransfer, "could not hand the workspace's shim over", withCause(fields, err))
+		return fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err)
+	case handed:
 		c.log.Debug(opTransfer, "detached from the workspace's shim, leaving it running", fields)
-	} else {
+	default:
 		c.log.Debug(opTransfer, "the workspace has no live shim to detach from", fields)
 	}
 

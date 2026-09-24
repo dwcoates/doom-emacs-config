@@ -51,6 +51,22 @@ func NewestLive(probe func(string) (State, error), base string) (string, State, 
 // the only candidate, which is the answer a daemon with no relaunch history
 // wants anyway.
 func generations(base string) []string {
+	found := numberedGenerations(base)
+	paths := make([]string, 0, len(found))
+	for _, g := range found {
+		paths = append(paths, g.path)
+	}
+	return paths
+}
+
+// generation is one `<base>.nN.sock` path on disk and its N.
+type generation struct {
+	n    int
+	path string
+}
+
+// numberedGenerations is generations with each N kept, newest first.
+func numberedGenerations(base string) []generation {
 	dir := filepath.Dir(base)
 	stem := strings.TrimSuffix(filepath.Base(base), ".sock")
 	if stem == filepath.Base(base) {
@@ -61,11 +77,7 @@ func generations(base string) []string {
 	if err != nil {
 		return nil
 	}
-	type gen struct {
-		n    int
-		name string
-	}
-	var found []gen
+	var found []generation
 	prefix := stem + GenerationSuffix
 	for _, entry := range entries {
 		name := entry.Name()
@@ -77,12 +89,26 @@ func generations(base string) []string {
 		if convErr != nil || n <= 0 {
 			continue
 		}
-		found = append(found, gen{n: n, name: name})
+		found = append(found, generation{n: n, path: filepath.Join(dir, name)})
 	}
 	sort.Slice(found, func(i, j int) bool { return found[i].n > found[j].n })
-	paths := make([]string, 0, len(found))
-	for _, g := range found {
-		paths = append(paths, filepath.Join(dir, g.name))
+	return found
+}
+
+// NextGeneration mints the socket path of a workspace's NEXT shim generation:
+// `<base>.nN.sock` with N one past both `after` (the caller's own counter) and
+// every generation that exists beside base on disk. It answers the path and N.
+//
+// THE DISK IS READ BECAUSE THE COUNTER IS NOT DURABLE. A successor adopts a
+// shim a predecessor already relaunched onto `.n1.sock`, and its own counter
+// starts at zero, so a counter-only mint handed the replacement the very
+// socket the running shim held: the replacement refused to bind and died at
+// once (deploy 2026-09-24T18:27:44, three workspaces).
+func NextGeneration(base string, after int) (string, int) {
+	n := after
+	if found := numberedGenerations(base); len(found) > 0 && found[0].n > n {
+		n = found[0].n
 	}
-	return paths
+	n++
+	return strings.TrimSuffix(base, ".sock") + GenerationSuffix + strconv.Itoa(n) + ".sock", n
 }
