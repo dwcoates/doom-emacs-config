@@ -533,9 +533,17 @@ func (c *client) ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]str
 // IsClean reports whether the working tree and index are clean. Untracked files
 // COUNT as unclean: every caller asks this before doing something that would
 // either lose them or sweep them into a commit, so "there is unexpected content
-// in this tree" is the answer they need.
+// in this tree" is the answer they need. Ignored files do not count: plain
+// `--porcelain` never lists them.
+//
+// A PROBE WRITES NOTHING. `--no-optional-locks` stops status from refreshing
+// the index's stat cache and writing it back, which it otherwise does
+// opportunistically. That write takes `index.lock` against whoever is working
+// in the tree, and it bumps the index's mtime -- which the landed-worktree
+// reaper reads as a sign of activity, so its own probe would otherwise keep a
+// tree looking busy.
 func (c *client) IsClean(ctx context.Context, dir string) (bool, error) {
-	out, err := c.run(ctx, "daemon.gitclient.is_clean", dir, "status", "--porcelain")
+	out, err := c.run(ctx, "daemon.gitclient.is_clean", dir, "--no-optional-locks", "status", "--porcelain")
 	if err != nil {
 		return false, err
 	}
