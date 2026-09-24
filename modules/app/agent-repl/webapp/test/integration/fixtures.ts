@@ -2085,6 +2085,9 @@ export const WATCH_DAEMON_PUSHES = [
   // contract: `unreachablePushArm` raises `UnknownPushArm`, and the stream
   // pipeline skips it quietly rather than filing a bad frame.
   "mutationProgress",
+  // Addressed to stale EMACS streams alone, never to a webview; a page that
+  // meets one skips it as the same forward-compat skew.
+  "reloadElisp",
 ] as const;
 
 export function shutdownAnnounced(init?: {
