@@ -676,3 +676,164 @@ func standingHold(t *testing.T, s *store, ws WorkspaceID) TurnID {
 	}
 	return turn
 }
+
+func TestReplaceHeldPromptSaidReplacesTheContent(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+
+	// Act
+	if err := s.ReplaceHeldPromptSaid(context.Background(), turn, said("the edited words")); err != nil {
+		t.Fatalf("ReplaceHeldPromptSaid: %v", err)
+	}
+
+	// Assert
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if firstText(got[0].Said) != "the edited words" {
+		t.Fatalf("said = %q, want the replacement", firstText(got[0].Said))
+	}
+}
+
+func TestReplaceHeldPromptSaidKeepsTheQueuePosition(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+
+	// Act
+	if err := s.ReplaceHeldPromptSaid(context.Background(), turn, said("the edited words")); err != nil {
+		t.Fatalf("ReplaceHeldPromptSaid: %v", err)
+	}
+
+	// Assert
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if !got[0].QueuedAt.Equal(instant) {
+		t.Fatalf("queued_at = %v, want the original %v", got[0].QueuedAt, instant)
+	}
+}
+
+func TestReplaceHeldPromptSaidDiscardsTheVerdict(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	if err := s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmHoldForTurnEnd, At: instant}); err != nil {
+		t.Fatalf("UpdateHeldPromptClassification: %v", err)
+	}
+	if err := s.SetHeldPromptAccepted(context.Background(), turn); err != nil {
+		t.Fatalf("SetHeldPromptAccepted: %v", err)
+	}
+
+	// Act
+	if err := s.ReplaceHeldPromptSaid(context.Background(), turn, said("the edited words")); err != nil {
+		t.Fatalf("ReplaceHeldPromptSaid: %v", err)
+	}
+
+	// Assert
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if got[0].Classification != nil || got[0].Accepted {
+		t.Fatalf("hold = %+v, want the verdict and the acceptance discarded", got[0])
+	}
+}
+
+func TestReplaceHeldPromptSaidRefusesARetiredHold(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	if err := s.TombstoneHeldPrompt(context.Background(), turn, Tombstone{Kind: "delivered", At: instant}); err != nil {
+		t.Fatalf("TombstoneHeldPrompt: %v", err)
+	}
+
+	// Act
+	err := s.ReplaceHeldPromptSaid(context.Background(), turn, said("too late"))
+
+	// Assert
+	if !errors.Is(err, ErrTombstoned) {
+		t.Fatalf("ReplaceHeldPromptSaid = %v, want ErrTombstoned", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.replace_held_prompt_said", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+}
+
+func TestReplaceHeldPromptSaidRefusesAMissingSubmission(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+
+	// Act
+	err := s.ReplaceHeldPromptSaid(context.Background(), turn, nil)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("ReplaceHeldPromptSaid(nil) succeeded, want a refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.replace_held_prompt_said", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+}
+
+func TestHeldPromptByTurnFindsAStandingHold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+
+	// Act
+	got, ok, err := s.HeldPromptByTurn(context.Background(), turn)
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("HeldPromptByTurn = (%v, %v), want the hold", ok, err)
+	}
+	if got.Turn != turn || got.Tombstone != nil {
+		t.Fatalf("hold = %+v, want the standing hold", got)
+	}
+}
+
+func TestHeldPromptByTurnFindsARetiredHold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	if err := s.TombstoneHeldPrompt(context.Background(), turn, Tombstone{Kind: "dropped", At: instant}); err != nil {
+		t.Fatalf("TombstoneHeldPrompt: %v", err)
+	}
+
+	// Act
+	got, ok, err := s.HeldPromptByTurn(context.Background(), turn)
+
+	// Assert
+	if err != nil || !ok {
+		t.Fatalf("HeldPromptByTurn = (%v, %v), want the retired hold", ok, err)
+	}
+	if got.Tombstone == nil || got.Tombstone.Kind != "dropped" {
+		t.Fatalf("tombstone = %+v, want the dropped retirement", got.Tombstone)
+	}
+}
+
+func TestHeldPromptByTurnReportsAnUnknownTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	testWorkspace(t, s)
+
+	// Act
+	_, ok, err := s.HeldPromptByTurn(context.Background(), NewTurnID())
+
+	// Assert
+	if err != nil || ok {
+		t.Fatalf("HeldPromptByTurn = (%v, %v), want not found and no error", ok, err)
+	}
+}

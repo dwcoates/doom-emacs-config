@@ -396,3 +396,45 @@ func TestEachRequestValidatorAcceptsAWellFormedRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestEditHeldPromptRefusesAMalformedRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  func() *agentreplv1.EditHeldPromptRequest
+	}{
+		{"no turn", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Turn = nil
+			return req
+		}},
+		{"a blank turn", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Turn = &conversationv1.TurnId{}
+			return req
+		}},
+		{"no step", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Action = nil
+			return req
+		}},
+		{"a commit with no content", func() *agentreplv1.EditHeldPromptRequest {
+			req := editRequest("begin")
+			req.Action = &agentreplv1.EditHeldPromptRequest_Commit{Commit: &agentreplv1.EditHeldPromptCommit{}}
+			return req
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(tt.req()))
+
+			// Assert.
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+		})
+	}
+}

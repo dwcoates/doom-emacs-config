@@ -786,6 +786,17 @@ describe("drawFooterTokensCell", () => {
     expect(h.calls.interrupt).toHaveLength(0);
   });
 
+  it("draws the idle figure the daemon states, verbatim", () => {
+    const { row } = drawStrip({ tokens: { input: { text: "--" } } });
+    expect(row.querySelector(".footer-tokens-input")?.textContent).toBe("--");
+  });
+
+  it("still selects the tokens panel when the idle figure is drawn", () => {
+    const { row, selected } = drawStrip({ tokens: { input: { text: "--" } } });
+    row.querySelector<HTMLElement>(".footer-tokens")?.dispatchEvent(new MouseEvent("click"));
+    expect(selected).toEqual(["tokens"]);
+  });
+
   it("marks the cell while its panel is the open one", () => {
     const { row } = drawStrip({}, "tokens");
     expect(row.querySelector(".footer-tokens")?.getAttribute("data-selected")).toBe("true");

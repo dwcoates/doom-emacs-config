@@ -61,8 +61,24 @@ type wsState struct {
 	// "the session is still coming up", never "there is no session".
 	bringUps int
 
-	head            *ids.TurnID
-	interrupting    bool
+	head         *ids.TurnID
+	interrupting bool
+
+	// edit is the workspace's standing held-prompt edit, nil when none
+	// stands. It is WRITTEN only while `drain` is held — the lock every
+	// delivery of a standing hold is decided under — and under mu as well,
+	// so a reader that decides nothing (the host view, the tray) takes mu
+	// alone. See edit.go.
+	edit *editClaim
+	// verdicts serializes a classifier verdict's SETTLING (its record and, on
+	// an interject, the interrupt) against an edit's commit replacing the
+	// content it judged; epochs counts each turn's content replacements under
+	// it. A verdict captured at one epoch settles only while that epoch still
+	// stands, so a judge that was already in flight when the content changed
+	// can never stamp — or interject — the new content with the old verdict.
+	// Lock order: drain, then verdicts; nothing holding verdicts takes drain.
+	verdicts        sync.Mutex
+	epochs          map[ids.TurnID]uint64
 	uninterruptible conversationv1.SessionCommand
 	acts            []Act
 }
@@ -93,6 +109,9 @@ type queue struct {
 	// id keys it; it is guarded by mu, and every re-drive registers on entry
 	// and consumes its own handle on exit.
 	redrives map[ids.WorkspaceID]*redriveHandle
+
+	// editSeq mints each edit's identity; guarded by mu.
+	editSeq uint64
 }
 
 // newQueue validates the dependencies and builds the queue. Every collaborator
@@ -118,6 +137,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs a session watcher resolver")
 	case deps.ResolveImage == nil:
 		return nil, fmt.Errorf("the prompt queue needs an image resolver for the rows it mirrors")
+	case deps.PublishHost == nil:
+		return nil, fmt.Errorf("the prompt queue needs the host view's publisher for the edits it claims")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now

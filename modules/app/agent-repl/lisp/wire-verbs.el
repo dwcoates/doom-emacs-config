@@ -71,6 +71,7 @@
 (declare-function agent-repl-wire-encode-drain-reason "agent-repl-wire-common" (reason))
 (declare-function agent-repl-wire-encode-workspace-priority "agent-repl-wire-common" (priority))
 (declare-function agent-repl-wire-decode-turn-id "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-encode-turn-id "agent-repl-wire-common" (turn))
 (declare-function agent-repl-wire-encode-feed-id "agent-repl-wire-common" (feedid))
 (declare-function agent-repl-wire-decode-feed-id "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-shim-start-failed "agent-repl-wire-common" (json))
@@ -3312,6 +3313,138 @@ this codec does not know is refused as an unknown field."
    "SelectResponseResponse" json
    #'agent-repl-wire-decode-select-response-response-success
    #'agent-repl-wire-decode-select-response-response-error))
+
+;;;; ---- EditHeldPrompt -------------------------------------------------
+;;
+;; Editing a held prompt.  The webapp's tray card BEGINS an edit; this
+;; composer COMMITS (the new content, whole) or CANCELS it.  THE ARM IS THE
+;; STEP on the request and THE ARM IS THE OUTCOME on the response.  See
+;; endpoint_edit_held_prompt.proto.
+
+(defun agent-repl-wire-encode-edit-held-prompt-request-workspace (ref)
+  "Encode EditHeldPromptRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-edit-held-prompt-request-turn (turn)
+  "Encode EditHeldPromptRequest's `turn' use site from TURN.
+TURN is the decoded TurnId plist the host view's edit carried, echoed."
+  (agent-repl-wire-encode-turn-id turn))
+
+(defun agent-repl-wire-encode-edit-held-prompt-commit-said (said)
+  "Encode EditHeldPromptCommit's `said' use site from SAID."
+  (agent-repl-wire-encode-user-said said))
+
+(defun agent-repl-wire-encode-edit-held-prompt-commit (value)
+  "Encode EditHeldPromptCommit from plist VALUE (:said SAID).
+The content is REQUIRED: a commit replaces the held prompt's content whole."
+  (list (cons 'said
+              (agent-repl-wire-encode-edit-held-prompt-commit-said
+               (agent-repl-wire-verbs--require "EditHeldPromptCommit" "said"
+                                                (plist-get value :said))))))
+
+(defun agent-repl-wire-encode-edit-held-prompt-empty-step (_value)
+  "Encode the empty EditHeldPromptBegin / EditHeldPromptCancel step."
+  nil)
+
+(defun agent-repl-wire-encode-edit-held-prompt-request-action (value)
+  "Encode EditHeldPromptRequest's `action' oneof from VALUE.
+VALUE is (:arm KEYWORD :value V), KEYWORD one of `:begin', `:commit' and
+`:cancel'."
+  (agent-repl-wire-verbs--encode-oneof
+   "EditHeldPromptRequest" "action" value
+   (list (list :begin 'begin #'agent-repl-wire-encode-edit-held-prompt-empty-step)
+         (list :commit 'commit #'agent-repl-wire-encode-edit-held-prompt-commit)
+         (list :cancel 'cancel #'agent-repl-wire-encode-edit-held-prompt-empty-step))))
+
+(defun agent-repl-wire-encode-edit-held-prompt-request (request)
+  "Encode EditHeldPromptRequest from plist REQUEST (:workspace :turn :action).
+All three are required; an incomplete request errors here rather than
+reaching the wire."
+  (let ((message "EditHeldPromptRequest"))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace")
+                     "elisp.wire.verbs-encode-edit-held-prompt-request step=%S"
+                     (plist-get (plist-get request :action) :arm))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-edit-held-prompt-request-workspace
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'turn
+                (agent-repl-wire-encode-edit-held-prompt-request-turn
+                 (agent-repl-wire-verbs--require message "turn" (plist-get request :turn))))
+          (agent-repl-wire-encode-edit-held-prompt-request-action
+           (agent-repl-wire-verbs--require message "action" (plist-get request :action))))))
+
+(defun agent-repl-wire-decode-edit-held-prompt-success (json)
+  "Decode EditHeldPromptSuccess from JSON.  Empty: the step was taken."
+  (agent-repl-wire-verbs--decode-empty "EditHeldPromptSuccess" json))
+
+(defun agent-repl-wire-decode-edit-held-prompt-workspace-ref-mismatch (json)
+  "Decode EditHeldPromptWorkspaceRefMismatch from JSON into (:registry-dir)."
+  (let ((message "EditHeldPromptWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-edit-held-prompt-transferring-away (json)
+  "Decode EditHeldPromptTransferringAway from JSON into (:address)."
+  (let ((message "EditHeldPromptTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string message 'address json))))
+
+(defun agent-repl-wire-decode-edit-held-prompt-being-edited-editing-turn (json)
+  "Decode EditHeldPromptBeingEdited's `editing_turn' use site from JSON."
+  (agent-repl-wire-decode-turn-id json))
+
+(defun agent-repl-wire-decode-edit-held-prompt-being-edited (json)
+  "Decode EditHeldPromptBeingEdited from JSON into (:editing-turn TURN)."
+  (let ((message "EditHeldPromptBeingEdited")
+        (cell nil))
+    (agent-repl-wire-verbs--check-keys message json '(editingTurn))
+    (setq cell (assq 'editingTurn json))
+    (unless (and cell (not (eq (cdr cell) :null)))
+      (agent-repl-wire-verbs--fail message "editing_turn" "required field is unset"))
+    (list :editing-turn
+          (agent-repl-wire-decode-edit-held-prompt-being-edited-editing-turn (cdr cell)))))
+
+(defun agent-repl-wire-decode-edit-held-prompt-empty-cause (message)
+  "Return a decoder for the empty refusal arm MESSAGE."
+  (lambda (json) (agent-repl-wire-verbs--decode-empty message json)))
+
+(defun agent-repl-wire-decode-edit-held-prompt-error (json)
+  "Decode EditHeldPromptError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
+  (let ((message "EditHeldPromptError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    noSuchHold notHeld alreadyDelivered beingEdited notEditing noEditor))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptUnknownWorkspace"))
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch
+                       #'agent-repl-wire-decode-edit-held-prompt-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away
+                       #'agent-repl-wire-decode-edit-held-prompt-transferring-away)
+                 (list 'notYetAdopted :not-yet-adopted
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotYetAdopted"))
+                 (list 'noSuchHold :no-such-hold
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNoSuchHold"))
+                 (list 'notHeld :not-held
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotHeld"))
+                 (list 'alreadyDelivered :already-delivered
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptAlreadyDelivered"))
+                 (list 'beingEdited :being-edited
+                       #'agent-repl-wire-decode-edit-held-prompt-being-edited)
+                 (list 'notEditing :not-editing
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotEditing"))
+                 (list 'noEditor :no-editor
+                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNoEditor")))))))
+
+(defun agent-repl-wire-decode-edit-held-prompt-response (json)
+  "Decode EditHeldPromptResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "EditHeldPromptResponse" json
+   #'agent-repl-wire-decode-edit-held-prompt-success
+   #'agent-repl-wire-decode-edit-held-prompt-error))
 
 ;; AdjustFeedTextScale — the feed text zoom nudge. The request is a bare
 ;; DIRECTION (the scale is daemon-global, so there is no workspace ref); the

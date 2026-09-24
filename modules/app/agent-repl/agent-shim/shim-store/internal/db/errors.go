@@ -70,6 +70,10 @@ const (
 	// shared by every session on the host, so an unscoped answer would hand
 	// one session every other session's obligations; it is refused instead.
 	SiteSessionEmpty = "session_empty"
+	// SiteWriteClassUnset is a write that states no class. The one writer's
+	// two-tier queue needs to know whether a write is interactive or bulk, and
+	// the store refuses to guess it from content.
+	SiteWriteClassUnset = "write_class_unset"
 )
 
 // refusal is one refusal's STRUCTURED detail: the site, the store's own name

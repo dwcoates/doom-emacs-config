@@ -236,13 +236,14 @@ export interface ExpandedInit {
 }
 
 /**
- * Every panel, populated as the daemon always populates them: the six token
+ * Every panel, populated as the daemon always populates them: the token
  * lines are ALWAYS SET (with no value until the turn reports one) and every
  * row list exists even when it is empty.
  */
 export function expanded(init: ExpandedInit = {}): FooterExpanded {
   return create(FooterExpandedSchema, {
     tokens: init.tokens ?? {
+      contextGrowth: {},
       input: {},
       cacheRead: {},
       cacheWrite: {},

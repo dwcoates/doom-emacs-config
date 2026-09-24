@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
+import {
+  EditHeldPromptResponseSchema,
+  type EditHeldPromptRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   UpdateHeldPromptErrorSchema,
@@ -9,8 +13,10 @@ import {
   type UpdateHeldPromptRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { oneofArms } from "../arms.js";
+import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   HeldPromptBadgeSchema,
+  HeldPromptEditingSchema,
   HeldPromptSchema,
   type HeldPrompt,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
@@ -24,6 +30,7 @@ import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
+  EDIT_REQUEST,
   HELD_BADGE_DETAIL_CLASS,
   HELD_STATUS_BADGES,
   drawHeldPrompt,
@@ -141,6 +148,14 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
   return prompt;
 }
 
+/** Mark U as being edited, and serve the badges the daemon then sends. */
+function markEditing(u: HeldPrompt): void {
+  u.editing = create(HeldPromptEditingSchema, {});
+  u.badges = standingStatuses(u).map((status) =>
+    create(HeldPromptBadgeSchema, { label: wireLabel(status), detail: wireDetail(status) }),
+  );
+}
+
 /** The label the test daemon sends for STATUS. */
 const wireLabel = (status: HeldStatus): string => `wire ${status}`;
 /** The detail the test daemon sends for STATUS. */
@@ -152,6 +167,7 @@ function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
   const classification = prompt.classification;
   if (classification.case !== undefined) {
     statuses.push(classification.case);
+    if (prompt.editing !== undefined) statuses.push("editing");
     if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true) {
       statuses.push("accepted");
     }
@@ -937,6 +953,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   buildRefresh: "amber",
   keepAlive: "teal",
   sessionStarting: "teal",
+  editing: "run",
 };
 
 describe("the daemon's badge words", () => {
@@ -957,6 +974,14 @@ describe("the daemon's badge words", () => {
     ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
     ["keepAlive", () => heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } })],
     ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
+    [
+      "editing",
+      () => {
+        const u = heldPrompt();
+        markEditing(u);
+        return u;
+      },
+    ],
   ];
 
   afterEach(() => {
@@ -1144,6 +1169,14 @@ describe("every status a held card shows is a badge in the table's tone", () => 
     ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
     ["keepAlive", () => heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } })],
     ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
+    [
+      "editing",
+      () => {
+        const u = heldPrompt();
+        markEditing(u);
+        return u;
+      },
+    ],
   ];
 
   it.each(cards)("draws the %s status as a badge in the header strip", (status, prompt) => {
@@ -1301,5 +1334,195 @@ describe("a tree the held prompt carries, at the held bubble's halved width", ()
     const { card } = mountedHalved(FITTING_TREE);
     // Assert
     expect(treeLineWidths(card).length).toBeGreaterThan(3);
+  });
+});
+
+/** A context whose EditHeldPrompt runs ANSWER, recording requests and chip filings. */
+function editContext(answer: () => unknown = () =>
+  create(EditHeldPromptResponseSchema, { result: { case: "success", value: {} } }),
+): { tc: TrayContext; seen: EditHeldPromptRequest[]; reported: FailureKind[] } {
+  const seen: EditHeldPromptRequest[] = [];
+  const reported: FailureKind[] = [];
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      editHeldPrompt: (request) => {
+        seen.push(request);
+        return answer() as never;
+      },
+    });
+  });
+  const ctx = testAppContext({
+    client: createAgentReplClient(transport),
+    workspace: WORKSPACE,
+    ticker: fakeTicker(),
+    failures: { report: (kind) => reported.push(kind), retract: () => undefined },
+    composerEnabled: false,
+  });
+  return { tc: { ctx, onDispose: () => undefined }, seen, reported };
+}
+
+/** An EditHeldPrompt refusal carrying ARM and its payload. */
+const editRefusal = (arm: string, value: Record<string, unknown> = {}) => () =>
+  create(EditHeldPromptResponseSchema, {
+    result: { case: "error", value: { cause: { case: arm, value } } },
+  } as never);
+
+/** The chip's filing, read as the request it names and the cause it states. */
+function filed(kind: FailureKind | undefined): [string, string] | undefined {
+  return kind?.kind.case === "controlPlaneFailed"
+    ? [kind.kind.value.what, kind.kind.value.cause]
+    : undefined;
+}
+
+describe("the Edit control", () => {
+  it("sits between Release and Cancel", () => {
+    // Arrange
+    const { tc } = editContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    const labels = [...card.querySelectorAll(".queued-actions button")].map((b) => b.textContent);
+    expect(labels.slice(0, 3)).toEqual(["Release", "Edit", "Cancel"]);
+  });
+
+  it("begins an edit of this card's turn", async () => {
+    // Arrange
+    const { tc, seen } = editContext();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect([seen[0]?.turn?.value, seen[0]?.action.case]).toEqual(["turn-1", "begin"]);
+  });
+
+  it("files a refused begin on the warning chip", async () => {
+    // Arrange
+    const { tc, reported } = editContext(editRefusal("alreadyDelivered"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect(filed(reported[0])).toEqual([EDIT_REQUEST, "this prompt has already been delivered"]);
+  });
+
+  it("names the prompt already being edited on a being-edited refusal", async () => {
+    // Arrange
+    const { tc, reported } = editContext(editRefusal("beingEdited", { editingTurn: { value: "turn-0" } }));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect(filed(reported[0])?.[1]).toBe("another held prompt is already being edited (turn turn-0)");
+  });
+
+  it("draws no refusal at the row: the chip is the one error surface", async () => {
+    // Arrange
+    const { tc } = editContext(editRefusal("notHeld"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect(card.querySelector(".queued-refusal")).toBeNull();
+  });
+
+  it("logs a refused begin at info with its arm", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { tc } = editContext(editRefusal("noSuchHold"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt.edit-refused");
+    expect([record.level.case, record.context?.arm]).toEqual(["info", "noSuchHold"]);
+  });
+
+  it("files a begin that failed at the transport on the warning chip", async () => {
+    // Arrange
+    const { tc, reported } = editContext(() => {
+      throw new ConnectError("connection refused", Code.Unavailable);
+    });
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect(filed(reported[0])?.[0]).toBe(EDIT_REQUEST);
+  });
+
+  it("logs a begin that failed at the transport at error", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { tc } = editContext(() => {
+      throw new ConnectError("connection refused", Code.Unavailable);
+    });
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt.edit-failed");
+    expect(record.level.case).toBe("error");
+  });
+
+  it("re-enables the row once the begin is answered", async () => {
+    // Arrange
+    const { tc } = editContext(editRefusal("notHeld"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<HTMLButtonElement>('[data-held-action="edit"]')?.click();
+    await settle();
+    // Assert
+    expect([...card.querySelectorAll(".queued-actions button")].some((b) => (b as HTMLButtonElement).disabled)).toBe(false);
+  });
+});
+
+describe("the editing badge", () => {
+  it("draws the editing badge while the daemon says the prompt is being edited", () => {
+    // Arrange
+    const { tc } = editContext();
+    const u = heldPrompt();
+    markEditing(u);
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(card.querySelector('[data-held-status="editing"]')?.textContent).toBe("wire editing");
+  });
+
+  it("draws no editing badge when the daemon says nothing", () => {
+    // Arrange
+    const { tc } = editContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.querySelector('[data-held-status="editing"]')).toBeNull();
+  });
+
+  it("states the editing standing on the card", () => {
+    // Arrange
+    const { tc } = editContext();
+    const u = heldPrompt();
+    markEditing(u);
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(card.getAttribute("data-editing")).toBe("true");
+  });
+
+  it("drops the editing standing when a redraw no longer carries it", () => {
+    // Arrange
+    const { tc } = editContext();
+    const u = heldPrompt();
+    markEditing(u);
+    const first = drawHeldPrompt(u, tc);
+    // Act
+    const second = drawHeldPrompt(heldPrompt(), tc, first);
+    // Assert
+    expect([second.hasAttribute("data-editing"), second.querySelector('[data-held-status="editing"]')]).toEqual([false, null]);
   });
 });

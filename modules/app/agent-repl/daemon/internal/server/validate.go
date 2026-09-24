@@ -497,6 +497,28 @@ func validateUpdateHeldPromptRequest(req *agentreplv1.UpdateHeldPromptRequest) *
 	return nil
 }
 
+// validateEditHeldPromptRequest is EditHeldPromptRequest's base function. A
+// commit carries the WHOLE new content, so a commit with no `said` is refused
+// here rather than answered as an arm.
+func validateEditHeldPromptRequest(req *agentreplv1.EditHeldPromptRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetTurn() == nil {
+		return invalid("turn", "a turn id is required")
+	}
+	if req.GetTurn().GetValue() == "" {
+		return invalid("turn.value", "a turn id value is required")
+	}
+	if req.GetAction() == nil {
+		return invalid("action", "an edit step arm is required")
+	}
+	if commit := req.GetCommit(); commit != nil && commit.GetSaid() == nil {
+		return invalid("commit.said", "a commit carries the prompt's new content")
+	}
+	return nil
+}
+
 // validateAnswerHeldOfferRequest is AnswerHeldOfferRequest's base function.
 func validateAnswerHeldOfferRequest(req *agentreplv1.AnswerHeldOfferRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
