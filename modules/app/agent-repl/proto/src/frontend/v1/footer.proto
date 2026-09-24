@@ -1445,9 +1445,7 @@ message FooterTokensLineFirstToken {
 // The tripped alarm's line. Exists only while the cell's glyph does.
 message FooterTokensLineAlarm {
   // The daemon-composed sentence ("expensive turn — 41k over 20k"). Drawn
-  // verbatim; the sentence also states WHY the turn ran when that changes
-  // the reading (an ordinary prompt vs a cache keep-alive that came back
-  // cold — its own alarm, phrased as such by the daemon).
+  // verbatim.
   string text = 1;
 }
 // The verdict's line. The set arm picks the treatment; the text is the
