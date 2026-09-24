@@ -605,6 +605,129 @@ func TestAFailedPublishDrawsItsReasonWhereTheUrlWould(t *testing.T) {
 	}
 }
 
+// failedArtifact is an artifact call's failure, restating `act` (nil for a
+// failure that restates none).
+func failedArtifact(act any) *conversationv1.AgentActivity {
+	failure := &conversationv1.AgentArtifactFailure{
+		Failure: &conversationv1.AgentToolFailure{
+			Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
+				Block: &conversationv1.ToolResultContentBlock_Text{Text: &conversationv1.TextBlock{Text: "the page was refused"}},
+			}}},
+		},
+	}
+	switch a := act.(type) {
+	case *conversationv1.AgentArtifactPublish:
+		failure.Act = &conversationv1.AgentArtifactFailure_Publish{Publish: a}
+	case *conversationv1.AgentArtifactList:
+		failure.Act = &conversationv1.AgentArtifactFailure_List{List: a}
+	}
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Failure{Failure: failure},
+		}},
+	}
+}
+
+func TestAReplayedFailedPublishDrawsItsCard(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	favicon, title := "📊", "Merge Queue Report"
+
+	// Act: the failure alone, as a replay serves it.
+	h.send(bound(failedArtifact(&conversationv1.AgentArtifactPublish{
+		FilePath: "/tmp/report.html", Favicon: &favicon, Title: &title,
+	})))
+
+	// Assert.
+	bubble := h.artifactBubble()
+	if got := bubble.GetHeading().GetText(); got != "📊 Merge Queue Report" {
+		t.Fatalf("heading = %q, want the restated publish's", got)
+	}
+	if got := bubble.GetFailed().GetText(); got != "the page was refused" {
+		t.Fatalf("reason = %q", got)
+	}
+}
+
+func TestAReplayedFailedListingDrawsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act: a listing is a quiet read, failed or not.
+	h.send(bound(failedArtifact(&conversationv1.AgentArtifactList{})))
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0 for a failed listing", len(rows))
+	}
+}
+
+func TestABoundArtifactFailureRestatingNoActIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.send(bound(failedArtifact(nil)))
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.feed.activity_undrawable") || len(h.rows(rootFeed())) != 0 {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.activity_undrawable and no row", h.records())
+	}
+}
+
+func TestAPreContractArtifactFailureRestatingNoActIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act: a row written before the contract, replayed alone.
+	h.send(failedArtifact(nil))
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.feed.settle_predates_contract") || len(h.anyErrors()) != 0 {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
+	}
+}
+
+func TestAPreContractArtifactFailureRestatingNoActDrawsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.send(failedArtifact(nil))
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0: nothing names the publish", len(rows))
+	}
+}
+
+func TestABoundArtifactFailureRestatingNoActIsRecordedAtErrorWithTheStartHeld(t *testing.T) {
+	// Arrange: the publish was announced.
+	h := newHarness(t)
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
+			Result: &conversationv1.AgentArtifact_Start{Start: &conversationv1.AgentArtifactStart{
+				Act: &conversationv1.AgentArtifactStart_Publish{
+					Publish: &conversationv1.AgentArtifactPublish{FilePath: "/tmp/report.html"},
+				},
+				StartedAtMs: 1_000,
+			}},
+		}},
+	})
+
+	// Act.
+	h.send(bound(failedArtifact(nil)))
+
+	// Assert: drawn from the start, and recorded.
+	if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+	}
+	if got := h.artifactBubble().GetHeading().GetText(); got != "report.html" {
+		t.Fatalf("heading = %q, want the held start's", got)
+	}
+}
+
 // ---- THE HOOK CARD ----
 
 // hookCard finds the hook card.
