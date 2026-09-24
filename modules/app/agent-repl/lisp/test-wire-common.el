@@ -789,6 +789,59 @@ that tells its three cases apart."
                      (agent-repl-test-wire-common--parse "{\"path\":{\"path\":\"/i\"},\"bytes\":\"x\"}"))))
                  '("ImageBlock" bytes "unknown field"))))
 
+;;;; ---- conversation.v1.LockHolderFailure ----
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-decodes-a-spawn-failure ()
+  "A spawn failure carries the operating system's account."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-lock-holder-failure
+                  "{\"binary\":\"/b/shim-lock\",\"spawnFailed\":{\"osError\":\"spawn ENOENT\"}}")
+                 '(:binary "/b/shim-lock" :how (:arm :spawn-failed :value (:os-error "spawn ENOENT"))))))
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-decodes-an-exit ()
+  "An exit carries its code and the holder's stderr."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-lock-holder-failure
+                  "{\"binary\":\"/b/shim-lock\",\"exited\":{\"code\":1,\"stderr\":\"EACCES\"}}")
+                 '(:binary "/b/shim-lock" :how (:arm :exited :value (:code 1 :stderr "EACCES"))))))
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-decodes-a-signal ()
+  "A signal death carries the signal's name."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-lock-holder-failure
+                  "{\"binary\":\"/b/shim-lock\",\"signaled\":{\"signal\":\"SIGSEGV\"}}")
+                 '(:binary "/b/shim-lock" :how (:arm :signaled :value (:signal "SIGSEGV" :stderr ""))))))
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-decodes-a-wrong-line ()
+  "A wrong answer carries the line the holder wrote."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-lock-holder-failure
+                  "{\"binary\":\"/b/shim-lock\",\"misanswered\":{\"line\":\"ok\"}}")
+                 '(:binary "/b/shim-lock" :how (:arm :misanswered :value (:line "ok"))))))
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-decodes-silence ()
+  "Silence carries the bound the shim waited."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-lock-holder-failure
+                  "{\"binary\":\"/b/shim-lock\",\"silent\":{\"timeoutMs\":5000}}")
+                 '(:binary "/b/shim-lock" :how (:arm :silent :value (:timeout-ms 5000))))))
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-refuses-an-unset-how ()
+  "A failure that says nothing of how the holder failed is a breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-lock-holder-failure
+                     (agent-repl-test-wire-common--parse "{\"binary\":\"/b/shim-lock\"}"))))
+                 '("LockHolderFailure" "how" "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-common-lock-holder-failure-refuses-a-field ()
+  "A field LockHolderFailure does not declare is refused."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-lock-holder-failure
+                     (agent-repl-test-wire-common--parse "{\"binary\":\"b\",\"osError\":\"x\"}"))))
+                 '("LockHolderFailure" osError "unknown field"))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here

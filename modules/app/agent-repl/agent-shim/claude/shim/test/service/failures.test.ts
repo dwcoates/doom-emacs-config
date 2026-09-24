@@ -41,18 +41,31 @@ describe("startSessionFailure", () => {
     expect(failure.cause).toEqual({ case: "cold", value: cold });
   });
 
-  it("carries the unavailable lock holder's binary and OS error", () => {
+  it("carries the failed lock holder's binary", () => {
     // Arrange, Act.
     const failure = failures.startSessionFailure(
-      { kind: "lockHolderUnavailable", binary: "/bin/shim-lock", osError: "spawn ENOENT" },
+      { kind: "lockHolderUnavailable", binary: "/bin/shim-lock", how: { kind: "spawnFailed", osError: "spawn ENOENT" } },
       "helper would not start",
     );
 
     // Assert.
-    expect(failure.cause).toEqual({
-      case: "lockHolderUnavailable",
-      value: containing({ binary: "/bin/shim-lock", osError: "spawn ENOENT" }),
-    });
+    expect(failure.cause.case === "lockHolderUnavailable" ? failure.cause.value.failure?.binary : undefined).toBe(
+      "/bin/shim-lock",
+    );
+  });
+
+  it.each([
+    ["a spawn failure", { kind: "spawnFailed", osError: "spawn ENOENT" } as const, { case: "spawnFailed", value: containing({ osError: "spawn ENOENT" }) }],
+    ["an exit", { kind: "exited", code: 1, stderr: "EACCES" } as const, { case: "exited", value: containing({ code: 1, stderr: "EACCES" }) }],
+    ["a signal", { kind: "signaled", signal: "SIGSEGV", stderr: "" } as const, { case: "signaled", value: containing({ signal: "SIGSEGV", stderr: "" }) }],
+    ["a wrong line", { kind: "misanswered", line: "ok" } as const, { case: "misanswered", value: containing({ line: "ok" }) }],
+    ["no answer", { kind: "silent", timeoutMs: 5000 } as const, { case: "silent", value: containing({ timeoutMs: 5000 }) }],
+  ])("carries %s as its own LockHolderFailure arm", (_name, how, want) => {
+    // Arrange, Act.
+    const failure = failures.lockHolderFailure("/bin/shim-lock", how);
+
+    // Assert.
+    expect(failure.how).toEqual(want);
   });
 
   it("carries the human detail alongside the machine-readable arm", () => {

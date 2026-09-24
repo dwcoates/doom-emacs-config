@@ -15,6 +15,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
@@ -1934,9 +1935,9 @@ func TestBringUpRelaysTheShimsConversationOwnedRefusal(t *testing.T) {
 	asRefusal(t, err, ArmConversationOwned)
 }
 
-// TestBringUpRelaysTheShimsLockHolderUnavailableRefusal covers a shim that
-// could not spawn its own kernel-lock holder: nobody owns the conversation, so
-// the relay must name the broken helper rather than an ownership conflict.
+// TestBringUpRelaysTheShimsLockHolderUnavailableRefusal covers a shim whose own
+// kernel-lock holder failed: nobody owns the conversation, so the relay must
+// name the broken helper and how it broke rather than an ownership conflict.
 func TestBringUpRelaysTheShimsLockHolderUnavailableRefusal(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1947,14 +1948,20 @@ func TestBringUpRelaysTheShimsLockHolderUnavailableRefusal(t *testing.T) {
 				t.Fatalf("arm = %q, want %q", refusal.Arm, ArmLockHolderUnavailable)
 			}
 		}},
-		{name: "the arm carries the binary", check: func(t *testing.T, refusal *Refusal) {
-			if got := refusal.Fields["binary"]; got != "/missing/shim-lock" {
-				t.Fatalf("binary = %v, want /missing/shim-lock", got)
+		{name: "the arm carries the shim's failure whole", check: func(t *testing.T, refusal *Refusal) {
+			got, _ := refusal.Fields["failure"].(*conversationv1.LockHolderFailure)
+			if !proto.Equal(got, exitedHolder()) {
+				t.Fatalf("failure = %v, want the shim's own LockHolderFailure", refusal.Fields["failure"])
 			}
 		}},
-		{name: "the arm carries the OS error", check: func(t *testing.T, refusal *Refusal) {
-			if got := refusal.Fields["os_error"]; got != "spawn /missing/shim-lock ENOENT" {
-				t.Fatalf("os_error = %v, want the spawn's own account", got)
+		{name: "the reason says how the helper failed", check: func(t *testing.T, refusal *Refusal) {
+			if !strings.Contains(refusal.Reason, "/bin/shim-lock exited with code 1 before taking the lock (EACCES)") {
+				t.Fatalf("reason = %q, want the helper's exit stated", refusal.Reason)
+			}
+		}},
+		{name: "the reason says nobody owns the conversation", check: func(t *testing.T, refusal *Refusal) {
+			if !strings.Contains(refusal.Reason, "nobody owns the conversation") {
+				t.Fatalf("reason = %q, want the ownership denied", refusal.Reason)
 			}
 		}},
 		{name: "the reason never claims another shim owns the conversation", check: func(t *testing.T, refusal *Refusal) {
@@ -1970,12 +1977,9 @@ func TestBringUpRelaysTheShimsLockHolderUnavailableRefusal(t *testing.T) {
 			ws := f.workspace("w1")
 			f.client.response = &shimv1.StartSessionResponse{
 				Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
-					Detail: "this shim's lock helper failed to start",
+					Detail: "this shim's lock helper failed",
 					Cause: &shimv1.StartSessionFailure_LockHolderUnavailable{
-						LockHolderUnavailable: &shimv1.StartSessionLockHolderUnavailable{
-							Binary:  "/missing/shim-lock",
-							OsError: "spawn /missing/shim-lock ENOENT",
-						},
+						LockHolderUnavailable: &shimv1.StartSessionLockHolderUnavailable{Failure: exitedHolder()},
 					},
 				}},
 			}
@@ -1990,6 +1994,40 @@ func TestBringUpRelaysTheShimsLockHolderUnavailableRefusal(t *testing.T) {
 			}
 			tt.check(t, refusal)
 		})
+	}
+}
+
+// exitedHolder is a lock holder that exited 1 before taking the lock.
+func exitedHolder() *conversationv1.LockHolderFailure {
+	return &conversationv1.LockHolderFailure{
+		Binary: "/bin/shim-lock",
+		How:    &conversationv1.LockHolderFailure_Exited{Exited: &conversationv1.LockHolderExited{Code: 1, Stderr: "EACCES"}},
+	}
+}
+
+// TestBringUpRecordsALockHolderFailureStatingNoHowAtError covers the contract
+// breach: the refusal is still relayed, and the breach is recorded loudly.
+func TestBringUpRecordsALockHolderFailureStatingNoHowAtError(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause: &shimv1.StartSessionFailure_LockHolderUnavailable{
+				LockHolderUnavailable: &shimv1.StartSessionLockHolderUnavailable{
+					Failure: &conversationv1.LockHolderFailure{Binary: "/bin/shim-lock"},
+				},
+			},
+		}},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	asRefusal(t, err, ArmLockHolderUnavailable)
+	if !recordedAt(f, "error", opBringUp, "the shim's lock_holder_unavailable refusal states no how; relayed as given") {
+		t.Fatalf("records = %+v, want the breach recorded at error", f.log.logger.Records())
 	}
 }
 

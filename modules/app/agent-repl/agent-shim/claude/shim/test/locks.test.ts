@@ -9,7 +9,10 @@ import {
   acquireWorkspaceLock,
   lockBinaryPath,
   lockPath,
+  describeLockHolderHow,
+  LockHeldError,
   LockHolderUnavailableError,
+  type LockHolderHow,
   workspaceLockPath,
   LOCK_BIN_ENV,
   LOCK_DIR_ENV,
@@ -133,8 +136,27 @@ describe("session lock", () => {
     isolateHome();
     installHolder(FAILS);
 
-    // Act / Assert
-    await expect(acquireSessionLock("s_broken")).rejects.toThrow(/exited \(code 1/);
+    // Act
+    const refusal = await acquireSessionLock("s_broken").catch((err: unknown) => err);
+
+    // Assert
+    expect((refusal as LockHolderUnavailableError).how).toEqual({
+      kind: "exited",
+      code: 1,
+      stderr: "the lock directory could not be created: EACCES",
+    });
+  });
+
+  it("refuses a holder that found the lock held as LockHeldError, the one genuine owner", async () => {
+    // Arrange
+    isolateHome();
+    installHolder(REFUSES);
+
+    // Act
+    const refusal = await acquireSessionLock("s_held_typed").catch((err: unknown) => err);
+
+    // Assert
+    expect(refusal).toBeInstanceOf(LockHeldError);
   });
 
   it("fails loudly when the holder binary is not there at all", async () => {
@@ -144,7 +166,7 @@ describe("session lock", () => {
 
     // Act / Assert: never a silent no-op, which would hand the daemon a false
     // "free" and let it spawn the duplicate this exists to prevent.
-    await expect(acquireSessionLock("s_nobin")).rejects.toThrow(/cannot spawn the lock holder/);
+    await expect(acquireSessionLock("s_nobin")).rejects.toThrow(/could not be spawned/);
   });
 
   it("refuses a missing holder binary as LockHolderUnavailableError naming that binary", async () => {
@@ -179,8 +201,11 @@ describe("session lock", () => {
     isolateHome();
     installHolder(`process.stdout.write("ok\\n");\nprocess.stdin.resume();\n`);
 
-    // Act / Assert
-    await expect(acquireSessionLock("s_wrong")).rejects.toThrow(/announced "ok"/);
+    // Act
+    const refusal = await acquireSessionLock("s_wrong").catch((err: unknown) => err);
+
+    // Assert
+    expect((refusal as LockHolderUnavailableError).how).toEqual({ kind: "misanswered", line: "ok" });
   });
 
   it("frees the session when the holder releases", async () => {
@@ -366,7 +391,7 @@ describe("the claim protocol over a synthetic holder", () => {
     // Act, Assert — the claim cannot be attempted, and a shim that cannot
     // prove it is the only one must not start.
     await expect(locks.acquireSessionLock("s_unspawnable")).rejects.toThrow(
-      /cannot spawn the lock holder .*EINVAL: invalid argument/,
+      /could not be spawned: EINVAL: invalid argument/,
     );
   });
 
@@ -381,9 +406,10 @@ describe("the claim protocol over a synthetic holder", () => {
     // Assert.
     const refusal = await claim;
     expect(refusal).toBeInstanceOf(locks.LockHolderUnavailableError);
-    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError).toBe(
-      "spawn /x/shim-lock ENOENT",
-    );
+    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).how).toEqual({
+      kind: "spawnFailed",
+      osError: "spawn /x/shim-lock ENOENT",
+    });
   });
 
   it("carries the OS error of a synchronous spawn failure on the typed refusal", async () => {
@@ -396,9 +422,10 @@ describe("the claim protocol over a synthetic holder", () => {
     const refusal = await locks.acquireWorkspaceLock("/ws").catch((err: unknown) => err);
 
     // Assert.
-    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError).toBe(
-      "EINVAL: invalid argument",
-    );
+    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).how).toEqual({
+      kind: "spawnFailed",
+      osError: "EINVAL: invalid argument",
+    });
   });
 
   it("records an unspawnable holder at ERROR, because it is a defect", async () => {
@@ -444,7 +471,7 @@ describe("the claim protocol over a synthetic holder", () => {
     ]);
   });
 
-  it("refuses a holder that never answers as lock_holder_unavailable naming the timeout, and kills it", async () => {
+  it("refuses a holder that never answers as the silent arm naming the bound, and kills it", async () => {
     // Arrange: a holder that spawned but neither answers nor exits.
     vi.useFakeTimers();
     try {
@@ -458,9 +485,9 @@ describe("the claim protocol over a synthetic holder", () => {
       // Assert.
       expect({
         typed: refusal instanceof locks.LockHolderUnavailableError,
-        osError: (refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError,
+        how: (refusal as InstanceType<typeof locks.LockHolderUnavailableError>).how,
         killed: child.killed,
-      }).toEqual({ typed: true, osError: textContaining(`within ${locks.HOLDER_ANSWER_TIMEOUT_MS} ms`), killed: ["SIGKILL"] });
+      }).toEqual({ typed: true, how: { kind: "silent", timeoutMs: locks.HOLDER_ANSWER_TIMEOUT_MS }, killed: ["SIGKILL"] });
     } finally {
       vi.useRealTimers();
     }
@@ -485,7 +512,7 @@ describe("the claim protocol over a synthetic holder", () => {
         .slice(before)
         .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
       expect(recorded).toContainEqual(
-        expect.objectContaining({ level: "error", message: textContaining("timed out") }),
+        expect.objectContaining({ level: "error", message: textContaining("gave no \"locked\" answer within") }),
       );
     } finally {
       vi.useRealTimers();
@@ -521,7 +548,100 @@ describe("the claim protocol over a synthetic holder", () => {
     child.emitter.emit("close", null, "SIGKILL");
 
     // Assert — a signal death is not a "held by another shim" refusal.
-    await expect(claim).rejects.toThrow(/code null, signal SIGKILL/);
+    const refusal = await claim.catch((err: unknown) => err);
+    expect((refusal as InstanceType<typeof locks.LockHolderUnavailableError>).how).toEqual({
+      kind: "signaled",
+      signal: "SIGKILL",
+      stderr: "",
+    });
+  });
+
+  it("carries the holder's stderr on a signal death", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_signalled_stderr").catch((err: unknown) => err);
+    child.stderr.emit("data", "fatal error: unexpected signal\n");
+
+    // Act.
+    child.emitter.emit("close", null, "SIGSEGV");
+
+    // Assert.
+    expect(((await claim) as InstanceType<typeof locks.LockHolderUnavailableError>).how).toEqual({
+      kind: "signaled",
+      signal: "SIGSEGV",
+      stderr: "fatal error: unexpected signal",
+    });
+  });
+
+  it("refuses a holder exiting 3 as LockHeldError, never as a failed holder", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_held_fake").catch((err: unknown) => err);
+
+    // Act.
+    child.emitter.emit("close", 3, null);
+
+    // Assert.
+    expect((await claim) instanceof locks.LockHeldError).toBe(true);
+  });
+
+  it("records a holder that exited before taking the lock at ERROR", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_exited_logged").catch(() => undefined);
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- read .mock.calls only
+    const mirror = vi.mocked(process.stderr.write);
+    const before = mirror.mock.calls.length;
+
+    // Act.
+    child.emitter.emit("close", 2, null);
+    await claim;
+
+    // Assert.
+    const recorded = mirror.mock.calls
+      .slice(before)
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(recorded).toContainEqual(
+      expect.objectContaining({ level: "error", message: textContaining("exited with code 2 before taking the lock") }),
+    );
+  });
+
+  it("raises a close naming neither a code nor a signal as an untyped invariant violation", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_neither").catch((err: unknown) => err);
+
+    // Act.
+    child.emitter.emit("close", null, null);
+    const refusal = await claim;
+
+    // Assert: neither refusal the contract names, so neither typed error.
+    expect({
+      held: refusal instanceof locks.LockHeldError,
+      unavailable: refusal instanceof locks.LockHolderUnavailableError,
+      message: (refusal as Error).message,
+    }).toEqual({ held: false, unavailable: false, message: textContaining("neither an exit code nor a signal") });
+  });
+
+  it("records a close naming neither a code nor a signal at ERROR", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_neither_logged").catch(() => undefined);
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- read .mock.calls only
+    const mirror = vi.mocked(process.stderr.write);
+    const before = mirror.mock.calls.length;
+
+    // Act.
+    child.emitter.emit("close", null, null);
+    await claim;
+
+    // Assert.
+    const recorded = mirror.mock.calls
+      .slice(before)
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(recorded).toContainEqual(
+      expect.objectContaining({ level: "error", message: textContaining("invariant violated") }),
+    );
   });
 
   it("waits for a whole line before judging what the holder announced", async () => {
@@ -578,5 +698,19 @@ describe("the claim protocol over a synthetic holder", () => {
 
     // Assert.
     expect(child.stdinEnded).toBe(1);
+  });
+});
+
+describe("describeLockHolderHow", () => {
+  it.each<[string, LockHolderHow, string]>([
+    ["a spawn failure", { kind: "spawnFailed", osError: "spawn ENOENT" }, "could not be spawned: spawn ENOENT"],
+    ["an exit with stderr", { kind: "exited", code: 1, stderr: "EACCES" }, "exited with code 1 before taking the lock (EACCES)"],
+    ["an exit with no stderr", { kind: "exited", code: 1, stderr: "" }, "exited with code 1 before taking the lock"],
+    ["a signal", { kind: "signaled", signal: "SIGSEGV", stderr: "" }, "was killed by SIGSEGV before taking the lock"],
+    ["a wrong line", { kind: "misanswered", line: "ok" }, 'answered "ok" instead of "locked" and was killed'],
+    ["no answer", { kind: "silent", timeoutMs: 5000 }, 'gave no "locked" answer within 5000 ms and was killed'],
+  ])("words %s", (_name, how, want) => {
+    // Arrange, Act, Assert.
+    expect(describeLockHolderHow(how)).toBe(want);
   });
 });

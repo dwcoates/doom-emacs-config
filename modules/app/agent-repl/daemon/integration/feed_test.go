@@ -2504,6 +2504,54 @@ func TestFindingsDrawRowsInServedOrder(t *testing.T) {
 }
 
 // ==========================================================================
+// MCP tools: ordinary tool calls.
+// ==========================================================================
+
+func TestAnMcpToolCallDrawsTheOrdinaryToolCardAndNoTopbarWarning(t *testing.T) {
+	t.Parallel()
+	// Arrange: no unmodeled_activity warning is declared; the sweep fails the
+	// test if one is recorded.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-mcp", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	topbar := f.d.WatchTopbar(f.ws)
+	tool := &conversationv1.AgentMcpTool{Name: "mcp__claude-in-chrome__tabs_context_mcp"}
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("mcp-1"),
+		Item: &conversationv1.AgentActivity_McpToolCall{McpToolCall: &conversationv1.AgentMcpToolCall{Result: &conversationv1.AgentMcpToolCall_Start{
+			Start: &conversationv1.AgentMcpToolCallStart{Tool: tool, StartedAt: startedAt(1)},
+		}}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("mcp-1"),
+		Item: &conversationv1.AgentActivity_McpToolCall{McpToolCall: &conversationv1.AgentMcpToolCall{Result: &conversationv1.AgentMcpToolCall_Success{
+			Success: &conversationv1.AgentMcpToolCallSuccess{
+				Tool: tool,
+				Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
+					Block: &conversationv1.ToolResultContentBlock_Text{Text: &conversationv1.TextBlock{Text: "Tab Context: 1 tab"}},
+				}}},
+				SettledAt: settledAt(2),
+			},
+		}}},
+	}))
+
+	// Assert: the one shared tool card, headed by the tool, with its text.
+	row := awaitRow(t, f, tail, "the MCP call's settled tool card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetReturned().GetForm() != nil
+	})
+	card := row.GetActivity().GetSimpleToolCall()
+	if card.GetName().GetText() != "mcp__claude-in-chrome__tabs_context_mcp" || card.GetReturned().GetText().GetText() != "Tab Context: 1 tab" {
+		t.Fatalf("card = %v, want the tool's name and its returned text", card)
+	}
+	view := awaitTopbar(t, f, topbar, "the topbar after the MCP call", func(v *frontendv1.TopbarView) bool { return v != nil })
+	if n := len(view.GetWarnings().GetWarnings()); n != 0 {
+		t.Fatalf("topbar warnings = %d, want none for an MCP tool call", n)
+	}
+}
+
+// ==========================================================================
 // Unmodeled tools.
 // ==========================================================================
 
@@ -2521,7 +2569,7 @@ func TestAnUnmodeledToolDrawsNoRowAndAddsOneTopbarWarning(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("unmodeled-1"),
 		Item: &conversationv1.AgentActivity_Unmodeled{Unmodeled: &conversationv1.AgentUnmodeled{Result: &conversationv1.AgentUnmodeled_Start{
-			Start: &conversationv1.AgentUnmodeledStart{ToolName: "mcp__weird__tool", StartedAt: startedAt(1)},
+			Start: &conversationv1.AgentUnmodeledStart{ToolName: "StructuredOutput", StartedAt: startedAt(1)},
 		}}},
 	}))
 
@@ -2531,8 +2579,8 @@ func TestAnUnmodeledToolDrawsNoRowAndAddsOneTopbarWarning(t *testing.T) {
 		return len(v.GetWarnings().GetWarnings()) == 1
 	})
 	w := warned.GetWarnings().GetWarnings()[0]
-	if w.GetUnmodeledTool().GetToolName().GetText() != "mcp__weird__tool" {
-		t.Fatalf("the topbar warning's tool name = %q, want %q", w.GetUnmodeledTool().GetToolName().GetText(), "mcp__weird__tool")
+	if w.GetUnmodeledTool().GetToolName().GetText() != "StructuredOutput" {
+		t.Fatalf("the topbar warning's tool name = %q, want %q", w.GetUnmodeledTool().GetToolName().GetText(), "StructuredOutput")
 	}
 }
 
@@ -2547,7 +2595,7 @@ func TestASecondCallToTheSameUnmodeledToolAddsNoSecondWarning(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("unmodeled-2"),
 		Item: &conversationv1.AgentActivity_Unmodeled{Unmodeled: &conversationv1.AgentUnmodeled{Result: &conversationv1.AgentUnmodeled_Start{
-			Start: &conversationv1.AgentUnmodeledStart{ToolName: "mcp__weird__tool", StartedAt: startedAt(1)},
+			Start: &conversationv1.AgentUnmodeledStart{ToolName: "StructuredOutput", StartedAt: startedAt(1)},
 		}}},
 	}))
 	awaitTopbar(t, f, topbar, "the first warning", func(v *frontendv1.TopbarView) bool { return len(v.GetWarnings().GetWarnings()) == 1 })
@@ -2556,7 +2604,7 @@ func TestASecondCallToTheSameUnmodeledToolAddsNoSecondWarning(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("unmodeled-3"),
 		Item: &conversationv1.AgentActivity_Unmodeled{Unmodeled: &conversationv1.AgentUnmodeled{Result: &conversationv1.AgentUnmodeled_Start{
-			Start: &conversationv1.AgentUnmodeledStart{ToolName: "mcp__weird__tool", StartedAt: startedAt(2)},
+			Start: &conversationv1.AgentUnmodeledStart{ToolName: "StructuredOutput", StartedAt: startedAt(2)},
 		}}},
 	}))
 

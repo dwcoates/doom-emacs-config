@@ -165,8 +165,8 @@ it(
     // Arrange
     const feedRowsBefore = rows(app, "activity", "simpleToolCall").length;
 
-    // Act — `unmodeled` is the accounting/mcp area's own scenario for a tool
-    // the contract does not model.
+    // Act — `unmodeled` is the scenario for a tool the contract does not
+    // model (an MCP server's tool is `mcp-tool`, an ordinary card).
     await driveTurn(app, "unmodeled", "activity", "response");
 
     // Assert — the warnings surface exists and the tool did NOT become a feed

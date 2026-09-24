@@ -147,6 +147,18 @@ it(
 );
 
 it(
+  "draws an MCP server's tool call through the same generic shell",
+  async () => {
+    // Arrange / Act
+    const row = await family("mcp-tool", "activity", "simpleToolCall");
+    // Assert — headed by the qualified tool name, with its output body.
+    expect(row.querySelector(".tool-name")?.textContent).toContain("mcp__echo__echo");
+    expect(row.querySelector("[data-output-body]")).not.toBeNull();
+  },
+  TURN_TEST_MS,
+);
+
+it(
   "draws a read tool call's output through the same generic shell",
   async () => {
     // Arrange / Act

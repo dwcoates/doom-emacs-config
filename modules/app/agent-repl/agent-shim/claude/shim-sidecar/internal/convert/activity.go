@@ -52,7 +52,8 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		return nil, reasonExempt
 	}
 
-	c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent})
+	mcp := mcpTool(name, block)
+	c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent, mcp: mcp})
 
 	if IsStreamOwned(name) {
 		// The stream plane authors this unit whole; see streamowned.go. The call
@@ -64,8 +65,11 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 	}
 
 	kind, known := classifyTool(name)
+	if !known && mcp != nil {
+		return []*storev1.StoreEntry{c.mcpToolCall(mcp, id, index, input, at, env, agent)}, ""
+	}
 	if !known {
-		return []*storev1.StoreEntry{c.unmodeledCall(name, id, index, input, block, at, env, agent)}, ""
+		return []*storev1.StoreEntry{c.unmodeledCall(name, id, index, input, at, env, agent)}, ""
 	}
 
 	activity := c.callItem(kind, name, input, env.timestampMs, at, id)
@@ -93,40 +97,21 @@ func (c *Converter) rememberCall(id string, call openCall) {
 	c.openCalls[id] = call
 }
 
-// unmodeledCall announces a tool whose schema genuinely cannot be known.
-func (c *Converter) unmodeledCall(name, id string, index int, input, block map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
+// unmodeledCall announces a tool whose schema genuinely cannot be known. An MCP
+// server's tool never reaches here (mcp.go).
+func (c *Converter) unmodeledCall(name, id string, index int, input map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("unmodeled-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
 		Log("tool call name=%q has no modeled schema; carried as AgentUnmodeled", name)
-	start := &conversationv1.AgentUnmodeledStart{
-		ToolName:  name,
-		Arguments: rawStruct(input),
-		StartedAt: startedAt(env.timestampMs),
-	}
-	if server := mcpServer(name, block); server != nil {
-		start.McpServer = server
-	}
 	return c.activityEntry(at, env, agent, id, index, &conversationv1.AgentActivity{
 		ActivityId: activityID(id),
 		Item: &conversationv1.AgentActivity_Unmodeled{Unmodeled: &conversationv1.AgentUnmodeled{
-			Result: &conversationv1.AgentUnmodeled_Start{Start: start},
+			Result: &conversationv1.AgentUnmodeled_Start{Start: &conversationv1.AgentUnmodeledStart{
+				ToolName:  name,
+				Arguments: rawStruct(input),
+				StartedAt: startedAt(env.timestampMs),
+			}},
 		}},
 	})
-}
-
-// mcpServer states which MCP server served a tool rather than parsing it out of
-// the qualified name: the qualification grammar is the vendor's, and a server
-// whose own name contains the separator would be split wrongly.
-func mcpServer(name string, block map[string]any) *string {
-	if server := optionalString(pick(block, "server_name", "mcp_server")); server != nil {
-		return server
-	}
-	if str(block["type"]) == "mcp_tool_use" {
-		// The vendor named no server on the block. The name is all we have, and
-		// splitting it would be a guess, so nothing is claimed.
-		return nil
-	}
-	_ = name
-	return nil
 }
 
 // callItem builds the announcement arm for a recognized built-in. It returns nil
@@ -523,6 +508,8 @@ func item(arm any) *conversationv1.AgentActivity {
 	case *conversationv1.AgentActivity_ContextInjected:
 		activity.Item = a
 	case *conversationv1.AgentActivity_Unmodeled:
+		activity.Item = a
+	case *conversationv1.AgentActivity_McpToolCall:
 		activity.Item = a
 	case *conversationv1.AgentActivity_Thinking:
 		activity.Item = a

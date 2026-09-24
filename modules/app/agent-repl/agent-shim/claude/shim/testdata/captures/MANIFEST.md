@@ -114,7 +114,7 @@ would be pure churn, so they keep their original names.
 | `interrupt` | 2026-09-01 | `hook`, `thinking`, `response` → `success.interrupted` | `!interrupt` | single turn | 36 KB |
 | `max-tokens` | 2026-09-01 | `hook`, `response` → `success.completed` | `!max-tokens` | single turn | 40 KB |
 | `mcp-server-healths` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!mcp-all` | single turn | 100 KB |
-| `mcp-unmodeled-tool` | 2026-09-01 | `hook`, `thinking`, `response`, `unmodeled` → `success.completed` | `!unmodeled` | single turn | 88 KB |
+| `mcp-unmodeled-tool` | 2026-09-01 | `hook`, `thinking`, `response`, `mcpToolCall` → `success.completed` | `!mcp-tool` | single turn | 88 KB |
 | `model-changed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!model-fallback` | single turn | 72 KB |
 | `monitor-deadline` | 2026-09-01 | `hook`, `thinking`, `bash`, `monitor`, `response` → `success.completed` | `!monitor-deadline` | single turn | 92 KB |
 | `monitor-persistent` | 2026-09-01 | `hook`, `thinking`, `monitor`, `response` → `success.completed` | `!monitor-persistent` | single turn | 84 KB |
@@ -421,6 +421,9 @@ the narrower/alternate state**:
   not a refusal); no capture recorded a refusal.
 - `!context-window` — declared `context-window-exceeded` terminal; no
   capture reached it.
+- `!unmodeled` — a `StructuredOutput` call landing as `AgentUnmodeled`, the
+  shape `turn-stop-max-structured-output-retries` recorded; no capture drives
+  it as a scenario of its own.
 - `!fault-converter`, `!fault-recover` — shim-internal fault-injection
   scenarios, not vendor shapes at all; no capture could ground them.
 - `!query-eof`, `!query-eof-mid-ask`, `!keepalive` — declared
