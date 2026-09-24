@@ -3,6 +3,7 @@ package harness
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -87,13 +88,30 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
+	own := filepath.Clean(path) == filepath.Clean(d.RunLogPath())
+	return awaitLogRecord(d.t, wait, path, what, func(r LogRecord) bool {
+		return (!own || r.PID == d.PID()) && pred(r)
+	})
+}
+
+// AwaitRunLogRecordFromAnyProcess waits for a run-log record written by ANY
+// process on this daemon's state root -- a handover successor's included,
+// which AwaitLogRecord's own-pid filter skips.
+func (d *Daemon) AwaitRunLogRecordFromAnyProcess(what string, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
+	return awaitLogRecord(d.t, wait, d.RunLogPath(), what, pred)
+}
+
+// awaitLogRecord polls path for the first record pred accepts, failing t when
+// wait ends first.
+func awaitLogRecord(t *testing.T, wait context.Context, path, what string, pred func(LogRecord) bool) LogRecord {
+	t.Helper()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		for _, r := range readLog(d.t, path) {
-			if filepath.Clean(path) == filepath.Clean(d.RunLogPath()) && r.PID != d.PID() {
-				continue
-			}
+		for _, r := range readLog(t, path) {
 			if pred(r) {
 				return r
 			}
@@ -101,7 +119,8 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 		select {
 		case <-ticker.C:
 		case <-wait.Done():
-			d.t.Fatalf("waiting for %s in %s: %v", what, path, wait.Err())
+			t.Fatalf("waiting for %s in %s: %v", what, path, wait.Err())
+			return LogRecord{}
 		}
 	}
 }
