@@ -33,9 +33,9 @@
  * into one badge would lose one of them.
  *
  * WHY RELEASE IS NOT ALWAYS DRAWN. A release's MECHANISM is an interrupt.
- * Against a context cut, a keep-alive turn, or a session still coming up, the
- * interrupt is precisely what must not happen (the protos say so on each of
- * those three arms), so the daemon refuses it. A button that acknowledges a
+ * Against a context cut or a session still coming up, the interrupt is
+ * precisely what must not happen (the protos say so on each of those arms), so
+ * the daemon refuses it. A button that acknowledges a
  * click and achieves nothing is worse than no button, so the card draws no
  * release there and says why in the actions row's title instead.
  *
@@ -62,7 +62,6 @@ import type {
   HeldPromptClassifying,
   HeldPromptHoldForTurnEnd,
   HeldPromptInterject,
-  HeldPromptKeepAliveHold,
   HeldPromptQueuedAt,
   HeldPromptSessionStartingHold,
   HeldPromptShutdownHold,
@@ -118,8 +117,6 @@ export interface HeldPromptDroppedDetail {
 export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
   uninterruptibleTurn:
     "a context cut is never interrupted for a queued prompt, so there is nothing to release it past — it is delivered the moment that turn ends",
-  keepAlive:
-    "the keep-alive turn has to finish before this prompt can be submitted, so there is no order in which releasing it works",
   sessionStarting:
     "the session is not up yet, so a released prompt would have nowhere to be delivered",
 };
@@ -231,11 +228,11 @@ function holdCardHooks(hold: string | null): string[] {
     case "shutdown":
     case "buildRefresh":
       return ["held-right", "lease-card"];
+    case "sessionStarting":
+      // The card's `data-hold` names the bring-up; it wears no hook of its own.
+      return ["held-right"];
     default:
-      // A keep-alive and a session bring-up are the same statement — the
-      // machinery holds this, no classifier judged it, it cannot be forced —
-      // which is the frame the revival hold always wore.
-      return ["held-right", "keep-alive-card"];
+      return unreachableArm("HeldPrompt.hold", hold);
   }
 }
 
@@ -427,8 +424,6 @@ function drawHold(
   switch (hold.case) {
     case "shutdown":
       return drawHeldPromptShutdownHold(hold.value, `${path}.shutdown`);
-    case "keepAlive":
-      return drawHeldPromptKeepAliveHold(hold.value, `${path}.keep_alive`);
     case "sessionStarting":
       return drawHeldPromptSessionStartingHold(hold.value, `${path}.session_starting`);
     case "buildRefresh":
@@ -447,16 +442,6 @@ export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: stri
     context: { path, schedule_id: u.scheduleId },
   });
   return "shutdown";
-}
-
-/** Held behind a keep-alive turn, which the arm must name. */
-export function drawHeldPromptKeepAliveHold(u: HeldPromptKeepAliveHold, path: string): HeldStatus {
-  const turn = requireMessage(u.turn, `${path}.turn`);
-  log.debug("drawing a keep-alive hold", {
-    operation: "tray.held-prompt.keep-alive-hold",
-    context: { path, turn: turn.value },
-  });
-  return "keepAlive";
 }
 
 /** Held until the session is up. Empty on the wire: presence is the fact. */
@@ -811,8 +796,8 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - a classification error: a failure, the error red;
  *   - accepted: a quiet acknowledgement that changes nothing about delivery;
  *   - a shutdown or build-refresh hold: coordinated daemon work, the merge amber;
- *   - a keep-alive or session-starting hold: the machinery keeping a session
- *     up, the hibernation teal;
+ *   - a session-starting hold: the machinery bringing a session up, the
+ *     hibernation teal;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
  *     the in-flight orange.
  */
@@ -825,7 +810,6 @@ export const HELD_STATUS_BADGES = {
   accepted: "muted",
   shutdown: "amber",
   buildRefresh: "amber",
-  keepAlive: "teal",
   sessionStarting: "teal",
   editing: "run",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
