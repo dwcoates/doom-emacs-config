@@ -199,7 +199,14 @@ environment. Every flag is optional.
    adopting a workspace is the moment it starts writing that workspace's rows,
    and the incumbent stopped writing them at its transfer notice, so the
    one-writer invariant holds across the swap;
-8. the component graph, then `boot.Sequence.Run`: CLOSE every open workspace
+8. the component graph, then `boot.Sequence.Run`: BIND every registered
+   workspace whose directory exists on the per-workspace resolvers
+   (`workspace.Verbs.BindViews`, which writes nothing, so a joining successor
+   runs it too) BEFORE any step can raise or close a fault, because a footer,
+   topbar or hold-tray record for an unbound workspace is an invariant
+   violation (stated once per workspace at ERROR `daemon.<resolver>.unbound_workspace`);
+   a manifest entry for a workspace the registry no longer holds or whose
+   directory is gone opens no fault at all, only an INFO record; CLOSE every open workspace
    whose directory is gone (a row naming a path that is not there is a tab
    Emacs cannot serve; counted as `missing_dir_closed`, and a stat that does
    not say "not exist" is never read as gone), adopt the shims whose

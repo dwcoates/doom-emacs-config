@@ -209,6 +209,13 @@ type Verbs interface {
 	// editor-global stream with nothing to deliver — including the EMPTY
 	// roster, which is a roster.
 	PublishRegistry(ctx context.Context) error
+	// BindViews binds every registered workspace whose directory exists on
+	// every resolver that logs per workspace, and writes NOTHING. The boot
+	// calls it FIRST, before any reconciliation step can raise or close a
+	// fault: those reach the footer, and a footer record for an unbound
+	// workspace is an invariant violation. PublishRegistry binds again, later,
+	// once it has closed the rows whose directory is gone.
+	BindViews(ctx context.Context) error
 	// Create materializes a new workspace: slug from the initial prompt by the
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.

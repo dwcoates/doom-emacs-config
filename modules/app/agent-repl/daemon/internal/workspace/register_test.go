@@ -761,3 +761,74 @@ func TestRegisterPrimesTheFooter(t *testing.T) {
 		t.Fatalf("footer was not primed for %q at registration; primed = %v", record.ID, f.footer.primed)
 	}
 }
+
+// TestBindViewsBindsAnInheritedWorkspacesDirectory pins the boot's first step:
+// a restarted daemon never ran Register for the rows it inherited, and the
+// reconciliation publishes faults for them before PublishRegistry runs.
+func TestBindViewsBindsAnInheritedWorkspacesDirectory(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	f.footer.dirs = nil
+
+	// Act.
+	if err := f.verbs.BindViews(context.Background()); err != nil {
+		t.Fatalf("BindViews: %v", err)
+	}
+
+	// Assert.
+	if f.footer.dirs[record.ID] != record.Dir {
+		t.Fatalf("footer bound %q for %v, want %q", f.footer.dirs[record.ID], record.ID, record.Dir)
+	}
+}
+
+func TestBindViewsPassesOverAWorkspaceWhoseDirectoryIsGone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	f.footer.dirs = nil
+
+	// Act.
+	if err := f.verbs.BindViews(context.Background()); err != nil {
+		t.Fatalf("BindViews: %v", err)
+	}
+
+	// Assert.
+	if _, bound := f.footer.dirs[record.ID]; bound {
+		t.Fatalf("a workspace whose directory is gone was bound")
+	}
+}
+
+func TestBindViewsWritesNothing(t *testing.T) {
+	// Arrange: a gone directory is exactly what PublishRegistry closes, and a
+	// joining successor's read-only handle must not be asked to.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	if err := f.verbs.BindViews(context.Background()); err != nil {
+		t.Fatalf("BindViews: %v", err)
+	}
+
+	// Assert.
+	if f.db.closedFlags[record.ID] {
+		t.Fatalf("BindViews closed workspace %v; it must write nothing", record.ID)
+	}
+}

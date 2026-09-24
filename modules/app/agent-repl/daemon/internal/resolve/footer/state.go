@@ -376,6 +376,9 @@ type wsState struct {
 	dir string
 	// log is the workspace-bound logger, nil until the directory is bound.
 	log dlog.Logger
+	// unboundReported latches that a record for this workspace already
+	// arrived unbound and the invariant violation was stated at ERROR.
+	unboundReported bool
 
 	// seen reports whether any fact has been observed — the readiness gate.
 	seen bool

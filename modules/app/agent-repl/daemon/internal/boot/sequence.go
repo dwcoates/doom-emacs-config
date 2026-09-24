@@ -56,6 +56,17 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	})
 
 	report := Report{}
+	// THE VIEWS ARE BOUND BEFORE ANY STEP CAN PUBLISH. The manifest's
+	// dispositions, the orphan closes and the missing-directory closes all
+	// reach the footer, and until this ran they reached it for every
+	// workspace before PublishRegistry had bound a single directory: one
+	// invariant-violation record per workspace on every boot.
+	if err := s.deps.BindViews(ctx); err != nil {
+		log.Error("daemon.boot.run", "the workspaces' views could not be bound", dlog.Context{
+			"error": err.Error(),
+		})
+		return Report{}, fmt.Errorf("boot: bind the workspaces' views: %w", err)
+	}
 	workspaces, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		log.Error("daemon.boot.run", "the workspace registry could not be read", dlog.Context{
