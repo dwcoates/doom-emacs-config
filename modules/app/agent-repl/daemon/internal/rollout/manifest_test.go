@@ -2,6 +2,8 @@ package rollout
 
 import (
 	"context"
+	"errors"
+	"os"
 	"sync"
 	"testing"
 
@@ -119,25 +121,69 @@ func TestARolledSessionsRecordIsAlreadyResolved(t *testing.T) {
 	}
 }
 
-func TestASessionThatSilentlyDiedLeavesAnOpenFault(t *testing.T) {
+// recordingDB remembers every fault id the reconciliation opened, so a test
+// can read a record back after it was resolved.
+type recordingDB struct {
+	wsm.DB
+	mu     sync.Mutex
+	opened []ids.FaultID
+}
+
+func (d *recordingDB) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, error) {
+	id, err := d.DB.OpenFault(ctx, f)
+	if err == nil {
+		d.mu.Lock()
+		d.opened = append(d.opened, id)
+		d.mu.Unlock()
+	}
+	return id, err
+}
+
+// diedRecord reconciles one preserve-intent session whose lock reads free and
+// answers the one record it left.
+func diedRecord(t *testing.T) wsm.Fault {
+	t.Helper()
+	h := newHarness(t)
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	h.c.deps.DB = recorder
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+	if len(recorder.opened) != 1 {
+		t.Fatalf("records opened = %d, want exactly one for the dead session", len(recorder.opened))
+	}
+	f, err := h.db.Fault(context.Background(), recorder.opened[0])
+	if err != nil {
+		t.Fatalf("Fault: %v", err)
+	}
+	return f
+}
+
+// TestASessionThatSilentlyDiedLeavesNoOpenFault pins the ordinary dead-shim
+// path: a free lock is the kernel's proof the shim is gone, nothing could
+// close an open fault here, and one stood on the strip for good.
+func TestASessionThatSilentlyDiedLeavesNoOpenFault(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
 	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	// The DIED disposition is recorded under health.KindBounceDied, which is
-	// the arm the host view renders; the generic kind reaches no arm at all.
 	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
 
 	// Assert
 	if err != nil {
 		t.Fatalf("OpenFaults: %v", err)
 	}
-	if len(open) != 1 {
-		t.Fatalf("open faults = %d, want one: which session died is the whole point of the record", len(open))
+	if len(open) != 0 {
+		t.Fatalf("open faults = %d, want none: a dead shim with a free lock takes the ordinary dead-shim path", len(open))
 	}
-	if open[0].Evidence["disposition"] != string(DispositionDied) {
-		t.Fatalf("evidence disposition = %q, want DIED", open[0].Evidence["disposition"])
+}
+
+func TestASessionThatSilentlyDiedIsStillRecorded(t *testing.T) {
+	// Arrange, Act
+	f := diedRecord(t)
+
+	// Assert: which session died is still the record's whole point.
+	if f.Evidence["disposition"] != string(DispositionDied) || f.ResolvedAt == nil {
+		t.Fatalf("record = %+v, want a resolved DIED record", f)
 	}
 }
 
@@ -159,21 +205,12 @@ func TestAnUndeterminableSessionLeavesAnOpenFault(t *testing.T) {
 }
 
 func TestTheDispositionRecordCarriesTheManifestsPidRatherThanACount(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	// The DIED disposition is recorded under health.KindBounceDied, which is
-	// the arm the host view renders; the generic kind reaches no arm at all.
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
+	// Arrange, Act
+	f := diedRecord(t)
 
 	// Assert
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if open[0].Evidence["shim_pid"] != "4242" || open[0].Evidence["vendor_session_id"] != "vendor-1" {
-		t.Fatalf("evidence = %v, want the manifest's own pid and vendor session", open[0].Evidence)
+	if f.Evidence["shim_pid"] != "4242" || f.Evidence["vendor_session_id"] != "vendor-1" {
+		t.Fatalf("evidence = %v, want the manifest's own pid and vendor session", f.Evidence)
 	}
 }
 
@@ -270,17 +307,11 @@ func TestNoManifestWithNoSurvivingSessionIsAnOrdinaryBoot(t *testing.T) {
 
 func TestADiedDispositionIsRecordedUnderTheBounceDiedKind(t *testing.T) {
 	// Arrange, Act
-	h := newHarness(t)
-	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	generic, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	f := diedRecord(t)
 
-	// Assert: nothing is left under the generic kind, which maps to no
-	// SessionFault or HostFault arm.
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if len(generic) != 0 {
-		t.Fatalf("open faults under %q = %+v, want none", FaultBounceDisposition, generic)
+	// Assert: the record's kind still says what became of the session.
+	if f.Kind != health.KindBounceDied {
+		t.Fatalf("record kind = %q, want %q", f.Kind, health.KindBounceDied)
 	}
 }
 
@@ -392,9 +423,10 @@ func TestABounceDispositionIsDeferredWhileTheHandleIsReadOnly(t *testing.T) {
 func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	handle := &toggleReadOnlyDB{DB: recorder, readOnly: true}
 	h.c.deps.DB = handle
-	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
 
 	// Act
 	if err := handle.Promote(context.Background()); err != nil {
@@ -403,12 +435,8 @@ func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	h.c.flushDispositions(context.Background())
 
 	// Assert
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if len(open) != 1 {
-		t.Fatalf("open faults = %d, want the deferred disposition written at the promotion", len(open))
+	if len(recorder.opened) != 1 {
+		t.Fatalf("records written = %d, want the deferred disposition written at the promotion", len(recorder.opened))
 	}
 }
 
@@ -452,5 +480,169 @@ func TestAManifestEntryWithNoPidIsNeverAnUnknownDisposition(t *testing.T) {
 	}
 	if got[0].Intent != IntentNoSession {
 		t.Fatalf("intent = %s, want the pidless entry normalized to no_session", got[0].Intent)
+	}
+}
+
+// manifestExists reports whether the harness's intent manifest is on disk.
+func manifestExists(t *testing.T, h *harness) bool {
+	t.Helper()
+	_, err := os.Stat(h.c.deps.IntentManifest)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, os.ErrNotExist):
+		return false
+	default:
+		t.Fatalf("stat the intent manifest: %v", err)
+		return false
+	}
+}
+
+// TestReconcileRetiresTheManifestOnceEveryDispositionIsRecorded pins that a
+// manifest is consumed: a manifest nothing removed was reconciled again on
+// every boot for a day, re-opening the same bounce fault each time.
+func TestReconcileRetiresTheManifestOnceEveryDispositionIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after every disposition it names was recorded")
+	}
+}
+
+func TestASecondBootFindsNoManifestToAccountFor(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+
+	// Act
+	got, err := h.c.Reconcile(context.Background(), nil)
+
+	// Assert
+	if err != nil || got != nil {
+		t.Fatalf("second Reconcile = (%+v, %v), want no dispositions: the manifest was consumed", got, err)
+	}
+}
+
+func TestAManifestWhoseAccountingWasDeferredIsKept(t *testing.T) {
+	// Arrange: the joining successor's read-only handle defers every record.
+	h := newHarness(t)
+	h.c.deps.DB = &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+
+	// Act
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+
+	// Assert
+	if !manifestExists(t, h) {
+		t.Fatalf("the intent manifest was retired while its dispositions were only deferred")
+	}
+}
+
+func TestWritingTheDeferredDispositionsRetiresTheManifest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+	h.c.deps.DB = handle
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+	if err := handle.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Act
+	h.c.flushDispositions(context.Background())
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after its deferred dispositions were written")
+	}
+}
+
+// refusingFaultsDB refuses every fault write, as a failing state client would.
+type refusingFaultsDB struct{ wsm.DB }
+
+func (refusingFaultsDB) OpenFault(context.Context, wsm.Fault) (ids.FaultID, error) {
+	return "", errors.New("disk I/O error")
+}
+
+func TestAManifestWhoseRecordFailedIsKept(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.c.deps.DB = refusingFaultsDB{DB: h.c.deps.DB}
+
+	// Act
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+
+	// Assert
+	if !manifestExists(t, h) {
+		t.Fatalf("the intent manifest was retired although a disposition it names was never recorded")
+	}
+}
+
+// reconcileGone reconciles a one-entry manifest for a workspace nothing can
+// serve, recording which faults the reconciliation opened.
+func reconcileGone(t *testing.T, h *harness, ws ids.WorkspaceID, dir string) *recordingDB {
+	t.Helper()
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	h.c.deps.DB = recorder
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Sessions: []ManifestSession{{Workspace: ws, Dir: dir, ShimPID: 4242, Intent: IntentPreserve}},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+	if _, err := h.c.Reconcile(context.Background(), nil); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	return recorder
+}
+
+// TestAWorkspaceWhoseDirectoryIsGoneGetsNoFault pins that the reconciliation
+// publishes nothing for a workspace no view is bound for: the fault reached a
+// footer with no bound directory, an invariant violation, and nobody could
+// ever read it.
+func TestAWorkspaceWhoseDirectoryIsGoneGetsNoFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	if err := os.Remove(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act
+	recorder := reconcileGone(t, h, ws, dir)
+
+	// Assert
+	if len(recorder.opened) != 0 {
+		t.Fatalf("faults opened = %d, want none for a workspace whose directory is gone", len(recorder.opened))
+	}
+}
+
+func TestAWorkspaceTheRegistryNoLongerHoldsGetsNoFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	recorder := reconcileGone(t, h, ids.WorkspaceID("0000000000000000"), t.TempDir())
+
+	// Assert
+	if len(recorder.opened) != 0 {
+		t.Fatalf("faults opened = %d, want none for a workspace the registry does not hold", len(recorder.opened))
+	}
+}
+
+func TestAManifestNamingOnlyAGoneWorkspaceIsRetired(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	reconcileGone(t, h, ids.WorkspaceID("0000000000000000"), t.TempDir())
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after its only entry named a workspace nothing serves")
 	}
 }

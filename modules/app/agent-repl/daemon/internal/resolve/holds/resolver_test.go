@@ -311,3 +311,29 @@ func TestTrayBadgesThePromptBeingEdited(t *testing.T) {
 		t.Fatalf("badge labels = %v, want [classifying editing]", labels)
 	}
 }
+
+// TestAHoldForAnUnboundWorkspaceStatesTheViolationAtError pins that the
+// violation is an ERROR, stated once, rather than context on quieter records.
+func TestAHoldForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
+	// Arrange
+	surfaces := dlog.NewTestSurfaces()
+	r, err := holds.New(surfaces)
+	if err != nil {
+		t.Fatalf("holds.New: %v", err)
+	}
+
+	// Act
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
+	r.SetHeldPrompts(testWS, nil)
+
+	// Assert
+	n := 0
+	for _, rec := range surfaces.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.holds.unbound_workspace" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("unbound-workspace ERROR records = %d, want 1", n)
+	}
+}
