@@ -381,6 +381,12 @@ type subagentState struct {
 	// rather than hypothetical, so a pre-start frame waits here and is folded
 	// the moment the start supplies the identity.
 	held []*conversationv1.AgentSubagent
+	// heldBound records that a frame in `held` came from a producer bound by
+	// the stands-alone contract (standsAlone). A hold that never met a naming
+	// frame is then a spawn whose frames all failed to name their agent, which
+	// is worth a warning; a hold of nothing but pre-contract rows is expected
+	// old data, recorded at INFO.
+	heldBound bool
 }
 
 // heldDetachment is what a detachment held against an undrawn unit said about
