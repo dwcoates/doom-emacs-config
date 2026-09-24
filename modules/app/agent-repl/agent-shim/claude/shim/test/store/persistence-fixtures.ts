@@ -40,6 +40,7 @@ export function promptEntry(
     upsertKey: promptUpsertKey(turn),
     source: { vendorUuid: `uuid-${turnValue}`, discriminator: "agent_prompt" },
     keepalive: false,
+    turn,
     item: {
       kind: "prompt",
       prompt: create(conversationv1.AgentPromptSchema, {
@@ -76,6 +77,7 @@ export function readEntry(
       discriminator: "activity.read.start",
     },
     keepalive: options.keepalive ?? false,
+    turn: undefined,
     item: {
       kind: "frame",
       frame: create(conversationv1.AgentFrameSchema, {
@@ -122,6 +124,7 @@ export function spawnEntry(spawner: conversationv1.AgentId, created: string): Pe
     upsertKey: activityUpsertKey(activityId),
     source: { vendorUuid: `uuid-spawn-${created}`, discriminator: "activity.subagent.start" },
     keepalive: false,
+    turn: undefined,
     item: {
       kind: "frame",
       frame: create(conversationv1.AgentFrameSchema, {
@@ -165,6 +168,7 @@ export function bashRunEntry(
     upsertKey: `bash:${runValue}`,
     source: { vendorUuid: `uuid-${runValue}`, discriminator: "agent_bash.start" },
     keepalive: false,
+    turn: undefined,
     item: {
       kind: "bash_run",
       run,
@@ -203,6 +207,7 @@ export function bashAnnouncementEntry(book = agent("book-1")): PersistEntry {
     upsertKey: detachedWorkUpsertKey(work),
     source: { vendorUuid: `uuid-${WORK_VALUE}`, discriminator: "agent_frame.detached_work" },
     keepalive: false,
+    turn: undefined,
     item: {
       kind: "frame",
       frame: create(conversationv1.AgentFrameSchema, {
@@ -239,6 +244,7 @@ function bashRow(
     upsertKey: `bash:${RUN_VALUE}:${discriminator}`,
     source: { vendorUuid: `uuid-${RUN_VALUE}-${discriminator}`, discriminator },
     keepalive: false,
+    turn: undefined,
     item: { kind: "bash_run", run: unit(RUN_VALUE), frame },
   };
 }
@@ -318,6 +324,7 @@ export function terminalEntry(book: conversationv1.AgentId, turnValue: string): 
     upsertKey: `terminal:${turnValue}`,
     source: { vendorUuid: `uuid-result-${turnValue}`, discriminator: "agent_frame.success.completed" },
     keepalive: false,
+    turn: undefined,
     item: {
       kind: "frame",
       frame: create(conversationv1.AgentFrameSchema, {

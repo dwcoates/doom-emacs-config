@@ -131,6 +131,8 @@ export function closingAgentTerminal(agent: conversationv1.AgentId): PersistEntr
     upsertKey: terminalUpsertKey(agent, coordinate),
     source: { vendorUuid: coordinate, discriminator: "agent_frame.failure.lost.swept_up" },
     keepalive: false,
+    // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+    turn: undefined,
     item: { kind: "frame", frame },
   };
 }
@@ -217,6 +219,8 @@ export function closingSubagentTerminal(
       discriminator: "activity.subagent.failure.lost.swept_up",
     },
     keepalive: false,
+    // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+    turn: undefined,
     item: {
       kind: "frame",
       frame: create(conversationv1.AgentFrameSchema, {
@@ -265,6 +269,8 @@ export function closingMonitorTerminal(
       discriminator: "activity.monitor.ended.swept_up",
     },
     keepalive: false,
+    // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+    turn: undefined,
     item: {
       kind: "frame",
       frame: create(conversationv1.AgentFrameSchema, {
@@ -330,6 +336,8 @@ export function closingBashTerminal(
       discriminator: "agent_bash.success.interrupted.lost.swept_up",
     },
     keepalive: false,
+    // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+    turn: undefined,
     item: { kind: "bash_run", run, frame },
   };
 }
@@ -396,6 +404,8 @@ export function stoppedBashTerminal(
       discriminator: "agent_bash.success.interrupted.by_user",
     },
     keepalive: false,
+    // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+    turn: undefined,
     item: { kind: "bash_run", run, frame },
   };
 }

@@ -4660,6 +4660,7 @@ describe("a foreground unit whose item has no lifecycle", () => {
               upsertKey: "k",
               source: { producer: "p", vendorUuid: "u", arm: "task_act" } as never,
               keepalive: false,
+              turn: undefined,
               item: {
                 kind: "frame",
                 frame: create(conversationv1.AgentFrameSchema, {
@@ -4735,6 +4736,7 @@ describe("the last change the fold context carries", () => {
               upsertKey: "k",
               source: { producer: "p", vendorUuid: "u", arm: kind } as never,
               keepalive: false,
+              turn: undefined,
               item: {
                 kind: "frame",
                 frame: create(conversationv1.AgentFrameSchema, {
@@ -5368,6 +5370,7 @@ function foldEntry(item: PersistEntry["item"], arm: string): PersistEntry {
     upsertKey: `k-${arm}`,
     source: { vendorUuid: `u-${arm}`, discriminator: arm },
     keepalive: false,
+    turn: undefined,
     item,
   };
 }
