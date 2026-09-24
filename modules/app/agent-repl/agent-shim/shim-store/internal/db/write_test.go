@@ -1317,3 +1317,63 @@ func TestWriteBatchRefusesAnUnclassifiedWrite(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteBatchKeepsARowsFirstTurnStamp(t *testing.T) {
+	// Arrange: each case writes one unit twice, as the two planes do, and reads
+	// back the turn the row is served with.
+	stamp := func(entry *storev1.StoreEntry, turn string) *storev1.StoreEntry {
+		if turn == "" {
+			return entry
+		}
+		return stampedTurn(entry, turn)
+	}
+	tests := []struct {
+		name        string
+		first       string
+		second      string
+		wantServed  string
+	}{
+		{name: "an unstamped write inherits the stored turn", first: "turn-a", second: "", wantServed: "turn-a"},
+		{name: "a write naming another turn keeps the stored one", first: "turn-a", second: "turn-b", wantServed: "turn-a"},
+		{name: "an unstamped row takes the turn a later write carries", first: "", second: "turn-b", wantServed: "turn-b"},
+		{name: "a row no write stamped is served with no turn", first: "", second: "", wantServed: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, _ := newStore(t)
+			writeOK(t, d, stamp(pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))), tt.first))
+
+			// Act
+			writeOK(t, d, stamp(pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", bashSuccess()))), tt.second))
+
+			// Assert
+			lines, err := d.LinesSince(ctx(), "agent-1", 0)
+			if err != nil {
+				t.Fatalf("LinesSince: %v", err)
+			}
+			if len(lines) != 1 {
+				t.Fatalf("lines = %d, want the one upserted row", len(lines))
+			}
+			if got := lines[0].Line.GetTurn().GetValue(); got != tt.wantServed {
+				t.Fatalf("served turn = %q, want %q", got, tt.wantServed)
+			}
+		})
+	}
+}
+
+func TestWriteBatchPublishesTheRowsKeptTurnToLiveWatchers(t *testing.T) {
+	// Arrange: the stream plane stamped the unit; the file plane's copy cannot.
+	d, _ := newStore(t)
+	writeOK(t, d, stampedTurn(pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))), "turn-a"))
+
+	// Act
+	result := writeOK(t, d, pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", bashSuccess()))))
+
+	// Assert
+	if len(result.Lines) != 1 {
+		t.Fatalf("published lines = %d, want 1", len(result.Lines))
+	}
+	if got := result.Lines[0].Line.GetTurn().GetValue(); got != "turn-a" {
+		t.Fatalf("published turn = %q, want the row's first stamp %q", got, "turn-a")
+	}
+}

@@ -863,3 +863,20 @@ func TestAResponseWithNoSettleInstantReadsBackUnset(t *testing.T) {
 		t.Fatalf("replayed settled_at = %v, want unset", got)
 	}
 }
+
+func TestOpenPageServesEachLineWithItsTurn(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, stampedTurn(pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))), "turn-a"))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", 10, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if got := opened.Page.GetLines()[0].GetTurn().GetValue(); got != "turn-a" {
+		t.Fatalf("served turn = %q, want %q", got, "turn-a")
+	}
+}

@@ -195,6 +195,10 @@ func TestClassifyRefusesEachUnsetRequiredField(t *testing.T) {
 			entry: &storev1.StoreEntry{Plane: streamPlane(), WriteId: "w", UpsertKey: "u"},
 		},
 		{
+			name:  "turn present with an empty value",
+			entry: stampedTurn(pageEntry("w", "u", "agent-1", promptItem("agent-1")), ""),
+		},
+		{
 			name:  "unset agent_info arm",
 			entry: agentUpdateEntry("w", "u", &storev1.StoreAgentUpdate{}),
 		},

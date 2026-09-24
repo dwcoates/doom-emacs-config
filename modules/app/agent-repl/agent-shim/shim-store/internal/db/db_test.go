@@ -180,6 +180,13 @@ func pageEntry(writeID, upsertKey, book string, item *storev1.StoreAgentItem) *s
 	})
 }
 
+// stampedTurn stamps an entry with the turn it was produced within — present
+// with an empty value when turn is "", so a refusal of that can be exercised.
+func stampedTurn(entry *storev1.StoreEntry, turn string) *storev1.StoreEntry {
+	entry.Turn = &conversationv1.TurnId{Value: turn}
+	return entry
+}
+
 func frameItem(frame *conversationv1.AgentFrame) *storev1.StoreAgentItem {
 	return &storev1.StoreAgentItem{Item: &storev1.StoreAgentItem_AgentFrame{AgentFrame: frame}}
 }
