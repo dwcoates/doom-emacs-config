@@ -408,6 +408,9 @@ type ShimFleet interface {
 	// marks the link degraded, and reopens watches at a shim the next line is
 	// about to stop.
 	StandDown(ctx context.Context, ws ids.WorkspaceID) error
+	// HandOver closes the workspace's watches and detaches its shim, leaving
+	// the process running for the successor; false when there is no session.
+	HandOver(ws ids.WorkspaceID) (bool, error)
 	// Resume runs StartSession(resume) on c. A cold context is an ANSWER, not
 	// an error: it comes back on Resumed.Cold for the ordinary cold gate.
 	Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) (Resumed, error)
