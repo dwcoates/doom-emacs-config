@@ -209,7 +209,17 @@ func (q *queue) CancelEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 
 // EditorGone retires the workspace's edit because no editor's host stream
 // stands for it any more. See the Queue interface.
+//
+// EVERY HOST STREAM'S LAST CLOSE REACHES HERE, the daemon's own shutdown
+// included, when the state store may already be closed. So a workspace with
+// no claim is answered from memory alone and resolves nothing: no store read,
+// no record, because nothing happened. (Regression watch: resolving the
+// workspace's logger first logged "database is closed" at ERROR on every
+// orderly exit.)
 func (q *queue) EditorGone(ws ids.WorkspaceID) {
+	if _, ok := q.Editing(ws); !ok {
+		return
+	}
 	ctx := context.Background()
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -222,7 +232,7 @@ func (q *queue) EditorGone(ws ids.WorkspaceID) {
 
 	claim, ok := q.Editing(ws)
 	if !ok {
-		log.Debug(opEditRelease, "the editor's host stream ended with no edit standing", nil)
+		log.Debug(opEditRelease, "the editor's host stream ended; the edit had already ended", nil)
 		return
 	}
 	q.retireClaim(ws)
