@@ -39,6 +39,8 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -1345,15 +1347,19 @@ func promptLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentPrompt)
 	}
 }
 
-// keepaliveLine is the RETIRED keep-alive arm, which the store refuses.
+// keepaliveLine is the RETIRED keep-alive arm, which the store refuses. The
+// tag is reserved, so it rides as the unknown field a stale producer's bytes
+// decode to.
 func keepaliveLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentPrompt) *storev1.StoreAgentUpdate {
+	body, err := proto.Marshal(promptItem(p))
+	if err != nil {
+		panic(fmt.Sprintf("marshaling a keep-alive's held item: %v", err))
+	}
+	item := &storev1.StoreUnservedItem{}
+	item.ProtoReflect().SetUnknown(protowire.AppendBytes(protowire.AppendTag(nil, 1, protowire.BytesType), body))
 	return &storev1.StoreAgentUpdate{
-		TopLevel: topLevel,
-		AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{
-			UnservedItem: &storev1.StoreUnservedItem{
-				UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem(p)},
-			},
-		},
+		TopLevel:  topLevel,
+		AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: item},
 	}
 }
 
