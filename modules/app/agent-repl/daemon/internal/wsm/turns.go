@@ -82,29 +82,24 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		s.log.Error(op, "refused an unencodable turn address", withError(fields, err))
 		return err
 	}
-	if t.Close != nil && !t.Close.valid() {
-		err := fmt.Errorf("wsm: undeclared turn close %d", int(*t.Close))
-		s.log.Error(op, "refused an undeclared turn close", withError(fields, err))
-		return err
-	}
-	if (t.Close == nil) != (t.ClosedAt == nil) {
-		err := errors.New("wsm: a turn close is written whole or not at all")
-		s.log.Error(op, "refused a half-written turn close", withError(fields, err))
+	// A TURN CLOSES ONLY THROUGH THE PROMPT QUEUE'S DOOR, which draws the
+	// turn's ending in the feed with the close. A record carrying a close is
+	// refused, and the upsert below never touches the close columns, so a
+	// re-put of a record read while it was open cannot reopen a turn that
+	// closed in between either.
+	if t.Close != nil || t.ClosedAt != nil {
+		err := errors.New("wsm: PutTurn never writes a close; a turn closes through the prompt queue's door")
+		s.log.Error(op, "refused a turn record carrying a close", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var kind any
-		if t.Close != nil {
-			kind = int(*t.Close)
-		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO turns (id, workspace_id, text, origin, address, displaced, started_at, closed_at, close_kind)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
 			 ON CONFLICT(id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, text = excluded.text, origin = excluded.origin,
-			   address = excluded.address, displaced = excluded.displaced, started_at = excluded.started_at,
-			   closed_at = excluded.closed_at, close_kind = excluded.close_kind`,
-			t.ID, t.Workspace, t.Text, t.Origin, address, t.Displaced, nanos(t.StartedAt), nullNanos(t.ClosedAt), kind)
+			   address = excluded.address, displaced = excluded.displaced, started_at = excluded.started_at`,
+			t.ID, t.Workspace, t.Text, t.Origin, address, t.Displaced, nanos(t.StartedAt))
 		if err != nil {
 			return err
 		}
@@ -144,6 +139,35 @@ func (s *store) CloseTurn(ctx context.Context, turn TurnID, at time.Time, how Tu
 		// transaction.
 		return bumpLastActivity(ctx, tx, ws, at)
 	})
+}
+
+// TurnCloses answers the recorded close of each named turn of one workspace
+// that has one, all-or-nothing. An open turn, and a turn this workspace never
+// recorded, is simply absent.
+func (s *store) TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]RecordedClose, error) {
+	out := make(map[TurnID]RecordedClose, len(turns))
+	if len(turns) == 0 {
+		return out, nil
+	}
+	err := s.read(ctx, "daemon.wsm.turn_closes", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
+		for _, turn := range turns {
+			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if t.Close != nil {
+				out[turn] = RecordedClose{How: *t.Close, At: *t.ClosedAt}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // OpenTurns loads a workspace's turns that have no terminal, all-or-nothing.
@@ -325,8 +349,8 @@ func (s *store) AllDisplacedTurns(ctx context.Context) ([]Turn, error) {
 }
 
 // ClaimDisplacedTurn takes a displaced turn exclusively: it clears the mark
-// and closes the turn if it is still open, in ONE conditional statement, and
-// reports whether this caller is the one that took it.
+// and closes the turn if it is still open, in ONE transaction, and reports
+// whether this caller is the one that took it and whether it closed the turn.
 //
 // EXACTLY-ONCE LIVES HERE, AND IT IS THE DATABASE THAT ARBITRATES. A displaced
 // record has two possible owners — the merge's own lease release and the boot
@@ -336,28 +360,38 @@ func (s *store) AllDisplacedTurns(ctx context.Context) ([]Turn, error) {
 // which is the same instruction: this caller does not own it.
 //
 // An already-closed turn keeps the close it has; the claim is about the mark.
-func (s *store) ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (bool, error) {
+// A turn still open is closed as CloseOrphaned: its capture's kill never
+// produced a terminal anyone saw. The caller is the prompt queue's door, which
+// draws that ending in the feed.
+func (s *store) ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (DisplacedClaim, error) {
 	const op = "daemon.wsm.claim_displaced_turn"
 	fields := dlog.Context{"turn": string(turn), "at": at}
-	claimed := false
+	var claim DisplacedClaim
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var closed sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT closed_at FROM turns WHERE id = ? AND displaced = 1`, turn).Scan(&closed)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx,
 			`UPDATE turns SET displaced = 0,
 			   closed_at = COALESCE(closed_at, ?),
 			   close_kind = COALESCE(close_kind, ?)
-			 WHERE id = ? AND displaced = 1`, nanos(at), int(CloseCompleted), turn)
+			 WHERE id = ? AND displaced = 1`, nanos(at), int(CloseOrphaned), turn)
 		if err != nil {
 			return err
 		}
-		rows, err := res.RowsAffected()
-		if err != nil {
+		if err := requireOneRow(res, fmt.Sprintf("wsm: displaced turn %s", turn)); err != nil {
 			return err
 		}
-		claimed = rows == 1
+		claim = DisplacedClaim{Claimed: true, Closed: !closed.Valid}
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return DisplacedClaim{}, err
 	}
-	return claimed, nil
+	return claim, nil
 }

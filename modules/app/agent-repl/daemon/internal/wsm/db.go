@@ -141,10 +141,16 @@ type DB interface {
 	// all-or-nothing: a corrupt row fails the read and nothing is loaded.
 	AllHeldPrompts(ctx context.Context) ([]HeldPrompt, error)
 
-	// PutTurn records a turn's durable origin and address.
+	// PutTurn records a turn's durable origin and address. It NEVER writes a
+	// close: a record carrying one is refused, and an existing row's close is
+	// kept, because a turn closes only through the prompt queue's door.
 	PutTurn(ctx context.Context, t Turn) error
-	// CloseTurn stamps a turn's close.
+	// CloseTurn stamps a turn's close. Only the prompt queue's door calls it.
 	CloseTurn(ctx context.Context, turn TurnID, at time.Time, how TurnClose) error
+	// TurnCloses answers the recorded close of each named turn that has one;
+	// an open or unknown turn is absent. It is what a feed replay draws a
+	// turn's ending from when the turn's own terminal was never stored.
+	TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]RecordedClose, error)
 	// OpenTurns loads a workspace's turns that have no terminal.
 	OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error)
 	// HasTurns reports whether a workspace has EVER recorded a turn, open or
@@ -168,12 +174,13 @@ type DB interface {
 	// normally a closed one. It is the boot recovery's whole input.
 	AllDisplacedTurns(ctx context.Context) ([]Turn, error)
 	// ClaimDisplacedTurn takes exclusive ownership of a displaced turn: it
-	// clears the mark and, for a turn still open, stamps its close, in ONE
-	// conditional statement. It reports whether THIS caller took the record —
+	// clears the mark and, for a turn still open, stamps its close as
+	// CloseOrphaned, in ONE transaction. It reports whether THIS caller took
+	// the record, and whether the claim closed the turn —
 	// false means somebody else already did, and the caller must not put the
 	// turn back. It is what makes the resubmission exactly-once with two
 	// possible owners (the merge's own release and the boot recovery).
-	ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (bool, error)
+	ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (DisplacedClaim, error)
 	// ClaimIdempotencyKey binds a client's key to a turn. When the key is
 	// already claimed it returns the existing turn and mints nothing.
 	ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (*TurnID, error)

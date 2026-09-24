@@ -2339,8 +2339,9 @@ func TestATurnStillInFlightAtAttachIsRecordedAtInfo(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestAShimDeathEndsTheTurnItCut covers what a death does to the turn in
-// flight: an unordered death ends it truthfully (the feed draws the query's
-// death, the queue hears a failed close) BEFORE the departure is told; a death
+// flight: an unordered death ends it truthfully (the queue hears the agent
+// process died, and its door draws that ending) BEFORE the departure is told;
+// a death
 // this daemon ordered, or one with nothing running, ends nothing here.
 func TestAShimDeathEndsTheTurnItCut(t *testing.T) {
 	tests := []struct {
@@ -2373,14 +2374,14 @@ func TestAShimDeathEndsTheTurnItCut(t *testing.T) {
 			if cut != tt.wantCut {
 				t.Fatalf("turn end told = %v, want %v; saw %v", cut, tt.wantCut, names(seen))
 			}
-			if hasEvent(seen, "feed.OnSessionUpdate") != tt.wantCut {
-				t.Fatalf("the feed's query-death account drawn = %v, want %v", !tt.wantCut, tt.wantCut)
+			if hasEvent(seen, "feed.OnSessionUpdate") {
+				t.Fatalf("the watcher drew a query death; the door draws the agent process's death instead")
 			}
 			if !tt.wantCut {
 				return
 			}
-			if ended.turn == nil || *ended.turn != ids.TurnID(tt.turn) || ended.close != wsm.CloseFailed {
-				t.Fatalf("turn end = (%v, %v), want %s failed", ended.turn, ended.close, tt.turn)
+			if ended.turn == nil || *ended.turn != ids.TurnID(tt.turn) || ended.close != wsm.CloseAgentDied {
+				t.Fatalf("turn end = (%v, %v), want %s agent_died", ended.turn, ended.close, tt.turn)
 			}
 			if h.w.TurnInFlight() != nil {
 				t.Fatal("the cut turn still stands in flight")
@@ -2403,5 +2404,24 @@ func TestACutTurnIsRecordedAtInfo(t *testing.T) {
 	// Assert.
 	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_cut")["turn_id"]; got != "turn-1" {
 		t.Fatalf("the INFO record names turn %v, want turn-1", got)
+	}
+}
+
+// TestAShimDeathTellsTheFeedTheTurnItCut covers the one feed fact the death
+// states: the turn it cut, so the queue's door has a turn to draw the ending
+// under even when no frame of it was ever routed.
+func TestAShimDeathTellsTheFeedTheTurnItCut(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+	h.awaitDeparture(t)
+
+	// Assert.
+	if !hasEvent(h.rec.drain(), "feed.OnTurnOpened") {
+		t.Fatal("the feed was not told the turn the death cut")
 	}
 }

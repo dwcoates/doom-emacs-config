@@ -385,7 +385,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// is refused loudly rather than drawn as an empty src.
 		ResolveImage:  resolveImage,
 		PortedPrompts: portedPrompts,
-		Faults:        p.DB,
+		// A REPLAYED TURN WHOSE PAGE CARRIES NO TERMINAL is ended from its
+		// durable close, the record the prompt queue's door wrote.
+		TurnCloses: p.DB.TurnCloses,
+		Faults:     p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,

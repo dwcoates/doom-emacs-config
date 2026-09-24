@@ -177,8 +177,7 @@ func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
 	f := newOpened(t, harness.Opts{})
-	// The feed's WARN is the truthful account of the turn the death cut.
-	f.d.ExpectWarnings(append([]string{"daemon.feed.query_died"}, deadShimRecords...)...)
+	f.d.ExpectWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	resp := f.submit("the turn the death cuts", "k-dead-shim-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	cut := resp.GetSuccess().GetTurn().GetTurn().GetValue()
@@ -190,13 +189,13 @@ func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
 	// Act
 	killShim(t, f, f.shim)
 
-	// Assert: the feed ends the cut turn as the query's death.
-	awaitRow(t, f, feed, "the cut turn's query-death terminal", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == cut && r.GetTurnEnded().GetErrored().GetQueryDied() != nil
+	// Assert: the feed ends the cut turn as the agent process's death.
+	awaitRow(t, f, feed, "the cut turn's agent-process-death ending", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == cut && r.GetTurnEnded().GetErrored().GetAgentProcessDied() != nil
 	})
-	// Assert: its durable row is closed, a failure, by the queue.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the cut turn's failed close", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.promptqueue.turn_ended" && r.Context["turn"] == cut && r.Context["close"] == "failed"
+	// Assert: its durable row is closed, as the agent dying, by the queue.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the cut turn's agent-died close", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_ended" && r.Context["turn"] == cut && r.Context["close"] == "agent_died"
 	})
 	// Assert: the revived session is drawn idle, not as the cut turn thinking.
 	awaitFooter(t, f, footer, "the footer drawing the death", footerDisconnected)
@@ -307,4 +306,61 @@ func TestAPromptSentRightAfterABootOverADeadShimIsDelivered(t *testing.T) {
 		t.Fatalf("the delivered StartTurn said %q, want the prompt sent at boot", got)
 	}
 	expectRPCCount(t, shim, harness.RPCStartTurn, 1, harness.ProbeWindow)
+}
+
+// TestATurnCutBeforeABootReplaysAsEnded covers the replay half of the one
+// door: a turn running when the daemon and its shim both died is closed by the
+// successor's boot while no feed has seen it, and the successor's replay of
+// the conversation draws its ending from that recorded close, so it never
+// replays as running.
+func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
+	t.Parallel()
+	// Arrange: a turn running when the daemon and its shim both die.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	const cutText = "the turn nobody saw end"
+	resp := f.submit(cutText, "k-dead-shim-replay", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	cut := resp.GetSuccess().GetTurn().GetTurn().GetValue()
+	f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
+	pid := f.shim.Info().PID
+	f.d.Kill()
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill the fake shim %d: %v", pid, err)
+	}
+	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	// The store's book as the resumed shim serves it: the cut turn's prompt,
+	// and no terminal, because none was ever written.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+		ResumeHistory: harness.EncodeHistory(t, &conversationv1.HistoryEntry{
+			Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
+				Id:     &conversationv1.TurnId{Value: cut},
+				Agent:  &conversationv1.AgentId{Value: mainAgent},
+				Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+				Said:   said(cutText),
+			}},
+		}),
+	})
+
+	// Act: a successor boots on the same machine.
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
+		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
+		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+	})
+	// The boot closing a turn the crash cut is loud by design.
+	successor.ExpectWarnings("daemon.promptqueue.restore_holds")
+	f.d = successor
+	f.host = successor.WatchHost(f.ws)
+	f.web = successor.WatchWeb(f.ws)
+
+	// Assert: the replayed feed ends the cut turn as dropped.
+	f.openFeedOnceCarrying("the cut turn's replayed ending", func(p *frontendv1.FeedPage) bool {
+		for _, row := range p.GetSuccess().GetRows() {
+			if row.GetTurn().GetValue() == cut && row.GetTurnEnded().GetErrored().GetTurnFailed().GetStopReason() == "closed:orphaned" {
+				return true
+			}
+		}
+		return false
+	})
 }

@@ -309,9 +309,9 @@ export function drawFeedBreadcrumb(crumb: FeedBreadcrumb, rc: RowContext): HTMLE
  *
  * GROUPING IS OPTIONAL and lives here because this is the one place the ORDERED
  * sequence — and so adjacency — is known. A run of >=2 consecutive TOP-LEVEL
- * same-specific-kind tool cards (see `groupKindOf`) collapses into one tabbed
- * container; a lone card, a non-groupable row, a kind change or a parented row
- * breaks the run and renders unchanged. Callers with no `groups` store (a fixture
+ * same-specific-kind tool cards (see `groupKindOf`) OF ONE TURN collapses into
+ * one tabbed container; a lone card, a non-groupable row, a kind change, a
+ * turn change or a parented row breaks the run and renders unchanged. Callers with no `groups` store (a fixture
  * exercising the arranger alone) get the plain per-row layout.
  */
 export function arrangeSubfeedRows(
@@ -342,11 +342,16 @@ export function arrangeSubfeedRows(
     // its appearance between two same-kind cards breaks the run.
     const kind = groups !== undefined && row.parent?.row === undefined ? groupKindOf(row) : null;
     if (kind !== null) {
+      // A RUN NEVER SPANS TWO TURNS (owner-approved, 2026-09-24): its cards
+      // share one `turn`, both unset or equal, so a turn boundary with no row
+      // between the two turns' cards still breaks it.
+      const turn = row.turn?.value;
       let j = i + 1;
       while (
         j < rows.length &&
         rows[j].parent?.row === undefined &&
-        groupKindOf(rows[j]) === kind
+        groupKindOf(rows[j]) === kind &&
+        rows[j].turn?.value === turn
       ) {
         j += 1;
       }
