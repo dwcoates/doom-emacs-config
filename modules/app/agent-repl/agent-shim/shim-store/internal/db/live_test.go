@@ -454,7 +454,7 @@ func TestLiveWorkReportsAStorageFailureWhenTheDetachedScanFails(t *testing.T) {
 
 func seedCursor(t *testing.T, d *DB, fileID, path string, offset int64) {
 	t.Helper()
-	if _, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: fileID, Path: path, Offset: offset},
 	}, nil); err != nil {
 		t.Fatalf("seed cursor: %v", err)
@@ -555,7 +555,7 @@ func TestCursorsPreservesTheCarry(t *testing.T) {
 	// Arrange: the carry is what makes a line split across two reads parse
 	// once and whole.
 	d, _ := newStore(t)
-	if _, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 5, Carry: []byte(`{"partial":`)},
 	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)

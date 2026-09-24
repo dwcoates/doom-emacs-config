@@ -244,7 +244,7 @@ func TestValidateEntryBatchValidatesTheCursorAdvance(t *testing.T) {
 
 func TestValidateWriteBatchRequestRefusesAnEmptyProducer(t *testing.T) {
 	// Arrange.
-	req := &storev1.WriteBatchRequest{Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}}}
+	req := &storev1.WriteBatchRequest{WriteClass: interactiveClass(), Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}}}
 
 	// Act.
 	ref := validateWriteBatchRequest(req)
@@ -252,6 +252,36 @@ func TestValidateWriteBatchRequestRefusesAnEmptyProducer(t *testing.T) {
 	// Assert.
 	if siteOf(ref) != SiteProducerEmpty {
 		t.Fatalf("site = %q, want %q", siteOf(ref), SiteProducerEmpty)
+	}
+}
+
+// TestValidateWriteBatchRequestRefusesAnUnstatedWriteClass: the class decides
+// which queue a write takes, and the store refuses to guess it.
+func TestValidateWriteBatchRequestRefusesAnUnstatedWriteClass(t *testing.T) {
+	tests := []struct {
+		name  string
+		class *storev1.WriteClass
+	}{
+		{name: "no class message", class: nil},
+		{name: "a class message with no arm", class: &storev1.WriteClass{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			req := &storev1.WriteBatchRequest{Producer: "claude-shim:s1", WriteClass: tc.class,
+				Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}}}
+
+			// Act.
+			ref := validateWriteBatchRequest(req)
+
+			// Assert.
+			if siteOf(ref) != SiteWriteClassUnset {
+				t.Fatalf("site = %q, want %q", siteOf(ref), SiteWriteClassUnset)
+			}
+			if ref.field != "write_class" {
+				t.Fatalf("field = %q, want %q", ref.field, "write_class")
+			}
+		})
 	}
 }
 
