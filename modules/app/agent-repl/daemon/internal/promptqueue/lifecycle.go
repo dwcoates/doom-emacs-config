@@ -18,6 +18,10 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	ctx := context.Background()
 	log, err := q.logger(ctx, ws)
 	if err != nil {
+		// THE TURN STILL CLOSES. A workspace this queue cannot resolve is
+		// recorded by q.logger at ERROR; its turn is closed and its ending
+		// drawn all the same, and nothing is delivered.
+		_ = q.closeTurn(ctx, ws, turn, how, q.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}))
 		return
 	}
 	log = log.With(dlog.Context{"turn": string(turn), "close": closeName(how)})
@@ -42,9 +46,9 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// The roster's turn fact is the daemon's own, so its close is too.
 	q.deps.Sidebar.SetTurnEnded(ws, how)
 
-	if err := q.deps.DB.CloseTurn(ctx, turn, q.deps.Now(), how); err != nil {
-		log.Error(opTurnEnded, "could not stamp the turn's close", dlog.Context{"cause": err.Error()})
-	}
+	// THE DOOR: the row closes and the feed draws the ending together. A
+	// failed write is recorded there, and the queue goes on to deliver.
+	_ = q.closeTurn(ctx, ws, turn, how, log)
 
 	// THE BOUNCE REGISTRY IS CHECKED FIRST, before anything queued is
 	// dispatched. A shim registered for a bounce that this turn end leaves
@@ -90,8 +94,7 @@ func (q *queue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 	}
 	for _, turn := range turns {
 		fields := dlog.Context{"turn": string(turn), "close": closeName(wsm.CloseOrphaned)}
-		if err := q.deps.DB.CloseTurn(ctx, turn, q.deps.Now(), wsm.CloseOrphaned); err != nil {
-			log.Error(opTurnEnded, "could not close a turn that ended while no daemon was watching", merged(fields, dlog.Context{"cause": err.Error()}))
+		if err := q.closeTurn(ctx, ws, turn, wsm.CloseOrphaned, log); err != nil {
 			continue
 		}
 		log.Info(opTurnEnded, "closed a turn that ended while no daemon was watching", fields)
@@ -365,7 +368,7 @@ func (q *queue) reconcileTurns(ctx context.Context, ws ids.WorkspaceID, global d
 		})
 		return
 	}
-	report, err := q.deps.DB.CloseOrphans(ctx, ws, q.deps.Now())
+	report, err := q.CloseOrphans(ctx, ws, q.deps.Now())
 	if err != nil {
 		global.Error(opRestore, "could not close a dead session's in-flight turns", dlog.Context{
 			"workspace": string(ws), "cause": err.Error(),
@@ -388,6 +391,8 @@ func closeName(how sessionwatcher.TurnClose) string {
 		return "killed"
 	case wsm.CloseOrphaned:
 		return "orphaned"
+	case wsm.CloseAgentDied:
+		return "agent_died"
 	default:
 		return fmt.Sprintf("close(%d)", how)
 	}
