@@ -441,11 +441,11 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 		}
 	}
 	// THE DEAD-QUERY LINE OUTLIVES THE SUBSTATUS THE TERMINAL PICKS. The turn's
-	// terminal arrives after the session's query_died update and respells the
-	// block from the FAILURE alone, which is a line-less vendor error; reading
-	// the line off the block therefore left the strip saying `blocked · vendor
-	// error` and nothing else. The line is the session's fact, so it stands
-	// under whichever blocked step the terminal chose.
+	// terminal can arrive after the session's query_died update and respells
+	// the block from the FAILURE alone; reading the line off the block let a
+	// terminal that did not say the query died leave the strip saying
+	// `blocked · vendor error` and nothing else. The line is the session's
+	// fact, so it stands under whichever blocked step the terminal chose.
 	if s.queryDied != nil {
 		return &frontendv1.FooterStatusBlockedActivity{
 			At: stamp(s.queryDied.at),
