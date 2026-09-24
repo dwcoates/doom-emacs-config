@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -140,6 +141,10 @@ func (m *fakeMerge) recoveries() int {
 type fakeRollout struct {
 	rollout.Controller
 	mu sync.Mutex
+	// bound reports whether the boot had bound the views when Reconcile ran,
+	// read through boundNow.
+	boundNow         func() bool
+	boundAtReconcile bool
 	// dispositions is what Reconcile answers.
 	dispositions []rollout.Disposition
 	reconcileErr error
@@ -154,6 +159,9 @@ func (r *fakeRollout) Reconcile(_ context.Context, adopted []rollout.AdoptedSess
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.adopted = append([]rollout.AdoptedSession(nil), adopted...)
+	if r.boundNow != nil {
+		r.boundAtReconcile = r.boundNow()
+	}
 	if r.reconcileErr != nil {
 		return nil, r.reconcileErr
 	}
@@ -187,6 +195,9 @@ func (d failingHolds) AllHeldPrompts(context.Context) ([]wsm.HeldPrompt, error) 
 
 // harness is one boot sequence under test with every fake reachable.
 type harness struct {
+	// binds counts the boot's BindViews calls; bindErr is what they answer.
+	binds      atomic.Int32
+	bindErr    error
 	seq        Sequence
 	deps       Deps
 	db         wsm.DB
@@ -255,7 +266,12 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		socketProbeErrs: map[string]error{},
 		startErrs:       map[ids.WorkspaceID]error{},
 	}
+	h.rollout.boundNow = func() bool { return h.binds.Load() > 0 }
 	h.deps = Deps{
+		BindViews: func(context.Context) error {
+			h.binds.Add(1)
+			return h.bindErr
+		},
 		Layout:     layout,
 		DB:         db,
 		Supervisor: h.supervisor,
