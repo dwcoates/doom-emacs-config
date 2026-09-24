@@ -1,7 +1,14 @@
 package harness
 
 import (
+	"bufio"
+	"context"
+	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -129,5 +136,105 @@ func TestReapStraysSparesATestOwnedProcess(t *testing.T) {
 					cmd.Process.Pid, found, tc.wantStray, strays)
 			}
 		})
+	}
+}
+
+// groupUnderKill starts a stand-in for the daemon: a shell leading its own
+// process group, with one member of that group running under it the way the
+// daemon's gits do. script must start the member in the background and print
+// its pid first. It answers the bare Daemon Kill acts on and the member's pid.
+func groupUnderKill(t *testing.T, script string) (*Daemon, int) {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the group: %v", err)
+	}
+	d := &Daemon{t: t, cmd: cmd}
+	t.Cleanup(func() {
+		if !d.reaped() {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			d.Wait()
+		}
+	})
+	line, err := bufio.NewReader(out).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read the member's pid: %v", err)
+	}
+	member, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("the member's pid %q: %v", line, err)
+	}
+	return d, member
+}
+
+// TestKillFreezesTheWholeGroupBeforeKillingAnyOfIt pins the ordering the
+// daemon's teardown depends on: at the instant before the SIGKILL, the leader
+// and its member are BOTH stopped and neither is dead, so no member can die
+// while the leader can still run.
+func TestKillFreezesTheWholeGroupBeforeKillingAnyOfIt(t *testing.T) {
+	// Arrange
+	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	var leaderState, memberState processState
+	var leaderErr, memberErr error
+	d.afterFreeze = func() {
+		leaderState, leaderErr = readProcessState(d.cmd.Process.Pid)
+		memberState, memberErr = readProcessState(member)
+	}
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if leaderErr != nil || memberErr != nil {
+		t.Fatalf("reading the frozen group: leader %v, member %v", leaderErr, memberErr)
+	}
+	if leaderState.name != "stopped" {
+		t.Fatalf("the leader was %s when the kill was sent, want stopped", leaderState.name)
+	}
+	if memberState.name != "stopped" {
+		t.Fatalf("the member was %s when the kill was sent, want stopped", memberState.name)
+	}
+}
+
+// TestKillEndsEveryMemberOfTheGroup pins that freezing first still kills the
+// whole group, not only its leader.
+func TestKillEndsEveryMemberOfTheGroup(t *testing.T) {
+	// Arrange
+	d, member := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait")
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if !d.reaped() {
+		t.Fatal("the leader is unreaped after Kill")
+	}
+	if err := WaitProcessExit(ctx, member); err != nil {
+		t.Fatalf("the member %d outlived the group kill: %v", member, err)
+	}
+}
+
+// TestKillLeavesTheLeaderNoInstantToObserveAMemberDying is the defect as the
+// daemon lived it: a leader that records the death of its member (the daemon
+// logging "git was killed by a signal") must never get to, because the member
+// only dies once the leader can no longer run.
+func TestKillLeavesTheLeaderNoInstantToObserveAMemberDying(t *testing.T) {
+	// Arrange: the leader writes the marker the moment its member dies.
+	marker := filepath.Join(t.TempDir(), "observed")
+	d, _ := groupUnderKill(t, "/bin/sleep 100 & echo $!; wait $!; : > "+marker)
+
+	// Act
+	d.Kill()
+
+	// Assert
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the leader recorded its member's death (stat %v), want it frozen before the member died", err)
 	}
 }
