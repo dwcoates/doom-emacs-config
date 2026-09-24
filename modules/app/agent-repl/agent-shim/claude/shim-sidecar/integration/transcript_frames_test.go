@@ -381,9 +381,9 @@ func TestWriteIdsAreUniqueAcrossOneIngest(t *testing.T) {
 	}
 }
 
-// TestKeepAliveTurnsNeverReachAPage asserts a keep-alive-marked turn's records
-// land as unserved keepalive items and never as page lines.
-func TestKeepAliveTurnsNeverReachAPage(t *testing.T) {
+// TestKeepAliveTurnsStoreNothing asserts a keep-alive-marked turn's records
+// are read and converted, and not one of them is stored.
+func TestKeepAliveTurnsStoreNothing(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -395,37 +395,31 @@ func TestKeepAliveTurnsNeverReachAPage(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "11111111-1111-4111-8111-111111111111"
 
-	prompt := setUserText(t,
-		retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd),
-		keepaliveMarker+"cache ping")
-	// The assistant work produced while the bit is set: the captured response's
-	// thinking line and its Bash call, re-pointed at this session.
-	thinking := retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)
-	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
+	// The marked prompt and the assistant work of its turn — the captured
+	// response's thinking line and its Bash call — linked as the vendor links
+	// them.
+	turn := chained(t,
+		setUserText(t, retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd), keepaliveMarker+"cache ping"),
+		retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd),
+		retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd),
+	)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	g.AppendLine(encodeRecord(t, prompt))
-	g.AppendLine(encodeRecord(t, thinking))
-	g.AppendLine(encodeRecord(t, call))
+	appendRecords(t, g, turn...)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.
-	entries := fake.Entries()
-	if len(keepalivesOf(entries)) == 0 {
-		t.Fatalf("nothing landed on the keepalive arm; every record of a marked turn must")
-	}
-	for _, line := range linesForBook(entries, session) {
-		if a := activityOf(line); a != nil {
-			t.Errorf("unit %q reached a page line during a keep-alive turn", a.GetActivityId().GetValue())
-		}
+	if entries := fake.Entries(); len(entries) != 0 {
+		t.Fatalf("a keep-alive turn stored %d entrie(s) (keys %v), want none", len(entries), upsertKeysOf(entries))
 	}
 }
 
-// TestKeepAliveEndsAtTheNextOrdinaryPrompt asserts the bit is cleared by the
-// next non-keepalive user prompt, so work after it is served again.
-func TestKeepAliveEndsAtTheNextOrdinaryPrompt(t *testing.T) {
+// TestAnOrdinaryPromptAfterAKeepAliveIsServed asserts the turn an ordinary
+// prompt opens after a keep-alive is served: its work names the ordinary
+// prompt, not the keep-alive, as its parent.
+func TestAnOrdinaryPromptAfterAKeepAliveIsServed(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -437,19 +431,18 @@ func TestKeepAliveEndsAtTheNextOrdinaryPrompt(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "22222222-2222-4222-8222-222222222222"
 
-	base := decodeRecord(t, captured.Lines[3])
-	marked := setUserText(t, retargetSession(t, base, session, cwd), keepaliveMarker+"cache ping")
-	ordinary := setUserText(t, retargetSession(t, base, session, cwd), "now do the real thing")
-	thinking := retargetSession(t, decodeRecord(t, captured.Lines[12]), session, cwd)
-	call := retargetSession(t, decodeRecord(t, captured.Lines[13]), session, cwd)
+	base := retargetSession(t, decodeRecord(t, captured.Lines[3]), session, cwd)
+	records := chained(t,
+		setUserText(t, base, keepaliveMarker+"cache ping"),
+		asOwnPrompt(t, setUserText(t, base, "now do the real thing"), "22222222-0000-4000-8000-000000000001", "22222222-0000-4000-8000-0000000000aa"),
+		retargetSession(t, decodeRecord(t, captured.Lines[12]), session, cwd),
+		retargetSession(t, decodeRecord(t, captured.Lines[13]), session, cwd),
+	)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
-	g.AppendLine(encodeRecord(t, marked))
-	g.AppendLine(encodeRecord(t, ordinary))
-	g.AppendLine(encodeRecord(t, thinking))
-	g.AppendLine(encodeRecord(t, call))
+	appendRecords(t, g, records...)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
 	// Assert.

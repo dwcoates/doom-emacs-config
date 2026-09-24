@@ -314,14 +314,6 @@ func BashRun(at Attribution, discriminator, upsertKey, run string, frame *conver
 	})
 }
 
-// Keepalive stores a well-formed conversation fact that has NO book: the turn
-// was marked keep-alive, so nothing it produced may ever reach a page.
-func Keepalive(at Attribution, discriminator, upsertKey string, frameAgent string, item *storev1.StoreAgentItem) *storev1.StoreEntry {
-	return unservedEntry(at, discriminator, upsertKey, frameAgent, &storev1.StoreUnservedItem{
-		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: item},
-	})
-}
-
 // VendorSpecificEntry stores a record we UNDERSTAND and have decided not to
 // carry into a vendor-agnostic feed. The follow-up it asks for is a CONVERTER.
 func VendorSpecificEntry(at Attribution, kind string, raw map[string]any) *storev1.StoreEntry {

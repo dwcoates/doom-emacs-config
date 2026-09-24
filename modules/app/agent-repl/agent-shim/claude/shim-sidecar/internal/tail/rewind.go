@@ -139,8 +139,8 @@ func lastTurnStart(buf []byte, startOffset int64, skipFirst bool, isTurnStart fu
 //     in progress — re-warming none of the joins the rewind exists for.
 //
 // A KEEP-ALIVE PROMPT DOES COUNT. It is a real user prompt with a marker in its
-// first text block; the marker changes how the turn's records are STORED, not
-// whether a turn began.
+// first text block; the marker decides whether the turn's records are STORED,
+// not whether a turn began.
 func IsUserPromptRecord(obj map[string]any) bool {
 	if kind, _ := obj["type"].(string); kind != "user" {
 		return false

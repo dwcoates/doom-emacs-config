@@ -7,13 +7,14 @@
 //     frame, upserting its unit whole.
 //   - A RUN FRAME. A detached shell run's delta or terminal, wrapped with the
 //     spawning call's unit id. Never paginatable.
-//   - AN UNSERVED ITEM. A keep-alive turn's item (no book), something one vendor
-//     does that no vendor-agnostic feed can show (vendor_specific), a record we
-//     parsed and do not model (unknown), or one we could not parse (unparsed).
-//   - A DROP, in two named cases and no others: the EXEMPT SET (built-ins
+//   - AN UNSERVED ITEM. Something one vendor does that no vendor-agnostic feed
+//     can show (vendor_specific), a record we parsed and do not model
+//     (unknown), or one we could not parse (unparsed).
+//   - A DROP, in three named cases and no others: the EXEMPT SET (built-ins
 //     deliberately not carried; a drop there is never residue and never
-//     AgentUnmodeled), and the NEVER-PERSISTED RESIDUE KINDS (neverpersist.go),
-//     which are classified exactly as before and then not written.
+//     AgentUnmodeled), the NEVER-PERSISTED RESIDUE KINDS (neverpersist.go),
+//     which are classified exactly as before and then not written, and a
+//     KEEP-ALIVE TURN'S RECORDS (keepalive.go), converted and then not stored.
 //
 // THE NO-VARIABLE-STATE PRINCIPLE BINDS THIS PACKAGE. Every join is a single
 // indexed lookup: a tool return finds its call by tool_use_id, a skill document
@@ -158,9 +159,10 @@ type Converter struct {
 	// `/clear` looks like from here.
 	foreignSpawns map[string]string
 
-	// keepalive marks every record converted while a keep-alive turn is open.
-	// ONE REMEMBERED BOOL per file, cleared by the next non-keepalive prompt.
-	keepalive bool
+	// keepaliveScope is which of this file's records a keep-alive turn
+	// produced, by the transcript's own prompt and parent links
+	// (keepalive.go). None of them is ever stored.
+	keepaliveScope keepaliveScope
 
 	// joined records WHERE IN THE FILE this converter started reading, and
 	// whether it has started at all. ONE OFFSET, written once.
@@ -187,12 +189,13 @@ type Converter struct {
 func New(log *logging.Bound) *Converter {
 	log.With(logging.Context{Operation: "convert-new"}).LogVerbose("constructing converter producer=%s", Producer)
 	return &Converter{
-		log:           log,
-		observer:      noopObserver{},
-		openCalls:     map[string]openCall{},
-		openSkills:    map[string]openCall{},
-		spawnedRuns:   map[string]string{},
-		foreignSpawns: map[string]string{},
+		log:            log,
+		observer:       noopObserver{},
+		openCalls:      map[string]openCall{},
+		openSkills:     map[string]openCall{},
+		spawnedRuns:    map[string]string{},
+		foreignSpawns:  map[string]string{},
+		keepaliveScope: newKeepaliveScope(),
 	}
 }
 
@@ -207,12 +210,6 @@ func (c *Converter) SetObserver(o Observer) {
 	c.observer = o
 }
 
-// KeepaliveMarker opens a prompt whose turn produces NOTHING servable.
-//
-// PENDING RULING, DEFAULT IMPLEMENTED (confirmed by the shim lead): the marker
-// is this literal at the very start of the prompt's first text block.
-const KeepaliveMarker = "<!--agent-repl:keepalive-->"
-
 // Line converts one decoded transcript line into the entries it implies.
 //
 // `next` is the line that FOLLOWS this one IN THE FILE, or nil at the end of a
@@ -220,21 +217,37 @@ const KeepaliveMarker = "<!--agent-repl:keepalive-->"
 // the harness writes as the following line.
 //
 // It NEVER returns zero entries for a line it was given, except for the EXEMPT
-// SET and the NEVER-PERSISTED RESIDUE KINDS, both of which are dropped
-// deliberately and loudly. Total ingestion still binds the READ: every line is
-// decoded and classified, and irrelevance to a reader is never a reason to stop
-// reading one — only, for the two ruled kinds, a reason not to store it.
+// SET, the NEVER-PERSISTED RESIDUE KINDS and a KEEP-ALIVE TURN'S RECORDS, all
+// of which are dropped deliberately and loudly. Total ingestion still binds the
+// READ: every line is decoded and classified, and irrelevance to a reader is
+// never a reason to stop reading one — only, for the ruled kinds, a reason not
+// to store it.
 func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	// SET ONCE, HERE, FOR THE WHOLE RECORD. Attribution travels by value, so
 	// every conversion this record fans out to carries the vendor's uuid without
 	// thirty call sites having to pass it — and residue minted anywhere in that
 	// fan-out keys on the same record the other plane keys on.
 	at.RecordUUID = str(record["uuid"])
+	// THE KEEP-ALIVE QUESTION IS ASKED ONCE PER RECORD, BEFORE ANYTHING IS
+	// CONVERTED, and answered by the record's own links (keepalive.go). A
+	// per-record answer is what makes the skip exact: every entry this record
+	// fans out to — a unit, a settle, a prompt, residue — is withheld together,
+	// whichever branch minted it.
+	keepalive := c.keepaliveScope.classify(keepaliveFactsOf(record))
 	// THE LINE IS CLASSIFIED IN FULL, and the READER decides what is written:
 	// residue is withheld at the sidecar's single write path (neverpersist.go,
 	// cycle.go withholdResidue), so every branch here still runs and still
-	// states what the vendor recorded.
-	return c.lineEntries(record, at, next)
+	// states what the vendor recorded. A keep-alive's record is converted too,
+	// so the joins it opens or settles stay exactly as warm as any other's.
+	entries := c.lineEntries(record, at, next)
+	if !keepalive {
+		return entries
+	}
+	// IT ANNOUNCES NO ROW, so it carries no upsert_key: nothing was stored.
+	c.log.With(at.ctxFor("keepalive-skip")).LogVerbose(
+		"a keep-alive turn's %s record is never stored; converted to %d entrie(s), stored none",
+		str(record["type"]), len(entries))
+	return nil
 }
 
 // lineEntries is the conversion itself.

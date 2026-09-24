@@ -57,8 +57,8 @@ type mockScenario struct {
 	// BudgetWarning — the scenario writes the vendor's context-budget warning,
 	// so an `AgentUpdate.context_budget_warning` carrying its text must land.
 	BudgetWarning bool
-	// KeepAlive — the prompt carries the keep-alive marker, so every record of
-	// the turn lands on `unserved_item.keepalive` and NO page line appears.
+	// KeepAlive — the prompt carries the keep-alive marker, so no record of the
+	// turn is stored and NO page line appears.
 	KeepAlive bool
 	// HeldTurn — the scenario's turn is STOPPED rather than finished, and the
 	// stop is reached with no permission question in the way. The TERMINAL
@@ -152,7 +152,7 @@ func TestMockScenarios(t *testing.T) {
 				requireContextBudgetWarning(t, tc.Prompt, entries)
 			}
 			if tc.KeepAlive {
-				requireKeepAliveNeverReachesAPage(t, tc.Prompt, entries)
+				requireKeepAliveStoresNothing(t, tc.Prompt, entries)
 			}
 			if tc.HeldTurn {
 				requireHeldTurnLandsWithoutAQuestion(t, tc.Prompt, tree, entries)
@@ -312,7 +312,7 @@ var mockScenarios = []mockScenario{
 		// `!name` at position 0 — so no `!scenario` prompt can carry the marker.
 		// A row asserting the keep-alive expectation here would be asserting it
 		// against a turn that is not keep-alive, and it fails exactly that way.
-		// The edge is covered instead by TestMockKeepAliveTurnsNeverReachAPage,
+		// The edge is covered instead by TestMockKeepAliveTurnsStoreNothing,
 		// which drives the marker on an ordinary prose prompt — the production
 		// shape.
 		Prompt: "!keepalive", Wait: waitTerminal,
@@ -345,13 +345,14 @@ const mockBlockedCancelAll = "the mocked vendor writes `EXIT=143` into the AGENT
 	"line as unparsed residue — nothing is dropped — but every universal residue assertion fails on it, so the " +
 	"whole row waits on the shim lead reconciling the two statements."
 
-// TestMockKeepAliveTurnsNeverReachAPage covers the keep-alive edge, which no
+// TestMockKeepAliveTurnsStoreNothing covers the keep-alive edge, which no
 // `!scenario` can: the marker is the SHIM's and the mocked vendor neither adds
 // nor removes it, while the scenario selector needs the `!name` at position 0.
 // So the marker rides an ORDINARY prose prompt — which is exactly the shape the
-// sidecar sees in production — and the turn's every record must land on
-// `unserved_item.keepalive`, structurally unable to reach a page.
-func TestMockKeepAliveTurnsNeverReachAPage(t *testing.T) {
+// sidecar sees in production — and not one of the turn's records may be
+// stored. The mocked vendor links its records exactly as the real one does,
+// which is what the keep-alive rule reads.
+func TestMockKeepAliveTurnsStoreNothing(t *testing.T) {
 	t.Parallel()
 	tree := generateMock(t, keepaliveMarker+" say something short", waitTerminal)
 	in := ingestMock(t, tree)
@@ -359,5 +360,5 @@ func TestMockKeepAliveTurnsNeverReachAPage(t *testing.T) {
 
 	requireNoUnparsedResidue(t, keepaliveMarker, entries)
 	requireNoUnknownResidue(t, keepaliveMarker, entries)
-	requireKeepAliveNeverReachesAPage(t, keepaliveMarker, entries)
+	requireKeepAliveStoresNothing(t, keepaliveMarker, entries)
 }
