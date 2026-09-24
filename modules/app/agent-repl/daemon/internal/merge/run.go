@@ -473,7 +473,7 @@ func (r *run) prePrompt(ctx context.Context) error {
 		r.address(TabPrePrompt, round)
 		r.upsert(TabPrePrompt, round, promptTab(TabPrePrompt, &frontendv1.FeedMergeTabLive{}, 0, ""))
 		close, err := r.runConfiguredPrompt(ctx, name, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
-		if err != nil || close == wsm.CloseFailed {
+		if err != nil || close.Failed() {
 			summary := fmt.Sprintf("the before-merge prompt %q did not complete", name)
 			r.upsert(TabPrePrompt, round, promptTab(TabPrePrompt, nil, r.o.nowMS(), summary))
 			r.closeTab(ctx, TabPrePrompt, round, "failed")
@@ -501,7 +501,7 @@ func (r *run) postPrompt(ctx context.Context) (bool, error) {
 		r.address(TabPostPrompt, round)
 		r.upsert(TabPostPrompt, round, promptTab(TabPostPrompt, &frontendv1.FeedMergeTabLive{}, 0, ""))
 		close, err := r.runConfiguredPrompt(ctx, name, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
-		if err != nil || close == wsm.CloseFailed {
+		if err != nil || close.Failed() {
 			summary := fmt.Sprintf("the after-merge prompt %q did not complete", name)
 			r.upsert(TabPostPrompt, round, promptTab(TabPostPrompt, nil, r.o.nowMS(), summary))
 			r.closeTab(ctx, TabPostPrompt, round, "failed")
