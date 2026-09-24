@@ -321,8 +321,12 @@ func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// (c) swept_up — a spool nobody ever claimed, whose file predates the reboot.
+// (c) a spool nobody ever claimed, whose file predates the reboot.
 // ---------------------------------------------------------------------------
+//
+// swept_up for a CLAIMED pre-boot spool is on the wire (lost_wire_test.go). An
+// UNCLAIMED one names no run and nothing renders it, so it is never read, never
+// tracked, and never concluded: a LOST verdict for it would settle nothing.
 
 // preBootStamp is a time no machine's boot can be older than, which is what
 // makes a fixture's file "not touched since before the reboot" without the test
@@ -347,40 +351,10 @@ func seedPreBootSpool(t *testing.T, tree *vendorTree, cwd, session, payload stri
 	return path
 }
 
-// TestAPreBootUnclaimedSpoolIsConcludedSweptUp asserts the reason: nothing
-// survives a reboot, so a run whose file has not been written since before the
-// machine booted was never going to report again.
-func TestAPreBootUnclaimedSpoolIsConcludedSweptUp(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	opts := lostOptions(t, fake.Socket, tree)
-	// The hold is what keeps an unclaimed spool from being tailed at all, so it
-	// is shortened too: the subject is the conclusion, not the wait.
-	opts.UnownedSpoolWindow = time.Millisecond
-	spoolPath := seedPreBootSpool(t, tree, "/Users/dodgecoates/lost-swept-probe",
-		"c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1", "output from before the reboot\n")
-
-	// Act.
-	startSidecar(t, opts)
-
-	// Assert.
-	awaitLostConclusion(ctx, t, opts.LogPath, spoolPath, "swept_up")
-}
-
-// TestAPreBootUnclaimedSpoolsBytesAreStillReadAndClassified asserts the other
-// half: concluding a run LOST is never a licence to skip what is on disk.
-// Nobody claimed the spool, so its bytes are read whole and classified as
-// unparsed residue naming that file.
-//
-// CLASSIFIED, NOT STORED. Residue is never persisted, so the evidence that the
-// bytes were ingested is the reader's own withholding record for this file plus
-// a cursor that reached the end of it — an empty store is the contract here,
-// not the failure it once was.
-func TestAPreBootUnclaimedSpoolsBytesAreStillReadAndClassified(t *testing.T) {
+// TestAPreBootUnclaimedSpoolIsNeverRead asserts that concluding nothing about a
+// spool nobody claimed is not a licence to read it either: its bytes are never
+// read, and no verdict is stated for it.
+func TestAPreBootUnclaimedSpoolIsNeverRead(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -389,18 +363,20 @@ func TestAPreBootUnclaimedSpoolsBytesAreStillReadAndClassified(t *testing.T) {
 	tree := newVendorTree(t)
 	opts := debugLogging(lostOptions(t, fake.Socket, tree))
 	opts.UnownedSpoolWindow = time.Millisecond
-	payload := "output from before the reboot\n"
 	spoolPath := seedPreBootSpool(t, tree, "/Users/dodgecoates/lost-swept-residue-probe",
-		"c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2", payload)
+		"c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2", "output from before the reboot\n")
 
 	// Act.
 	startSidecar(t, opts)
-	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
+	awaitCatchupEnd(ctx, t, opts.LogPath)
+	endAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool { return r.Operation == "catchup-end" })
+	awaitRestatedAfter(ctx, t, opts.LogPath, spoolPath, "hold-spool", endAt)
 
-	// Assert: every byte of the file was read...
-	awaitCursorInBatches(ctx, t, fake, spoolPath, int64(len(payload)))
-	// ...and none of it was stored.
-	requireNoResidueStored(t, fake.Entries())
+	// Assert.
+	requireNeverRead(t, fake, opts.LogPath, spoolPath)
+	if got := lostConclusions(t, opts.LogPath, spoolPath); len(got) != 0 {
+		t.Fatalf("a spool nothing claimed was concluded LOST %d time(s); it names no run: %v", len(got), got)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -412,10 +388,11 @@ func TestAPreBootUnclaimedSpoolsBytesAreStillReadAndClassified(t *testing.T) {
 // and a file that keeps producing it is never concluded LOST however short the
 // window is.
 //
-// THE FENCE IS ANOTHER FILE, not elapsed time. A second, unclaimed spool is
-// left silent from the start; the moment the reader concludes THAT one LOST we
-// know the sweep has run under the same short window, so the growing spool's
-// having no conclusion is a decision rather than an absence of one.
+// THE FENCE IS ANOTHER FILE, not elapsed time. A second run, launched in the
+// same session and so claimed and read like the subject's own, is left silent
+// after one line; the moment the reader concludes THAT one LOST we know the
+// sweep has run under the same short window, so the growing spool's having no
+// conclusion is a decision rather than an absence of one.
 func TestASpoolThatKeepsGrowingIsNeverConcludedLost(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -427,9 +404,9 @@ func TestASpoolThatKeepsGrowingIsNeverConcludedLost(t *testing.T) {
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-growing-probe", session)
 	opts := lostOptions(t, store.Socket, tree)
 	opts.StaleShellSilence = growthSilence
-	// The fence: an unclassifiable spool is tailed at once and claimed by
-	// nobody, so it goes silent immediately and concludes under the same window.
-	fencePath := tree.spoolPath(cwdSlug("/Users/dodgecoates/lost-growing-probe"), session, "z0uncla551f1able")
+	// The fence: a second claimed run that says one line and goes silent, so it
+	// concludes under the same window.
+	fencePath := appendDetachedLaunch(t, fx, "b0fence", capturedBashCall2)
 
 	// Act.
 	startSidecar(t, opts)
