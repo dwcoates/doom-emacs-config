@@ -135,11 +135,12 @@ after the focus handback, so a failure, a panic and an interrupt all reach it.
   and letting it overwrite a realtest's exit status would lose the finding the
   sweep exists for.
 
-`bin/deploy-all.sh` holds the other half of the same invariant: it REFUSES to
-restart the daemon through an Emacs that carries the guard, because the restart
-is made BY that editor and the incoming daemon would inherit it. The refusal
-names the guard and the remedy (quit that editor, start a normal one), and
-`AGENT_REPL_REALTEST_TAKEOVER=1` is the one answer that goes ahead anyway.
+`bin/deploy-all.sh` used to hold the other half of the same invariant, by
+refusing to restart the daemon through an Emacs that carried the guard. It is
+retired: the daemon owns deploys (`Deploy`), and a deploy never restarts the
+daemon through an editor. A stale daemon is handed over to a successor the
+daemon spawns itself, so a guarded daemon's successor is guarded too, which is
+why the guarded daemon above is part of the handback.
 
 ## The entry point: `bin/realtest.sh`
 
