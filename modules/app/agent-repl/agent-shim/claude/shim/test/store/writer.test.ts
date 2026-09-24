@@ -518,13 +518,6 @@ describe("upsert by identity", () => {
 });
 
 describe("a keep-alive turn's entries", () => {
-  /** Every log record written since `before`, as the durable sink received it. */
-  const logRecordsSince = (before: number): Array<Record<string, unknown>> =>
-    (vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>).map(
-      ([, bytes, offset, length]) =>
-        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
-    );
-
   it("are never sent to the store by write", async () => {
     const { store: fake, persistence: plane } = await persistence("keepalive-write");
 
@@ -875,6 +868,62 @@ function planeOver(overrides: Partial<StoreClient>): Persistence {
 }
 
 describe("a WriteBatch the store answers badly", () => {
+  it("warns once per entry the store skipped as a book conflict, naming the key and both books", async () => {
+    // A durable batch that left a row out of the book it named is not a quiet
+    // success: the daemon watches that book and will never see the row.
+    // Arrange.
+    const plane = planeOver({
+      writeBatch: async () =>
+        create(storev1.WriteBatchResponseSchema, {
+          result: {
+            case: "success",
+            value: create(storev1.WriteBatchSuccessSchema, {
+              skipped: [
+                create(storev1.WriteBatchSkippedEntrySchema, {
+                  upsertKey: "activity:msg_1:1",
+                  fromBook: "rotated-book",
+                  toBook: "book-1",
+                }),
+              ],
+            }),
+          },
+        }),
+    });
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    const records = logRecordsSince(before).filter((record) => typeof record.message === "string" && record.message.startsWith("the store skipped a row"));
+    expect(
+      records.map((record) => {
+        const context = record.context as Record<string, unknown>;
+        return [record.level, context.upsert_key, context.from_book, context.to_book];
+      }),
+    ).toEqual([["warn", "activity:msg_1:1", "rotated-book", "book-1"]]);
+  });
+
+  it("states nothing when the store skipped nothing", async () => {
+    // Arrange.
+    const plane = planeOver({
+      writeBatch: async () =>
+        create(storev1.WriteBatchResponseSchema, {
+          result: { case: "success", value: create(storev1.WriteBatchSuccessSchema, {}) },
+        }),
+    });
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
+    expect(warned).toEqual([]);
+  });
+
   it("renders a thrown non-Error as the fault's detail", async () => {
     // A rejected transport can carry anything at all; the fault must still say
     // something a reader of the diagnostics can act on.
