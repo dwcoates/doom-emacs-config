@@ -60,6 +60,8 @@ src/
     fold.ts            the fold seam and FoldOutput
     ids.ts             the four identifier spaces, minted
   store/
+    persistence.ts     THE seam the engine writes and reads through; retry + batch policies
+    writer.ts          the one ordered store writer: never drops, bounded batches, backpressure
     keys.ts            upsert_key + write_id (THE one place)
     retry.ts           the READ half's retry schedule (the writer's own policy)
     client.ts          the store.v1 client over the store UDS
@@ -766,6 +768,58 @@ pass; a test has no clock to wait on, so `EngineDeps.onHibernationCompactionSett
 is injected the way the scheduler and the identity store are. Production leaves
 it absent and reads the compaction's own records instead.
 
+## The store writer: it never drops a row
+
+`src/store/writer.ts` is the ONE ordered writer every row the shim produces goes
+through (`write`, `writeDurable`). Its invariants:
+
+- **NO ROW IS EVER DROPPED FOR AN OUTAGE OR A BACKLOG.** The store is the
+  durable record every consumer reads from, the daemon's turn endings
+  included. A failed batch is HELD in its place and replayed: on the retry
+  schedule, then — once `maxAttempts` failures declare it PERSISTENT — every
+  `heldRetryMs` (1s; a `--fake` backoff override's last step) for as long as
+  the process lives, which bounds how long a store that came back waits to be
+  noticed. The first failure
+  opens the degraded window and raises `store_unreachable` (WARN); the
+  persistent declaration is an ERROR naming the held keys; the window closes,
+  with nothing dropped, when a write lands again (INFO). The only row that is
+  ever not written is one the store REFUSES as malformed: it is named at ERROR
+  and raised as `converter_defect`, and a refused multi-row batch is re-sent one
+  row at a time so its well-formed neighbours still land.
+- **THE BUFFER IS BOUNDED BY BACKPRESSURE, NOT EVICTION.** At either high-water
+  mark (`DEFAULT_BATCH_POLICY`: 1,024 rows or 16 MiB queued) the writer opens a
+  backlog episode (one WARN) and `Persistence.whenWritable()` holds the vendor
+  message loop (`engine/session.ts` `runLoop`) before it reads the next
+  message; the episode closes (one INFO) at the low-water marks (256 rows and
+  4 MiB). A durable producer-side spill was rejected: it would make the shim a
+  second durable copy of the record. The SDK keeps reading its child's stdout
+  while the loop is held (it must, to answer control requests), so a pause
+  moves the backlog into the SDK's own queue of raw vendor messages rather
+  than into the writer.
+- **BATCHES ARE BOUNDED IN ROWS, BYTES AND TIME.** An interactive batch is one
+  store transaction, so its size is the store's hold on its one writer. A
+  batch carries at most `maxBatchRows` (64) rows and `maxBatchBytes` (1 MiB) of
+  payload — at least one row, always — and a batch that overran
+  `batchTimeBudgetMs` (500ms) halves the next one's row bound, which doubles
+  back once a batch lands inside a quarter of the budget. A backlog of one-row
+  writes is MERGED into bounded batches; one huge write (an interrupt's cut
+  calls) is SPLIT.
+- **THE STORE RECEIVES EVERY ROW IN EXACTLY THE ORDER IT WAS PRODUCED, across
+  every book.** A turn's terminal is the turn's last word — the fold puts even
+  the calls a stop cut ahead of it — and consumers read "the terminal landed"
+  as "the whole turn is recorded", subagent books included (the integration
+  suite's subagent and meta-sidecar scenarios wait on exactly that). So no row
+  overtakes another; the latency lever for a TURN EDGE (a prompt, an agent
+  terminal) is that its batch ENDS at it, so its ack never waits on a row
+  produced after it. `writeDurable` joins the same buffer: its caller is
+  released at once when the store is known to be down, and the rows stay held
+  — a caller must never re-queue them.
+- **`flush()` never waits forever.** It resolves when the buffer is empty, or
+  as soon as an attempt declares or confirms a persistent failure, counting the
+  rows still held; the stand-down's exit code is decided by that count.
+- Batch timing is logged per batch (`logVerbose`, or `debug` while a backlog
+  episode is open) with rows, bytes, attempts, `duration_ms` and the backlog.
+
 ## Validation and errors
 
 - **One base validate function per request message** (`service/validate/
@@ -952,10 +1006,10 @@ env; a test that wants a production window back overrides it per-spawn through
 `SpawnShimOptions.env`, which layers over that standard env.
 
 ONLY THE WAITING IS OVERRIDABLE. The retry override reaches `backoffMs` alone —
-`maxAttempts` and `bufferCapacity` stay pinned to `DEFAULT_RETRY_POLICY` and are
-not reachable from the environment at all, precisely so this cannot become a way
-to weaken the attempt-count and bounded-buffer assertions it exists to keep
-fast. Keep it that way.
+`maxAttempts` stays pinned to `DEFAULT_RETRY_POLICY`, and the batch and backlog
+bounds to `DEFAULT_BATCH_POLICY`; none is reachable from the environment at all,
+precisely so this cannot become a way to weaken the attempt-count and
+never-drop assertions it exists to keep fast. Keep it that way.
 
 The forced-kill scenarios fell from ~5.14s to ~0.64s and the six store-outage
 scenarios from ~4.2s to ~0.55s each; the suite went from 30.9s to 11.6s, and its
