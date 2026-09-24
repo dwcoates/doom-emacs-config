@@ -343,7 +343,7 @@ func TestPushSuccessReportsNotSentWithItsReason(t *testing.T) {
 	result := map[string]any{"reason": "no_transport"}
 
 	// Act
-	got := pushSuccess(result, 1000)
+	got := pushSuccess(openCall{}, result, 1000)
 
 	// Assert
 	notSent, ok := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_NotSent)
@@ -1119,7 +1119,7 @@ func TestPushSuccessReadsTheVendorsDisabledReason(t *testing.T) {
 	result := map[string]any{"pushSent": false, "localSent": false, "disabledReason": "user_present"}
 
 	// Act
-	got := pushSuccess(result, 1000)
+	got := pushSuccess(openCall{}, result, 1000)
 
 	// Assert
 	notSent, ok := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_NotSent)
@@ -1137,7 +1137,7 @@ func TestPushSuccessLeavesAnUnknownDeclineReasonUnstated(t *testing.T) {
 	result := map[string]any{"pushSent": false, "disabledReason": "moon_phase"}
 
 	// Act
-	got := pushSuccess(result, 1000)
+	got := pushSuccess(openCall{}, result, 1000)
 
 	// Assert
 	notSent := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_NotSent)
@@ -1151,7 +1151,7 @@ func TestPushSuccessReadsTheIsoSendInstant(t *testing.T) {
 	result := map[string]any{"pushSent": true, "sentAt": "2026-01-01T00:00:00Z"}
 
 	// Act
-	got := pushSuccess(result, 1000)
+	got := pushSuccess(openCall{}, result, 1000)
 
 	// Assert
 	sent := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_Sent)
@@ -1166,7 +1166,7 @@ func TestPushSuccessLeavesTheSendInstantUnsetWhenTheVendorStatedNone(t *testing.
 	result := map[string]any{"pushSent": true}
 
 	// Act
-	got := pushSuccess(result, 1000)
+	got := pushSuccess(openCall{}, result, 1000)
 
 	// Assert
 	sent := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_Sent)

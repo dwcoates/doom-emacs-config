@@ -57,7 +57,7 @@ func TestTaskActSettledMarksARejectionWithoutChangingTheTask(t *testing.T) {
 	// task as it STILL stands rather than as the act would have left it.
 	call := openCall{name: "TaskUpdate"}
 	result := map[string]any{"task": map[string]any{"id": "t1", "status": "pending"}}
-	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(1000)}
+	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(1000, 0)}
 
 	// Act
 	got := taskActSettled(call, result, true, failure)
@@ -80,7 +80,7 @@ func TestTaskActSettledNeverResolvesTheStatusARejectedActAskedFor(t *testing.T) 
 	// of its own -- which is what a refusal for an id the tracker does not hold
 	// looks like. The status the call asked for is not the standing one.
 	call := openCall{name: "TaskUpdate", input: map[string]any{"taskId": "9", "status": "completed"}}
-	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(1000)}
+	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(1000, 0)}
 
 	// Act
 	got := taskActSettled(call, map[string]any{"taskId": "9"}, true, failure)

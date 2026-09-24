@@ -19,7 +19,7 @@ import (
 
 // settledItem builds the settled arm for a recognized built-in.
 func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[string]any, failed bool, ts int64, at Attribution) *conversationv1.AgentActivity {
-	failure := toolFailure(block, ts)
+	failure := toolFailure(block, ts, call.startedAt)
 	switch kind {
 	case kindRead:
 		if failed {
@@ -250,7 +250,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
-			State: &conversationv1.AgentPushNotification_Success{Success: pushSuccess(result, ts)},
+			State: &conversationv1.AgentPushNotification_Success{Success: pushSuccess(call, result, ts)},
 		}})
 	default:
 		return nil
@@ -269,7 +269,7 @@ func (c *Converter) settleUnmodeled(call openCall, block map[string]any, failed 
 			Result: &conversationv1.AgentUnmodeled_Failure{Failure: &conversationv1.AgentUnmodeledFailure{
 				ToolName:  call.name,
 				Content:   content,
-				SettledAt: settledAt(env.timestampMs),
+				SettledAt: settledAt(env.timestampMs, call.startedAt),
 			}},
 		}})
 	} else {
@@ -277,7 +277,7 @@ func (c *Converter) settleUnmodeled(call openCall, block map[string]any, failed 
 			Result: &conversationv1.AgentUnmodeled_Success{Success: &conversationv1.AgentUnmodeledSuccess{
 				ToolName:  call.name,
 				Content:   content,
-				SettledAt: settledAt(env.timestampMs),
+				SettledAt: settledAt(env.timestampMs, call.startedAt),
 			}},
 		}})
 	}

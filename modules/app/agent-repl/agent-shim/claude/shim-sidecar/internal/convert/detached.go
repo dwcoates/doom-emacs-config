@@ -209,7 +209,9 @@ func (c *Converter) BashCancelled(at Attribution, run, output string, omitted ui
 		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user, output_observed=%t carrying %d byte(s)", observed, len(output))
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
-			SettledAt: settledAt(settledAtMs),
+			// NO START IS RESTATED: this is the detached run's own terminal,
+			// and its start instant rides the run's own start frame.
+			SettledAt: settledAt(settledAtMs, 0),
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
 				// A stop for a run whose spool was never readable states
 				// not_observed: the stop is evidence about the PERSON's

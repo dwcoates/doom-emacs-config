@@ -29,7 +29,7 @@ func readSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 	path := firstNonEmpty(str(file["filePath"]), str(pick(call.input, "file_path", "path")))
 	success := &conversationv1.AgentReadSuccess{
 		Path:      &conversationv1.ReadPath{Path: path},
-		SettledAt: settledAt(ts),
+		SettledAt: settledAt(ts, call.startedAt),
 	}
 	// A NON-TEXT READ HAS NO EXTENT ARM THIS WAVE. AgentReadSuccess retired the
 	// image, pdf, notebook, parts and file_unchanged tags, so no arm can say how
@@ -110,7 +110,7 @@ func writeSuccess(call openCall, result map[string]any, ts int64) *conversationv
 		Path:         &conversationv1.ReadPath{Path: path},
 		Patch:        writePatch(result),
 		UserModified: boolean(result["userModified"]),
-		SettledAt:    settledAt(ts),
+		SettledAt:    settledAt(ts, call.startedAt),
 	}
 	switch {
 	case str(result["type"]) == "create":
@@ -156,7 +156,7 @@ func editSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 		Path:         &conversationv1.ReadPath{Path: path},
 		Patch:        patchHunks(result["structuredPatch"]),
 		UserModified: boolean(result["userModified"]),
-		SettledAt:    settledAt(ts),
+		SettledAt:    settledAt(ts, call.startedAt),
 	}
 }
 
@@ -199,7 +199,7 @@ func patchHunks(raw any) []*conversationv1.FilePatchHunk {
 func grepSuccess(call openCall, result, block map[string]any, ts int64) *conversationv1.AgentGrepSuccess {
 	success := &conversationv1.AgentGrepSuccess{
 		Query:     grepQuery(call.input),
-		SettledAt: settledAt(ts),
+		SettledAt: settledAt(ts, call.startedAt),
 	}
 	// The vendor's own default output mode applies when neither the result nor
 	// the call named one, rather than a guess of our own.
@@ -278,7 +278,7 @@ func setGrepFromText(success *conversationv1.AgentGrepSuccess, mode, text string
 func globSuccess(call openCall, result, block map[string]any, ts int64) *conversationv1.AgentGlobSuccess {
 	success := &conversationv1.AgentGlobSuccess{
 		Query:     globQuery(call.input),
-		SettledAt: settledAt(ts),
+		SettledAt: settledAt(ts, call.startedAt),
 	}
 	if !has(result, "numFiles") && !has(result, "filenames") {
 		// The vendor typed nothing: the rendered list is all there is, and with
@@ -369,7 +369,7 @@ func bashMovedToBackground(result map[string]any) bool {
 func bashSuccess(call openCall, result map[string]any, block map[string]any, exit *int32, ts int64) *conversationv1.AgentBashSuccess {
 	success := &conversationv1.AgentBashSuccess{
 		Command:   bashCommand(call.input),
-		SettledAt: settledAt(ts),
+		SettledAt: settledAt(ts, call.startedAt),
 	}
 	output := bashOutput(result, block)
 	if boolean(result["interrupted"]) {
@@ -571,7 +571,7 @@ func sendMessageSuccess(call openCall, result map[string]any, ts int64) *convers
 	recipient := firstNonEmpty(str(result["resumedAgentId"]), sendAddressedTo(call.input))
 	success := &conversationv1.AgentSendMessageSuccess{
 		RecipientAgentId: agentID(recipient),
-		SettledAt:        settledAt(ts),
+		SettledAt:        settledAt(ts, call.startedAt),
 		// RESTATED so the settled frame stands alone: the start it upserts
 		// over is gone once it lands, and a replay draws the send from this.
 		AddressedTo: sendAddressedTo(call.input),
@@ -711,7 +711,7 @@ func artifactSuccess(call openCall, result map[string]any) *conversationv1.Agent
 }
 
 func planModeSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentPlanModeSuccess {
-	success := &conversationv1.AgentPlanModeSuccess{SettledAt: settledAt(ts)}
+	success := &conversationv1.AgentPlanModeSuccess{SettledAt: settledAt(ts, call.startedAt)}
 	if call.name == "ExitPlanMode" {
 		exited := &conversationv1.AgentPlanModeExited{
 			PlanWasEdited:          boolean(result["planWasEdited"]),
@@ -741,7 +741,7 @@ func planModeSuccess(call openCall, result map[string]any, ts int64) *conversati
 // VERDICT and a re-report's OUTCOME exist only there. The input is the fallback
 // for a vendor that echoed nothing, since the report is otherwise lost.
 func findingsSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentReportFindingsSuccess {
-	success := &conversationv1.AgentReportFindingsSuccess{SettledAt: settledAt(ts)}
+	success := &conversationv1.AgentReportFindingsSuccess{SettledAt: settledAt(ts, call.startedAt)}
 	if level := readEffort(pick(call.input, "effort", "level")); level != nil {
 		success.Level = *level
 	}
@@ -800,7 +800,7 @@ func setFindingOutcome(finding *conversationv1.AgentFinding, outcome string) {
 // blank. What became of the tree comes from the vendor's own `action`, not from
 // a boolean it does not emit.
 func worktreeSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentWorktreeSuccess {
-	success := &conversationv1.AgentWorktreeSuccess{SettledAt: settledAt(ts)}
+	success := &conversationv1.AgentWorktreeSuccess{SettledAt: settledAt(ts, call.startedAt)}
 	path := str(pick(result, "worktreePath", "worktree_path", "path"))
 	branch := optionalString(pick(result, "worktreeBranch", "worktree_branch", "branch"))
 	if call.name == "ExitWorktree" {
@@ -840,7 +840,7 @@ func setWorktreeExitOutcome(exited *conversationv1.AgentWorktreeExited, result m
 }
 
 func cronSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentCronSuccess {
-	success := &conversationv1.AgentCronSuccess{SettledAt: settledAt(ts)}
+	success := &conversationv1.AgentCronSuccess{SettledAt: settledAt(ts, call.startedAt)}
 	switch call.name {
 	case "CronDelete":
 		success.Act = &conversationv1.AgentCronSuccess_Deleted{Deleted: &conversationv1.AgentCronDeleted{
@@ -876,8 +876,8 @@ func cronSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 
 // pushSuccess states WHETHER THE VENDOR DELIVERED, which matters: an agent that
 // believes it notified an absent user, and did not, left them waiting on nothing.
-func pushSuccess(result map[string]any, ts int64) *conversationv1.AgentPushNotificationSuccess {
-	success := &conversationv1.AgentPushNotificationSuccess{SettledAt: settledAt(ts)}
+func pushSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentPushNotificationSuccess {
+	success := &conversationv1.AgentPushNotificationSuccess{SettledAt: settledAt(ts, call.startedAt)}
 	if boolean(pick(result, "pushSent", "push_sent")) || boolean(pick(result, "localSent", "local_sent")) {
 		success.Outcome = &conversationv1.AgentPushNotificationSuccess_Sent{Sent: &conversationv1.AgentPushNotificationSent{
 			PushSent:  boolean(pick(result, "pushSent", "push_sent")),
