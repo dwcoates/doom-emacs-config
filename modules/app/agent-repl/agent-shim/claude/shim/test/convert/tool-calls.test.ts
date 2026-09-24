@@ -63,6 +63,8 @@ function recordsDuring(act: () => unknown): LogRecord[] {
   );
 }
 
+const REGISTRY_FULL =
+  "invariant violated: the in-flight call registry is full; the oldest call is forgotten and its unit can no longer settle on this plane";
 const UNHELD_STREAM_RESULT =
   "a tool result on a stream this plane does not hold (a backgrounded agent's); the file plane settles its unit";
 const UNANNOUNCED_RESULT =
@@ -110,6 +112,46 @@ describe("the registry of calls in flight", () => {
     // Assert: the oldest is forgotten rather than the table growing without bound.
     expect(registry.peek("toolu_0")).toBeUndefined();
     expect(registry.peek(`toolu_${CALL_REGISTRY_CAPACITY}`)).toBeDefined();
+  });
+
+  it("raises reaching the bound as an ERROR-level invariant violation", () => {
+    // Arrange: the table drains at every turn's end, so reaching the bound
+    // means a path held calls and never let them go — and the eviction loses
+    // that card's settle, which is never a quiet warning.
+    const registry = createCallRegistry();
+    for (let index = 0; index < CALL_REGISTRY_CAPACITY; index += 1) {
+      registry.remember(call(`toolu_${index}`));
+    }
+
+    // Act
+    const records = recordsDuring(() => registry.remember(call("toolu_overflow")));
+
+    // Assert
+    expect(records.filter((record) => record.message === REGISTRY_FULL)).toMatchObject([
+      {
+        level: "error",
+        context: {
+          tool_use_id: "toolu_0",
+          tool: "Read",
+          capacity: CALL_REGISTRY_CAPACITY,
+          held: CALL_REGISTRY_CAPACITY,
+        },
+      },
+    ]);
+  });
+
+  it("writes no warning at all when the bound is reached", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    for (let index = 0; index < CALL_REGISTRY_CAPACITY; index += 1) {
+      registry.remember(call(`toolu_${index}`));
+    }
+
+    // Act
+    const records = recordsDuring(() => registry.remember(call("toolu_overflow")));
+
+    // Assert
+    expect(records.filter((record) => record.level === "warn")).toEqual([]);
   });
 
   it("does not evict when a call already held is held again", () => {
