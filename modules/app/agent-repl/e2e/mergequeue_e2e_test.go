@@ -522,12 +522,9 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 // after it captured and ended the displaced turn, and logs
 // `daemon.merge.capture_pause` once it is held. This test used to race the
 // crash against the merge's own next step instead — a scripted conflict whose
-// repair turn was "comfortably" later than the test's reaction — and on a
-// loaded host the merge won: the crash landed while the incumbent was
-// spawning the TARGET's shim for that repair, the orphaned half-started shim
-// took the conversation's lock after the next boot had judged it absent, and
-// that boot's own spawn was refused `conversation_owned`. Held, the merge
-// never reaches git at all, so no conflict is scripted.
+// repair turn it expected to start "comfortably" after the test's reaction —
+// which is a bet on the host's speed, not a guarantee. Held, the merge never
+// reaches git at all, so no conflict is scripted.
 // ---------------------------------------------------------------------------
 
 func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
