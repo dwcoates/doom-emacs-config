@@ -169,11 +169,17 @@ export class PersistenceError extends Error {
  */
 export interface FlushOutcome {
   /**
-   * How many rows this flush watched being dropped, loudly.
+   * How many rows this flush could NOT see land: the rows the store refused as
+   * malformed while it waited, plus — when it returned because the store is in
+   * a persistent failure — every row the writer still HOLDS unacknowledged.
    *
-   * Scoped to the flush and not to the writer's life: the stand-down's exit
-   * code answers "did the writes this flush waited for actually land", and an
-   * outage the session already recovered from is not a dirty exit.
+   * THE WRITER DROPS NOTHING FOR AN OUTAGE; a held row keeps being retried for
+   * as long as the process lives. This count is what the stand-down's exit code
+   * is decided by, because a process that exits with rows still held takes them
+   * with it.
+   *
+   * Scoped to the flush and not to the writer's life: an outage the session
+   * already recovered from is not a dirty exit.
    */
   readonly lostRows: number;
 }
@@ -228,30 +234,55 @@ export interface Persistence {
   /**
    * Write these rows and resolve when the store says they are DURABLE.
    *
-   * Rejects with a {@link PersistenceError} when the batch could not be landed
-   * after the retry schedule. Nothing is committed on a failure, so a caller
-   * that retries duplicates nothing. A keep-alive entry is never stored: it is
-   * dropped at the door, and a batch of nothing else resolves at once.
+   * THE ROWS ARE HELD EITHER WAY. They join the one ordered retry buffer
+   * behind every row produced before them (see {@link Persistence.write}), so
+   * the answer never costs the record a row: a rejection says only that this
+   * caller cannot wait for the ack, never that the rows are gone.
+   *
+   * Rejects with a {@link PersistenceError}: `store_unavailable` the moment the
+   * store is known to be unreachable (the buffer keeps the rows and replays
+   * them, in order, when it answers again), `invalid_request` when the store
+   * refused a row as malformed (logged at ERROR and raised as a
+   * `converter_defect` fault by the writer). A caller must NOT re-queue the rows
+   * on either rejection: the buffer already holds everything that can land.
+    * A keep-alive entry is never stored: it is dropped at the door, and a batch
+    * of nothing else resolves at once.
    */
   writeDurable(entries: PersistEntry[]): Promise<void>;
   /**
-   * Enqueue these rows. Returns at once.
+   * Enqueue these rows. Returns at once, and NEVER DROPS A ROW.
    *
-   * Transient store failures replay silently from the BOUNDED in-memory retry
-   * buffer; an exhausted retry is a LOUD logged drop naming every lost upsert
-   * key, a degraded window, and a `store_unreachable` fault. There is NO spill
-   * to disk, ever. A keep-alive entry is never stored: it is dropped at the
-   * door, before any batch is formed.
+   * Rows land in BOUNDED batches (rows, bytes, and a time budget the row bound
+   * adapts to), in EXACTLY the order they were produced, across every book; a
+   * batch ends at a turn edge (a prompt, an agent terminal), so an edge's ack
+   * never waits on a row produced after it. Transient store failures replay from the
+   * in-memory buffer; a store that stays down past the retry schedule is an
+   * ERROR, a degraded window and a `store_unreachable` fault, and the rows stay
+   * HELD and keep being retried. The buffer is bounded by BACKPRESSURE, not by
+   * eviction: see {@link Persistence.whenWritable}. There is NO spill to disk.
+    * A keep-alive entry is never stored: it is dropped at the door, before any
+    * batch is formed.
    */
   write(entries: PersistEntry[]): void;
   /**
-   * Resolve once every buffered write has been acked or loudly dropped.
+   * Resolve when the writer can take more rows without its backlog growing
+   * past its high-water mark — at once, unless a backlog episode is open.
    *
-   * The outcome carries the LIFETIME lost-row count, because the graceful
-   * stand-down's exit code is decided by it: a stand-down that flushed with
-   * rows still lost has not stood down cleanly, and reporting 0 there would
-   * tell the daemon the session ended in good order when part of the record
-   * never landed.
+   * THIS IS THE BACKPRESSURE. The vendor message loop awaits it before it reads
+   * the next message, so a store that falls behind pauses the one unbounded
+   * producer instead of the buffer evicting what it holds. It resolves once the
+   * backlog drains below its low-water mark.
+   */
+  whenWritable(): Promise<void>;
+  /**
+   * Resolve once every buffered write has been acked, or refused as malformed —
+   * or, when the store is in a PERSISTENT failure (a batch has failed through
+   * the whole retry schedule), as soon as an attempt has declared or confirmed
+   * that failure, counting every row still held.
+   *
+   * The persistent-failure exit is what keeps a stand-down from waiting forever
+   * on a store that is gone; the rows it counts are still held and still
+   * retried, and the count decides the stand-down's exit code.
    */
   flush(): Promise<FlushOutcome>;
   /**
@@ -352,23 +383,85 @@ export interface Persistence {
  * The retry schedule, as constants rather than as behavior buried in a loop.
  *
  * IMPLEMENTATION DETAIL, deliberately overridable: what is contractual is that
- * the buffer is BOUNDED and that exhaustion is loud. The numbers are a shape
- * that absorbs a store restart without absorbing a store that is simply gone.
+ * exhaustion is LOUD and that it loses nothing. On the WRITE half, a batch that
+ * has failed `maxAttempts` times is declared a persistent failure (an ERROR,
+ * with the degraded window and `store_unreachable` fault already standing) and
+ * is then retried every `heldRetryMs` for as long as the process lives.
+ * On the READ half, `maxAttempts` is where a read gives up and raises.
  */
 export interface PersistenceRetryPolicy {
-  /** How many batches may wait at once before the oldest is dropped LOUDLY. */
-  readonly bufferCapacity: number;
-  /** The delay before each attempt after the first, in milliseconds. */
+  /** The delay before each attempt after the first, in milliseconds; the last step repeats. */
   readonly backoffMs: readonly number[];
-  /** How many attempts one batch gets in total, the first included. */
+  /** How many attempts before a failure is declared persistent, the first included. */
   readonly maxAttempts: number;
+  /**
+   * How often a HELD batch is retried once its failure is persistent.
+   *
+   * It bounds how long a store that came back waits for the shim to notice:
+   * the held batch is the head of the one ordered buffer, so nothing lands
+   * until it does. A second is a connect attempt a second against a store that
+   * is gone, and at most a second of extra outage for one that returned.
+   */
+  readonly heldRetryMs: number;
 }
 
-/** The default schedule: five attempts over roughly six seconds, 256 batches deep. */
+/**
+ * The default schedule: five attempts over roughly four seconds, then a held
+ * batch every second.
+ */
 export const DEFAULT_RETRY_POLICY: PersistenceRetryPolicy = {
-  bufferCapacity: 256,
   backoffMs: [50, 200, 800, 3000],
   maxAttempts: 5,
+  heldRetryMs: 1000,
+};
+
+/**
+ * How big one write may be, and how big the backlog may grow before the
+ * vendor stream is paused.
+ *
+ * THE STORE COMMITS AN INTERACTIVE BATCH AS ONE TRANSACTION, so the shim's
+ * batch size IS the store's hold on its one writer: a 494-row interactive batch
+ * held it for 163s (2026-09-23) and everything behind it waited. So a batch is
+ * bounded three ways — rows, payload bytes, and a TIME budget the row bound
+ * adapts to (a batch that overran it halves the next one's row bound; one that
+ * finished well inside it doubles it back toward `maxBatchRows`) — and a batch
+ * always carries at least one row, so a single oversized row still lands.
+ *
+ * The backlog marks are the BACKPRESSURE: at or past either high-water mark the
+ * writer opens a backlog episode (one WARN) and {@link Persistence.whenWritable}
+ * pauses the vendor message loop; the episode closes (one INFO) once the
+ * backlog is at or below BOTH low-water marks.
+ */
+export interface PersistenceBatchPolicy {
+  /** The most rows one WriteBatch carries. */
+  readonly maxBatchRows: number;
+  /** The most payload bytes one WriteBatch carries, unless one row alone is larger. */
+  readonly maxBatchBytes: number;
+  /** How long one WriteBatch may take before the next one's row bound is halved. */
+  readonly batchTimeBudgetMs: number;
+  /** Queued rows at which the backlog episode opens and the vendor stream pauses. */
+  readonly backlogHighWaterRows: number;
+  /** Queued rows at or below which (bytes permitting) the episode closes. */
+  readonly backlogLowWaterRows: number;
+  /** Queued payload bytes at which the backlog episode opens. */
+  readonly backlogHighWaterBytes: number;
+  /** Queued payload bytes at or below which (rows permitting) the episode closes. */
+  readonly backlogLowWaterBytes: number;
+}
+
+/**
+ * The default bounds: the store's own bulk split (64 rows, 1 MiB), a 500ms
+ * budget (64 healthy rows cost ~220ms on the owner's largest database), and a
+ * backlog of 1,024 rows or 16 MiB before the vendor stream is paused.
+ */
+export const DEFAULT_BATCH_POLICY: PersistenceBatchPolicy = {
+  maxBatchRows: 64,
+  maxBatchBytes: 1 << 20,
+  batchTimeBudgetMs: 500,
+  backlogHighWaterRows: 1024,
+  backlogLowWaterRows: 256,
+  backlogHighWaterBytes: 16 << 20,
+  backlogLowWaterBytes: 4 << 20,
 };
 
 /** What {@link createPersistence} needs to exist. */
@@ -385,6 +478,8 @@ export interface PersistenceOptions {
   readonly producer?: string;
   /** The retry schedule. Defaults to {@link DEFAULT_RETRY_POLICY}. */
   readonly retry?: PersistenceRetryPolicy;
+  /** The batch and backlog bounds. Defaults to {@link DEFAULT_BATCH_POLICY}. */
+  readonly batching?: PersistenceBatchPolicy;
   /** The clock, injected so a test does not wait in real time. */
   readonly nowMs: () => number;
   /**
@@ -429,6 +524,9 @@ export function unavailablePersistence(): Persistence {
     write: () => {
       throw refuse("write");
     },
+    // NOTHING IS EVER BUFFERED HERE -- `write` refuses -- so there is no
+    // backlog for a caller to wait out.
+    whenWritable: () => Promise.resolve(),
     flush: () => Promise.resolve({ lostRows: 0 }),
     openAgentPage: () => Promise.reject(refuse("openAgentPage")),
     noteAgentMinted: () => undefined,

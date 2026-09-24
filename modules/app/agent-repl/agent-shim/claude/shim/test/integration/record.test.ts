@@ -9,10 +9,12 @@
  * # The retry story, and why there is no spill
  *
  * A failed WriteBatch commits NOTHING, so a whole-batch retry is correct rather
- * than duplicating. Failures hold in a bounded IN-MEMORY buffer: transient blips
- * absorb silently, and exhausted retries are a LOUD LOGGED DROP — never a shim
- * crash and never a durable spill nobody drains. Graceful stand-down waits for
- * every ack, because exiting with unacknowledged writes is the loud failure.
+ * than duplicating. Failures hold in an IN-MEMORY buffer bounded by pausing the
+ * vendor stream: transient blips absorb silently, and a store that stays down
+ * past the schedule is a LOUD ERROR naming the held keys — never a dropped row,
+ * never a shim crash and never a durable spill nobody drains. Graceful
+ * stand-down waits for every ack, because exiting with unacknowledged writes is
+ * the loud failure.
  */
 import { create } from "@bufbuild/protobuf";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -616,22 +618,21 @@ describe("write ids and absorption", () => {
     stream.close();
   });
 
-  test("exhausted retries drop LOUDLY, naming the lost keys", async () => {
-    // There is NO durable spill: exhausted retries log what was lost and the
-    // shim keeps running. A crash here would lose the live session too.
+  test("an exhausted schedule is a LOUD ERROR naming the held keys, and nothing is dropped", async () => {
+    // There is NO durable spill and NO drop: the held rows are named at ERROR
+    // and the shim keeps running. A crash here would lose the live session too.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
 
     shim.store?.failWrites("down for good");
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
-    const dropped = await shim.log.record(
-      (record) => record.level === "error" && record.context.lost_upsert_keys !== undefined,
+    const held = await shim.log.record(
+      (record) => record.level === "error" && record.context.held_upsert_keys !== undefined,
     );
 
-    expect(Array.isArray(dropped.context.lost_upsert_keys)).toBe(true);
-    expect((dropped.context.lost_upsert_keys as string[]).length).toBeGreaterThan(0);
-    // Still serving: the drop is a report, not a death.
+    expect((held.context.held_upsert_keys as string[]).length).toBeGreaterThan(0);
+    // Still serving: the persistent failure is a report, not a death.
     expect(shim.child.exitCode).toBeNull();
     stream.close();
   });
@@ -663,7 +664,7 @@ describe("write ids and absorption", () => {
     session.close();
   });
 
-  test("a recovered outage closes the window with the dropped count", async () => {
+  test("a recovered outage closes the window with nothing dropped", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const session = openSessionUpdates((options) =>
@@ -673,22 +674,45 @@ describe("write ids and absorption", () => {
     shim.store?.failWrites("down for a while");
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
     await shim.log.record(
-      (record) => record.level === "error" && record.context.lost_upsert_keys !== undefined,
+      (record) => record.level === "error" && record.context.held_upsert_keys !== undefined,
     );
 
     shim.store?.failWrites(null);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
     const closed = await session.until((frame) => {
       const update = sessionUpdate(frame);
       if (update.update.case !== "diagnostics") return false;
-      return update.update.value.degradedWindows.some(
-        (window) =>
-          window.extent.case === "closed" && window.extent.value.droppedCount > 0n,
-      );
+      return update.update.value.degradedWindows.some((window) => window.extent.case === "closed");
     });
 
-    expect(sessionUpdate(closed).update.case).toBe("diagnostics");
+    const update = sessionUpdate(closed);
+    const window =
+      update.update.case === "diagnostics"
+        ? update.update.value.degradedWindows.find((candidate) => candidate.extent.case === "closed")
+        : undefined;
+    expect(window?.extent.case === "closed" ? window.extent.value.droppedCount : undefined).toBe(0n);
     session.close();
+  });
+
+  test("the rows a persistent outage held all land once the store answers", async () => {
+    // The owner's rule: dropping a store write is data loss. The turn's prompt
+    // and its terminal are both still written after the outage.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    shim.store?.failWrites("down for a while");
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.log.record(
+      (record) => record.level === "error" && record.context.held_upsert_keys !== undefined,
+    );
+
+    shim.store?.failWrites(null);
+    await shim.store?.entryLanded((entry) => {
+      const line = pageLineOf(entry);
+      const frame = line?.agentItem?.item.case === "agentFrame" ? line.agentItem.item.value : undefined;
+      return frame?.result.case === "success" || frame?.result.case === "failure";
+    });
+
+    const accepted = (shim.store?.writeBatches() ?? []).filter((batch) => batch.accepted).map((batch) => batch.request);
+    expect(writtenKeys(accepted)).toContain("prompt:t1");
   });
 });
 

@@ -44,6 +44,16 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   every defer and `t.Cleanup`, and before this a day of such runs filled the
   disk and left daemons spinning. The root is under `/tmp` and short, so the
   103-byte socket path budget holds without a `TMPDIR=/tmp` override.
+- **A daemon's teardown FREEZES its process group before killing it**
+  (`harness.Daemon.Kill`): SIGSTOP to the group, the kernel's own report that
+  the leader is stopped, then SIGKILL. A bare `kill(-pgid, SIGKILL)` is walked
+  member by member and can be preempted between them, so under load the
+  daemon outlived its in-flight git (or a shim still in its group between fork
+  and setpgid) and logged that death at ERROR, failing the warning sweep on a
+  record the teardown itself caused. Never add a signal path to the harness
+  that lets a member of the daemon's group die while the daemon can run.
+  Reclaim tests make their dead roots in a private `runRootSpace`, never in
+  `hostRunRoots`, which every other run on the host reclaims.
 - **The suite bounds its own load**: `harness.DefaultDaemonSlots` (8,
   `AGENT_REPL_ITEST_DAEMON_SLOTS`) top-level tests hold a live daemon at once,
   whatever `-p`/`-parallel` the run was invoked with, because
@@ -375,15 +385,24 @@ mints nothing, and crons, tasks and workflows are never in the set.
 ### A footer jump names the entry THE FEED drew
 
 Every detached-work row the footer publishes states a `FooterJump`: the
-entry's FeedId, or `unresolved` with the reason (`not_drawn`,
-`no_feed_entry`). The FeedId is never composed by the footer. The feed
-resolver announces each subagent bubble's and shell head's FeedId the moment it
-first draws it, and again when it changes (`feed.Deps.EntryPlaced`, wired in
+entry's FeedId, or `unresolved(not_drawn)` until the feed has announced one
+(`no_feed_entry` is retired: every kind draws an entry). The FeedId is never
+composed by the footer. The feed resolver announces each subagent bubble's,
+shell head's and Monitor call's tool-call card's FeedId the moment it first
+draws it, and again when it changes (`feed.Deps.EntryPlaced`, wired in
 `graph.go` to `footer.OnEntryPlaced`). A subagent of a subagent lives on its
 parent's sub-feed, and only the feed knows that. The call runs under the feed's
 lock and takes the footer's, which is the same feed-then-footer order the fault
 path already takes. The footer never calls back into the feed. Each row's
 resolution change is recorded as `daemon.footer.jump_resolution`.
+
+A MONITOR's entry is its call's ordinary tool-call card (owner ruling,
+2026-09-23), drawn in its owner's feed at the call's position and keyed by the
+monitor's unit, which is also its detached-work id. The monitor is detached from
+birth, so its detachment announcement continues the card as it stands (never a
+shell head), its `ended` and `failure` arms restate the call so a replay draws
+the card alone, and a card still running when the live set drops the monitor is
+settled there (`settleMonitorsLeftLive`, `daemon.feed.monitor_left_live`).
 
 ## History is replayed ONLY on a workspace open or a transcript select
 
