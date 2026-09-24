@@ -4,7 +4,7 @@
  * FOREGROUND: what the tool result says, because that is the only place a
  * shell's cause of backgrounding, its spill and its image-ness are ever stated.
  *
- * DETACHED: what the SPOOL says, because `AgentBashUpdate` is structurally
+ * DETACHED: what the SPOOL says, because `AgentBashTail` is structurally
  * detach-only and every byte of it comes from the sidecar tailing that file.
  * A detached test that only checked messages would pass against a mock that
  * wrote nothing at all.
