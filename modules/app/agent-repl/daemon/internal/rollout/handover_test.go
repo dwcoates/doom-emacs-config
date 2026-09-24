@@ -933,3 +933,34 @@ func TestASpawnThatStartedNothingIsNotStopped(t *testing.T) {
 		t.Fatalf("a handover that started nothing still holds the slot")
 	}
 }
+
+// TestAHandoverRemovesAStaleManifestBeforeItsSuccessorBoots pins that a
+// joining successor can never read an EARLIER bounce's manifest as this
+// handover's intent: it starts looking the moment it boots, before the
+// incumbent has written anything.
+func TestAHandoverRemovesAStaleManifestBeforeItsSuccessorBoots(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.participants.Set(ws, Participants{Host: true})
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: ids.InstanceID("daemon-long-gone"), WrittenAt: instant,
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+	var presentAtSpawn atomic.Bool
+	h.spawner.onSpawn = func() {
+		_, err := os.Stat(h.c.deps.IntentManifest)
+		presentAtSpawn.Store(err == nil)
+	}
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	if presentAtSpawn.Load() {
+		t.Fatalf("the stale intent manifest was still on disk when the successor was spawned")
+	}
+}

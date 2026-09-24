@@ -117,8 +117,17 @@ func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, in
 		// The process ran and answered with a non-zero code: that is a
 		// classified, non-error outcome, per the package's RAN-AND-FAILED
 		// ruling.
+		//
+		// THE CALLER OWNS THE LEVEL, so this record is DEBUG. Whether a
+		// non-zero exit is a failure depends on what was asked: `launchctl
+		// print` of a service that has left its domain exits 113 as the
+		// ordinary "stopped" answer, while a build step's non-zero exit is an
+		// ERROR. Every caller logs its own judgement of the code (the deploy's
+		// builder and services, the merge gate), so a WARN here was a second,
+		// context-free verdict that was wrong whenever the exit was expected
+		// (2026-09-24, a deploy's sidecar stop).
 		code := exitErr.ExitCode()
-		r.log.Warn("daemon.scriptrunner.run", "script exited non-zero", dlog.Context{
+		r.log.Debug("daemon.scriptrunner.run", "script exited non-zero; its caller judges the exit", dlog.Context{
 			"script": argv[0], "dir": dir, "exit_code": code,
 		})
 		return output, code, nil

@@ -17,15 +17,18 @@ import (
 // reach it — and the arm is WHY it cannot be served, which is the only thing
 // an investigator needs from the column.
 const (
-	kindPageLine       = "page_line"
-	kindKeepalive      = "keepalive"
-	kindVendorSpecific = "vendor_specific"
-	kindUnknown        = "unknown"
-	kindUnparsed       = "unparsed"
-	kindBash           = "bash"
-	kindWorkflow       = "workflow"
-	kindSessionUpdate  = "session_update"
-	kindDetachedWork   = "detached_work"
+	kindPageLine = "page_line"
+	// kindKeepaliveRetired is NO LONGER WRITTEN: the arm is refused
+	// (SiteKeepaliveRetired). It names the rows stored before the rule, which
+	// are inert and which a real record may supersede (applyIdentityPolicy).
+	kindKeepaliveRetired = "keepalive"
+	kindVendorSpecific   = "vendor_specific"
+	kindUnknown          = "unknown"
+	kindUnparsed         = "unparsed"
+	kindBash             = "bash"
+	kindWorkflow         = "workflow"
+	kindSessionUpdate    = "session_update"
+	kindDetachedWork     = "detached_work"
 )
 
 // Plane column values. The observing plane is a producer-side fact the store is
@@ -430,10 +433,16 @@ func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, e
 	}
 	switch arm := item.GetUnservedItem().(type) {
 	case *storev1.StoreUnservedItem_Keepalive:
-		if arm.Keepalive.GetItem() == nil {
-			return "", invalidFieldf(entryField(index, "agent_update.unserved_item.keepalive"), "entries[%d].agent_update.unserved_item.keepalive sets no `item` arm", index)
-		}
-		return kindKeepalive, nil
+		// NOTHING OF A KEEP-ALIVE IS STORED, ON EITHER PLANE (2026-09-23), so
+		// the arm is refused rather than routed. Held rows named real work: the
+		// shim that predated the rule tagged a backgrounded subagent's frames
+		// arriving during a keep-alive turn, and the sidecar's page line for the
+		// same upsert_key was then refused as an identity change, parking the
+		// subagent's whole transcript. A producer still minting the arm is a
+		// defect to surface, never a row to keep.
+		return "", invalidSitef(SiteKeepaliveRetired,
+			entryField(index, "agent_update.unserved_item.keepalive"),
+			"entries[%d].agent_update.unserved_item.keepalive is retired — nothing of a keep-alive is stored, on either plane", index)
 	case *storev1.StoreUnservedItem_VendorSpecific:
 		// THE VERBATIM RECORD IS THE ONLY THING RESIDUE IS FOR. These arms exist
 		// so nothing unconvertible is dropped — a row saying only "there was

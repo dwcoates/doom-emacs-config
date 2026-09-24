@@ -199,13 +199,25 @@ environment. Every flag is optional.
    adopting a workspace is the moment it starts writing that workspace's rows,
    and the incumbent stopped writing them at its transfer notice, so the
    one-writer invariant holds across the swap;
-8. the component graph, then `boot.Sequence.Run`: CLOSE every open workspace
+8. the component graph, then `boot.Sequence.Run`: BIND every registered
+   workspace whose directory exists on the per-workspace resolvers
+   (`workspace.Verbs.BindViews`, which writes nothing, so a joining successor
+   runs it too) BEFORE any step can raise or close a fault, because a footer,
+   topbar or hold-tray record for an unbound workspace is an invariant
+   violation (stated once per workspace at ERROR `daemon.<resolver>.unbound_workspace`);
+   a manifest entry for a workspace the registry no longer holds or whose
+   directory is gone opens no fault at all, only an INFO record; CLOSE every open workspace
    whose directory is gone (a row naming a path that is not there is a tab
    Emacs cannot serve; counted as `missing_dir_closed`, and a stat that does
    not say "not exist" is never read as gone), adopt the shims whose
    workspace lock is still held (never kill-and-restart, and EVERY survivor is
    dialled concurrently so one adoption bound covers the whole boot), reconcile the intent
-   manifest (all four dispositions persisted as faults), restore the holds
+   manifest (all four dispositions persisted as faults; a manifest is CONSUMED
+   ONCE — removed as soon as every disposition it names is durably recorded,
+   kept only while a record failed or is deferred behind a read-only handle,
+   and an incumbent removes any leftover before it spawns a successor, so no
+   later boot and no joining successor ever reads an earlier bounce's intent),
+   restore the holds
    all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
    transaction each (an adopted workspace's in-flight turns are re-opened by its
    sessionwatcher instead), recover the in-flight merges, and — for a successor
@@ -663,8 +675,13 @@ first is silent (`internal/resolve/feed/finalanswer.go`, `turnended.go`).
    a substatus is legal only under a status the fault claims, and neither
    claimable status would be true here.
 
-A CONTEXT-CUT DIRECTIVE and a turn that drew no prose at all are excluded from
-(2): neither ever had an answer to lose.
+A CONTEXT-CUT DIRECTIVE, a turn that drew no prose at all, and a turn whose
+only drawn prose is a VENDOR-SYNTHESIZED NOTICE (`AgentResponseSuccess.authorship
+= synthesized_notice`, e.g. "API Error: Can't reach the API server", which the
+feed already draws in the notice register) are excluded from (2): none ever had
+an answer to lose. The settled whole decides a block's authorship, so a block
+re-settled as the model's prose counts again; model prose beside a notice still
+raises.
 
 **THE ALIASING RULE.** One prose block can reach the resolver under two
 divergent activity ids (the two store planes disagreeing on

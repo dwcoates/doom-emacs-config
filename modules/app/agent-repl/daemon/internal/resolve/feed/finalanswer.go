@@ -282,6 +282,17 @@ func (r *resolver) turnDrewProse(s *wsState, turn string) (string, bool) {
 		if fold.turn != turn || fold.markdown == "" || s.directiveUnits[unit] {
 			continue
 		}
+		if fold.notice {
+			// A VENDOR NOTICE IS NOT AN ANSWER. The vendor wrote it in the
+			// shape of prose (a turn cut off by an unreachable API ends on
+			// "API Error: …" and nothing else), the feed already draws it as a
+			// notice, and a turn left with nothing else never had an answer to
+			// lose.
+			r.logger(s.id).Debug("daemon.feed.final_answer_notice_not_prose",
+				"a vendor-synthesized notice drawn in this turn is not answer prose; it owes no final answer",
+				dlog.Context{"turn": turn, "unit": unit})
+			continue
+		}
 		candidates = append(candidates, unit)
 	}
 	if len(candidates) == 0 {

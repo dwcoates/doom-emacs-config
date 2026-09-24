@@ -5872,3 +5872,134 @@ restores them afterwards."
             (should (file-exists-p generation))
             (should (file-exists-p base)))
         (delete-directory dir t)))))
+
+(defmacro agent-repl-test--with-roster-dirs (dirs &rest body)
+  "Run BODY with the last roster push naming exactly DIRS, closed or not."
+  (declare (indent 1))
+  `(let ((agent-repl-roster-view '(:pushed t)))
+     (cl-letf (((symbol-function 'agent-repl-roster-walk)
+                (lambda (_roster)
+                  (mapcar (lambda (dir) (list :row (list :workspace (list :workspace (list :dir dir)))))
+                          ,dirs))))
+       ,@body)))
+
+(defun agent-repl-test--plant-emacs-log-link (workspace target)
+  "Plant WORKSPACE's canonical `emacs.log' link naming TARGET."
+  (let ((canonical (agent-repl--workspace-emacs-log-path workspace)))
+    (make-directory (file-name-directory canonical) t)
+    (make-symbolic-link target canonical)
+    canonical))
+
+(ert-deftest agent-repl-test-log-sweep-spares-a-target-a-closed-workspace-s-link-names ()
+  "A closed workspace has no tab; the roster's directory is what names its link."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((dir (make-temp-file "agent-repl-sweep-closed-" t))
+           (workspace (make-temp-file "agent-repl-closed-ws-" t))
+           (target (expand-file-name "agent-repl-emacs-closed.log" dir))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (agent-repl-test--with-roster-dirs (list workspace)
+            (write-region "x" nil target nil 'silent)
+            (set-file-times target (time-subtract (current-time) (* 3 86400)))
+            (agent-repl-test--plant-emacs-log-link workspace target)
+            ;; Act
+            (agent-repl--sweep-orphan-log-targets dir)
+            ;; Assert
+            (should (file-exists-p target)))
+        (delete-directory dir t)
+        (delete-directory workspace t)))))
+
+(ert-deftest agent-repl-test-a-dangling-owned-log-link-is-retired ()
+  "A roster workspace's link naming a removed target of ours is removed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((workspace (make-temp-file "agent-repl-dangling-ws-" t))
+           (gone (expand-file-name "agent-repl-emacs-gone.log" temporary-file-directory))
+           (agent-repl--dangling-log-links-checked (make-hash-table :test #'equal)))
+      (unwind-protect
+          (agent-repl-test--with-roster-dirs (list workspace)
+            (let ((canonical (agent-repl-test--plant-emacs-log-link workspace gone)))
+              ;; Act
+              (agent-repl--retire-dangling-emacs-log-links nil)
+              ;; Assert
+              (should-not (file-symlink-p canonical))))
+        (delete-directory workspace t)))))
+
+(ert-deftest agent-repl-test-a-live-log-link-is-kept ()
+  "A link whose target exists is left exactly as it is."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((workspace (make-temp-file "agent-repl-live-ws-" t))
+           (target (make-temp-file "agent-repl-emacs-live-" nil ".log"))
+           (agent-repl--dangling-log-links-checked (make-hash-table :test #'equal)))
+      (unwind-protect
+          (agent-repl-test--with-roster-dirs (list workspace)
+            (let ((canonical (agent-repl-test--plant-emacs-log-link workspace target)))
+              ;; Act
+              (agent-repl--retire-dangling-emacs-log-links nil)
+              ;; Assert
+              (should (equal (file-symlink-p canonical) target))))
+        (delete-file target)
+        (delete-directory workspace t)))))
+
+(ert-deftest agent-repl-test-a-dangling-foreign-log-link-is-kept ()
+  "A link naming a file this module could not have minted is the workspace's."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((workspace (make-temp-file "agent-repl-foreign-ws-" t))
+           (foreign (expand-file-name "somebody-elses-gone.log" temporary-file-directory))
+           (agent-repl--dangling-log-links-checked (make-hash-table :test #'equal)))
+      (unwind-protect
+          (agent-repl-test--with-roster-dirs (list workspace)
+            (let ((canonical (agent-repl-test--plant-emacs-log-link workspace foreign)))
+              ;; Act
+              (agent-repl--retire-dangling-emacs-log-links nil)
+              ;; Assert
+              (should (equal (file-symlink-p canonical) foreign))))
+        (delete-directory workspace t)))))
+
+(ert-deftest agent-repl-test-the-orphan-sweep-waits-for-the-first-roster-push ()
+  "With no roster yet, scheduling arms no timer and defers to the first push."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster-view nil)
+          (agent-repl-roster-update-functions nil)
+          (armed 0))
+      (cl-letf (((symbol-function 'run-with-idle-timer)
+                 (lambda (&rest _) (setq armed (1+ armed)) 'timer)))
+        ;; Act
+        (agent-repl-schedule-orphan-log-sweep)
+        ;; Assert
+        (should (equal armed 0))
+        (should (memq #'agent-repl--arm-orphan-log-sweep-on-first-roster
+                      agent-repl-roster-update-functions))))))
+
+(ert-deftest agent-repl-test-the-orphan-sweep-arms-at-once-when-a-roster-is-held ()
+  "With a roster already pushed, scheduling arms the idle timer immediately."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster-view '(:pushed t))
+          (agent-repl-roster-update-functions nil)
+          (armed 0))
+      (cl-letf (((symbol-function 'run-with-idle-timer)
+                 (lambda (&rest _) (setq armed (1+ armed)) 'timer)))
+        ;; Act
+        (agent-repl-schedule-orphan-log-sweep)
+        ;; Assert
+        (should (equal armed 1))))))
+
+(ert-deftest agent-repl-test-the-first-roster-push-arms-the-deferred-sweep-once ()
+  "The deferred arming runs on the first push and removes itself."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster-update-functions
+           (list #'agent-repl--arm-orphan-log-sweep-on-first-roster))
+          (armed 0))
+      (cl-letf (((symbol-function 'run-with-idle-timer)
+                 (lambda (&rest _) (setq armed (1+ armed)) 'timer)))
+        ;; Act
+        (run-hook-with-args 'agent-repl-roster-update-functions '(:pushed t))
+        (run-hook-with-args 'agent-repl-roster-update-functions '(:pushed t))
+        ;; Assert
+        (should (equal armed 1))))))

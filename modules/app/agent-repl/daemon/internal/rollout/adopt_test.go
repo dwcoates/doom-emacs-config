@@ -1301,3 +1301,34 @@ func TestAFailedAdoptionMayBeRunAgainByALaterCaller(t *testing.T) {
 		t.Fatal("a failed adoption left the latch closed; no later caller could run it again")
 	}
 }
+
+// TestAJoiningDaemonRetiresTheManifestItArmedFrom pins the successor's half of
+// consuming a manifest: once it has armed from it and recorded what it names,
+// no later boot of the same state root reads it again.
+func TestAJoiningDaemonRetiresTheManifestItArmedFrom(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	arm(t, h, ws, Participants{Host: true})
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after the joining daemon armed from it")
+	}
+}
+
+func TestAJoiningDaemonKeepsTheRendezvousItArmedAfterRetiringTheManifest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	arm(t, h, ws, Participants{Host: true})
+
+	// Assert
+	if got := h.c.rendezvousSize(); got != 1 {
+		t.Fatalf("armed workspaces = %d, want the one the retired manifest named", got)
+	}
+}

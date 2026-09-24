@@ -1457,3 +1457,29 @@ func TestAOneRootMachineStillOffersThatOneOption(t *testing.T) {
 		t.Fatalf("options = %d on a one-root machine, want 1", got)
 	}
 }
+
+// TestAFactForAnUnboundWorkspaceStatesTheViolationAtError pins that the
+// violation is an ERROR, stated once, rather than context on quieter records.
+func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestSurfaces()
+	r, err := New(testColors(), log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act
+	r.SetParked("ws-unbound", true)
+	r.SetParked("ws-unbound", false)
+
+	// Assert
+	n := 0
+	for _, rec := range log.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.topbar.unbound_workspace" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("unbound-workspace ERROR records = %d, want 1", n)
+	}
+}

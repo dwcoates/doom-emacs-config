@@ -1551,3 +1551,50 @@ func containsWorkspace(list []wsm.Workspace, want ids.WorkspaceID) bool {
 	}
 	return false
 }
+
+// TestTheBootBindsTheViewsBeforeItReconcilesTheManifest pins the order that
+// keeps a reconciliation fault off an unbound footer: every disposition used to
+// reach the footer before PublishRegistry had bound a single directory.
+func TestTheBootBindsTheViewsBeforeItReconcilesTheManifest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if !h.rollout.boundAtReconcile {
+		t.Fatalf("the manifest was reconciled before the views were bound")
+	}
+}
+
+func TestAViewBindingFailureFailsTheBoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.bindErr = errors.New("the log sink could not be opened")
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, h.bindErr) {
+		t.Fatalf("Run = %v, want the binding failure", err)
+	}
+}
+
+func TestNewRefusesASequenceWithNoViewBinder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.deps
+	deps.BindViews = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a sequence that cannot bind the views")
+	}
+}

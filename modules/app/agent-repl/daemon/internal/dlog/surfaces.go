@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"claude-repld/internal/dirpath"
 )
 
 // scanInterval is how often the periodic cap scan runs. The daemon's own
@@ -58,6 +60,17 @@ type surfaces struct {
 	// and AttachDir drops it once a worktree is created there again. A sink
 	// of a detached directory creates nothing inside it -- see DetachDir.
 	detached map[string]struct{}
+	// keys maps each cleaned SPELLING of a workspace directory to the sink key
+	// it resolves to: dirpath.Canonical's answer, the on-disk spelling with
+	// its case. Two spellings of one directory used to be two entries sharing
+	// ONE canonical link on disk, so each one's records were appended to the
+	// target the other had installed (realtest 7, 2026-09-24,
+	// attribution-conflict). The canonicalization reads the directory tree, so
+	// it is paid once per spelling and remembered here.
+	keys map[string]string
+	// canonical is dirpath.Canonical, injectable so a test can model a
+	// case-folding volume.
+	canonical func(string) (string, error)
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -114,6 +127,8 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 		workspaces: make(map[string]*workspaceSinks),
 		targets:    make(map[string]string),
 		detached:   make(map[string]struct{}),
+		keys:       make(map[string]string),
+		canonical:  dirpath.Canonical,
 		scanEvery:  scanInterval,
 		stop:       make(chan struct{}),
 		scanDone:   make(chan struct{}),
@@ -376,11 +391,12 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 // links and their targets stay on disk: a reader keeps resolving them, and a
 // later runtime makes its own target rather than trusting this one.
 func (s *surfaces) Evict(dir string) error {
-	clean, err := cleanDir(dir)
+	s.mu.Lock()
+	clean, err := s.sinkKeyLocked(dir)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
-	s.mu.Lock()
 	ws, ok := s.workspaces[clean]
 	delete(s.workspaces, clean)
 	s.mu.Unlock()
@@ -406,11 +422,12 @@ func (s *surfaces) Evict(dir string) error {
 // open holds, so a link is either created before the removal starts — and is
 // removed with the directory — or never.
 func (s *surfaces) DetachDir(dir string) error {
-	clean, err := cleanDir(dir)
+	s.mu.Lock()
+	clean, err := s.sinkKeyLocked(dir)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
-	s.mu.Lock()
 	s.detached[clean] = struct{}{}
 	ws, open := s.workspaces[clean]
 	sinks := 0
@@ -433,11 +450,12 @@ func (s *surfaces) DetachDir(dir string) error {
 // entry left from the removed workspace is dropped with its descriptors: the
 // directory now belongs to a workspace that must resolve afresh.
 func (s *surfaces) AttachDir(dir string) error {
-	clean, err := cleanDir(dir)
+	s.mu.Lock()
+	clean, err := s.sinkKeyLocked(dir)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
-	s.mu.Lock()
 	_, was := s.detached[clean]
 	delete(s.detached, clean)
 	var stale *workspaceSinks
@@ -491,14 +509,14 @@ func (s *surfaces) Close() error {
 
 // resolve finds (or opens) one named sink of one workspace.
 func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
-	clean, err := cleanDir(dir)
-	if err != nil {
-		return nil, nil, err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil, nil, errSurfacesClosed
+	}
+	clean, err := s.sinkKeyLocked(dir)
+	if err != nil {
+		return nil, nil, err
 	}
 	ws, ok := s.workspaces[clean]
 	_, detached := s.detached[clean]
@@ -738,6 +756,27 @@ func closeWorkspace(ws *workspaceSinks) error {
 		}
 	}
 	return firstErr
+}
+
+// sinkKeyLocked answers the sink key of one spelling of a workspace
+// directory: the on-disk spelling dirpath.Canonical reads, remembered per
+// spelling. A spelling it cannot canonicalize is refused, never keyed as
+// given: keyed as given, it is exactly the second entry over one directory
+// this key exists to make unrepresentable.
+func (s *surfaces) sinkKeyLocked(dir string) (string, error) {
+	clean, err := cleanDir(dir)
+	if err != nil {
+		return "", err
+	}
+	if key, ok := s.keys[clean]; ok {
+		return key, nil
+	}
+	key, err := s.canonical(clean)
+	if err != nil {
+		return "", fmt.Errorf("resolve the sink key of workspace directory %q: %w", clean, err)
+	}
+	s.keys[clean] = key
+	return key, nil
 }
 
 // cleanDir is the one spelling of a workspace directory used as a map key and

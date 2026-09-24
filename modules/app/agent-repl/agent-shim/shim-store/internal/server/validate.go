@@ -59,6 +59,7 @@ const (
 	SitePageBookMismatch      = db.SitePageBookMismatch
 	SiteResidueRawUnset       = db.SiteResidueRawUnset
 	SiteBashTailOverCap       = db.SiteBashTailOverCap
+	SiteKeepaliveRetired      = db.SiteKeepaliveRetired
 	SiteUnknownAgent          = db.SiteUnknownAgent
 	SiteSessionEmpty          = db.SiteSessionEmpty
 	SiteWriteClassUnset       = db.SiteWriteClassUnset

@@ -106,11 +106,20 @@ func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 	if s.log != nil {
 		return s.log
 	}
-	return r.log.Global().With(dlog.Context{
+	log := r.log.Global().With(dlog.Context{
 		"workspace_id":        string(ws),
 		"invariant_violation": "topbar resolver frame for a workspace with no bound directory",
 		"remediation":         "call SetWorkspaceDir at registration",
 	})
+	// THE VIOLATION IS AN ERROR, stated ONCE per workspace. Every record after
+	// it keeps its own level and carries the violation as context; before
+	// this, the only trace was that context on records logged at INFO and
+	// DEBUG, so a level sweep never saw the invariant break.
+	if !s.unboundReported {
+		s.unboundReported = true
+		log.Error("daemon.topbar.unbound_workspace", "a topbar record arrived for a workspace whose directory was never bound", nil)
+	}
+	return log
 }
 
 // mutate runs one accumulation change under the lock and republishes the whole

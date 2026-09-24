@@ -30,14 +30,16 @@ const AGENT = create(conversationv1.AgentIdSchema, { value: "agent-1" });
 /** The one subagent this session has announced. */
 const SUBAGENT = create(conversationv1.AgentIdSchema, { value: "agent-sub" });
 
-function gateWith(): { gate: PermissionGate; written: PersistEntry[]; modes: conversationv1.AgentPermissionMode[] } {
+function gateWith(
+  keepalive: (agentId: conversationv1.AgentId) => boolean = () => false,
+): { gate: PermissionGate; written: PersistEntry[]; modes: conversationv1.AgentPermissionMode[] } {
   const written: PersistEntry[] = [];
   const modes: conversationv1.AgentPermissionMode[] = [];
   const gate = new PermissionGate({
     mainAgentId: () => AGENT,
     agentFor: (vendorAgentId) => (vendorAgentId === SUBAGENT.value ? SUBAGENT : undefined),
     persist: (entries) => written.push(...entries),
-    keepalive: () => false,
+    keepalive,
     nowMs: () => 1000,
     onPermissionModeSet: (mode) => modes.push(mode),
   });
@@ -776,6 +778,31 @@ describe("whose book an ask lands on", () => {
 
     // Assert.
     expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+  });
+
+  it("leaves a backgrounded subagent's ask untagged while the main agent's keep-alive runs", async () => {
+    // Arrange: the keep-alive is the running vendor turn, and it did not spawn
+    // the subagent that asks.
+    const { gate, written } = gateWith((agentId) => agentId.value === AGENT.value);
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: SUBAGENT.value }));
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.keepalive).toBe(false);
+  });
+
+  it("tags an ask the keep-alive's own turn raised", async () => {
+    // Arrange.
+    const { gate, written } = gateWith((agentId) => agentId.value === AGENT.value);
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions());
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.keepalive).toBe(true);
   });
 
   it("leaves a main-agent ask on the main agent's book", async () => {
