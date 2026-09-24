@@ -427,6 +427,14 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			r.endCompactionAtTerminal(ws, s, *turn)
 			if FailureBlocks(failure) {
 				s.blocked = r.blockFor(failure)
+				// A QUERY-DIED TERMINAL IS THE DEATH ITSELF, so it stands the
+				// dead-query line as the session's push does: the two arrive by
+				// independent channels in no fixed order, and the strip must not
+				// depend on which came first. A line the push already stood keeps
+				// its own instant.
+				if _, died := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); died && s.queryDied == nil {
+					s.queryDied = &standing{text: deadQueryLine, at: r.opts.clock.Now()}
+				}
 				return
 			}
 			if interrupted, ok := success.GetOutcome().(*conversationv1.AgentSuccess_Interrupted); ok {
@@ -500,6 +508,10 @@ func (r *resolver) blockFor(failure *conversationv1.AgentFailure) *blockedState 
 		*conversationv1.AgentFailure_RapidRefillBreaker,
 		*conversationv1.AgentFailure_BudgetExhausted:
 		return &blockedState{kind: blockedUsageLimit, at: now}
+	case *conversationv1.AgentFailure_QueryDied:
+		// The same block the session's query_died push stands, whichever of
+		// the two statements of the death lands first.
+		return &blockedState{kind: blockedQueryDied, at: now}
 	default:
 		return &blockedState{kind: blockedVendorError, at: now}
 	}
