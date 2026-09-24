@@ -19,12 +19,11 @@ import { forgetOwnTurns, rememberOwnTurn } from "../../src/composer/own-turns.js
 import {
   createFeedController,
   isBubbleRow,
-  SELECTED_RESPONSE_ATTRIBUTE,
-  SELECTED_RESPONSE_CLASS,
   type BubbleLike,
   type FeedController,
 } from "../../src/feed/feed-view.js";
 import { defaultBubbleBody, type RowContext } from "../../src/feed/renderers.js";
+import { SELECTED_ENTRY_CLASS, SELECTED_RESPONSE_ATTRIBUTE } from "../../src/feed/selected-entry.js";
 import type { Overscan } from "../../src/feed/overscan.js";
 import { drawFeedSimpleToolCall } from "../../src/feed/cards/tool-call.js";
 import { onDiscard } from "../../src/feed/ticking.js";
@@ -1504,7 +1503,31 @@ describe("createFeedController: the response selection", () => {
     controller.applySelection(sel({ selected: "r1", active: true }));
     // Assert
     const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
-    expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(true);
+    expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
+  });
+
+  it("puts the selection mark on the card, never on the row's full-width wrapper", () => {
+    // Arrange
+    const { controller, host } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true }));
+    // Assert
+    const row = host.querySelector('[data-feed-row="r1"]');
+    expect(row?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
+  });
+
+  it("carries the selection mark onto a card a push replaced", () => {
+    // Arrange — a tool card's push draws a new card element in the old one's place.
+    const { controller, host } = selecting();
+    controller.upsert(toolCallRow("t1", "running"));
+    controller.applySelection(sel({ selected: "t1", active: true }));
+    const before = host.querySelector('[data-feed-row="t1"]')?.firstElementChild;
+    // Act
+    controller.upsert(toolCallRow("t1", "returned"));
+    // Assert — a different element, still marked.
+    const after = host.querySelector('[data-feed-row="t1"]')?.firstElementChild;
+    expect([after === before, after?.classList.contains(SELECTED_ENTRY_CLASS)]).toEqual([false, true]);
   });
 
   it("marks the selected row's chrome so the feed's own record names it", () => {
@@ -1528,7 +1551,7 @@ describe("createFeedController: the response selection", () => {
     controller.applySelection(sel({ selected: "r2", active: true }));
     // Assert
     const first = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
-    expect(first?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(false);
+    expect(first?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
   });
 
   it("clears the blue from every bubble when the selection is cleared", () => {
@@ -1540,7 +1563,7 @@ describe("createFeedController: the response selection", () => {
     controller.applySelection(sel({ active: false }));
     // Assert
     const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
-    expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(false);
+    expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
   });
 
   it("hands an active selection to the tail owner as selectionMoved", () => {
@@ -1670,7 +1693,7 @@ describe("createFeedController: the response selection", () => {
     controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
     // Assert
     const bubble = host.querySelector('[data-feed-row="r1"] .bubble.assistant');
-    expect(bubble?.classList.contains(SELECTED_RESPONSE_CLASS)).toBe(true);
+    expect(bubble?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
   });
 });
 
