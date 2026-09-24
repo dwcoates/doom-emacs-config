@@ -391,26 +391,17 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 			dlog.Context{"rendezvous_satisfied": false})
 		c.log.Debug(operation, "an expected participant has not called yet; waiting for the rendezvous",
 			merge(fields, outstanding))
-		// EVERY EXPECTED PARTICIPANT SUCCEEDS TOGETHER. The callers arrive
-		// concurrently and the one that arrives first has not failed: it
-		// waits for the one that completes the rendezvous. `not_yet_adopted`
-		// on an ADOPT call means only that this caller's own context expired
-		// first, which is the retry-with-backoff case.
-		select {
-		case <-done:
-			c.mu.Lock()
-			failed := e.failed
-			c.mu.Unlock()
-			if failed != nil {
-				return failed
-			}
-			c.log.Debug(operation, "the rendezvous completed while this caller waited", fields)
-			return nil
-		case <-ctx.Done():
-			c.log.Debug(operation, "the caller gave up before the rendezvous completed", fields)
-			return ErrNotYetAdopted
-		}
+		return c.awaitRendezvous(ctx, e, done, operation, fields)
 	}
+	if e.adopting {
+		// THE ADOPTION IS ALREADY RUNNING on another caller's behalf. It is
+		// run exactly once per rendezvous; this caller shares its outcome.
+		done := e.done
+		c.mu.Unlock()
+		c.log.Debug(operation, "the rendezvous is satisfied and its adoption is already running; waiting on it", fields)
+		return c.awaitRendezvous(ctx, e, done, operation, fields)
+	}
+	e.adopting = true
 	c.mu.Unlock()
 	c.logTransition(operation, ws, "participants_called", before, after,
 		dlog.Context{"rendezvous_satisfied": true})
@@ -445,12 +436,42 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	err := c.adopt(context.WithoutCancel(ctx), ws, operation)
 	c.mu.Lock()
 	e.settle(err)
+	// A FAILED ADOPTION MAY BE TRIED AGAIN by a later caller, as before: only
+	// a CONCURRENT second run is what the latch forbids.
+	if err != nil {
+		e.adopting = false
+	}
 	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	c.log.Info(operation, "every expected participant called; the workspace is adopted", fields)
 	return nil
+}
+
+// awaitRendezvous waits for a rendezvous's one adoption to settle, and shares
+// its outcome with this caller.
+//
+// EVERY EXPECTED PARTICIPANT SUCCEEDS TOGETHER. The callers arrive
+// concurrently and the one that arrives first has not failed: it waits for the
+// one that completes the rendezvous. `not_yet_adopted` on an ADOPT call means
+// only that this caller's own context expired first, which is the
+// retry-with-backoff case.
+func (c *controller) awaitRendezvous(ctx context.Context, e *entry, done <-chan struct{}, operation string, fields dlog.Context) error {
+	select {
+	case <-done:
+		c.mu.Lock()
+		failed := e.failed
+		c.mu.Unlock()
+		if failed != nil {
+			return failed
+		}
+		c.log.Debug(operation, "the rendezvous completed while this caller waited", fields)
+		return nil
+	case <-ctx.Done():
+		c.log.Debug(operation, "the caller gave up before the rendezvous completed", fields)
+		return ErrNotYetAdopted
+	}
 }
 
 // adopt completes one workspace's adoption on the joining daemon: claim the
