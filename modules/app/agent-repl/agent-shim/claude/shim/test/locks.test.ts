@@ -444,6 +444,74 @@ describe("the claim protocol over a synthetic holder", () => {
     ]);
   });
 
+  it("refuses a holder that never answers as lock_holder_unavailable naming the timeout, and kills it", async () => {
+    // Arrange: a holder that spawned but neither answers nor exits.
+    vi.useFakeTimers();
+    try {
+      const { locks, child } = await withFakeChild();
+      const claim = locks.acquireSessionLock("s_silent").catch((err: unknown) => err);
+
+      // Act.
+      vi.advanceTimersByTime(locks.HOLDER_ANSWER_TIMEOUT_MS);
+      const refusal = await claim;
+
+      // Assert.
+      expect({
+        typed: refusal instanceof locks.LockHolderUnavailableError,
+        osError: (refusal as InstanceType<typeof locks.LockHolderUnavailableError>).osError,
+        killed: child.killed,
+      }).toEqual({ typed: true, osError: textContaining("within 250 ms"), killed: ["SIGKILL"] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records a holder that never answers at ERROR", async () => {
+    // Arrange.
+    vi.useFakeTimers();
+    try {
+      const { locks } = await withFakeChild();
+      const claim = locks.acquireSessionLock("s_silent_logged").catch(() => undefined);
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- read .mock.calls only
+      const mirror = vi.mocked(process.stderr.write);
+      const before = mirror.mock.calls.length;
+
+      // Act.
+      vi.advanceTimersByTime(locks.HOLDER_ANSWER_TIMEOUT_MS);
+      await claim;
+
+      // Assert.
+      const recorded = mirror.mock.calls
+        .slice(before)
+        .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+      expect(recorded).toContainEqual(
+        expect.objectContaining({ level: "error", message: textContaining("timed out") }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a holder that answers just inside the bound held, past the bound too", async () => {
+    // Arrange.
+    vi.useFakeTimers();
+    try {
+      const { locks, child } = await withFakeChild();
+      const claim = locks.acquireSessionLock("s_prompt");
+      vi.advanceTimersByTime(locks.HOLDER_ANSWER_TIMEOUT_MS - 1);
+
+      // Act: the answer lands inside the bound, then the bound passes.
+      child.stdout.emit("data", "locked\n");
+      const release = await claim;
+      vi.advanceTimersByTime(locks.HOLDER_ANSWER_TIMEOUT_MS);
+
+      // Assert: held, and never killed by the deadline.
+      expect({ release: typeof release, killed: child.killed }).toEqual({ release: "function", killed: [] });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports the signal when the holder was killed before taking the lock", async () => {
     // Arrange.
     const { locks, child } = await withFakeChild();

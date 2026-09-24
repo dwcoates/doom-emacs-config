@@ -94,6 +94,20 @@ const HELD_EXIT_CODE = 3;
 const READY_LINE = "locked";
 
 /**
+ * How long a spawned holder has to answer `locked` (or exit) before the claim
+ * is refused.
+ *
+ * `shim-lock` takes `LOCK_EX|LOCK_NB`, so it never waits on the kernel: a
+ * healthy answer is one exec plus one flock. Measured spawn-to-`locked` on the
+ * deployed binary (darwin, 2026-09-24): 300 serial claims max 4.3 ms (p50
+ * 1.9 ms, first exec of a fresh copy included); 32 concurrent max 16.0 ms; 128
+ * concurrent (a spawn storm far past any real fleet) max 59.6 ms. The bound is
+ * ~4x that worst observed case. Without it a holder that spawned but neither
+ * answered nor exited would hang StartSession forever.
+ */
+export const HOLDER_ANSWER_TIMEOUT_MS = 250;
+
+/**
  * The environment variable that names the lock-holder binary.
  *
  * It exists for the suites and worlds that build their own `shim-lock` rather
@@ -281,8 +295,18 @@ function acquireExclusiveLock(claim: {
     const settle = (act: () => void): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(answerDeadline);
       act();
     };
+
+    // A HOLDER THAT NEITHER ANSWERS NOR EXITS is refused, and killed so it
+    // cannot take the lock after this claim has already been refused.
+    const answerDeadline = setTimeout(() => {
+      settle(() => {
+        child.kill("SIGKILL");
+        reject(holderSilent(claim, binary, file));
+      });
+    }, HOLDER_ANSWER_TIMEOUT_MS);
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -374,6 +398,30 @@ function acquireExclusiveLock(claim: {
       });
     });
   });
+}
+
+/**
+ * A spawned holder that never answered inside {@link HOLDER_ANSWER_TIMEOUT_MS}:
+ * recorded at ERROR and refused as `lock_holder_unavailable`, because nobody is
+ * known to own the conversation and this shim's holder is broken.
+ */
+function holderSilent(
+  claim: { kind: string; context: Record<string, unknown> },
+  binary: string,
+  file: string,
+): LockHolderUnavailableError {
+  const osError = `the lock holder gave no ${JSON.stringify(READY_LINE)} answer within ${HOLDER_ANSWER_TIMEOUT_MS} ms and was killed`;
+  // error: a defect, because a healthy holder answers in milliseconds and this
+  // one neither answered nor exited, so no session can start on it.
+  LOGGER.error(
+    { ...claim.context, lock_path: file, lock_binary: binary, os_error: osError, timeout_ms: HOLDER_ANSWER_TIMEOUT_MS },
+    `the ${claim.kind} lock holder ${binary} timed out: ${osError}`,
+  );
+  return new LockHolderUnavailableError(
+    binary,
+    osError,
+    `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} timed out: ${osError}`,
+  );
 }
 
 /**
