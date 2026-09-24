@@ -13,7 +13,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
 | `fix/e2e-load-flakes` | `~/.config/doom-worktrees/e2e-load-flakes` | Root-cause the e2e flakes `TestWebappLayerRoster` (ClientLog/lease ERRORs during a drain) and `TestClearRotatesIdentity` (the separation row timed out; `final_answer_unresolved`). | `a3cc32b3e6611f35f` | 22:55 |
-| `fix/restate-rest-and-old-row-level` | `~/.config/doom-worktrees/restate-rest-and-old-row-level` | Pre-contract unrestated rows log INFO (a new defect stays ERROR). Subagent and artifact failures restate; every settle carries `started_at`. | `aa95f06fc74ba5cf4` | 23:05 |
 | `fix/shim-open-call-leak` | `~/.config/doom-worktrees/shim-open-call-leak` | The shim's in-flight tool registry leaks (full at 512; an interrupt cut 493 phantom calls). Settle and remove every call on its settling path; reaching the bound is an ERROR. | `a90cb0143868c171b` | 23:55 |
 | `fix/handover-leak-and-dead-shim-freeness` | `~/.config/doom-worktrees/handover-leak-and-dead-shim` | A failed handover stops its successor (a single-successor slot); a dead shim's death drives the bounce registry. | `a0fae6cd54268b49c` | 00:40 |
 
@@ -30,6 +29,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Settles restate the rest: subagent failures (prompt, created agent), artifact failures (the start's act), and `AgentActivitySettledAt.started_at` for runtime. `AgentActivity.contract` stamps bound producers; unstamped old rows that restate nothing log INFO `settle_predates_contract`, while stamped ones stay ERROR (`fix/restate-rest-and-old-row-level`, all suites green, e2e with Emacs tests skipped).
 - DAEMON-OWNED DEPLOYS plus the keep-alive hold removed (`integrate/deploys-and-keepalive` → `b14afc9b4`; test-all green, e2e twice). `deploy-all.sh` is gone; `claude-repld deploy [-force]`; one deploy per landing. BOOTSTRAP (one-time, owner): AGENTS.md "ONE-TIME: moving the live runtime onto the daemon-owned deploy". `ensure-deps` never installs through the shared node-store.
 - A Monitor call draws the ordinary tool-call card in its owner's feed; its footer row centers and rings it; the monitor's settles restate its call (`no_feed_entry` reserved) (`feat/monitor-feed-card`, all suites green).
 - Shell output is stored as one rolling tail at the shared 16 KiB cap (`AgentBashTail`; `update` retired); live and replay draw the same body; old delta rows are skipped at INFO (`fix/shell-output-tail-only`).
