@@ -435,6 +435,92 @@ func TestCreateWorktreeFailurePropagatesTheGitEvidence(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeReattachesTheDirectoryToItsLogSinks(t *testing.T) {
+	// Arrange: a path an earlier removal detached belongs to the new workspace.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.CreateWorktree(context.Background(), "/repo", "feature/one", "main", "/wt"); err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	// Assert.
+	if got := strings.Join(surfaces.dirEvents, ","); got != "attach /wt" {
+		t.Fatalf("log sink directory events = %q, want the new worktree attached", got)
+	}
+}
+
+func TestCreateWorktreeThatFailsAttachesNothing(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: a branch named 'feature/one' already exists\n"))
+
+	// Act.
+	_ = git.CreateWorktree(context.Background(), "/repo", "feature/one", "main", "/wt")
+
+	// Assert.
+	if len(surfaces.dirEvents) != 0 {
+		t.Fatalf("log sink directory events = %v, want none for a worktree that was never created", surfaces.dirEvents)
+	}
+}
+
+func TestCreateWorktreeAttachFailureIsReturnedAndLogged(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	surfaces.dirFailure = errors.New("attach refused")
+	newFakeGit(t, ok(""))
+
+	// Act.
+	err := git.CreateWorktree(context.Background(), "/repo", "feature/one", "main", "/wt")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "attach refused") {
+		t.Fatalf("CreateWorktree = %v, want the attach failure", err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.create_worktree"); !found {
+		t.Fatal("the attach failure was not recorded at ERROR")
+	}
+}
+
+func TestRemoveWorktreeDetachesTheDirectoryBeforeGitRuns(t *testing.T) {
+	// Arrange: a sink opened mid-removal must not re-create the directory.
+	git, surfaces := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir}, ok("", "worktree", "prune"))
+
+	// Act.
+	if err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+
+	// Assert.
+	if got := strings.Join(surfaces.dirEvents, ","); got != "detach "+worktreeDir {
+		t.Fatalf("log sink directory events = %q, want the worktree detached", got)
+	}
+}
+
+func TestRemoveWorktreeDetachFailureRemovesNothing(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	surfaces.dirFailure = errors.New("detach refused")
+	worktreeDir := existingDir(t, "wt")
+	fake := newFakeGit(t, ok("", "worktree", "prune"))
+
+	// Act.
+	err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "detach refused") {
+		t.Fatalf("RemoveWorktree = %v, want the detach failure", err)
+	}
+	fake.assertNever("worktree", "remove")
+	fake.assertNever("worktree", "prune")
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.remove_worktree"); !found {
+		t.Fatal("the detach failure was not recorded at ERROR")
+	}
+}
+
 func TestRemoveWorktreeForcesTheRemovalThenPrunes(t *testing.T) {
 	// Arrange: --force is what a tree parked mid-merge needs; the prune keeps
 	// git's administrative record from outliving the directory.

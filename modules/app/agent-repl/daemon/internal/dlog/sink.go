@@ -61,7 +61,10 @@ type sink struct {
 	// workspaceDir and workspaceID attribute every failure this sink reports.
 	workspaceDir string
 	workspaceID  string
-	// link is the canonical symlink path inside the workspace.
+	// link is the canonical symlink path inside the workspace. EMPTY for a
+	// sink of a DETACHED workspace directory (Surfaces.DetachDir): the daemon
+	// is removing that directory, so this sink never creates, re-points or
+	// reads anything inside it and writes its target under logsDir alone.
 	link string
 	// target is the daemon-owned file the link names.
 	target string
@@ -104,19 +107,25 @@ type sink struct {
 // more. Long-lived sinks append on open and rotate only at the byte cap
 // (logging-contract.md), so a bounce loop cannot evict history merely by
 // restarting, and that rule now holds for the workspace sinks as well.
-func openSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
-	return openSinkSized(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups)
+//
+// A DETACHED directory (`linked` false) gets no canonical link at all: nothing
+// is created inside it, no standing link is read out of it, and the target is
+// the one this runtime remembers or a freshly minted one. See Surfaces.DetachDir.
+func openSink(logsDir, workspaceDir, workspaceID, name, target string, linked bool) (*sink, error) {
+	return openSinkSized(logsDir, workspaceDir, workspaceID, name, target, linked, CapBytes, logging.DefaultBackups)
 }
 
 // openSinkSized is the test seam for the generation cap. Production always
 // supplies the contract's 64 MiB cap and shared generation count through
 // openSink.
-func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capBytes int64, backups int) (*sink, error) {
+func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, linked bool, capBytes int64, backups int) (*sink, error) {
 	linkDir := filepath.Join(workspaceDir, linkDirRel)
-	if err := os.MkdirAll(linkDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
+	if linked {
+		if err := os.MkdirAll(linkDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
+		}
 	}
-	if target == "" {
+	if target == "" && linked {
 		standing, err := standingTarget(logsDir, linkDir, name, capBytes)
 		if err != nil {
 			return nil, err
@@ -145,18 +154,31 @@ func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capB
 		name:         name,
 		workspaceDir: workspaceDir,
 		workspaceID:  workspaceID,
-		link:         filepath.Join(linkDir, name+".log"),
 		target:       target,
 		mintedTarget: mintedTarget,
 		file:         file,
 		cap:          capBytes,
 		size:         info.Size(),
 	}
+	if !linked {
+		return s, nil
+	}
+	s.link = filepath.Join(linkDir, name+".log")
 	if err := replaceLink(s.link, target); err != nil {
 		file.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// detach stops this sink from touching its workspace directory: the canonical
+// link is forgotten, so a rotation neither verifies nor re-points it. The
+// target and the descriptor are untouched, so every later record still lands
+// in the same file.
+func (s *sink) detach() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.link = ""
 }
 
 // standingTarget answers the daemon-owned target the workspace's canonical
@@ -425,6 +447,10 @@ func (s *sink) repointAfterRollLocked() error {
 		s.poisonLocked(fmt.Errorf("set fresh log target %q permissions after rotation: %w", s.target, err))
 		return s.poison
 	}
+	if s.link == "" {
+		// A detached directory's sink has no link to re-point.
+		return nil
+	}
 	if err := replaceLink(s.link, s.target); err != nil {
 		s.poisonLocked(fmt.Errorf("re-point canonical link after rotating %q: %w", s.target, err))
 		return s.poison
@@ -433,6 +459,11 @@ func (s *sink) repointAfterRollLocked() error {
 }
 
 func (s *sink) verifyLinkLocked(operation string) error {
+	if s.link == "" {
+		// A detached directory's sink owns no link, so there is nothing a
+		// workspace could have displaced.
+		return nil
+	}
 	dest, err := os.Readlink(s.link)
 	if err != nil {
 		s.poisonLocked(fmt.Errorf("read canonical link %q during %s: %w", s.link, operation, err))

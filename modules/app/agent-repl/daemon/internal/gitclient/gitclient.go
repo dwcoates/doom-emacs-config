@@ -132,9 +132,20 @@ func (c *client) ResolveRef(ctx context.Context, repoDir, ref string) (string, e
 // One command does both, so there is no window in which the branch exists
 // without its tree.
 func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error {
-	_, err := c.run(ctx, "daemon.gitclient.create_worktree", repoDir,
-		"worktree", "add", "-b", branch, worktreeDir, baseRef)
-	return err
+	const operation = "daemon.gitclient.create_worktree"
+	if _, err := c.run(ctx, operation, repoDir,
+		"worktree", "add", "-b", branch, worktreeDir, baseRef); err != nil {
+		return err
+	}
+	// A WORKTREE AT A PATH A REMOVAL DETACHED IS A NEW WORKSPACE'S: its log
+	// sinks link into it again (see RemoveWorktree).
+	if err := c.log.AttachDir(worktreeDir); err != nil {
+		c.log.Global().Error(operation, "the new worktree could not be re-attached to its log sinks", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "cause": err.Error(),
+		})
+		return fmt.Errorf("gitclient: attach the log sinks of %s: %w", worktreeDir, err)
+	}
+	return nil
 }
 
 // RemoveWorktree removes a worktree and leaves its branch alone.
@@ -149,6 +160,18 @@ func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, w
 // into after it logged loud failures for directories that were already gone.
 func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error {
 	const operation = "daemon.gitclient.remove_worktree"
+
+	// THE LOG SINKS LET GO OF THE DIRECTORY BEFORE ANYTHING REMOVES IT. A
+	// workspace sink opened mid-removal re-created `<worktree>/.claude/emacs`
+	// with its canonical link, and the postcondition below then found the
+	// worktree "still present after removal" (TestHandoverTransfersAtFreeness,
+	// 2026-09-23). Detached first, no sink creates anything inside it again.
+	if err := c.log.DetachDir(worktreeDir); err != nil {
+		c.log.Global().Error(operation, "the worktree could not be detached from its log sinks; it is not removed", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "cause": err.Error(),
+		})
+		return fmt.Errorf("gitclient: detach the log sinks of %s: %w", worktreeDir, err)
+	}
 
 	present, err := pathPresent(worktreeDir)
 	if err != nil {

@@ -496,6 +496,16 @@ MIGRATION: a target an older daemon minted under that hash is APPENDED TO
 where the canonical link still names it (the standing-target rule); nothing is
 renamed and no history is orphaned. Only a new target gets the minted name.
 
+A WORKTREE THE DAEMON REMOVES IS DETACHED FROM ITS SINKS FIRST.
+`gitclient.RemoveWorktree` calls `Surfaces.DetachDir` before `git worktree
+remove`, and `CreateWorktree` calls `AttachDir` after `git worktree add`. A
+detached directory's sinks create, re-point and read nothing inside it; their
+records keep landing in the same targets under `<state>/logs/`. Before this, a
+late sidecar record opening the merged workspace's first `sidecar.log` re-created
+`<worktree>/.claude/emacs` one instant after the removal, and the teardown's
+postcondition logged "still present after removal" at ERROR. The mark is taken
+under the mutex every sink open holds, so the race is closed, not narrowed.
+
 `daemon.log`, `webapp.log`, and `sidecar.log` rotate synchronously at 64 MiB
 through `agentrepl/logging.OpenRotating`, retain `logging.DefaultBackups`
 generations, and atomically refresh their canonical symlink after each roll.
