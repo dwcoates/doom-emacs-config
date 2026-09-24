@@ -505,6 +505,9 @@ func hasOperation(records []dlog.Record, operation string) bool {
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s *stubSurfaces) Evict(_ string) error { return nil }
 
+// Retire satisfies dlog.Surfaces; the health checks never retire a directory.
+func (s *stubSurfaces) Retire(_ string) error { return nil }
+
 // TestOpenFaultLevelsAForgottenWorkspaceAtDebug is the middle layer of the
 // shim-death cascade. A fault about a workspace the registry no longer holds
 // has nowhere to stand, and that is an ordinary end for one: this reporter
