@@ -1490,8 +1490,9 @@ func TestChangedPathsKeepsAPathWithUnusualBytesUnquoted(t *testing.T) {
 
 // --- IsClean / CurrentBranch -------------------------------------------
 
-func TestIsCleanAsksForThePorcelainStatus(t *testing.T) {
-	// Arrange.
+func TestIsCleanAsksForThePorcelainStatusWithoutOptionalLocks(t *testing.T) {
+	// Arrange: a probe must not refresh and write the index, which would take
+	// index.lock against the tree's user and bump the index's mtime.
 	git, _ := newTestClient(t)
 	fake := newFakeGit(t, ok(""))
 
@@ -1501,7 +1502,7 @@ func TestIsCleanAsksForThePorcelainStatus(t *testing.T) {
 	}
 
 	// Assert.
-	fake.assertSubject(0, "status", "--porcelain")
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain")
 }
 
 func TestIsCleanIsTrueForAnEmptyStatus(t *testing.T) {
