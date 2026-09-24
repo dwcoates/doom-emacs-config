@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"claude-repld/internal/clock"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
@@ -94,7 +95,7 @@ type Deps struct {
 	// for (the fleet's in-memory map). It is read once per sweep.
 	LiveSessions func() []ids.WorkspaceID
 	// Clock is the reaper's view of time.
-	Clock Clock
+	Clock clock.Clock
 	// LockPath is the kernel lock one sweep holds for its whole run, so two
 	// daemons (an incumbent and its handover successor) never sweep at once.
 	LockPath string
