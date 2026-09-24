@@ -126,7 +126,7 @@ export const monitorConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the monitor never armed");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentMonitorFailureSchema, { failure: failureOf(outcome) }),
+        value: create(conversationv1.AgentMonitorFailureSchema, { failure: failureOf(call, outcome) }),
       });
     }
     LOGGER.logVerbose(

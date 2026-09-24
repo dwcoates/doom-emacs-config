@@ -8,7 +8,9 @@
  * double-counted across a response's units, an exempt tool leaking a frame.
  */
 import { writeSync } from "node:fs";
+import { toJson } from "@bufbuild/protobuf";
 import { describe, expect, it, vi } from "vitest";
+import { conversationv1 } from "../../../src/proto.js";
 import {
   EXEMPT_TOOLS,
   ENGINE_OWNED_TOOLS,
@@ -369,5 +371,63 @@ describe("the shim never invents a context cut", () => {
       arm.includes("context_cut"),
     );
     expect(compacted).toEqual(["agent_update.context_cut.compacted"]);
+  });
+});
+
+/**
+ * The unit kinds whose START ARM CARRIES NO INSTANT, so there is no start for
+ * their settle to restate: a prose or reasoning block is announced empty.
+ */
+const STARTLESS_KINDS: ReadonlySet<string> = new Set(["thinking", "response"]);
+
+/** Every settle instant under a value, by the JSON path it sits at. */
+function settleInstants(value: unknown, path: string, out: [string, Record<string, unknown>][]): void {
+  if (Array.isArray(value)) {
+    value.forEach((element, index) => settleInstants(element, `${path}[${index}]`, out));
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "settledAt" && typeof child === "object" && child !== null) {
+      out.push([`${path}.${key}`, child as Record<string, unknown>]);
+    }
+    settleInstants(child, `${path}.${key}`, out);
+  }
+}
+
+describe("every activity stands alone on a real capture", () => {
+  it("the captures actually carry settle instants on started units", () => {
+    let checked = 0;
+    for (const scenario of SCENARIOS) {
+      for (const activity of foldScenario(scenario).entries.map(activityOf)) {
+        if (activity === undefined || STARTLESS_KINDS.has(activity.item.case ?? "")) continue;
+        const instants: [string, Record<string, unknown>][] = [];
+        settleInstants(toJson(conversationv1.AgentActivitySchema, activity), "", instants);
+        checked += instants.length;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it.each(SCENARIOS)("%s stamps every activity with the stands-alone contract", (scenario) => {
+    const unstamped = foldScenario(scenario)
+      .entries.map(activityOf)
+      .filter((activity) => activity !== undefined)
+      .filter((activity) => activity.contract !== conversationv1.AgentActivityContract.SETTLES_STAND_ALONE)
+      .map((activity) => activity.activityId?.value);
+    expect(unstamped).toEqual([]);
+  });
+
+  it.each(SCENARIOS)("%s restates the start on every settle instant a started unit carries", (scenario) => {
+    const bare: string[] = [];
+    for (const activity of foldScenario(scenario).entries.map(activityOf)) {
+      if (activity === undefined || STARTLESS_KINDS.has(activity.item.case ?? "")) continue;
+      const instants: [string, Record<string, unknown>][] = [];
+      settleInstants(toJson(conversationv1.AgentActivitySchema, activity), activity.item.case ?? "", instants);
+      for (const [path, instant] of instants) {
+        if (instant.startedAt === undefined) bare.push(`${activity.activityId?.value ?? ""} ${path}`);
+      }
+    }
+    expect(bare).toEqual([]);
   });
 });
