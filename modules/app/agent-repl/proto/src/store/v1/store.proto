@@ -150,15 +150,20 @@ message PlaneStream {}
 // Read by the sidecar from what the vendor wrote to disk.
 message PlaneFile {}
 
-// A fact the store holds but never serves. THE ARM IS WHY: material with no
-// book (a keep-alive), or material the producer could not convert at all.
-// The residue arms are what keep eager conversion at the edge a reversible
-// bet — nothing unconvertible is dropped; it lands durably and whole.
+// A fact the store holds but never serves. THE ARM IS WHY: material the
+// producer could not convert at all. The residue arms are what keep eager
+// conversion at the edge a reversible bet — nothing unconvertible is dropped;
+// it lands durably and whole.
 message StoreUnservedItem {
+  // Tag 1 and the name `keepalive` are RETIRED and must not be revived.
+  // Nothing of a keep-alive is stored on either plane (2026-09-23), so no
+  // producer writes the arm, and the store refuses a write that still carries
+  // it (`keepalive_retired`). Rows stored under it before the rule keep the
+  // kind text `keepalive` and may be superseded by a real record; a frame
+  // blob holding the retired arm decodes with the arm as an unknown field.
+  reserved 1;
+  reserved "keepalive";
   oneof unserved_item {
-    // A well-formed conversation fact with no book: keep-alive turns and
-    // their kin. Never returned by any page; excluded from every read.
-    StoreAgentItem keepalive = 1;
     // Something one vendor does that no vendor-agnostic feed can show.
     // UNDERSTOOD, unlike the two arms below: we know what it is and have
     // decided not to carry it. The follow-up is a CONVERTER, if it turns out

@@ -2,12 +2,14 @@ package feed
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -144,8 +146,13 @@ func withExit(outcome toolOutcome, exit *frontendv1.FeedShellExit) toolOutcome {
 // failureText is the account a failed call gives, drawn in the same forms a
 // successful one is.
 func failureText(failure *conversationv1.AgentToolFailure) string {
+	return contentText(failure.GetContent())
+}
+
+// contentText is a tool's returned text blocks, joined in order.
+func contentText(content *conversationv1.ToolResultContent) string {
 	var parts []string
-	for _, block := range failure.GetContent().GetBlocks() {
+	for _, block := range content.GetBlocks() {
 		if text, ok := block.GetBlock().(*conversationv1.ToolResultContentBlock_Text); ok {
 			parts = append(parts, text.Text.GetText())
 		}
@@ -163,19 +170,27 @@ func failureText(failure *conversationv1.AgentToolFailure) string {
 // text block carries a word. Dropping it silently, which is what a text-only
 // read did, left the card with an empty body and no sign anything was lost.
 func (r *resolver) failureForm(s *wsState, failure *conversationv1.AgentToolFailure) returnedForm {
-	if text := failureText(failure); text != "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "text := failureText(failure); text != \"\""})
-		return textForm(text)
-	}
-	return r.failureImageForm(s, failure)
+	return r.contentForm(s, failure.GetContent(), true)
 }
 
-// failureImageForm draws the FIRST image a wordless failure returned, through
-// the same resolver and the same shared block a prompt's image is drawn with.
-// An image the daemon cannot resolve into a src is recorded LOUDLY and draws
-// no body, rather than carrying a src that renders broken on every client.
-func (r *resolver) failureImageForm(s *wsState, failure *conversationv1.AgentToolFailure) returnedForm {
-	for _, block := range failure.GetContent().GetBlocks() {
+// contentForm is the form a tool's returned blocks are DRAWN in, by the rule
+// failureForm states: the text whenever any block carries a word, else the
+// first image, else nothing. `failed` says which settle the blocks answered,
+// for the record an unresolvable image leaves.
+func (r *resolver) contentForm(s *wsState, content *conversationv1.ToolResultContent, failed bool) returnedForm {
+	if text := contentText(content); text != "" {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "text := contentText(content); text != \"\""})
+		return textForm(text)
+	}
+	return r.contentImageForm(s, content, failed)
+}
+
+// contentImageForm draws the FIRST image wordless blocks returned, through the
+// same resolver and the same shared block a prompt's image is drawn with. An
+// image the daemon cannot resolve into a src is recorded LOUDLY and draws no
+// body, rather than carrying a src that renders broken on every client.
+func (r *resolver) contentImageForm(s *wsState, content *conversationv1.ToolResultContent, failed bool) returnedForm {
+	for _, block := range content.GetBlocks() {
 		image, ok := block.GetBlock().(*conversationv1.ToolResultContentBlock_Image)
 		if !ok {
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
@@ -183,9 +198,15 @@ func (r *resolver) failureImageForm(s *wsState, failure *conversationv1.AgentToo
 		}
 		src, alt, err := r.resolveImage(image.Image)
 		if err != nil {
-			r.logger(s.id).Warn("daemon.feed.tool_failure_image_unresolved",
-				"a failed tool answered with an image that resolves to no drawable src; the card draws no output body",
-				dlog.Context{"media_type": image.Image.GetMediaType(), "cause": err.Error()})
+			if failed {
+				r.logger(s.id).Warn("daemon.feed.tool_failure_image_unresolved",
+					"a failed tool answered with an image that resolves to no drawable src; the card draws no output body",
+					dlog.Context{"media_type": image.Image.GetMediaType(), "cause": err.Error()})
+			} else {
+				r.logger(s.id).Warn("daemon.feed.tool_result_image_unresolved",
+					"a tool returned an image that resolves to no drawable src; the card draws no output body",
+					dlog.Context{"media_type": image.Image.GetMediaType(), "cause": err.Error()})
+			}
 			return nil
 		}
 		return imageForm(&frontendv1.FeedImageBlock{Src: src, Alt: alt})
@@ -1062,6 +1083,96 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 		return row, nil
 	}
 	return nil, errNotARow
+}
+
+// ---- MCP ----
+
+// drawMcpToolCall draws an MCP server's tool as the ORDINARY tool card: the
+// tool as the agent named it in the head, its arguments as the input line, and
+// what it returned (or how it failed) as the output. Nothing here knows any one
+// server's tool: the arguments are untyped, so the line is their JSON.
+func (r *resolver) drawMcpToolCall(s *wsState, at placement, act *conversationv1.AgentActivity, call *conversationv1.AgentMcpToolCall) (*frontendv1.FeedRow, error) {
+	unitID := act.GetActivityId().GetValue()
+	u := s.unit(unitID)
+
+	switch state := call.GetResult().(type) {
+	case *conversationv1.AgentMcpToolCall_Start:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Start"})
+		u.startHeld = true
+		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
+		input, err := mcpInputLine(state.Start.GetArguments())
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		name := state.Start.GetTool().GetName()
+		if u.denied {
+			return r.toolRow(s, at, unitID, name, deniedOutcome()), nil
+		}
+		return r.toolRow(s, at, unitID, name, runningOutcome(u)), nil
+	case *conversationv1.AgentMcpToolCall_Progress:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Progress"})
+		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
+		if u.name == "" {
+			// A beat names no tool, and no frame of this unit has drawn one:
+			// there is no head to draw the card under yet.
+			return nil, errNotARow
+		}
+		return r.toolRow(s, at, unitID, u.name, runningOutcome(u)), nil
+	case *conversationv1.AgentMcpToolCall_Success:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Success"})
+		name, err := r.restatedMcpCall(s, act, u, state.Success.GetTool(), state.Success.GetArguments())
+		if err != nil {
+			return nil, err
+		}
+		return r.toolRow(s, at, unitID, name,
+			r.settledOutcome(s, act, u, "mcp_tool_call", true, r.contentForm(s, state.Success.GetContent(), false),
+				state.Success.GetSettledAt())), nil
+	case *conversationv1.AgentMcpToolCall_Failure:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMcpToolCall", "branch": "case *conversationv1.AgentMcpToolCall_Failure"})
+		name, err := r.restatedMcpCall(s, act, u, state.Failure.GetTool(), state.Failure.GetArguments())
+		if err != nil {
+			return nil, err
+		}
+		return r.toolRow(s, at, unitID, name,
+			r.settledOutcome(s, act, u, "mcp_tool_call", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
+	}
+	return nil, errNotARow
+}
+
+// restatedMcpCall answers the head a settled MCP frame draws, and folds the
+// restated arguments into the unit's input line. The tool's name is what the
+// settle must restate (restatedOrHeld); arguments a settle does not carry keep
+// the line the start drew.
+func (r *resolver) restatedMcpCall(s *wsState, act *conversationv1.AgentActivity, u *unitState, tool *conversationv1.AgentMcpTool, args *structpb.Struct) (string, error) {
+	name, err := r.restatedOrHeld(s, act, u, "mcp_tool_call", tool.GetName(), u.name)
+	if err != nil {
+		return "", err
+	}
+	if args != nil {
+		input, err := mcpInputLine(args)
+		if err != nil {
+			return "", err
+		}
+		u.input = input
+	}
+	return name, nil
+}
+
+// mcpInputLine is an MCP call's input line: its arguments as compact JSON, keys
+// sorted, drawn verbatim (the card caps and folds a long line). No arguments
+// draw an empty line. structpb spells a non-finite number by its name; an
+// encoding failure is still an error the sink records, and no card is drawn.
+func mcpInputLine(args *structpb.Struct) (string, error) {
+	if len(args.GetFields()) == 0 {
+		return "", nil
+	}
+	line, err := json.Marshal(args.AsMap())
+	if err != nil {
+		return "", fmt.Errorf("feed: an MCP call's arguments do not encode as JSON: %w", err)
+	}
+	return string(line), nil
 }
 
 // linkInput makes a card's input line a hyperlink.

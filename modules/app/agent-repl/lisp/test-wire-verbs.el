@@ -1611,16 +1611,24 @@ it carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-open-workspace-error
                     (agent-repl-test-wire-verbs--parse
-                     "{\"lockHolderUnavailable\":{\"binary\":\"/b/shim-lock\",\"osError\":\"spawn ENOENT\"}}"))
+                     "{\"lockHolderUnavailable\":{\"failure\":{\"binary\":\"/b/shim-lock\",\"exited\":{\"code\":1}}}}"))
                    '(:cause (:arm :lock-holder-unavailable
-                             :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+                             :value (:failure (:binary "/b/shim-lock"
+                                               :how (:arm :exited :value (:code 1 :stderr ""))))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-open-error-lock-holder-unavailable-empty-fields ()
-  "Omitted `binary' and `osError' decode as empty strings, never as missing keys."
+(ert-deftest agent-repl-test-wire-verbs-open-error-lock-holder-unavailable-without-failure-is-a-breach ()
+  "A lock_holder_unavailable arm that says nothing of the failure is a breach."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-open-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"lockHolderUnavailable\":{}}"))
-                   '(:cause (:arm :lock-holder-unavailable :value (:binary "" :os-error "")))))))
+    (should-error (agent-repl-wire-decode-open-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"lockHolderUnavailable\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-lock-holder-unavailable-retired-field-is-a-breach ()
+  "The retired `osError' field is unknown now, never silently dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-open-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"lockHolderUnavailable\":{\"osError\":\"x\"}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-open-error-unset-cause-is-a-breach ()
   "OpenWorkspaceError with no arm set says nothing actionable, so it is a

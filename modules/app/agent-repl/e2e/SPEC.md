@@ -1036,10 +1036,12 @@ One test per remaining golden, as below.
 79. **HookFailed** — `hook-failed`.
 80. **HookCancelled** — `hook-cancelled`.
 81. **McpServerHealths** — `mcp-server-healths`.
-82. **McpUnmodeledTool** — `mcp-unmodeled-tool` — asserts the topbar warning
-    dropdown, per `daemon.md`: "Unmodeled tools are NOT failures and never
-    feed rows — their home is the topbar's warning dropdown, one warning per
-    distinct name."
+82. **McpToolCall** — `mcp-unmodeled-tool` — an MCP server's tool is an
+    ordinary tool call: it draws the ordinary tool card and raises no
+    unmodeled-tool warning. The warning dropdown ("Unmodeled tools are NOT
+    failures and never feed rows — their home is the topbar's warning
+    dropdown, one warning per distinct name") is asserted by
+    **UnmodeledTool**, driven as `!unmodeled`.
 83. **MonitorDeadline** — `monitor-deadline`.
 84. **MonitorPersistent** — `monitor-persistent`.
 85. **PlanModeEnterExit** — `plan-mode-enter-exit`.
@@ -1191,7 +1193,7 @@ reported as such rather than papered over.
 | 30 | interrupt | `!interrupt` | #18 | no |
 | 31 | max-tokens | `!max-tokens` | #9 | no |
 | 32 | mcp-server-healths | `!mcp-all` | #81 | no |
-| 33 | mcp-unmodeled-tool | `!unmodeled` | #82 | no |
+| 33 | mcp-unmodeled-tool | `!mcp-tool` | #82 | no |
 | 34 | model-changed | `!model-fallback` | #7 | no |
 | 35 | monitor-deadline | `!monitor-deadline` | #83 | no |
 | 36 | monitor-persistent | `!monitor-persistent` | #84 | no |

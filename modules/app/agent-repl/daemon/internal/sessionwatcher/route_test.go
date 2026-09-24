@@ -39,12 +39,42 @@ func TestRouteUnmodeledActivityAlsoWarnsTheTopbar(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(unmodeledActivity("act-1", "mcp__thing__do")))))
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(unmodeledActivity("act-1", "StructuredOutput")))))
 
 	// Assert.
 	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
 	if !h.hasRecord("warn", "daemon.sessionwatcher.unmodeled_activity") {
 		t.Fatal("an unmodeled activity was not warned about")
+	}
+}
+
+// TestRouteMcpToolCallRoutesAsAnOrdinaryActivity covers an MCP server's tool:
+// an ordinary tool call, routed like any other.
+func TestRouteMcpToolCallRoutesAsAnOrdinaryActivity(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(mcpActivity("act-1", "mcp__claude-in-chrome__navigate")))))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+}
+
+// TestRouteMcpToolCallIsNeverWarnedAboutAsUnmodeled covers the WARN that used
+// to fire for every MCP call: it no longer does.
+func TestRouteMcpToolCallIsNeverWarnedAboutAsUnmodeled(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(mcpActivity("act-1", "mcp__claude-in-chrome__navigate")))))
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.sessionwatcher.unmodeled_activity") {
+		t.Fatal("an MCP tool call was warned about as unmodeled")
 	}
 }
 
@@ -966,8 +996,13 @@ func TestActivityToolName(t *testing.T) {
 		},
 		{
 			name: "an unmodeled call is named by the tool it stated",
-			act:  unmodeledActivity("act-1", "mcp__thing__do"),
-			want: "mcp__thing__do",
+			act:  unmodeledActivity("act-1", "StructuredOutput"),
+			want: "StructuredOutput",
+		},
+		{
+			name: "an MCP call is named by the tool as the agent named it",
+			act:  mcpActivity("act-1", "mcp__claude-in-chrome__navigate"),
+			want: "mcp__claude-in-chrome__navigate",
 		},
 		{
 			name: "prose is not a tool call and has no name",

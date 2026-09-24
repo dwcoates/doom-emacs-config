@@ -99,6 +99,10 @@ type openCall struct {
 	// settle it a second time under its own book (which the store would refuse
 	// as a book move). The result is kept as residue instead; see settle.go.
 	inherited bool
+
+	// mcp is the MCP tool the call addressed, nil for any other tool. Kept so
+	// the settle restates it (mcp.go).
+	mcp *conversationv1.AgentMcpTool
 }
 
 // Converter holds the per-file correlation a conversion needs beyond the record
