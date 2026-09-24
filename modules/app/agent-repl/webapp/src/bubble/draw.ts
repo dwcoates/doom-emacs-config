@@ -7,14 +7,17 @@
  *   - its ROLE, which is its side and its background: a prompt hangs on the
  *     right rail in blue, a response on the left rail in purple;
  *   - its VARIANT and STATE, which select its BORDER and nothing else (the
- *     thinking/pear/green/blue ladder, the compaction divider's own color, the
- *     held prompt's parked frame) — the one exception is the held prompt's
- *     grey-blue background, which the rulings name;
+ *     thinking/pear/green/blue ladder, the compaction divider's own color, a
+ *     user prompt's permanent purple, an agent-to-agent prompt's amber, and a
+ *     held prompt's NONE) — the one exception is the held prompt's grey-blue
+ *     background, which the rulings name;
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;
  *   - its CONTENT, drawn through the one body pipeline (src/bubble/body.ts);
  *   - its COLLAPSED LINE LIMIT, the lines shown before the has-more fade;
+ *   - its EXPAND-ONLY chrome: what the reader sees only once the bubble is
+ *     opened (a held prompt's details and actions), hidden while collapsed;
  *   - the WORKING wave, which only a prompt can carry: the spec types make a
  *     waving response unrepresentable rather than merely unlikely.
  *
@@ -26,7 +29,7 @@
  */
 import { armPromptWave, setPromptWave } from "../breathing.js";
 import { placeChildren } from "../dom.js";
-import { BUBBLE_STRIP_CLASS } from "../expand.js";
+import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS } from "../expand.js";
 import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../feed/bubble-scroll.js";
 import { stopTicking } from "../feed/ticking.js";
 import {
@@ -76,7 +79,7 @@ export const BUBBLE_CAP_ATTRIBUTE = "data-cap-lines";
 
 /** The class every bubble wears, and the class every header strip element wears. */
 export const BUBBLE_CLASS = "bubble";
-export { BUBBLE_STRIP_CLASS };
+export { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS };
 
 /** What every bubble spec states, whatever its role. */
 interface BubbleSpecBase {
@@ -94,7 +97,14 @@ interface BubbleSpecBase {
   corner?: HTMLElement;
   /** The content: nodes, markdown slots among them (see body.ts). */
   content: readonly ChildNode[];
-  /** Chrome after the scroll box (a cut-short marker, a held prompt's actions). */
+  /**
+   * Chrome after the scroll box shown ONLY while the bubble is expanded (a held
+   * prompt's details and actions): it wears `BUBBLE_EXPAND_ONLY_CLASS`, which
+   * the stylesheet hides while the scroll box is not `.expanded`, so the one
+   * toggle (expand.ts) is what reveals it. Drawn before the footer.
+   */
+  expandOnly?: readonly HTMLElement[];
+  /** Chrome after the scroll box, always shown (a cut-short marker). */
   footer?: readonly HTMLElement[];
   /** The collapsed line limit. */
   capLines: BubbleCapLines;
@@ -171,8 +181,12 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
 
   const strip = keepSaid(liveChrome(bubble, "strip", scroll), spec.strip ?? []);
   for (const el of strip) el.classList.add(BUBBLE_STRIP_CLASS);
-  const footer = keepSaid(liveChrome(bubble, "footer", scroll), spec.footer ?? []);
-  placeChildren(bubble, [...strip, scroll, ...footer]);
+  const expandOnly = spec.expandOnly ?? [];
+  const after = keepSaid(liveChrome(bubble, "footer", scroll), [...expandOnly, ...(spec.footer ?? [])]);
+  // Position decides the region, so a kept element that moved between the two
+  // takes the class of the one it now stands in.
+  after.forEach((el, i) => el.classList.toggle(BUBBLE_EXPAND_ONLY_CLASS, i < expandOnly.length));
+  placeChildren(bubble, [...strip, scroll, ...after]);
 
   const liveCorner = reused === null ? [] : [...scroll.children].filter((el) => el !== body);
   const corner = keepSaid(liveCorner as HTMLElement[], spec.corner === undefined ? [] : [spec.corner]);

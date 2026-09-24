@@ -21,6 +21,9 @@
  * NO FAIL-FAST. `bail` stays unset so one run reports every failure it found;
  * fixing them one process-restart at a time is what this suite exists to avoid.
  */
+// Refuses a run that did not come through bin/background.sh: tests only ever
+// run at background priority (see that script and require-background.mjs).
+import "../../../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 

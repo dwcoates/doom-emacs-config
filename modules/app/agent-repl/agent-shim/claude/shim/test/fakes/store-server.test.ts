@@ -230,6 +230,9 @@ function bashTerminalEntry(runId: string): storev1.StoreEntry {
 async function write(client: StoreClient, ...entries: storev1.StoreEntry[]): Promise<void> {
   const response = await client.writeBatch(
     create(storev1.WriteBatchRequestSchema, {
+      writeClass: create(storev1.WriteClassSchema, {
+        writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+      }),
       producer: "claude-shim:test",
       batch: create(storev1.EntryBatchSchema, { entries }),
     }),
@@ -301,6 +304,9 @@ describe("WriteBatch", () => {
     // Act.
     const response = await client.writeBatch(
       create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
         producer: "claude-shim:test",
         batch: create(storev1.EntryBatchSchema, {
           entries: [pageLineEntry("a", "prompt:t1", "t1")],
@@ -320,6 +326,9 @@ describe("WriteBatch", () => {
     // Act.
     await client.writeBatch(
       create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
         producer: "claude-shim:test",
         batch: create(storev1.EntryBatchSchema, {
           entries: [pageLineEntry("a", "prompt:t1", "t1")],
@@ -1151,6 +1160,9 @@ describe("typed write refusals", () => {
     // Act.
     const response = await client.writeBatch(
       create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
         producer: "claude-shim:test",
         batch: create(storev1.EntryBatchSchema, { entries: [] }),
       }),
@@ -1162,6 +1174,27 @@ describe("typed write refusals", () => {
     ).toBe("storageFailure");
   });
 
+  it("refuses a write that states no class, as the real store does", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    const response = await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, { entries: [pageLineEntry("a", "prompt:t1", "t1")] }),
+      }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" && response.result.value.kind.case === "invalidRequest"
+        ? response.result.value.kind.value.field
+        : undefined,
+    ).toBe("write_class");
+    expect(fake.book("a")).toHaveLength(0);
+  });
+
   it("names invalid_request when the bytes can never be accepted", async () => {
     // Arrange.
     const { store: fake, client } = await store();
@@ -1170,6 +1203,9 @@ describe("typed write refusals", () => {
     // Act.
     const response = await client.writeBatch(
       create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
         producer: "claude-shim:test",
         batch: create(storev1.EntryBatchSchema, { entries: [] }),
       }),

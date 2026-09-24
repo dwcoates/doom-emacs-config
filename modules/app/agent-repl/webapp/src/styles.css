@@ -161,29 +161,33 @@
      the deep-orange --compact-rule and amber --async, so an in-progress
      reasoning card reads as its own state. Same 0.3px thickness the base bubble
      reserves; only the color lands here. */
-  --thinking-border: #eab308;
+  --thinking-border: #e3a008;
   /* The border around a FINISHED response the agent wrote MID-TURN (prose
      between tool calls: settled, but not the turn's answer): pear, the step
      between thinking's yellow and an answer's green (owner ruling,
      2026-09-23), so the border ladder runs monotonic toward done: yellow
      (reasoning) -> pear (said, not concluded) -> green (the answer). */
-  --interim-response-border: #a3b10b;
+  --interim-response-border: #b0b00c;
   /* The border around the response the reader has SELECTED to reply to
      (reply-to-a-past-response mode): blue, distinct from the green a final
      answer wears at rest, so the one bubble the next prompt will quote is
      unmistakable among the green answers around it. Only a final-response
      bubble is ever selected, so this is only ever seen replacing the green. */
   --selected-response: #2563eb;
-  /* The prompt bubble's own in-flight border: light purple, worn ONLY while
-     `data-wave="working"` is on the bubble (see `.bubble.user[data-wave=
-     "working"]` below and `armPromptWave` / `setPromptWave` in
-     breathing.ts, drawn from the prompt row's daemon-stated `working`
-     flag) — the SAME attribute that drives the
-     thinking-wave shadow band, so the border can never start or end a frame
-     out of step with the glimmer: one attribute, one lifecycle. Reads clearly
-     against the blue --user fill in this theme; the dark theme lifts it the
-     same way --final-response lifts for its own dark fill. */
+  /* The USER prompt bubble's border: light purple, worn PERMANENTLY (owner
+     ruling, 2026-09-23) — in flight and after its turn resolves alike, so it
+     is independent of the `working` flag and the wave. It used to be keyed on
+     `data-wave="working"` and vanish at the turn's terminal; the name is kept
+     because the token is the vocabulary other surfaces are written in. Reads
+     clearly against the blue --user fill in this theme; the dark theme lifts
+     it the same way --final-response lifts for its own dark fill. */
   --prompt-live-border: #c084fc;
+  /* THE AGENT-TO-AGENT PROMPT'S BORDER (owner ruling, 2026-09-23): the one
+     amber every prompt one agent addresses to another wears — the
+     agent-addressed prompt row (the lead's or any agent's send, and its
+     delivered copy) and the peer message alike. Its own token rather than
+     --async's, which means background work; the dark theme lifts it. */
+  --agent-prompt-border: #f59e0b;
   /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
      datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
@@ -359,14 +363,16 @@
     --final-response: #4ade80;
     /* Lighter yellow for the dark theme, as the other state borders lift, so
        the thinking hairline still reads against the dark purple fill. */
-    --thinking-border: #facc15;
-    --interim-response-border: #c7d32a;
+    --thinking-border: #f9c21b;
+    --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-response hairline still reads against the dark bubble. */
     --selected-response: #60a5fa;
     /* Brighter light purple for the dark theme, as the other state borders
        lift, so the hairline still reads against the dark --user navy fill. */
     --prompt-live-border: #d8b4fe;
+    /* Brighter amber for the dark theme, as the other state borders lift. */
+    --agent-prompt-border: #fbbf24;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
     /* Brighter token yellow for the dark theme, so the figure reads on the
@@ -457,6 +463,13 @@ body::after {
      token and hands the inset it gave up to the CONTENT inside the scroll box,
      so the bar lands on the edge while the text keeps the margin it had. */
   --bubble-scroll-gap: 2px;
+  /* THE SCROLLBAR'S GUTTER: the classic bar's width (see "bubble scrollbars"
+     below), which an expanded bubble lays out inside its scroll box whenever
+     its content passes the 50vh ceiling. A metaprompt tree's column budget
+     (src/bubble/body.ts `measureTreeCols`) always takes it off, collapsed or
+     not, so a tree is wrapped as if expanded and never re-wraps on a click
+     (owner ruling, 2026-09-23). One token, read by both. */
+  --scrollbar-gutter-width: 8px;
   /* THE ONE BUBBLE WIDTH (owner ruling, 2026-09-23): every blue and purple
      bubble -- response, prompt, peer, held prompt, compaction summary,
      agentic card -- fits its text up to this cap, and a metaprompt tree in
@@ -1456,8 +1469,13 @@ pre {
 /* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
    in the tray is "much more grey than blue", with only a subtle blue hue, so it
    reads as the prompt it will become that has not been sent yet. */
+/* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
+   derived from the same token rather than a copied number. The body measures
+   a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
+   a tree in a held prompt wraps at the halved cap. */
 .bubble[data-variant="held"] {
   --bubble-bg: var(--held-prompt-bg);
+  max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
@@ -1508,17 +1526,22 @@ pre {
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
 }
-/* The in-flight prompt's light-purple border. Keyed on the SAME
-   `data-wave="working"` attribute the glimmer above reads, rather than a
-   separate class or JS toggle, so the two can never desync: whatever sets or
-   clears the attribute at the glimmer's own start/end drives this border too,
-   by construction. Only the color changes — `.bubble`'s base rule already
-   reserves the 0.3px border box for every bubble, so this never reflows the
-   feed. Static, not animated: the attribute's presence is itself the signal,
-   so it survives `prefers-reduced-motion` (which only stops the wave's
-   animation above) unchanged. */
-.bubble[data-role="prompt"][data-wave="working"] {
+/* THE PROMPT BORDERS (owner ruling, 2026-09-23). A border lands on a prompt
+   once it is RECEIVED — in flight or completed — and stays: none of these is
+   keyed on `data-wave`, so the turn resolving takes nothing away, and nothing
+   here animates. A HELD prompt in the tray has not been received and wears NO
+   border (only the base rule's transparent reservation).
+   The USER prompt wears the light purple, recoloring the 0.3px the base rule
+   already reserves, so it never reflows the feed. */
+.bubble[data-role="prompt"][data-variant="user"] {
   border-color: var(--prompt-live-border);
+}
+/* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
+   lead or any agent to another, on either end) and the peer message — is the
+   same blue prompt bubble in the one amber. */
+.bubble[data-role="prompt"][data-variant="agent"],
+.bubble[data-role="prompt"][data-variant="peer"] {
+  border: 1px solid var(--agent-prompt-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
@@ -1546,7 +1569,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 /* THE PEER MESSAGE'S HEADER STRIP: the sender label, the whole of its
    collapsed face (its cap is zero lines, src/feed/rows/peer-message.ts). One
-   line, ellipsized, clear of the has-more chevron that sits at its right. */
+   line, ellipsized, its right padding the room a has-more chevron once took
+   (the chevron is gone, owner ruling 2026-09-23; the padding is kept so the
+   label does not move). */
 .peer-label {
   font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.85;
@@ -2209,6 +2234,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   overflow-y: auto;
   cursor: zoom-out;
 }
+/* THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
+   bubble's scroll box that the reader sees only once the bubble is opened (a
+   held prompt's details and actions). It is keyed on the one toggle's own
+   `.expanded` on the sibling scroll box, so the click that opens the text
+   opens this too, and no second fold exists. */
+.bubble-scroll:not(.expanded) ~ .bubble-expand-only { display: none; }
 
 /* THE CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool-call and a skill card
    are ONE click-to-expand unit: `.tool-fold` is the whole card, the feed-wide
@@ -2248,7 +2279,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    a shell bubble runs, a tool call's input line (command, path, query or plain
    input), a skill's invocation, a hook's headline, a subagent's description —
    is capped at TWO LINES while the fold that owns it is collapsed, and wears the
-   response bubble's fade and chevron (the `has-more` rules below) when it
+   response bubble's fade (the `has-more` rules below) when it
    actually overflows them. `line-clamp` caps by text rows and `max-height: none`
    drops each line's own preview cap (`.tool-input`, `.bash-input`), so the two
    rows are the only limit. This is the ONE title cap: title-fold.ts marks every
@@ -2286,16 +2317,16 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    scroll box wears it (one measurer, one rule) — never a tool-call section —
    and each fades into its OWN bubble background (`--bubble-bg`) so the last
    line dissolves rather than being hard-clipped.
-   Both pseudo-elements are absolutely positioned against the box, which the cap
-   holds still while collapsed (overflow-y: hidden), so bottom:0 is the visible
-   fold. `pointer-events: none` keeps a click on either one falling through to
-   click-to-expand. A tool card's TITLE fold (above) wears the same fade and
-   chevron from the same rules, fading into its card's `--title-fold-bg`; an
-   output section still never does.
+   The fade is absolutely positioned against the box, which the cap holds
+   still while collapsed (overflow-y: hidden), so bottom:0 is the visible
+   fold. `pointer-events: none` keeps a click on it falling through to
+   click-to-expand. A tool card's TITLE fold (above) wears the same fade from
+   the same rule, fading into its card's `--title-fold-bg`; an output section
+   still never does.
    THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
    scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
    (`position: relative` on the box itself, not on `.has-more`), and the fade
-   and chevron are out of flow, so the measurer toggling the class moves
+   is out of flow, so the measurer toggling the class moves
    nothing inside or around the box. */
 .bubble > .bubble-scroll,
 .title-fold {
@@ -2318,32 +2349,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .title-fold.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
 }
-/* The chevron, centered on the bottom edge over the fade. Generated content is
-   not selectable, so it needs no user-select carve-out. */
-.bubble > .bubble-scroll.has-more::before,
-.title-fold.has-more::before {
-  content: "\2304";
-  position: absolute;
-  left: 50%;
-  bottom: 0.05em;
-  transform: translateX(-50%);
-  z-index: 1;
-  pointer-events: none;
-  font-size: 1.05em;
-  line-height: 1;
-  color: var(--muted);
-}
-/* A ZERO-LINE CAP shows its header strip and nothing below it, so there is no
-   last line to fade: the chevron alone says there is more, at the strip's
-   right end where the box (zero tall) meets it. */
-.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::after {
-  background: none;
-}
-.bubble[data-cap-lines="0"] > .bubble-scroll.has-more::before {
-  left: auto;
-  right: calc(0.9rem - var(--bubble-scroll-gap));
-  transform: none;
-}
+/* "MORE BELOW" IS THE FADE ONLY, NEVER A CHEVRON (owner ruling, 2026-09-23),
+   on every bubble and every title fold: nothing draws a glyph from `has-more`,
+   and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* Edge-gated scrolling: a section takes the wheel only while the pointer
    is in a scroll box's left/right gutter, and while it is, both gutters
    light up. The bars ride the SECTION (the whole card) rather than the
@@ -2573,39 +2581,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    A queued message is PARKED, not active. It must read as plainly distinct
    from a live prompt bubble, so the user sees the message is waiting for later
    and is explicitly NOT interrupting the running turn unless escalated: its
-   grey-blue held fill and its DASHED frame (a solid one is the live bubble's)
-   carry that, and everything else is the one bubble's. */
-/* THE HELD PROMPT'S FRAME (owner rulings, 2026-09-23): a held prompt is a
-   prompt-role bubble (src/tray/held-prompt.ts) on the grey-blue held fill
-   (`--held-prompt-bg`), and its variant sets its BORDER: DASHED in the very
-   --user blue the live bubble fills with, so parked it still reads as the
-   user's own prompt held back. A hold that is not the turn's names its own
-   frame below. */
-.bubble[data-variant="held"] {
-  border: 1px dashed var(--user);
-}
-.queued-head { display: flex; align-items: center; margin-bottom: 0.3rem; }
-/* The status pill: "queued — classifying…" → "queued — waiting" or
-   "interrupting…". An interrupt lights up in the in-flight orange the rest
-   of the app uses for "the model is about to act", since that verdict is
-   the one that preempts the running turn. */
-.queued-badge {
-  font-size: calc(0.7rem * var(--feed-text-scale));
-  padding: 0.05rem 0.5rem;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-}
-.queued-badge.interrupt { color: var(--thinking); border-color: var(--thinking); }
-/* A prompt queued behind a CONTEXT CUT, which no classifier judged and no
-   force can jump. Bolded and muted rather than tinted: it borrows neither the
-   interrupt's orange (nothing is preempting anything) nor a hold vocabulary's
-   color (nothing but the running turn is holding it) — the badge's job is to
-   say that the turn in front of it is one the queue never interrupts. */
-.queued-badge.uninterruptible {
-  color: var(--muted);
-  border-color: var(--muted);
-  font-weight: 700;
-}
+   grey-blue held fill carries that, and everything else is the one bubble's.
+   A HELD PROMPT HAS NO BORDER (owner ruling, 2026-09-23): a border lands only
+   once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
+   frame, the lease hold's amber and the keep-alive hold's teal are gone; the
+   hold's badge alone says what holds it. */
+.queued-head { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-bottom: 0.3rem; }
 /* The classifier's one-line reason reads as an aside: muted and italic. */
 .queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
@@ -2620,26 +2601,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* --- the drain-lease bubble (render.ts LeaseHeldCard) ---------------------
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
    shares the queued card's geometry (same column, same fit-content width) so
-   it sits in the feed as one more parked prompt, and departs from it in
-   the cue that carries meaning: the border goes SOLID in the merge/bounce
-   amber rather than dashed user-blue.
-   The dashed blue card means "waiting on the turn above you"; this one means
-   "waiting on the whole daemon", and the reader must not have to read the
-   badge to tell them apart. */
-.bubble[data-variant="held"].lease-card {
-  border: 1px solid var(--merge-border);
-}
-/* The badge says WHY, and takes the same amber so the pill and the frame
-   agree — it is never the classifier's grey, because no classification
-   happened. */
-.queued-badge.lease {
-  color: var(--merge-border);
-  border-color: var(--merge-border);
-  font-weight: 700;
-}
-/* The standing explanation of the hold. Not italic like `.queued-reason`:
-   that is the classifier quoting itself, this is the app stating a rule. */
-.lease-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); color: var(--fg); }
+   it sits in the feed as one more parked prompt. Its `.lease-card` hook once
+   selected a solid merge-amber frame; a held prompt has no border now (owner
+   ruling, 2026-09-23), so the badge carries the distinction. */
 
 /* --- The keep-alive hold bubble (render.ts `KeepAliveHeldCard`) ----------
    A prompt parked behind an in-flight cache keep-alive ping. It borrows the
@@ -2649,23 +2613,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    out of hibernation, so it belongs to that vocabulary, and it is the
    textbook teal case — nothing is wired to this prompt yet, and nothing is
    wrong. The amber is spent on coordinated daemon work (merges, bounces),
-   which this is not. */
-.bubble[data-variant="held"].keep-alive-card {
-  border: 1px solid var(--hibernated);
-}
-/* The badge takes the same teal so pill and frame agree. Never the
-   classifier's grey: no classification happened, and none will. */
-.queued-badge.keep-alive {
-  color: var(--hibernated);
-  border-color: var(--hibernated);
-  font-weight: 700;
-}
-
-.queued-badge.revival {
-  color: var(--hibernated);
-  border-color: var(--hibernated);
-  font-weight: 700;
-}
+   which this is not. Its `.keep-alive-card` hook once selected a teal frame;
+   a held prompt has no border now (owner ruling, 2026-09-23). */
 
 #composer {
   display: flex;
@@ -4258,64 +4207,93 @@ body.draining #composer-input::placeholder {
 bubble-body.bubble-body { display: block; }
 
 /* THE COST CORNER: the token figure, and — once the response has settled —
-   the relative duration it reveals on hover. Collapsed, only the token shows,
-   at a fixed inset from the bubble's top and right edges whatever its digit
-   count. Revealed, the token slides left by the duration's fixed-width slot
-   (plus its gap), and the duration reads beside it.
+   the relative duration it reveals on hover (owner spec, 2026-09-23).
 
-   THE SLIDE IS THE DURATION SLOT'S WIDTH, and every width here is FIXED
-   (owner rule, 2026-09-23: the user owns the scroll), so no figure, tick or
-   settle moves the float. The corner holds two in-flow pieces:
-     1. `::before`, an invisible copy of the token text (`data-tokens`) in a
-        fixed-width slot;
-     2. `.usage-slider`, the fixed-width duration slot, whose ONLY in-flow
-        content is `.usage-ago` (the gap is that element's `margin-left`).
-   The visible `.usage-stamp` is taken out of flow and pinned to the slider's
-   left edge (`right: 100%`). Collapsed, the slider is `translateX(100%)` — a
-   percentage of its OWN width — so the duration sits just past the corner's
-   right edge (clipped by `overflow: hidden`) and the token's right edge lands
-   exactly on that edge. Revealed, the slider is `translateX(0)`: the duration
-   fills its slot and the token sits exactly over the spacer. A corner with no
-   duration yet (still arriving, `data-arriving`) keeps its slot reserved and
-   collapsed, so the token sits at the right edge and nothing moves on hover.
+   AT REST only the token shows, and its gap to the bubble's RIGHT edge equals
+   its gap to the bubble's TOP edge: both are `--usage-corner-gap`, the one
+   token the corner's top and right margins are derived from. The duration
+   waits one further `--usage-corner-gap` beyond its normal gap from the token,
+   which puts it past the bubble's inner edge, clipped, so it never peeks in.
+
+   ON HOVER the reveal runs in two phases, in sequence:
+     A. only the duration moves: `.usage-ago` slides left by that one extra
+        `--usage-corner-gap` until it sits at its normal gap
+        (`--usage-pair-gap`) from the token, fading in as it comes;
+     B. then the token and the duration slide left TOGETHER: `.usage-slider`
+        goes from `translateX(100%)` — a percentage of its OWN width, which is
+        the duration plus its gap — to `translateX(0)`, so the duration's
+        right edge lands `--usage-corner-gap` from the bubble's right edge.
+   Mouse-leave runs B back, then A back. The sequence is `transition-delay`:
+   the phase that runs second waits out the first (`--usage-phase`).
+
+   THE MARKUP (src/feed/cards/response.ts):
+     .usage-corner[data-tokens]      ::before reserves the token's slot
+       .usage-reserve                 reserves the gap plus the widest duration
+       .usage-slider                  absolute, its right edge the corner's
+         .usage-stamp                 absolute, its right edge the slider's left
+         .usage-ago                   the slider's only in-flow content
+
+   NO REFLOW, EVER (owner rule, 2026-09-23: the user owns the scroll). The
+   corner's in-flow content is the two reserves alone, both of fixed width, so
+   its float is the corner's full HOVERED footprint — both figures, their gap
+   and the right gap — from the first draw. The prose's first line wraps
+   around that footprint, and no hover, tick or settle moves it: the slider is
+   out of flow and every motion is a transform.
 
    FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling,
    2026-09-15). The corner floats top-right INSIDE the scroll box, before the
    `.bubble-body` block it shares that box's block-formatting context with, so
    the prose's FIRST line flows to its left and every later line runs the
-   bubble's full width. The float's width is spacer + slider at all times —
-   `transform` never changes layout — so the reveal never reflows that first
-   line. */
+   bubble's full width. */
 .usage-corner {
+  /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
+     inherited, so the token, the duration and both reserves cannot differ. */
+  font-size: 0.85em;
+  /* The half-leading of the corner's line: the space between its line box's
+     top and the figures' em box. It is part of the top gap as drawn, so the
+     right gap carries it too. */
+  --usage-half-leading: calc((var(--md-line-h) - 1) / 2 * 1em);
+  /* `.bubble`'s own top padding, which the corner sits under. styles.test.ts
+     fails if the two ever disagree. */
+  --usage-bubble-pad-top: 0.6rem;
+  /* THE ONE GAP TOKEN: the distance from the bubble's edge to the figure's em
+     box, top and right alike. It is the top gap the corner has always had,
+     and the right gap is derived from it below. */
+  --usage-corner-gap: calc(var(--usage-bubble-pad-top) + var(--usage-half-leading));
+  /* The normal gap between the token and the duration, unchanged. */
+  --usage-pair-gap: 0.35rem;
+  /* One phase of the reveal; the two phases together take 0.5s. */
+  --usage-phase: 0.25s;
+  /* The hover hit area's padding (owner ruling, 2026-09-14). */
+  --usage-hit-x: 1.25rem;
+  --usage-hit-y: 0.4rem;
   float: right;
-  display: inline-flex;
+  position: relative;
+  display: flex;
   flex-direction: row;
-  align-items: baseline;
-  justify-content: flex-end;
   max-width: 100%;
   overflow: hidden;
-  /* Enlarge the hover/hit region to roughly 4x its area — 2x wide and 2x tall
-     for a typical token figure — so the duration is easier to summon (owner
-     ruling, 2026-09-14). The padding grows the hoverable box; the equal and
-     opposite negative margin cancels it in layout on the top, bottom and left,
-     so no neighbor shifts. `overflow: hidden` clips to this padding box. */
-  padding: 0.4rem 1.25rem;
-  margin-top: -0.4rem;
-  margin-bottom: -0.4rem;
-  margin-left: -1.25rem;
-  /* CORNER-SCOPED RIGHT-EDGE GAP (owner ruling, 2026-09-15): the token's gap
-     from the bubble's right border, without touching the global
-     `--bubble-scroll-gap`. `.bubble`'s own right padding contributes one
-     `--bubble-scroll-gap`; the right margin departs from the fully-cancelling
-     `-1.25rem` by `--usage-corner-edge-gap - --bubble-scroll-gap`, so the total
-     gap is `--usage-corner-edge-gap`. It is static, never part of the reveal. */
-  --usage-corner-edge-gap: var(--bubble-scroll-gap);
-  margin-right: calc(
-    var(--usage-corner-edge-gap) - var(--bubble-scroll-gap) - 1.25rem
+  white-space: nowrap;
+  /* Enlarge the hover/hit region to roughly 4x its area, so the duration is
+     easier to summon (owner ruling, 2026-09-14). The padding grows the
+     hoverable box; `overflow: hidden` clips to it. */
+  padding: var(--usage-hit-y) var(--usage-hit-x);
+  margin-bottom: calc(0px - var(--usage-hit-y));
+  margin-left: calc(0px - var(--usage-hit-x));
+  /* THE TOP GAP: the bubble's top padding plus the line's half-leading, which
+     is `--usage-corner-gap` by definition; the margin cancels the hit padding
+     and adds exactly what the gap asks beyond that padding (nothing). */
+  margin-top: calc(
+    var(--usage-corner-gap) - var(--usage-half-leading) - var(--usage-bubble-pad-top)
+      - var(--usage-hit-y)
   );
-  /* The one size the token figure, its spacer and the revealed duration all
-     read (owner ruling, 2026-09-15: token and duration must match). */
-  --usage-ago-font-size: 0.85em;
+  /* THE RIGHT GAP: the corner's content edge sits `--usage-corner-gap` from
+     the bubble's right edge. `.bubble`'s own right padding contributes one
+     `--bubble-scroll-gap` and the hit padding is cancelled, so the margin
+     supplies the rest. */
+  margin-right: calc(
+    var(--usage-corner-gap) - var(--bubble-scroll-gap) - var(--usage-hit-x)
+  );
 }
 /* The token's width reservation: the token text again, invisible, in the
    token's own size and figures. ITS WIDTH IS FIXED (owner rule, 2026-09-23:
@@ -4328,30 +4306,40 @@ bubble-body.bubble-body { display: block; }
   visibility: hidden;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  font-size: var(--usage-ago-font-size);
   width: 6ch;
 }
-/* The element the reveal moves: the duration's fixed-width slot, so
-   `translateX(100%)` is exactly the slot's width. It is the token's containing
-   block (`position: relative`) and stretches to the row's height so the
-   token's `top: 0` lines it up with the spacer. */
+/* The duration's width reservation: the normal gap, then every widest label
+   the age formatter can write, stacked in ONE grid cell so the cell is as
+   wide as the widest of them. The live clock repaints the duration every
+   second, and its width never reaches past this. */
+.usage-reserve {
+  display: grid;
+  visibility: hidden;
+  margin-left: var(--usage-pair-gap);
+  font-variant-numeric: tabular-nums;
+}
+.usage-reserve > .usage-reserve-label {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+/* The pair's carrier, and the element PHASE B moves: out of flow, its right
+   edge on the corner's content edge, its top on the corner's content top, and
+   as wide as the duration plus its gap. At rest it is `translateX(100%)` of
+   that width, so the token hanging off its left edge sits on the corner's
+   content edge. It starts moving back first on mouse-leave, and waits out
+   phase A on hover. */
 .usage-slider {
-  position: relative;
-  align-self: stretch;
-  /* THE DURATION SLOT IS A FIXED WIDTH, arriving or settled (owner rule,
-     2026-09-23: the user owns the scroll). The live clock repaints the
-     duration every second, and a slot as wide as its text moved the float --
-     and reflowed the first prose line under a reader -- on every tick that
-     changed a digit's width or the label's length. The gap plus 11ch of the
-     duration's own 0.85em font holds its longest label ("364d 23h ago"). */
-  width: calc(0.35rem + 11ch * 0.85);
+  position: absolute;
+  top: var(--usage-hit-y);
+  right: var(--usage-hit-x);
   transform: translateX(100%);
-  transition: transform 0.5s ease;
+  transition: transform var(--usage-phase) ease 0s;
 }
 /* The cost corner's figure, drawn verbatim in the token amber the footer's
-   token cell wears, so the same idea reads the same color wherever it appears.
-   Anchored to the slider's left edge, it rides the slider's transform and has
-   no transform or transition of its own. */
+   token cell wears. Anchored to the slider's left edge at the slider's top —
+   the line the duration's text starts on, in the same inherited size and
+   leading, so the two share one baseline. It rides the slider's transform and
+   has no transform or transition of its own. */
 .usage-stamp {
   position: absolute;
   top: 0;
@@ -4359,33 +4347,37 @@ bubble-body.bubble-body { display: block; }
   white-space: nowrap;
   color: var(--info-tokens);
   font-variant-numeric: tabular-nums;
-  font-size: var(--usage-ago-font-size);
 }
 /* THE HOVER DURATION: the response's settled time, relative and live
-   ("5m 30s ago"), grey (the shared muted token) and the same size as the token
-   figure. Collapsed it is faded out as well as slid past the right edge; its
-   gap and width are the slider's width in both states, so nothing resizes. */
+   ("5m 30s ago"), grey (the shared muted token). The element PHASE A moves:
+   at rest it waits one `--usage-corner-gap` beyond its normal gap, faded out;
+   on hover it slides in and fades up first, and on mouse-leave it goes back
+   last, once phase B has returned. A block, so its transform applies. */
 .usage-ago {
+  display: block;
   color: var(--muted);
-  font-size: var(--usage-ago-font-size);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  margin-left: 0.35rem;
+  margin-left: var(--usage-pair-gap);
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transform: translateX(var(--usage-corner-gap));
+  transition:
+    transform var(--usage-phase) ease var(--usage-phase),
+    opacity var(--usage-phase) ease var(--usage-phase);
 }
 /* The reveal triggers off the WHOLE assistant bubble, not just the small
    corner: hovering the corner would put the cursor on top of the duration it
    had just revealed. The corner's own `:hover`/`:focus-within` and the
    `usage-corner--revealed` class (toggled on hover and keyboard focus) stay
    too (owner ruling, 2026-09-14). The slider and the duration share the one
-   trigger list. */
+   trigger list. On hover phase B waits for phase A. */
 .bubble.assistant:hover .usage-slider,
 .bubble.assistant:focus-within .usage-slider,
 .usage-corner:hover .usage-slider,
 .usage-corner:focus-within .usage-slider,
 .usage-corner.usage-corner--revealed .usage-slider {
   transform: translateX(0);
+  transition-delay: var(--usage-phase);
 }
 .bubble.assistant:hover .usage-ago,
 .bubble.assistant:focus-within .usage-ago,
@@ -4393,10 +4385,12 @@ bubble-body.bubble-body { display: block; }
 .usage-corner:focus-within .usage-ago,
 .usage-corner.usage-corner--revealed .usage-ago {
   opacity: 1;
+  transform: translateX(0);
+  transition-delay: 0s;
 }
-/* AN ARRIVING CORNER NEVER SLIDES: its duration slot is reserved but empty
-   until the response settles, so revealing it would move the token over
-   nothing. (0,5,0) outranks every reveal trigger above. */
+/* AN ARRIVING CORNER NEVER SLIDES: it has no duration yet, so revealing it
+   would move the token over nothing. (0,5,0) outranks every reveal trigger
+   above. */
 .bubble.assistant .usage-corner[data-arriving] .usage-slider {
   transform: translateX(100%);
 }
@@ -4616,8 +4610,6 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.7rem;
   color: var(--muted);
 }
-/* An AGENT-addressed prompt wears the orange border the schema names for it. */
-.bubble[data-role="prompt"][data-variant="agent"] { border: 1px solid var(--thinking); }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
 /* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
    it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
@@ -4640,44 +4632,31 @@ bubble-body.bubble-body { display: block; }
 .hold-tray-items > * + * { padding-top: 0.5rem; }
 .hold-tray-items > * { padding-bottom: 0.5rem; }
 
-/* The ticking queued-at age, trailing the badge. Tabular so the number does
-   not shuffle the badge sideways once a second. */
+/* The ticking queued-at age, first in the expand-only details (a badge row no
+   longer holds it). Tabular so the number does not shuffle once a second. */
 .queued-age {
-  margin-left: auto;
   font-size: 0.7rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-/* The classifier is still deciding: a slow breath, which is how every other
+/* THE HELD STATUS BADGES (src/tray/held-prompt.ts `HELD_STATUS_BADGES`, owner
+   spec 2026-09-23). Every status a held prompt shows is the tool cards' own
+   `.badge`, colored by the ONE table's tone class: `ok` (interrupting, green),
+   `err` (waiting, red), `run` (classifying, the in-flight orange) come from the
+   shared `.badge` rules, as does `muted` (acceptance); the two below are the held
+   card's own. The badges are
+   the card's headline, so `.queued-head` wraps a row of them rather than
+   widening the card. */
+.badge.held-badge.amber { color: var(--merge-border); }
+.badge.held-badge.teal { color: var(--hibernated); }
+/* A classifier still deciding: a slow breath, which is how every other
    transient state in this app says "not settled". */
-.queued-badge.classifying {
-  color: var(--muted);
-  border-color: var(--muted);
-  animation: hold-breathe 2.6s ease-in-out infinite;
-}
+.badge.held-badge.run { animation: hold-breathe 2.6s ease-in-out infinite; }
 @keyframes hold-breathe {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-/* NOTHING classified this entry, and that is a warning rather than a state:
-   the orange the app spends on "something did not work as intended". */
-.queued-badge.unclassified {
-  color: var(--thinking);
-  border-color: var(--thinking);
-  font-weight: 700;
-}
 .queued-reason.queued-unclassified { font-style: normal; color: var(--muted); }
-/* The hold the user has seen and confirmed. A quiet mark, never a second
-   button: accepting changes nothing about delivery. */
-.queued-accepted {
-  margin-left: 0.4rem;
-  font-size: 0.7rem;
-  color: var(--muted);
-}
-.queued-accepted::before {
-  content: "✓";
-  margin-right: 0.2rem;
-}
 /* An attached image, capped so a paste cannot take over the tray. */
 .queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
 /* A host-local image the webview cannot fetch: named, not drawn broken. */
@@ -6602,7 +6581,7 @@ bubble-body.bubble-body { display: block; }
 .skill-input::-webkit-scrollbar,
 .skill-content::-webkit-scrollbar,
 .fold-fixed > .agent-panel::-webkit-scrollbar {
-  width: 8px;
+  width: var(--scrollbar-gutter-width);
 }
 .bubble > .bubble-scroll::-webkit-scrollbar-track,
 .tool-input::-webkit-scrollbar-track,
@@ -6691,4 +6670,15 @@ bubble-body.bubble-body { display: block; }
   max-width: none;
   margin-left: 0;
   margin-right: 0;
+}
+
+/* ---- the detached-work id (src/feed/work-id.ts) ---- */
+/* The id an async bubble's head names its work by (owner ruling, 2026-09-23):
+   the head's quiet figures' size and muted ink, in the monospace ids read in,
+   and selectable so a reader can copy it to refer to the work. */
+.async-work-id {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-family: var(--mono, ui-monospace, monospace);
+  user-select: text;
 }

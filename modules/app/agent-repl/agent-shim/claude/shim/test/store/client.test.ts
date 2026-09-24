@@ -139,6 +139,9 @@ describe("createStoreClient", () => {
     // Act.
     await client.writeBatch(
       create(storev1.WriteBatchRequestSchema, {
+        writeClass: create(storev1.WriteClassSchema, {
+          writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+        }),
         producer: "claude-shim:test",
         batch: create(storev1.EntryBatchSchema, { entries: [entry] }),
       }),

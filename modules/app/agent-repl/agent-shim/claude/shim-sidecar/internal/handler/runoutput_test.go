@@ -95,6 +95,43 @@ func TestRunOutputReportsWhatItOmittedPastTheBound(t *testing.T) {
 	}
 }
 
+func TestRunOutputKeepsTheTailTheRendererShows(t *testing.T) {
+	// Arrange. The daemon draws a shell's LAST 16 KiB, so the run's most recent
+	// bytes are what a terminal keeps — across batches, not only within one.
+	r := NewRunOutput(testLogger(t))
+	ctx := runOutputCtx("/tmp/b1.output", "1:2", 0)
+	r.Remember(ctx, []byte(strings.Repeat("a", maxRememberedOutput)))
+
+	// Act.
+	r.Remember(ctx, []byte("the latest line\n"))
+
+	// Assert.
+	seen, omitted := r.Seen()
+	if !strings.HasSuffix(seen, "the latest line\n") || len(seen) != maxRememberedOutput {
+		t.Fatalf("seen = %d bytes ending %q, want the bound held on the run's tail", len(seen), seen[len(seen)-16:])
+	}
+	if omitted != uint64(len("the latest line\n")) {
+		t.Fatalf("omitted = %d, want the earlier bytes the tail dropped", omitted)
+	}
+}
+
+func TestRunOutputStatesTheBoundOnlyOnTheBatchThatCrossesIt(t *testing.T) {
+	// Arrange. Every later batch of a talkative run drops more of its head; the
+	// crossing is the one fact worth a record.
+	sink, log := capturingLogger()
+	r := NewRunOutput(log)
+	ctx := runOutputCtx("/tmp/b1.output", "1:2", 0)
+	r.Remember(ctx, []byte(strings.Repeat("x", maxRememberedOutput+1)))
+
+	// Act.
+	r.Remember(ctx, []byte("more\n"))
+
+	// Assert.
+	if got := strings.Count(sink.String(), "the run has said more than"); got != 1 {
+		t.Fatalf("the bound was recorded %d times, want once; log:\n%s", got, sink.String())
+	}
+}
+
 func TestRunOutputRecordsTheBoundAtInfo(t *testing.T) {
 	// Arrange. A run saying more than the bound is ordinary — three did it in
 	// one session on 2026-09-13 — and the terminal carries the omitted count,
@@ -123,7 +160,7 @@ func TestRunOutputStatesBothCountsWhenItPassesTheBound(t *testing.T) {
 
 	// Assert.
 	logged := sink.String()
-	if !strings.Contains(logged, "1048576") {
+	if !strings.Contains(logged, "16384") {
 		t.Errorf("the run-output bound record does not state the bound it held; log:\n%s", logged)
 	}
 	if !strings.Contains(logged, "64 omitted") {

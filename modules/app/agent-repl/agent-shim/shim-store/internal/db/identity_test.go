@@ -22,7 +22,7 @@ func TestWriteBatchSkipsAnUpsertThatMovesTheRowToAnotherBook(t *testing.T) {
 	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
 
 	// Act
-	result, err := d.WriteBatch(ctx(), "producer", batch(
+	result, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(
 		pageEntry("w2", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))), nil)
 
 	// Assert: no refusal, the entry is skipped and reported, nothing was written.
@@ -59,7 +59,7 @@ func TestABookConflictEntryDoesNotLoseItsLegitimateSiblings(t *testing.T) {
 
 	// Act: one batch carries a brand-new, perfectly legitimate line AND the
 	// legacy book-conflict entry.
-	result, err := d.WriteBatch(ctx(), "producer", batch(
+	result, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(
 		pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("agent-1", "act-2", prose()))),
 		pageEntry("w3", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))), nil)
 
@@ -92,12 +92,12 @@ func TestReIngestingTheSameCorpusTwiceIsANoOp(t *testing.T) {
 	before := scalar[int](t, d, `SELECT write_seq FROM entry WHERE upsert_key = 'u1'`)
 
 	// Act: the same write_id replays (absorbed), and a re-booked re-ingest skips.
-	absorb, err := d.WriteBatch(ctx(), "producer", batch(
+	absorb, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(
 		pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))), nil)
 	if err != nil {
 		t.Fatalf("replay error = %v, want nil", err)
 	}
-	skip, err := d.WriteBatch(ctx(), "producer", batch(
+	skip, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(
 		pageEntry("w2", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose())))), nil)
 	if err != nil {
 		t.Fatalf("re-book error = %v, want nil", err)
@@ -123,7 +123,7 @@ func TestWriteBatchRefusesAnUpsertThatChangesTheRowsKind(t *testing.T) {
 	writeOK(t, d, pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(unservedEntry("w2", "u1",
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w2", "u1",
 		&storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{
 			Unknown: &storev1.StoreUnknown{Discriminator: "widget", Raw: rawRecord("widget")},
 		}})), nil)
@@ -156,7 +156,7 @@ func TestWriteBatchRefusesAPageLineWhoseBookDisagreesWithItsFrame(t *testing.T) 
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(
 		pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-2", "act-1", prose())))), nil)
 
 	// Assert
@@ -170,7 +170,7 @@ func TestWriteBatchRefusesAPromptWhoseBookDisagreesWithItsRecipient(t *testing.T
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-2"))), nil)
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-2"))), nil)
 
 	// Assert
 	if got := RefusalSite(err); got != SitePageBookMismatch {
@@ -183,7 +183,7 @@ func TestWriteBatchRefusesAPeerMessageWhoseBookDisagreesWithItsRecipient(t *test
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(pageEntry("w1", "u1", "agent-1", peerItem("agent-2"))), nil)
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(pageEntry("w1", "u1", "agent-1", peerItem("agent-2"))), nil)
 
 	// Assert
 	if got := RefusalSite(err); got != SitePageBookMismatch {
@@ -196,7 +196,7 @@ func TestAMismatchedPageLineCommitsNothing(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	if _, err := d.WriteBatch(ctx(), "producer", batch(
+	if _, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(
 		pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-2", "act-1", prose())))), nil); err == nil {
 		t.Fatal("WriteBatch accepted a page line whose envelope and frame disagree")
 	}
@@ -213,7 +213,7 @@ func TestWriteBatchRefusesVendorSpecificResidueWithNoRawRecord(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(unservedEntry("w1", "u1",
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1",
 		&storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{
 			VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook"},
 		}})), nil)
@@ -229,7 +229,7 @@ func TestWriteBatchRefusesUnknownResidueWithNoRawRecord(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(unservedEntry("w1", "u1",
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1",
 		&storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{
 			Unknown: &storev1.StoreUnknown{Discriminator: "widget"},
 		}})), nil)
@@ -245,7 +245,7 @@ func TestWriteBatchRefusesUnparsedResidueWithEmptyRawBytes(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "producer", batch(unservedEntry("w1", "u1",
+	_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(unservedEntry("w1", "u1",
 		&storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{
 			Unparsed: &storev1.StoreUnparsed{Source: "t.jsonl", ParseError: "unexpected EOF"},
 		}})), nil)

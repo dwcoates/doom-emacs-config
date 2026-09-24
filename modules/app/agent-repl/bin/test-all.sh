@@ -23,6 +23,10 @@
 # A failing suite is reported loudly the moment it fails, the run continues
 # through the remaining suites, and the run ends with a summary of every failure
 # plus a non-zero exit status.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,6 +66,7 @@ ALL_SUITES=(
     logging-density-harness
     build-frontend-harness
     suite-slot-harness
+    background-harness
     store-reset-harness
     readiness-harness
     logs-harness
@@ -365,6 +370,7 @@ require_executable "$THIS_DIR/test-report-nonlisp-coverage.sh"
 require_executable "$THIS_DIR/test-report-logging-density.sh"
 require_executable "$THIS_DIR/test-build-frontend.sh"
 require_executable "$THIS_DIR/test-suite-slot.sh"
+require_executable "$THIS_DIR/test-background.sh"
 require_executable "$THIS_DIR/test-store-reset.sh"
 require_executable "$THIS_DIR/test-readiness-report.sh"
 require_executable "$THIS_DIR/test-e2e.sh"
@@ -391,6 +397,7 @@ run_timed coverage-harness "$THIS_DIR/test-report-nonlisp-coverage.sh"
 run_timed logging-density-harness "$THIS_DIR/test-report-logging-density.sh"
 run_timed build-frontend-harness "$THIS_DIR/test-build-frontend.sh"
 run_timed suite-slot-harness "$THIS_DIR/test-suite-slot.sh"
+run_timed background-harness "$THIS_DIR/test-background.sh"
 run_timed store-reset-harness "$THIS_DIR/test-store-reset.sh"
 run_timed readiness-harness "$THIS_DIR/test-readiness-report.sh"
 run_timed logs-harness "$THIS_DIR/test-logs.sh"

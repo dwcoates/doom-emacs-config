@@ -48,6 +48,10 @@
 # what is happening now; the 5- and 15-minute figures stay high for minutes
 # after the previous run's own work has stopped, so gating on those would make
 # every run after the first wait for nothing.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

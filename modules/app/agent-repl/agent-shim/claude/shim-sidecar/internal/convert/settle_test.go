@@ -717,3 +717,53 @@ func TestAnUnlaunchedAgentStopIsWarnedOnlyWhenTheLaunchCouldHaveBeenSeen(t *test
 		})
 	}
 }
+
+// A SEND COPIED FROM THE TRANSCRIPT STANDS ALONE: the settle this plane writes
+// over the start restates the address and summary the call carried, so the one
+// row the store keeps draws the send on replay.
+func TestASendSettledFromTheTranscriptRestatesItsAddressAndSummary(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+		// restated reads the address and summary off whichever arm settled.
+		restated func(*conversationv1.AgentSendMessage) (string, string)
+		isError  bool
+	}{
+		{
+			name:   "a delivered send",
+			result: `{"success":true,"resumedAgentId":"a1b2"}`,
+			restated: func(s *conversationv1.AgentSendMessage) (string, string) {
+				return s.GetSuccess().GetAddressedTo(), s.GetSuccess().GetSummary().GetText()
+			},
+		},
+		{
+			name:   "a refused send",
+			result: `{"success":false}`,
+			restated: func(s *conversationv1.AgentSendMessage) (string, string) {
+				return s.GetFailure().GetAddressedTo(), s.GetFailure().GetSummary().GetText()
+			},
+			isError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := newTestConverter(t)
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_send", "SendMessage",
+				`{"to":"vetter","message":"the whole relay","summary":"Scroll fix landed; merge master in"}`))
+			result := toolResultLineWithError("u1", "toolu_send", ts2,
+				`[{"type":"text","text":"sent"}]`, tt.result, tt.isError)
+
+			// Act
+			entries := convertLines(t, c, call, result)
+
+			// Assert: the LAST frame under the send's key is the settle.
+			settled := activityOf(entries[len(entries)-1]).GetSendMessage()
+			to, summary := tt.restated(settled)
+			if to != "vetter" || summary != "Scroll fix landed; merge master in" {
+				t.Fatalf("restated (to, summary) = (%q, %q), want (%q, %q)",
+					to, summary, "vetter", "Scroll fix landed; merge master in")
+			}
+		})
+	}
+}
