@@ -134,6 +134,10 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		} else {
 			c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
 		}
+		// THE OLD SHIM'S REPORTED BUILD LEAVES WITH IT. The reap gate has
+		// passed, so whatever build is on record was the stood-down shim's;
+		// the replacement's own report is the one judged, whenever it arrives.
+		c.forgetReported(ws)
 
 		// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
 		// and the prelaunched one takes them at its StartSession.
@@ -315,6 +319,12 @@ func (c *controller) ShimReported(ws ids.WorkspaceID, build string) {
 		c.log.Error(opStaleness, "the shim reported no build; it cannot be proven current, so it is judged stale",
 			dlog.Context{"workspace": string(ws)})
 	}
+	c.judgeStaleAsync(ws)
+}
+
+// judgeStaleAsync runs the staleness judgement off the caller's goroutine,
+// joinable through staleChecks.
+func (c *controller) judgeStaleAsync(ws ids.WorkspaceID) {
 	c.staleChecks.Add(1)
 	go func() {
 		defer c.staleChecks.Done()
@@ -323,6 +333,18 @@ func (c *controller) ShimReported(ws ids.WorkspaceID, build string) {
 			c.log.Error(opStaleness, "the reported shim build could not be judged", withCause(dlog.Context{"workspace": string(ws)}, err))
 		}
 	}()
+}
+
+// forgetReported drops a workspace's reported shim build once the shim that
+// reported it is gone, so the next report is judged as the new shim's.
+func (c *controller) forgetReported(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	before, known := c.reported[ws]
+	delete(c.reported, ws)
+	c.mu.Unlock()
+	if known {
+		c.logTransition(opStaleness, ws, "reported_shim_build", before, "", dlog.Context{"cause": "the reporting shim was stood down"})
+	}
 }
 
 // takeoverForce reports whether a stale shim in this workspace is bounced at
@@ -376,43 +398,92 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 		return check, nil
 	}
 	check.Stale = true
-	if !c.claimStaleBounce(ws, reported) {
+	switch c.claimStaleBounce(ws, reported) {
+	case staleBounceInFlight:
+		// THE REPORT IS FROM THE SHIM BEING REPLACED. A takeover re-judges
+		// every adopted shim, and the bounce its adoption started may still be
+		// standing that very shim down; the relaunched shim reports its own
+		// build once installed, and that report is the one judged.
+		check.Skipped = SkippedBounceInFlight
+		c.log.Debug(opStaleness, "the workspace's stale-build bounce is registered or running; the relaunched shim is judged when it reports", fields)
+		return check, nil
+	case staleBounceAlreadyRan:
 		// THE BOUNCE FIRES ONCE PER OBSERVED BUILD. A shim that comes back
 		// still reporting the build it was bounced for cannot be fixed by
 		// bouncing it again, and re-bouncing spawns a process per report
 		// forever. The disagreement is stated loudly, and the session is
 		// served on the build it has.
-		check.Skipped = "already_bounced_for_this_build"
+		check.Skipped = SkippedAlreadyBounced
 		c.log.Error(opStaleness, "the shim still reports the build it was already bounced for; not bouncing it again", fields)
 		return check, nil
 	}
 	c.log.Info(opStaleness, "the shim runs an older build than the installed one; bouncing it", fields)
-	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, nil)
+	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, func(err error) { c.settleStaleBounce(ws, err) })
 	if err != nil {
+		c.settleStaleBounce(ws, err)
 		return check, err
 	}
 	check.Bounce = decision
 	return check, nil
 }
 
+// The StaleCheck.Skipped reasons.
+const (
+	SkippedAlreadyBounced = "already_bounced_for_this_build"
+	SkippedBounceInFlight = "stale_bounce_in_flight"
+)
+
+// staleClaim is what claimStaleBounce answers.
+type staleClaim int
+
+const (
+	staleBounceClaimed staleClaim = iota
+	staleBounceInFlight
+	staleBounceAlreadyRan
+)
+
 // claimStaleBounce records that this workspace is being bounced for `reported`
-// and answers whether that build is NEW. A build already bounced for answers
-// false, which is what makes the build-staleness bounce fire once per build
-// rather than once per report.
-func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) bool {
+// and answers whether it may be. A bounce still registered or running answers
+// staleBounceInFlight; a build already bounced for answers
+// staleBounceAlreadyRan, which is what makes the build-staleness bounce fire
+// once per build rather than once per report. Both are decided under ONE lock
+// with the claim, so two concurrent reports cannot both claim.
+func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) staleClaim {
 	c.mu.Lock()
+	if c.staleInFlight[ws] {
+		c.mu.Unlock()
+		return staleBounceInFlight
+	}
 	previous, seen := c.bouncedStamp[ws]
 	if seen && previous == reported {
 		c.mu.Unlock()
 		c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, previous,
 			dlog.Context{"changed": false})
-		return false
+		return staleBounceAlreadyRan
 	}
 	c.bouncedStamp[ws] = reported
+	c.staleInFlight[ws] = true
 	c.mu.Unlock()
 	c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, reported,
 		dlog.Context{"changed": true})
-	return true
+	return staleBounceClaimed
+}
+
+// settleStaleBounce ends a claimed stale-build bounce, however it ended: from
+// here a report is the relaunched shim's own and is judged.
+//
+// A BOUNCE THAT FINISHED RE-JUDGES AT ONCE. The relaunched shim reports its
+// build while the bounce is still resuming it, so that report met the
+// in-flight skip and, being unchanged, is not reported again; judging here is
+// what makes a relaunched shim still on the old build the ERROR it is. A
+// failed or unregistered bounce is not re-judged: its own record says why.
+func (c *controller) settleStaleBounce(ws ids.WorkspaceID, err error) {
+	c.mu.Lock()
+	delete(c.staleInFlight, ws)
+	c.mu.Unlock()
+	if err == nil {
+		c.judgeStaleAsync(ws)
+	}
 }
 
 // ReloadWebapp pushes the EMPTY reload_webapp arm: Emacs reloads this

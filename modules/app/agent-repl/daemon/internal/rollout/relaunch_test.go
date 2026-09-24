@@ -526,6 +526,9 @@ func TestAStaleBuildIsBouncedOnlyOncePerReportedBuild(t *testing.T) {
 	first := len(h.registry.Requests())
 
 	// Act: the relaunched shim still reports the same older build.
+	h.c.mu.Lock()
+	h.c.reported[ws] = "0ldbu1ld"
+	h.c.mu.Unlock()
 	got, err := h.c.CheckStaleness(context.Background(), ws, false)
 
 	// Assert
@@ -537,6 +540,140 @@ func TestAStaleBuildIsBouncedOnlyOncePerReportedBuild(t *testing.T) {
 	}
 	if !loggedError(h.log, opStaleness, "still reports the build it was already bounced for") {
 		t.Fatalf("records = %+v, want the disagreement at ERROR", h.log.Records())
+	}
+}
+
+// staleReported arranges a workspace whose live shim reported an older build.
+func staleReported(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	ws, _ := h.workspace(t)
+	h.c.mu.Lock()
+	h.c.reported[ws] = "0ldbu1ld"
+	h.c.mu.Unlock()
+	return ws
+}
+
+// TestAStaleBounceStillRegisteredIsNotReJudged is the takeover's re-judgement
+// of the first live handover that carried sessions: the bounce its adoption
+// started was still standing the shim down, and the re-check called that
+// shim's report "already bounced for" at ERROR.
+func TestAStaleBounceStillRegisteredIsNotReJudged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	h.freeness.SetFree(ws, false)
+	if _, err := h.c.CheckStaleness(context.Background(), ws, false); err != nil {
+		t.Fatalf("the first CheckStaleness: %v", err)
+	}
+
+	// Act
+	got, err := h.c.CheckStaleness(context.Background(), ws, false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the second CheckStaleness: %v", err)
+	}
+	if got.Skipped != SkippedBounceInFlight || len(h.registry.Requests()) != 1 {
+		t.Fatalf("check = %+v, requests %d; want the in-flight bounce skipped", got, len(h.registry.Requests()))
+	}
+	if loggedError(h.log, opStaleness, "already bounced for") {
+		t.Fatalf("records = %+v, want no ERROR for a bounce still in flight", h.log.Records())
+	}
+}
+
+// TestAFinishedStaleBounceForgetsTheStoodDownShimsBuild covers the
+// replacement's report being the one judged: the old shim's build does not
+// outlive its reap.
+func TestAFinishedStaleBounceForgetsTheStoodDownShimsBuild(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	h.fleet.live[ws].Reap()
+
+	// Act
+	if _, err := h.c.CheckStaleness(context.Background(), ws, false); err != nil {
+		t.Fatalf("CheckStaleness: %v", err)
+	}
+	h.registry.wait()
+	h.c.staleChecks.Wait()
+
+	// Assert
+	h.c.mu.Lock()
+	reported, known := h.c.reported[ws]
+	h.c.mu.Unlock()
+	if known {
+		t.Fatalf("reported = %q after the bounce, want the stood-down shim's build forgotten", reported)
+	}
+	if loggedError(h.log, opStaleness, "already bounced for") {
+		t.Fatalf("records = %+v, want no ERROR before the replacement reports", h.log.Records())
+	}
+}
+
+// TestAFinishedStaleBounceReJudgesTheReplacementsReport pins the genuine
+// ERROR: a replacement that reported the old build while its bounce was still
+// resuming it is judged once the bounce finishes.
+func TestAFinishedStaleBounceReJudgesTheReplacementsReport(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	if got := h.c.claimStaleBounce(ws, "0ldbu1ld"); got != staleBounceClaimed {
+		t.Fatalf("claim = %v, want claimed", got)
+	}
+
+	// Act
+	h.c.settleStaleBounce(ws, nil)
+	h.c.staleChecks.Wait()
+
+	// Assert
+	if !loggedError(h.log, opStaleness, "still reports the build it was already bounced for") {
+		t.Fatalf("records = %+v, want the relaunched shim's old build at ERROR", h.log.Records())
+	}
+}
+
+// TestAFailedStaleBounceIsNotReJudged keeps a failed bounce to its own record.
+func TestAFailedStaleBounceIsNotReJudged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	h.c.claimStaleBounce(ws, "0ldbu1ld")
+	before := len(records(h.log, opStaleness))
+
+	// Act
+	h.c.settleStaleBounce(ws, errFake)
+	h.c.staleChecks.Wait()
+
+	// Assert
+	if got := records(h.log, opStaleness)[before:]; len(got) != 0 {
+		t.Fatalf("records = %+v, want no judgement after a failed bounce", got)
+	}
+	h.c.mu.Lock()
+	inFlight := h.c.staleInFlight[ws]
+	h.c.mu.Unlock()
+	if inFlight {
+		t.Fatal("a failed bounce was left in flight")
+	}
+}
+
+// TestARefusedStaleBounceIsNotLeftInFlight covers the registry refusing the
+// request: nothing runs, so nothing may stay in flight.
+func TestARefusedStaleBounceIsNotLeftInFlight(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	h.registry.err = errFake
+
+	// Act
+	_, err := h.c.CheckStaleness(context.Background(), ws, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("CheckStaleness = nil error, want the refusal surfaced")
+	}
+	h.c.mu.Lock()
+	inFlight := h.c.staleInFlight[ws]
+	h.c.mu.Unlock()
+	if inFlight {
+		t.Fatal("a refused bounce was left in flight")
 	}
 }
 
