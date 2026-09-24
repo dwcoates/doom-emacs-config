@@ -343,6 +343,41 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
     expect(host.children).toHaveLength(3);
   });
 
+  it("breaks a run at a turn boundary with no row between the two turns' cards", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [
+      toolCallRow("a", "returned", { turn: "t1" }),
+      toolCallRow("b", "returned", { turn: "t1" }),
+      toolCallRow("c", "returned", { turn: "t2" }),
+      toolCallRow("d", "returned", { turn: "t2" }),
+    ];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // Assert: one group per turn, never one across them.
+    expect([...host.children].map((child) => child.querySelectorAll(".feed-group-tab").length)).toEqual([2, 2]);
+  });
+
+  it("breaks a run between a card of a turn and a card of no turn", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [toolCallRow("a", "returned", { turn: "t1" }), toolCallRow("b", "returned")];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // Assert
+    expect(host.querySelector(".feed-group")).toBeNull();
+  });
+
+  it("still groups a run of cards that all carry no turn", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [toolCallRow("a", "returned"), toolCallRow("b", "returned")];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore());
+    // Assert
+    expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(2);
+  });
+
   it("groups a run of subagent bubbles into tabs", () => {
     const host = document.createElement("div");
     const rows = [subagentRow("a"), subagentRow("b"), subagentRow("c")];
