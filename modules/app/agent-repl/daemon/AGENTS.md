@@ -205,7 +205,12 @@ environment. Every flag is optional.
    not say "not exist" is never read as gone), adopt the shims whose
    workspace lock is still held (never kill-and-restart, and EVERY survivor is
    dialled concurrently so one adoption bound covers the whole boot), reconcile the intent
-   manifest (all four dispositions persisted as faults), restore the holds
+   manifest (all four dispositions persisted as faults; a manifest is CONSUMED
+   ONCE — removed as soon as every disposition it names is durably recorded,
+   kept only while a record failed or is deferred behind a read-only handle,
+   and an incumbent removes any leftover before it spawns a successor, so no
+   later boot and no joining successor ever reads an earlier bounce's intent),
+   restore the holds
    all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
    transaction each (an adopted workspace's in-flight turns are re-opened by its
    sessionwatcher instead), recover the in-flight merges, and — for a successor

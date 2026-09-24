@@ -2,6 +2,8 @@ package rollout
 
 import (
 	"context"
+	"errors"
+	"os"
 	"sync"
 	"testing"
 
@@ -452,5 +454,106 @@ func TestAManifestEntryWithNoPidIsNeverAnUnknownDisposition(t *testing.T) {
 	}
 	if got[0].Intent != IntentNoSession {
 		t.Fatalf("intent = %s, want the pidless entry normalized to no_session", got[0].Intent)
+	}
+}
+
+// manifestExists reports whether the harness's intent manifest is on disk.
+func manifestExists(t *testing.T, h *harness) bool {
+	t.Helper()
+	_, err := os.Stat(h.c.deps.IntentManifest)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, os.ErrNotExist):
+		return false
+	default:
+		t.Fatalf("stat the intent manifest: %v", err)
+		return false
+	}
+}
+
+// TestReconcileRetiresTheManifestOnceEveryDispositionIsRecorded pins that a
+// manifest is consumed: a manifest nothing removed was reconciled again on
+// every boot for a day, re-opening the same bounce fault each time.
+func TestReconcileRetiresTheManifestOnceEveryDispositionIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after every disposition it names was recorded")
+	}
+}
+
+func TestASecondBootFindsNoManifestToAccountFor(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+
+	// Act
+	got, err := h.c.Reconcile(context.Background(), nil)
+
+	// Assert
+	if err != nil || got != nil {
+		t.Fatalf("second Reconcile = (%+v, %v), want no dispositions: the manifest was consumed", got, err)
+	}
+}
+
+func TestAManifestWhoseAccountingWasDeferredIsKept(t *testing.T) {
+	// Arrange: the joining successor's read-only handle defers every record.
+	h := newHarness(t)
+	h.c.deps.DB = &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+
+	// Act
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+
+	// Assert
+	if !manifestExists(t, h) {
+		t.Fatalf("the intent manifest was retired while its dispositions were only deferred")
+	}
+}
+
+func TestWritingTheDeferredDispositionsRetiresTheManifest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+	h.c.deps.DB = handle
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+	if err := handle.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Act
+	h.c.flushDispositions(context.Background())
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after its deferred dispositions were written")
+	}
+}
+
+func TestAManifestWhoseRecordFailedIsKept(t *testing.T) {
+	// Arrange: a workspace the registry does not hold refuses its fault.
+	h := newHarness(t)
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Sessions: []ManifestSession{{
+			Workspace: ids.WorkspaceID("0000000000000000"), Dir: t.TempDir(), ShimPID: 4242, Intent: IntentPreserve,
+		}},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+
+	// Act
+	if _, err := h.c.Reconcile(context.Background(), nil); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// Assert
+	if !manifestExists(t, h) {
+		t.Fatalf("the intent manifest was retired although a disposition it names was never recorded")
 	}
 }
