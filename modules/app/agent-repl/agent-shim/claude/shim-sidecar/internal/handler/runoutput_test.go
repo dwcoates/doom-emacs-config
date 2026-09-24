@@ -7,9 +7,13 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
@@ -267,5 +271,252 @@ func TestRunOutputLostStatesHowItStoppedBeingSeen(t *testing.T) {
 	cut := got[0].GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
 	if cut.GetLost().GetWentSilent() == nil {
 		t.Fatalf("cause = %v, want the went_silent arm the reader concluded", cut.GetCause())
+	}
+}
+
+// ---- the rendered tail ----
+
+func TestTheWindowIsBoundedByTheContractsCap(t *testing.T) {
+	// Arrange. The writer and the renderer read ONE number, the contract's; a
+	// local copy of 16 KiB here is how the two would drift apart.
+	want := int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
+
+	// Act.
+	got := maxRememberedOutput
+
+	// Assert.
+	if got != want {
+		t.Fatalf("maxRememberedOutput = %d, want the contract's AGENT_BASH_TAIL_CAP_BYTES %d", got, want)
+	}
+}
+
+func TestRenderedCutsTheWindowAsTheRendererDraws(t *testing.T) {
+	// Arrange. One case per shape of cut: nothing omitted, a window holding a
+	// line break, one holding none after a mid-line cut, one holding none
+	// after a cut on a line end, a window opening mid-character, and a window
+	// whose only line break is its last byte.
+	limit := maxRememberedOutput
+	cases := []struct {
+		name      string
+		output    string
+		wantText  string
+		wantBytes uint64
+		wantLines uint64
+	}{
+		{name: "inside the cap", output: "a\nb\n", wantText: "a\nb\n"},
+		{
+			name:      "a line break in the window",
+			output:    strings.Repeat("x", 10) + "\n" + strings.Repeat("z", limit-6) + "\nlast\n",
+			wantText:  "last\n",
+			wantBytes: uint64(10 + 1 + limit - 6 + 1),
+			wantLines: 2,
+		},
+		{
+			name:      "no line break after a mid-line cut",
+			output:    "one\ntwo" + strings.Repeat("z", limit),
+			wantText:  strings.Repeat("z", limit),
+			wantBytes: 7,
+			wantLines: 2,
+		},
+		{
+			name:      "no line break after a cut on a line end",
+			output:    "one\ntwo\n" + strings.Repeat("z", limit),
+			wantText:  strings.Repeat("z", limit),
+			wantBytes: 8,
+			wantLines: 2,
+		},
+		{
+			name:      "a window opening mid-character",
+			output:    "é" + strings.Repeat("z", limit-1),
+			wantText:  strings.Repeat("z", limit-1),
+			wantBytes: 2,
+			wantLines: 1,
+		},
+		{
+			name:      "the only line break is the last byte",
+			output:    strings.Repeat("a", limit) + "tail\n",
+			wantText:  "",
+			wantBytes: uint64(limit + 5),
+			wantLines: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRunOutput(testLogger(t))
+			r.Remember(runOutputCtx("/tmp/b1.output", "1:2", 0), []byte(tc.output))
+
+			// Act.
+			text, bytesOmitted, linesOmitted := r.Rendered()
+
+			// Assert.
+			if text != tc.wantText || bytesOmitted != tc.wantBytes || linesOmitted != tc.wantLines {
+				t.Fatalf("rendered = {%d bytes, %d, %d}, want {%d bytes, %d, %d}",
+					len(text), bytesOmitted, linesOmitted, len(tc.wantText), tc.wantBytes, tc.wantLines)
+			}
+		})
+	}
+}
+
+// capSpoolOracle is the daemon's retired capSpool over a WHOLE spool, kept as
+// the oracle the window must agree with: the window never holds the whole
+// spool, and it still has to draw exactly what the whole spool drew.
+func capSpoolOracle(spool string) (string, uint64) {
+	if len(spool) <= maxRememberedOutput {
+		return spool, 0
+	}
+	dropped := spool[:len(spool)-maxRememberedOutput]
+	tail := spool[len(spool)-maxRememberedOutput:]
+	if i := strings.IndexByte(tail, '\n'); i >= 0 {
+		dropped = spool[:len(spool)-maxRememberedOutput+i+1]
+		tail = tail[i+1:]
+	}
+	lines := uint64(strings.Count(dropped, "\n"))
+	if dropped != "" && !strings.HasSuffix(dropped, "\n") {
+		lines++
+	}
+	return tail, lines
+}
+
+func TestRenderedDrawsWhatTheWholeSpoolDrew(t *testing.T) {
+	// Arrange. Deterministic spools of varied line lengths, fed in varied
+	// batch sizes, so the window's accounting is exercised across every cut.
+	lineLengths := []int{0, 1, 17, 200, 5000, 20000}
+	batchSizes := []int{1, 7, 4096, 1 << 20}
+	for _, lineLen := range lineLengths {
+		for _, batch := range batchSizes {
+			var spool strings.Builder
+			for spool.Len() < 3*maxRememberedOutput {
+				spool.WriteString(strings.Repeat("q", lineLen))
+				spool.WriteByte('\n')
+			}
+			spool.WriteString("unterminated")
+			whole := spool.String()
+			r := NewRunOutput(testLogger(t))
+			ctx := runOutputCtx("/tmp/b1.output", "1:2", 0)
+
+			// Act.
+			for i := 0; i < len(whole); i += batch {
+				end := i + batch
+				if end > len(whole) {
+					end = len(whole)
+				}
+				r.Remember(ctx, []byte(whole[i:end]))
+			}
+			text, bytesOmitted, linesOmitted := r.Rendered()
+
+			// Assert.
+			wantText, wantLines := capSpoolOracle(whole)
+			if text != wantText || linesOmitted != wantLines || bytesOmitted+uint64(len(text)) != uint64(len(whole)) {
+				t.Fatalf("line=%d batch=%d: rendered {%d bytes, lines %d, omitted %d}, want {%d bytes, lines %d} over %d written",
+					lineLen, batch, len(text), linesOmitted, bytesOmitted, len(wantText), wantLines, len(whole))
+			}
+		}
+	}
+}
+
+func TestAbsorbAtTheFilesStartResetsWithoutReadingIt(t *testing.T) {
+	// Arrange. A rotated or truncated spool is re-read from offset 0, and the
+	// window it had is not the new file's.
+	r := NewRunOutput(testLogger(t))
+	r.readPrefix = func(string, int64, func([]byte)) error {
+		t.Fatal("a batch at offset 0 read the file's prefix")
+		return nil
+	}
+	ctx := runOutputCtx("/tmp/b1.output", "1:2", 0)
+	if err := r.Absorb(ctx, 0, []byte("old file\n")); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+
+	// Act.
+	err := r.Absorb(ctx, 0, []byte("new\n"))
+
+	// Assert.
+	text, _, _ := r.Rendered()
+	if err != nil || text != "new\n" {
+		t.Fatalf("absorb = %v, text = %q, want the new file alone", err, text)
+	}
+}
+
+func TestAbsorbOfAContinuingBatchNeverReadsTheFile(t *testing.T) {
+	// Arrange. The ordinary poll continues the window; reseeding it would read
+	// the whole spool on every batch.
+	r := NewRunOutput(testLogger(t))
+	r.readPrefix = func(string, int64, func([]byte)) error {
+		t.Fatal("a continuing batch read the file's prefix")
+		return nil
+	}
+	ctx := runOutputCtx("/tmp/b1.output", "1:2", 0)
+	if err := r.Absorb(ctx, 0, []byte("one\n")); err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+
+	// Act.
+	err := r.Absorb(ctx, 4, []byte("two\n"))
+
+	// Assert.
+	text, _, _ := r.Rendered()
+	if err != nil || text != "one\ntwo\n" {
+		t.Fatalf("absorb = %v, text = %q, want both batches", err, text)
+	}
+}
+
+func TestAbsorbAnswersTheReseedsFailure(t *testing.T) {
+	// Arrange.
+	r := NewRunOutput(testLogger(t))
+	r.readPrefix = func(string, int64, func([]byte)) error { return errors.New("disk said no") }
+
+	// Act.
+	err := r.Absorb(runOutputCtx("/tmp/b1.output", "1:2", 9), 5, []byte("tail\n"))
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "disk said no") {
+		t.Fatalf("absorb = %v, want the reseed's failure", err)
+	}
+}
+
+func TestReadFilePrefixStreamsExactlyThePrefix(t *testing.T) {
+	// Arrange. A prefix longer than one chunk, so the loop is exercised.
+	path := filepath.Join(t.TempDir(), "b1.output")
+	content := strings.Repeat("0123456789", prefixChunk/5)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var got strings.Builder
+
+	// Act.
+	err := readFilePrefix(path, int64(len(content)-3), func(chunk []byte) { got.Write(chunk) })
+
+	// Assert.
+	if err != nil || got.String() != content[:len(content)-3] {
+		t.Fatalf("read = %v, %d bytes, want the first %d bytes", err, got.Len(), len(content)-3)
+	}
+}
+
+func TestReadFilePrefixRefusesAFileShorterThanThePrefix(t *testing.T) {
+	// Arrange. A prefix the file no longer holds cannot rebuild the window.
+	path := filepath.Join(t.TempDir(), "b1.output")
+	if err := os.WriteFile(path, []byte("short"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	// Act.
+	err := readFilePrefix(path, 64, func([]byte) {})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a prefix longer than the file was read without error")
+	}
+}
+
+func TestReadFilePrefixRefusesAMissingFile(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "gone.output")
+
+	// Act.
+	err := readFilePrefix(path, 1, func([]byte) {})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a missing spool was read without error")
 	}
 }

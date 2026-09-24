@@ -53,7 +53,7 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 	// Assert: the endpoint's ordering contract across the boundary, contiguous
 	// offsets throughout, and every byte of both phases in order.
 	requireBashReplayOrder(t, fx.CallID, rows)
-	joined := requireContiguousDeltas(t, fx.CallID, rows)
+	joined := requireLatestTail(t, fx.CallID, rows)
 	// EXACT EQUALITY, NOT CONTAINMENT. The three containment-and-index checks
 	// this replaced were all satisfied by a read-back that had also DUPLICATED a
 	// phase, dropped a newline, or interleaved bytes the run never wrote; the
