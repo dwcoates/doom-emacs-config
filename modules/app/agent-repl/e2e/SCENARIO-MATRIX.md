@@ -145,6 +145,7 @@ Two further limits, stated rather than hidden:
 | `!max-tokens` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestMaxTokens asserts Concluded plus an exact truncated prose string. | covered |
 | `!mcp-all` | grounded | mcpmonitors_e2e_test.go, sessionfacts_e2e_test.go | — | — | Go: TestMcpServerHealths asserts exact per-server oneof-arm mapping and exact Failed.Detail.Text. | covered |
 | `!mcp-healthy` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows states the five-server catalog first, then narrows to it, and asserts all five McpPanelRow rows STAND with their healths unchanged — the specific negative that "absent from the newest catalog" is not "gone" (only an UNSET health arm drops a row). | covered |
+| `!mcp-tool` | grounded | mcpmonitors_e2e_test.go | feed-families.layer.test.ts | — | Go: TestMcpToolCall asserts the turn's settled FeedSimpleToolCall headed mcp__echo__echo carries the tool's text, and no TopbarWarning.UnmodeledTool names it. Web: feed-families.layer asserts the generic shell's .tool-name and output body. | covered |
 | `!md` | ungrounded | — | feed-families.layer.test.ts | — | Web: feed-families.layer asserts literal !md text in the user_prompt row and exact 'Markdown showcase' body text. | covered |
 | `!memory` | declared-only | remainder_e2e_test.go | — | — | Go: TestContextInjectedMemory asserts AgentContextInjected.GetMemory() non-nil with non-empty Path/Content. | covered |
 | `!model-fallback` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestModelChanged asserts TopbarModelSelector.selected.model.name is `fake-sonnet-5` — the model the VENDOR swapped to unasked, which session.proto:173-174 says is stated in one authoritative place whether or not the consumer asked for it. | covered |
@@ -199,7 +200,7 @@ Two further limits, stated rather than hidden:
 | `!task-create` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts turn concluded and footer LiveWork.Tasks.Total==2. | covered |
 | `!task-reject` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts checklist rows persist and LiveWork.Tasks chip still non-nil after rejection. | covered |
 | `!tokens-reminder` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestTokensReminderDrawsNoRow asserts the only-prose-rows negative AND the named negative that no `context_budget` footer line was minted from a TOKEN-COUNT reminder. | covered |
-| `!unmodeled` | grounded | mcpmonitors_e2e_test.go | surfaces.layer.test.ts | — | Go: TestMcpUnmodeledTool asserts exactly 1 TopbarWarning.UnmodeledTool for the tool name, feed rows never mention it. Web: surfaces.layer asserts .topbar-warnings present and unchanged tool-call row count. | covered |
+| `!unmodeled` | grounded | mcpmonitors_e2e_test.go | surfaces.layer.test.ts | — | Go: TestUnmodeledTool asserts exactly 1 TopbarWarning.UnmodeledTool for StructuredOutput, feed rows never mention it. Web: surfaces.layer asserts .topbar-warnings present and unchanged tool-call row count. | covered |
 | `!usage-available` | grounded | accounting_e2e_test.go | — | — | Go: TestAccountUsageAvailableArm drives this arm's OWN spelling (rather than only its `!usage-full` alias) and asserts both halves: the resolver's `daemon.footer.on_session_update` record with arm=account_usage, AND the specific negative that these sub-threshold figures draw NO FooterStatusActivityRateLimited line — so the sample landed and the newsworthiness gate held. | covered |
 | `!usage-full` | grounded | accounting_e2e_test.go | surfaces.layer.test.ts | — | Go: TestAccountUsage (same log-record assertion as usage-available). Web: surfaces.layer asserts .footer-tokens/.footer-clock elements and a footer panel with named data-panel. | covered |
 | `!usage-historical` | ungrounded | subagents_e2e_test.go | — | — | Go: TestNestedSubagentHistoricalUsage asserts specifically that NO subagent bubble row is fabricated on the root feed (a shape-absence check) alongside Concluded. | covered |
@@ -227,14 +228,14 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **152**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **1**
 - Uncovered (no counted layer drives the scenario at all): **0**
-- Total canonical scenarios: 153
+- Total canonical scenarios: 154
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 152 scenarios referenced across 26 files
-- Webapp layer: 35 scenarios referenced across 8 files
+- Go e2e (non-emacs): 153 scenarios referenced across 26 files
+- Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
 ## (c) Uncovered and weak scenarios

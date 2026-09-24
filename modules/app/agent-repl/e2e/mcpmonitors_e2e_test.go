@@ -1,5 +1,5 @@
-// mcpmonitors_e2e_test.go — MCP server healths, the unmodeled-MCP-tool
-// warning, and the two Monitor lifetime arms (SPEC.md section C, "Everything
+// mcpmonitors_e2e_test.go — MCP server healths, an MCP tool call's ordinary
+// tool card, the unmodeled-tool warning, and the two Monitor lifetime arms (SPEC.md section C, "Everything
 // else", entries #81-84 — project-lead ruling 5's split; this file owns
 // mcp-server-healths, mcp-unmodeled-tool, monitor-deadline, monitor-persistent
 // and none of the other three split files' goldens).
@@ -19,9 +19,10 @@
 //   - golden "mcp-server-healths" (#81)    -> fake scenario "!mcp-all"
 //     (session.ts MCP_ALL: switches mcpServerStatus() to the five-server
 //     catalog, one row per declared health).
-//   - golden "mcp-unmodeled-tool" (#82)    -> fake scenario "!unmodeled"
-//     (automation.ts UNMODELED_MCP: an mcp__echo__echo call no converter
-//     owns).
+//   - golden "mcp-unmodeled-tool" (#82)    -> fake scenario "!mcp-tool"
+//     (automation.ts MCP_TOOL: an mcp__echo__echo call, an ordinary MCP tool
+//     call). The unmodeled-tool warning is driven by "!unmodeled"
+//     (automation.ts UNMODELED: a StructuredOutput call no converter owns).
 //   - golden "monitor-deadline" (#83)      -> fake scenario "!monitor-deadline"
 //     (exact name match, automation.ts MONITOR_DEADLINE).
 //   - golden "monitor-persistent" (#84)    -> fake scenario "!monitor-persistent"
@@ -196,26 +197,80 @@ func slashCommandSaid(text string) *conversationv1.UserSaid {
 }
 
 // ===========================================================================
-// #82 McpUnmodeledTool — mcp-unmodeled-tool (driven as "!unmodeled").
+// #82 McpToolCall — mcp-unmodeled-tool (driven as "!mcp-tool").
+//
+// Contract: proto/src/conversation/v1/agent_activity.proto AgentMcpToolCall —
+// an MCP server's tool is an ORDINARY TOOL CALL, drawn as the ordinary tool
+// card (FeedSimpleToolCall) headed by the tool as the agent named it, and it
+// raises no unmodeled-tool warning. No `unmodeled_activity` WARN is declared,
+// so the world's log sweep fails the test if one is recorded.
+// ===========================================================================
+
+func TestMcpToolCall(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	topbar := w.WatchTopbar(ws)
+	defer topbar.Close()
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-tool")
+
+	// Assert: the turn drew one ordinary tool card for the MCP call, with
+	// what the tool returned.
+	const toolName = "mcp__echo__echo"
+	card := turnToolCard(t, w, ws, turn, toolName)
+	if got := card.GetReturned().GetText().GetText(); got != "hello from the offline session" {
+		t.Fatalf("the MCP card's output = %q, want the tool's own text: %v", got, card)
+	}
+
+	// Assert: the call raised no unmodeled-tool warning.
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	view := harness.AwaitView(t, ctx, topbar, "the topbar after the MCP turn", func(v *frontendv1.TopbarView) bool { return v != nil })
+	if got := countUnmodeledWarnings(view, toolName); got != 0 {
+		t.Fatalf("TopbarWarningStrip carries %d unmodeled warnings for %q, want none: %v", got, toolName, view.GetWarnings())
+	}
+}
+
+// turnToolCard reads the workspace's root feed and answers the one settled
+// tool card of turn headed toolName, failing the test when there is none.
+func turnToolCard(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId, toolName string) *frontendv1.FeedSimpleToolCall {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	for _, row := range opened.Msg.GetSuccess().GetPage().GetSuccess().GetRows() {
+		card := row.GetActivity().GetSimpleToolCall()
+		if row.GetTurn().GetValue() == turn.GetValue() && card.GetName().GetText() == toolName && card.GetReturned() != nil {
+			return card
+		}
+	}
+	t.Fatalf("turn %s drew no settled tool card headed %q", turn.GetValue(), toolName)
+	return nil
+}
+
+// ===========================================================================
+// UnmodeledTool — driven as "!unmodeled".
 //
 // Contract, cited verbatim by the dispatching agent: docs/overhaul/daemon.md
 // "Failure classification": "Unmodeled tools are NOT failures and never feed
 // rows — their home is the topbar's warning dropdown, one warning per
 // distinct name." This is also STRUCTURAL, not merely a convention:
-// proto/src/frontend/v1/feed.proto's FeedTurnActivity.unit oneof (response,
-// simple_tool_call, skill, merge, subagent, hook, artifact, plan, findings)
-// has no "unmodeled" arm at all — there is no representation an unmodeled
-// tool call COULD occupy on the feed. The tool name and its opaque payload
-// are asserted absent from the turn's feed rows as an extra check on top of
-// that structural fact (the row content should never leak the raw call even
-// incidentally, e.g. folded into a response's own text).
+// proto/src/frontend/v1/feed.proto's FeedTurnActivity.unit oneof has no
+// "unmodeled" arm at all — there is no representation an unmodeled tool call
+// COULD occupy on the feed. The tool name and its opaque payload are asserted
+// absent from the turn's feed rows as an extra check on top of that fact.
 //
 // The scenario is driven TWICE to pin "one warning per distinct name" (not
-// one per occurrence): agent-shim/claude/shim/src/fake/scenarios/automation.ts
-// UNMODELED_MCP always calls the same tool_name, "mcp__echo__echo".
+// one per occurrence): automation.ts UNMODELED always calls the same tool,
+// "StructuredOutput".
 // ===========================================================================
 
-func TestMcpUnmodeledTool(t *testing.T) {
+func TestUnmodeledTool(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -236,8 +291,8 @@ func TestMcpUnmodeledTool(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	const toolName = "mcp__echo__echo"
-	view := harness.AwaitView(t, ctx, topbar, "the mcp__echo__echo unmodeled-tool warning", func(v *frontendv1.TopbarView) bool {
+	const toolName = "StructuredOutput"
+	view := harness.AwaitView(t, ctx, topbar, "the StructuredOutput unmodeled-tool warning", func(v *frontendv1.TopbarView) bool {
 		return countUnmodeledWarnings(v, toolName) > 0
 	})
 
@@ -249,8 +304,8 @@ func TestMcpUnmodeledTool(t *testing.T) {
 
 	// Assert: neither turn's feed content mentions the tool or its opaque
 	// payload — its only home is the warning dropdown just asserted above.
-	assertFeedRowsMentionNoneOf(t, w, ws, firstTurn, toolName, "hello from the offline session")
-	assertFeedRowsMentionNoneOf(t, w, ws, secondTurn, toolName, "hello from the offline session")
+	assertFeedRowsMentionNoneOf(t, w, ws, firstTurn, toolName, "Structured output provided successfully")
+	assertFeedRowsMentionNoneOf(t, w, ws, secondTurn, toolName, "Structured output provided successfully")
 }
 
 // countUnmodeledWarnings counts TopbarWarning entries whose unmodeled_tool
