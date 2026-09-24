@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -488,7 +490,7 @@ func TestWriteBatchAdvancesTheCursorInTheSameTransaction(t *testing.T) {
 	entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries: []*storev1.StoreEntry{entry},
 		CursorAdvance: &storev1.CursorState{
 			FileId: "12:34", Path: "/t/a.jsonl", Offset: 4096, Carry: []byte("half a line"),
@@ -512,7 +514,7 @@ func TestWriteBatchAcceptsACursorOnlyBatch(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	result, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	result, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
 	}, nil)
 
@@ -536,7 +538,7 @@ func TestWriteBatchCommitsNothingWhenALaterEntryIsInvalid(t *testing.T) {
 	bad := pageEntry("w2", "u2", "", promptItem("agent-1"))
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", &storev1.EntryBatch{
+	_, err := d.WriteBatch(ctx(), "shim", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{good, bad},
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 99},
 	}, nil)
@@ -558,14 +560,14 @@ func TestWriteBatchLeavesTheCursorUnchangedWhenTheBatchFails(t *testing.T) {
 	// Arrange: an ALREADY-ADVANCED cursor must not roll forward on a batch
 	// that failed, or the sidecar skips the records it never landed.
 	d, _ := newStore(t)
-	if _, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	if _, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 10},
 	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		Entries:       []*storev1.StoreEntry{pageEntry("w1", "u1", "", promptItem("agent-1"))},
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: 999},
 	}, nil)
@@ -584,7 +586,7 @@ func TestWriteBatchRefusesAnEmptyProducer(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))), nil)
+	_, err := d.WriteBatch(ctx(), "", WriteInteractive, batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))), nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -598,7 +600,7 @@ func TestWriteBatchRefusesAnUnsetBatch(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", nil, nil)
+	_, err := d.WriteBatch(ctx(), "shim", WriteInteractive, nil, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -612,7 +614,7 @@ func TestWriteBatchRefusesABatchThatCarriesNothing(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", &storev1.EntryBatch{}, nil)
+	_, err := d.WriteBatch(ctx(), "shim", WriteInteractive, &storev1.EntryBatch{}, nil)
 
 	// Assert
 	if !errors.Is(err, ErrInvalid) {
@@ -626,7 +628,7 @@ func TestWriteBatchRefusesACursorWithNoFileIdentity(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{Path: "/t/a.jsonl", Offset: 1},
 	}, nil)
 
@@ -642,7 +644,7 @@ func TestWriteBatchRefusesACursorWithNoPath(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Offset: 1},
 	}, nil)
 
@@ -657,7 +659,7 @@ func TestWriteBatchRefusesANegativeCursorOffset(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "sidecar", &storev1.EntryBatch{
+	_, err := d.WriteBatch(ctx(), "sidecar", WriteInteractive, &storev1.EntryBatch{
 		CursorAdvance: &storev1.CursorState{FileId: "12:34", Path: "/t/a.jsonl", Offset: -1},
 	}, nil)
 
@@ -675,7 +677,7 @@ func TestWriteBatchReportsAStorageFailureOnAClosedDatabase(t *testing.T) {
 	}
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))), nil)
+	_, err := d.WriteBatch(ctx(), "shim", WriteInteractive, batch(pageEntry("w1", "u1", "agent-1", promptItem("agent-1"))), nil)
 
 	// Assert
 	if !errors.Is(err, ErrStorage) {
@@ -693,7 +695,7 @@ func TestWriteBatchCorrelatesTheRefusalWithTheOffendingWrite(t *testing.T) {
 	d, s := newStore(t)
 
 	// Act
-	_, err := d.WriteBatch(ctx(), "shim", batch(pageEntry("w1", "u1", "", promptItem("agent-1"))), nil)
+	_, err := d.WriteBatch(ctx(), "shim", WriteInteractive, batch(pageEntry("w1", "u1", "", promptItem("agent-1"))), nil)
 
 	// Assert
 	if err == nil {
@@ -857,7 +859,7 @@ func TestWriteBatchCommitsNoLedgerRowWhenTheBatchFails(t *testing.T) {
 	bad := pageEntry("w2", "u2", "agent-1", frameItem(activityFrame("", "act-2", prose())))
 
 	// Act
-	if _, err := d.WriteBatch(ctx(), "producer", batch(good, bad), nil); !errors.Is(err, ErrInvalid) {
+	if _, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(good, bad), nil); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("WriteBatch error = %v, want ErrInvalid", err)
 	}
 
@@ -1008,7 +1010,7 @@ func TestAThirtyRowBatchOnAFullSizedCorpusStaysWithinItsOwnBudget(t *testing.T) 
 
 	// Act
 	started := time.Now()
-	result, err := d.WriteBatch(ctx(), "test-sidecar", thirtyRowFileBatch("live", "corpus-file-0", spread+4096), nil)
+	result, err := d.WriteBatch(ctx(), "test-sidecar", WriteInteractive, thirtyRowFileBatch("live", "corpus-file-0", spread+4096), nil)
 	elapsed := time.Since(started)
 
 	// Assert
@@ -1102,6 +1104,217 @@ func TestEveryStatementOfAWriteBatchSeeksRatherThanScans(t *testing.T) {
 
 			// Assert
 			assertNoTableScan(t, test.name, plan)
+		})
+	}
+}
+
+// ---- the class decides how a batch is committed ----
+
+// newBoundedStore opens a store with the given bulk bounds, a hand-moved
+// monotonic clock and verbose logging, so a test reads each transaction's
+// timing record rather than guessing where the split fell.
+func newBoundedStore(t *testing.T, clock *fakeClock, rows, bytes int, span time.Duration) (*DB, *sink) {
+	t.Helper()
+	s, log := newSink(t)
+	d, err := OpenWithOptions(filepath.Join(t.TempDir(), "store.db"), log, Options{
+		Now:            func() int64 { return testNow },
+		Clock:          clock.Now,
+		BulkChunkRows:  rows,
+		BulkChunkBytes: bytes,
+		BulkChunkTime:  span,
+	})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	return d, s
+}
+
+// entriesOf builds n distinct page lines for one book.
+func entriesOf(n int) []*storev1.StoreEntry {
+	out := make([]*storev1.StoreEntry, n)
+	for i := range out {
+		id := "e" + string(rune('a'+i))
+		out[i] = pageEntry("w-"+id, "u-"+id, "agent-1", frameItem(activityFrame("agent-1", "act-"+id, prose())))
+	}
+	return out
+}
+
+// transactionRows reads, in order, how many entries each write_batch
+// transaction took, from the per-write timing records.
+func transactionRows(t *testing.T, s *sink) []int {
+	t.Helper()
+	var out []int
+	for _, record := range s.records(t) {
+		context, _ := record["context"].(map[string]any)
+		if record["operation"] == WriteTimingOperation && context["statement"] == StatementWriteBatch {
+			rows, _ := context["rows"].(float64)
+			out = append(out, int(rows))
+		}
+	}
+	return out
+}
+
+// TestABulkBatchIsSplitWithinItsBounds pins that the store's own bounds decide
+// how much one bulk transaction takes, whatever size the producer sent, and
+// that an interactive batch is never split.
+func TestABulkBatchIsSplitWithinItsBounds(t *testing.T) {
+	tests := []struct {
+		name  string
+		class WriteClass
+		rows  int
+		bytes int
+		span  time.Duration
+		// tick is how far the clock moves after each applied bulk entry.
+		tick time.Duration
+		want []int
+	}{
+		{name: "the row bound", class: WriteBulk, rows: 3, want: []int{3, 3, 3, 1}},
+		{name: "the byte bound", class: WriteBulk, bytes: 1, want: []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}},
+		{name: "the time bound", class: WriteBulk, span: 10 * time.Millisecond, tick: 5 * time.Millisecond, want: []int{2, 2, 2, 2, 2}},
+		{name: "an interactive batch is one transaction whatever the bounds", class: WriteInteractive, rows: 3, want: []int{10}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, s := newBoundedStore(t, clock, test.rows, test.bytes, test.span)
+			d.bulkEntryApplied = func() { clock.advance(test.tick) }
+
+			// Act
+			result, err := d.WriteBatch(ctx(), "test-producer", test.class, batch(entriesOf(10)...), nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("WriteBatch: %v", err)
+			}
+			if result.Written != 10 || len(result.Lines) != 10 {
+				t.Fatalf("written=%d lines=%d, want 10 and 10", result.Written, len(result.Lines))
+			}
+			if got := transactionRows(t, s); fmt.Sprint(got) != fmt.Sprint(test.want) {
+				t.Fatalf("entries per transaction = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+// TestASplitBulkBatchAdvancesTheCursorOnlyInItsLastTransaction: the cursor
+// advance and the shapes ride the LAST transaction, so a failure part-way can
+// leave leading entries committed but never the advance past them.
+func TestASplitBulkBatchAdvancesTheCursorOnlyInItsLastTransaction(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "the cursor advance", query: `SELECT COUNT(*) FROM cursor WHERE file_id = 'f1'`},
+		{name: "the shape observation", query: `SELECT COUNT(*) FROM residue_shapes`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, _ := newBoundedStore(t, clock, 2, 0, 0)
+			var seen []int64
+			d.transactionCommitted = func(WriteClass) { seen = append(seen, scalar[int64](t, d, test.query)) }
+			b := batch(entriesOf(5)...)
+			b.CursorAdvance = &storev1.CursorState{FileId: "f1", Path: "/t/f1.jsonl", Offset: 100}
+			shapes := []*storev1.ShapeObservation{observation("h1", "unparsed", "{a:string}", "{}", 1000)}
+
+			// Act
+			if _, err := d.WriteBatch(ctx(), "test-producer", WriteBulk, b, shapes); err != nil {
+				t.Fatalf("WriteBatch: %v", err)
+			}
+
+			// Assert
+			if fmt.Sprint(seen) != fmt.Sprint([]int64{0, 0, 1}) {
+				t.Fatalf("rows after each committed transaction = %v, want [0 0 1]", seen)
+			}
+		})
+	}
+}
+
+// TestAnInteractiveWriteBehindALargeBulkBatchRunsNext is the owner's rule end
+// to end: an interactive write that arrives while a large bulk batch is being
+// written waits for the one bounded transaction in flight, then goes before
+// the rest of the bulk batch.
+func TestAnInteractiveWriteBehindALargeBulkBatchRunsNext(t *testing.T) {
+	tests := []struct {
+		name string
+		want []WriteClass
+	}{
+		{name: "one bulk transaction, then the interactive write, then the rest",
+			want: []WriteClass{WriteBulk, WriteInteractive, WriteBulk, WriteBulk, WriteBulk, WriteBulk}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			clock := &fakeClock{now: time.Unix(0, 0)}
+			d, _ := newBoundedStore(t, clock, 2, 0, 0)
+			var order []WriteClass
+			d.transactionCommitted = func(class WriteClass) { order = append(order, class) }
+			interactiveQueued := make(chan struct{})
+			d.queuedForWrite = func(class WriteClass) {
+				if class == WriteInteractive {
+					close(interactiveQueued)
+				}
+			}
+			interactiveDone := make(chan error, 1)
+			var once sync.Once
+			d.bulkEntryApplied = func() {
+				once.Do(func() {
+					go func() {
+						_, err := d.WriteBatch(ctx(), "test-shim", WriteInteractive,
+							batch(pageEntry("w-live", "u-live", "agent-1", frameItem(activityFrame("agent-1", "act-live", prose())))), nil)
+						interactiveDone <- err
+					}()
+					<-interactiveQueued
+				})
+			}
+
+			// Act
+			_, err := d.WriteBatch(ctx(), "test-sidecar", WriteBulk, batch(entriesOf(10)...), nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("bulk WriteBatch: %v", err)
+			}
+			if err := <-interactiveDone; err != nil {
+				t.Fatalf("interactive WriteBatch: %v", err)
+			}
+			if fmt.Sprint(order) != fmt.Sprint(test.want) {
+				t.Fatalf("transaction order = %v, want %v", order, test.want)
+			}
+		})
+	}
+}
+
+// TestWriteBatchRefusesAnUnclassifiedWrite: a write that states no class is
+// refused before anything is queued or written, and the refusal is traced.
+func TestWriteBatchRefusesAnUnclassifiedWrite(t *testing.T) {
+	tests := []struct {
+		name  string
+		class WriteClass
+	}{
+		{name: "the zero value", class: WriteClassUnset},
+		{name: "a value no class names", class: WriteClass(7)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, s := newStore(t)
+			entry := pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose())))
+
+			// Act
+			_, err := d.WriteBatch(ctx(), "test-producer", test.class, batch(entry), nil)
+
+			// Assert
+			if RefusalSite(err) != SiteWriteClassUnset {
+				t.Fatalf("WriteBatch = %v, want a %s refusal", err, SiteWriteClassUnset)
+			}
+			if got := scalar[int64](t, d, `SELECT COUNT(*) FROM entry`); got != 0 {
+				t.Fatalf("entry rows = %d, want 0", got)
+			}
+			s.assertTracedRefusal(t, "write_class is unset")
 		})
 	}
 }

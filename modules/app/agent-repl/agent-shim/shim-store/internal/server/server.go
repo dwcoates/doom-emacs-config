@@ -234,7 +234,9 @@ func (s *Server) logOwnFailure(log *logging.Logger, operation string, ref *refus
 
 func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
 	msg := req.Msg
-	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header()).With(batchAttribution(msg.GetBatch()))
+	attribution := batchAttribution(msg.GetBatch())
+	attribution.WriteClass = writeClassOf(msg.GetWriteClass()).String()
+	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header()).With(attribution)
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
 		"write batch entries=%d shapes=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), len(msg.GetShapes()), msg.GetBatch().GetCursorAdvance() != nil)
 
@@ -243,8 +245,15 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 		return writeBatchFailure(ref), nil
 	}
 
-	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), msg.GetBatch(), msg.GetShapes())
+	class := writeClassOf(msg.GetWriteClass())
+	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), class, msg.GetBatch(), msg.GetShapes())
 	if err != nil {
+		// WHAT COMMITTED BEFORE THE FAILURE IS STILL PUBLISHED. A split bulk
+		// batch can fail after its leading transactions made lines durable;
+		// the retry absorbs them by write_id and publishes nothing, so this is
+		// the only moment a live watcher can be told about them.
+		s.publish(log, msg.GetProducer(), result.Lines)
+		s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 		ref := s.storeFailure(log, "store.rpc.write-batch", err, logging.Fields{Producer: msg.GetProducer()})
 		return writeBatchFailure(ref), nil
 	}
@@ -259,6 +268,21 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 			Skipped: skippedEntries(result.Skipped),
 		}},
 	}), nil
+}
+
+// writeClassOf reads the class the caller stated. Validation has already
+// refused a request that stated none, so the unset answer here is only ever
+// reached by a caller that skipped validation — and the storage layer refuses
+// it again rather than guessing.
+func writeClassOf(class *storev1.WriteClass) WriteClass {
+	switch class.GetWriteClass().(type) {
+	case *storev1.WriteClass_Interactive:
+		return WriteInteractive
+	case *storev1.WriteClass_Bulk:
+		return WriteBulk
+	default:
+		return db.WriteClassUnset
+	}
 }
 
 // skippedEntries carries the store's per-entry legacy book-conflict skips onto

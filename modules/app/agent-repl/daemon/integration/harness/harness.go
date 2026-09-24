@@ -39,7 +39,7 @@
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_CLAUDE_BIN                 the claude binary for the login pty and the classifier
-//	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's always fails)
+//	AGENT_REPL_DEPLOY_BUILDER             replaces the deploy's build (the harness's stages what runs)
 //
 // Fake-shim-only (read by the fake, never by the daemon; they ride the
 // daemon's own environment into the spawned shim):
@@ -103,6 +103,12 @@ func MainAt(m *testing.M, module string) int {
 // harness's temp helpers without the daemon builds (the harness's own tests)
 // calls it from its TestMain directly.
 func WithRunRoot(body func() int) int {
+	// Refused before anything else runs: a run at normal priority is the
+	// overload background.go records, and nothing it does first is worth that.
+	if err := requireBackgroundPriority(os.Getenv); err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
 	// A dead run's leftovers are reclaimed BEFORE this run adds its own. A
 	// reclaim that fails is a failed run, never a shrug: the leftovers are
 	// exactly the disk and the CPU the suite cannot spare.

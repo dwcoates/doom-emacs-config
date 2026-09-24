@@ -125,6 +125,24 @@ const KEEPALIVE_ECHO = scenario({
   },
 });
 
+const QUEUE_VENDOR_TURN = scenario({
+  name: "queue-vendor-turn",
+  prompt: "!queue-vendor-turn",
+  emits:
+    "an ordinary short turn, and then — ahead of the NEXT send's own turn — a turn the vendor runs ON ITS OWN, the " +
+    "way a background task's notification starts one: an assistant answer and a result with " +
+    "`origin: {kind: \"task-notification\"}`, and NO `user_message_uuid` anywhere, because no send asked for it",
+  writes: "the assistant line, the prompt line and the turn record, then the vendor turn's assistant line and record",
+  arms:
+    "AgentResponse.from_model, AgentSuccess.completed — twice, the second answering nobody. Grounded in the " +
+    "2026-09-23 keep-alive leak, where such a turn's result closed the shim's keep-alive early",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "queue-vendor-turn" }, "fake turn that queues a vendor turn of its own");
+    ctx.queueVendorTurn();
+    conclude(ctx, "ok");
+  },
+});
+
 export const LIFECYCLE_SCENARIOS = [
   HOLD,
   INTERRUPT_MID_TOOL,
@@ -132,4 +150,5 @@ export const LIFECYCLE_SCENARIOS = [
   QUERY_EOF_MID_ASK,
   QUERY_FAIL,
   KEEPALIVE_ECHO,
+  QUEUE_VENDOR_TURN,
 ];

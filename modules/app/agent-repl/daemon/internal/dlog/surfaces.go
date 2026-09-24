@@ -53,6 +53,10 @@ type surfaces struct {
 	// record that met it, and a per-record report is the error flood this set
 	// exists to prevent.
 	centralFallbacks map[string]struct{}
+	// retired are the workspace directories the daemon has said it is
+	// removing (Retire) that have no sinks open yet; a workspace that has
+	// sinks carries its retirement on its own entry.
+	retired map[string]struct{}
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -72,6 +76,9 @@ type workspaceSinks struct {
 	// as ordinary evidence under workspace_dir_hash.
 	dirHash string
 	sinks   map[string]*sink
+	// retired says the daemon is removing this directory (Retire): no sink
+	// of it creates, links or re-points anything inside it.
+	retired bool
 }
 
 // OpenSurfaces opens the daemon's log surfaces under the state root's logs
@@ -105,6 +112,7 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 		now:        time.Now,
 		workspaces: make(map[string]*workspaceSinks),
 		targets:    make(map[string]string),
+		retired:    make(map[string]struct{}),
 		scanEvery:  scanInterval,
 		stop:       make(chan struct{}),
 		scanDone:   make(chan struct{}),
@@ -374,11 +382,48 @@ func (s *surfaces) Evict(dir string) error {
 	s.mu.Lock()
 	ws, ok := s.workspaces[clean]
 	delete(s.workspaces, clean)
+	// The retirement ends with the workspace's entry: a directory registered
+	// again after its workspace was released links like any other.
+	delete(s.retired, clean)
 	s.mu.Unlock()
 	if !ok {
 		return nil
 	}
 	return closeWorkspace(ws)
+}
+
+// Retire marks a workspace directory the daemon is about to remove. From its
+// return on, no sink of that workspace creates, links or re-points anything
+// inside the directory; its open sinks stay open, and a sink opened later
+// lands in its daemon-owned target under the logs directory with no link.
+//
+// IT IS TAKEN UNDER THE ONE LOCK EVERY SINK OPEN HOLDS, so a sink open either
+// finished its link before the retirement or never makes one. A record that
+// reached a merged workspace while its worktree was being removed used to
+// open a new sink there, and that open's MkdirAll recreated the directory
+// under the removal (e2e TestWebappLayerRestartHandover: "the worktree is
+// still present after removal").
+func (s *surfaces) Retire(dir string) error {
+	clean, err := cleanDir(dir)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	ws, ok := s.workspaces[clean]
+	if ok {
+		ws.retired = true
+		for _, sk := range ws.sinks {
+			sk.unlink()
+		}
+	} else {
+		s.retired[clean] = struct{}{}
+	}
+	s.mu.Unlock()
+	s.Global().Debug("daemon.dlog.retire", "retired a workspace directory; its sinks touch nothing inside it", Context{
+		KeyWorkspaceDir: clean,
+		"open_sinks":    ok,
+	})
+	return nil
 }
 
 // Close flushes and closes every sink the daemon opened.
@@ -424,6 +469,7 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		return nil, nil, errSurfacesClosed
 	}
 	ws, ok := s.workspaces[clean]
+	_, retired := s.retired[clean]
 	if !ok {
 		// THE DIRECTORY IS STAT-ED ONCE, ON THE FIRST RESOLVE, AND NEVER
 		// AGAIN. A workspace already carrying open sinks keeps them: the
@@ -434,12 +480,17 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		// the merged workspace -- the footer and the feed its own roster
 		// still lists under recently_merged -- fail with "no such file or
 		// directory" and record an ERROR for a teardown the daemon ordered.
-		info, err := os.Stat(clean)
-		if err != nil {
-			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w", clean, err)
-		}
-		if !info.IsDir() {
-			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: not a directory", clean)
+		// A RETIRED directory is not stat-ed at all: the daemon is removing
+		// it, so whether it is still there says nothing, and its sinks touch
+		// nothing inside it.
+		if !retired {
+			info, err := os.Stat(clean)
+			if err != nil {
+				return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w", clean, err)
+			}
+			if !info.IsDir() {
+				return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: not a directory", clean)
+			}
 		}
 		id, err := s.mintedIDLocked(clean)
 		if err != nil {
@@ -449,15 +500,20 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		ws = &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames))}
+		ws = &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames)), retired: retired}
 		s.workspaces[clean] = ws
+		delete(s.retired, clean)
 	}
 	if sk, ok := ws.sinks[name]; ok {
 		return ws, sk, nil
 	}
 	key := ws.id + "/" + name
 	remembered := s.targets[key] != ""
-	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key])
+	open := openSink
+	if ws.retired {
+		open = openLinklessSink
+	}
+	sk, err := open(s.logsDir, ws.dir, ws.id, name, s.targets[key])
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
 	}

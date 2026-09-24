@@ -195,6 +195,20 @@ describe("writeConverter.settle", () => {
       (write.result.value as conversationv1.AgentWriteFailure).error?.settledAt?.atMs,
     ).toBe(1_700_000_001_000n);
   });
+
+  it("restates the requested path on the failure arm, so the settled frame stands alone", () => {
+    // Arrange, Act.
+    const item = writeConverter.settle(call({ file_path: "/tmp/a.txt" }), outcome("nope", true));
+
+    // Assert.
+    const write = item?.value as conversationv1.AgentWrite;
+    expect((write.result.value as conversationv1.AgentWriteFailure).path?.path).toBe("/tmp/a.txt");
+  });
+
+  it("produces NO failure frame for a call that named no path, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(writeConverter.settle(call({}), outcome("nope", true))).toBeUndefined();
+  });
 });
 
 describe("writeConverter.progress", () => {

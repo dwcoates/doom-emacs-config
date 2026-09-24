@@ -121,6 +121,29 @@ func (a *fakeAnnouncer) Shutdowns() []*agentreplv1.DaemonShutdownAnnounced {
 	return append([]*agentreplv1.DaemonShutdownAnnounced(nil), a.shutdowns...)
 }
 
+// fakeReviving answers the prompt queue's revival state from a set the test
+// controls.
+type fakeReviving struct {
+	mu       sync.Mutex
+	reviving map[ids.WorkspaceID]bool
+}
+
+func newFakeReviving() *fakeReviving {
+	return &fakeReviving{reviving: make(map[ids.WorkspaceID]bool)}
+}
+
+func (f *fakeReviving) Reviving(ws ids.WorkspaceID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reviving[ws]
+}
+
+func (f *fakeReviving) Set(ws ids.WorkspaceID, reviving bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reviving[ws] = reviving
+}
+
 // fakeFreeness answers freeness from a set the test controls, and lets a test
 // release a pending AwaitFree through a channel rather than a sleep.
 type fakeFreeness struct {
@@ -447,6 +470,7 @@ type harness struct {
 	clock     *fakeClock
 	announcer *fakeAnnouncer
 	freeness  *fakeFreeness
+	reviving  *fakeReviving
 	stand     *fakeStand
 	spawns    *fakeSpawns
 	log       *dlog.TestSurfaces
@@ -471,6 +495,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		clock:     newFakeClock(instant),
 		announcer: &fakeAnnouncer{},
 		freeness:  newFakeFreeness(),
+		reviving:  newFakeReviving(),
 		stand:     newFakeStand(),
 		spawns:    newFakeSpawns(),
 		log:       log,
@@ -484,6 +509,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Stand:         h.stand,
 		Spawns:        h.spawns,
 		Freeness:      h.freeness,
+		Reviving:      h.reviving.Reviving,
 		Announcer:     h.announcer,
 		Exit:          func(context.Context) error { h.exits <- struct{}{}; return nil },
 		Clock:         h.clock,

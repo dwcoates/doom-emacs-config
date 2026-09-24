@@ -11,6 +11,10 @@
 # absent) and the pre-commit hook install/uninstall logic.
 #
 # Run with:   bash .claude/test-install.sh
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -65,7 +65,7 @@ import type {
   FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
-import { SAYS_ATTRIBUTE, drawBubble } from "../../bubble/draw.js";
+import { SAYS_ATTRIBUTE, drawBubble, type BubbleCapLines } from "../../bubble/draw.js";
 import { formatAge } from "../../duration.js";
 import { markdownSlot, paintGeneration, repaintSlot, type BubbleBody } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -201,7 +201,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       ...(corner === undefined ? {} : { corner }),
       content: [prose],
       footer: result.case === "error" ? [cutShortMarker()] : [],
-      capLines: u.thinking ? 2 : "feed",
+      capLines: responseCapLines(u),
     },
     rc.previous,
   );
@@ -218,6 +218,21 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const characters = markdown.length;
   recordDraw(u, rc, result.case, characters);
   return bubble;
+}
+
+/**
+ * The bubble's collapsed line limit, drawn verbatim from the daemon's flags.
+ *
+ * A THINKING BUBBLE IS SHOWN IN FULL WHILE IT IS THE LATEST AGENT RESPONSE
+ * (owner rule, 2026-09-23): the ordinary response cap until the daemon states
+ * that a later response landed in the same feed (`FeedResponse.superseded`),
+ * and the two-line thinking cap from then on. Whether it is superseded is the
+ * daemon's fact; nothing here looks at the rows around it. Only the DEFAULT
+ * limit changes: a bubble the reader expanded wears `.expanded` on its scroll
+ * box, which the in-place redraw keeps (src/bubble/draw.ts), so it stays open.
+ */
+export function responseCapLines(u: FeedResponse): BubbleCapLines {
+  return u.thinking && u.superseded ? 2 : "feed";
 }
 
 /**
@@ -324,41 +339,85 @@ export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTM
 export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
 
 /**
+ * One instant per shape `formatAge` writes, each at the widest figures that
+ * shape reaches: two-level and one-level days (to 999), hours and minutes,
+ * and seconds alone.
+ */
+const USAGE_AGE_WIDEST_MS: readonly number[] = [
+  (999 * 86_400 + 23 * 3_600) * 1000,
+  999 * 86_400 * 1000,
+  (23 * 3_600 + 59 * 60) * 1000,
+  23 * 3_600 * 1000,
+  (59 * 60 + 59) * 1000,
+  59 * 60 * 1000,
+  59 * 1000,
+];
+
+/** A label with every figure zeroed: in tabular figures, the same width. */
+function zeroFigures(label: string): string {
+  return label.replace(/\d/g, "0");
+}
+
+/** The duration's label for an age, as the corner draws it. */
+function usageAgeLabel(ageMs: number): string {
+  return `${formatAge(ageMs)} ago`;
+}
+
+/**
+ * THE DURATION'S WIDTH RESERVE: the widest label of every shape the age
+ * formatter writes, figures zeroed. The corner stacks them in one grid cell,
+ * so the reserve is exactly as wide as the widest label the clock can tick to.
+ * Derived from `formatAge` itself, so a formatter that changes its shapes
+ * changes the reserve with it.
+ */
+export const USAGE_AGE_RESERVE_LABELS: readonly string[] = USAGE_AGE_WIDEST_MS.map((ms) =>
+  zeroFigures(usageAgeLabel(ms)),
+);
+
+/**
+ * Whether LABEL fits the reserve: some reserved label has its shape (the same
+ * units in the same order) and at least as many figures. In tabular figures
+ * that is "no wider". An age of a thousand days or more does not fit.
+ */
+export function usageAgeWithinReserve(label: string): boolean {
+  const zeroed = zeroFigures(label);
+  const shape = zeroed.replace(/0+/g, "0");
+  return USAGE_AGE_RESERVE_LABELS.some(
+    (reserved) => reserved.replace(/0+/g, "0") === shape && zeroed.length <= reserved.length,
+  );
+}
+
+/**
  * The cost corner: the token figure, drawn verbatim, and — once the response
  * has SETTLED — the relative timestamp it reveals when hovered or focused.
  *
  * THE MARKUP (the stylesheet's `.usage-corner` comment has the mechanism):
  *
- *   span.usage-corner[data-tokens=<token text>]   ::before is a hidden copy of
- *     span.usage-slider                           the token, in a fixed-width slot
+ *   span.usage-corner[data-tokens=<token text>]   ::before reserves the token's slot
+ *     span.usage-reserve[aria-hidden]             reserves the gap + widest duration
+ *       span.usage-reserve-label × N              one per age shape, stacked
+ *     span.usage-slider                           out of flow; phase B moves it
  *       span.usage-stamp  <token text>            out of flow, at the slider's left
- *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content
+ *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content;
+ *                                                 phase A moves it
  *
- * The slider is the duration's fixed-width slot (plus its gap), translated by
- * a percentage of that width, so the collapsed token sits exactly at the right
- * edge and the revealed token slides left by the slot. The corner's floated
- * width is spacer + slider in every state, so the first prose line that wraps
- * around it never reflows on the reveal, the tick or the settle. The
- * stylesheet owns the 0.5s transition; `prefers-reduced-motion` drops it. A
- * state class is toggled here too, so a keyboard focus reveals the same
- * timestamp a hover does.
+ * The corner's in-flow content is the two reserves, so its float is the whole
+ * HOVERED footprint from the first draw, arriving or settled, and the first
+ * prose line that wraps around it never reflows on the reveal, the tick or the
+ * settle. The stylesheet owns the two-phase slide; `prefers-reduced-motion`
+ * drops it. A state class is toggled here too, so a keyboard focus reveals the
+ * same timestamp a hover does.
  *
  * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
  * once per shared tick, so "5m 30s ago" stays current while it is on screen.
- * The slot does not grow with it, so nothing around the corner moves.
  * The subscription is taken through `tick`, which marks the element, so the
- * feed's teardown of the bubble — a re-push replacing the row, or the turn-end
- * backstop that stops every clock in a settled turn — unsubscribes it with no
- * disposer to remember here.
+ * feed's teardown of the bubble unsubscribes it with no disposer to remember
+ * here. A label the reserve cannot hold (an age of a thousand days or more)
+ * would widen past it, so it is logged at ERROR, once per corner.
  *
  * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
  * a corner with no settled instant has an empty slider, marked
  * `data-arriving`, so the token sits at the right edge and nothing slides.
- *
- * NOTHING HERE CHANGES THE CORNER'S WIDTH (owner rule, 2026-09-23: the user
- * owns the scroll). The token spacer and the duration slot are fixed widths in
- * the stylesheet, so a growing figure, the clock's tick and the settle itself
- * leave the float -- and the first prose line wrapped around it -- in place.
  */
 export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
@@ -376,6 +435,17 @@ export function drawFeedResponseUsageStamp(
   corner.dataset.tokens = u.text;
   corner.setAttribute(SAYS_ATTRIBUTE, `${u.text}|${String(atMs)}`);
 
+  const reserve = document.createElement("span");
+  reserve.className = "usage-reserve";
+  reserve.setAttribute("aria-hidden", "true");
+  for (const text of USAGE_AGE_RESERVE_LABELS) {
+    const label = document.createElement("span");
+    label.className = "usage-reserve-label";
+    label.textContent = text;
+    reserve.appendChild(label);
+  }
+  corner.appendChild(reserve);
+
   const slider = document.createElement("span");
   slider.className = "usage-slider";
   corner.appendChild(slider);
@@ -385,14 +455,22 @@ export function drawFeedResponseUsageStamp(
   stamp.textContent = u.text;
   slider.appendChild(stamp);
 
-  // The duration slot is reserved at a fixed width either way (styles.css);
-  // an arriving corner marks itself so its empty slot never slides out.
+  // The reserve is drawn either way; an arriving corner marks itself so its
+  // empty slider never slides out.
   corner.toggleAttribute("data-arriving", atMs === 0);
   if (atMs > 0) {
     const ago = document.createElement("span");
     ago.className = "usage-ago";
+    let overflowReported = false;
     tick(ago, rc.ctx.ticker, (nowMs) => {
-      ago.textContent = `${formatAge(nowMs - atMs)} ago`;
+      const label = usageAgeLabel(nowMs - atMs);
+      ago.textContent = label;
+      if (overflowReported || usageAgeWithinReserve(label)) return;
+      overflowReported = true;
+      log.error("the usage corner's duration outgrew its reserved width", {
+        operation: "feed.cards.response.usage-reserve-exceeded",
+        context: { path, label, reserve: USAGE_AGE_RESERVE_LABELS },
+      });
     });
     slider.appendChild(ago);
 

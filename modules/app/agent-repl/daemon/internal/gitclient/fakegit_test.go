@@ -433,6 +433,10 @@ func (s *testSurfaces) Evict(string) error {
 	panic("gitclient must never evict a workspace's sinks")
 }
 
+func (s *testSurfaces) Retire(string) error {
+	panic("gitclient must never retire a workspace's sinks")
+}
+
 func (s *testSurfaces) Close() error { return nil }
 
 func (s *testSurfaces) records() []dlog.Record { return s.global.Records() }

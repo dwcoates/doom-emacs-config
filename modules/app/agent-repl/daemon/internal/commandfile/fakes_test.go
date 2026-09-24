@@ -292,3 +292,6 @@ func verbNames(calls []verbCall) []string {
 
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s *fakeSurfaces) Evict(_ string) error { return nil }
+
+// Retire implements dlog.Surfaces; no command file retires a directory.
+func (s *fakeSurfaces) Retire(_ string) error { return nil }

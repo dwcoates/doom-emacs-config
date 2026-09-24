@@ -174,6 +174,12 @@ export function toWriteBatchRequest(
 ): storev1.WriteBatchRequest {
   return create(storev1.WriteBatchRequestSchema, {
     producer,
+    // EVERY SHIM WRITE IS INTERACTIVE: it is live turn content somebody is
+    // waiting to see, and the store takes it ahead of any queued bulk copy.
+    // The store refuses a write that states no class, so this is not optional.
+    writeClass: create(storev1.WriteClassSchema, {
+      writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+    }),
     batch: create(storev1.EntryBatchSchema, {
       entries: entries.map((entry) => toStoreEntry(producer, entry)),
       // A STREAM-PLANE PRODUCER HAS NO FILE to be positioned in, so no cursor
@@ -204,6 +210,22 @@ interface BatchFailure {
 interface PendingBatch {
   readonly entries: readonly PersistEntry[];
   attempts: number;
+  /**
+   * Settles once the batch has left the buffer: durable, dropped loudly, or
+   * evicted. A durable write orders itself behind the batch that was last in
+   * the buffer when it was made, and no further.
+   */
+  readonly settled: Promise<void>;
+  readonly settle: () => void;
+}
+
+/** A batch for the buffer, carrying the promise its leaving settles. */
+function pendingBatch(entries: readonly PersistEntry[]): PendingBatch {
+  let settle = (): void => {};
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return { entries, attempts: 0, settled, settle };
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -543,7 +565,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       const batch = queue[0];
       if (batch === undefined) break;
       await deliver(batch);
-      queue.shift();
+      // A full buffer evicts its head from under the drain, delivering or not;
+      // shifting blindly then would remove the next batch, undelivered.
+      if (queue[0] === batch) queue.shift();
+      batch.settle();
     }
     draining = undefined;
   };
@@ -630,14 +655,25 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       // replaying on a schedule measured in seconds and the caller is holding
       // an RPC open. Abandoning keeps the order: the caller's answer to the
       // refusal is to re-queue the row at the TAIL of the same buffer.
-      if (degradedSince === undefined) await Promise.race([this.flush(), whenDegraded()]);
+      //
+      // BEHIND WHAT IS BUFFERED NOW, NEVER BEHIND AN IDLE BUFFER. Waiting for
+      // the drain to go idle starved the write for as long as anything kept
+      // enqueueing -- a keep-alive's rows, a detached shell's spool -- and a
+      // StartTurn held its RPC open on it until the daemon's deadline (e2e
+      // TestKeepAliveAnswerAfterVendorTurnNeverServed, 30 of 30 under load).
+      // The buffer drains in order, so the batch last in it now settling means
+      // every batch ahead of this write has.
+      const ahead = queue[queue.length - 1];
+      if (ahead !== undefined && degradedSince === undefined) {
+        await Promise.race([ahead.settled, whenDegraded()]);
+      }
       if (degradedSince !== undefined) {
         throw new PersistenceError(
           "store_unavailable",
           `the store is unreachable (${degradedReason}); ${entries.length} durable row(s) belong on the retry buffer`,
         );
       }
-      const batch: PendingBatch = { entries, attempts: 0 };
+      const batch = pendingBatch(entries);
       const landed = await deliverOnce(batch);
       if (!landed) {
         throw new PersistenceError(
@@ -655,9 +691,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         const evicted = queue.shift();
         if (evicted !== undefined) {
           dropLoudly(evicted, `retry buffer is full at ${retry.bufferCapacity} batches`);
+          evicted.settle();
         }
       }
-      queue.push({ entries, attempts: 0 });
+      queue.push(pendingBatch(entries));
       LOGGER.logVerbose({ entries: entries.length, queued: queue.length }, "batch enqueued");
       startDraining();
     },

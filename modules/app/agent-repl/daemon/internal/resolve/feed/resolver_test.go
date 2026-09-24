@@ -67,6 +67,9 @@ func (f *fakeSurfaces) ClientLog(dir string, record dlog.ClientRecord) error { r
 // Evict implements dlog.Surfaces.
 func (f *fakeSurfaces) Evict(dir string) error { return nil }
 
+// Retire implements dlog.Surfaces.
+func (f *fakeSurfaces) Retire(dir string) error { return nil }
+
 // Close implements dlog.Surfaces.
 func (f *fakeSurfaces) Close() error { return nil }
 
@@ -114,6 +117,14 @@ type harness struct {
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
 	// by the test, never waited on.
 	clock *fakeStallClock
+	// placed are the entry placements Deps.EntryPlaced was told, in order.
+	placed []placedEntry
+}
+
+// placedEntry is one Deps.EntryPlaced call.
+type placedEntry struct {
+	unit string
+	row  string
 }
 
 // newHarness builds a resolver with deterministic dependencies: a fixed clock,
@@ -144,6 +155,9 @@ func newHarness(t *testing.T) *harness {
 		AfterFunc: h.clock.AfterFunc,
 		Faults:    h.faults,
 		PageSize:  3,
+		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
+			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
+		},
 	})
 	if err != nil {
 		t.Fatalf("newResolver: %v", err)
@@ -697,7 +711,7 @@ func TestAMergeHeadIsUpsertedWhereTheOrchestratorPlacesIt(t *testing.T) {
 
 	// Act.
 	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), row)
-	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
+	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Root: true}, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
 
 	// Assert: on the root feed, and its sub-feed is addressable.
 	rows := h.rows(rootFeed())

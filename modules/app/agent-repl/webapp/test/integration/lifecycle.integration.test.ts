@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
 import { DrainReasonSchema } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { REFUSAL_FACTS, ROOT_FEED, type RpcName } from "./fake-daemon";
 import {
   DRAIN_REASON_ARMS,
@@ -40,6 +40,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
@@ -191,6 +193,35 @@ describe("a WatchDaemon push arm this build has no case for", () => {
     harness = await startHarness();
     await harness.fake.awaitStream("watchDaemon");
     harness.fake.pushMutationProgress("op-1");
+    await harness.settle();
+    // Act
+    harness.fake.scheduleDrain(60_000n, drainReason("deploy"));
+    await harness.settle();
+    // Assert
+    expect(harness.$('[data-component="drain-banner"] [data-arm]')?.dataset.arm).toBe("deploy");
+  });
+});
+
+// `reload_elisp` IS EMACS'S. The daemon addresses it to stale Emacs streams
+// alone, so a webview never meets it; one that did would skip it as skew,
+// raising nothing and keeping the stream.
+describe("a reload_elisp push reaching a webview", () => {
+  it("raises no failure card", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    // Act
+    harness.fake.pushReloadElisp("/checkout", "elisp-build");
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("leaves the stream standing, so the next push it DOES know still lands", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchDaemon");
+    harness.fake.pushReloadElisp("/checkout", "elisp-build");
     await harness.settle();
     // Act
     harness.fake.scheduleDrain(60_000n, drainReason("deploy"));

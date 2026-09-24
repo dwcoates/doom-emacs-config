@@ -223,12 +223,27 @@ export const grepConverter: ToolConverter = {
   settle(call, outcome) {
     if (outcome.isError) {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a search failed");
+      // THE SETTLED FRAME STANDS ALONE: it restates what the call named, since
+      // the start it upserts over is gone once it lands. A call that named
+      // nothing has no start either, so it gets no failure frame, exactly as
+      // it got no announcement.
+      const pattern = requestedPattern(call);
+      if (pattern === undefined) {
+        LOGGER.debug(
+          { tool_use_id: call.toolUseId },
+          "a search failed with no pattern to restate; no failure frame is produced",
+        );
+        return undefined;
+      }
       return {
         case: "grep",
         value: create(conversationv1.AgentGrepSchema, {
           result: {
             case: "failure",
-            value: create(conversationv1.AgentGrepFailureSchema, { error: failureOf(outcome) }),
+            value: create(conversationv1.AgentGrepFailureSchema, {
+              error: failureOf(outcome),
+              query: grepQuery(call, pattern),
+            }),
           },
         }),
       };

@@ -12,43 +12,52 @@ import (
 
 // SUBJECT 4 — who a spool belongs to, and what happens when nobody claims it.
 //
-// A spool that appears BEFORE the transcript line naming it is retained and
-// re-checked, never dropped; an unclassifiable task-id prefix is a loud
-// total-ingestion violation whose bytes are still read whole and classified as
-// residue; and the /tmp versus /private/tmp spellings of one file are one file.
+// ONLY WHAT IS RENDERED IS READ. A spool is read for the run a spawning call
+// claimed and for nothing else: one that appears BEFORE the transcript line
+// naming it is held and re-checked, never read, and stays unread after its
+// window lapses — until a launch claims it. A spool whose task id has no a/b/w
+// prefix is refused loudly and never read. The /tmp versus /private/tmp
+// spellings of one file are one file.
 //
-// RESIDUE IS NEVER PERSISTED, so "landed as residue" is asserted where the
-// evidence now is: the reader's own withholding record, plus a cursor that
-// reached the end of the file. The store must hold no residue row at all.
+// "NEVER READ" IS ASSERTED ON A POSITIVE SIGNAL: the reader re-resolves every
+// UNWATCHED spool on every rescan and says so at debug, so a later record naming
+// the spool is proof it is still unwatched — a watched file is never resolved
+// again. The store then holds no cursor for it and the log no residue.
 
-// awaitResidueWithheldNamingFile waits for the sidecar's statement that it
-// classified a record read from ONE file as residue and did not store it.
-//
-// THE FILE IS THE POINT HERE. `awaitResidueWithheld` matches a label anywhere in
-// the process, which is enough for a subject about a label but not for one about
-// a particular spool: these subjects say "THIS file's bytes were read and
-// classified", and the record's file_id is what says which file that was.
-func awaitResidueWithheldNamingFile(ctx context.Context, t *testing.T, logPath, path, label string) logRecord {
+// awaitRestatedAfter waits for a record of `operation` naming path that was
+// written AFTER log index `after`: the next rescan re-resolving a spool it still
+// does not watch.
+func awaitRestatedAfter(ctx context.Context, t *testing.T, logPath, path, operation string, after int) {
 	t.Helper()
-	id := fileID(t, path)
-	return awaitLog(ctx, t, logPath, "residue "+label+" classified and withheld for "+path, func(r logRecord) bool {
-		return r.Operation == "residue-drop" && r.Context["reason"] == label && r.Context["file_id"] == id
-	})
-}
-
-// firstResidueWithheldIndexFor answers where in the log the reader FIRST said it
-// had classified residue out of one file, or -1. It is an index rather than a
-// timestamp because the log is written in order, and ordering is the only thing
-// a subject about "nothing was read before X" needs.
-func firstResidueWithheldIndexFor(t *testing.T, logPath, path string) int {
-	t.Helper()
-	id := fileID(t, path)
-	for i, r := range readLog(t, logPath) {
-		if r.Operation == "residue-drop" && r.Context["file_id"] == id {
-			return i
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		for i, r := range readLog(t, logPath) {
+			if i > after && r.Operation == operation && samePathAny(r.Context["path"], path) {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("no %s record for %s after log index %d: the spool was not re-resolved, so it is being watched", operation, path, after)
+		case <-tick.C:
 		}
 	}
-	return -1
+}
+
+// requireNeverRead asserts a spool left no trace of a read: no cursor offered
+// for it, and no residue classified out of it.
+func requireNeverRead(t *testing.T, fake *fakeStore, logPath, path string) {
+	t.Helper()
+	if cs := latestCursorFor(fake.Batches(), path); cs != nil {
+		t.Fatalf("a spool nothing renders was read: the store was offered a cursor for %s at offset %d", path, cs.GetOffset())
+	}
+	id := fileID(t, path)
+	for _, r := range readLog(t, logPath) {
+		if r.Operation == "residue-drop" && r.Context["file_id"] == id {
+			t.Fatalf("a spool nothing renders was read: its bytes were classified as residue: %v", r.Context)
+		}
+	}
 }
 
 // logIndexOf answers where in the log a record matching `match` first appears,
@@ -63,20 +72,16 @@ func logIndexOf(t *testing.T, logPath string, match func(logRecord) bool) int {
 	return -1
 }
 
-// TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue asserts the
-// whole shape of the hold, which the design states in two halves:
+// TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses asserts the whole shape
+// of the hold:
 //
-//   - HELD MEANS DISCOVERED AND RE-CHECKED, NOT TAILED. A spool whose spawning
-//     call has not been read names no run, so reading it would mean either
-//     inventing an owner or keying its output on the spool path's runtime id.
-//     Nothing is read, so no cursor is offered for it.
-//   - AN AGED UNOWNED SPOOL IS NEVER DROPPED. Once the bounded wait lapses the
-//     bytes are READ WHOLE and classified as residue, with a WARNING, and the
-//     file keeps being tailed — so a cursor appears exactly then and not before.
-//     RESIDUE IS NEVER PERSISTED, so what the reader saw is stated in the log
-//     rather than stored: the file is still read to its end, and the store holds
-//     no row for it.
-func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testing.T) {
+//   - HELD MEANS DISCOVERED AND RE-CHECKED, NOT READ. A spool whose spawning call
+//     has not been read names no run, so reading it would mean either inventing
+//     an owner or keying its output on the spool path's runtime id.
+//   - A LAPSED HOLD CHANGES WHAT IS SAID, NOT WHAT IS READ. Nothing renders a
+//     spool no call claimed, so once the window lapses it is stated once and
+//     left unread — however much the file keeps growing.
+func TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -87,70 +92,32 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 	slug := cwdSlug(cwd)
 	session := "10101010-1010-4010-8010-101010101010"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
-	payload := "output written before anyone claimed it\n"
-	// The suite default (200ms). This used to be 2s so that "held but not yet
-	// lapsed" was a wide enough window for the assertion below to land inside;
-	// the assertion is an ORDERING now (see below) rather than a snapshot taken
-	// during a race, so the window buys nothing and the subject pays production
-	// nothing to wait it out.
-	// THE WITHHOLDING IS STATED PER RECORD AT DEBUG, because it is the steady
-	// state rather than news. This subject asserts the per-record statement, so
-	// it reads the log at the threshold that statement is written to.
+	// The re-resolution this subject waits on is stated at DEBUG.
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
-	// Act: the spool exists and no transcript ever names it. It is created AFTER
-	// the first production cycle so it is a steady-state spool, not startup
-	// backlog: a spool already on disk when the reader's first scan runs is
-	// caught up on and summarized (see the catch-up subjects), while one that
-	// appears while the reader is running is the per-file degradation this
-	// subject asserts.
+	// Act: the spool appears after catch-up, so it is steady state, and keeps
+	// growing past its window as a test log does.
 	startSidecar(t, opts)
 	awaitCatchupEnd(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
-	spool.AppendRaw([]byte(payload))
-	awaitLog(ctx, t, opts.LogPath, "the spool being held", func(r logRecord) bool {
-		return r.Operation == "hold-spool" && samePathAny(r.Context["path"], spoolPath)
-	})
-
-	// Act (the second half): let the bounded wait lapse.
+	spool.AppendRaw([]byte("output written before anyone claimed it\n"))
 	awaitLog(ctx, t, opts.LogPath, "the hold expiring", func(r logRecord) bool {
 		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
 	})
-	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
-
-	// Assert (the first half): HELD IS NOT TAILED, stated as an ordering in the
-	// log rather than as a look taken while the hold happened to still stand.
-	// Every line of an unowned spool classifies as `unparsed`, so the reader's
-	// first withholding record for this file IS the moment it first read it, and
-	// "the lapse was written before it" says exactly what the design says —
-	// nothing was read until the wait lapsed — whatever the window's length or
-	// the machine's load.
+	spool.AppendRaw([]byte("and it kept growing\n"))
 	lapsedAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool {
 		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
 	})
-	readAt := firstResidueWithheldIndexFor(t, opts.LogPath, spoolPath)
-	if readAt < 0 {
-		t.Fatalf("the reader never said it classified %s, so there is no read to order against the lapse", spoolPath)
-	}
-	if lapsedAt < 0 || lapsedAt > readAt {
-		t.Fatalf("a held spool was tailed: %s was read and classified at log record %d, before its hold expired at %d, while its owner was unknown",
-			spoolPath, readAt, lapsedAt)
-	}
+	awaitRestatedAfter(ctx, t, opts.LogPath, spoolPath, "hold-spool", lapsedAt)
 
-	// Assert (the second half): the file is being read, and read WHOLE — the
-	// cursor reaching the end of the payload is what says the bytes were
-	// ingested rather than dropped, now that residue leaves no row behind.
-	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
-
-	// Assert (the invariant): none of it was stored. The bytes were read,
-	// classified and counted; residue is never persisted.
-	requireNoResidueStored(t, fake.Entries())
+	// Assert.
+	requireNeverRead(t, fake, opts.LogPath, spoolPath)
 }
 
-// TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses asserts the lapse is
-// a stated degradation rather than a silent reclassification: the bytes stop
-// being a shell run's output and become residue, and that is worth saying once.
-func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
+// TestTheLapseOfAnUnownedSpoolIsStatedAtInfo asserts the lapse is a stated
+// decision rather than a silent one: the spool is not read, and that is worth
+// saying once, with its path and its reason.
+func TestTheLapseOfAnUnownedSpoolIsStatedAtInfo(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -175,20 +142,22 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
 	})
 	if rec.Level != "info" {
-		t.Errorf("the hold expired at level %q; an aged unowned spool is the mandate working and is stated at INFO", rec.Level)
+		t.Errorf("the hold expired at level %q; not reading what nothing renders is the rule working and is stated at INFO", rec.Level)
+	}
+	if rec.Context["reason"] != "spool_unclaimed" {
+		t.Errorf("the hold-expiry record states reason %v, want spool_unclaimed", rec.Context["reason"])
 	}
 	_ = fake
 }
 
-// backlogPayload is the one line each backlog spool holds, so a file's withheld
-// tally is exactly one `unparsed` record and its summary's count is readable.
+// backlogPayload is the one line each backlog spool holds.
 const backlogPayload = "backlog output nobody claimed\n"
 
 // TestStartupCatchUpSummarizesABacklogOfUnownedSpools asserts the realtest-1
 // flood is leveled: a sidecar that starts with a backlog of pre-existing
-// unclaimed spools states ONE summary rather than one warning per spool. The
-// spools are created BEFORE the sidecar starts, so they are exactly the
-// historical corpus a restart catches up on.
+// unclaimed spools states ONE summary rather than one record per spool — and
+// reads none of them. The spools are created BEFORE the sidecar starts, so they
+// are exactly the historical corpus a restart catches up on.
 func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -199,8 +168,7 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 	cwd := "/Users/dodgecoates/spool-catchup-probe"
 	slug := cwdSlug(cwd)
 	session := "12121212-1212-4212-8212-121212121212"
-	// The per-line withholding statement is DEBUG; the leveling this subject is
-	// about is stated at INFO either way.
+	// The re-resolution the never-read half waits on is stated at DEBUG.
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 	tasks := []string{"b0aaaaaaa", "b0bbbbbbb", "b0ccccccc"}
 	var spoolPaths []string
@@ -213,25 +181,17 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 
 	// Act: the sidecar starts with the backlog already on disk.
 	startSidecar(t, opts)
-	for _, spoolPath := range spoolPaths {
-		// EVERY BACKLOG SPOOL IS READ WHOLE. Its bytes are never stored — they
-		// classify as residue — so the cursor reaching the end of the file is
-		// what says the reader ingested it rather than skipped it.
-		awaitCursorInBatches(ctx, t, fake, spoolPath, int64(len(backlogPayload)))
-	}
 	rec := awaitLog(ctx, t, opts.LogPath, "the spool catch-up summary", func(r logRecord) bool {
 		return r.Operation == "catchup-summary" && r.Context["reason"] == "spool_unclaimed"
 	})
-	// EVERY BACKLOG SPOOL WAS ALSO CLASSIFIED, one record per line read. The
-	// bytes are never stored, so this is what says the reader saw them rather
-	// than merely stepped its cursor past them.
+	summaryAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool {
+		return r.Operation == "catchup-summary" && r.Context["reason"] == "spool_unclaimed"
+	})
 	for _, spoolPath := range spoolPaths {
-		awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
+		awaitRestatedAfter(ctx, t, opts.LogPath, spoolPath, "hold-spool", summaryAt)
 	}
 
-	// Assert: the backlog is summarized, not stated one spool at a time. The
-	// bytes were still read whole and classified (awaited above), so nothing was
-	// silenced — only unstored.
+	// Assert: the backlog is summarized, not stated one spool at a time...
 	if rec.Level != "info" {
 		t.Errorf("the catch-up summary is at level %q, want info", rec.Level)
 	}
@@ -252,7 +212,10 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 			t.Errorf("a backlog spool was stated as a per-file record: %v", r.Context)
 		}
 	}
-	requireNoResidueStored(t, fake.Entries())
+	// ...and none of it was read.
+	for _, spoolPath := range spoolPaths {
+		requireNeverRead(t, fake, opts.LogPath, spoolPath)
+	}
 }
 
 // TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears asserts the retained spool
@@ -337,8 +300,10 @@ func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
 	// z* is none of b* (shell), a* (agent transcript) or w* (workflow journal).
 	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
 
-	// Act.
+	// Act: the spool appears after catch-up, so its skip is a steady-state
+	// decision stated at INFO rather than a demoted catch-up record.
 	startSidecar(t, opts)
+	awaitCatchupEnd(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("bytes nobody can classify\n"))
 
@@ -348,12 +313,10 @@ func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
 	})
 }
 
-// TestAnUnclassifiableSpoolIsStillReadWholeAndClassifiedAsResidue asserts the
-// refusal does not drop the bytes: nothing on disk is ever skipped. The reader
-// still reads the file to its end and still classifies what it read — and
-// because residue is never persisted, what it read is stated in the log and the
-// cursor, not in a row.
-func TestAnUnclassifiableSpoolIsStillReadWholeAndClassifiedAsResidue(t *testing.T) {
+// TestAnUnclassifiableSpoolIsNeverRead asserts the refusal is the whole
+// outcome: no conversion can be selected for the bytes, so nothing could render
+// them, and the reader states why it skipped the file rather than reading it.
+func TestAnUnclassifiableSpoolIsNeverRead(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -364,22 +327,28 @@ func TestAnUnclassifiableSpoolIsStillReadWholeAndClassifiedAsResidue(t *testing.
 	slug := cwdSlug(cwd)
 	session := "40404040-4040-4040-8040-404040404040"
 	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
-	payload := "bytes nobody can classify\n"
-	// The withholding is stated per record at DEBUG, which is where this
-	// subject's evidence lives.
+	// The repeat of the skip this subject waits on is stated at DEBUG.
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
-	// Act.
+	// Act: the spool appears after catch-up, so its skip is a steady-state
+	// decision stated at INFO rather than a demoted catch-up record.
 	startSidecar(t, opts)
+	awaitCatchupEnd(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
-	spool.AppendRaw([]byte(payload))
-	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
+	spool.AppendRaw([]byte("bytes nobody can classify\n"))
+	rec := awaitLog(ctx, t, opts.LogPath, "the skip decision", func(r logRecord) bool {
+		return r.Operation == "spool-skip" && r.Level == "info" && samePathAny(r.Context["path"], spoolPath)
+	})
+	skippedAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool {
+		return r.Operation == "spool-skip" && r.Level == "info" && samePathAny(r.Context["path"], spoolPath)
+	})
+	awaitRestatedAfter(ctx, t, opts.LogPath, spoolPath, "spool-skip", skippedAt)
 
-	// Assert: read to the end of the file — the cursor is what says the bytes
-	// were consumed rather than skipped over.
-	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
-	// And stored nowhere.
-	requireNoResidueStored(t, fake.Entries())
+	// Assert.
+	if rec.Context["reason"] != "unrecognized_prefix" {
+		t.Errorf("the skip states reason %v, want unrecognized_prefix", rec.Context["reason"])
+	}
+	requireNeverRead(t, fake, opts.LogPath, spoolPath)
 }
 
 // TestOneSpoolReachedByTwoPathSpellingsIsOneFile asserts the /tmp ->
@@ -474,42 +443,17 @@ func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
 	// The uid directory itself, one level below the launchd default.
 	opts.SpoolRoot = filepath.Join(tree.SpoolRoot, "claude-"+spoolUID)
 
-	// Act.
+	// Act: the spool appears after catch-up, so its first hold is stated at
+	// INFO rather than demoted as a catch-up record.
 	startSidecar(t, opts)
+	awaitCatchupEnd(ctx, t, opts.LogPath)
 	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("discovered from the uid level too\n"))
 
-	// Assert.
-	awaitAnyCursorFor(ctx, t, fake, spoolPath)
-}
-
-// TestWithheldResidueAnnouncesNoRow asserts residue attributes itself to
-// nothing at all: an unclassifiable record may belong to nobody, so it names no
-// agent — and now that it is never persisted, it names no ROW either. The
-// reader's withholding record therefore carries no upsert_key, because a record
-// naming a key nobody can look up is an untraceable announcement.
-func TestWithheldResidueAnnouncesNoRow(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/residue-toplevel-probe"
-	slug := cwdSlug(cwd)
-	session := "70707070-7070-4070-8070-70707070aaaa"
-	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
-	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
-
-	// Act.
-	startSidecar(t, opts)
-	spool := newGrowingFile(t, spoolPath)
-	spool.AppendRaw([]byte("bytes belonging to nobody\n"))
-	rec := awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
-
-	// Assert.
-	if key, ok := rec.Context["upsert_key"]; ok && key != "" {
-		t.Errorf("the withholding record names upsert_key %v; it announces no row, and a key nobody can look up is untraceable", key)
-	}
-	requireNoResidueStored(t, fake.Entries())
+	// Assert: discovered from the uid level — the hold names the file, which
+	// only a discovered spool can have.
+	awaitLog(ctx, t, opts.LogPath, "the spool being held", func(r logRecord) bool {
+		return r.Operation == "hold-spool" && samePathAny(r.Context["path"], spoolPath)
+	})
+	_ = fake
 }

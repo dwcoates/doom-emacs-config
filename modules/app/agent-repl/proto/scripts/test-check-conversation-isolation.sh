@@ -15,6 +15,10 @@
 #
 # EVERY ROW RUNS. Failures are collected and reported together rather than
 # aborting on the first, because the rows are independent spellings of one rule.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../../bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

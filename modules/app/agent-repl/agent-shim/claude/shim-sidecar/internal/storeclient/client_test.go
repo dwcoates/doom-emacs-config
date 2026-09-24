@@ -157,6 +157,27 @@ func TestWriteBatchSuccessIsDurable(t *testing.T) {
 	}
 }
 
+// TestWriteBatchStatesTheBulkClass: every sidecar write is a copy of what the
+// vendor already wrote, so it states BULK, and the store queues it behind any
+// interactive write. The store refuses a write that states no class.
+func TestWriteBatchStatesTheBulkClass(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+	}}
+	client := serve(t, store)
+
+	// Act.
+	if _, err := client.WriteBatch(ctx(), &storev1.EntryBatch{CursorAdvance: cursor("1:2", "/tmp/session.jsonl", 64)}, nil); err != nil {
+		t.Fatalf("WriteBatch returned %v", err)
+	}
+
+	// Assert.
+	if store.lastWrite.GetWriteClass().GetBulk() == nil {
+		t.Fatalf("write_class = %v, want bulk", store.lastWrite.GetWriteClass())
+	}
+}
+
 func TestWriteBatchCarriesCursorAdvance(t *testing.T) {
 	// Arrange.
 	store := &fakeStore{write: &storev1.WriteBatchResponse{

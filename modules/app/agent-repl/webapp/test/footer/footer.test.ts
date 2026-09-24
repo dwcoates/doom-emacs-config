@@ -61,10 +61,13 @@ async function settle(): Promise<void> {
 }
 
 /** Mount the footer into a fresh host. */
-function mount(h: Harness = harness()) {
+function mount(
+  h: Harness = harness(),
+  selectDetachedWork: () => Promise<boolean> = async () => true,
+) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
-  const footer = mountFooter(host, h.ctx, { selectDetachedWork: async () => true });
+  const footer = mountFooter(host, h.ctx, { selectDetachedWork });
   mounted.push(footer);
   return { host, h, footer };
 }
@@ -73,7 +76,8 @@ function mount(h: Harness = harness()) {
  * fold away. The daemon ships the chip count and the expanded rows together,
  * so a chip count rides with a matching row. */
 const AGENT_ROW = {
-  target: { value: "bubble-1" },
+  work: { value: "work-1" },
+  jump: { target: { case: "entry" as const, value: { value: "bubble-1" } } },
   label: { text: "Explore" },
   tokens: { text: "0 tok" },
   runtime: { startedAtMs: BigInt(NOW) },
@@ -83,7 +87,8 @@ const AGENT_ROW = {
 function withAgents(count = 1): ReturnType<typeof footerView> {
   const rows = Array.from({ length: count }, (_unused, i) => ({
     ...AGENT_ROW,
-    target: { value: `bubble-${i + 1}` },
+    work: { value: `work-${i + 1}` },
+    jump: { target: { case: "entry" as const, value: { value: `bubble-${i + 1}` } } },
   }));
   return footerView({
     strip: strip({ liveWork: { agents: { count } } }),
@@ -895,5 +900,149 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     footer.dispose();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
     expect(host.querySelector(".footer-status")).toBeNull();
+  });
+});
+
+/**
+ * THE DID-NOTHING PATH (owner report, 2026-09-23): a live subagent row whose
+ * token count kept updating was clicked and showed neither a selection nor a
+ * notice. The footer redraws whole on every push, and the notice used to be
+ * appended to the ROW ELEMENT that was clicked -- after the reveal's round trip,
+ * by which time a push had already replaced it. The notice is now the mount's
+ * state, painted by every draw.
+ */
+describe("mountFooter: a row's click outcome outlives the pushes around it", () => {
+  /** Mount with a selection the test answers by hand, and open the agents panel. */
+  async function openWithPendingSelect() {
+    let answer: (reached: boolean) => void = () => undefined;
+    const pending = new Promise<boolean>((resolve) => {
+      answer = resolve;
+    });
+    const { host, h } = mount(harness(), () => pending);
+    await settle();
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    return { host, h, answer };
+  }
+
+  it("draws the notice on the LIVE row when a push landed while the reveal was in flight", async () => {
+    // Arrange: the click is in flight.
+    const { host, h, answer } = await openWithPendingSelect();
+    host.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+    // Act: a token update pushes the footer, then the reveal misses.
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    answer(false);
+    await settle();
+    // Assert
+    expect(host.querySelector(".footer-row-jump .footer-row-unreachable")?.textContent).toBe(
+      "not on screen",
+    );
+  });
+
+  it("keeps the notice standing across the next push", async () => {
+    // Arrange
+    const { host, h, answer } = await openWithPendingSelect();
+    host.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+    answer(false);
+    await settle();
+    // Act
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    // Assert
+    expect(host.querySelector(".footer-row-unreachable")?.textContent).toBe("not on screen");
+  });
+
+  it("drops the notice once the row leaves the view", async () => {
+    // Arrange
+    const { host, h, answer } = await openWithPendingSelect();
+    host.querySelector<HTMLElement>(".footer-row-jump")?.dispatchEvent(new MouseEvent("click"));
+    answer(false);
+    await settle();
+    // Act: the row goes, then comes back.
+    h.tail.push(pushView(withAgents(0)));
+    await settle();
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    // Assert
+    expect(host.querySelector(".footer-row-unreachable")).toBeNull();
+  });
+});
+
+describe("mountFooter: the expanded section's scroll is the reader's", () => {
+  /** Mount, push a view with SIX agents (past the cap), and open the panel. */
+  async function openBusyPanel() {
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(withAgents(6)));
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("click"));
+    return { host, h };
+  }
+
+  it("keeps the SAME section element across a push", async () => {
+    // Arrange
+    const { host, h } = await openBusyPanel();
+    const before = host.querySelector(".footer-expanded");
+    // Act
+    h.tail.push(pushView(withAgents(6)));
+    await settle();
+    // Assert
+    expect(host.querySelector(".footer-expanded")).toBe(before);
+  });
+
+  it("never detaches the section or the dock on a push", async () => {
+    // Arrange
+    const { host, h } = await openBusyPanel();
+    const section = host.querySelector(".footer-expanded");
+    const dock = host.querySelector(".pfooter");
+    const removed: Node[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) removed.push(...record.removedNodes);
+    });
+    observer.observe(host, { childList: true, subtree: true });
+    // Act
+    h.tail.push(pushView(withAgents(6)));
+    await settle();
+    observer.disconnect();
+    // Assert
+    expect(removed).not.toContain(section);
+    expect(removed).not.toContain(dock);
+  });
+
+  it("keeps the reader's scroll position across a push", async () => {
+    // Arrange
+    const { host, h } = await openBusyPanel();
+    const section = host.querySelector<HTMLElement>(".footer-expanded");
+    if (section === null) throw new Error("no section");
+    section.scrollTop = 35;
+    // Act
+    h.tail.push(pushView(withAgents(6)));
+    await settle();
+    // Assert
+    expect(section.scrollTop).toBe(35);
+  });
+
+  it("scrolls past four rows under the real stylesheet", async () => {
+    // Arrange
+    const uninstall = installStylesheet();
+    const { host } = await openBusyPanel();
+    const section = host.querySelector(".footer-expanded");
+    if (section === null) throw new Error("no section");
+    // Act
+    const overflow = cascadedValue(section, "overflow-y");
+    const rows = (section as HTMLElement).style.getPropertyValue("--pfooter-sheet-rows");
+    uninstall();
+    // Assert
+    expect({ overflow, rows }).toEqual({ overflow: "auto", rows: "4" });
+  });
+
+  it("caps the section's height at the markup's row count in the stylesheet", () => {
+    // Assert: the ceiling is rows x row height, with the count read from the markup.
+    expect(STYLESHEET).toMatch(
+      /\.pfooter-sheet \{[^}]*max-height: calc\(var\(--pfooter-row-h\) \* var\(--pfooter-sheet-rows\)\);/,
+    );
   });
 });

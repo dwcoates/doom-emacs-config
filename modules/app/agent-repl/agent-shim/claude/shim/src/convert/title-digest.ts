@@ -34,6 +34,7 @@
  * records and returns the digest. `engine/title-digest.ts` owns reading and
  * parsing the transcript bytes — a converter reads none.
  */
+import { isKeepalivePrompt } from "../engine/keepalive.js";
 
 /** The kind of context boundary a digest is measured from. */
 export type TitleDigestBoundary = "none" | "clear" | "compact";
@@ -139,6 +140,11 @@ export function promptText(r: TitleDigestRecord): string | undefined {
   const trimmed = text.trim();
   if (trimmed === "") return undefined;
   if (COMMAND_ARTIFACT_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) return undefined;
+  // THE SHIM'S OWN KEEP-ALIVE IS NOBODY'S PROMPT. It is never served, so it
+  // must not name a conversation, open its listing, or count toward it either.
+  // On the FILE plane the marker is the ruled contract (engine/keepalive.ts):
+  // the transcript line carries nothing else that says whose send it was.
+  if (isKeepalivePrompt(trimmed)) return undefined;
   return trimmed;
 }
 

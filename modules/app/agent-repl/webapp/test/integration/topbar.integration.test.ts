@@ -25,7 +25,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
-import { chipFailureText, startHarness, type Harness } from "./harness";
+import { bootColdOnce, chipFailureText, startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
 import {
@@ -43,6 +43,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
