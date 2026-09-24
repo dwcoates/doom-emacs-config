@@ -804,6 +804,23 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
 
       async writeBatch(request) {
         receivedWrites.push(request);
+        // AN UNCLASSIFIED WRITE IS REFUSED, as the real store refuses it: the
+        // class decides which queue the write takes, and nothing guesses it.
+        if (request.writeClass?.writeClass.case === undefined) {
+          writeVerdicts.push({ request, accepted: false });
+          return create(storev1.WriteBatchResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.WriteBatchFailureSchema, {
+                detail: "write_class: the write states neither interactive nor bulk",
+                kind: {
+                  case: "invalidRequest",
+                  value: create(storev1.WriteBatchInvalidRequestSchema, { field: "write_class" }),
+                },
+              }),
+            },
+          });
+        }
         writeVerdicts.push({ request, accepted: writeFailure === null });
         if (writeFailure !== null) {
           // DURABLE OR NOTHING: a failed batch lands no entry at all, which is
