@@ -12,12 +12,11 @@ import (
 
 // SUBJECT 3 — the detached-shell lifecycle, read entirely out of files.
 //
-// A b* spool is a DELTA STREAM terminated by its `EXIT=<code>` line. Its bytes
+// A b* spool is a byte stream terminated by its `EXIT=<code>` line. Its bytes
 // become StoreAgentUpdate.bash entries whose run is the SPAWNING CALL's
 // tool_use_id (agent_activity.proto: a detached command is announced under one
-// identity on both streams), each frame an AgentBash.update carrying
-// new_output and the from_offset that must equal the bytes the consumer has
-// already accumulated — a gap detector, so contiguity is the contract.
+// identity on both streams), each an AgentBash.tail holding the rendered
+// window so far — one row superseded per batch, never the whole spool.
 
 // detachedFixture seeds a parent transcript that spawns a background shell
 // command, and answers the spool the vendor would be writing for it.
