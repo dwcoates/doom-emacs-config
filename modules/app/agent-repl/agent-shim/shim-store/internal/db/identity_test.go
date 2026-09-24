@@ -291,6 +291,83 @@ func TestARefusedKeepaliveWritesNoRow(t *testing.T) {
 	}
 }
 
+// seedRetiredKeepaliveRow stages a row the way the pre-2026-09-23 shim left
+// one: kind `keepalive`, no book, under a key a real record later needs. The
+// arm is refused today, so no write path can produce it.
+func seedRetiredKeepaliveRow(t *testing.T, d *DB, upsertKey string) {
+	t.Helper()
+	if _, err := d.sql.Exec(`INSERT INTO entry (upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame,
+	    first_inserted_at_ms, last_written_at_ms) VALUES (?, 'w-legacy-keepalive', 1, ?, ?, NULL, NULL, 'agent-1', x'00', ?, ?)`,
+		upsertKey, planeStream, kindKeepaliveRetired, testNow, testNow); err != nil {
+		t.Fatalf("staging a retired keep-alive row: %v", err)
+	}
+}
+
+func TestARetiredKeepaliveRowIsSupersededByAPageLine(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	seedRetiredKeepaliveRow(t, d, "activity:toolu_sub")
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "activity:toolu_sub", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert
+	if got := scalar[string](t, d, `SELECT kind || '/' || book_agent_id FROM entry WHERE upsert_key = 'activity:toolu_sub'`); got != "page_line/agent-1" {
+		t.Fatalf("kind/book = %q, want the real record's page_line/agent-1", got)
+	}
+}
+
+func TestSupersedingARetiredKeepaliveRowIsRecordedAtInfoWithBothKinds(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	seedRetiredKeepaliveRow(t, d, "activity:toolu_sub")
+
+	// Act
+	writeOK(t, d, pageEntry("w2", "activity:toolu_sub", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))))
+
+	// Assert
+	s.assertLogged(t, "info", "a retired keep-alive row was superseded by a real record old_kind=keepalive new_kind=page_line")
+}
+
+func TestEveryOtherKindChangeIsStillRefused(t *testing.T) {
+	// Arrange: the retired kind is the ONE row a real record may supersede.
+	tests := []struct {
+		name  string
+		first *storev1.StoreEntry
+		then  *storev1.StoreEntry
+	}{
+		{
+			name:  "residue to page line",
+			first: unservedEntry("w1", "u1", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}}}),
+			then:  pageEntry("w2", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))),
+		},
+		{
+			name:  "one residue arm to another",
+			first: unservedEntry("w1", "u1", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}}}),
+			then:  unservedEntry("w2", "u1", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{Discriminator: "widget", Raw: rawRecord("widget")}}}),
+		},
+		{
+			name:  "page line to bash",
+			first: pageEntry("w1", "u1", "agent-1", frameItem(activityFrame("agent-1", "act-1", prose()))),
+			then:  bashEntry("w2", "u1", "run-1", bashStart()),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			d, _ := newStore(t)
+			writeOK(t, d, test.first)
+
+			// Act
+			_, err := d.WriteBatch(ctx(), "producer", WriteInteractive, batch(test.then), nil)
+
+			// Assert
+			if got := RefusalSite(err); got != SiteUpsertChangesIdentity {
+				t.Fatalf("site = %q (error: %v), want %q", got, err, SiteUpsertChangesIdentity)
+			}
+		})
+	}
+}
+
 // ---- landing 4: the two identities are minted to the same bytes ----
 
 func TestARunAnnouncedUnderItsOwnUnitIdConvergesOnOneRow(t *testing.T) {
