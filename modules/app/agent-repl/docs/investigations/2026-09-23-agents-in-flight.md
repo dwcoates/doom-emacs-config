@@ -12,19 +12,19 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
+| `feat/daemon-reaps-landed-worktrees` | `~/.config/doom-worktrees/daemon-reaps-landed-worktrees` | A daily daemon sweep removes clean, idle worktrees whose changes landed on the default branch (`merge-tree --write-tree` equals its tree), via `gitclient.RemoveWorktree`. | `aa74819e023c7efe2` | 09-24 |
+| `fix/lock-spawn-refusal-and-store-self-heal` | `~/.config/doom-worktrees/lock-spawn-refusal-and-store-self-heal` | A separate refusal for a lock holder that can't be spawned; a broken node-store entry is repaired in place (locked, atomic swap) by `link_node_modules` and `ensure-deps`. | `a9a5534645c1dacfe` | 09-24 |
 
 ## Still waiting on the owner
 
-- The shared `~/.cache/agent-repl/node-store` webapp entry was emptied by a worktree's `npm ci`. Repopulating it is outside the project: the owner runs it, or approves.
-- The shim reports "another process owns this conversation" when it can't even spawn its lock holder. A new refusal arm?
 - Ordering contract: a turn's ending still waits behind every row produced before it (the store gets rows in exact production order, which subagent consumers rely on). Should a terminal ever overtake? That's an ordering-contract change.
-- Harness stray reaping still selects by argv path, not a kernel mark (a session id would break handover successors and Emacs-launched e2e daemons). Keep it as is?
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
 - A successor announcement can't be retracted after a manifest-write failure (clients see the successor stop and stay on the incumbent). A retraction arm is a contract change.
 - The one-time bootstrap onto daemon-owned deploys (AGENTS.md "ONE-TIME"), then the `SPC TAB f` retry.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- 09-24 lead: the webapp node-store entry `webapp-4153e127492d6543` was repopulated (owner approved); 86 landed worktrees pruned (clean, and `merge-tree` into master was a no-op); 37 dirty or unlanded ones kept. Stray reaping by argv path is kept (owner ruling).
 - e2e load flakes fixed at their sources: the sidecar holds a rotated transcript until a record names its book; registry reads are ordered against Close; worktree log sinks detach inside `RemoveWorktree` and re-attach in `CreateWorktree` (master's `Surfaces.Retire` removed as the duplicate); one adoption per rendezvous; the restarting notice waits for a dropped stream to read again; `WatchBash` waits for an announced run's rows; store `unknown_run` at INFO (`fix/e2e-load-flakes`, e2e 3x green on the branch). Open: `forkSession` rotations aren't held; a `/clear` outside the shim in a shared directory is held forever (INFO once).
 - A handover owns one successor slot: every post-spawn failure stops (TERM, KILL, reap) its successor and disarms the rendezvous; an unstoppable successor keeps the slot claimed. A shim's departure is a freeness edge: a dead shim in an open workspace is relaunched at once, an ordered or closed-workspace departure unregisters the bounce (INFO) (`fix/handover-leak-and-dead-shim-freeness`, daemon unit and integration green on master). Open for the owner: no proto arm retracts a successor announcement after a manifest-write failure.
 - The shim's in-flight tool registry holds only calls its stream can settle (background agents' calls are never held; every result releases; handoffs are never cut; an agent's end releases its stream; every turn and query end drains it); reaching 512 is an ERROR. All 4,490 live evictions were already-settled calls (`fix/shim-open-call-leak`; shim unit 6073, integration 341 on master).
