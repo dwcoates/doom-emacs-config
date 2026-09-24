@@ -1444,6 +1444,10 @@ func (s *fakeSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+func (s *fakeSurfaces) DetachDir(string) error { return nil }
+
+func (s *fakeSurfaces) AttachDir(string) error { return nil }
+
 // fakeBorrowed is a non-closeable sink handle over the null device, which is
 // what a spawn is handed as fd 3.
 type fakeBorrowed struct {

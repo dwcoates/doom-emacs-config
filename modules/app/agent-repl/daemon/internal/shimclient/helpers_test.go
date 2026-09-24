@@ -134,6 +134,10 @@ func (s testSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+func (s testSurfaces) DetachDir(string) error { return nil }
+
+func (s testSurfaces) AttachDir(string) error { return nil }
+
 func (s testSurfaces) ClientLog(string, dlog.ClientRecord) error { return nil }
 
 func (s testSurfaces) Close() error { return nil }
