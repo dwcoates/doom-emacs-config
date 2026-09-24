@@ -198,6 +198,7 @@ function detachmentEntry(
       discriminator: `agent_frame.detached_work.detached.${facts.cause}`,
     },
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: {
       kind: "frame",
       frame: agentFrame(agentId, {
@@ -1030,6 +1031,7 @@ export function lostBashEntry(
       discriminator: `agent_bash.success.interrupted.lost.${String(how.how.case)}`,
     },
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: {
       kind: "bash_run",
       run,
@@ -1088,6 +1090,7 @@ export function lostSubagentEntry(
       discriminator: `activity.subagent.failure.lost.${String(how.how.case)}`,
     },
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: {
       kind: "frame",
       frame: updateFrame(
@@ -1135,6 +1138,7 @@ export function lostAgentEntry(
       discriminator: `agent_frame.failure.lost.${String(how.how.case)}`,
     },
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: {
       kind: "frame",
       frame: agentFrame(agentId, {

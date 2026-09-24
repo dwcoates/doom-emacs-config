@@ -207,6 +207,8 @@ export function toStoreEntry(producer: string, entry: PersistEntry): storev1.Sto
     writeId: entryWriteId(producer, entry),
     upsertKey: entry.upsertKey,
     entry: arm,
+    // THE ONE PLACE A ROW IS STAMPED WITH ITS TURN, for every arm alike.
+    ...(entry.turn === undefined ? {} : { turn: entry.turn }),
   });
 }
 

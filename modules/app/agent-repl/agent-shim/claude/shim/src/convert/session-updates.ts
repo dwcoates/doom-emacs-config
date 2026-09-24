@@ -44,6 +44,7 @@ function sessionEntry(
     upsertKey: sessionUpsertKey(arm, vendorUuid),
     source: { vendorUuid, discriminator: `session_update.${arm}` },
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: { kind: "session_update", update },
   };
 }

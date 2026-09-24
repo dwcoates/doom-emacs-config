@@ -220,6 +220,36 @@ describe("rows", () => {
   });
 });
 
+describe("the turn stamp", () => {
+  const origin = { agentId: MAIN_AGENT, vendorUuid: "u", discriminator: "d" };
+  const builders: ReadonlyArray<{ name: string; build: (turnId: string | null) => { turn?: conversationv1.TurnId } }> = [
+    { name: "a unit's row", build: (turnId) => activityEntry(foldContext({ turnId }), origin, agentActivity(UNIT, readStart())) },
+    {
+      name: "a terminal's row",
+      build: (turnId) =>
+        terminalEntry(foldContext({ turnId }), origin, {
+          case: "success",
+          value: create(conversationv1.AgentSuccessSchema, {}),
+        }),
+    },
+    {
+      name: "a non-activity page line",
+      build: (turnId) =>
+        pageLineEntry(foldContext({ turnId }), origin, "cut:uuid-1", create(conversationv1.AgentUpdateSchema, {})),
+    },
+  ];
+
+  for (const { name, build } of builders) {
+    it(`stamps ${name} with the open turn`, () => {
+      expect(build("turn-7").turn?.value).toBe("turn-7");
+    });
+
+    it(`leaves ${name} unstamped when no turn is open`, () => {
+      expect(build(null).turn).toBeUndefined();
+    });
+  }
+});
+
 describe("source coordinates", () => {
   it("omits the block index for a frame no block derived", () => {
     expect(sourceOf({ agentId: MAIN_AGENT, vendorUuid: "u", discriminator: "d" })).toEqual({

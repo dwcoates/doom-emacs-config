@@ -33,14 +33,30 @@ message HistoryPage {
   }
 }
 
-// One entry and its position, so the caller always holds a pointer for the
-// newest thing it has seen — the reconnect mark and the older-pages walk key.
+// One entry, its position, and the turn it belongs to, so the caller always
+// holds a pointer for the newest thing it has seen — the reconnect mark and the
+// older-pages walk key — and never has to infer a turn from where an entry sits.
 message HistoryEntryAt {
   // This entry's position in the agent's order. Stable across upserts:
   // order is by the entry's FIRST appearance, never its last write.
   HistoryPointer at = 1;
   // The entry itself.
   HistoryEntry entry = 2;
+  // THE TURN THIS ENTRY WAS PRODUCED WITHIN — the one door every entry rides,
+  // prompts, activities, asks and terminals alike, so a consumer attributes an
+  // entry by identity and never by its position among prompts.
+  //
+  // SET: the producing session had this turn open when the entry was produced
+  // (a keep-alive's entries carry the keep-alive's own id). For an upsert it is
+  // the turn of the row's FIRST stamped write: a later write never moves an
+  // entry into another turn.
+  //
+  // UNSET: the entry was produced outside any turn, the producer could not
+  // name the turn from what it observed (a transcript record whose turn the
+  // vendor's own records do not identify), or the entry predates this field.
+  // Never guessed: an unset turn is the producer's honest "not known", and a
+  // consumer falls back to whatever it did before stamps existed.
+  optional TurnId turn = 3;
 }
 
 // One thing in an agent's history. THE ARM IS WHAT IT IS.

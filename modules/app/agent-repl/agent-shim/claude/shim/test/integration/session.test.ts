@@ -1377,6 +1377,19 @@ describe("host shutdown as a turn's cause", () => {
     // session down, and it is the path SIGTERM itself takes.
     expect(frame.result.value.outcome.value.cause.case).toBe("hostShutdown");
   });
+
+  test("the host_shutdown terminal is stamped with the turn it concluded", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+
+    await shim.standDown();
+
+    const terminal = writtenEntries(shim.store?.writes() ?? []).find((entry) =>
+      entry.upsertKey.startsWith(`terminal:${started.vendorSessionId}:`),
+    );
+    expect(terminal?.turn?.value).toBe("t1");
+  });
 });
 
 describe("context usage at the turn boundary", () => {
