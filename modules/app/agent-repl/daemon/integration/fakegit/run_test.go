@@ -1452,3 +1452,31 @@ func TestUpdateRefRefusesABranchThatMoved(t *testing.T) {
 		t.Fatalf("update-ref -d of a moved branch = %+v, want git's refusal and the branch kept", got)
 	}
 }
+
+func TestRevParseResolvesAFullBranchRef(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "rev-parse", "--verify", "--end-of-options", "refs/heads/main^{commit}"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != repo.BranchHeads["main"]+"\n" {
+		t.Fatalf("rev-parse refs/heads/main = %+v, want main's head", got)
+	}
+}
+
+func TestGitDirOfIsWhatRevParseReports(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	target := addTree(t, s, dir, "wt")
+	reported := Run(s, "/", []string{"-C", target, "rev-parse", "--absolute-git-dir"})
+
+	// Act.
+	got, ok := s.GitDirOf(target)
+
+	// Assert.
+	if !ok || got+"\n" != reported.Stdout {
+		t.Fatalf("GitDirOf = (%q, %v), want what rev-parse reported, %q", got, ok, reported.Stdout)
+	}
+}
