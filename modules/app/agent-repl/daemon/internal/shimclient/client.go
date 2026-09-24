@@ -660,7 +660,7 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
 	for {
-		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+		if processGone(-pgid) {
 			return true
 		}
 		if !time.Now().Before(deadline) {
@@ -672,6 +672,13 @@ func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Dura
 			return false
 		}
 	}
+}
+
+// processGone reports whether the kernel holds no process for target: a pid,
+// or a process group when negative. It is the one observation a daemon that is
+// not the process's parent has.
+func processGone(target int) bool {
+	return errors.Is(syscall.Kill(target, 0), syscall.ESRCH)
 }
 
 // publishAdoptedKill records the death of a shim the daemon stopped but never
@@ -1182,7 +1189,7 @@ func (c *client) awaitAdoptedExit(ctx context.Context) {
 	poll := time.NewTicker(adoptedGonePoll)
 	defer poll.Stop()
 	for {
-		if err := syscall.Kill(target, 0); errors.Is(err, syscall.ESRCH) {
+		if processGone(target) {
 			c.log.Debug("daemon.shimclient.exit", "the adopted shim's process is gone after the stand-down it was asked for", dlog.Context{
 				"workspace_id": string(c.ws), "pid": pid, "group": target < 0,
 			})

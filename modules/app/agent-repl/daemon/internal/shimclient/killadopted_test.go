@@ -479,3 +479,40 @@ func TestKillOfAnAbsentAdoptedSocketKeepsTheAdoptedPid(t *testing.T) {
 		t.Fatalf("exit = %+v (reaped %v), want the adopted pid 28278 kept", info, reaped)
 	}
 }
+
+// TestProcessGoneReadsTheKernelsAnswer covers the observation both adopted
+// waits share, for a pid and for its group.
+func TestProcessGoneReadsTheKernelsAnswer(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	tests := []struct {
+		name   string
+		target int
+		kill   bool
+		want   bool
+	}{
+		{name: "a running process", target: p.pid, want: false},
+		{name: "a running process group", target: -p.pid, want: false},
+		{name: "a process that has gone", target: p.pid, kill: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.kill {
+				if err := syscall.Kill(-p.pid, syscall.SIGKILL); err != nil {
+					t.Fatalf("stop the peer: %v", err)
+				}
+				c := standingDownAdopted(p)
+				go c.awaitAdoptedExit(context.Background())
+				awaitExitInfo(t, c, 5*time.Second)
+			}
+
+			// Act.
+			got := processGone(tt.target)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("processGone(%d) = %v, want %v", tt.target, got, tt.want)
+			}
+		})
+	}
+}
