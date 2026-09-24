@@ -219,3 +219,52 @@ func TestEverySettleInstantRestatesTheCallsStart(t *testing.T) {
 		})
 	}
 }
+
+func TestAFailedArtifactCallRestatesItsAct(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]any
+		restated func(*conversationv1.AgentArtifactFailure) string
+		want     string
+	}{
+		{
+			name:     "a publish restates its file",
+			input:    map[string]any{"file_path": "/p/page.html", "title": "The Page"},
+			restated: func(f *conversationv1.AgentArtifactFailure) string { return f.GetPublish().GetFilePath() },
+			want:     "/p/page.html",
+		},
+		{
+			name:     "a publish restates its title",
+			input:    map[string]any{"file_path": "/p/page.html", "title": "The Page"},
+			restated: func(f *conversationv1.AgentArtifactFailure) string { return f.GetPublish().GetTitle() },
+			want:     "The Page",
+		},
+		{
+			name:  "a listing restates itself as a list",
+			input: map[string]any{"action": "list", "scope": "mine"},
+			restated: func(f *conversationv1.AgentArtifactFailure) string {
+				if f.GetList() == nil {
+					return "not a list"
+				}
+				return f.GetList().GetScope()
+			},
+			want: "mine",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: an artifact call the service refused.
+			c := newTestConverter(t)
+			call := openCall{input: tt.input, startedAt: 1000}
+			block := map[string]any{"content": "Error: refused"}
+
+			// Act
+			got := c.settledItem(kindArtifact, call, nil, block, true, 4000, Attribution{})
+
+			// Assert
+			if restated := tt.restated(got.GetArtifact().GetFailure()); restated != tt.want {
+				t.Fatalf("restated = %q, want %q", restated, tt.want)
+			}
+		})
+	}
+}

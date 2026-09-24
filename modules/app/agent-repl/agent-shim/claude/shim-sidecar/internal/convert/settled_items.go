@@ -201,7 +201,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindArtifact:
 		if failed {
 			return item(&conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
-				Result: &conversationv1.AgentArtifact_Failure{Failure: &conversationv1.AgentArtifactFailure{Failure: failure}},
+				Result: &conversationv1.AgentArtifact_Failure{Failure: artifactFailure(call.input, failure)},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Artifact{Artifact: &conversationv1.AgentArtifact{
