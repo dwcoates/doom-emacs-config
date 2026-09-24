@@ -94,6 +94,12 @@
 # per-worktree `npm install`, no per-worktree 100MB tree), and a lockfile change
 # transparently keys a fresh store entry.
 #
+# THE STORE HEALS ITSELF. An entry is judged by whether it satisfies its own
+# lockfile, never by whether it exists: an entry that exists but is broken
+# (emptied through a link, left partial) is repaired in place under a per-entry
+# lock and swapped in atomically. lib-node-store.sh holds that one repair path,
+# shared with ensure-deps.sh; see link_node_modules below.
+#
 # STORE COLLECTION. Because a lockfile change keys a NEW entry and nothing ever
 # removed the old one, the store grew without bound: entries for lockfiles no
 # checkout references any more sat there forever (a webapp entry is ~60-90MB).
@@ -145,6 +151,8 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 
 # shellcheck source=lib-deploy-stamp.sh
 . "$THIS_DIR/lib-deploy-stamp.sh"
+# shellcheck source=lib-node-store.sh
+. "$THIS_DIR/lib-node-store.sh"
 
 SHIM_DIR="$ROOT/agent-shim/claude/shim"
 WEBAPP_DIR="$ROOT/webapp"
@@ -169,7 +177,7 @@ fi
 REL_SHIM="${REL_ROOT:+$REL_ROOT/}agent-shim/claude/shim"
 REL_WEBAPP="${REL_ROOT:+$REL_ROOT/}webapp"
 
-NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
+NODE_STORE="$(node_store_root)"
 
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
@@ -358,35 +366,49 @@ stamp_source_tree() {
 
 # store_key DIR — echo a short content hash of DIR's dependency manifest, so a
 # lockfile (or, absent one, package.json) change keys a different store entry.
+# The one derivation lives in lib-node-store.sh, shared with ensure-deps.sh.
 store_key() {
-    local manifest="$1/package-lock.json"
-    [ -f "$manifest" ] || manifest="$1/package.json"
-    { shasum -a 256 "$manifest" 2>/dev/null || sha256sum "$manifest"; } | cut -c1-16
+    node_store_key "$1"
 }
 
 # link_node_modules DIR NAME — point DIR/node_modules at the shared store entry
-# for NAME, installing that entry once (for every worktree, forever) when it is
-# not there yet. The store holds only the manifests plus node_modules, so the
-# install is a pure dependency fetch, independent of the checkout it serves.
-# Deps that already resolve (a real directory, or a symlink into a populated
-# store) are left exactly as they are — including a deliberate local install.
+# for NAME, making sure the entry it points at SATISFIES ITS LOCKFILE.
+#
+#   - A real directory is a deliberate local install and is left exactly as it
+#     is.
+#   - A link into the store has THAT entry checked (`npm ls` inside it) and,
+#     when it exists but is broken — emptied or partial — repaired in place
+#     under the entry's lock (lib-node-store.sh). The link itself is kept.
+#   - Anything else (absent, dangling) is linked to the entry the current
+#     lockfile keys, installing that entry once, for every worktree, when it
+#     is not there yet.
+#
+# A repair that fails fails the build: a checkout linked to a tree that does
+# not satisfy its lockfile would build against missing dependencies.
 link_node_modules() {
-    local dir="$1" name="$2" entry
+    local dir="$1" name="$2" entry linked
+    if [ -d "$dir/node_modules" ] && [ ! -L "$dir/node_modules" ]; then
+        return 0
+    fi
+    if [ -d "$dir/node_modules" ] && linked="$(node_store_entry_of_link "$dir/node_modules")"; then
+        require_bin npm "install Node.js"
+        if ! node_store_repair "$linked" "$dir"; then
+            echo "[build-frontend] $name: the store entry $linked is broken and could not be repaired" >&2
+            return 1
+        fi
+        return 0
+    fi
     [ -d "$dir/node_modules" ] && return 0
     entry="$NODE_STORE/$name-$(store_key "$dir")"
-    if [ ! -d "$entry/node_modules" ]; then
-        require_bin npm "install Node.js"
+    require_bin npm "install Node.js"
+    if [ ! -e "$entry/node_modules" ]; then
         echo "[build-frontend] $name: populating shared dep store $entry"
         # The store just grew: this run is the one that should sweep.
         MINTED_ENTRY=1
-        mkdir -p "$entry"
-        cp "$dir/package.json" "$entry/package.json"
-        if [ -f "$dir/package-lock.json" ]; then
-            cp "$dir/package-lock.json" "$entry/package-lock.json"
-            ( cd "$entry" && npm ci )
-        else
-            ( cd "$entry" && npm install )
-        fi
+    fi
+    if ! node_store_repair "$entry" "$dir"; then
+        echo "[build-frontend] $name: the store entry $entry could not be installed" >&2
+        return 1
     fi
     ln -sfn "$entry/node_modules" "$dir/node_modules"
     echo "[build-frontend] $name: node_modules -> $entry/node_modules"
