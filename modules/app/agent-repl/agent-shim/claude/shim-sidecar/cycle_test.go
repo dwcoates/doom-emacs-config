@@ -1929,8 +1929,8 @@ func TestOnlyTypedEntriesReachTheStore(t *testing.T) {
 			stored: false,
 		},
 		{
-			name:   "keepalive is a well-formed fact with no book, not residue",
-			entry:  convert.Keepalive(at, "keepalive", "turn:1", at.AgentID, &storev1.StoreAgentItem{}),
+			name:   "a page line is a typed entry, so it is stored",
+			entry:  convert.PageLine(at, "block:0", "unit:typed", at.AgentID, &conversationv1.AgentFrame{}),
 			stored: true,
 		},
 	}

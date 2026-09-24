@@ -438,6 +438,9 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   (`page_agent_id`) and is the ONLY thing a page can ever return;
   `unserved_item` (keepalive / vendor_specific / unknown / unparsed) is durable
   and never served; `bash` and `workflow` are structurally not page lines.
+  (No producer writes the `keepalive` arm since 2026-09-23 — nothing of a
+  keep-alive is stored on either plane — but the store still accepts it, and
+  the rows written before stand.)
 - One transaction per batch, and **failure commits nothing**. Per entry, in
   producer order: absorb by `write_id` against the **write ledger** (a hit is
   success), else check that the upsert does not change the row's IDENTITY, then

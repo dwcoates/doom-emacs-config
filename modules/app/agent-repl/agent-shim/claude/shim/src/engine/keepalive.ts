@@ -9,9 +9,13 @@
  *
  * THE MARKER IS THE CONTRACT (ruled 2026-08-29). Every keep-alive prompt BEGINS
  * with the literal `<!--agent-repl:keepalive-->`, mirroring the existing
- * `<!--agent-repl:meta-->` marker. The store and sidecar treat a turn opened by
- * such a prompt as keep-alive — its prompt and every frame land as
- * `unserved_item.keepalive` — until the next non-keep-alive prompt.
+ * `<!--agent-repl:meta-->` marker. NOTHING OF A KEEP-ALIVE IS STORED (2026-09-23):
+ * this plane drops every entry its {@link KeepaliveScope} tags at the writer's
+ * door (`store/writer.ts`), and the sidecar skips the turn's transcript records
+ * by the marker plus the transcript's own promptId and parentUuid links. None
+ * of the keep-alive's machinery needs a row: the send, the answer and the
+ * rewind anchor below are this process's memory, and the rewind itself reads
+ * the vendor's own transcript.
  *
  * THE INTERVAL. Fifty-two minutes (ruled 2026-09-17). The ~5-minute ephemeral
  * cache-invalidation window (`cache_creation.ephemeral_5m_input_tokens`,

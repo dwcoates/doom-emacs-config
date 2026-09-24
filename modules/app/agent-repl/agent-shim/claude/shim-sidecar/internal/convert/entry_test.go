@@ -303,24 +303,6 @@ func TestTheFileResidueSpaceCannotCollideWithTheUuidSpace(t *testing.T) {
 	}
 }
 
-func TestAKeepAliveKeepsTheKeyOfTheItemItWouldHaveBeen(t *testing.T) {
-	// Arrange. A keep-alive turn's item is a WELL-FORMED conversation fact with
-	// no book — not residue — so it keeps its unit's identity and never falls
-	// into the residue space.
-	c := newTestConverter(t)
-	at := testAttribution(0)
-	at.RecordUUID = "rec-1"
-
-	// Act.
-	entry := Keepalive(at, "block:0", ActivityKey("toolu_call"), "agent-1", nil)
-
-	// Assert.
-	if got := entry.GetUpsertKey(); got != ActivityKey("toolu_call") {
-		t.Fatalf("upsert_key = %q, want the unit's own key", got)
-	}
-	_ = c
-}
-
 // errTestParse stands in for a decoder failure.
 var errTestParse = errors.New("invalid character 'n'")
 

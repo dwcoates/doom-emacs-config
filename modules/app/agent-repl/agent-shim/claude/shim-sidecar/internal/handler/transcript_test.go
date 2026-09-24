@@ -1,10 +1,17 @@
 package handler
 
-// transcript_test.go — the session transcript handler: the hold protocol and the
-// per-kind shapes a converted record must have.
+// transcript_test.go — the session transcript handler: the hold protocol, the
+// keep-alive prime, and the per-kind shapes a converted record must have.
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"strings"
 	"testing"
+
+	"agentrepl/shim-claude-sidecar/internal/logging"
 
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -351,5 +358,107 @@ func TestTwoCompactionsEachCoalesceWithTheirOwnFollowingSummary(t *testing.T) {
 		GetUpdate().GetContextCut().GetCompacted()
 	if got := second.GetSummary().GetMarkdown(); got != "the story since then" {
 		t.Errorf("the second cut carries the summary %q, wanted the line that follows IT, %q", got, "the story since then")
+	}
+}
+
+// ---- the keep-alive prime ----
+
+// keepalivePrompt and keepaliveReply are a keep-alive turn split across a
+// restart: the prompt before the resumed cursor, its reply after it.
+const keepalivePrompt = `{"type":"user","uuid":"k-1","parentUuid":null,"promptId":"p-k","isSidechain":false,"entrypoint":"sdk-cli",` +
+	`"timestamp":"2026-07-21T20:14:05.040Z","message":{"role":"user","content":[{"type":"text","text":"<!--agent-repl:keepalive-->\nRespond with \".\" (1)"}]}}`
+
+const keepaliveReply = `{"type":"assistant","uuid":"k-2","parentUuid":"k-1","isSidechain":false,` +
+	`"timestamp":"2026-07-21T20:14:06.040Z","message":{"id":"msg_k","role":"assistant","content":[{"type":"text","text":"."}]}}`
+
+// framesAt is framesFrom with every offset moved past a prefix of `from` bytes.
+func framesAt(t *testing.T, from int64, text string) []tail.Frame {
+	t.Helper()
+	frames := framesFrom(t, text)
+	for i := range frames {
+		frames[i].Offset += from
+	}
+	return frames
+}
+
+func TestAPrimedHandlerStoresNothingOfAKeepaliveItResumedInside(t *testing.T) {
+	// Arrange.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	prefix := keepalivePrompt + "\n"
+	if err := h.Prime(strings.NewReader(prefix), ctx); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	// Act.
+	entries := h.Handle(framesAt(t, int64(len(prefix)), keepaliveReply), ctx)
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want 0: the reply belongs to the keep-alive the prefix opened", len(entries))
+	}
+}
+
+func TestAnUnprimedHandlerResumedInsideAKeepaliveStoresTheReply(t *testing.T) {
+	// Arrange: the same resumed delivery with no prime — what the prime exists
+	// to prevent.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+
+	// Act.
+	entries := h.Handle(framesAt(t, int64(len(keepalivePrompt)+1), keepaliveReply), ctx)
+
+	// Assert.
+	if len(entries) == 0 {
+		t.Fatal("entries = 0, want the reply converted: without the prefix nothing names it the keep-alive's")
+	}
+}
+
+func TestPrimeStatesItsTallyAtDebug(t *testing.T) {
+	// Arrange.
+	sink := &bytes.Buffer{}
+	h := NewSessionTranscriptHandler(logging.New(io.Discard, sink).With(logging.Context{Component: "test"}))
+	ctx := sessionContext("/p/s.jsonl", "s")
+
+	// Act.
+	if err := h.Prime(strings.NewReader(keepalivePrompt+"\n"), ctx); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	// Assert.
+	var seed map[string]any
+	for _, raw := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(raw), &rec) == nil && rec["operation"] == "keepalive-seed" {
+			seed = rec
+		}
+	}
+	if seed == nil {
+		t.Fatalf("no keepalive-seed record; log:\n%s", sink.String())
+	}
+	fields, _ := seed["context"].(map[string]any)
+	if seed["level"] != "debug" || fields["path"] != "/p/s.jsonl" {
+		t.Fatalf("keepalive-seed record = %v, want debug naming the file", seed)
+	}
+}
+
+// errPrime stands in for a failed read of the prefix.
+var errPrime = errors.New("input/output error")
+
+// brokenReader fails its first read.
+type brokenReader struct{}
+
+func (brokenReader) Read([]byte) (int, error) { return 0, errPrime }
+
+func TestPrimeReturnsAPrefixReadFailure(t *testing.T) {
+	// Arrange.
+	h := NewSessionTranscriptHandler(testLogger(t))
+
+	// Act.
+	err := h.Prime(brokenReader{}, sessionContext("/p/s.jsonl", "s"))
+
+	// Assert.
+	if !errors.Is(err, errPrime) {
+		t.Fatalf("Prime error = %v, want the read failure", err)
 	}
 }

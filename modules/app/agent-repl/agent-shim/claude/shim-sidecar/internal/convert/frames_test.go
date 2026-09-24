@@ -1,71 +1,9 @@
 package convert
 
-// frames_test.go — the keep-alive bit, and the refusal for a frame that names no
-// agent.
+// frames_test.go — the refusal for a frame that names no agent, and whose book a
+// frame lands in.
 
 import "testing"
-
-// promptLine builds agent-repl's OWN prompt: entrypoint "sdk-cli", so it is
-// withheld (R15). The keep-alive tests use it because the keep-alive mechanism
-// is agent-repl's own, riding sdk-cli prompts.
-func promptLine(uuid, text string) string {
-	return sdkPromptLine(uuid, text)
-}
-
-func TestKeepaliveTurnsRecordsAreNeverServed(t *testing.T) {
-	// Arrange. Keep-alive turns are FIRST-CLASS NEVER-SERVED rows: they must be
-	// indexed such that no page returns them and no activity routes onward.
-	c := newTestConverter(t)
-	prompt := promptLine("u1", KeepaliveMarker+"ping")
-	work := assistantWith("a1", "msg_1", ts1, `{"type":"text","text":"pong"}`)
-
-	// Act.
-	entries := convertLines(t, c, prompt, work)
-
-	// Assert.
-	unit := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_1", 0)))
-	if unit.GetAgentUpdate().GetServeableFrame() != nil {
-		t.Fatal("a keep-alive turn's unit must NOT be a page line")
-	}
-	if unit.GetAgentUpdate().GetUnservedItem().GetKeepalive() == nil {
-		t.Fatal("it must land on the keepalive arm, which is structurally unable to appear in a page")
-	}
-}
-
-func TestOrdinaryPromptClosesTheKeepaliveTurn(t *testing.T) {
-	// Arrange. The bit is opened by the marker and closed by the NEXT
-	// non-keepalive prompt — one remembered bool, nothing accumulated.
-	c := newTestConverter(t)
-	keepalive := promptLine("u1", KeepaliveMarker+"ping")
-	ordinary := promptLine("u2", "a real question")
-	work := assistantWith("a1", "msg_1", ts1, `{"type":"text","text":"an answer"}`)
-
-	// Act.
-	entries := convertLines(t, c, keepalive, ordinary, work)
-
-	// Assert.
-	unit := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_1", 0)))
-	if unit.GetAgentUpdate().GetServeableFrame() == nil {
-		t.Fatal("after an ordinary prompt, records must be served again")
-	}
-}
-
-func TestKeepaliveMarkerMustOpenThePrompt(t *testing.T) {
-	// Arrange. A prompt merely MENTIONING the marker mid-text is not a keep-alive
-	// turn; treating it as one would silently hide a real conversation.
-	c := newTestConverter(t)
-	prompt := promptLine("u1", "please explain "+KeepaliveMarker+" to me")
-	work := assistantWith("a1", "msg_1", ts1, `{"type":"text","text":"sure"}`)
-
-	// Act.
-	entries := convertLines(t, c, prompt, work)
-
-	// Assert.
-	unit := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_1", 0)))
-	if unit.GetAgentUpdate().GetServeableFrame() == nil {
-		t.Fatal("the marker must OPEN the first text block to count")
-	}
-}
 
 func TestFrameWithNoAgentIsRefusedRatherThanServedToNoBook(t *testing.T) {
 	// Arrange. The store reads the book FROM THE FRAME and never invents one, so
