@@ -24,10 +24,10 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 - `rollout/handover.go` `beginHandover`: if `served()` fails after the spawn, the successor is leaked and the next deploy spawns a second one, which races for the manifest. If `writeManifest` fails, the latch never releases. `SuccessorSpawner` needs a stop handle.
 - A shim that dies with work recorded in flight produces no freeness edge, so its registered bounce waits until the workspace is revived.
+| `feat/held-badge-short-labels` | `~/.config/doom-worktrees/held-badge-short-labels` | The daemon supplies short held-badge labels plus a detail sentence (`HeldPromptBadge`), and the webapp draws them verbatim. The tone table is unchanged. | `afa700f3cc7c79cf2` | 21:40 |
 
 ## Still waiting on the owner
 
-- The held badges use the daemon's existing hold sentences as badge text, because the proto carries no short labels. Want shorter labels? That needs daemon-supplied text. Also confirm the tone table: classification error, uninterruptible and waiting are red; restart and build holds amber; keep-alive and session-starting teal; accepted muted.
 - Old store rows: settles written before the restate change now log an ERROR and draw nothing on replay, instead of an empty card. That's ERROR noise until the store ages out. Accept it, or treat pre-change rows at a lower level?
 - Restating for a Subagent failure (prompt and created agent id) and an Artifact failure (the publish act) needs a contract shape. Should every settle also carry `started_at`, so replayed cards show their runtime?
 - The proto keeps a `DaemonFault.deploy_script_failed` arm with no raise site now that the script is gone. Remove it?
