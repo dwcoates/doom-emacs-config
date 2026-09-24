@@ -10,6 +10,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { oneofArms } from "../arms.js";
 import {
+  HeldPromptBadgeSchema,
   HeldPromptSchema,
   type HeldPrompt,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
@@ -23,6 +24,7 @@ import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import {
   DROPPED_EVENT,
+  HELD_BADGE_DETAIL_CLASS,
   HELD_STATUS_BADGES,
   drawHeldPrompt,
   drawUnsupportedBlock,
@@ -51,6 +53,7 @@ import {
 import { installClickExpand } from "../../src/expand.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import stylesheet from "../../src/styles.css?raw";
+import heldPromptSource from "../../src/tray/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -117,7 +120,7 @@ const errorResponse = refusalResponse("noSuchHold");
 type HeldPromptInit = Exclude<MessageInitShape<typeof HeldPromptSchema>, HeldPrompt>;
 
 function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
-  return create(HeldPromptSchema, {
+  const prompt = create(HeldPromptSchema, {
     turn: { value: "turn-1" },
     queuedAt: { atMs: BigInt(NOW - 12_000) },
     said: overrides.said ?? {
@@ -125,7 +128,36 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
     },
     classification: overrides.classification ?? { case: "classifying", value: {} },
     ...(overrides.hold !== undefined ? { hold: overrides.hold } : {}),
+    ...(overrides.badges !== undefined ? { badges: overrides.badges } : {}),
   });
+  // THE DAEMON'S BADGES, one per standing fact, in the proto's order. Their
+  // words are deliberately ones no card would compose (`wire <status>`), so an
+  // assertion on them proves the card drew the wire verbatim.
+  if (overrides.badges === undefined) {
+    prompt.badges = standingStatuses(prompt).map((status) =>
+      create(HeldPromptBadgeSchema, { label: wireLabel(status), detail: wireDetail(status) }),
+    );
+  }
+  return prompt;
+}
+
+/** The label the test daemon sends for STATUS. */
+const wireLabel = (status: HeldStatus): string => `wire ${status}`;
+/** The detail the test daemon sends for STATUS. */
+const wireDetail = (status: HeldStatus): string => `the daemon's whole sentence for ${status}`;
+
+/** The facts a prompt's badges stand for, in daemon_hold.proto's order. */
+function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
+  const statuses: HeldStatus[] = [];
+  const classification = prompt.classification;
+  if (classification.case !== undefined) {
+    statuses.push(classification.case);
+    if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true) {
+      statuses.push("accepted");
+    }
+  }
+  if (prompt.hold.case !== undefined) statuses.push(prompt.hold.case);
+  return statuses;
 }
 
 /** Let the click's promise chain settle. */
@@ -178,7 +210,7 @@ describe("drawHeldPrompt classification arms", () => {
       name: "classifying",
       prompt: heldPrompt({ classification: { case: "classifying", value: {} } }),
       arm: "classifying",
-      badge: "queued — classifying",
+      badge: "wire classifying",
     },
     {
       name: "interject",
@@ -186,7 +218,7 @@ describe("drawHeldPrompt classification arms", () => {
         classification: { case: "interject", value: { rationale: "it stops the wrong work" } },
       }),
       arm: "interject",
-      badge: "interjects",
+      badge: "wire interject",
     },
     {
       name: "hold_for_turn_end",
@@ -194,7 +226,7 @@ describe("drawHeldPrompt classification arms", () => {
         classification: { case: "holdForTurnEnd", value: { rationale: "it can wait" } },
       }),
       arm: "holdForTurnEnd",
-      badge: "after this turn",
+      badge: "wire holdForTurnEnd",
     },
     {
       name: "uninterruptible_turn",
@@ -205,7 +237,7 @@ describe("drawHeldPrompt classification arms", () => {
         },
       }),
       arm: "uninterruptibleTurn",
-      badge: "waits for /compact to finish",
+      badge: "wire uninterruptibleTurn",
     },
     {
       name: "classification_error",
@@ -213,7 +245,7 @@ describe("drawHeldPrompt classification arms", () => {
         classification: { case: "classificationError", value: { detail: "answered neither" } },
       }),
       arm: "classificationError",
-      badge: "unclassified",
+      badge: "wire classificationError",
     },
   ];
 
@@ -302,7 +334,7 @@ describe("drawHeldPrompt accept", () => {
       tc,
     );
     expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-    expect(card.querySelector("[data-accepted]")?.textContent).toBe("confirmed");
+    expect(card.querySelector("[data-accepted]")?.textContent).toBe("wire accepted");
   });
 
   it("echoes the TurnId on the accept request", async () => {
@@ -325,27 +357,25 @@ describe("drawHeldPrompt hold arms", () => {
       name: "shutdown",
       prompt: heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
       arm: "shutdown",
-      // The schedule id is DRAWN, not hidden in a title: it is the token that
-      // joins the card to the shutdown it explains.
-      line: "held for the scheduled restart (sched-9)",
+      line: "wire shutdown",
     },
     {
       name: "keep_alive",
       prompt: heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka-1" } } } }),
       arm: "keepAlive",
-      line: "held behind a keep-alive",
+      line: "wire keepAlive",
     },
     {
       name: "session_starting",
       prompt: heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
       arm: "sessionStarting",
-      line: "held until the session is up",
+      line: "wire sessionStarting",
     },
     {
       name: "build_refresh",
       prompt: heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
       arm: "buildRefresh",
-      line: "held for the build refresh",
+      line: "wire buildRefresh",
     },
   ];
 
@@ -356,7 +386,7 @@ describe("drawHeldPrompt hold arms", () => {
       expect(card.getAttribute("data-hold")).toBe(hold.arm);
     });
 
-    it(`badges the ${hold.name} hold in its own words`, () => {
+    it(`badges the ${hold.name} hold in the daemon's words`, () => {
       const { tc } = trayContext();
       const card = drawHeldPrompt(hold.prompt, tc);
       expect(card.querySelector(`.queued-head > [data-held-status="${hold.arm}"]`)?.textContent).toBe(hold.line);
@@ -372,10 +402,10 @@ describe("drawHeldPrompt hold arms", () => {
     expect(card.querySelector('[data-held-status="shutdown"]')?.getAttribute("data-schedule-id")).toBe("sched-9");
   });
 
-  it("titles a keep-alive hold's badge with the turn it waits on", () => {
+  it("composes no title of its own on a keep-alive hold's badge", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka-1" } } } }), tc);
-    expect(card.querySelector<HTMLElement>('[data-held-status="keepAlive"]')?.title).toBe("waiting on turn ka-1");
+    expect(card.querySelector<HTMLElement>('[data-held-status="keepAlive"]')?.title).toBe("");
   });
 
   it("refuses a keep-alive hold whose turn is unset", () => {
@@ -908,6 +938,133 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   keepAlive: "teal",
   sessionStarting: "teal",
 };
+
+describe("the daemon's badge words", () => {
+  const byStatus: Array<[HeldStatus, () => HeldPrompt]> = [
+    ["classifying", () => heldPrompt({ classification: { case: "classifying", value: {} } })],
+    ["interject", () => heldPrompt({ classification: { case: "interject", value: { rationale: "" } } })],
+    ["holdForTurnEnd", () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { rationale: "" } } })],
+    [
+      "uninterruptibleTurn",
+      () => heldPrompt({ classification: { case: "uninterruptibleTurn", value: { command: SessionCommand.COMPACT } } }),
+    ],
+    ["classificationError", () => heldPrompt({ classification: { case: "classificationError", value: { detail: "" } } })],
+    [
+      "accepted",
+      () => heldPrompt({ classification: { case: "holdForTurnEnd", value: { accepted: { accepted: true } } } }),
+    ],
+    ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
+    ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
+    ["keepAlive", () => heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } })],
+    ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
+  ];
+
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  it.each(byStatus)("draws the %s label verbatim on its badge", (status, prompt) => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(prompt(), tc);
+    // Assert
+    expect(card.querySelector(`.queued-head > [data-held-status="${status}"]`)?.textContent).toBe(wireLabel(status));
+  });
+
+  it.each(byStatus)("draws the %s detail verbatim in the expand-only details", (status, prompt) => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(prompt(), tc);
+    // Assert
+    expect(
+      card.querySelector(`.queued-details > .${HELD_BADGE_DETAIL_CLASS}[data-held-status="${status}"]`)?.textContent,
+    ).toBe(wireDetail(status));
+  });
+
+  it("draws no detail element for a badge the daemon gave none", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt({ badges: [{ label: "after this turn" }], classification: { case: "holdForTurnEnd", value: {} } });
+    // Act
+    const card = drawHeldPrompt(prompt, tc);
+    // Assert
+    expect(card.querySelector(`.${HELD_BADGE_DETAIL_CLASS}`)).toBeNull();
+  });
+
+  it("refuses a badge with an empty label", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt({ badges: [{ label: "" }] });
+    // Act / Assert
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("logs an empty label as an error through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { tc } = trayContext();
+    // Act
+    expect(() => drawHeldPrompt(heldPrompt({ badges: [{ label: "" }] }), tc)).toThrow(MalformedView);
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt.badge-empty-label");
+    expect(record.level.case).toBe("error");
+  });
+
+  it("refuses fewer badges than the standing facts", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt({
+      badges: [{ label: "after this turn" }],
+      classification: { case: "holdForTurnEnd", value: {} },
+      hold: { case: "buildRefresh", value: {} },
+    });
+    // Act / Assert
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("refuses more badges than the standing facts", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt({ badges: [{ label: "classifying" }, { label: "restart hold" }] });
+    // Act / Assert
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("logs a badge count mismatch as an error through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { tc } = trayContext();
+    // Act
+    expect(() => drawHeldPrompt(heldPrompt({ badges: [] }), tc)).toThrow(MalformedView);
+    // Assert
+    const record = await forwardedRecord(capture, "tray.held-prompt.badges-mismatch");
+    expect(record.level.case).toBe("error");
+  });
+
+  it("composes no status sentence of its own", () => {
+    // Arrange: every sentence the card used to compose for a badge.
+    const composed = [
+      '"queued — classifying"',
+      '"interjects"',
+      '"after this turn"',
+      '"waits for "',
+      '" to finish"',
+      '"unclassified"',
+      '"confirmed"',
+      "held for the scheduled restart",
+      "held behind a keep-alive",
+      "waiting on turn",
+      "held until the session is up",
+      "held for the build refresh",
+    ];
+    // Act
+    const source = heldPromptSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    // Assert
+    expect(composed.filter((sentence) => source.includes(sentence))).toEqual([]);
+  });
+});
 
 describe("the held status badge table", () => {
   afterEach(() => {
