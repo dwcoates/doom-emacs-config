@@ -68,6 +68,8 @@ type fakeDB struct {
 	// and replaceErr fails an edit's content replacement.
 	byTurnErr  error
 	replaceErr error
+	// workspaceErr fails the workspace read when set.
+	workspaceErr error
 }
 
 func newFakeDB() *fakeDB {
@@ -91,6 +93,9 @@ func (d *fakeDB) TouchEngagement(_ context.Context, _ ids.WorkspaceID, _ time.Ti
 func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.workspaceErr != nil {
+		return wsm.Workspace{}, d.workspaceErr
+	}
 	record, ok := d.workspaces[id]
 	if !ok {
 		return wsm.Workspace{}, errors.New("no such workspace")
@@ -471,6 +476,25 @@ type fakeWatcher struct {
 	opened     []*conversationv1.AgentPrompt
 	opening    []ids.TurnID
 	openFailed []ids.TurnID
+	// departure is the watched shim's departure, nil while it runs.
+	departure *sessionwatcher.Departure
+}
+
+func (w *fakeWatcher) Departed() (sessionwatcher.Departure, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.departure == nil {
+		return sessionwatcher.Departure{}, false
+	}
+	return *w.departure, true
+}
+
+// depart records the watched shim as gone, as the real watcher does on its
+// dead link or its close.
+func (w *fakeWatcher) depart(d sessionwatcher.Departure) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.departure = &d
 }
 
 func (w *fakeWatcher) TurnInFlight() *ids.TurnID {

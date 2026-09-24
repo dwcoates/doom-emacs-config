@@ -311,6 +311,20 @@ type LifecycleSink interface {
 	// carry an exit code and cannot tell a process that died from a stream
 	// that broke.
 	OnLinkFault(ws ids.WorkspaceID, fault LinkFault)
+	// OnDeparted reports that the shim this watcher watched is GONE: its
+	// process died (the link went dead), or the watcher was closed on a
+	// session that was ending or already reaped. A departure RESOLVES ALL OF
+	// ITS IN-FLIGHT WORK -- a turn or a detached item that ran inside the
+	// shim's vendor child has ended with it -- and it is the prompt queue's
+	// bounce registry that must hear it, because a dead shim produces no
+	// other freeness edge. `departed` names the watcher that departed, so a
+	// late edge is never taken for a newer shim's. It is told ONCE per
+	// watcher.
+	//
+	// IT MUST NOT BLOCK. It is told inline from Close, and Close runs under
+	// the prompt queue's own delivery lock when a held prompt's revival
+	// retires the dead session it replaces.
+	OnDeparted(ws ids.WorkspaceID, departed Watcher, departure Departure)
 	// OnWatchOpenRefused reports a watch open the shim refused for a handle
 	// NOTHING announced. A refusal on a handle the daemon legitimately
 	// expects is retried and never reaches here: only an unexpected one is
@@ -403,8 +417,35 @@ type TitleSink interface {
 	OnContextReset(ws ids.WorkspaceID)
 }
 
+// Departure is how a watched shim went away. See LifecycleSink.OnDeparted.
+type Departure struct {
+	// Ordered reports that this daemon ended the session itself -- a stop, a
+	// kill, a stand-down, a session it announced as ending -- rather than the
+	// shim dying on its own.
+	Ordered bool
+	// Cause names the edge that established the departure.
+	Cause DepartureCause
+}
+
+// DepartureCause is the edge a departure was established on.
+type DepartureCause string
+
+// The departure causes.
+const (
+	// DepartureLinkDead is the shim's process observed gone: the link went
+	// dead while the watcher was open.
+	DepartureLinkDead DepartureCause = "link_dead"
+	// DepartureClosed is the watcher closed on a session that was ending or
+	// whose process was already reaped.
+	DepartureClosed DepartureCause = "watcher_closed"
+)
+
 // Watcher is one live workspace's watch fleet.
 type Watcher interface {
+	// Departed reports whether the shim this watcher watched is gone, and
+	// how. A departed watcher's recorded turn and live work are HISTORY, not
+	// work in flight: they ended with the shim.
+	Departed() (Departure, bool)
 	// Connected reports whether the daemon-to-shim link is serving.
 	Connected() bool
 	// Link is the current link state.

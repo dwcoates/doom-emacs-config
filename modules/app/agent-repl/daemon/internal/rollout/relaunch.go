@@ -2,6 +2,7 @@ package rollout
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	shimv1 "agentrepl/proto/shim/v1"
@@ -33,13 +34,21 @@ const FaultRelaunchFailed = health.KindResumeFailed
 func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
 	decision, err := c.deps.Bounces.RequestBounce(ctx, ws, bounce.Request{
-		Reason: string(reason),
-		Force:  force,
-		Run:    c.shimBounce(reason, force),
+		Reason:       string(reason),
+		Force:        force,
+		Run:          c.shimBounce(reason, force),
+		ReplacesShim: true,
 		Done: func(err error) {
-			if err != nil {
+			switch {
+			case errors.Is(err, bounce.ErrUnregistered):
+				// AN OUTCOME, NOT A FAILURE: the shim this bounce would have
+				// replaced departed, and nothing is left to replace -- this
+				// daemon ended the session itself, or the workspace is closed,
+				// or a newer shim already runs the installed build.
+				c.log.Info(opBounce, "the shim bounce was unregistered: the shim it would replace is gone and nothing is left to replace", fields)
+			case err != nil:
 				c.log.Error(opBounce, "the shim bounce failed; the workspace is served as it was", withCause(fields, err))
-			} else {
+			default:
 				c.log.Info(opBounce, "the shim bounce finished; the workspace runs the installed build", fields)
 			}
 			if done != nil {

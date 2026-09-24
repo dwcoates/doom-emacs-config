@@ -132,6 +132,7 @@ func TestTheShimLogRollRecordsHowItsBounceEnded(t *testing.T) {
 	}{
 		{name: "the bounce ran", wantLevel: "info", wantText: "rolled the shim"},
 		{name: "the bounce failed", endOf: errors.New("prelaunch refused"), wantLevel: "error", wantText: "could not roll"},
+		{name: "the bounce was unregistered", endOf: bounce.ErrUnregistered, wantLevel: "info", wantText: "nothing is left to roll"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -147,7 +148,7 @@ func TestTheShimLogRollRecordsHowItsBounceEnded(t *testing.T) {
 			// Assert.
 			for _, r := range log.Records() {
 				if r.Level == tc.wantLevel && strings.Contains(r.Message, tc.wantText) {
-					if tc.endOf != nil && r.Context["cause"] != tc.endOf.Error() {
+					if tc.wantLevel == "error" && r.Context["cause"] != tc.endOf.Error() {
 						t.Fatalf("record = %+v, want the bounce's cause", r)
 					}
 					return
