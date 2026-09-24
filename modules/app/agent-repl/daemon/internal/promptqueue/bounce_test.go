@@ -879,3 +879,25 @@ func TestADepartureWithNoBounceRegisteredDecidesNothing(t *testing.T) {
 		t.Fatalf("a departure with nothing registered drained the workspace")
 	}
 }
+
+func TestADepartureAfterTheExitsDrainDecidesNothing(t *testing.T) {
+	// Arrange: the exit has joined the queue's work; a watcher closed by the
+	// exit then reports its shim departed.
+	h := newHarness(t)
+	g := newGate()
+	registerBehindWork(t, h, g.relaunching("build_stale"))
+	if !h.q.Drain(bounceStartBound) {
+		t.Fatalf("Drain did not join the queue's work")
+	}
+
+	// Act
+	depart(h, h.watcher, departedOrdered)
+
+	// Assert
+	if runs := g.runs.Load(); runs != 0 {
+		t.Fatalf("a departure at the exit ran the bounce %d times", runs)
+	}
+	if !recordWith(h.log.Records(), "debug", opBounce, "the daemon is exiting; a shim departure at the exit decides nothing") {
+		t.Fatalf("records = %+v, want the exit's no-op recorded", h.log.Records())
+	}
+}
