@@ -22,6 +22,7 @@
 //	--log              size-capped rotating log file
 //	--poll-interval    how often each watched file is polled, and how often the
 //	                   directory-change probe looks for NEW files (1s)
+//	--pprof            OPT-IN local-only profiling surface (env AGENT_REPL_SIDECAR_PPROF_ADDR; OFF by default)
 //	--rescan-interval  how often the FULL discovery enumeration runs (30s)
 //
 // The LOST policy's windows (internal/stale) are configurable too, so the
@@ -63,6 +64,7 @@ import (
 
 	"agentrepl/shim-claude-sidecar/internal/daemonclient"
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/pprofsurface"
 	"agentrepl/shim-claude-sidecar/internal/stale"
 
 	sharedlogging "agentrepl/logging"
@@ -144,6 +146,7 @@ func main() {
 		"delay before the first retry of a suspended cycle (Go duration; default $"+RecoverBackoffMinEnv+", else 250ms)")
 	recoverBackoffMaxFlag := flag.String("recover-backoff-max", "",
 		"ceiling the store-recovery ladder's doubling holds forever (Go duration; default $"+RecoverBackoffMaxEnv+", else 10s)")
+	pprofAddr := flag.String("pprof", os.Getenv(pprofsurface.EnvAddr), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6062). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the pprof.enabled record at startup")
 	flag.Parse()
 
 	// ONE RESOLUTION, ONE REFUSAL. Every window is resolved by a single tested
@@ -176,6 +179,7 @@ func main() {
 		UnownedSpoolWindow: w.UnownedSpool,
 		RecoverBackoffMin:  w.RecoverBackoffMin,
 		RecoverBackoffMax:  w.RecoverBackoffMax,
+		PprofAddr:          *pprofAddr,
 	}
 	if err := run(options, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
@@ -206,6 +210,8 @@ type Options struct {
 	// recoverBackoffMax.
 	RecoverBackoffMin time.Duration
 	RecoverBackoffMax time.Duration
+	// PprofAddr is the opt-in profiling surface's address. Empty is OFF.
+	PprofAddr string
 }
 
 // durationSource is one duration option's two spellings: the flag value the
@@ -483,6 +489,14 @@ func refReplacedObserver(logf *logging.Bound) func(dir, oldID, newID string) {
 // runWithLogger owns process-level failures once canonical logging exists.
 // Lower layers keep ownership of the errors they log themselves.
 func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) error {
+	// OPENED BEFORE ANY FILE IS READ, so a sidecar wedged in its boot walk is
+	// still profilable.
+	pprofSurface, err := openPprofSurface(options.PprofAddr, logf)
+	if err != nil {
+		logf.With(logging.Context{Operation: "pprof.open", Level: "error"}).Log("opening pprof surface failed: %v", err)
+		return err
+	}
+	defer closePprofSurface(pprofSurface, logf)
 	// THE CATCH-UP WINDOW OPENS BEFORE ANY FILE IS READ and closes when the
 	// first full poll pass has drained the corpus that was already on disk. The
 	// operations named here are the ones the boot walk restates wholesale.
