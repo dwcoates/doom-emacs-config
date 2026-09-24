@@ -67,6 +67,9 @@ type fakeDB struct {
 	openTurnsErr error
 	// closeTurnErrs fails one turn's close each.
 	closeTurnErrs map[ids.TurnID]error
+	// orphansErr fails CloseOrphans, and claimErr ClaimDisplacedTurn.
+	orphansErr error
+	claimErr   error
 	// byTurnErr fails the one-hold read an edit resolves its prompt through,
 	// and replaceErr fails an edit's content replacement.
 	byTurnErr  error
@@ -302,6 +305,9 @@ func (d *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, e
 func (d *fakeDB) CloseOrphans(_ context.Context, id ids.WorkspaceID, at time.Time) (wsm.OrphanReport, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.orphansErr != nil {
+		return wsm.OrphanReport{}, d.orphansErr
+	}
 	d.orphaned = append(d.orphaned, id)
 	report := wsm.OrphanReport{At: at}
 	for _, t := range d.turns {
@@ -312,6 +318,27 @@ func (d *fakeDB) CloseOrphans(_ context.Context, id ids.WorkspaceID, at time.Tim
 		}
 	}
 	return report, nil
+}
+
+// ClaimDisplacedTurn takes a marked turn, closing it as orphaned when it is
+// still open, as the store's one transaction does.
+func (d *fakeDB) ClaimDisplacedTurn(_ context.Context, turn ids.TurnID, _ time.Time) (wsm.DisplacedClaim, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.claimErr != nil {
+		return wsm.DisplacedClaim{}, d.claimErr
+	}
+	t, ok := d.turns[turn]
+	if !ok || !t.Displaced {
+		return wsm.DisplacedClaim{}, nil
+	}
+	t.Displaced = false
+	claim := wsm.DisplacedClaim{Claimed: true, Closed: t.Close == nil}
+	if claim.Closed {
+		how := wsm.CloseOrphaned
+		t.Close = &how
+	}
+	return claim, nil
 }
 
 // hold reads back one recorded hold.
@@ -573,6 +600,30 @@ type fakeFeed struct {
 	clearReceived   []ids.TurnID
 	compactReceived []ids.TurnID
 	cutAborted      []ids.TurnID
+	// closed are the door's feed tells, in order.
+	closed []closedTell
+}
+
+// closedTell is one OnTurnClosed the door made.
+type closedTell struct {
+	turn ids.TurnID
+	how  wsm.TurnClose
+}
+
+// OnTurnClosed records the door telling the feed a turn closed.
+func (f *fakeFeed) OnTurnClosed(_ ids.WorkspaceID, turn ids.TurnID, close wsm.RecordedClose) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, closedTell{turn: turn, how: close.How})
+}
+
+// closedTells answers the door's feed tells, in order.
+func (f *fakeFeed) closedTells() []closedTell {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]closedTell, len(f.closed))
+	copy(out, f.closed)
+	return out
 }
 
 // OnClearReceived records the turns a /clear drew its optimistic divider for.
