@@ -172,6 +172,54 @@ export function closingSubagentTerminal(
   };
 }
 
+/**
+ * The row that closes a MONITOR unit the record holds no terminal for.
+ *
+ * `AgentMonitor.ended` is the monitor's own word for "the watch left the live
+ * set", and it claims no cause, which is exactly what a sweep knows. Closing a
+ * monitor with a SHELL terminal instead relabelled the watch as a shell run in
+ * the store (three monitors on 2026-09-23).
+ */
+export function closingMonitorTerminal(
+  agent: conversationv1.AgentId,
+  monitor: conversationv1.AgentActivityId,
+): PersistEntry {
+  LOGGER.debug(
+    { agent: agent.value, monitor: monitor.value },
+    "closing a monitor the record holds no terminal for as ended",
+  );
+  const activity = create(conversationv1.AgentActivitySchema, {
+    activityId: monitor,
+    item: {
+      case: "monitor",
+      value: create(conversationv1.AgentMonitorSchema, {
+        result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, {}) },
+      }),
+    },
+  });
+  return {
+    agentId: agent,
+    upsertKey: activityUpsertKey(monitor),
+    source: {
+      vendorUuid: reconciledCoordinate(monitor.value),
+      discriminator: "activity.monitor.ended.swept_up",
+    },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: agent,
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentUpdateSchema, {
+            update: { case: "activity", value: activity },
+          }),
+        },
+      }),
+    },
+  };
+}
+
 export function closingBashTerminal(
   agent: conversationv1.AgentId,
   run: conversationv1.AgentActivityId,

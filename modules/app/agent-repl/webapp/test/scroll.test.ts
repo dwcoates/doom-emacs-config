@@ -17,10 +17,13 @@ import {
   sectionFor,
   sectionTakesWheel,
   wheelDeltaPx,
-  revealDelta,
+  detachedWorkDelta,
   revealGeometry,
   centerDelta,
+  collapseDelta,
   observeScrollBox,
+  latestEntryVisible,
+  type RevealGeometry,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { fireResize } from "./resize-observer.js";
@@ -380,7 +383,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the six causes the owner rule allows", () => {
+  it("names exactly the eight causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -389,6 +392,8 @@ describe("SCROLL_CAUSES", () => {
       "initialPlacement",
       "replaceRestore",
       "prependCompensation",
+      "collapseCompensation",
+      "latestVisible",
     ]);
   });
 });
@@ -753,6 +758,81 @@ describe("TailFollow.prependCompensation", () => {
   });
 });
 
+/**
+ * A THINKING BUBBLE ABOVE THE READER COLLAPSING (owner rule, 2026-09-23): the
+ * view shifts by exactly the height it lost, so nothing under the reader moves.
+ * The box's top edge is at 100; the row ended at 90 and ends at 40 collapsed.
+ */
+describe("TailFollow.collapseCompensation", () => {
+  const above = { boxTop: 100, rowBottomBefore: 90, rowBottomAfter: 40 };
+
+  it("shifts a reader who is not following by exactly the height lost above them", () => {
+    // Arrange
+    const box = { scrollTop: 500, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.collapseCompensation(above);
+    // Assert
+    expect(box.scrollTop).toBe(450);
+  });
+
+  it("adds nothing on top of a standing follow", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.collapseCompensation(above);
+    // Assert
+    expect(f.box.scrollTop).toBe(1000);
+  });
+
+  it("moves nothing for a row the reader can see", () => {
+    // Arrange
+    const box = { scrollTop: 500, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    a.tail.collapseCompensation({ boxTop: 100, rowBottomBefore: 250, rowBottomAfter: 200 });
+    // Assert
+    expect(box.scrollTop).toBe(500);
+  });
+
+  it("records nothing when the row's height did not change", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 500, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.collapseCompensation({ boxTop: 100, rowBottomBefore: 90, rowBottomAfter: 90 });
+    // Assert
+    expect(await moves(capture)).toEqual([]);
+  });
+
+  it("is recorded at DEBUG as collapseCompensation", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 500, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.collapseCompensation(above);
+    // Assert
+    expect(await moves(capture)).toEqual([
+      { cause: "collapseCompensation", from: 500, to: 450, follow: false },
+    ]);
+  });
+});
+
+describe("collapseDelta", () => {
+  it.each([
+    { name: "a row wholly above the viewport moves the view by its change", before: 90, after: 40, want: -50 },
+    { name: "a row ending exactly at the viewport's top counts as above", before: 100, after: 60, want: -40 },
+    { name: "a row the reader can see any part of moves nothing", before: 101, after: 60, want: 0 },
+  ])("$name", ({ before, after, want }) => {
+    // Arrange
+    const g = { boxTop: 100, rowBottomBefore: before, rowBottomAfter: after };
+    // Act
+    const got = collapseDelta(g);
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
 describe("TailFollow.selectionMoved", () => {
   /** A 300px viewport over 1000px, and a 100px row at 500. */
   const centered = { clientHeight: 300, scrollHeight: 1000, nodeOffsetTop: 500, nodeHeight: 100 };
@@ -800,14 +880,14 @@ describe("TailFollow.selectionMoved", () => {
 });
 
 describe("TailFollow.detachedWorkSelected", () => {
-  it("brings a card below the fold up by exactly its overhang", () => {
-    // Arrange
+  it("centers a card below the fold in the viewport", () => {
+    // Arrange: a 200px card whose top is 250px down a 300px viewport.
     const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
     const a = armed(box);
     // Act
     a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
-    // Assert
-    expect(box.scrollTop).toBe(250);
+    // Assert: its midpoint (350) moves to the viewport's (150): 200px down.
+    expect(box.scrollTop).toBe(300);
   });
 
   it("ends a standing follow", () => {
@@ -827,8 +907,339 @@ describe("TailFollow.detachedWorkSelected", () => {
     a.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
     // Assert
     expect(await moves(capture)).toEqual([
-      { cause: "detachedWorkSelected", from: 100, to: 250, follow: false },
+      { cause: "detachedWorkSelected", from: 100, to: 300, follow: false },
     ]);
+  });
+});
+
+describe("latestEntryVisible", () => {
+  // A 300px viewport whose top edge sits at 100.
+  const at = (nodeTop: number, nodeHeight: number): RevealGeometry => ({
+    boxTop: 100,
+    boxHeight: 300,
+    nodeTop,
+    nodeHeight,
+  });
+
+  it("sees an entry wholly inside the viewport", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(150, 100))).toBe(true);
+  });
+
+  it("sees an entry whose top shows above the fold and whose rest runs below it", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(390, 200))).toBe(true);
+  });
+
+  it("sees an entry whose bottom shows below the viewport top and whose rest runs above it", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(0, 110))).toBe(true);
+  });
+
+  it("sees an entry taller than the viewport that covers it end to end", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(0, 1000))).toBe(true);
+  });
+
+  it("does not see an entry whose top sits exactly on the viewport bottom", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(400, 100))).toBe(false);
+  });
+
+  it("does not see an entry whose bottom sits exactly on the viewport top", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(0, 100))).toBe(false);
+  });
+
+  it("does not see an entry wholly below the fold", () => {
+    // Arrange + Act + Assert
+    expect(latestEntryVisible(at(900, 100))).toBe(false);
+  });
+
+  it("throws on a non-finite edge", () => {
+    // Arrange + Act + Assert
+    expect(() => latestEntryVisible(at(Number.NaN, 100))).toThrow(/not a real layout/);
+  });
+
+  it("throws on a negative height", () => {
+    // Arrange + Act + Assert
+    expect(() => latestEntryVisible(at(150, -1))).toThrow(/not a real layout/);
+  });
+
+  it("reports a geometry that is not a real layout at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    expect(() => latestEntryVisible(at(150, Number.POSITIVE_INFINITY))).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.latest-geometry-invalid");
+    expect(record.level.case).toBe("error");
+  });
+});
+
+/**
+ * THE LATEST-VISIBLE LATCH (owner rule, 2026-09-23): a reader who can see the
+ * feed's latest entry is following.
+ *
+ * The box is 1000px of content in a 300px viewport; the latest entry is the
+ * last 100px of it (offset 900), read live off the box's position, so it is
+ * visible exactly while `scrollTop > 600`.
+ */
+describe("TailFollow's latest-visible latch", () => {
+  interface Entry {
+    offset: number;
+    height: number;
+  }
+
+  function withLatest(scrollTop: number): ReturnType<typeof armed> & {
+    box: ReanchorBox;
+    entry: Entry;
+    append: (height: number) => void;
+  } {
+    const box: ReanchorBox = { scrollTop, scrollHeight: 1000, clientHeight: 300 };
+    const entry: Entry = { offset: 900, height: 100 };
+    let onScroll = (): void => {};
+    let onResize = (): void => {};
+    let onInput = (): void => {};
+    const tail = new TailFollow(box, () => ({
+      boxTop: 0,
+      boxHeight: box.clientHeight,
+      nodeTop: entry.offset - box.scrollTop,
+      nodeHeight: entry.height,
+    }));
+    tail.observe(
+      (cb) => {
+        onScroll = cb;
+      },
+      (cb) => {
+        onResize = cb;
+      },
+      (cb) => {
+        onInput = cb;
+      },
+    );
+    return {
+      tail,
+      box,
+      entry,
+      scroll: () => onScroll(),
+      resize: () => onResize(),
+      input: () => onInput(),
+      gesture: () => {
+        onInput();
+        onScroll();
+      },
+      // A new row drawn under the last one becomes the latest entry.
+      append: (height: number) => {
+        entry.offset = box.scrollHeight;
+        entry.height = height;
+        box.scrollHeight += height;
+      },
+    };
+  }
+
+  it("latches when the reader scrolls back down until the latest entry shows", () => {
+    // Arrange
+    const l = withLatest(100);
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("does not move the view when it latches", () => {
+    // Arrange
+    const l = withLatest(100);
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.box.scrollTop).toBe(650);
+  });
+
+  it("keeps the tail in view when the next row arrives after the latch", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Act
+    l.append(100);
+    l.tail.follow();
+    // Assert
+    expect(l.box.scrollTop).toBe(1100);
+  });
+
+  it("records the later follow move under latestVisible", async () => {
+    // Arrange
+    const l = withLatest(100);
+    l.box.scrollTop = 650;
+    l.gesture();
+    const capture = captureLogRecords("debug");
+    // Act
+    l.append(100);
+    l.tail.follow();
+    // Assert
+    expect(await moves(capture)).toEqual([{ cause: "latestVisible", from: 650, to: 1100, follow: true }]);
+  });
+
+  it("records the latch at DEBUG as a follow started by latestVisible", async () => {
+    // Arrange
+    const l = withLatest(100);
+    const capture = captureLogRecords("debug");
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.follow-started");
+    expect(record.context).toMatchObject({ cause: "latestVisible", at: 650 });
+  });
+
+  it("does not latch while the latest entry is out of view", () => {
+    // Arrange
+    const l = withLatest(100);
+    // Act
+    l.box.scrollTop = 600;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(false);
+  });
+
+  it("latches on a resize that brings the latest entry into view", () => {
+    // Arrange
+    const l = withLatest(500);
+    // Act
+    l.box.clientHeight = 450;
+    l.resize();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("latches on a row upsert that finds the latest entry in view, without moving", () => {
+    // Arrange
+    const l = withLatest(650);
+    // Act
+    l.tail.follow();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+  });
+
+  it("latches on a movement with no reader behind it that brings the entry into view", () => {
+    // Arrange
+    const l = withLatest(100);
+    // Act
+    l.box.scrollTop = 650;
+    l.scroll();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("stays following when the reader scrolls up while the latest entry is still visible", () => {
+    // Arrange
+    const l = withLatest(700);
+    l.tail.promptSent();
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("ends following when the reader scrolls the latest entry out of view", () => {
+    // Arrange
+    const l = withLatest(700);
+    l.tail.promptSent();
+    // Act
+    l.box.scrollTop = 600;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(false);
+  });
+
+  it("is held off while a reply selection is active", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(false);
+  });
+
+  it("reports the held-off latch once per spell of visibility", async () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    const capture = captureLogRecords("debug");
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    l.box.scrollTop = 680;
+    l.gesture();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    const held = capture.sent.filter((r) => r.operation === "scroll.follow-held-by-selection");
+    expect(held.length).toBe(1);
+  });
+
+  it("parks at the tail when the active selection clears", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Act
+    l.tail.selectionCleared();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 1000]);
+  });
+
+  it("applies again once the selection has cleared", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    l.tail.selectionCleared();
+    l.box.scrollTop = 100;
+    l.gesture();
+    // Act
+    l.box.scrollTop = 650;
+    l.gesture();
+    // Assert
+    expect(l.tail.isFollowing()).toBe(true);
+  });
+
+  it("latches after a detached-work selection that leaves the latest entry in view", () => {
+    // Arrange
+    const l = withLatest(500);
+    // Act — the card's 150px overhang below the fold brings the box to 650.
+    l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 650]);
+  });
+
+  it("does not latch after a detached-work selection that leaves the latest entry out of view", () => {
+    // Arrange
+    const l = withLatest(700);
+    l.tail.promptSent();
+    // Act — a card above the viewport top brings the box up to 400.
+    l.tail.detachedWorkSelected({ boxTop: 0, boxHeight: 300, nodeTop: -600, nodeHeight: 50 });
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 400]);
+  });
+
+  it("throws and reports at ERROR when the latest entry's geometry is not a real layout", async () => {
+    // Arrange
+    const l = withLatest(100);
+    l.entry.height = Number.NaN;
+    const capture = captureLogRecords();
+    // Act
+    l.box.scrollTop = 650;
+    expect(() => l.gesture()).toThrow(/not a real layout/);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.latest-geometry-invalid");
+    expect(record.level.case).toBe("error");
   });
 });
 
@@ -1225,33 +1636,60 @@ describe("observeScrollBox", () => {
 });
 
 /**
- * THE DETACHED-WORK SELECTION'S ARITHMETIC: how far the feed moves to bring
- * the card the reader picked in the footer into view.
+ * THE DETACHED-WORK SELECTION'S ARITHMETIC: how far the feed moves to CENTER
+ * the card the reader picked in the footer (owner ruling, 2026-09-23).
  */
-describe("revealDelta", () => {
-  /** A 300px viewport starting at the top of the screen. */
-  const box = { boxTop: 0, boxHeight: 300 };
+describe("detachedWorkDelta", () => {
+  /** A 300px viewport at the top of the screen over a 1000px feed. */
+  const view = { boxTop: 0, boxHeight: 300 };
 
-  it("moves nothing for a panel already wholly on screen", () => {
-    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 100 })).toBe(0);
-  });
+  it.each([
+    {
+      name: "centers a card in the middle of the feed",
+      node: { nodeTop: 400, nodeHeight: 100 },
+      box: { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 },
+      // midpoint 450 onto 150: +300, inside the range.
+      want: 300,
+    },
+    {
+      name: "moves nothing for a card already centered",
+      node: { nodeTop: 100, nodeHeight: 100 },
+      box: { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 },
+      want: 0,
+    },
+    {
+      name: "clamps at the feed's TOP for a card near its start",
+      node: { nodeTop: 20, nodeHeight: 40 },
+      box: { scrollTop: 30, scrollHeight: 1000, clientHeight: 300 },
+      // centering asks -110, but the feed is only 30px from its start.
+      want: -30,
+    },
+    {
+      name: "clamps at the feed's BOTTOM for a card near its end",
+      node: { nodeTop: 250, nodeHeight: 40 },
+      box: { scrollTop: 650, scrollHeight: 1000, clientHeight: 300 },
+      // centering asks +120, but only 50px of range remain below.
+      want: 50,
+    },
+    {
+      name: "aligns a card taller than the viewport at the viewport's top",
+      node: { nodeTop: 180, nodeHeight: 900 },
+      box: { scrollTop: 0, scrollHeight: 3000, clientHeight: 300 },
+      want: 180,
+    },
+    {
+      name: "brings a card above the viewport down to center",
+      node: { nodeTop: -200, nodeHeight: 100 },
+      box: { scrollTop: 500, scrollHeight: 1000, clientHeight: 300 },
+      // midpoint -150 onto 150: -300.
+      want: -300,
+    },
+  ])("$name", ({ node, box, want }) => {
+    // Arrange, Act
+    const got = detachedWorkDelta({ ...view, ...node }, box);
 
-  it("moves by exactly the overhang for a panel running past the fold", () => {
-    expect(revealDelta({ ...box, nodeTop: 250, nodeHeight: 200 })).toBe(150);
-  });
-
-  it("stops at the panel's own top for a panel taller than the viewport", () => {
-    // Capped: the head above it stays on screen rather than being pushed off
-    // to chase a bottom edge that cannot fit anyway.
-    expect(revealDelta({ ...box, nodeTop: 80, nodeHeight: 900 })).toBe(80);
-  });
-
-  it("brings a panel above the viewport back down to its top", () => {
-    expect(revealDelta({ ...box, nodeTop: -50, nodeHeight: 100 })).toBe(-50);
-  });
-
-  it("counts a panel ending exactly at the fold as visible", () => {
-    expect(revealDelta({ ...box, nodeTop: 100, nodeHeight: 200 })).toBe(0);
+    // Assert
+    expect(got).toBe(want);
   });
 });
 

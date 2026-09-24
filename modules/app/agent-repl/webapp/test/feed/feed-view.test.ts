@@ -9,6 +9,7 @@ import {
   FeedRowSchema,
   FeedSelectionSchema,
   type FeedId,
+  type FeedResponse,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
@@ -47,7 +48,11 @@ import {
 } from "./harness.js";
 import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { centerDelta, type CenterGeometry } from "../../src/scroll.js";
+import { TailFollow, centerDelta, type CenterGeometry } from "../../src/scroll.js";
+import { responseCapLines } from "../../src/feed/cards/response.js";
+
+/** A scroll box's rect, for fixtures whose box is never measured for a collapse. */
+const boxRect = (): DOMRect => ({ top: 0 }) as DOMRect;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -312,7 +317,7 @@ describe("createFeedController: upserts", () => {
       revealRow: async () => false,
       bubble: (row) => stubBubble(row),
       bodyContext: { ctx: h.ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => false },
-      scroll: { box: { scrollTop: 0, scrollHeight: 0, clientHeight: 0 }, tail: tail as never },
+      scroll: { box: { scrollTop: 0, scrollHeight: 0, clientHeight: 0, getBoundingClientRect: boxRect }, tail: tail as never },
     });
     controller.applyPage(page([responseRow("a", "one")]), "replace");
     follows.length = 0;
@@ -1025,7 +1030,7 @@ describe("createFeedController: following the tail", () => {
     const acts: string[] = [];
     const parkedOver: string[][] = [];
     const shifts: number[] = [];
-    const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100 };
+    const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100, getBoundingClientRect: boxRect };
     const park = (cause: string) => (): void => {
       acts.push(cause);
       parkedOver.push(drawnIds(host));
@@ -1258,6 +1263,165 @@ describe("createFeedController: following the tail", () => {
   });
 });
 
+/**
+ * A THINKING BUBBLE ABOVE THE READER COLLAPSES WITHOUT MOVING THEM (owner rule,
+ * 2026-09-23). The daemon re-pushes a thinking row superseded once a later
+ * response lands; its redraw drops it to two lines. jsdom lays nothing out, so
+ * the row's bottom edge is stubbed from the cap its body was drawn at, and the
+ * tail owner is the REAL `TailFollow` over a fake box.
+ */
+describe("createFeedController: a superseded thinking row collapsing", () => {
+  /** A thinking response row, superseded or not. */
+  function thinkingRow(id: string, superseded: boolean, markdown = "weighing"): FeedRow {
+    return create(FeedRowSchema, {
+      id: feedId(id),
+      row: {
+        case: "activity",
+        value: {
+          unit: {
+            case: "response",
+            value: { thinking: true, superseded, result: { case: "success", value: { prose: { markdown } } } },
+          },
+        },
+      },
+    });
+  }
+
+  /** A response renderer stating the cap the real card would draw, and nothing else. */
+  function cappedResponse(u: FeedResponse): HTMLElement {
+    const el = document.createElement("div");
+    el.setAttribute("data-cap-lines", String(responseCapLines(u)));
+    el.textContent = u.result.case === "success" ? (u.result.value.prose?.markdown ?? "") : "";
+    return el;
+  }
+
+  /**
+   * A feed over a 300px viewport whose top edge sits at 100, scrolled to 500
+   * by the READER (so no follow stands) unless FOLLOWING, holding thinking row
+   * t1 whose bottom edge is BEFORE while at the response cap and AFTER once
+   * collapsed to two lines.
+   */
+  function collapsing(opts: { following: boolean; before: number; after: number }) {
+    const h = harness();
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const box = {
+      scrollTop: 0,
+      scrollHeight: 2000,
+      clientHeight: 300,
+      getBoundingClientRect: () => ({ top: 100 }) as DOMRect,
+    };
+    const tail = new TailFollow(box);
+    const controller = createFeedController({
+      ctx: h.ctx,
+      host,
+      feed: "root",
+      renderers: stubRenderers({ response: cappedResponse }),
+      body: defaultBubbleBody,
+      revealRow: async () => false,
+      bubble: (row) => stubBubble(row),
+      bodyContext: { ctx: h.ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => false },
+      scroll: { box, tail },
+    });
+    controller.applyPage(page([thinkingRow("t1", false)]), "replace");
+    const row = host.querySelector<HTMLElement>('[data-feed-row="t1"]');
+    if (row === null) throw new Error("t1 is not drawn");
+    row.getBoundingClientRect = () => {
+      const cap = row.querySelector("[data-cap-lines]")?.getAttribute("data-cap-lines");
+      return { bottom: cap === "2" ? opts.after : opts.before } as DOMRect;
+    };
+    if (!opts.following) {
+      tail.onInput();
+      box.scrollTop = 500;
+      tail.onScroll();
+    }
+    return { controller, box, tail, host };
+  }
+
+  it.each([
+    {
+      name: "a collapse wholly above the viewport shifts the view by the height it lost",
+      following: false,
+      before: 90,
+      after: 40,
+      want: 450,
+    },
+    {
+      name: "a collapse the reader can see moves nothing",
+      following: false,
+      before: 250,
+      after: 200,
+      want: 500,
+    },
+    {
+      name: "a superseded row whose height did not change (the reader expanded it) moves nothing",
+      following: false,
+      before: 90,
+      after: 90,
+      want: 500,
+    },
+    {
+      name: "a following feed stays at its tail",
+      following: true,
+      before: 90,
+      after: 40,
+      want: 2000,
+    },
+  ])("$name", ({ following, before, after, want }) => {
+    // Arrange
+    const { controller, box } = collapsing({ following, before, after });
+    // Act — the later response lands, then the daemon re-pushes t1 superseded.
+    controller.upsert(responseRow("r2"));
+    controller.upsert(thinkingRow("t1", true));
+    // Assert
+    expect(box.scrollTop).toBe(want);
+  });
+
+  it("keeps a following feed following", () => {
+    // Arrange
+    const { controller, tail } = collapsing({ following: true, before: 90, after: 40 });
+    // Act
+    controller.upsert(responseRow("r2"));
+    controller.upsert(thinkingRow("t1", true));
+    // Assert
+    expect(tail.isFollowing()).toBe(true);
+  });
+
+  it("moves nothing for a re-push above the viewport that is not the supersede edge", () => {
+    // Arrange — a re-push that changes the text, not the flag.
+    const { controller, box, host } = collapsing({ following: false, before: 90, after: 40 });
+    const row = host.querySelector<HTMLElement>('[data-feed-row="t1"]') as HTMLElement;
+    row.getBoundingClientRect = () => ({ bottom: row.textContent?.includes("longer") ? 140 : 90 }) as DOMRect;
+    // Act
+    controller.upsert(thinkingRow("t1", false, "weighing, longer"));
+    // Assert
+    expect(box.scrollTop).toBe(500);
+  });
+
+  it("records the collapse it measured at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = collapsing({ following: false, before: 90, after: 40 });
+    // Act
+    controller.upsert(thinkingRow("t1", true));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.collapse-kept-place");
+    expect(record.context).toMatchObject({ feed: "root", row: "t1", box_top: 100, before: 90, after: 40 });
+  });
+
+  it("records a collapsing row its redraw detached as an ERROR and moves nothing", async () => {
+    // Arrange — a listener that detaches the row during the redraw.
+    const capture = captureLogRecords("debug");
+    const { controller, box, host } = collapsing({ following: false, before: 90, after: 40 });
+    controller.onChange(() => host.querySelector('[data-feed-row="t1"]')?.remove());
+    // Act
+    controller.upsert(thinkingRow("t1", true));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.collapse-anchor-detached");
+    expect([record.level.case, box.scrollTop]).toEqual(["error", 500]);
+  });
+});
+
 describe("createFeedController: the response selection", () => {
   /** A response renderer that draws the real `.bubble.assistant` chrome. */
   function assistantResponse(): HTMLElement {
@@ -1274,7 +1438,7 @@ describe("createFeedController: the response selection", () => {
   }) {
     const acts: string[] = [];
     const shifts: number[] = [];
-    const box = { ...geometry, querySelector: () => null };
+    const box = { ...geometry, querySelector: () => null, getBoundingClientRect: boxRect };
     const tail = {
       isFollowing: () => false,
       follow: () => undefined,
@@ -1466,6 +1630,36 @@ describe("createFeedController: the response selection", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.selection-center-absent");
     expect(record.context).toMatchObject({ feed: "root", row: "gone" });
+  });
+
+  it("reports no active selection before the daemon pushes one", () => {
+    // Arrange
+    const { controller } = selecting();
+    // Act
+    const active = controller.selectionActive();
+    // Assert
+    expect(active).toBe(false);
+  });
+
+  it("reports the selection active once an active selection is pushed", () => {
+    // Arrange
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Assert
+    expect(controller.selectionActive()).toBe(true);
+  });
+
+  it("reports the selection inactive once the daemon pushes it cleared", () => {
+    // Arrange
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(sel({ selected: "r1", active: true, center: "r1" }));
+    // Act
+    controller.applySelection(sel({ active: false }));
+    // Assert
+    expect(controller.selectionActive()).toBe(false);
   });
 
   it("applies the border even with no scroll box", () => {

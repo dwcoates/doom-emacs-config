@@ -11,7 +11,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
@@ -88,13 +87,6 @@ func (c *fakeClock) Advance(d time.Duration) {
 	}
 }
 
-// fakeEncode is the injected FeedId encoder: feedid.Encode is a peer leaf and
-// its landing is not this package's to wait on, so the tests assert the ROW
-// KEY the resolver asked for rather than the bytes the encoder produces.
-func fakeEncode(ref feedid.Ref) *frontendv1.FeedId {
-	return &frontendv1.FeedId{Value: string(ref.Row.Kind) + "|" + ref.Row.ID + "|" + ref.Row.Sub}
-}
-
 // harness is one resolver under test with its clock and its log records.
 type harness struct {
 	r     *resolver
@@ -124,7 +116,6 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 	log := dlog.NewTestSurfaces()
 	all := append([]Option{
 		WithClock(clock),
-		WithFeedIDEncoder(fakeEncode),
 	}, opts...)
 	r, err := newResolver(testColors(), log, all...)
 	if err != nil {
@@ -133,9 +124,6 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 	if err := r.SetWorkspaceDir(testWS, t.TempDir()); err != nil {
 		t.Fatalf("SetWorkspaceDir: %v", err)
 	}
-	// THE WATCHER NAMES THE MAIN AGENT before it routes a frame; the harness
-	// stands in for it.
-	r.OnMainAgent(testWS, mainAgent)
 	return &harness{r: r, clock: clock, log: log}
 }
 
@@ -533,9 +521,6 @@ func wakeupScheduled(at time.Time) *conversationv1.AgentActivity {
 func createdShell(work, command string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: work},
-		// The producer names the owner of work it re-announces: the book the
-		// work's start was found in, here the main agent's.
-		Owner: mainAgent,
 		Origin: &conversationv1.AgentDetachedWork_Created{
 			Created: &conversationv1.DetachedWorkCreated{
 				WorkCreated: &conversationv1.DetachableWork{

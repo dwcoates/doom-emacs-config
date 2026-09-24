@@ -211,6 +211,85 @@ describe("sendMessageConverter.settle", () => {
   });
 });
 
+// A SETTLED SEND STANDS ALONE. Its start and its settle upsert one unit, so a
+// store keeping the latest frame replays the settle with no start beside it;
+// the settle therefore restates the address and the summary from the call.
+describe("sendMessageConverter.settle restates what the start carried", () => {
+  function failureOf(
+    item: conversationv1.AgentActivity["item"] | undefined,
+  ): conversationv1.AgentSendMessageFailure {
+    const arm = armOf(item);
+    expect(arm.case).toBe("failure");
+    return arm.value as conversationv1.AgentSendMessageFailure;
+  }
+
+  it("restates the address on the success arm", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(call({ to: "vetter", message: "go" }), outcome(toolUseResult("send_message"))),
+    );
+
+    // Assert.
+    expect(success.addressedTo).toBe("vetter");
+  });
+
+  it("restates the summary on the success arm", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(
+        call({ to: "vetter", message: "go", summary: "Scroll fix landed; merge master in" }),
+        outcome(toolUseResult("send_message")),
+      ),
+    );
+
+    // Assert.
+    expect(success.summary?.text).toBe("Scroll fix landed; merge master in");
+  });
+
+  it("leaves the success arm's summary UNSET when the caller supplied none", () => {
+    // Arrange, Act.
+    const success = successOf(
+      sendMessageConverter.settle(call({ to: "vetter", message: "go" }), outcome(toolUseResult("send_message"))),
+    );
+
+    // Assert.
+    expect(success.summary).toBeUndefined();
+  });
+
+  it("restates the address on the failure arm", () => {
+    // Arrange, Act.
+    const failure = failureOf(
+      sendMessageConverter.settle(call({ to: "vetter", message: "go" }), outcome(undefined, true)),
+    );
+
+    // Assert.
+    expect(failure.addressedTo).toBe("vetter");
+  });
+
+  it("restates the summary on the failure arm", () => {
+    // Arrange, Act.
+    const failure = failureOf(
+      sendMessageConverter.settle(
+        call({ to: "vetter", message: "go", summary: "resume the vetting" }),
+        outcome(undefined, true),
+      ),
+    );
+
+    // Assert.
+    expect(failure.summary?.text).toBe("resume the vetting");
+  });
+
+  it("leaves the failure arm's summary UNSET when the caller supplied none", () => {
+    // Arrange, Act.
+    const failure = failureOf(
+      sendMessageConverter.settle(call({ to: "vetter", message: "go" }), outcome(undefined, true)),
+    );
+
+    // Assert.
+    expect(failure.summary).toBeUndefined();
+  });
+});
+
 describe("sendMessageConverter.progress", () => {
   it("relays the vendor's liveness beat as the unit's progress arm", () => {
     // Arrange, Act.

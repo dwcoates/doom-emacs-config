@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { PREFS_KEY } from "../../src/sidebar/sidebar";
 import { assertVocabCoversArms, RENDER_COLORS, mergeGlyph, rosterStatusColor } from "./vocab";
 import {
@@ -27,6 +27,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();

@@ -8,7 +8,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 )
 
 // subagentStart is a spawn announcing the agent it created.
@@ -184,10 +183,12 @@ func TestALiveSubagentRaisesTheAgentsChip(t *testing.T) {
 	}
 }
 
-func TestTheAgentRowJumpsToTheSubagentBubble(t *testing.T) {
-	// Arrange
+func TestTheAgentRowJumpsToTheEntryTheFeedPlaced(t *testing.T) {
+	// Arrange: the feed draws the bubble on the SPAWNING subagent's sub-feed.
 	h := newHarness(t)
 	connected(h)
+	placed := &frontendv1.FeedId{Value: "a|outer|activity|spawn-1|agent-2"}
+	h.r.OnEntryPlaced(testWS, "spawn-1", placed)
 
 	// Act
 	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map the resolvers"))
@@ -197,8 +198,8 @@ func TestTheAgentRowJumpsToTheSubagentBubble(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
-	if got := rows[0].GetTarget().GetValue(); got != "activity|spawn-1|agent-2" {
-		t.Fatalf("target = %q, want the bubble keyed by the spawn unit and the created agent", got)
+	if got := rows[0].GetJump().GetEntry().GetValue(); got != placed.GetValue() {
+		t.Fatalf("jump entry = %q, want the FeedId the feed announced %q", got, placed.GetValue())
 	}
 }
 
@@ -601,8 +602,8 @@ func TestADetachedShellRaisesTheShellsChip(t *testing.T) {
 	if rows[0].GetCommand().GetText() != "npm test" {
 		t.Fatalf("command = %q, want the announced command line", rows[0].GetCommand().GetText())
 	}
-	if got := rows[0].GetTarget().GetValue(); got != "shell_head|work-1|" {
-		t.Fatalf("target = %q, want the shell HEAD bubble keyed by the work handle", got)
+	if got := rows[0].GetWork().GetValue(); got != "work-1" {
+		t.Fatalf("work = %q, want the shell's work handle", got)
 	}
 }
 
@@ -1118,126 +1119,196 @@ func TestASpawnUnitReplayedAfterItsRunSettledDoesNotCountItLiveAgain(t *testing.
 	}
 }
 
-// feedEncode spells a row address WITH its feed, so a test can see which feed
-// a jump target addresses; fakeEncode leaves the feed out.
-func feedEncode(ref feedid.Ref) *frontendv1.FeedId {
-	feed := "root"
-	switch {
-	case ref.Feed.Agent != nil:
-		feed = "agent:" + ref.Feed.Agent.GetValue()
-	case !ref.Feed.Root:
-		feed = "other"
-	}
-	return &frontendv1.FeedId{Value: feed + "|" + string(ref.Row.Kind) + "|" + ref.Row.ID}
+// ---- the jump rows ----------------------------------------------------------
+
+// jumpArm names a row's jump the way the record does.
+func jumpArm(jump *frontendv1.FooterJump) string {
+	resolution, _ := jumpResolution(jump)
+	return resolution
 }
 
-// bashStart is a Bash call's start, as the calling agent's stream states it.
-func bashStart(unit, command string) *conversationv1.AgentActivity {
-	return &conversationv1.AgentActivity{
-		ActivityId: &conversationv1.AgentActivityId{Value: unit},
-		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
-			Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
-				Command:   &conversationv1.AgentBashCommand{Line: command},
-				StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
-			}},
-		}},
-	}
-}
-
-// detachedFrom announces that a unit's work left, naming owner when non-nil.
-func detachedFrom(work, unit string, owner *conversationv1.AgentId) *conversationv1.AgentDetachedWork {
-	return &conversationv1.AgentDetachedWork{
-		Work:  &conversationv1.DetachedWorkId{Value: work},
-		Owner: owner,
-		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
-			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
-			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
-		}},
-	}
-}
-
-// TestAShellsJumpTargetAddressesTheHeadOnItsOwnersFeed pins the address half of
-// the owner's rule: the head is drawn in the feed of the agent that made the
-// call, so the $ panel's jump must land there — a subagent's sub-feed for a
-// subagent's shell. It used to address the root for every shell.
-func TestAShellsJumpTargetAddressesTheHeadOnItsOwnersFeed(t *testing.T) {
-	sub := &conversationv1.AgentId{Value: "agent-sub"}
-	for _, tc := range []struct {
+func TestEveryDetachedWorkRowStatesExactlyOneJumpArm(t *testing.T) {
+	tests := []struct {
 		name    string
 		arrange func(h *harness)
+		read    func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string)
 		want    string
+		wantID  string
 	}{
 		{
-			name: "the main agent's re-announced shell addresses the root",
+			name: "an agent row the feed has not drawn is unresolved(not_drawn)",
+			arrange: func(h *harness) {
+				h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map"))
+			},
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetAgents().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "not_drawn", wantID: "spawn-1",
+		},
+		{
+			name: "an agent row the feed drew names its entry",
+			arrange: func(h *harness) {
+				h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "r|spawn-1"})
+				h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map"))
+			},
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetAgents().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "entry", wantID: "spawn-1",
+		},
+		{
+			name: "a detached agent row carries its handle as its work id",
+			arrange: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-9", "work-9", "Explore"))
+			},
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetAgents().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "not_drawn", wantID: "work-9",
+		},
+		{
+			name: "a shell row the feed drew names its head",
+			arrange: func(h *harness) {
+				h.r.OnEntryPlaced(testWS, "work-1", &frontendv1.FeedId{Value: "r|shell_head|work-1"})
+				h.r.OnDetachedWork(testWS, mainAgent, createdShell("work-1", "npm test"))
+			},
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetShells().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "entry", wantID: "work-1",
+		},
+		{
+			name: "a shell row the feed has not drawn is unresolved(not_drawn)",
 			arrange: func(h *harness) {
 				h.r.OnDetachedWork(testWS, mainAgent, createdShell("work-1", "npm test"))
 			},
-			want: "root|shell_head|work-1",
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetShells().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
+			},
+			want: "not_drawn", wantID: "work-1",
 		},
 		{
-			name: "the main agent's call that moved addresses the root",
+			name: "a monitor row is always unresolved(no_feed_entry)",
 			arrange: func(h *harness) {
-				h.r.OnActivity(testWS, mainAgent, bashStart("work-1", "npm test"))
-				h.r.OnDetachedWork(testWS, mainAgent, detachedFrom("work-1", "work-1", nil))
+				h.r.OnActivity(testWS, mainAgent, monitorStart("mon-1", "watch the build", false))
 			},
-			want: "root|shell_head|work-1",
-		},
-		{
-			name: "a subagent's call announced on the main book addresses the subagent's feed",
-			arrange: func(h *harness) {
-				h.r.OnActivity(testWS, sub, bashStart("work-1", "npm test"))
-				h.r.OnDetachedWork(testWS, mainAgent, detachedFrom("work-1", "work-1", nil))
+			read: func(v *frontendv1.FooterView) (*frontendv1.FooterJump, string) {
+				row := v.GetExpanded().GetMonitors().GetRows()[0]
+				return row.GetJump(), row.GetWork().GetValue()
 			},
-			want: "agent:agent-sub|shell_head|work-1",
+			want: "no_feed_entry", wantID: "mon-1",
 		},
-		{
-			name: "a re-announced shell whose announcement names a subagent addresses its feed",
-			arrange: func(h *harness) {
-				work := createdShell("work-1", "npm test")
-				work.Owner = sub
-				h.r.OnDetachedWork(testWS, mainAgent, work)
-			},
-			want: "agent:agent-sub|shell_head|work-1",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, WithFeedIDEncoder(feedEncode))
+			h := newHarness(t)
 			connected(h)
+			tt.arrange(h)
 
 			// Act
-			tc.arrange(h)
+			jump, id := tt.read(h.view(t))
 
 			// Assert
-			rows := h.view(t).GetExpanded().GetShells().GetRows()
-			if len(rows) != 1 {
-				t.Fatalf("shell rows = %d, want 1", len(rows))
+			if got := jumpArm(jump); got != tt.want {
+				t.Fatalf("jump = %q, want %q", got, tt.want)
 			}
-			if got := rows[0].GetTarget().GetValue(); got != tc.want {
-				t.Fatalf("target = %q, want %q", got, tc.want)
+			if id != tt.wantID {
+				t.Fatalf("work = %q, want %q", id, tt.wantID)
 			}
 		})
 	}
 }
 
-// TestAShellWithNoKnownOwnerIsLeftOutOfThePanelRatherThanAddressedToTheRoot:
-// no address is invented. Its head is on no feed, so a target would point at
-// nothing; the omission is recorded.
-func TestAShellWithNoKnownOwnerIsLeftOutOfThePanelRatherThanAddressedToTheRoot(t *testing.T) {
-	// Arrange
-	h := newHarness(t, WithFeedIDEncoder(feedEncode))
+func TestAPlacementAfterTheRowResolvesItsJump(t *testing.T) {
+	// Arrange: the row stands unresolved.
+	h := newHarness(t)
 	connected(h)
-	work := createdShell("work-1", "npm test")
-	work.Owner = nil
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map"))
 
-	// Act
-	h.r.OnDetachedWork(testWS, mainAgent, work)
+	// Act: the feed draws the entry.
+	h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "a|outer|spawn-1"})
 
 	// Assert
-	if rows := h.view(t).GetExpanded().GetShells().GetRows(); len(rows) != 0 {
-		t.Fatalf("shell rows = %+v, want none addressed for an unknown owner", rows)
+	row := h.view(t).GetExpanded().GetAgents().GetRows()[0]
+	if got := row.GetJump().GetEntry().GetValue(); got != "a|outer|spawn-1" {
+		t.Fatalf("jump entry = %q, want the placement the feed announced after the row opened", got)
 	}
-	if !hasLevel(h.log.Records(), dlog.LevelDebug, "daemon.footer.shell_row_unaddressed") {
-		t.Fatalf("records = %+v, want the omission recorded", h.log.Records())
+}
+
+func TestAJumpResolutionIsRecordedOncePerChange(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map"))
+
+	// Act: two pushes that leave the row unresolved, then the placement.
+	h.r.OnActivity(testWS, mainAgent, subagentProgress("spawn-1", 10))
+	h.r.OnActivity(testWS, mainAgent, subagentProgress("spawn-1", 20))
+	h.r.OnEntryPlaced(testWS, "spawn-1", &frontendv1.FeedId{Value: "r|spawn-1"})
+
+	// Assert
+	notes := recordsOf(h.log.Records(), "daemon.footer.jump_resolution")
+	if len(notes) != 2 {
+		t.Fatalf("jump records = %d, want 2 (not_drawn once, then entry): %+v", len(notes), notes)
+	}
+	if notes[0].Context["resolution"] != "not_drawn" || notes[1].Context["resolution"] != "entry" {
+		t.Fatalf("resolutions = %v then %v, want not_drawn then entry", notes[0].Context["resolution"], notes[1].Context["resolution"])
+	}
+}
+
+func TestAJumpRecordStatesWhatTheRowIs(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "outer-agent"}, subagentStart("spawn-1", "agent-2", "Explore", "map"))
+
+	// Assert
+	note := recordsOf(h.log.Records(), "daemon.footer.jump_resolution")[0]
+	want := dlog.Context{
+		"kind": "agent", "work_id": "spawn-1", "resolution": "not_drawn", "entry": "",
+		"provenance": "spawn_frame", "spawned_on": "outer-agent", "detached": false,
+		"label": "Explore", "has_description": true, "tokens": uint64(0), "retired_before": false,
+	}
+	for k, v := range want {
+		if note.Context[k] != v {
+			t.Fatalf("record[%q] = %#v, want %#v (whole record %+v)", k, note.Context[k], v, note.Context)
+		}
+	}
+	if note.Level != dlog.LevelInfo {
+		t.Fatalf("level = %q, want info", note.Level)
+	}
+}
+
+func TestAnEntryPlacementWithNoUnitIsAnError(t *testing.T) {
+	tests := []struct {
+		name string
+		unit string
+		row  *frontendv1.FeedId
+	}{
+		{name: "no unit", unit: "", row: &frontendv1.FeedId{Value: "r|x"}},
+		{name: "no FeedId", unit: "spawn-1", row: &frontendv1.FeedId{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.OnEntryPlaced(testWS, tt.unit, tt.row)
+
+			// Assert
+			if !hasLevel(h.log.Records(), dlog.LevelError, "daemon.footer.entry_unaddressed") {
+				t.Fatalf("records = %+v, want the ERROR for an unaddressed placement", h.log.Records())
+			}
+		})
 	}
 }

@@ -14,6 +14,7 @@ import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { producerId } from "../../src/store/keys.js";
 import { PersistenceError } from "../../src/store/persistence.js";
 import {
+  closingMonitorTerminal,
   announceLiveWork,
   createReconciler,
   findBashStart,
@@ -478,6 +479,24 @@ describe("closingAgentTerminal", () => {
 
     expect(second.upsertKey).toBe(first.upsertKey);
     expect(first.source.vendorUuid).toBe(reconciledCoordinate("book-1"));
+  });
+});
+
+describe("closingMonitorTerminal", () => {
+  it("ends the watch with the monitor's own ended arm", () => {
+    const entry = closingMonitorTerminal(BOOK, RUN);
+
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const activity = update.value as conversationv1.AgentActivity;
+    expect(activity.item.case).toBe("monitor");
+    expect((activity.item.value as conversationv1.AgentMonitor).result.case).toBe("ended");
+  });
+
+  it("keys the row by the monitor's own unit, so the unit concludes in place", () => {
+    const entry = closingMonitorTerminal(BOOK, RUN);
+
+    expect(entry.upsertKey).toBe(`activity:${RUN.value}`);
   });
 });
 

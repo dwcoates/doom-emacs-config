@@ -27,7 +27,7 @@ import {
 import { AnswerHeldOfferRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { create } from "@bufbuild/protobuf";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import {
   HELD_OFFER_ARMS,
   HELD_OFFER_HEADLINE,
@@ -44,6 +44,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
