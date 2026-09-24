@@ -2568,14 +2568,6 @@ window closed."
                     (agent-repl-test-wire-verbs--parse "{\"logSinkPoisoned\":{\"sink\":\"emacs\"}}"))
                    '(:detail "" :kind (:arm :log-sink-poisoned :value (:sink "emacs")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-script-failed-kind ()
-  "DaemonFault's `deploy_script_failed' kind decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-daemon-fault
-                    (agent-repl-test-wire-verbs--parse "{\"deployScriptFailed\":{\"detail\":\"exit 1\"}}"))
-                   '(:detail "" :kind (:arm :deploy-script-failed :value (:detail "exit 1")))))))
-
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-successor-spawn-failed-kind ()
   "DaemonFault's `successor_spawn_failed' kind decodes with everything it
 carries."
@@ -2607,11 +2599,11 @@ carries."
                    '(:detail "" :kind (:arm :daemon-state-unreadable :value (:cause "state client refused")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
-  "DaemonFault's kind oneof has exactly the seven arms decoded here."
+  "DaemonFault's kind oneof has exactly the six arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
                        #'string<)
-                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "deployScriptFailed" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable")
                        #'string<))))
 
 ;;;; ---- Interrupt -------------------------------------------------------

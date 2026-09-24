@@ -2811,13 +2811,6 @@ Which sink."
     (agent-repl-wire-verbs--check-keys message json '(sink))
     (list :sink (agent-repl-wire-verbs--decode-string message 'sink json))))
 
-(defun agent-repl-wire-decode-daemon-fault-deploy-script-failed (json)
-  "Decode DaemonFaultDeployScriptFailed from JSON into (:detail).
-The script's own account of the failure."
-  (let ((message "DaemonFaultDeployScriptFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
-
 (defun agent-repl-wire-decode-daemon-fault-successor-spawn-failed (json)
   "Decode DaemonFaultSuccessorSpawnFailed from JSON into (:detail).
 The spawn's own account of the failure."
@@ -2858,11 +2851,6 @@ oneof unset, which every consumer reads as a contract breach."
 `DaemonFaultLogSinkPoisoned'."
   (agent-repl-wire-decode-daemon-fault-log-sink-poisoned json))
 
-(defun agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed (json)
-  "Decode DaemonFault's `deploy_script_failed' kind arm from JSON as a
-`DaemonFaultDeployScriptFailed'."
-  (agent-repl-wire-decode-daemon-fault-deploy-script-failed json))
-
 (defun agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed (json)
   "Decode DaemonFault's `successor_spawn_failed' kind arm from JSON as a
 `DaemonFaultSuccessorSpawnFailed'."
@@ -2891,7 +2879,6 @@ fault with no kind is a contract breach."
    "DaemonFault" "kind" json
    (list (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired)
                  (list 'logSinkPoisoned :log-sink-poisoned #'agent-repl-wire-decode-daemon-fault-kind-log-sink-poisoned)
-                 (list 'deployScriptFailed :deploy-script-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed)
                  (list 'successorSpawnFailed :successor-spawn-failed #'agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed)
                  (list 'promptsDirMissing :prompts-dir-missing #'agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing)
                  (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only)
@@ -2900,7 +2887,7 @@ fault with no kind is a contract breach."
 (defun agent-repl-wire-decode-daemon-fault (json)
   "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
   (let ((message "DaemonFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned deployScriptFailed successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-daemon-fault-kind json))))
 
