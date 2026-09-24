@@ -222,4 +222,29 @@ describe("artifactConverter.settle", () => {
     expect(artifact.result.case).toBe("failure");
     expect(failure.failure?.settledAt?.atMs).toBe(1_700_000_003_000n);
   });
+
+  it("restates a failed publish's act, so a replayed failure draws its card", () => {
+    // Arrange.
+    const call = callWith({ file_path: "/tmp/page.html", title: "The Page", favicon: "📄" });
+
+    // Act.
+    const artifact = artifactOf(artifactConverter.settle(call, outcomeWith(undefined, true)));
+
+    // Assert.
+    const failure = artifact.result.value as conversationv1.AgentArtifactFailure;
+    expect(failure.act.case).toBe("publish");
+    expect(failure.act.value).toMatchObject({ filePath: "/tmp/page.html", title: "The Page", favicon: "📄" });
+  });
+
+  it("restates a failed listing's act as a list, which draws nowhere", () => {
+    // Arrange.
+    const call = callWith({ action: "list", limit: 5 });
+
+    // Act.
+    const artifact = artifactOf(artifactConverter.settle(call, outcomeWith(undefined, true)));
+
+    // Assert.
+    const failure = artifact.result.value as conversationv1.AgentArtifactFailure;
+    expect(failure.act.case).toBe("list");
+  });
 });
