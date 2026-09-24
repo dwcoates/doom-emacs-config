@@ -230,9 +230,12 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   counts the usage corner's hit area); a prompt's border lands once it is
   received and stays (the user's purple independent of the wave, one amber
   `--agent-prompt-border` for agent-addressed prompts and peer messages, none
-  on a held prompt); and a tree's column budget always takes off the expanded
-  scrollbar's gutter (`--scrollbar-gutter-width`), so it never re-wraps on a
-  click.
+  on a held prompt); every scroll box wears the SYSTEM default bar (no
+  `::-webkit-scrollbar` rule anywhere) and the bubble scroll box declares
+  `scrollbar-gutter: stable`, so its gutter is the system bar's width in both
+  states; and a tree's column budget takes off that gutter as MEASURED on the
+  `.bubble-scroll` box (`offsetWidth - clientWidth - borders`), so it never
+  re-wraps on a click.
 - **ONE VIEWPORT CLAMP.** `clampReveal` (src/topbar/clamp.ts). Any panel that
   must hang under an anchor and stay inside the window places itself through
   it — the topbar reveals and the sidebar row's detail panel both do — rather
