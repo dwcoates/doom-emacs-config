@@ -194,10 +194,63 @@ func (r *resolver) failureImageForm(s *wsState, failure *conversationv1.AgentToo
 }
 
 // errSettleNotRestated is a settled frame that restated nothing of its call,
-// arriving with no start held to draw it from. It draws NO ROW: a card with an
-// empty input line (or a send with an empty body) is the defect the settle's
-// restatement exists to prevent. The sink records it once, at ERROR.
+// arriving with no start held to draw it from, from a producer BOUND by the
+// stands-alone contract. It draws NO ROW: a card with an empty input line (or a
+// send with an empty body) is the defect the settle's restatement exists to
+// prevent. The sink records it once, at ERROR.
 var errSettleNotRestated = errors.New("feed: a settled frame restated nothing of its call, and no start was held to draw it from")
+
+// errSettlePredatesContract is the same bare settle from a producer that
+// PREDATES the stands-alone contract: a row the store kept from before every
+// settle restated its start. It is EXPECTED OLD DATA, not a defect, and it
+// draws no row for the same reason. The sink records it once, at INFO.
+var errSettlePredatesContract = errors.New("feed: a settled frame written before the stands-alone contract restated nothing of its call, and no start was held to draw it from")
+
+// standsAlone reports whether act's producer is bound by the stands-alone
+// contract, by the evidence the row itself carries: the contract revision its
+// producer stamped at its one activity constructor (AgentActivity.contract).
+//
+// THE STAMP IS THE DISCRIMINATOR BECAUSE IT CANNOT MISGRADE A NEW DEFECT AS OLD
+// DATA. It is written by the envelope constructor, never by the per-kind code
+// that does the restating, so a new arm that forgets to restate is still
+// stamped and is still graded a defect. Only a row whose producer predates the
+// stamp reads as old — which is exactly what such a row is.
+func standsAlone(act *conversationv1.AgentActivity) bool {
+	return act.GetContract() >= conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE
+}
+
+// unrestated records a settled frame that restated nothing of what `field`
+// names, and says what it is drawn from instead (`drawn`). A producer bound by
+// the stands-alone contract has violated it (ERROR); one that predates it wrote
+// expected old data (INFO).
+func (r *resolver) unrestated(s *wsState, act *conversationv1.AgentActivity, kind, field, drawn string) {
+	ctx := dlog.Context{
+		"unit":     act.GetActivityId().GetValue(),
+		"kind":     kind,
+		"field":    field,
+		"drawn":    drawn,
+		"contract": act.GetContract().String(),
+	}
+	if standsAlone(act) {
+		r.logger(s.id).Error("daemon.feed.settle_not_restated",
+			"a settled frame restated nothing of its call though its producer is bound by the stands-alone contract",
+			ctx)
+		return
+	}
+	r.logger(s.id).Info("daemon.feed.settle_predates_contract",
+		"a settled frame written before the stands-alone contract restates nothing of its call; expected old data",
+		ctx)
+}
+
+// unrestatedErr answers the error a bare settle with no held start draws, by
+// its producer's contract: a defect or expected old data.
+func unrestatedErr(act *conversationv1.AgentActivity, kind string) error {
+	base := errSettlePredatesContract
+	if standsAlone(act) {
+		base = errSettleNotRestated
+	}
+	return fmt.Errorf("%w (unit %s, kind %s)", base, act.GetActivityId().GetValue(), kind)
+}
 
 // restatedOrHeld answers what a SETTLED frame draws its input from.
 //
@@ -207,21 +260,46 @@ var errSettleNotRestated = errors.New("feed: a settled frame restated nothing of
 // start beside it. Every settled arm therefore restates what its start carried,
 // and that restatement is what is drawn.
 //
-// A SETTLE THAT RESTATES NOTHING IS AN INVARIANT VIOLATION by its producer. It
-// is recorded at ERROR either way: when this process held the start it is drawn
-// from what the start said, and when it did not the frame draws no row at all,
-// answered as errSettleNotRestated.
-func (r *resolver) restatedOrHeld(s *wsState, u *unitState, unitID, kind, restated, held string) (string, error) {
+// A SETTLE THAT RESTATES NOTHING is graded by its producer's contract
+// (standsAlone): an invariant violation from a bound producer, expected old
+// data from one that predates it. When this process held the start it is drawn
+// from what the start said; when it did not the frame draws no row at all,
+// answered as errSettleNotRestated or errSettlePredatesContract.
+func (r *resolver) restatedOrHeld(s *wsState, act *conversationv1.AgentActivity, u *unitState, kind, restated, held string) (string, error) {
 	if restated != "" {
 		return restated, nil
 	}
 	if !u.startHeld {
-		return "", fmt.Errorf("%w (unit %s, kind %s)", errSettleNotRestated, unitID, kind)
+		return "", unrestatedErr(act, kind)
 	}
-	r.logger(s.id).Error("daemon.feed.settle_not_restated",
-		"a settled frame restated nothing of its call; it is drawn from the start this process held",
-		dlog.Context{"unit": unitID, "kind": kind})
+	r.unrestated(s, act, kind, "input", "the start this process held")
 	return held, nil
+}
+
+// settledOutcome is returnedOutcome for a settle that carries a settle
+// instant: the card's runtime counts from the start the settle RESTATES, so a
+// replayed card, whose start the store no longer holds, still states how long
+// the call ran.
+//
+// A START THIS PROCESS HELD STANDS: the restated start is the same instant,
+// and taking the held one keeps a live card's clock exactly where it was. A
+// settle instant that restates no start is graded like any other bare settle
+// (unrestated); the card is still drawn, with no runtime chip if no start was
+// held, because the runtime is the only thing the missing start costs it.
+func (r *resolver) settledOutcome(s *wsState, act *conversationv1.AgentActivity, u *unitState, kind string, ok bool, form returnedForm, settled *conversationv1.AgentActivitySettledAt) toolOutcome {
+	if settled != nil {
+		switch restated := settled.GetStartedAt(); {
+		case restated != nil:
+			if u.startedAtMs == 0 {
+				u.startedAtMs = restated.GetAtMs()
+			}
+		case u.startedAtMs != 0:
+			r.unrestated(s, act, kind, "started_at", "the start this process held")
+		default:
+			r.unrestated(s, act, kind, "started_at", "a card with no runtime")
+		}
+	}
+	return returnedOutcome(u, ok, form, settled.GetAtMs())
 }
 
 // failureSettledMs is the instant a failed call settled, zero when none was
@@ -265,18 +343,18 @@ func (r *resolver) drawRead(s *wsState, at placement, act *conversationv1.AgentA
 			return nil, err
 		}
 		return r.toolRow(s, at, unitID, "Read",
-			returnedOutcome(u, true, form, state.Success.GetSettledAt().GetAtMs())), nil
+			r.settledOutcome(s, act, u, "read", true, form, state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentRead_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Failure"})
-		input, err := r.restatedOrHeld(s, u, unitID, "read", state.Failure.GetPath().GetPath(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "read", state.Failure.GetPath().GetPath(), u.input)
 		if err != nil {
 			return nil, err
 		}
 		u.input = input
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Read",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			r.settledOutcome(s, act, u, "read", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
 	}
 	return nil, errNotARow
 }
@@ -387,19 +465,19 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 		u.input = state.Success.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Write",
-			returnedOutcome(u, true, diffForm(state.Success.GetPatch()),
-				state.Success.GetSettledAt().GetAtMs())), nil
+			r.settledOutcome(s, act, u, "write", true, diffForm(state.Success.GetPatch()),
+				state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentWrite_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Failure"})
-		input, err := r.restatedOrHeld(s, u, unitID, "write", state.Failure.GetPath().GetPath(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "write", state.Failure.GetPath().GetPath(), u.input)
 		if err != nil {
 			return nil, err
 		}
 		u.input = input
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Write",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			r.settledOutcome(s, act, u, "write", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
 	case *conversationv1.AgentWrite_Diagnostics:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Diagnostics"})
 		return r.applyDiagnostics(s, unitID, state.Diagnostics)
@@ -433,19 +511,19 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 		u.input = state.Success.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Edit",
-			returnedOutcome(u, true, diffForm(state.Success.GetPatch()),
-				state.Success.GetSettledAt().GetAtMs())), nil
+			r.settledOutcome(s, act, u, "edit", true, diffForm(state.Success.GetPatch()),
+				state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentEdit_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Failure"})
-		input, err := r.restatedOrHeld(s, u, unitID, "edit", state.Failure.GetPath().GetPath(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "edit", state.Failure.GetPath().GetPath(), u.input)
 		if err != nil {
 			return nil, err
 		}
 		u.input = input
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Edit",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			r.settledOutcome(s, act, u, "edit", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
 	case *conversationv1.AgentEdit_Diagnostics:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Diagnostics"})
 		return r.applyDiagnostics(s, unitID, state.Diagnostics)
@@ -604,18 +682,18 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 		u.input = state.Success.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Grep",
-			returnedOutcome(u, true, grepForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
+			r.settledOutcome(s, act, u, "grep", true, grepForm(state.Success), state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentGrep_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Failure"})
-		input, err := r.restatedOrHeld(s, u, unitID, "grep", state.Failure.GetQuery().GetPattern(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "grep", state.Failure.GetQuery().GetPattern(), u.input)
 		if err != nil {
 			return nil, err
 		}
 		u.input = input
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Grep",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			r.settledOutcome(s, act, u, "grep", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
 	}
 	return nil, errNotARow
 }
@@ -679,18 +757,18 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 		u.input = state.Success.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Glob",
-			returnedOutcome(u, true, globForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
+			r.settledOutcome(s, act, u, "glob", true, globForm(state.Success), state.Success.GetSettledAt())), nil
 	case *conversationv1.AgentGlob_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Failure"})
-		input, err := r.restatedOrHeld(s, u, unitID, "glob", state.Failure.GetQuery().GetPattern(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "glob", state.Failure.GetQuery().GetPattern(), u.input)
 		if err != nil {
 			return nil, err
 		}
 		u.input = input
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Glob",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			r.settledOutcome(s, act, u, "glob", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
 	}
 	return nil, errNotARow
 }
@@ -798,11 +876,11 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		// number, so the reader was told the command went wrong and never told
 		// how. The two sites must stay parallel; see FeedToolCallReturned.exit.
 		return r.toolRow(s, at, unitID, "Bash",
-			withExit(returnedOutcome(u, ok, form, state.Success.GetSettledAt().GetAtMs()),
+			withExit(r.settledOutcome(s, act, u, "bash", ok, form, state.Success.GetSettledAt()),
 				bashExit(state.Success))), nil
 	case *conversationv1.AgentBash_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
-		input, err := r.restatedOrHeld(s, u, unitID, "bash", state.Failure.GetCommand().GetLine(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "bash", state.Failure.GetCommand().GetLine(), u.input)
 		if err != nil {
 			return nil, err
 		}
@@ -810,8 +888,8 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		u.inputForm = inputFormCommand
 		u.ending = bash
 		return r.toolRow(s, at, unitID, "Bash",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
-				failureSettledMs(state.Failure.GetError()))), nil
+			r.settledOutcome(s, act, u, "bash", false, r.failureForm(s, state.Failure.GetError()),
+				state.Failure.GetError().GetSettledAt())), nil
 	}
 	return nil, errNotARow
 }
@@ -978,8 +1056,8 @@ func (r *resolver) drawWebFetch(s *wsState, at placement, act *conversationv1.Ag
 		u.input = url
 		u.inputForm = inputFormPath
 		row := r.toolRow(s, at, unitID, "WebFetch",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetFailure()),
-				failureSettledMs(state.Failure.GetFailure())))
+			r.settledOutcome(s, act, u, "web_fetch", false, r.failureForm(s, state.Failure.GetFailure()),
+				state.Failure.GetFailure().GetSettledAt()))
 		linkInput(row, url)
 		return row, nil
 	}
@@ -1027,15 +1105,15 @@ func (r *resolver) drawWebSearch(s *wsState, at placement, act *conversationv1.A
 		// The failure RESTATES the query (it always has); drawing it rather
 		// than only what a held start said is what lets a replayed failure name
 		// its search.
-		input, err := r.restatedOrHeld(s, u, unitID, "web_search", state.Failure.GetQuery().GetTerms(), u.input)
+		input, err := r.restatedOrHeld(s, act, u, "web_search", state.Failure.GetQuery().GetTerms(), u.input)
 		if err != nil {
 			return nil, err
 		}
 		u.input = input
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "WebSearch",
-			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetFailure()),
-				failureSettledMs(state.Failure.GetFailure()))), nil
+			r.settledOutcome(s, act, u, "web_search", false, r.failureForm(s, state.Failure.GetFailure()),
+				state.Failure.GetFailure().GetSettledAt())), nil
 	}
 	return nil, errNotARow
 }
