@@ -868,6 +868,8 @@ npm run coverage      # vitest with istanbul coverage over authored src/**/*.ts
 npm run coverage:verify  # prove the per-file numbers are still a measurement
 npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
+# test, coverage and smoke (and their pre-hooks) run through ../../../bin/background.sh;
+# the vitest configs refuse a run without it, so prefix any bare `npx vitest` with it
 ```
 
 - `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same

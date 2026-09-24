@@ -7,6 +7,10 @@
 # merge.SuiteRunner), which tests each cherry-picked commit as it lands on the
 # target.  Every fixture below therefore asserts BOTH halves — the lint ran,
 # and the suite runner was never invoked.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/../modules/app/agent-repl/bin/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -euo pipefail
 
 # This harness creates scratch repositories and is itself run by pre-commit.

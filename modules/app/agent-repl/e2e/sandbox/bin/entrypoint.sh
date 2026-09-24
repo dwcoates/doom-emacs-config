@@ -344,4 +344,8 @@ fi
 
 log "exec: $* (in $run_rel)"
 cd "$REPO/$run_rel"
-exec "$@"
+# THROUGH bin/background.sh, like every test run on the host: inside this
+# Linux container that is `nice -n 19`, and the marker it exports is what
+# lets the ERT harness, the vitest configs and the Go integration harness
+# start at all (docker run passes the host's environment in empty).
+exec "$REPO/$MODULE_REL/bin/background.sh" "$@"

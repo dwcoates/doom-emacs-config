@@ -103,6 +103,12 @@ func MainAt(m *testing.M, module string) int {
 // harness's temp helpers without the daemon builds (the harness's own tests)
 // calls it from its TestMain directly.
 func WithRunRoot(body func() int) int {
+	// Refused before anything else runs: a run at normal priority is the
+	// overload background.go records, and nothing it does first is worth that.
+	if err := requireBackgroundPriority(os.Getenv); err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
 	// A dead run's leftovers are reclaimed BEFORE this run adds its own. A
 	// reclaim that fails is a failed run, never a shrug: the leftovers are
 	// exactly the disk and the CPU the suite cannot spare.
