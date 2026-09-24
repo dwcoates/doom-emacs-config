@@ -8,9 +8,9 @@
  *     right rail in blue, a response on the left rail in purple;
  *   - its VARIANT and STATE, which select its BORDER and nothing else (the
  *     thinking/pear/green/blue ladder, the compaction divider's own color, a
- *     user prompt's permanent purple, an agent-to-agent prompt's amber, and a
- *     held prompt's NONE) — the one exception is the held prompt's grey-blue
- *     background, which the rulings name;
+ *     user prompt's permanent purple, an agent-to-agent prompt's amber, an
+ *     ended turn's red, and a held prompt's NONE) — the one exception is the
+ *     held prompt's grey-blue background, which the rulings name;
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;
@@ -44,7 +44,7 @@ import {
 export type BubbleRole = "prompt" | "response";
 
 /** The response kinds: purple, left rail. */
-export type ResponseVariant = "response" | "thinking" | "agentic" | "compaction";
+export type ResponseVariant = "response" | "thinking" | "agentic" | "compaction" | "turn-ended";
 
 /** The prompt kinds: blue (a held prompt grey-blue), right rail. */
 export type PromptVariant = "user" | "agent" | "peer" | "held";
@@ -55,6 +55,7 @@ export const BUBBLE_VARIANTS = {
   thinking: "response",
   agentic: "response",
   compaction: "response",
+  "turn-ended": "response",
   user: "prompt",
   agent: "prompt",
   peer: "prompt",

@@ -23,6 +23,7 @@ import (
 	"claude-repld/internal/paint"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/wsm"
 )
 
 // ReaderID identifies one open connection's page walk. It is minted per
@@ -118,6 +119,12 @@ type Resolver interface {
 	// turn ran: it retires the optimistic /clear divider and forgets the turn, so
 	// no phantom bar is left and the feed recovers to what it showed before.
 	OnContextCutAborted(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnTurnClosed is THE DOOR'S FEED HALF: the prompt queue's door closed a
+	// turn's durable row with this close. A turn this feed already ended (its
+	// own terminal drew the ending) is left as it is; any other turn it has
+	// seen opened is ended from the close, so every turn that ends has exactly
+	// one ending row. See turnclosed.go.
+	OnTurnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.RecordedClose)
 	// UpsertSynthesized upserts a daemon-synthesized row: a merge tab, the
 	// cold gate, a session separation, or the mirror of an accepted user
 	// prompt. The mirror is a user_prompt row stamped with the minted TurnId
@@ -248,6 +255,13 @@ type Deps struct {
 	// nil means no workspace ever carries a ported conversation, which is
 	// what a test that is not about forking wants.
 	PortedPrompts func(context.Context, ids.WorkspaceID) ([]PortedPrompt, error)
+	// TurnCloses answers the durable close of each named turn that has one
+	// (wsm.DB.TurnCloses). A replay reads it for the turns its page opens, and
+	// ends a turn whose page carries no terminal from its recorded close.
+	//
+	// nil draws no ending from a record, which is what a test that is not
+	// about replayed closes wants.
+	TurnCloses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]wsm.RecordedClose, error)
 	// Now is the resolver's clock, injected so tests never sleep. Defaults to
 	// time.Now.
 	Now func() time.Time

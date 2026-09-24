@@ -464,7 +464,29 @@ const (
 	// CloseOrphaned is a close written for a turn that had no terminal when the
 	// daemon reconciled.
 	CloseOrphaned
+	// CloseAgentDied is a turn the agent process (its shim) cut by dying on its
+	// own: nobody ordered the death, and no terminal will ever arrive for it.
+	CloseAgentDied
 )
+
+// Failed reports whether the close is the turn failing: its own failure, or
+// the agent process dying under it.
+func (c TurnClose) Failed() bool { return c == CloseFailed || c == CloseAgentDied }
+
+// RecordedClose is a turn's durable close: how, and when.
+type RecordedClose struct {
+	How TurnClose
+	At  time.Time
+}
+
+// DisplacedClaim is what ClaimDisplacedTurn took.
+type DisplacedClaim struct {
+	// Claimed is true for the one caller that took the displaced mark.
+	Claimed bool
+	// Closed is true when the claim also closed the turn, which was still open
+	// (as CloseOrphaned: no terminal was ever seen for it).
+	Closed bool
+}
 
 // OrphanReport is what CloseOrphans closed, in one transaction.
 type OrphanReport struct {

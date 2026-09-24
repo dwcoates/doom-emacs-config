@@ -315,6 +315,8 @@ func erroredArmWord(errored *frontendv1.FeedTurnEndedErrored) string {
 		return "turn_failed"
 	case *frontendv1.FeedTurnEndedErrored_StopHookPrevented:
 		return "stop_hook_prevented"
+	case *frontendv1.FeedTurnEndedErrored_AgentProcessDied:
+		return "agent_process_died"
 	}
 	return "unset"
 }

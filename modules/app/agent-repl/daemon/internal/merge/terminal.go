@@ -477,7 +477,7 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 	// mark came down, would have the next boot put the same turn back a second
 	// time. A claim that answers false means the sweep already put it back,
 	// and this owner resubmits NOTHING.
-	claimed, err := r.o.deps.DB.ClaimDisplacedTurn(ctx, displaced.Turn, r.o.deps.Now())
+	claimed, err := r.o.deps.Queue.ClaimDisplacedTurn(ctx, r.ws, displaced.Turn)
 	if err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not claim the displaced turn",
 			withField(fields, "error", err.Error()))

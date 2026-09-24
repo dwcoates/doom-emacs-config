@@ -490,7 +490,7 @@ func (s *sequence) restoreHolds(ctx context.Context, log dlog.Logger, report *Re
 func (s *sequence) closeOrphans(ctx context.Context, log dlog.Logger, clientless []wsm.Workspace, report *Report) error {
 	at := s.now()
 	for _, ws := range clientless {
-		orphans, err := s.deps.DB.CloseOrphans(ctx, ws.ID, at)
+		orphans, err := s.deps.Queue.CloseOrphans(ctx, ws.ID, at)
 		if err != nil {
 			log.Error("daemon.boot.close_orphans", "a client-less workspace's orphaned turns could not be closed", dlog.Context{
 				"workspace_id": string(ws.ID),
