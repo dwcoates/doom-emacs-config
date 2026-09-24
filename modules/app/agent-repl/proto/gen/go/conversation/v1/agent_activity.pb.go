@@ -17730,7 +17730,21 @@ func (*AgentArtifactListed) Descriptor() ([]byte, []int) {
 type AgentArtifactFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Why, in the shared vocabulary.
-	Failure       *AgentToolFailure `protobuf:"bytes,1,opt,name=failure,proto3" json:"failure,omitempty"`
+	Failure *AgentToolFailure `protobuf:"bytes,1,opt,name=failure,proto3" json:"failure,omitempty"`
+	// WHICH ACT FAILED, restated whole from the start so the settled frame
+	// stands alone: a call's start and its settle upsert ONE unit, so once the
+	// call settles its start is gone from any store that keeps the latest frame,
+	// and a replay drawing this frame alone must still draw a failed publish's
+	// card — its favicon, title and file. The same arms, with the same meaning,
+	// as AgentArtifactStart's act: a failed list is still a quiet read, drawn
+	// nowhere. UNSET only on a row written before AgentActivityContract
+	// SETTLES_STAND_ALONE.
+	//
+	// Types that are valid to be assigned to Act:
+	//
+	//	*AgentArtifactFailure_Publish
+	//	*AgentArtifactFailure_List
+	Act           isAgentArtifactFailure_Act `protobuf_oneof:"act"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17771,6 +17785,49 @@ func (x *AgentArtifactFailure) GetFailure() *AgentToolFailure {
 	}
 	return nil
 }
+
+func (x *AgentArtifactFailure) GetAct() isAgentArtifactFailure_Act {
+	if x != nil {
+		return x.Act
+	}
+	return nil
+}
+
+func (x *AgentArtifactFailure) GetPublish() *AgentArtifactPublish {
+	if x != nil {
+		if x, ok := x.Act.(*AgentArtifactFailure_Publish); ok {
+			return x.Publish
+		}
+	}
+	return nil
+}
+
+func (x *AgentArtifactFailure) GetList() *AgentArtifactList {
+	if x != nil {
+		if x, ok := x.Act.(*AgentArtifactFailure_List); ok {
+			return x.List
+		}
+	}
+	return nil
+}
+
+type isAgentArtifactFailure_Act interface {
+	isAgentArtifactFailure_Act()
+}
+
+type AgentArtifactFailure_Publish struct {
+	// A publish (or redeploy) that failed.
+	Publish *AgentArtifactPublish `protobuf:"bytes,2,opt,name=publish,proto3,oneof"`
+}
+
+type AgentArtifactFailure_List struct {
+	// A listing that failed.
+	List *AgentArtifactList `protobuf:"bytes,3,opt,name=list,proto3,oneof"`
+}
+
+func (*AgentArtifactFailure_Publish) isAgentArtifactFailure_Act() {}
+
+func (*AgentArtifactFailure_List) isAgentArtifactFailure_Act() {}
 
 // What a TOOL returned.
 //
@@ -20318,9 +20375,12 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x19\n" +
 	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01B\b\n" +
 	"\x06_title\"\x15\n" +
-	"\x13AgentArtifactListed\"S\n" +
+	"\x13AgentArtifactListed\"\xd7\x01\n" +
 	"\x14AgentArtifactFailure\x12;\n" +
-	"\afailure\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureR\afailure\"T\n" +
+	"\afailure\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureR\afailure\x12A\n" +
+	"\apublish\x18\x02 \x01(\v2%.conversation.v1.AgentArtifactPublishH\x00R\apublish\x128\n" +
+	"\x04list\x18\x03 \x01(\v2\".conversation.v1.AgentArtifactListH\x00R\x04listB\x05\n" +
+	"\x03act\"T\n" +
 	"\x11ToolResultContent\x12?\n" +
 	"\x06blocks\x18\x01 \x03(\v2'.conversation.v1.ToolResultContentBlockR\x06blocks\"\xcf\x01\n" +
 	"\x16ToolResultContentBlock\x120\n" +
@@ -21112,41 +21172,43 @@ var file_conversation_v1_agent_activity_proto_depIdxs = []int32{
 	241, // 349: conversation.v1.AgentArtifactSuccess.published:type_name -> conversation.v1.AgentArtifactPublished
 	242, // 350: conversation.v1.AgentArtifactSuccess.listed:type_name -> conversation.v1.AgentArtifactListed
 	6,   // 351: conversation.v1.AgentArtifactFailure.failure:type_name -> conversation.v1.AgentToolFailure
-	245, // 352: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
-	268, // 353: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
-	269, // 354: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
-	270, // 355: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
-	247, // 356: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
-	62,  // 357: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
-	248, // 358: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
-	249, // 359: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
-	267, // 360: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
-	112, // 361: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	244, // 362: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
-	7,   // 363: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	244, // 364: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
-	7,   // 365: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	251, // 366: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
-	252, // 367: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
-	254, // 368: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
-	255, // 369: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
-	256, // 370: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
-	1,   // 371: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
-	5,   // 372: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
-	112, // 373: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
-	253, // 374: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
-	253, // 375: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
-	258, // 376: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
-	259, // 377: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
-	2,   // 378: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
-	261, // 379: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
-	262, // 380: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
-	263, // 381: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
-	382, // [382:382] is the sub-list for method output_type
-	382, // [382:382] is the sub-list for method input_type
-	382, // [382:382] is the sub-list for extension type_name
-	382, // [382:382] is the sub-list for extension extendee
-	0,   // [0:382] is the sub-list for field type_name
+	238, // 352: conversation.v1.AgentArtifactFailure.publish:type_name -> conversation.v1.AgentArtifactPublish
+	239, // 353: conversation.v1.AgentArtifactFailure.list:type_name -> conversation.v1.AgentArtifactList
+	245, // 354: conversation.v1.ToolResultContent.blocks:type_name -> conversation.v1.ToolResultContentBlock
+	268, // 355: conversation.v1.ToolResultContentBlock.text:type_name -> conversation.v1.TextBlock
+	269, // 356: conversation.v1.ToolResultContentBlock.image:type_name -> conversation.v1.ImageBlock
+	270, // 357: conversation.v1.ToolResultContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
+	247, // 358: conversation.v1.AgentUnmodeled.start:type_name -> conversation.v1.AgentUnmodeledStart
+	62,  // 359: conversation.v1.AgentUnmodeled.progress:type_name -> conversation.v1.AgentToolCallProgress
+	248, // 360: conversation.v1.AgentUnmodeled.success:type_name -> conversation.v1.AgentUnmodeledSuccess
+	249, // 361: conversation.v1.AgentUnmodeled.failure:type_name -> conversation.v1.AgentUnmodeledFailure
+	267, // 362: conversation.v1.AgentUnmodeledStart.arguments:type_name -> google.protobuf.Struct
+	112, // 363: conversation.v1.AgentUnmodeledStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	244, // 364: conversation.v1.AgentUnmodeledSuccess.content:type_name -> conversation.v1.ToolResultContent
+	7,   // 365: conversation.v1.AgentUnmodeledSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	244, // 366: conversation.v1.AgentUnmodeledFailure.content:type_name -> conversation.v1.ToolResultContent
+	7,   // 367: conversation.v1.AgentUnmodeledFailure.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	251, // 368: conversation.v1.AgentHook.start:type_name -> conversation.v1.AgentHookStart
+	252, // 369: conversation.v1.AgentHook.succeeded:type_name -> conversation.v1.AgentHookSucceeded
+	254, // 370: conversation.v1.AgentHook.blocking_error:type_name -> conversation.v1.AgentHookBlockingError
+	255, // 371: conversation.v1.AgentHook.non_blocking_error:type_name -> conversation.v1.AgentHookNonBlockingError
+	256, // 372: conversation.v1.AgentHook.cancelled:type_name -> conversation.v1.AgentHookCancelled
+	1,   // 373: conversation.v1.AgentHookStart.event:type_name -> conversation.v1.AgentHookEvent
+	5,   // 374: conversation.v1.AgentHookStart.gated_call:type_name -> conversation.v1.AgentActivityId
+	112, // 375: conversation.v1.AgentHookStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	253, // 376: conversation.v1.AgentHookSucceeded.output:type_name -> conversation.v1.AgentHookOutput
+	253, // 377: conversation.v1.AgentHookNonBlockingError.output:type_name -> conversation.v1.AgentHookOutput
+	258, // 378: conversation.v1.AgentDiagnosticsReport.files:type_name -> conversation.v1.AgentDiagnosticsFile
+	259, // 379: conversation.v1.AgentDiagnosticsFile.diagnostics:type_name -> conversation.v1.AgentDiagnostic
+	2,   // 380: conversation.v1.AgentDiagnostic.severity:type_name -> conversation.v1.AgentDiagnosticSeverity
+	261, // 381: conversation.v1.AgentContextInjected.memory:type_name -> conversation.v1.AgentInjectedMemory
+	262, // 382: conversation.v1.AgentContextInjected.skills:type_name -> conversation.v1.AgentInjectedSkills
+	263, // 383: conversation.v1.AgentInjectedSkills.skills:type_name -> conversation.v1.AgentInjectedSkill
+	384, // [384:384] is the sub-list for method output_type
+	384, // [384:384] is the sub-list for method input_type
+	384, // [384:384] is the sub-list for extension type_name
+	384, // [384:384] is the sub-list for extension extendee
+	0,   // [0:384] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_activity_proto_init() }
@@ -21549,6 +21611,10 @@ func file_conversation_v1_agent_activity_proto_init() {
 		(*AgentArtifactSuccess_Listed)(nil),
 	}
 	file_conversation_v1_agent_activity_proto_msgTypes[238].OneofWrappers = []any{}
+	file_conversation_v1_agent_activity_proto_msgTypes[240].OneofWrappers = []any{
+		(*AgentArtifactFailure_Publish)(nil),
+		(*AgentArtifactFailure_List)(nil),
+	}
 	file_conversation_v1_agent_activity_proto_msgTypes[242].OneofWrappers = []any{
 		(*ToolResultContentBlock_Text)(nil),
 		(*ToolResultContentBlock_Image)(nil),
