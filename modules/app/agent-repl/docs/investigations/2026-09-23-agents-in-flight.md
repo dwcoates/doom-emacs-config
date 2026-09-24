@@ -16,7 +16,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/shim-writer-never-drops` | `~/.config/doom-worktrees/shim-writer-never-drops` | The shim's store writer never drops writes (it was "DROPPING store writes" at 256 batches); it uses backpressure, bounded batches, and latency-critical frames not stuck behind a backlog. | `a81508fcefcb60065` | 22:10 |
 | `fix/store-checkpoint-and-cache` | `~/.config/doom-worktrees/store-checkpoint-and-cache` | Checkpoints become bulk-tier jobs (autocheckpoint off, `journal_size_limit`), plus a larger page cache (and maybe mmap), measured before and after. | `a959c0a4401ddeef2` | 22:10 |
 | `fix/shell-output-tail-only` | `~/.config/doom-worktrees/shell-output-tail-only` | Shell output is stored as a rolling tail at the renderer's 16 KiB cap (one shared constant) instead of contiguous deltas from 0; live and replay show what they show today. | `a11d136b2405a419b` | 22:10 |
-| `fix/fake-git-killed-flake` | `~/.config/doom-worktrees/fake-git-killed-flake` | Root-cause the flake `TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal` (fake git SIGKILLed under load; suspect cross-run stray reaping). Make ownership-scoped reaping structural. | `af0db7ff97ed4c775` | 22:35 |
 | `fix/e2e-load-flakes` | `~/.config/doom-worktrees/e2e-load-flakes` | Root-cause the e2e flakes `TestWebappLayerRoster` (ClientLog/lease ERRORs during a drain) and `TestClearRotatesIdentity` (the separation row timed out; `final_answer_unresolved`). | `a3cc32b3e6611f35f` | 22:55 |
 | `fix/restate-rest-and-old-row-level` | `~/.config/doom-worktrees/restate-rest-and-old-row-level` | Pre-contract unrestated rows log INFO (a new defect stays ERROR). Subagent and artifact failures restate; every settle carries `started_at`. | `aa95f06fc74ba5cf4` | 23:05 |
 | `fix/remove-keepalive-hold` | `~/.config/doom-worktrees/remove-keepalive-hold` | Remove `turn_already_open.keepalive` and the keep-alive hold arm and badge. The shim handles a real prompt during a keep-alive internally, and the daemon never sees keep-alives. | `a3d48a539c2a3b1c4` | 23:05 |
@@ -29,6 +28,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
+- Harness stray reaping still selects by argv path, not a kernel mark (a session id would break handover successors and Emacs-launched e2e daemons). Keep it as is?
 - `DaemonFault.deploy_script_failed` removal is folded into the deploy branch's finishing agent.
 - `SPC TAB f` retry: needs a deploy, and the owner must OK the bounce.
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
@@ -36,6 +36,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- The fake-git SIGKILL flake: the test's own teardown `kill(-pgid)` isn't atomic, so the daemon saw its child die first. The harness now freezes the group, then kills. Reclaim tests use private spaces, and strays match whole paths (`fix/fake-git-killed-flake`; 10/10 concurrent integration runs green twice).
 - A selected entry is ringed on its own card (one `.entry-selected` for footer jumps and reply selection), and "Release" reads "Send now" (`fix/selected-mark-and-send-now`, 5695 tests pass).
 - Keep-alive rows are stored by neither plane (nothing that runs or rewinds a keep-alive reads them). The sidecar classifies keep-alive records by promptId and parent chain, primed across restarts by reading earlier bytes (a one-time pass of up to 166 MB per resumed transcript). Known gap: a keep-alive turn that spawns a subagent (`fix/keepalive-rows-unstored`).
 - Held-prompt badges carry daemon-written short labels plus an expand-only detail (`HeldPrompt.badges`), drawn verbatim; an "editing" badge too (`feat/held-badge-short-labels`, 5672 webapp tests).
