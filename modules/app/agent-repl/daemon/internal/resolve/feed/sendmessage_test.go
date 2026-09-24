@@ -490,3 +490,162 @@ func TestAReplayedStartKeepsTheRecipientTheSuccessResolved(t *testing.T) {
 		t.Fatalf("address after the replayed start = %q, want the resolved identity, not the unnamed fallback", got)
 	}
 }
+
+// A SETTLED SEND STANDS ALONE. Its start and its settle upsert one unit, and
+// the store keeps one row per unit, so a replay (a workspace open, a transcript
+// select) serves the settle with no start beside it. Drawn from the start's
+// fields alone, row prompt:toolu_01GiUF1L5VCoxJQZ8nURrUEv:send replayed with an
+// EMPTY body; the settle now restates the address and the summary.
+
+// replayedSends are a send's two settle arms, each restating what its start
+// carried, with no start ever delivered.
+func replayedSends(to, summary string) []struct {
+	name   string
+	settle any
+} {
+	var restated *conversationv1.AgentSendMessageSummary
+	if summary != "" {
+		restated = &conversationv1.AgentSendMessageSummary{Text: summary}
+	}
+	return []struct {
+		name   string
+		settle any
+	}{
+		{
+			name: "a delivered send",
+			settle: &conversationv1.AgentSendMessageSuccess{
+				RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"},
+				AddressedTo:      to,
+				Summary:          restated,
+			},
+		},
+		{
+			name:   "a refused send",
+			settle: &conversationv1.AgentSendMessageFailure{AddressedTo: to, Summary: restated},
+		},
+	}
+}
+
+func TestAReplayedSettledSendDrawsItsSummary(t *testing.T) {
+	for _, tc := range replayedSends("vetter", "Scroll fix landed; merge master in") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: the settle alone, as a replay serves it.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			blocks := h.sendRow().GetBody().GetBlocks()
+			if len(blocks) != 1 || blocks[0].GetText().GetText() != "Scroll fix landed; merge master in" {
+				t.Fatalf("blocks = %v, want the restated summary", blocks)
+			}
+		})
+	}
+}
+
+func TestAReplayedSettledSendDrawsItsAddress(t *testing.T) {
+	for _, tc := range replayedSends("vetter", "Scroll fix landed; merge master in") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			if got := h.sendRow().GetAddress().GetText(); got != "→ vetter" {
+				t.Fatalf("address = %q, want the restated addressed string", got)
+			}
+		})
+	}
+}
+
+func TestAReplayedSettledSendWithNoSummaryDrawsNoBody(t *testing.T) {
+	for _, tc := range replayedSends("vetter", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert: the caller supplied none, so there is nothing to draw —
+			// never the relayed message.
+			if blocks := h.sendRow().GetBody().GetBlocks(); len(blocks) != 0 {
+				t.Fatalf("blocks = %d, want 0", len(blocks))
+			}
+		})
+	}
+}
+
+func TestAReplayedSettledSendRestatingNoAddressDrawsNothing(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: a settle that restated nothing, with no start held.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert: no row with an empty body is drawn.
+			if rows := h.rows(rootFeed()); len(rows) != 0 {
+				t.Fatalf("rows = %d, want 0: an unrestated settle must not draw an empty send", len(rows))
+			}
+		})
+	}
+}
+
+func TestAReplayedSettledSendRestatingNoAddressIsRecordedAtError(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
+				t.Fatalf("records = %+v, want an ERROR daemon.feed.activity_undrawable", h.records())
+			}
+		})
+	}
+}
+
+func TestASettledSendRestatingNoAddressIsRecordedAtErrorWithTheStartHeld(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
+				t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+			}
+		})
+	}
+}
+
+func TestASettledSendRestatingNoAddressIsDrawnFromTheStartHeld(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			blocks := h.sendRow().GetBody().GetBlocks()
+			if len(blocks) != 1 || blocks[0].GetText().GetText() != "vet the diff" {
+				t.Fatalf("blocks = %v, want the held start's summary", blocks)
+			}
+		})
+	}
+}

@@ -699,6 +699,55 @@ func TestAnUnreadableSampleKeepsTheStandingFiguresDrawn(t *testing.T) {
 	}
 }
 
+// A SAMPLING FAILURE'S CAUSE IS RECORDED. The strip draws no unread caveat
+// (owner ruling of 2026-09-15), so the breadcrumb is where a reader learns
+// what the shim could not do — the reason alone would say only "it failed".
+func TestAnUnreadableSamplingFailureRecordsTheShimsCause(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	sample := unavailableUsageSample(instant.UnixMilli())
+	sample.GetAccountUsage().GetUnavailable().Reason = &conversationv1.SessionAccountUsageUnavailable_SamplingFailure{
+		SamplingFailure: &conversationv1.SessionUsageSamplingFailure{Cause: "the transcript scan failed"},
+	}
+
+	// Act
+	h.r.OnSessionUpdate(testWS, sample)
+
+	// Assert
+	for _, rec := range h.log.Records() {
+		if rec.Operation == "daemon.footer.usage_sample_unreadable" {
+			if rec.Context["reason"] != "sampling_failure" || rec.Context["cause"] != "the transcript scan failed" {
+				t.Fatalf("record context = %+v, want reason sampling_failure and the shim's cause", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no daemon.footer.usage_sample_unreadable record in %+v", h.log.Records())
+}
+
+// Every other unread arm names its reason and states no cause, since none was
+// given.
+func TestAnUnreadableServiceUnavailableRecordsNoCause(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.UnixMilli()))
+
+	// Assert
+	for _, rec := range h.log.Records() {
+		if rec.Operation == "daemon.footer.usage_sample_unreadable" {
+			if _, has := rec.Context["cause"]; has || rec.Context["reason"] != "service_unavailable" {
+				t.Fatalf("record context = %+v, want reason service_unavailable and no cause", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no daemon.footer.usage_sample_unreadable record in %+v", h.log.Records())
+}
+
 func TestASettledHookLeavesTheActivityLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

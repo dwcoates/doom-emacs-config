@@ -76,6 +76,22 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no shim to address; skipping its hibernation", fields)
 			continue
 		}
+		// A SESSION A PROMPT IS REVIVING IS ENGAGED, whatever its record says.
+		// The revival's bring-up serves the session and retires its terminal
+		// before it records the session's facts, and delivers the prompt it
+		// holds only after that, so across that window the record reads live
+		// and idle since the engagement before the last hibernation. Standing
+		// it down there hibernated the shim the prompt was about to reach: the
+		// hold then met `query_dead`, or no session at all, and was dropped.
+		//
+		// THE ORDER IS WHAT MAKES THIS TOTAL. Serving was read true above, so
+		// any revival behind it had already raised its flag; a flag read false
+		// here means that revival has delivered, and the turn it started is
+		// the shim's own `turn_in_flight` refusal to the directive below.
+		if c.deps.Reviving(ws.ID) {
+			log.Debug(opSweep, "a prompt is reviving the session; deferring its hibernation", fields)
+			continue
+		}
 		if retry, backingOff := c.backingOff(ws.ID, now); backingOff {
 			log.Debug(opSweep, "the workspace's last hibernation failed; backing off before the next attempt",
 				merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))

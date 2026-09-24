@@ -194,6 +194,8 @@ func TestAFailedSkillDrawsTheProducersAccount(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{
+		// A settled frame restates what its call named (the contract).
+		Skill: &conversationv1.AgentSkillName{Name: "absent-skill"},
 		Error: &conversationv1.AgentToolFailure{
 			Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
 				Block: &conversationv1.ToolResultContentBlock_Text{
@@ -212,7 +214,9 @@ func TestAFailedSkillDrawsTheProducersAccount(t *testing.T) {
 func TestAFailedSkillWithNoAccountStillStatesSomething(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
-	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{})
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{
+		Skill: &conversationv1.AgentSkillName{Name: "absent-skill"},
+	})
 
 	// Assert: never an empty card.
 	if got := h.skillCard().GetFailed().GetText(); got == "" {
@@ -244,5 +248,111 @@ func TestASkillTheGateRefusedSaysNothingWasLoaded(t *testing.T) {
 	// Assert: the badge says it; consent is the permission card's story.
 	if h.skillCard().GetDenied() == nil {
 		t.Fatalf("outcome = %T, want denied", h.skillCard().GetOutcome())
+	}
+}
+
+func TestAStartAfterTheDocumentLandedKeepsTheCardLoaded(t *testing.T) {
+	// Arrange: the stream plane's success lands before the file plane's start
+	// for the same unit.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseSuccess{
+		Skill:    &conversationv1.AgentSkillName{Name: "graphify"},
+		Document: &conversationv1.AgentSkillDocument{Markdown: "# graphify\n"},
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetLoaded().GetDocument().GetMarkdown(); got != "# graphify\n" {
+		t.Fatalf("outcome = %T (document %q), want the loaded card to stand", h.skillCard().GetOutcome(), got)
+	}
+}
+
+func TestAStartAfterTheDocumentLandedStillStatesItsInvocation(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseSuccess{
+		Skill:    &conversationv1.AgentSkillName{Name: "graphify"},
+		Document: &conversationv1.AgentSkillDocument{Markdown: "# graphify\n"},
+	})
+	args := "--deep"
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		Args:      &args,
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetInvocation().GetText(); got != "/graphify --deep" {
+		t.Fatalf("invocation = %q, want the start's full line", got)
+	}
+}
+
+func TestAStartAfterAFailureKeepsTheCardFailed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{Skill: &conversationv1.AgentSkillName{Name: "graphify"}})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill:     &conversationv1.AgentSkillName{Name: "graphify"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert.
+	if h.skillCard().GetFailed() == nil {
+		t.Fatalf("outcome = %T, want the failed card to stand", h.skillCard().GetOutcome())
+	}
+}
+
+// A REPLAYED SKILL FAILURE STANDS ALONE: the store keeps the settle alone once
+// it has upserted over the start, so the failure names the skill itself.
+func TestAReplayedSkillFailureDrawsTheSkillItRestated(t *testing.T) {
+	// Arrange, Act: the settle alone, as a replay serves it.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{
+		Skill: &conversationv1.AgentSkillName{Name: "absent-skill"},
+	})
+
+	// Assert.
+	if got := h.skillCard().GetInvocation().GetText(); got != "/absent-skill" {
+		t.Fatalf("invocation = %q, want the restated skill", got)
+	}
+}
+
+func TestAReplayedSkillFailureRestatingNothingDrawsNoCard(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{})
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0: an unrestated failure must not draw an empty card", len(rows))
+	}
+}
+
+func TestASkillFailureKeepsTheHeldStartsArguments(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	args := "--deep"
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseStart{
+		Skill: &conversationv1.AgentSkillName{Name: "graphify"},
+		Args:  &args,
+	})
+
+	// Act.
+	h.skillFrame("unit-1", &conversationv1.AgentSkillUseFailure{
+		Skill: &conversationv1.AgentSkillName{Name: "graphify"},
+	})
+
+	// Assert: the start carried the arguments, which no settle restates.
+	if got := h.skillCard().GetInvocation().GetText(); got != "/graphify --deep" {
+		t.Fatalf("invocation = %q, want the held start's full line", got)
 	}
 }
