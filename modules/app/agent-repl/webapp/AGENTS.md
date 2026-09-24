@@ -269,7 +269,9 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   A bubble's own scroll box (an expanded response, thinking, tool or async
   bubble) has NO implicit writer: it moves only on the reader's input. The
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
-  `promptSent`, `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
+  `promptSent`, `promptHeld` (a held prompt's card drawn in the tray for the
+  FIRST time parks the feed at its tail and follows, as a sent prompt does; a
+  re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`, `initialPlacement`,
   `replaceRestore`, `prependCompensation`, `collapseCompensation` (a thinking
   bubble wholly above the reader collapsing when the daemon marks it
   `superseded`; the view shifts by exactly the height it lost), `latestVisible`
