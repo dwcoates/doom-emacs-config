@@ -162,43 +162,16 @@ func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 	}
 }
 
-// TestSenderStartTurnMarksAKeepaliveCollisionTransient covers the transient
-// case: a turn_already_open whose open turn is a keep-alive ping is classified
-// so the queue re-drives it rather than surfacing a terminal error.
-func TestSenderStartTurnMarksAKeepaliveCollisionTransient(t *testing.T) {
-	// Arrange
-	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
-		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
-			Detail: "turn keepalive-1-2 is already in flight",
-			Kind: &shimv1.StartTurnFailure_TurnAlreadyOpen{
-				TurnAlreadyOpen: &shimv1.StartTurnTurnAlreadyOpen{Keepalive: true},
-			},
-		}},
-	}}}
-
-	// Act
-	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
-
-	// Assert
-	refusal, ok := AsShimRefusal(err)
-	if !ok {
-		t.Fatalf("StartTurn = %v, want a typed shim refusal", err)
-	}
-	if !refusal.KeepaliveTurnAlreadyOpen() {
-		t.Fatalf("refusal = %+v, want it classified as a transient keep-alive collision", refusal)
-	}
-}
-
-// TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal covers the boundary: a
-// turn_already_open that is NOT a keep-alive stays a genuine daemon bug, so the
-// queue must not re-drive it.
+// TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal covers a
+// turn_already_open, which is always the daemon's own bug: it is carried up as
+// its typed arm rather than retried.
 func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 	// Arrange
 	s := &sender{client: &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
 			Detail: "turn t-9 is already in flight",
 			Kind: &shimv1.StartTurnFailure_TurnAlreadyOpen{
-				TurnAlreadyOpen: &shimv1.StartTurnTurnAlreadyOpen{Keepalive: false},
+				TurnAlreadyOpen: &shimv1.StartTurnTurnAlreadyOpen{},
 			},
 		}},
 	}}}
@@ -213,9 +186,6 @@ func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 	}
 	if refusal.Arm != "turn_already_open" {
 		t.Fatalf("refusal arm = %q, want turn_already_open", refusal.Arm)
-	}
-	if refusal.KeepaliveTurnAlreadyOpen() {
-		t.Fatalf("refusal = %+v, want a genuine daemon double-submit left terminal", refusal)
 	}
 }
 

@@ -1953,7 +1953,7 @@ export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 /** The ONE classification that draws an [accept] button (ruled). */
 export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
 
-export const HOLD_ARMS = ["shutdown", "keepAlive", "sessionStarting", "buildRefresh"] as const;
+export const HOLD_ARMS = ["shutdown", "sessionStarting", "buildRefresh"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
 type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
@@ -1983,8 +1983,6 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
   switch (arm) {
     case "shutdown":
       return { case: "shutdown", value: { scheduleId: "sched-1" } };
-    case "keepAlive":
-      return { case: "keepAlive", value: { turn: turnId("turn-live") } };
     case "sessionStarting":
       return { case: "sessionStarting", value: {} };
     case "buildRefresh":
@@ -2006,7 +2004,6 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   classificationError: { label: "unclassified" },
   accepted: { label: "confirmed" },
   shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
-  keepAlive: { label: "keep-alive", detail: "held behind a keep-alive, waiting on turn turn-live" },
   sessionStarting: { label: "starting up", detail: "held until the session is up" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
 };
@@ -2019,7 +2016,7 @@ export function heldPrompt(init?: {
   accepted?: boolean;
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
-  const hold = init?.hold ?? "keepAlive";
+  const hold = init?.hold ?? "sessionStarting";
   const statuses: string[] = [classification];
   if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
   statuses.push(hold);

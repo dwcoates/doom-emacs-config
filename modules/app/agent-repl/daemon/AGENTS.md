@@ -668,8 +668,8 @@ logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 An interrupt ends only the synchronous turn: `KillTurn(..., false)`. Detached
 work (background agents, shells, monitors, workflows) ends only by its own
 per-task stop, or by a forced kill the user explicitly asked for. The daemon
-never forces a kill on the user's behalf for a merge, a rollout, a redrive or
-any other act of its own; a holder that needs the session quiet waits on the
+never forces a kill on the user's behalf for a merge, a rollout or any
+other act of its own; a holder that needs the session quiet waits on the
 fleet's watcher-driven freeness — an admitted merge through `Fleet.AwaitFree`,
 and every shim bounce and handover transfer through the prompt queue's bounce
 registry, which takes it on the freeness edge. A FORCED deploy or restart is

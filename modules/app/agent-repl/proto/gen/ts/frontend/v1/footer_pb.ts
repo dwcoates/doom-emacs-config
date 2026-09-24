@@ -4415,9 +4415,7 @@ export const FooterTokensLineFirstTokenSchema: GenMessage<FooterTokensLineFirstT
 export type FooterTokensLineAlarm = Message<"frontend.v1.FooterTokensLineAlarm"> & {
   /**
    * The daemon-composed sentence ("expensive turn — 41k over 20k"). Drawn
-   * verbatim; the sentence also states WHY the turn ran when that changes
-   * the reading (an ordinary prompt vs a cache keep-alive that came back
-   * cold — its own alarm, phrased as such by the daemon).
+   * verbatim.
    *
    * @generated from field: string text = 1;
    */
