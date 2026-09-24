@@ -18,6 +18,9 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/shell-output-tail-only` | `~/.config/doom-worktrees/shell-output-tail-only` | Shell output is stored as a rolling tail at the renderer's 16 KiB cap (one shared constant) instead of contiguous deltas from 0; live and replay show what they show today. | `a11d136b2405a419b` | 22:10 |
 | `fix/fake-git-killed-flake` | `~/.config/doom-worktrees/fake-git-killed-flake` | Root-cause the flake `TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal` (fake git SIGKILLed under load; suspect cross-run stray reaping). Make ownership-scoped reaping structural. | `af0db7ff97ed4c775` | 22:35 |
 | `fix/e2e-load-flakes` | `~/.config/doom-worktrees/e2e-load-flakes` | Root-cause the e2e flakes `TestWebappLayerRoster` (ClientLog/lease ERRORs during a drain) and `TestClearRotatesIdentity` (the separation row timed out; `final_answer_unresolved`). | `a3cc32b3e6611f35f` | 22:55 |
+| `fix/restate-rest-and-old-row-level` | `~/.config/doom-worktrees/restate-rest-and-old-row-level` | Pre-contract unrestated rows log INFO (a new defect stays ERROR). Subagent and artifact failures restate; every settle carries `started_at`. | `aa95f06fc74ba5cf4` | 23:05 |
+| `fix/remove-keepalive-hold` | `~/.config/doom-worktrees/remove-keepalive-hold` | Remove `turn_already_open.keepalive` and the keep-alive hold arm and badge. The shim handles a real prompt during a keep-alive internally, and the daemon never sees keep-alives. | `a3d48a539c2a3b1c4` | 23:05 |
+| `fix/selected-mark-and-send-now` | `~/.config/doom-worktrees/selected-mark-and-send-now` | The selection mark goes on the card itself; "Release" becomes "Send now"; ALSO monitor rows jump to and center their Monitor tool-call card. | `ab71a2baf32886c69` | 23:05 |
 
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
@@ -26,16 +29,9 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
-- Old store rows: settles written before the restate change now log an ERROR and draw nothing on replay, instead of an empty card. That's ERROR noise until the store ages out. Accept it, or treat pre-change rows at a lower level?
-- Restating for a Subagent failure (prompt and created agent id) and an Artifact failure (the publish act) needs a contract shape. Should every settle also carry `started_at`, so replayed cards show their runtime?
-- The proto keeps a `DaemonFault.deploy_script_failed` arm with no raise site now that the script is gone. Remove it?
+- `DaemonFault.deploy_script_failed` removal is folded into the deploy branch's finishing agent.
+- `SPC TAB f` retry: needs a deploy, and the owner must OK the bounce.
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
-- Background priority vs. the tight test timeouts: under `taskpolicy -b` on a loaded machine, suites time out (900ms tests, 1800ms cold boot). Which gives way?
-- Proto: footer rows retired field tag 1 (`FeedId target`), a removal rather than an addition. Confirm.
-- Monitor rows are now clickable and always show "not on screen" (a small visible change). Confirm.
-- The selected-row mark is a 3px bar at the feed's far left, away from a centered card. Should it be restyled?
-- The keep-alive hold is still visible to the daemon through the proto-ruled `turn_already_open.keepalive` refusal. Remove it (a proto change)?
-- The new name for "Release" (suggested: "Send now").
 - A retry of `SPC TAB f`, which now logs.
 
 ## Landed on master (this session, since the 09-21 compaction)
