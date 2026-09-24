@@ -9,10 +9,10 @@ import (
 //
 // b* already has the whole detached-shell suite. The unclassifiable prefix
 // already has its two subjects in spool_ownership_test.go (the loud ERROR, and
-// the bytes landing whole as residue anyway). These are the two that were
-// missing: an a* spool is a backgrounded SUBAGENT'S OWN TRANSCRIPT and converts
-// as one, into the SPAWNING CALL's book; a w* spool is residue only, because
-// workflow is KICKED this wave.
+// the file never being read). These are the ones that were missing: an a* spool
+// is a backgrounded SUBAGENT'S OWN TRANSCRIPT and converts as one, into the
+// SPAWNING CALL's book; a w* spool nobody claimed is never read, because
+// workflow is KICKED this wave and nothing renders it.
 
 // corpusAsyncAgentTask is the a* task id the checked-in async-launch fixture
 // names — the vendor's `agentId`, which is the SPOOL's name and never the
@@ -115,15 +115,10 @@ func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 	requireNoResidueStored(t, fake.Entries())
 }
 
-// TestAWorkflowSpoolLandsAsResidueOnly asserts the w* routing while workflow is
-// KICKED: the file is discovered and cursor-tailed like any other, its bytes are
-// read whole and classified as residue, and nothing about it is converted as
-// workflow.
-//
-// RESIDUE IS NEVER PERSISTED, so "landed" is asserted where the evidence now is:
-// the reader's own record saying it classified this file's bytes and withheld
-// them, and a cursor that reached the end of the file.
-func TestAWorkflowSpoolLandsAsResidueOnly(t *testing.T) {
+// TestAnUnclaimedWorkflowSpoolIsNeverRead asserts the w* routing while
+// workflow is KICKED: no transcript ever names the spool, so it is held, its
+// window lapses, and it is never read — nothing renders it.
+func TestAnUnclaimedWorkflowSpoolIsNeverRead(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -134,49 +129,23 @@ func TestAWorkflowSpoolLandsAsResidueOnly(t *testing.T) {
 	slug := cwdSlug(cwd)
 	session := "a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3"
 	spoolPath := tree.spoolPath(slug, session, "ww0dfgg1i")
-	payload := "{\"kind\":\"workflow-journal-line\"}\n"
+	// The re-resolution this subject waits on is stated at DEBUG.
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
 	startSidecar(t, opts)
 	spool := newGrowingFile(t, spoolPath)
-	spool.AppendRaw([]byte(payload))
-	// The label is `unparsed`: no transcript ever names this spool, so it is
-	// held and then ingested by the unowned path rather than by its w* prefix.
-	awaitResidueWithheldNamingFile(ctx, t, opts.LogPath, spoolPath, "unparsed")
-
-	// Assert: the whole file was read, nothing workflow-shaped was produced, and
-	// no residue row was stored.
-	awaitCursorInBatches(ctx, t, fake, spoolPath, spool.Offset())
-	for _, e := range fake.Entries() {
-		if e.GetAgentUpdate().GetWorkflow() != nil {
-			t.Errorf("a w* spool produced a workflow entry while workflow is kicked: %v", e.GetUpsertKey())
-		}
-	}
-	requireNoResidueStored(t, fake.Entries())
-}
-
-// TestAWorkflowSpoolReachesNoPage asserts the other half of "residue only": a
-// kicked kind is structurally unservable, so none of it reaches any book.
-func TestAWorkflowSpoolReachesNoPage(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	ctx, cancel := testContext(t)
-	defer cancel()
-	fake := startFakeStore(t)
-	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/workflow-spool-page-probe"
-	slug := cwdSlug(cwd)
-	session := "a4a4a4a4-a4a4-4a4a-8a4a-a4a4a4a4a4a4"
-	spoolPath := tree.spoolPath(slug, session, "ww0dfgg1i")
-
-	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	spool := newGrowingFile(t, spoolPath)
 	spool.AppendRaw([]byte("{\"kind\":\"workflow-journal-line\"}\n"))
-	awaitAnyCursorFor(ctx, t, fake, spoolPath)
+	awaitLog(ctx, t, opts.LogPath, "the hold expiring", func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
+	})
+	lapsedAt := logIndexOf(t, opts.LogPath, func(r logRecord) bool {
+		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
+	})
+	awaitRestatedAfter(ctx, t, opts.LogPath, spoolPath, "hold-spool", lapsedAt)
 
 	// Assert.
+	requireNeverRead(t, fake, opts.LogPath, spoolPath)
 	if len(pageLinesOf(fake.Entries())) != 0 {
 		t.Errorf("a w* spool produced %d page line(s) while workflow is kicked", len(pageLinesOf(fake.Entries())))
 	}

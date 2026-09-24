@@ -35,6 +35,8 @@ import { fireIntersection, intersectionObservers } from "../intersection-observe
 import { OVERSCAN_CLASS } from "../../src/feed/overscan.js";
 import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
+import { resetLoggingForTests } from "../../src/log.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -287,6 +289,78 @@ describe("mountFeed: the bubble kinds", () => {
     mount(h);
     await settle();
     expect(h.calls.openFeed.map((req) => req.feed?.value)).toEqual([undefined, "m1"]);
+  });
+});
+
+/**
+ * A HELD PROMPT'S FIRST DRAW PARKS THE FEED (owner ruling, 2026-09-23): the
+ * tray calls `promptHeld`, and the feed parks at its tail and follows under the
+ * `promptHeld` cause, as a sent prompt does.
+ */
+describe("mountFeed: promptHeld", () => {
+  afterEach(() => {
+    resetLoggingForTests();
+  });
+
+  /** The feed's scroll box, its geometry scripted since jsdom lays out nothing. */
+  function scriptedBox(scroll: HTMLElement): void {
+    let top = 100;
+    Object.defineProperties(scroll, {
+      scrollHeight: { get: () => 2000 },
+      clientHeight: { get: () => 300 },
+      scrollTop: { get: () => top, set: (next: number) => { top = next; } },
+    });
+  }
+
+  it("parks the feed at its tail", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    const scroll = host.parentElement as HTMLElement;
+    scriptedBox(scroll);
+    // Act
+    feed.promptHeld("t1");
+    // Assert
+    expect(scroll.scrollTop).toBe(2000);
+  });
+
+  it("records the park under the promptHeld cause", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    scriptedBox(host.parentElement as HTMLElement);
+    const capture = captureLogRecords("debug");
+    // Act
+    feed.promptHeld("t1");
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved");
+    expect((record.context as Record<string, unknown>).cause).toBe("promptHeld");
+  });
+
+  it("logs the held prompt it parked for", async () => {
+    // Arrange
+    const { feed, host } = mount();
+    await settle();
+    scriptedBox(host.parentElement as HTMLElement);
+    const capture = captureLogRecords("debug");
+    // Act
+    feed.promptHeld("t1");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.held-prompt-parked");
+    expect(record.context).toMatchObject({ turn: "t1" });
+  });
+
+  it("logs, and moves nothing, when the feed has no scroll box", async () => {
+    // Arrange
+    const host = document.createElement("div");
+    const feed = mountFeed(host, harness().ctx, { renderers: stubRenderers() });
+    await settle();
+    const capture = captureLogRecords("debug");
+    // Act
+    feed.promptHeld("t1");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.held-prompt-unparked");
+    expect(record.context).toMatchObject({ turn: "t1" });
   });
 });
 
