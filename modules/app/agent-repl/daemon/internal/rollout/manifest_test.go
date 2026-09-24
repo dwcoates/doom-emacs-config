@@ -121,25 +121,69 @@ func TestARolledSessionsRecordIsAlreadyResolved(t *testing.T) {
 	}
 }
 
-func TestASessionThatSilentlyDiedLeavesAnOpenFault(t *testing.T) {
+// recordingDB remembers every fault id the reconciliation opened, so a test
+// can read a record back after it was resolved.
+type recordingDB struct {
+	wsm.DB
+	mu     sync.Mutex
+	opened []ids.FaultID
+}
+
+func (d *recordingDB) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, error) {
+	id, err := d.DB.OpenFault(ctx, f)
+	if err == nil {
+		d.mu.Lock()
+		d.opened = append(d.opened, id)
+		d.mu.Unlock()
+	}
+	return id, err
+}
+
+// diedRecord reconciles one preserve-intent session whose lock reads free and
+// answers the one record it left.
+func diedRecord(t *testing.T) wsm.Fault {
+	t.Helper()
+	h := newHarness(t)
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	h.c.deps.DB = recorder
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+	if len(recorder.opened) != 1 {
+		t.Fatalf("records opened = %d, want exactly one for the dead session", len(recorder.opened))
+	}
+	f, err := h.db.Fault(context.Background(), recorder.opened[0])
+	if err != nil {
+		t.Fatalf("Fault: %v", err)
+	}
+	return f
+}
+
+// TestASessionThatSilentlyDiedLeavesNoOpenFault pins the ordinary dead-shim
+// path: a free lock is the kernel's proof the shim is gone, nothing could
+// close an open fault here, and one stood on the strip for good.
+func TestASessionThatSilentlyDiedLeavesNoOpenFault(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
 	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	// The DIED disposition is recorded under health.KindBounceDied, which is
-	// the arm the host view renders; the generic kind reaches no arm at all.
 	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
 
 	// Assert
 	if err != nil {
 		t.Fatalf("OpenFaults: %v", err)
 	}
-	if len(open) != 1 {
-		t.Fatalf("open faults = %d, want one: which session died is the whole point of the record", len(open))
+	if len(open) != 0 {
+		t.Fatalf("open faults = %d, want none: a dead shim with a free lock takes the ordinary dead-shim path", len(open))
 	}
-	if open[0].Evidence["disposition"] != string(DispositionDied) {
-		t.Fatalf("evidence disposition = %q, want DIED", open[0].Evidence["disposition"])
+}
+
+func TestASessionThatSilentlyDiedIsStillRecorded(t *testing.T) {
+	// Arrange, Act
+	f := diedRecord(t)
+
+	// Assert: which session died is still the record's whole point.
+	if f.Evidence["disposition"] != string(DispositionDied) || f.ResolvedAt == nil {
+		t.Fatalf("record = %+v, want a resolved DIED record", f)
 	}
 }
 
@@ -161,21 +205,12 @@ func TestAnUndeterminableSessionLeavesAnOpenFault(t *testing.T) {
 }
 
 func TestTheDispositionRecordCarriesTheManifestsPidRatherThanACount(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	// The DIED disposition is recorded under health.KindBounceDied, which is
-	// the arm the host view renders; the generic kind reaches no arm at all.
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
+	// Arrange, Act
+	f := diedRecord(t)
 
 	// Assert
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if open[0].Evidence["shim_pid"] != "4242" || open[0].Evidence["vendor_session_id"] != "vendor-1" {
-		t.Fatalf("evidence = %v, want the manifest's own pid and vendor session", open[0].Evidence)
+	if f.Evidence["shim_pid"] != "4242" || f.Evidence["vendor_session_id"] != "vendor-1" {
+		t.Fatalf("evidence = %v, want the manifest's own pid and vendor session", f.Evidence)
 	}
 }
 
@@ -272,17 +307,11 @@ func TestNoManifestWithNoSurvivingSessionIsAnOrdinaryBoot(t *testing.T) {
 
 func TestADiedDispositionIsRecordedUnderTheBounceDiedKind(t *testing.T) {
 	// Arrange, Act
-	h := newHarness(t)
-	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	generic, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	f := diedRecord(t)
 
-	// Assert: nothing is left under the generic kind, which maps to no
-	// SessionFault or HostFault arm.
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if len(generic) != 0 {
-		t.Fatalf("open faults under %q = %+v, want none", FaultBounceDisposition, generic)
+	// Assert: the record's kind still says what became of the session.
+	if f.Kind != health.KindBounceDied {
+		t.Fatalf("record kind = %q, want %q", f.Kind, health.KindBounceDied)
 	}
 }
 
@@ -394,9 +423,10 @@ func TestABounceDispositionIsDeferredWhileTheHandleIsReadOnly(t *testing.T) {
 func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+	recorder := &recordingDB{DB: h.c.deps.DB}
+	handle := &toggleReadOnlyDB{DB: recorder, readOnly: true}
 	h.c.deps.DB = handle
-	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
 
 	// Act
 	if err := handle.Promote(context.Background()); err != nil {
@@ -405,12 +435,8 @@ func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	h.c.flushDispositions(context.Background())
 
 	// Assert
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
-	if err != nil {
-		t.Fatalf("OpenFaults: %v", err)
-	}
-	if len(open) != 1 {
-		t.Fatalf("open faults = %d, want the deferred disposition written at the promotion", len(open))
+	if len(recorder.opened) != 1 {
+		t.Fatalf("records written = %d, want the deferred disposition written at the promotion", len(recorder.opened))
 	}
 }
 

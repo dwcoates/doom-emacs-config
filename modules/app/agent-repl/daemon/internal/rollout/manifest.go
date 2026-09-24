@@ -57,7 +57,9 @@ const (
 	// DispositionRolled is a session meant to end that did: its lock is free.
 	DispositionRolled DispositionKind = "ROLLED"
 	// DispositionDied is a session meant to survive whose lock is free — it
-	// died silently, and this record is the only place that says so.
+	// died silently, and this record is the only place that says so. It is
+	// recorded RESOLVED: the free lock proves the process owns nothing, and
+	// the workspace takes the ordinary dead-shim path.
 	DispositionDied DispositionKind = "DIED"
 	// DispositionUnknown is a probe that could not tell, or a session meant to
 	// end whose lock is still held. Never read as either of the other two.
@@ -229,9 +231,11 @@ func ReadManifest(path string) (Manifest, bool, error) {
 //	stand_down + held    → UNKNOWN     (meant to end; something still holds it)
 //	any        + unknown → UNKNOWN     (the probe could not tell)
 //
-// PRESERVED and ROLLED are recorded as ALREADY-RESOLVED faults, so the record
-// exists per session without polluting the open-fault set; DIED and UNKNOWN
-// stay OPEN, because each is a workspace whose session state needs a human.
+// PRESERVED, ROLLED and DIED are recorded as ALREADY-RESOLVED faults, so the
+// record exists per session without polluting the open-fault set: a DIED
+// session's free lock is the kernel's proof its shim is gone, and the boot's
+// ordinary client-less path takes the workspace from there. Only UNKNOWN
+// stays OPEN, because the probe could not say what became of the session.
 //
 // A MANIFEST IS CONSUMED EXACTLY ONCE. It is one outgoing daemon's statement
 // about one bounce, so once every disposition it names is durably recorded it
@@ -508,13 +512,26 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 		c.log.Error(opReconcile, "could not record a session's bounce disposition", withCause(fields, err))
 		return false
 	}
-	if d.Kind == DispositionPreserved || d.Kind == DispositionRolled {
+	if d.Kind == DispositionPreserved || d.Kind == DispositionRolled || d.Kind == DispositionDied {
 		// The record exists; nothing needs doing about it. Closing it here is
 		// what keeps the OPEN fault set meaningful without losing the per
 		// session accounting.
 		if err := c.deps.DB.CloseFault(ctx, id, c.deps.Clock.Now()); err != nil {
 			c.log.Error(opReconcile, "could not resolve an ordinary bounce disposition", withCause(fields, err))
 			return false
+		}
+		if d.Kind == DispositionDied {
+			// A DEAD SHIM WITH A FREE LOCK IS THE ORDINARY DEAD-SHIM PATH, not
+			// a question for a human. The lock being free is the kernel's
+			// proof the process is gone and owns nothing; the boot's own steps
+			// already treat the workspace as client-less (its in-flight turns
+			// are closed, and an open one's session is brought back up). No
+			// verb could close an open fault here, so one stood on the
+			// footer's strip and the host view for good: seven of them for one
+			// workspace on 2026-09-24. The record stays, resolved, under
+			// health.KindBounceDied with the manifest's pid and vendor session.
+			c.log.Info(opReconcile, "a session the bounce meant to preserve had died; its record is resolved and the workspace takes the ordinary dead-shim path", fields)
+			return true
 		}
 		c.log.Debug(opReconcile, "recorded an ordinary bounce disposition", fields)
 		return true
