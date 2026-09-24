@@ -472,6 +472,8 @@ type fakeFleet struct {
 	installErr   map[ids.WorkspaceID]error
 	resumeErr    map[ids.WorkspaceID]error
 	resumeCold   map[ids.WorkspaceID]*conversationv1.SessionCold
+	// handOverErr is what HandOver answers for a workspace with a session.
+	handOverErr map[ids.WorkspaceID]error
 
 	installs  []ids.WorkspaceID
 	adoptions []ids.WorkspaceID
@@ -489,6 +491,7 @@ func newFakeFleet(order *steps) *fakeFleet {
 		installErr:   make(map[ids.WorkspaceID]error),
 		resumeErr:    make(map[ids.WorkspaceID]error),
 		resumeCold:   make(map[ids.WorkspaceID]*conversationv1.SessionCold),
+		handOverErr:  make(map[ids.WorkspaceID]error),
 		order:        order,
 	}
 }
@@ -546,6 +549,23 @@ func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Cli
 		f.adopted[ws] = c
 	}
 	return c, nil
+}
+
+// HandOver mirrors the real fleet's: the watches close, then the shim is
+// detached; a stated error refuses before the detach.
+func (f *fakeFleet) HandOver(ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	shim := f.live[ws]
+	err := f.handOverErr[ws]
+	f.mu.Unlock()
+	if shim == nil {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	shim.Detach()
+	return true, nil
 }
 
 // StandDown mirrors the real fleet's: the session is ended, then the process.
