@@ -133,10 +133,6 @@ func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Lo
 // setHold projects the daemon-side condition onto the tray's oneof. NO ARM is
 // the ordinary case — a turn is running and the classifier decides delivery —
 // so a nil condition leaves the oneof unset rather than inventing a reason.
-//
-// There is no keep-alive arm to project: the keep-alive window is the shim's
-// and the daemon never holds a prompt for it, so wsm.HoldKind has no such
-// value and frontend.v1's keep_alive arm is dead on this side.
 func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 	ctx := dlog.Context{"turn_id": string(h.Turn)}
 	if h.Hold == nil {
@@ -234,16 +230,6 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		out = append(out, badge("restart hold", sentence))
 	case *frontendv1.HeldPrompt_BuildRefresh:
 		out = append(out, badge("build refresh", "held for the build refresh"))
-	case *frontendv1.HeldPrompt_KeepAlive:
-		sentence := "held behind a keep-alive"
-		if turn := arm.KeepAlive.GetTurn().GetValue(); turn != "" {
-			sentence += ", waiting on turn " + turn
-		} else {
-			ctx["invariant_violation"] = "HeldPromptKeepAliveHold.turn is empty"
-			ctx["remediation"] = "name the keep-alive turn the hold waits on"
-			log.Error("daemon.holds.badges", "a keep-alive badge named no turn and was composed without one", ctx)
-		}
-		out = append(out, badge("keep-alive", sentence))
 	case *frontendv1.HeldPrompt_SessionStarting:
 		out = append(out, badge("starting up", "held until the session is up"))
 	default:

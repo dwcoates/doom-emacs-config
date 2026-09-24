@@ -44,6 +44,7 @@ import {
   type HeldPromptDroppedDetail,
   type HeldStatus,
 } from "../../src/tray/held-prompt.js";
+import * as heldPromptModule from "../../src/tray/held-prompt.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
@@ -380,12 +381,6 @@ describe("drawHeldPrompt hold arms", () => {
       line: "wire shutdown",
     },
     {
-      name: "keep_alive",
-      prompt: heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka-1" } } } }),
-      arm: "keepAlive",
-      line: "wire keepAlive",
-    },
-    {
       name: "session_starting",
       prompt: heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
       arm: "sessionStarting",
@@ -422,17 +417,6 @@ describe("drawHeldPrompt hold arms", () => {
     expect(card.querySelector('[data-held-status="shutdown"]')?.getAttribute("data-schedule-id")).toBe("sched-9");
   });
 
-  it("composes no title of its own on a keep-alive hold's badge", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka-1" } } } }), tc);
-    expect(card.querySelector<HTMLElement>('[data-held-status="keepAlive"]')?.title).toBe("");
-  });
-
-  it("refuses a keep-alive hold whose turn is unset", () => {
-    const { tc } = trayContext();
-    const prompt = heldPrompt({ hold: { case: "keepAlive", value: {} } });
-    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
-  });
 });
 
 describe("drawHeldPrompt release availability", () => {
@@ -467,10 +451,6 @@ describe("drawHeldPrompt release availability", () => {
       prompt: heldPrompt({
         classification: { case: "uninterruptibleTurn", value: { command: SessionCommand.CLEAR } },
       }),
-    },
-    {
-      name: "keep_alive",
-      prompt: heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } }),
     },
     {
       name: "session_starting",
@@ -828,11 +808,11 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
   it.each([
     ["no hold", null, []],
     ["a lease hold", { case: "shutdown", value: { scheduleId: "s" } }, ["lease-card"]],
-    ["a keep-alive hold", { case: "keepAlive", value: { turn: { value: "ka-1" } } }, ["keep-alive-card"]],
+    ["a session-starting hold", { case: "sessionStarting", value: {} }, []],
   ] as const)("names %s by its hook, which selects no border", (_name, hold, frames) => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(hold === null ? {} : { hold: hold as never }), tc);
-    expect(["lease-card", "keep-alive-card"].filter((frame) => card.classList.contains(frame))).toEqual(frames);
+    expect(["lease-card"].filter((frame) => card.classList.contains(frame))).toEqual(frames);
   });
 });
 
@@ -974,7 +954,6 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   accepted: "muted",
   shutdown: "amber",
   buildRefresh: "amber",
-  keepAlive: "teal",
   sessionStarting: "teal",
   editing: "run",
 };
@@ -995,7 +974,6 @@ describe("the daemon's badge words", () => {
     ],
     ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
     ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
-    ["keepAlive", () => heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } })],
     ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
     [
       "editing",
@@ -1102,8 +1080,6 @@ describe("the daemon's badge words", () => {
       '"unclassified"',
       '"confirmed"',
       "held for the scheduled restart",
-      "held behind a keep-alive",
-      "waiting on turn",
       "held until the session is up",
       "held for the build refresh",
     ];
@@ -1190,7 +1166,6 @@ describe("every status a held card shows is a badge in the table's tone", () => 
     ],
     ["shutdown", () => heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } })],
     ["buildRefresh", () => heldPrompt({ hold: { case: "buildRefresh", value: {} } })],
-    ["keepAlive", () => heldPrompt({ hold: { case: "keepAlive", value: { turn: { value: "ka" } } } })],
     ["sessionStarting", () => heldPrompt({ hold: { case: "sessionStarting", value: {} } })],
     [
       "editing",
@@ -1580,5 +1555,51 @@ describe("the retired Release label", () => {
       .map((name) => join(lisp, name));
     // Act, Assert
     expect([sources.length > 0, holdingTheLabel(sources)]).toEqual([true, []]);
+  });
+});
+
+/**
+ * THE KEEP-ALIVE HOLD IS RETIRED. The shim makes a prompt that arrives during
+ * its own keep-alive wait inside the shim, so the daemon never holds one behind
+ * a keep-alive and the tray draws no such hold, badge, tone or reason.
+ */
+describe("the retired keep-alive hold", () => {
+  it("draws no keep-alive-card hook on a prompt whose hold is unset", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.classList.contains("keep-alive-card")).toBe(false);
+  });
+
+  it("draws no keep-alive status badge on a prompt whose hold is unset", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.querySelector('[data-held-status="keepAlive"]')).toBeNull();
+  });
+
+  it("exports no keep-alive hold drawer", () => {
+    // Arrange / Act
+    const exported = Object.keys(heldPromptModule);
+    // Assert
+    expect(exported).not.toContain("drawHeldPromptKeepAliveHold");
+  });
+
+  it("gives no keep-alive status a badge tone", () => {
+    // Arrange / Act
+    const statuses = Object.keys(HELD_STATUS_BADGES);
+    // Assert
+    expect(statuses).not.toContain("keepAlive");
+  });
+
+  it("states no keep-alive reason for a withheld release", () => {
+    // Arrange / Act
+    const arms = Object.keys(heldPromptModule.NO_RELEASE_TITLES);
+    // Assert
+    expect(arms).not.toContain("keepAlive");
   });
 });

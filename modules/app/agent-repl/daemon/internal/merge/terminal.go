@@ -200,10 +200,19 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	// concurrent load that recreated the just-removed tree between git's exit
 	// and the postcondition check. A failed stand-down leaves the tree intact,
 	// loudly, because deleting a live process's working directory is forbidden.
+	//
+	// THE LOG SURFACES ARE TOLD NEXT, for the same regression from the other
+	// side: a record reaching this workspace mid-removal (a forwarded sidecar
+	// diagnostic) opened a new sink whose MkdirAll recreated the tree between
+	// git's exit and the postcondition. Retired, the workspace's sinks touch
+	// nothing inside it; a retirement that fails leaves the tree intact, loudly.
 	if out.failed == "" && out.landed != "" {
 		if err := r.o.deps.StopSession(ctx, r.ws, true); err != nil {
 			log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
 				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "force": true, "error": err.Error()})
+		} else if err := r.o.deps.Log.Retire(r.job.Layout.SourceDir); err != nil {
+			log.Error(op, "could not retire the merged workspace's log sinks before removing its worktree", dlog.Context{
+				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})
 		} else if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), r.job.Layout.SourceDir); err != nil {
 			log.Error(op, "could not remove the merged worktree", dlog.Context{
 				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})
@@ -511,12 +520,11 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 	if out.failed != "" || out.landed == "" || !r.selfCheckout || len(out.commits) == 0 {
 		return
 	}
-	r.o.log(ctx, r.ws).Debug(op, "triggering the self-reload for a merge into this daemon's own checkout",
+	// ONE MERGE IS ONE LANDING, AND ONE DEPLOY: the deploy is told once with
+	// every commit the merge landed, never once per commit.
+	r.o.log(ctx, r.ws).Info(op, "a merge landed in this daemon's own checkout; the deploy is told once",
 		dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": len(out.commits)})
-	if err := r.o.deps.Rollout.Trigger(ctx, out.commits); err != nil {
-		r.o.log(ctx, r.ws).Error(op, "the self-reload trigger failed",
-			dlog.Context{"workspace": string(r.ws), "error": err.Error()})
-	}
+	r.o.deps.Rollout.Landed(ctx, out.commits)
 }
 
 // publishAbandoned draws the ABANDONED terminal: a merge taken off the queue

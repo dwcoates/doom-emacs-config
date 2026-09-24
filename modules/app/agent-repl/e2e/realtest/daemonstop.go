@@ -39,8 +39,7 @@ import (
 // The warning is correct. The defect is the signal.
 //
 // `UpdateShutdownSchedule{now}` is the stop the product itself uses — it is
-// what `agent-repl-frontend-daemon-stop` sends from the editor, which is the
-// door `bin/deploy-all.sh` reaches through `agent-repl-runtime-restart-await`.
+// what `agent-repl-frontend-daemon-stop` sends from the editor.
 // The daemon stops accepting work, STANDS EVERY SESSION DOWN
 // (`drain.standEverySessionDown`, then `sweepInFlightSpawns`), flushes its
 // in-flight writes and exits itself. Its successor therefore adopts nothing,

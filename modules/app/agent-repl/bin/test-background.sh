@@ -421,11 +421,12 @@ scan() {
             printf '%s: does not import %s\n' "$file" "$guard"
     done
 
-    # (f) The live runtime and the deploy's builds are never demoted.
-    for file in "$module/bin/deploy-all.sh" "$module/bin/build-frontend.sh" \
+    # (f) The live runtime and the deploy's builds are never demoted: the
+    # daemon's deploy (daemon/internal/deploy) runs bin/build-frontend.sh.
+    for file in "$module"/daemon/internal/deploy/*.go "$module/bin/build-frontend.sh" \
         "$module"/launchd/* "$module"/lisp/*.el; do
         [ -f "$file" ] || continue
-        case "$(basename "$file")" in test-*.el) continue ;; esac
+        case "$(basename "$file")" in test-*.el | *_test.go) continue ;; esac
         if grep -Eq 'background\.sh|nice -n|"nice"|taskpolicy|require-background' "$file"; then
             printf '%s: live runtime or deploy path references the test background helper\n' "$file"
         fi
@@ -503,7 +504,8 @@ EOF
 #!/usr/bin/env bash
 ./lint.sh
 EOF
-    printf '#!/usr/bin/env bash\nset -eu\n' >"$m/bin/deploy-all.sh"
+    mkdir -p "$m/daemon/internal/deploy"
+    printf 'package deploy\n' >"$m/daemon/internal/deploy/builder.go"
     printf ';;; daemon.el\n' >"$m/lisp/daemon.el"
     printf '(defun agent-repl-test--require-background-priority (m b))\n(agent-repl-test--require-background-priority\n (getenv "X") noninteractive)\n' >"$m/lisp/test-helpers.el"
     printf '(load (expand-file-name "test-helpers.el" dir) nil t)\n' >"$m/lisp/test-daemon.el"
@@ -587,8 +589,8 @@ expect_violation "a git hook that runs a suite without the prologue" "$d" "pre-c
 
 # --- 3n. the deploy path referencing the helper ----------------------------------
 d="$TMP/s-deploy"; make_fixture "$d"
-printf '#!/usr/bin/env bash\nbin/background.sh npm run build\n' >"$d/modules/app/agent-repl/bin/deploy-all.sh"
-expect_violation "the deploy path demoting its build" "$d" "deploy-all.sh: live runtime or deploy path references the test background helper"
+printf 'package deploy\n\nvar argv = []string{"bin/background.sh", "bash", "bin/build-frontend.sh"}\n' >"$d/modules/app/agent-repl/daemon/internal/deploy/builder.go"
+expect_violation "the deploy path demoting its build" "$d" "builder.go: live runtime or deploy path references the test background helper"
 
 # --- 3o. the live runtime's spawn demoting with nice ----------------------------
 d="$TMP/s-runtime"; make_fixture "$d"
