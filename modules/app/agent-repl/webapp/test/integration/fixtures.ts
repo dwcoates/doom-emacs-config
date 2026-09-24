@@ -2151,7 +2151,6 @@ export const hostWorkspacePush = (): WatchHostWorkspaceResponse =>
 export const DAEMON_FAULT_ARMS = [
   "adoptionWindowExpired",
   "logSinkPoisoned",
-  "deployScriptFailed",
   "successorSpawnFailed",
   "promptsDirMissing",
   "wsmReadOnly",
@@ -2183,8 +2182,6 @@ export function daemonFault(arm: DaemonFaultArm, detail?: string): DaemonFaultIn
         return { case: "adoptionWindowExpired" as const, value: { workspace: workspaceRef() } };
       case "logSinkPoisoned":
         return { case: "logSinkPoisoned" as const, value: { sink: "the durable log" } };
-      case "deployScriptFailed":
-        return { case: "deployScriptFailed" as const, value: { detail: "the deploy script exited 1" } };
       case "successorSpawnFailed":
         return { case: "successorSpawnFailed" as const, value: { detail: "the successor never came up" } };
       case "promptsDirMissing":

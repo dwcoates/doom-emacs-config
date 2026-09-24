@@ -209,7 +209,6 @@ export const FooterStripSchema: GenMessage<FooterStrip> = /*@__PURE__*/
  *   | disconnected | severed           | link_severed, watch_open_refused   |
  *   | blocked      | daemon_impaired   | prompts_dir_missing, wsm_read_only,|
  *   |              |                   | log_sink_poisoned,                 |
- *   |              |                   | deploy_script_failed,              |
  *   |              |                   | successor_spawn_failed,            |
  *   |              |                   | daemon_state_unreadable,           |
  *   |              |                   | adoption_window_expired (daemon)   |

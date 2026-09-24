@@ -1167,7 +1167,7 @@ raise: that is exactly how three kinds came to have a path and sixteen did not.
 | `disconnected` | `start_failed` | `shim_start_failed`, `resume_failed`, `relaunch_resume_failed`, `adoption_window_expired` (session scope), `cold_gate_reopen_failed` |
 | `disconnected` | `dead` | `shim_died`, `bounce_died`, `session_absent` |
 | `disconnected` | `severed` | `link_severed`, `watch_open_refused` |
-| `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `deploy_script_failed`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
+| `blocked` | `daemon_impaired` | `prompts_dir_missing`, `wsm_read_only`, `log_sink_poisoned`, `successor_spawn_failed`, `daemon_state_unreadable`, `adoption_window_expired` (daemon scope) |
 | unchanged | unchanged | `shim_reported`, `classifier_failed`, `bounce_unknown`, `conversation_abandoned` — NON-ESCALATING |
 
 The activity cell is `FooterStatusActivityFault{kind, detail}` in every case but
