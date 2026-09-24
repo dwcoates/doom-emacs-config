@@ -517,6 +517,10 @@ and no narrative: the commit message holds the reasoning and
 It also carries a short "standing measurements to protect" section. Update those
 numbers when a measurement genuinely improves; never when it regresses.
 
+## Every optimization carries a comment saying it is one
+
+Any code shaped by performance — a cache, a skipped check, a batched or reordered call, a narrowed watch set — gets a comment at the site naming the cost it avoids, with the measurement if there is one. A decision that looks strange because it is an optimization is never removed or "simplified" without asking the owner first.
+
 ## A regression fix leaves a breadcrumb at the fix site
 
 Owner instruction, 2026-09-14, standing. When a change fixes a REGRESSION — a
