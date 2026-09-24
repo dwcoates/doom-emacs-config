@@ -115,7 +115,7 @@ func TestAGatedStreamWithholdsItsAcceptance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		baseURL+"/agentrepl.v1.AgentRepl/WatchDaemon", connectStreamBody("{}"))
+		baseURL+"/agentrepl.v1.AgentRepl/WatchDaemon", connectStreamBody(emacsWatchDaemonJSON))
 	if err != nil {
 		t.Fatalf("build WatchDaemon request: %v", err)
 	}

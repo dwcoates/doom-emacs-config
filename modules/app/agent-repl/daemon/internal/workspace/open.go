@@ -10,7 +10,6 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/rollout"
 	"claude-repld/internal/shimclient"
 )
 
@@ -117,13 +116,25 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	v.deps.Footer.SetClosing(ws, nil)
 
 	// The build-staleness check belongs to the mount: a workspace coming up
-	// against a shim older than the deployed build is bounced onto it now,
-	// rather than discovering the mismatch mid-turn.
+	// against a shim older than the installed build goes to the bounce
+	// registry now — bounced at once when free, when its work ends otherwise —
+	// rather than discovering the mismatch mid-turn. The mount never waits on
+	// the bounce.
 	reportOpenStage(progress, OpenStageCheckingBuild)
-	if err := v.deps.Rollout.RelaunchShim(ctx, ws, rollout.ReasonBuildStale); err != nil {
-		// A staleness bounce that will not run is a WARNING, not a failed
-		// mount: the session is up and usable on the older build.
-		log.Warn(opOpen, "the build-staleness check did not bounce the shim", dlog.Context{"cause": err.Error()})
+	check, err := v.deps.Rollout.CheckStaleness(ctx, ws, false)
+	switch {
+	case err != nil:
+		// NOT A FAILED MOUNT: the session is up and usable on the build it
+		// has. The judgement that could not be made is the rollout's own loud
+		// record too.
+		log.Error(opOpen, "the build-staleness check could not judge the shim", dlog.Context{"cause": err.Error()})
+	case check.Stale:
+		log.Info(opOpen, "the shim runs an older build; it went to the bounce registry", dlog.Context{
+			"reported_build": check.Reported, "installed_build": check.Installed,
+			"bounce_now": check.Bounce.Now, "skipped": check.Skipped,
+		})
+	default:
+		log.Debug(opOpen, "the shim runs the installed build", nil)
 	}
 
 	log.Info(opOpen, "opened the workspace", dlog.Context{"dir": record.Dir})

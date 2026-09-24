@@ -16,6 +16,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/account"
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
@@ -760,6 +761,7 @@ type fakeRollout struct {
 	mu          sync.Mutex
 	relaunches  []rolloutCall
 	relaunchErr error
+	checkErr    error
 	reloads     []ids.WorkspaceID
 	reloadErr   error
 	// done fires once per finished relaunch. The restart verb ACCEPTS and
@@ -771,17 +773,34 @@ type fakeRollout struct {
 type rolloutCall struct {
 	WS     ids.WorkspaceID
 	Reason rollout.RelaunchReason
+	Force  bool
 }
 
-func (r *fakeRollout) RelaunchShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason) error {
+// BounceShim records the bounce and completes it on a goroutine of its own,
+// as the registry does: with relaunchErr as the bounce's outcome.
+func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
-	r.relaunches = append(r.relaunches, rolloutCall{ws, reason})
+	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
 	err := r.relaunchErr
 	r.mu.Unlock()
-	if err != nil {
-		r.signal()
-	}
-	return err
+	go func() {
+		if done != nil {
+			done(err)
+		}
+		if err != nil {
+			r.signal()
+		}
+	}()
+	return bounce.Decision{Now: true, Forced: force}, nil
+}
+
+// CheckStaleness records the mount's staleness check as a build-stale call,
+// failing with checkErr.
+func (r *fakeRollout) CheckStaleness(_ context.Context, ws ids.WorkspaceID, force bool) (rollout.StaleCheck, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: rollout.ReasonBuildStale, Force: force})
+	return rollout.StaleCheck{}, r.checkErr
 }
 
 func (r *fakeRollout) ReloadWebapp(_ context.Context, ws ids.WorkspaceID) error {
@@ -1807,6 +1826,9 @@ func (s *fakeSurfaces) Evict(dir string) error {
 	s.evicted = append(s.evicted, dir)
 	return nil
 }
+
+// Retire implements dlog.Surfaces; no workspace verb retires a directory.
+func (s *fakeSurfaces) Retire(dir string) error { return nil }
 
 // FixtureMintedName is the name the fixture's naming call answers. It is the
 // SHAPE a real answer has — at most three lowercase hyphenated words — and it

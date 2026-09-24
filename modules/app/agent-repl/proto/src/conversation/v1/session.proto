@@ -56,10 +56,9 @@ message SessionStarted {
 
 // The shim and the SDK it drives. Fixed for the process; stated once.
 message SessionRuntime {
-  // The shim's build commit. THE STALENESS-BOUNCE CARRIER: the daemon
-  // compares this against its current deploy stamp and relaunches a
-  // stale surviving shim at freeness (the rollout's build-staleness
-  // bounce).
+  // The shim's build: the content hash of its bundle, the same value
+  // SessionDiagnostics.shim_build reports on every watch (which is the
+  // staleness authority, because it is reported before any session exists).
   string shim_build_sha = 1;
   // The vendor SDK package version the shim embeds.
   string sdk_version = 2;
@@ -551,6 +550,15 @@ message SessionDiagnostics {
   // closed, oldest first. Kept so a daemon that asks after the fact still
   // learns what was lost.
   repeated SessionDegradedWindow degraded_windows = 3;
+  // THE BUILD THIS SHIM PROCESS RUNS: the content hash (lowercase hex SHA-256)
+  // of the bundle it was spawned from, as its spawner stated it. REQUIRED on
+  // every frame. It rides the diagnostics because diagnostics are the opening
+  // frame of EVERY WatchSession — an inert shim with no session, and a
+  // survivor a new daemon adopts, report it the moment they are attached,
+  // which SessionRuntime (stated only once a session starts) cannot. The
+  // daemon's deploy compares it against the freshly built bundle's hash and
+  // bounces a shim that differs; a frame without it is a malformed frame.
+  string shim_build = 4;
 }
 
 // Nothing is wrong with the shim itself.

@@ -368,21 +368,6 @@ func TestRaiseColdGateRefusesWithoutColdFacts(t *testing.T) {
 	}
 }
 
-// TestSessionBuildSHAReportsAnUnknownWorkspace covers the staleness check on a
-// workspace whose session never started: nothing states a build.
-func TestSessionBuildSHAReportsAnUnknownWorkspace(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-
-	// Act
-	_, known := f.fleet.SessionBuildSHA("ws-1")
-
-	// Assert
-	if known {
-		t.Fatal("SessionBuildSHA answered a build for a workspace with no session")
-	}
-}
-
 // TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts covers the seam the
 // host stream's HostSessionExisting arm is composed from.
 func TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts(t *testing.T) {
@@ -882,5 +867,44 @@ func TestKillSessionRecordsTheUnansweredKillByWhoOrderedIt(t *testing.T) {
 			}
 			t.Fatalf("records = %+v, want the unanswered kill recorded at %s", f.log.logger.Records()[before:], tt.wantLevel)
 		})
+	}
+}
+
+func TestPrelaunchStampsTheSpawnWithTheBundleItHolds(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	heldDuringSpawn := false
+	f.supervisor.onSpawn = func() { heldDuringSpawn = f.bundle.holding() }
+
+	// Act
+	if _, err := f.fleet.Prelaunch(context.Background(), ws); err != nil {
+		t.Fatalf("Prelaunch: %v", err)
+	}
+
+	// Assert
+	if got := f.supervisor.spawns[0].ShimBuildSHA; got != "installed-build" {
+		t.Fatalf("prelaunch build = %q, want the bundle's own", got)
+	}
+	if !heldDuringSpawn || f.bundle.holding() {
+		t.Fatalf("held during the spawn = %v, still held after = %v; want held across it and released after", heldDuringSpawn, f.bundle.holding())
+	}
+}
+
+func TestPrelaunchRefusesAnUnresolvableBundle(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	f.bundle.err = errors.New("main.js does not exist and SHIM_BUILD_SHA is unset")
+
+	// Act
+	_, err := f.fleet.Prelaunch(context.Background(), ws)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Prelaunch() = nil error, want the unresolvable bundle refused")
+	}
+	if f.supervisor.spawnAttempts != 0 {
+		t.Fatalf("spawn attempts = %d, want none", f.supervisor.spawnAttempts)
 	}
 }

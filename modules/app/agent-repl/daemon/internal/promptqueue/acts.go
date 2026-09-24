@@ -54,6 +54,11 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 // somethingIsAhead reports whether a turn is running or a prompt is standing in
 // the path, which is what an act must queue behind.
 func (q *queue) somethingIsAhead(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	// A BOUNCE IS AHEAD OF EVERYTHING: the act applies to the new shim, and
+	// the bounce's finish drains the acts before any prompt.
+	if q.isDraining(ws) {
+		return true, nil
+	}
 	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
 		return true, nil
 	}

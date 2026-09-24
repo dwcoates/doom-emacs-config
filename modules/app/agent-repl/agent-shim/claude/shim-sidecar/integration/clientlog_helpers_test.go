@@ -62,8 +62,8 @@ func startFakeClientLog(t *testing.T, stateDir, globalLogPath string, roots []st
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure, fake.handle))
 	fake.server = &http.Server{Handler: mux}
 	if err := os.WriteFile(filepath.Join(stateDir, "daemon.addr"), []byte(listener.Addr().String()+"\n"), 0o600); err != nil {
-		listener.Close()
-		t.Fatalf("publish fake daemon.addr: %v", err)
+		closeErr := listener.Close()
+		t.Fatalf("publish fake daemon.addr: %v (closing the listener afterward: %v)", err, closeErr)
 	}
 	clientLogsByGlobalPath.Store(globalLogPath, fake)
 	go func() { _ = fake.server.Serve(listener) }()

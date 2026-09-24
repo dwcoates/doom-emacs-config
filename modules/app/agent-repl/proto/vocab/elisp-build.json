@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "THE ELISP BUILD ALGORITHM, held to one answer in two languages (WatchDaemonRequest.elisp_build).",
+    "Emacs computes it from the bytes it loaded (config.el's agent-repl--load-module); the daemon computes it from the checkout.",
+    "Each case lists the modules in config.el's load order; a null content is a module the loader names whose file is absent.",
+    "Contents are written as UTF-8 bytes. want = sha256 hex of the lines '<name>\\t<sha256 hex of the file bytes>\\n' in order.",
+    "Asserted by daemon/internal/buildid (Go) and lisp/test-elisp-build.el (ERT)."
+  ],
+  "cases": [
+    {
+      "name": "two modules in load order",
+      "modules": [
+        {
+          "name": "core",
+          "content": ";;; core.el\n(provide 'agent-repl-core)\n"
+        },
+        {
+          "name": "status",
+          "content": ";;; status.el\n(defvar agent-repl--x 1)\n"
+        }
+      ],
+      "want": "4f1cf57208e44c4bfec171e76ab8a0f1daf22dcc39d8cd0651c9a51a659c8570"
+    },
+    {
+      "name": "the same files in the other order hash differently",
+      "modules": [
+        {
+          "name": "status",
+          "content": ";;; status.el\n(defvar agent-repl--x 1)\n"
+        },
+        {
+          "name": "core",
+          "content": ";;; core.el\n(provide 'agent-repl-core)\n"
+        }
+      ],
+      "want": "9b45f4ddeadc95d605d88f593f5a01ba1228480f6f1aa3b3f9cb9a92999f8b03"
+    },
+    {
+      "name": "a module the loader names with no file contributes nothing",
+      "modules": [
+        {
+          "name": "core",
+          "content": ";;; core.el\n(provide 'agent-repl-core)\n"
+        },
+        {
+          "name": "ghost",
+          "content": null
+        },
+        {
+          "name": "status",
+          "content": ";;; status.el\n(defvar agent-repl--x 1)\n"
+        }
+      ],
+      "want": "4f1cf57208e44c4bfec171e76ab8a0f1daf22dcc39d8cd0651c9a51a659c8570"
+    },
+    {
+      "name": "non-ASCII bytes are hashed as the file's bytes",
+      "modules": [
+        {
+          "name": "glyphs",
+          "content": ";; ⟢ — tree glyphs ├── └──\n"
+        }
+      ],
+      "want": "01e4dc62306141012b5b3fa33aa6e449f3616e74360ceba279ad27f86be5e89a"
+    },
+    {
+      "name": "no modules is the hash of nothing",
+      "modules": [],
+      "want": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

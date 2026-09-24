@@ -686,12 +686,12 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 	// called and the orderly exit itself logs nothing above DEBUG.
 }
 
-// ---- Reload webapp (webapp-only rollout) ----
+// ---- Reload webapp (a deploy that finds only the webapp out of date) ----
 
 func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 	t.Parallel()
-	// Arrange: the merge target is the daemon's own checkout; a landed
-	// commit touching only the webapp subsystem classifies as webapp-only.
+	// Arrange: the merge target is the daemon's own checkout, and the deploy
+	// its landing runs finds only the webapp out of date.
 	selfRepo, d := drainSelfRepoDaemon(t)
 	f := drainOpenWorkspace(t, d)
 	host := d.WatchHost(f.ws)
@@ -703,15 +703,14 @@ func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
 
 	// Act
-	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/webapp/src/App.tsx")
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleWebapp)
 
 	// Assert
 	harness.AwaitView(t, d.Ctx(), host, "reload_webapp", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetReloadWebapp() != nil
 	})
-	// A single-subsystem (webapp-only) landed range classifies cleanly and the
-	// harness's own fake deploy script succeeds, so rollout.Trigger
-	// (internal/rollout/trigger.go) never reaches its opClassify/opDeploy WARNs.
+	// The staged build succeeds and every other component is current, so the
+	// deploy records nothing above INFO.
 }
 
 // ---- Handover ----
@@ -733,7 +732,7 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 
 	// Act: land a commit on the daemon's own checkout to fire the self-merge
 	// rollout.
-	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 
 	// Assert: the announcement names the successor.
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
@@ -861,7 +860,7 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 	daemonStream := d.WatchDaemonStream()
 
 	// Act: fire the handover while the turn is still running.
-	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
@@ -889,6 +888,13 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 
 	// Assert: the two held prompts drain FIFO onto the adopted (running) shim.
 	req1 := f.shim.ExpectStartTurn()
+	// ONE TURN AT A TIME: the third prompt was held for the running turn's
+	// end, so it waits for the second's end on the successor exactly as it
+	// would have on the incumbent.
+	if got := f.shim.Count(harness.RPCStartTurn); got != 2 {
+		t.Fatalf("StartTurn count = %d while the second prompt's turn runs, want 2 (the third waits for it)", got)
+	}
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 	req2 := f.shim.ExpectStartTurn()
 	if text(req1.GetSaid()) != "second" || text(req2.GetSaid()) != "third" {
 		t.Fatalf("held intake drained as (%q, %q), want (\"second\", \"third\") in order", text(req1.GetSaid()), text(req2.GetSaid()))
@@ -922,7 +928,7 @@ func TestASuccessorDoesNotAdoptABusyWorkspaceBeforeTheIncumbentTransfersIt(t *te
 			}
 			f.shim.ExpectStartTurn()
 			daemonStream := d.WatchDaemonStream()
-			drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+			drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 			announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 				return r.GetShutdownAnnounced() != nil
 			}).GetShutdownAnnounced()
@@ -988,7 +994,7 @@ func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
 			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
 		},
-		// This test's own drainTriggerRollout call boots a real successor
+		// This test's own drainTriggerDeploy call boots a real successor
 		// within THIS daemon's one context (see drainSelfRepoDaemon), so it
 		// needs the same longer, justified bound.
 		Timeout: harness.HandoverChainTimeout,
@@ -1007,17 +1013,28 @@ func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
 	incumbentLog := d.RunLogPath()
 
 	// Act: hand over while the turn is still in flight, and never end it.
-	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 
 	// Assert: the holdout is named in a periodic warning that repeats.
 	second := d.AwaitLogRecord(incumbentLog, "the second holdout warning", func(r harness.LogRecord) bool {
-		return r.PID == d.PID() && r.Operation == "daemon.rollout.transfer" && strings.ToLower(r.Level) == "warn" &&
-			r.Context["workspace"] == f.ws.GetId() && numeric(r.Context["warnings"]) >= 2
+		return r.PID == d.PID() && r.Operation == "daemon.rollout.handover" && strings.ToLower(r.Level) == "warn" &&
+			namesHoldout(r.Context["holdouts"], f.ws.GetId()) && numeric(r.Context["warnings"]) >= 2
 	})
 	if got := second.Context["cadence"]; got != "25ms" {
 		t.Fatalf("the holdout warning's cadence = %v, want the 25ms the knob set", got)
 	}
-	d.ExpectWarnings("daemon.rollout.transfer")
+	d.ExpectWarnings("daemon.rollout.handover")
+}
+
+// namesHoldout reports whether a JSON-decoded holdout list names ws.
+func namesHoldout(v any, ws string) bool {
+	list, _ := v.([]any)
+	for _, item := range list {
+		if item == ws {
+			return true
+		}
+	}
+	return false
 }
 
 // numeric reads a JSON-decoded log context number, which arrives as float64.
@@ -1038,7 +1055,7 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	daemonStream := d.WatchDaemonStream()
 
 	// Act
-	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
@@ -1091,7 +1108,7 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	daemonStream := d.WatchDaemonStream()
 
 	// Act: fire the handover with no web stream ever opened.
-	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
@@ -1301,16 +1318,13 @@ func drainOpenWorkspace(t *testing.T, d *harness.Daemon) *fixture {
 	return f
 }
 
-// drainTriggerRollout lands one commit touching the given path on the
-// daemon's own checkout (selfRepo), which fires rollout.Trigger classified
-// by that path's subsystem prefix.
 // drainSelfRepoDaemon starts a daemon whose OWN checkout is a fresh fake
 // repository, with a PASSING test gate.
 //
-// The gate matters: the rollout fires only off a merge that LANDED, and a
-// merge whose gate fails opens the fixes tab instead. Without the override the
-// gate runs the repository's own bin/test-all.sh, which a fake repository does
-// not have, and every rollout trigger died at exit 127.
+// The gate matters: the deploy runs only off a merge that LANDED, and a merge
+// whose gate fails opens the fixes tab instead. Without the override the gate
+// runs the repository's own bin/test-all.sh, which a fake repository does not
+// have, and every landing died at exit 127.
 func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
@@ -1321,7 +1335,7 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 		SelfRepo: selfRepo.Dir,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 		// Every caller of this fixture drives a real self-reload handover
-		// (drainTriggerRollout): a second real claude-repld boots and adopts
+		// (drainTriggerDeploy): a second real claude-repld boots and adopts
 		// every workspace within THIS daemon's one context, never a fresh one
 		// of its own, so it gets HandoverChainTimeout rather than the tighter
 		// single-boot default.
@@ -1330,12 +1344,17 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	return selfRepo, d
 }
 
-func drainTriggerRollout(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo, path string) {
+// drainTriggerDeploy stages a deploy build that changes one component, then
+// lands one commit on the daemon's own checkout (selfRepo): the landing runs
+// the daemon's ONE deploy for it, which finds that component out of date.
+func drainTriggerDeploy(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo, build harness.DeployBuild) {
 	t.Helper()
+	d.StageDeployBuild(build)
+	path := "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
 	// The trigger workspace is CREATED, never merely registered: a merge runs
 	// off the creation job's recorded geometry, and a registered worktree has
 	// none, so a registered one is refused with no_layout_facts and no merge
-	// ever lands to trigger the rollout.
+	// ever lands to run the deploy.
 	repoRef := mergeRepositoryRef(t, d, selfRepo)
 	f := mergeCreateChild(t, d, repoRef, "trigger", "trigger work", nil)
 	sha := writeCommit(t, selfRepo, f.ws.GetDir(), path, "trigger\n")

@@ -57,6 +57,11 @@ message DaemonUnhealthy {
 message DaemonFault {
   // The dynamic account, verbatim — supplements the kind, never replaces it.
   string detail = 1;
+  // Tag 4 / `deploy_script_failed` is RETIRED (owner ruling, 2026-09-23): it
+  // named a failed `bin/deploy-all.sh`, and the daemon owns deploys now —
+  // there is no deploy script left to fail.
+  reserved 4;
+  reserved "deploy_script_failed";
   // Kinds derived from the daemon's real fault sites (landing 4, 2026-08-29).
   oneof kind {
     // A workspace's adoption window closed before the joining daemon
@@ -64,8 +69,6 @@ message DaemonFault {
     DaemonFaultAdoptionWindowExpired adoption_window_expired = 2;
     // A log sink can no longer be written.
     DaemonFaultLogSinkPoisoned log_sink_poisoned = 3;
-    // The deploy script failed.
-    DaemonFaultDeployScriptFailed deploy_script_failed = 4;
     // Spawning the successor daemon failed.
     DaemonFaultSuccessorSpawnFailed successor_spawn_failed = 5;
     // The prompts directory is not on disk.
@@ -93,10 +96,6 @@ message DaemonFaultDaemonStateUnreadable {
 message DaemonFaultLogSinkPoisoned {
   // Which sink.
   string sink = 1;
-}
-message DaemonFaultDeployScriptFailed {
-  // The script's own account of the failure.
-  string detail = 1;
 }
 message DaemonFaultSuccessorSpawnFailed {
   // The spawn's own account of the failure.

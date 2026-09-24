@@ -14,6 +14,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -219,6 +220,17 @@ type Queue interface {
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
 	// OnLeaseChanged re-evaluates every hold against the new lease policy.
 	OnLeaseChanged(ws ids.WorkspaceID)
+	// RequestBounce asks the per-workspace BOUNCE REGISTRY to replace what
+	// serves a workspace (bounce.go): at once when nothing is in flight or the
+	// request is forced, else when the workspace's work ends. The queue owns
+	// the decision because it owns dispatch: both are taken under one
+	// per-workspace lock, and a decided bounce DRAINS the workspace — nothing is
+	// dispatched until it has finished, and what was queued is then delivered
+	// to the new shim. Queued prompts never block a bounce.
+	RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error)
+	// OnFree is the watcher's freeness edge: the last turn or detached item
+	// ended. It takes a registered bounce.
+	OnFree(ws ids.WorkspaceID)
 	// Reviving reports whether a background revival this queue started for
 	// the workspace is still in flight: from before its bring-up spawns a shim
 	// until the prompt it holds has been handed to that shim. The idle sweep
@@ -292,6 +304,9 @@ type Deps struct {
 	// the person attached. REQUIRED -- a nil default here is what made an
 	// attached image invisible for a whole live session.
 	ResolveImage feed.ImageResolver
+	// Lifetime is the daemon's serving lifetime, which a bounce the registry
+	// runs is bounded by. nil leaves it bounded by the process alone.
+	Lifetime context.Context
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
 	// After schedules the wait before each re-drive of a StartTurn the shim
@@ -371,6 +386,9 @@ type WatcherFunc func(ws ids.WorkspaceID) (Watcher, bool)
 type Watcher interface {
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
+	// LiveWork is the live detached work: what a bounce registered on the
+	// workspace waits on besides the turn.
+	LiveWork() sessionwatcher.LiveWorkSet
 	// SetMainAgent names the session's main agent from an accepted turn.
 	SetMainAgent(agent *conversationv1.AgentId)
 	// OnTurnOpening records a turn BEFORE StartTurn is dispatched, so a
