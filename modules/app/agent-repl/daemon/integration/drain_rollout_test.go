@@ -475,10 +475,6 @@ func TestAScheduledDrainDoesNotWaitOnADetachedSubagentThatHasSettled(t *testing.
 	f := newOpened(t, harness.Opts{})
 	expectSessionKillRecords(f.d)
 	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
-	// THE SCHEDULE'S OWN HOLD, SEEN TWICE: Schedule() takes the drain hold on
-	// this workspace when the schedule is armed and fire() takes it again at
-	// the deadline, which is the state fire() explicitly anticipates.
-	f.d.ExpectWarnings("daemon.wsm.acquire_lease", "daemon.drain.fire")
 	f.shim.ExpectStartSession()
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
@@ -649,12 +645,6 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 		t.Fatalf("SubmitPrompt = %v, want a minted TurnId", resp)
 	}
 	f.shim.ExpectStartTurn()
-	// THE SCHEDULE'S OWN HOLD, SEEN TWICE. Schedule() takes the drain hold on
-	// every workspace the instant it is armed, and fire() takes it again when
-	// the deadline passes; the second attempt finds the first one standing,
-	// which is the state fire() explicitly anticipates ("the drain will wait
-	// on it as it stands") and the state client records as a refused write.
-	f.d.ExpectWarnings("daemon.wsm.acquire_lease", "daemon.drain.fire")
 
 	// Act
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
