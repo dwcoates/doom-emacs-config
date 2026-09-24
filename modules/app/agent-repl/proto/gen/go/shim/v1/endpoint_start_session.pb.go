@@ -589,17 +589,19 @@ type StartSessionFailure_AlreadyStarted struct {
 }
 
 type StartSessionFailure_ConversationOwned struct {
-	// Another shim holds this conversation's kernel lock.
+	// Another shim holds this conversation's kernel lock: the holder exited
+	// with the code reserved for "already held". Nothing else answers this.
 	ConversationOwned *StartSessionConversationOwned `protobuf:"bytes,6,opt,name=conversation_owned,json=conversationOwned,proto3,oneof"`
 }
 
 type StartSessionFailure_LockHolderUnavailable struct {
-	// THIS shim could not spawn its own kernel-lock holder (`shim-lock`), so
-	// no claim was ever attempted and NOBODY is known to own the
+	// THIS shim's own kernel-lock holder (`shim-lock`) FAILED — it could not
+	// be spawned, exited or was killed before holding the lock, answered the
+	// wrong line, or never answered — so NOBODY is known to own the
 	// conversation. Distinct from conversation_owned, which is a real
-	// ownership conflict: this one is a defect in this shim's deployment (a
-	// missing or unexecutable binary), and naming it as an ownership conflict
-	// sends the reader hunting for a second process that does not exist.
+	// ownership conflict: this one is a defect in this shim's deployment, and
+	// naming it as an ownership conflict sends the reader hunting for a second
+	// process that does not exist.
 	LockHolderUnavailable *StartSessionLockHolderUnavailable `protobuf:"bytes,7,opt,name=lock_holder_unavailable,json=lockHolderUnavailable,proto3,oneof"`
 }
 
@@ -761,11 +763,8 @@ func (*StartSessionConversationOwned) Descriptor() ([]byte, []int) {
 
 type StartSessionLockHolderUnavailable struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The lock-holder binary the shim tried to spawn.
-	Binary string `protobuf:"bytes,1,opt,name=binary,proto3" json:"binary,omitempty"`
-	// The operating system's account of why the spawn failed (e.g.
-	// `spawn /path/shim-lock ENOENT`).
-	OsError       string `protobuf:"bytes,2,opt,name=os_error,json=osError,proto3" json:"os_error,omitempty"`
+	// Which holder failed, and how. Always set.
+	Failure       *v1.LockHolderFailure `protobuf:"bytes,3,opt,name=failure,proto3" json:"failure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -800,18 +799,11 @@ func (*StartSessionLockHolderUnavailable) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *StartSessionLockHolderUnavailable) GetBinary() string {
+func (x *StartSessionLockHolderUnavailable) GetFailure() *v1.LockHolderFailure {
 	if x != nil {
-		return x.Binary
+		return x.Failure
 	}
-	return ""
-}
-
-func (x *StartSessionLockHolderUnavailable) GetOsError() string {
-	if x != nil {
-		return x.OsError
-	}
-	return ""
+	return nil
 }
 
 var File_shim_v1_endpoint_start_session_proto protoreflect.FileDescriptor
@@ -852,10 +844,9 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x1dStartSessionVendorStartFailed\"\x1c\n" +
 	"\x1aStartSessionUnknownSession\"\x1c\n" +
 	"\x1aStartSessionAlreadyStarted\"\x1f\n" +
-	"\x1dStartSessionConversationOwned\"V\n" +
-	"!StartSessionLockHolderUnavailable\x12\x16\n" +
-	"\x06binary\x18\x01 \x01(\tR\x06binary\x12\x19\n" +
-	"\bos_error\x18\x02 \x01(\tR\aosErrorB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x1dStartSessionConversationOwned\"\x7f\n" +
+	"!StartSessionLockHolderUnavailable\x12<\n" +
+	"\afailure\x18\x03 \x01(\v2\".conversation.v1.LockHolderFailureR\afailureJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x06binaryR\bos_errorB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_start_session_proto_rawDescOnce sync.Once
@@ -888,6 +879,7 @@ var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*v1.SessionColdRemediation)(nil),         // 14: conversation.v1.SessionColdRemediation
 	(*v1.SessionStarted)(nil),                 // 15: conversation.v1.SessionStarted
 	(*v1.SessionCold)(nil),                    // 16: conversation.v1.SessionCold
+	(*v1.LockHolderFailure)(nil),              // 17: conversation.v1.LockHolderFailure
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	1,  // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
@@ -905,11 +897,12 @@ var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	9,  // 12: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
 	10, // 13: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
 	11, // 14: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	17, // 15: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }

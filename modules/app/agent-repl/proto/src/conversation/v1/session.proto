@@ -832,3 +832,65 @@ message SessionContextApiUsage {
   int64 cache_creation_input_tokens = 3;
   int64 cache_read_input_tokens = 4;
 }
+
+// ---- The kernel-lock helper: how a session start's claim failed ----
+
+// HOW THE SHIM'S OWN KERNEL-LOCK HOLDER FAILED, so a claim that was never
+// completed says what happened instead of naming an owner.
+//
+// A session start takes two kernel locks through a child holder
+// (`shim-lock <path>`), which answers one `locked` line once it holds the
+// flock, or exits 3 when another process already holds it. Exit 3 is a GENUINE
+// OWNER and is `conversation_owned`, never this. Every other outcome is this
+// helper failing, and then NOBODY IS KNOWN TO OWN THE CONVERSATION: naming it as
+// ownership sends the reader hunting for a second process that does not exist.
+//
+// Declared here rather than beside either refusal arm because two surfaces
+// carry it whole: the shim's StartSession refusal and the daemon's relay of it
+// on OpenWorkspace, which a client decodes.
+message LockHolderFailure {
+  // The lock-holder binary the shim ran.
+  string binary = 1;
+  // HOW IT FAILED. THE ARM IS THE ACCOUNT, and each carries what that
+  // account needs: the operating system's error, the exit code, the signal,
+  // or the line. Always set.
+  oneof how {
+    // The holder could not be spawned at all (a missing or unexecutable
+    // binary), so no claim was attempted.
+    LockHolderSpawnFailed spawn_failed = 2;
+    // The holder exited before it held the lock, with a code other than the
+    // one reserved for "already held".
+    LockHolderExited exited = 3;
+    // The holder was killed by a signal before it held the lock.
+    LockHolderSignaled signaled = 4;
+    // The holder answered a first line other than `locked`; the shim killed it.
+    LockHolderMisanswered misanswered = 5;
+    // The holder neither answered nor exited inside the shim's bound; the shim
+    // killed it.
+    LockHolderSilent silent = 6;
+  }
+}
+message LockHolderSpawnFailed {
+  // The operating system's account (e.g. `spawn /path/shim-lock ENOENT`).
+  string os_error = 1;
+}
+message LockHolderExited {
+  // The exit code. Never 3, which is a genuine owner.
+  int32 code = 1;
+  // What the holder wrote to stderr, trimmed. Empty when it wrote nothing.
+  string stderr = 2;
+}
+message LockHolderSignaled {
+  // The signal's name, as the operating system reports it (e.g. `SIGSEGV`).
+  string signal = 1;
+  // What the holder wrote to stderr, trimmed. Empty when it wrote nothing.
+  string stderr = 2;
+}
+message LockHolderMisanswered {
+  // The first line the holder wrote, trimmed.
+  string line = 1;
+}
+message LockHolderSilent {
+  // How long the shim waited for an answer, in milliseconds.
+  uint32 timeout_ms = 1;
+}
