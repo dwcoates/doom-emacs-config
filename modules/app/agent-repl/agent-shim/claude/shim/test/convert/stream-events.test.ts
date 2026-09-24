@@ -420,7 +420,7 @@ describe("a tool_use block the vendor did not fully name", () => {
     );
 
     const item = activityOf(entries[0])?.item;
-    const result = item?.case === "unmodeled" ? item.value.result : undefined;
+    const result = item?.case === "mcpToolCall" ? item.value.result : undefined;
     expect(result?.case === "start" ? result.value.arguments : undefined).toEqual({});
   });
 });

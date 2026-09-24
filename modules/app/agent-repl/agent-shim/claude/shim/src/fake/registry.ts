@@ -103,7 +103,7 @@ export const ALIASES: Readonly<Record<string, string>> = {
   "ide-diagnostics-after-edit": "ide-diagnostics",
   "identity-rotation-clear": "rotate",
   "mcp-server-healths": "mcp-all",
-  "mcp-unmodeled-tool": "unmodeled",
+  "mcp-unmodeled-tool": "mcp-tool",
   "model-changed": "model-fallback",
   "permission-mode-changed": "perm-allow-standing-mode",
   "permission-undecidable-parked": "perm-hold",

@@ -19,9 +19,11 @@
  * `originalFile` and `content`, so the shim diffs those two itself — the
  * PRODUCER diffs, and does it once.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, isMessage, toJson, type JsonObject } from "@bufbuild/protobuf";
+import { StructSchema } from "@bufbuild/protobuf/wkt";
 import { conversationv1 } from "../../proto.js";
 import { settledAt, toolFailure } from "../entries.js";
+import { rawStruct } from "../residue.js";
 import type { PendingCall, ToolOutcome } from "../tool-calls.js";
 
 // ---------------------------------------------------------------------------
@@ -102,6 +104,40 @@ export function resultText(content: conversationv1.ToolResultContent | undefined
   return content.blocks
     .map((block) => (block.block.case === "text" ? block.block.value.text : ""))
     .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Untyped calls: a tool whose schema the producer does not hold
+// ---------------------------------------------------------------------------
+
+/**
+ * The call's input as the untyped `Struct` an untyped tool's arm carries, or
+ * `undefined` when it cannot be represented as one (the caller records that).
+ *
+ * `rawStruct` is the one place a vendor record is checked for JSON
+ * representability, and its answer is normalized to the generated field's JSON
+ * form here — a `Struct` and its JSON object are the same value in two
+ * spellings, and this accepts whichever the helper hands back.
+ */
+export function untypedArguments(call: PendingCall): JsonObject | undefined {
+  const raw = rawStruct(call.input);
+  if (raw === undefined) return undefined;
+  return isMessage(raw, StructSchema) ? toJson(StructSchema, raw) : raw;
+}
+
+/**
+ * What an untyped tool returned, for an arm whose content is NON-OPTIONAL: when
+ * the vendor returned nothing at all an EMPTY content is the honest value — the
+ * call did settle, and the frame says the tool answered with no blocks rather
+ * than pretending it never answered. `returned` says which it was, so the
+ * caller can record an empty answer.
+ */
+export function returnedContent(outcome: ToolOutcome): {
+  readonly content: conversationv1.ToolResultContent;
+  readonly returned: boolean;
+} {
+  if (outcome.content !== undefined) return { content: outcome.content, returned: true };
+  return { content: create(conversationv1.ToolResultContentSchema, {}), returned: false };
 }
 
 // ---------------------------------------------------------------------------

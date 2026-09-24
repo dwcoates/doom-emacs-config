@@ -169,11 +169,19 @@ describe("AgentUnmodeled means a genuinely unknown tool", () => {
     expect(unmodeledNames(scenario).filter((name) => EXEMPT_TOOLS.has(name))).toEqual([]);
   });
 
-  it("the MCP tool the captures exercised lands there", () => {
-    expect(unmodeledNames("mcp-unmodeled-tool")).toEqual([
-      "mcp__capture-probe__echo",
-      "mcp__capture-probe__slow",
-    ]);
+  it.each(WITH_UNMODELED)("%s never files an MCP server's tool as unmodeled", (scenario) => {
+    expect(unmodeledNames(scenario).filter((name) => name.startsWith("mcp__"))).toEqual([]);
+  });
+
+  it("the MCP tools the captures exercised are ordinary MCP tool calls", () => {
+    const byId = new Map(toolUses("mcp-unmodeled-tool").map((call) => [call.id, call.name]));
+    const names: string[] = [];
+    for (const entry of foldScenario("mcp-unmodeled-tool").entries) {
+      if (activityOf(entry)?.item.case !== "mcpToolCall") continue;
+      const name = byId.get(entry.upsertKey.replace(/^activity:/, ""));
+      if (name !== undefined && !names.includes(name)) names.push(name);
+    }
+    expect(names).toEqual(["mcp__capture-probe__echo", "mcp__capture-probe__slow"]);
   });
 
   it("an SDK tool with no conversation arm lands there", () => {

@@ -324,10 +324,10 @@ const ROWS: readonly ConformanceRow[] = [
   },
   {
     capture: "mcp-unmodeled-tool",
-    prompt: "!unmodeled",
-    golden: ["thinking", "response", "unmodeled"],
-    mock: ["thinking", "unmodeled", "response"],
-    // MODEL CHOICE: the run answered before its unmodeled call.
+    prompt: "!mcp-tool",
+    golden: ["thinking", "response", "mcpToolCall"],
+    mock: ["thinking", "mcpToolCall", "response"],
+    // MODEL CHOICE: the run answered before its MCP call.
     diverges: "MODEL CHOICE",
   },
   { capture: "model-changed", prompt: "!model-fallback", golden: ["thinking", "response"], mock: ["thinking", "response"] },
@@ -444,7 +444,7 @@ const ROWS: readonly ConformanceRow[] = [
     prompt: "!fail-structured-output",
     golden: ["thinking", "response", "unmodeled"],
     mock: ["thinking", "response"],
-    // MODEL CHOICE: the run's retries were around an unmodeled MCP call.
+    // MODEL CHOICE: the run's retries were around an unmodeled StructuredOutput call.
     diverges: "MODEL CHOICE",
     terminalsDiverge:
       "DECLARED, NOT CAPTURE-GROUNDED: the capture ended success.completed; the retries never exhausted (MANIFEST evidence gap)",

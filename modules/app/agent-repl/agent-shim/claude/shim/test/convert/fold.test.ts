@@ -443,7 +443,18 @@ describe("tool calls", () => {
     expect(output.entries).toHaveLength(0);
   });
 
-  it("makes an unknown tool an unmodeled unit, and only an unknown one", () => {
+  it("makes an unknown tool an unmodeled unit", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(
+      assistant("msg-unknown", [{ type: "tool_use", id: "toolu_u", name: "StructuredOutput", input: {} }]),
+      foldContext(),
+    );
+
+    expect(activityOf(output.entries[0])?.item.case).toBe("unmodeled");
+  });
+
+  it("makes an MCP server's tool an ordinary MCP tool call, never unmodeled", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(
@@ -453,10 +464,10 @@ describe("tool calls", () => {
       foldContext(),
     );
 
-    expect(activityOf(output.entries[0])?.item.case).toBe("unmodeled");
+    expect(activityOf(output.entries[0])?.item.case).toBe("mcpToolCall");
   });
 
-  it("resolves an MCP server by LOOKUP against the names the session knows", () => {
+  it("resolves an MCP tool's address by LOOKUP against the names the session knows", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(
@@ -464,12 +475,12 @@ describe("tool calls", () => {
       foldContext({ mcpServerNames: ["Slack"] }),
     );
 
-    const unmodeled = activityOf(output.entries[0])?.item.value as conversationv1.AgentUnmodeled;
-    const start = unmodeled.result.value as conversationv1.AgentUnmodeledStart;
-    expect(start.mcpServer).toBe("Slack");
+    const mcp = activityOf(output.entries[0])?.item.value as conversationv1.AgentMcpToolCall;
+    const start = mcp.result.value as conversationv1.AgentMcpToolCallStart;
+    expect(start.tool?.address?.server).toBe("Slack");
   });
 
-  it("leaves the MCP server unset when no known name matches, rather than guessing", () => {
+  it("leaves the MCP address unset when no known name matches, rather than guessing", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(
@@ -477,9 +488,9 @@ describe("tool calls", () => {
       foldContext({ mcpServerNames: ["Gmail"] }),
     );
 
-    const unmodeled = activityOf(output.entries[0])?.item.value as conversationv1.AgentUnmodeled;
-    const start = unmodeled.result.value as conversationv1.AgentUnmodeledStart;
-    expect(start.mcpServer).toBeUndefined();
+    const mcp = activityOf(output.entries[0])?.item.value as conversationv1.AgentMcpToolCall;
+    const start = mcp.result.value as conversationv1.AgentMcpToolCallStart;
+    expect(start.tool?.address).toBeUndefined();
   });
 
   it("relays a progress beat on a kind that declares the arm", () => {
