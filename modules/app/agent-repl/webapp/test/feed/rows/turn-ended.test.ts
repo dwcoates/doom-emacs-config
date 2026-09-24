@@ -8,7 +8,10 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  INTERRUPTED_SENTENCE,
   QUERY_CAUSE_WORDS,
+  TURN_ENDED_BUBBLE_CLASS,
+  TURN_ENDED_BUBBLE_SAYS_CLASS,
   TURN_ERROR_WAIT_ARMS,
   drawFeedTurnEnded,
   drawFeedTurnEndedErrored,
@@ -553,5 +556,86 @@ describe("drawFeedTurnEnded: the records of the turn's end", () => {
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-turn-error");
     expect(record.level.case).toBe("info");
+  });
+});
+
+/** An errored ending with this arm and headline. */
+function erroredEnding(arm: string, headline: string): FeedTurnEnded {
+  return ended({
+    case: "errored",
+    value: create(FeedTurnEndedErroredSchema, {
+      headline: { text: headline },
+      error: { case: arm as never, value: {} as never },
+    }),
+  });
+}
+
+describe("drawFeedTurnEnded: the ended-turn bubble (owner ruling 2026-09-24)", () => {
+  it("draws no bubble for a normal completed turn", () => {
+    // ACT
+    const el = drawFeedTurnEnded(ended({ case: "concluded", value: {} }), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`)).toBeNull();
+  });
+
+  it("draws a failed turn's bubble as a response bubble of the turn-ended variant", () => {
+    // ACT
+    const el = drawFeedTurnEnded(erroredEnding("internal", "the vendor failed"), contextWithRow(null));
+    // ASSERT
+    const bubble = el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`);
+    expect([bubble?.getAttribute("data-role"), bubble?.getAttribute("data-variant")]).toEqual([
+      "response",
+      "turn-ended",
+    ]);
+  });
+
+  it("states the daemon's headline in a failed turn's bubble", () => {
+    // ACT
+    const el = drawFeedTurnEnded(erroredEnding("internal", "the vendor failed"), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe("the vendor failed");
+  });
+
+  it("states the agent process's death in its bubble", () => {
+    // ACT
+    const el = drawFeedTurnEnded(
+      erroredEnding("agentProcessDied", "the agent process died, and the turn it was running ended with it"),
+      contextWithRow(null),
+    );
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(
+      "the agent process died, and the turn it was running ended with it",
+    );
+  });
+
+  it("states an interrupt in plain words in its bubble", () => {
+    // ACT
+    const el = drawFeedTurnEnded(ended({ case: "interrupted", value: {} }), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(INTERRUPTED_SENTENCE);
+  });
+
+  it("draws the bubble above the row's own line", () => {
+    // ACT
+    const el = drawFeedTurnEnded(ended({ case: "interrupted", value: {} }), contextWithRow(null));
+    // ASSERT
+    expect([...el.children].map((child) => child.classList.contains(TURN_ENDED_BUBBLE_CLASS))).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("updates the bubble in place on a re-push", () => {
+    // ARRANGE
+    const first = drawFeedTurnEnded(erroredEnding("internal", "first"), contextWithRow(null));
+    const bubble = first.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`);
+    const { ctx } = harness({});
+    // ACT
+    const second = drawFeedTurnEnded(
+      erroredEnding("internal", "second"),
+      rowContext(ctx, userPromptRow("p1", "hi"), { previous: first, findRowElement: () => null }),
+    );
+    // ASSERT
+    expect(second.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`)).toBe(bubble);
   });
 });

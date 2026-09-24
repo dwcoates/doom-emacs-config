@@ -674,6 +674,7 @@ export const TURN_ERROR_ARMS = [
   "executionError",
   "turnFailed",
   "stopHookPrevented",
+  "agentProcessDied",
 ] as const;
 export type TurnErrorArm = (typeof TURN_ERROR_ARMS)[number];
 
@@ -711,6 +712,7 @@ export const TURN_ERROR_HEADLINES: Record<TurnErrorArm, string> = {
   executionError: "the run broke while executing",
   turnFailed: "the turn ended abnormally",
   stopHookPrevented: "a Stop hook forbade the stop",
+  agentProcessDied: "the agent process died",
 };
 
 /** The vendor conversation the run's own terminals name as their context. */

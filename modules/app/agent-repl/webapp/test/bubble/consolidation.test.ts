@@ -47,6 +47,7 @@ const KINDS = [
   "feed/rows/agent-prompt.ts",
   "feed/rows/peer-message.ts",
   "feed/rows/separation.ts",
+  "feed/rows/turn-ended.ts",
   "tray/held-prompt.ts",
 ] as const;
 
