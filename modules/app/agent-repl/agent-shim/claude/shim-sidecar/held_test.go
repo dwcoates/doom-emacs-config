@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,7 +54,7 @@ func TestUnownedSpoolIsRetainedAcrossRescans(t *testing.T) {
 	}
 }
 
-func TestAgedUnownedSpoolIsIngestedAsResidue(t *testing.T) {
+func TestAnAgedUnownedSpoolIsNotRead(t *testing.T) {
 	// Arrange: a spool whose owner never arrives.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
@@ -65,18 +66,37 @@ func TestAgedUnownedSpoolIsIngestedAsResidue(t *testing.T) {
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
 
-	// Assert: an aged unowned spool is never dropped; its bytes go to residue.
-	watched, ok := h.sc.watchers[spool]
-	if !ok {
-		t.Fatal("an aged unclaimed spool was dropped instead of ingested as residue")
-	}
-	if watched.target.Kind != tail.KindResidueSpool {
-		t.Fatalf("kind = %s, want the residue spool kind", watched.target.Kind)
+	// Assert: nothing renders an unclaimed spool, so nothing reads it.
+	if _, watched := h.sc.watchers[spool]; watched {
+		t.Fatal("an aged unclaimed spool was tailed; nothing renders it")
 	}
 }
 
-func TestAgedUnownedSpoolKeepsBeingTailed(t *testing.T) {
-	// Arrange.
+func TestAnAgedUnownedSpoolWritesNothingToTheStore(t *testing.T) {
+	// Arrange: the spool keeps growing after its window lapsed, as a test log
+	// does.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1", "hello\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Act.
+	h.write(t, spool, "hello\nmore\n")
+	h.sc.pollAll()
+
+	// Assert: not a residue row, and not a cursor either.
+	if store.writeCalls != 0 {
+		t.Fatalf("an unclaimed spool cost %d store write(s), want none", store.writeCalls)
+	}
+}
+
+func TestALapsedSpoolIsReadFromItsStartOnceClaimed(t *testing.T) {
+	// Arrange: the window lapses first; the launch is read afterwards, as it
+	// is when a restart catches up on a backlog.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
 	if err := h.sc.beginCycle(); err != nil {
@@ -85,19 +105,21 @@ func TestAgedUnownedSpoolKeepsBeingTailed(t *testing.T) {
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
 
-	// Act: bytes appended after the demotion.
-	h.sc.pollAll()
-	before := h.sc.watchers[spool].tailer.Offset()
-	h.write(t, spool, "hello\nmore\n")
-	h.sc.pollAll()
+	// Act.
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.rescan()
 
-	// Assert: nothing appended later is lost either.
-	if got := h.sc.watchers[spool].tailer.Offset(); got <= before {
-		t.Fatalf("offset = %d, want it past %d (a demoted spool keeps being tailed)", got, before)
+	// Assert: it is claimed as the shell run it is, not left to residue.
+	watched, ok := h.sc.watchers[spool]
+	if !ok {
+		t.Fatal("a lapsed spool was not read once a launch claimed it")
+	}
+	if watched.target.Kind != tail.KindShellSpool {
+		t.Fatalf("kind = %s, want the shell spool it was claimed as", watched.target.Kind)
 	}
 }
 
-func TestAgedUnownedSpoolIsWarnedAboutOnce(t *testing.T) {
+func TestAnAgedUnownedSpoolIsStatedOnce(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
 	h.spoolFile(t, "b1", "hello\n")
@@ -112,23 +134,170 @@ func TestAgedUnownedSpoolIsWarnedAboutOnce(t *testing.T) {
 
 	// Assert.
 	if got := strings.Count(h.logText(), "spool unclaimed after"); got != 1 {
-		t.Fatalf("the demotion was stated %d times, want once", got)
+		t.Fatalf("the lapse was stated %d times, want once", got)
 	}
 }
 
-func TestAResidueSpoolNeedsNoOwner(t *testing.T) {
-	// Arrange: a spool whose task-id prefix already failed classification.
+func TestAnAgedUnownedSpoolStatesItsPathAndReason(t *testing.T) {
+	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	spool := h.spoolFile(t, "q1", "hello\n")
+	h.advance(time.Second)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.advance(time.Second)
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.rescan()
+	h.advance(UnownedSpoolWindow)
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert.
+	rec := h.requireOnce(t, "hold-expired", "info")
+	if got := ctxString(t, rec, "path"); got != spool {
+		t.Fatalf("path = %q, want %q", got, spool)
+	}
+	if got := ctxString(t, rec, "reason"); got != reasonSpoolUnclaimed {
+		t.Fatalf("reason = %q, want %q", got, reasonSpoolUnclaimed)
+	}
+}
+
+func TestAClaimedSpoolStatesTheClaim(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
 
-	// Assert: no owner would change what happens to it, so it is not held.
+	// Assert: the decision to read it names the file and the call.
+	rec := h.requireOnce(t, "spool-claim", "info")
+	if got := ctxString(t, rec, "path"); got != spool {
+		t.Fatalf("path = %q, want %q", got, spool)
+	}
+	if got := ctxString(t, rec, "activity_id"); got != "call-1" {
+		t.Fatalf("activity_id = %q, want call-1", got)
+	}
+}
+
+func TestSpoolsNothingRendersAreNeverRead(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(t *testing.T, h *harness) string
+		wantReason string
+	}{
+		{
+			name: "an unrecognized task-id prefix",
+			arrange: func(t *testing.T, h *harness) string {
+				return h.spoolFile(t, "q1", "hello\n")
+			},
+			wantReason: reasonUnrecognizedPrefix,
+		},
+		{
+			name: "an agent spool linking a transcript not written yet",
+			arrange: func(t *testing.T, h *harness) string {
+				return h.danglingAgentSpool(t, "a1")
+			},
+			wantReason: reasonTranscriptSymlink,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: claimed, so only the skip rule can keep it unread.
+			h := newHarness(t, &fakeStore{})
+			spool := tc.arrange(t, h)
+			h.sc.TaskSpawned(strings.TrimSuffix(filepath.Base(spool), ".output"), "call-1", "agent-1", "", true, "/workspace", "workspace-id", "session-1")
+
+			// Act.
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+
+			// Assert.
+			if _, watched := h.sc.watchers[spool]; watched {
+				t.Fatal("a spool nothing renders was tailed")
+			}
+			rec := h.requireOnce(t, "spool-skip", "info")
+			if got := ctxString(t, rec, "reason"); got != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", got, tc.wantReason)
+			}
+			if got := ctxString(t, rec, "path"); got != spool {
+				t.Fatalf("path = %q, want %q", got, spool)
+			}
+		})
+	}
+}
+
+func TestASkippedSpoolIsStatedOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.spoolFile(t, "q1", "hello\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: every rescan re-resolves every unwatched spool.
+	h.sc.rescan()
+
+	// Assert.
+	h.requireOnce(t, "spool-skip", "info")
+}
+
+func TestAnAgentSpoolThatIsItsOwnFileIsStillRead(t *testing.T) {
+	// Arrange: an a* spool that is NOT a link holds the only copy the reader
+	// can prove, so the skip rule leaves it to its claim.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "a1", promptLine+"\n")
+	h.sc.TaskSpawned("a1", "call-1", "agent-1", "", true, "/workspace", "workspace-id", "session-1")
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
 	if _, watched := h.sc.watchers[spool]; !watched {
-		t.Fatal("an unclassifiable spool was held instead of ingested")
+		t.Fatal("a claimed agent spool that is a regular file was not read")
+	}
+}
+
+func TestAnAgentSpoolThatCannotBeExaminedIsNotRead(t *testing.T) {
+	// Arrange: an agent spool target whose parent directory cannot be searched,
+	// so whether it is a link cannot be established.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "a1", "x\n")
+	dir := filepath.Dir(spool)
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	target := discover.Target{Path: spool, Kind: tail.KindAgentTranscript, TaskID: "a1"}
+
+	// Act.
+	_, _, skip, ok := h.sc.unrenderedSpool(target)
+
+	// Assert: not read this pass, and said so at warn.
+	if ok || skip {
+		t.Fatalf("ok=%t skip=%t, want the examination refused", ok, skip)
+	}
+	h.requireOnce(t, "spool-skip", "warn")
+}
+
+func TestAnAgentSpoolGoneBeforeItsExaminationIsNotRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	target := discover.Target{Path: filepath.Join(h.spool, "claude-501", "proj", "runtime-sess", "tasks", "a9.output"), Kind: tail.KindAgentTranscript, TaskID: "a9"}
+
+	// Act.
+	reason, _, skip, ok := h.sc.unrenderedSpool(target)
+
+	// Assert.
+	if !ok || !skip || reason != reasonSpoolVanished {
+		t.Fatalf("reason=%q skip=%t ok=%t, want a vanished spool skipped", reason, skip, ok)
 	}
 }
 
@@ -193,7 +362,7 @@ func TestStartupCatchUpSummarizesABacklogOfUnclaimedSpools(t *testing.T) {
 		t.Fatalf("beginCycle: %v", err)
 	}
 
-	// Act: the hold window lapses and the whole backlog demotes on one rescan.
+	// Act: the hold window lapses for the whole backlog on one rescan.
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
 
@@ -210,7 +379,7 @@ func TestStartupCatchUpSummarizesABacklogOfUnclaimedSpools(t *testing.T) {
 	}
 }
 
-func TestABacklogSpoolIsDemotedAtDebugNotWarn(t *testing.T) {
+func TestABacklogSpoolsLapseIsStatedAtDebugNotInfo(t *testing.T) {
 	// Arrange: one pre-existing unclaimed spool.
 	h := newHarness(t, &fakeStore{})
 	h.spoolFile(t, "b1", "orphaned\n")
@@ -223,9 +392,9 @@ func TestABacklogSpoolIsDemotedAtDebugNotWarn(t *testing.T) {
 	h.advance(UnownedSpoolWindow)
 	h.sc.rescan()
 
-	// Assert: nothing is silenced — the demotion is still stated, at debug.
+	// Assert: nothing is silenced — the lapse is still stated, at debug.
 	if got := len(h.opsAt(t, "hold-expired", "debug")); got != 1 {
-		t.Fatalf("the backlog demotion was stated at debug %d times, want once", got)
+		t.Fatalf("the backlog lapse was stated at debug %d times, want once", got)
 	}
 }
 
@@ -244,7 +413,7 @@ func TestASpoolThatAppearsAfterCatchUpIsStatedPerItem(t *testing.T) {
 	h.sc.rescan()
 
 	// Assert: a newly-arising unclaimed spool is stated per file, at INFO —
-	// the mandated ingest-as-residue-and-keep-tailing behavior working.
+	// the not-rendered-so-not-read rule working.
 	h.requireOnce(t, "hold-expired", "info")
 	if got := len(h.opsAt(t, "catchup-summary", "")); got != 0 {
 		t.Fatalf("a steady-state spool produced %d catch-up summaries, want none", got)
