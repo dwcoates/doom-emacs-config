@@ -825,7 +825,11 @@ arms are derived from, and each one is logged once with `refusal_site`.
   - **THE LEVEL OF THAT RECORD IS A PROPERTY OF THE REFUSAL CLASS**, read from
     `refusalClass.logLevel` beside `armName`, never written at a call site and
     never switched on a site or a message string. Every class is `warn` —
-    something is wrong somewhere — except `unknown_agent`, which is `info`.
+    something is wrong somewhere — except `unknown_agent` and `unknown_run`,
+    which are `info`. `unknown_run` is `WatchBashRun` asked for a run with no
+    row yet: the shim that announced the run re-asks until the sidecar's rows
+    land, so the refusal is the same ordinary answer (its `refusal_kind` is
+    `not_found`, the Connect code, because the verb has no failure arm).
   - **`unknown_agent` IS AN ANSWER, NOT A FAULT.** `OpenAgentSession` is the one
     verb that asks whether a book exists, and the two populations that reach the
     refusal — a consumer opening against an agent whose first row has not landed,

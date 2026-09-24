@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -1214,5 +1215,89 @@ func TestIncumbentExitDelay(t *testing.T) {
 		if got := incumbentExitDelay(tc.attempt); got != tc.want {
 			t.Fatalf("incumbentExitDelay(%d) = %v, want %v", tc.attempt, got, tc.want)
 		}
+	}
+}
+
+// awaitRecord waits, bounded, for a record the controller writes as it takes a
+// decision, which is how a test knows a concurrent caller has reached it.
+func awaitRecord(t *testing.T, h *harness, operation, message string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, rec := range records(h.log, operation) {
+			if rec.Message == message {
+				return
+			}
+		}
+		runtime.Gosched()
+	}
+	t.Fatalf("no %s record %q was written", operation, message)
+}
+
+// TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime is the forced
+// interleaving the webapp layer's restart handover lost at random: the page's
+// own AdoptWebWorkspace reaches the successor while the adoption the test's
+// call started is still waiting on the serving release. Two adoptions ran,
+// both drained the handover hold, and the second's release met "not found".
+func TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime(t *testing.T) {
+	// Arrange: the first caller's adoption is parked on the serving latch.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Web: true})
+	const outgoing = ids.InstanceID("daemon-outgoing-previous")
+	if err := h.db.ClaimServing(context.Background(), ws, outgoing); err != nil {
+		t.Fatalf("ClaimServing(outgoing): %v", err)
+	}
+	first := make(chan error, 1)
+	go func() { first <- h.c.AdoptWeb(context.Background(), ws) }()
+	h.clock.awaitArmed(t, manifestPoll)
+
+	// Act: a second web call arrives, then the incumbent lets go.
+	second := make(chan error, 1)
+	go func() { second <- h.c.AdoptWeb(context.Background(), ws) }()
+	awaitRecord(t, h, opAdoptWeb, "the rendezvous is satisfied and its adoption is already running; waiting on it")
+	if err := h.db.ReleaseServing(context.Background(), ws, outgoing); err != nil {
+		t.Fatalf("ReleaseServing(outgoing): %v", err)
+	}
+	h.clock.Fire(manifestPoll)
+
+	// Assert.
+	if err := <-first; err != nil {
+		t.Fatalf("the first AdoptWeb = %v, want success", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("the second AdoptWeb = %v, want the first's success", err)
+	}
+	drains := 0
+	for _, step := range h.order.Taken() {
+		if step == "drain_intake" {
+			drains++
+		}
+	}
+	if drains != 1 {
+		t.Fatalf("the held intake was drained %d time(s), want once", drains)
+	}
+}
+
+// TestAFailedAdoptionMayBeRunAgainByALaterCaller: the latch forbids only a
+// concurrent second run; a later call after a failure still runs the adoption.
+func TestAFailedAdoptionMayBeRunAgainByALaterCaller(t *testing.T) {
+	// Arrange: the first adoption fails dialing the shim.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.adoptErr[ws] = errFake
+	arm(t, h, ws, Participants{Host: true})
+	if err := h.c.AdoptHost(context.Background(), ws); err == nil {
+		t.Fatal("precondition: the first adoption succeeded")
+	}
+
+	// Act.
+	h.c.mu.Lock()
+	adopting := h.c.rendezvous[ws].adopting
+	h.c.mu.Unlock()
+
+	// Assert.
+	if adopting {
+		t.Fatal("a failed adoption left the latch closed; no later caller could run it again")
 	}
 }

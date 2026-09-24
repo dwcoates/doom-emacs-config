@@ -61,8 +61,10 @@ type sink struct {
 	// workspaceDir and workspaceID attribute every failure this sink reports.
 	workspaceDir string
 	workspaceID  string
-	// link is the canonical symlink path inside the workspace, or empty for a
-	// sink of a retired workspace directory, which touches nothing inside it.
+	// link is the canonical symlink path inside the workspace. EMPTY for a
+	// sink of a DETACHED workspace directory (Surfaces.DetachDir): the daemon
+	// is removing that directory, so this sink never creates, re-points or
+	// reads anything inside it and writes its target under logsDir alone.
 	link string
 	// target is the daemon-owned file the link names.
 	target string
@@ -105,27 +107,18 @@ type sink struct {
 // more. Long-lived sinks append on open and rotate only at the byte cap
 // (logging-contract.md), so a bounce loop cannot evict history merely by
 // restarting, and that rule now holds for the workspace sinks as well.
-func openSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
-	return openSinkLinked(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups, true)
-}
-
-// openLinklessSink opens a sink for a RETIRED workspace directory (see
-// surfaces.Retire): its target under the logs directory, and nothing at all
-// inside the workspace directory, which the daemon is removing or has removed.
-func openLinklessSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
-	return openSinkLinked(logsDir, workspaceDir, workspaceID, name, target, CapBytes, logging.DefaultBackups, false)
+//
+// A DETACHED directory (`linked` false) gets no canonical link at all: nothing
+// is created inside it, no standing link is read out of it, and the target is
+// the one this runtime remembers or a freshly minted one. See Surfaces.DetachDir.
+func openSink(logsDir, workspaceDir, workspaceID, name, target string, linked bool) (*sink, error) {
+	return openSinkSized(logsDir, workspaceDir, workspaceID, name, target, linked, CapBytes, logging.DefaultBackups)
 }
 
 // openSinkSized is the test seam for the generation cap. Production always
 // supplies the contract's 64 MiB cap and shared generation count through
 // openSink.
-func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, capBytes int64, backups int) (*sink, error) {
-	return openSinkLinked(logsDir, workspaceDir, workspaceID, name, target, capBytes, backups, true)
-}
-
-// openSinkLinked opens one sink, creating and pointing its canonical link
-// inside the workspace directory only when linked.
-func openSinkLinked(logsDir, workspaceDir, workspaceID, name, target string, capBytes int64, backups int, linked bool) (*sink, error) {
+func openSinkSized(logsDir, workspaceDir, workspaceID, name, target string, linked bool, capBytes int64, backups int) (*sink, error) {
 	linkDir := filepath.Join(workspaceDir, linkDirRel)
 	if linked {
 		if err := os.MkdirAll(linkDir, 0o755); err != nil {
@@ -178,9 +171,11 @@ func openSinkLinked(logsDir, workspaceDir, workspaceID, name, target string, cap
 	return s, nil
 }
 
-// unlink stops this sink touching its workspace directory: from its return
-// on, a rotation re-points no canonical link. The target stays open.
-func (s *sink) unlink() {
+// detach stops this sink from touching its workspace directory: the canonical
+// link is forgotten, so a rotation neither verifies nor re-points it. The
+// target and the descriptor are untouched, so every later record still lands
+// in the same file.
+func (s *sink) detach() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.link = ""
@@ -453,6 +448,7 @@ func (s *sink) repointAfterRollLocked() error {
 		return s.poison
 	}
 	if s.link == "" {
+		// A detached directory's sink has no link to re-point.
 		return nil
 	}
 	if err := replaceLink(s.link, s.target); err != nil {
@@ -463,8 +459,9 @@ func (s *sink) repointAfterRollLocked() error {
 }
 
 func (s *sink) verifyLinkLocked(operation string) error {
-	// A retired workspace's sink has no link to verify: see unlink.
 	if s.link == "" {
+		// A detached directory's sink owns no link, so there is nothing a
+		// workspace could have displaced.
 		return nil
 	}
 	dest, err := os.Readlink(s.link)

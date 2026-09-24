@@ -293,14 +293,28 @@ func (r *resolver) clockCell(s *wsState) *frontendv1.FooterClock {
 // asked; the turn-open edge that follows is the same turn, not a new one, so it
 // must not reset the strip's clock to the later turn-open instant. Only a turn
 // the edge is the FIRST to hear of (no SetTurn ran) starts the clock here.
+//
+// AND IT KEEPS EVERYTHING THE TURN HAS ALREADY SAID. The shim can put the
+// turn's frames on the agent stream before StartTurn's answer is back, so the
+// frames of an installed turn may already have been folded in when this edge
+// arrives. Re-running the turn start here wiped them: the usage the first API
+// response carried and the ledger that files it (so an ordinary prose turn
+// reconciled `incomplete` — TestFooterTokensCellVerdictIsComplete... lost a
+// full integration run to it), the activity seen, a permission block. SetTurn
+// is the ONE start of a daemon-delivered turn, and it is published before the
+// shim is asked, so it precedes every frame of the turn by construction. The
+// edge re-takes only the context baseline, which is what it always owned.
 func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 	r.mutate(ws, "daemon.footer.on_turn_opened", "the footer took the turn-open edge",
 		dlog.Context{"turn_id": string(turn)}, func(s *wsState) {
-			started := &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt}
 			if s.turn != nil {
-				started = s.turn
+				s.tok.ctx = s.tok.ctx.rebased()
+				r.logOf(ws, s).Debug("daemon.footer.on_turn_opened",
+					"the turn was already installed at acceptance; the edge re-took the context baseline and kept what the turn had said",
+					dlog.Context{"turn_id": string(turn), "saw_activity": s.sawActivity})
+				return
 			}
-			r.applyTurnStarted(s, started)
+			r.applyTurnStarted(s, &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt})
 		})
 }
 

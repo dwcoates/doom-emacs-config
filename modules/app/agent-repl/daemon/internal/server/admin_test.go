@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -473,5 +474,60 @@ func TestClientLogIsFiledWhateverTheServingStanding(t *testing.T) {
 				t.Fatalf("warnings = %v, want none", warnings)
 			}
 		})
+	}
+}
+
+// clientLogOnce sends one ordinary forwarded record.
+func clientLogOnce(h *harness) error {
+	_, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: ref(),
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.drain.banner",
+			Message:   "a record forwarded while the daemon goes away",
+		},
+	}))
+	return err
+}
+
+// TestClientLogAfterCloseIsUnavailableWithNoError: a record that reaches a
+// daemon already exiting — the webapp layer's drain area sends them as the
+// drain fires — is answered UNAVAILABLE, and the daemon going away is not
+// restated as a failure.
+func TestClientLogAfterCloseIsUnavailableWithNoError(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.DB.workspaceErr = errors.New("sql: database is closed")
+	if err := h.Server.Close(); err != nil {
+		t.Fatalf("close the surface: %v", err)
+	}
+
+	// Act.
+	err := clientLogOnce(h)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("ClientLog after Close = %v, want unavailable", err)
+	}
+	if errs := log.at("ERROR"); len(errs) != 0 {
+		t.Fatalf("a ClientLog after Close recorded %d ERROR(s): %+v", len(errs), errs)
+	}
+}
+
+// TestClientLogWhoseCallerLeftRecordsNoError: the request's own context ending
+// under the registry read is the caller leaving, recorded at INFO only.
+func TestClientLogWhoseCallerLeftRecordsNoError(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.DB.workspaceErr = context.Canceled
+
+	// Act.
+	_ = clientLogOnce(h)
+
+	// Assert.
+	if errs := log.at("ERROR"); len(errs) != 0 {
+		t.Fatalf("a ClientLog whose caller left recorded %d ERROR(s): %+v", len(errs), errs)
 	}
 }

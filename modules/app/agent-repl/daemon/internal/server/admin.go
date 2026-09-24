@@ -230,7 +230,7 @@ func (s *server) subjectForClientLog(
 	}
 	subject, r, err := s.resolveRegistered(ctx, rpc, ref)
 	if err != nil {
-		return resolved{}, fail(s.log, rpc, err), true
+		return resolved{}, failResolution(s.log, rpc, err), true
 	}
 	if r != nil {
 		if r.Arm == workspace.ArmUnknownWorkspace {

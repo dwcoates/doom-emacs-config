@@ -201,18 +201,16 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	// and the postcondition check. A failed stand-down leaves the tree intact,
 	// loudly, because deleting a live process's working directory is forbidden.
 	//
-	// THE LOG SURFACES ARE TOLD NEXT, for the same regression from the other
-	// side: a record reaching this workspace mid-removal (a forwarded sidecar
-	// diagnostic) opened a new sink whose MkdirAll recreated the tree between
-	// git's exit and the postcondition. Retired, the workspace's sinks touch
-	// nothing inside it; a retirement that fails leaves the tree intact, loudly.
+	// THE LOG SURFACES LET GO OF THE DIRECTORY INSIDE RemoveWorktree, for the
+	// same regression from the other side: a record reaching this workspace
+	// mid-removal (a forwarded sidecar diagnostic) opened a new sink whose
+	// MkdirAll recreated the tree. gitclient detaches the directory from its
+	// sinks before git runs (Surfaces.DetachDir), and a failed detachment
+	// removes nothing and is returned here as the removal's failure.
 	if out.failed == "" && out.landed != "" {
 		if err := r.o.deps.StopSession(ctx, r.ws, true); err != nil {
 			log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
 				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "force": true, "error": err.Error()})
-		} else if err := r.o.deps.Log.Retire(r.job.Layout.SourceDir); err != nil {
-			log.Error(op, "could not retire the merged workspace's log sinks before removing its worktree", dlog.Context{
-				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})
 		} else if err := r.o.deps.Git.RemoveWorktree(ctx, string(r.repo), r.job.Layout.SourceDir); err != nil {
 			log.Error(op, "could not remove the merged worktree", dlog.Context{
 				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})

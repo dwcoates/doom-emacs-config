@@ -185,6 +185,14 @@ type server struct {
 	life   context.Context
 	cancel context.CancelFunc
 
+	// registry orders every registry read a request's RESOLUTION makes
+	// against Close: a read holds it shared, Close takes it exclusively and
+	// sets registryClosed before cancelling life. The daemon closes this
+	// surface before it closes the state client, so a read either completes
+	// before Close returns or is never made -- see readRegistry.
+	registry       sync.RWMutex
+	registryClosed bool
+
 	mu sync.Mutex
 	// hostTopics is one EVENT topic per workspace's WatchHostWorkspace stream.
 	hostTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]
@@ -394,6 +402,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 
 // Close ends every open stream by cancelling the lifetime they hang off.
 func (s *server) Close() error {
+	// THE REGISTRY GATE CLOSES FIRST: every resolution read already admitted
+	// finishes, and none is admitted after, so no request of this surface
+	// reads a state client the exit is about to close.
+	s.registry.Lock()
+	s.registryClosed = true
+	s.registry.Unlock()
 	s.cancel()
 	s.log.Info("daemon.server.close", "every open stream was ended", nil)
 	return nil

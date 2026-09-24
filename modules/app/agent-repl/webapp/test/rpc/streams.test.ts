@@ -699,6 +699,53 @@ describe("watchStream: the link's health, published page-wide", () => {
   });
 });
 
+describe("watchStream: the link coming back, published page-wide", () => {
+  it("notes the link restored on the first frame after a run that dropped", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[], [push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const restored = vi.fn();
+    ctx.onLinkRestored(restored);
+    // ACT
+    const handle = open(ctx, () => {});
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(restored).toHaveBeenCalledTimes(1);
+  });
+
+  it("notes nothing for frames on a link that never dropped", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[push(), push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const restored = vi.fn();
+    ctx.onLinkRestored(restored);
+    // ACT
+    const handle = open(ctx, () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(restored).not.toHaveBeenCalled();
+  });
+
+  it("notes the link restored BEFORE the frame is drawn", async () => {
+    // ARRANGE: a reconnected stream whose first frame is itself a new
+    // announcement must not have it taken down by its own arrival.
+    const { client } = scriptedClient([[], [push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const order: string[] = [];
+    ctx.onLinkRestored(() => order.push("restored"));
+    // ACT
+    const handle = open(ctx, () => order.push("drawn"));
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(order.slice(0, 2)).toEqual(["restored", "drawn"]);
+  });
+});
+
 describe("watchStream: cancelling mid-run", () => {
   /**
    * A stream whose producer is a local generator rather than the transport, so

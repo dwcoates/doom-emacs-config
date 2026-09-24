@@ -1453,6 +1453,10 @@ func (s *fakeSurfaces) BindWorkspaceIDs(dlog.WorkspaceIDLookup) {}
 
 func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
+func (s *fakeSurfaces) DetachDir(string) error { return nil }
+
+func (s *fakeSurfaces) AttachDir(string) error { return nil }
+
 // fakeBorrowed is a non-closeable sink handle over the null device, which is
 // what a spawn is handed as fd 3.
 type fakeBorrowed struct {
@@ -1816,9 +1820,6 @@ func (s *fakeSurfaces) Evict(dir string) error {
 	s.evicted = append(s.evicted, dir)
 	return nil
 }
-
-// Retire implements dlog.Surfaces; no workspace verb retires a directory.
-func (s *fakeSurfaces) Retire(dir string) error { return nil }
 
 // FixtureMintedName is the name the fixture's naming call answers. It is the
 // SHAPE a real answer has — at most three lowercase hyphenated words — and it

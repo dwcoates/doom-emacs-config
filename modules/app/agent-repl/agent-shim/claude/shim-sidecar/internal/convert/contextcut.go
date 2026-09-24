@@ -262,11 +262,19 @@ const clearCommand = "/clear"
 var commandEnvelopeTags = []string{"command-name", "command-message", "command-args"}
 
 // isClearCommand reports whether a user message is `/clear` and nothing else.
+// It is IsClearCommand, the one spelling of the rule the reader's rotation hold
+// shares, so the converter and the hold can never disagree about what a clear is.
+func (c *Converter) isClearCommand(message map[string]any) bool {
+	return IsClearCommand(message)
+}
+
+// IsClearCommand reports whether a `user` record's message is `/clear` and
+// nothing else.
 //
 // Detection unwraps the envelope first and then requires the command to be the
 // ONLY non-whitespace content left: an argument, or prose around the envelope,
 // means the user asked for something else.
-func (c *Converter) isClearCommand(message map[string]any) bool {
+func IsClearCommand(message map[string]any) bool {
 	// A clear is always plain text. A blocks-form user message is a tool result
 	// or a composed prompt, never a command envelope.
 	text, ok := message["content"].(string)

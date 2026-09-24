@@ -32,7 +32,7 @@ func TestAcquireLeaseRoundTripsThePolicyMetadata(t *testing.T) {
 
 func TestAcquireLeaseIsExclusive(t *testing.T) {
 	// Arrange
-	s, log := testStore(t)
+	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	first, err := s.AcquireLease(context.Background(), ws.ID, HolderMerge, PolicyRefuse)
 	if err != nil {
@@ -50,8 +50,28 @@ func TestAcquireLeaseIsExclusive(t *testing.T) {
 	if refusal.Lease != first.ID || refusal.Holder != HolderMerge || refusal.Policy != PolicyRefuse {
 		t.Fatalf("refusal = %+v, want the standing holder", refusal)
 	}
-	if !loggedOperation(log, "daemon.wsm.acquire_lease", "error") {
-		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+}
+
+// TestAHeldLeaseRefusalIsRecordedAtDebug: the arbitration refusing a second
+// holder is the store ANSWERING, and every caller states what it means at its
+// own level. It was recorded at ERROR beside every ordinary hold and drain.
+func TestAHeldLeaseRefusalIsRecordedAtDebug(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.AcquireLease(context.Background(), ws.ID, HolderMerge, PolicyRefuse); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	_, _ = s.AcquireLease(context.Background(), ws.ID, HolderDrain, PolicyHold)
+
+	// Assert
+	if loggedOperation(log, "daemon.wsm.acquire_lease", "error") {
+		t.Fatalf("a held-lease refusal was recorded at error: %v", log.Records())
+	}
+	if !loggedOperation(log, "daemon.wsm.acquire_lease", "debug") {
+		t.Fatalf("the held-lease refusal was not recorded at debug: %v", log.Records())
 	}
 }
 

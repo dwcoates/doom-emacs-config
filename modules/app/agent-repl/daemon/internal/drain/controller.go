@@ -429,13 +429,37 @@ func (c *controller) fire(ctx context.Context, s wsm.DrainSchedule) error {
 	// THE HOLD FIRST, ON EVERY WORKSPACE, before any wait: a workspace whose
 	// intake is still open while a sibling is being waited on would keep
 	// accepting work the drain then has to wait for again.
+	//
+	// THE SCHEDULE'S OWN HOLDS ARE ALREADY THE HOLD. Schedule took the drain
+	// lease on every workspace it could the moment the shutdown was announced
+	// (holdForSchedule), so re-acquiring here asked the arbitration for a lease
+	// this controller already held: every workspace of every drain came back
+	// refused, as a WARN here and an ERROR in the store, for a hold that stood.
+	c.mu.Lock()
+	standing := c.scheduled
+	c.mu.Unlock()
 	held := make([]wsm.Lease, 0, len(workspaces))
 	for _, ws := range workspaces {
+		if lease, own := standing[ws.ID]; own {
+			c.log.Debug(opFire, "the standing schedule's own drain hold already holds this workspace",
+				merge(fields, dlog.Context{"workspace": string(ws.ID), "lease": string(lease)}))
+			continue
+		}
 		lease, err := c.deps.DB.AcquireLease(ctx, ws.ID, wsm.HolderDrain, wsm.PolicyHold)
-		if err != nil {
+		var otherHolder *wsm.LeaseHeldError
+		switch {
+		case errors.As(err, &otherHolder):
 			// Another holder has the lease; its own policy already parks or
-			// refuses intake, so the drain does not need one of its own.
-			c.log.Warn(opFire, "a workspace's lease is already held; the drain will wait on it as it stands",
+			// refuses intake, so the drain does not need one of its own. That
+			// is the arbitration answering, and waiting on it is the drain's
+			// ordinary course.
+			c.log.Info(opFire, "a workspace's lease is held by another holder; the drain will wait on it as it stands",
+				merge(fields, dlog.Context{
+					"workspace": string(ws.ID), "holder": otherHolder.Holder.String(), "lease": string(otherHolder.Lease),
+				}))
+			continue
+		case err != nil:
+			c.log.Error(opFire, "could not take the drain hold on a workspace; the drain waits on it unheld",
 				merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
 			continue
 		}

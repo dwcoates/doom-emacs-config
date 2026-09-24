@@ -21,7 +21,7 @@ func TestOpenSinkLinksToAnExternalTarget(t *testing.T) {
 	dir, id := newWorkspace(t)
 
 	// Act.
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestOpenSinkDisplacesAWorkspaceProvidedRegularFile(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestOpenSinkReplacesAForeignSymlink(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestOpenSinkReplacesAForeignSymlink(t *testing.T) {
 func TestSinkWriteAppends(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestDaemonOwnedSinksRotateWithGenerationsAtTheCap(t *testing.T) {
 			// Arrange: one generation at its eight-byte cap and a reader holding
 			// the inode that is about to retire.
 			dir, id := newWorkspace(t)
-			s, err := openSinkSized(t.TempDir(), dir, id, name, "", 8, 2)
+			s, err := openSinkSized(t.TempDir(), dir, id, name, "", true, 8, 2)
 			if err != nil {
 				t.Fatalf("openSinkSized: %v", err)
 			}
@@ -218,7 +218,7 @@ func TestDaemonOwnedSinksRotateWithGenerationsAtTheCap(t *testing.T) {
 func TestSinkRefusesToRepointALinkItNoLongerOwns(t *testing.T) {
 	// Arrange: the workspace redirects the canonical link elsewhere.
 	dir, id := newWorkspace(t)
-	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", true, 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestSinkRefusesToRepointALinkItNoLongerOwns(t *testing.T) {
 func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", true, 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 func TestSinkRefusesEveryRecordOncePoisoned(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", true, 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestSinkScanMarksWritesTheDaemonNeverMadeForTheNextShimRoll(t *testing.T) {
 	// Arrange: the shim writes straight to the same inode through fd 3, so the
 	// daemon's own byte count is only a lower bound.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "shim", "")
+	s, err := openSink(t.TempDir(), dir, id, "shim", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestSinkScanMarksWritesTheDaemonNeverMadeForTheNextShimRoll(t *testing.T) {
 func TestSinkScanLeavesAnUnderCapTargetAlone(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "shim", "")
+	s, err := openSink(t.TempDir(), dir, id, "shim", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestANewRuntimeAppendsToTheStandingTarget(t *testing.T) {
 	// Arrange: one runtime writes a record and closes its sink.
 	dir, id := newWorkspace(t)
 	logs := t.TempDir()
-	first, err := openSink(logs, dir, id, "daemon", "")
+	first, err := openSink(logs, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink (first runtime): %v", err)
 	}
@@ -457,7 +457,7 @@ func TestANewRuntimeAppendsToTheStandingTarget(t *testing.T) {
 	first.close()
 
 	// Act: the NEXT runtime opens the same workspace sink knowing no target.
-	second, err := openSink(logs, dir, id, "daemon", "")
+	second, err := openSink(logs, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink (second runtime): %v", err)
 	}
@@ -486,7 +486,7 @@ func TestANewRuntimeLeavesTheStandingLinkInPlace(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
 	logs := t.TempDir()
-	first, err := openSink(logs, dir, id, "daemon", "")
+	first, err := openSink(logs, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink (first runtime): %v", err)
 	}
@@ -498,7 +498,7 @@ func TestANewRuntimeLeavesTheStandingLinkInPlace(t *testing.T) {
 	}
 
 	// Act.
-	second, err := openSink(logs, dir, id, "daemon", "")
+	second, err := openSink(logs, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink (second runtime): %v", err)
 	}
@@ -521,7 +521,7 @@ func TestANewRuntimeStartsAGenerationAtTheCap(t *testing.T) {
 	// Arrange: an 8-byte cap and a standing target that has reached it.
 	dir, id := newWorkspace(t)
 	logs := t.TempDir()
-	first, err := openSinkSized(logs, dir, id, "daemon", "", 8, 2)
+	first, err := openSinkSized(logs, dir, id, "daemon", "", true, 8, 2)
 	if err != nil {
 		t.Fatalf("openSinkSized (first runtime): %v", err)
 	}
@@ -531,7 +531,7 @@ func TestANewRuntimeStartsAGenerationAtTheCap(t *testing.T) {
 	first.close()
 
 	// Act.
-	second, err := openSinkSized(logs, dir, id, "daemon", "", 8, 2)
+	second, err := openSinkSized(logs, dir, id, "daemon", "", true, 8, 2)
 	if err != nil {
 		t.Fatalf("openSinkSized (second runtime): %v", err)
 	}
@@ -562,7 +562,7 @@ func TestANewRuntimeNeverAppendsToAForeignTarget(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestANewRuntimeNeverAppendsToAWorkspaceProvidedRegularFile(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -616,7 +616,7 @@ func TestAStandingTargetThatIsGoneIsNotJoined(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
 	logs := t.TempDir()
-	first, err := openSink(logs, dir, id, "daemon", "")
+	first, err := openSink(logs, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink (first runtime): %v", err)
 	}
@@ -626,7 +626,7 @@ func TestAStandingTargetThatIsGoneIsNotJoined(t *testing.T) {
 	}
 
 	// Act.
-	second, err := openSink(logs, dir, id, "daemon", "")
+	second, err := openSink(logs, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink (second runtime): %v", err)
 	}
@@ -649,7 +649,7 @@ func TestMintedTargetNameCarriesTheMintedWorkspaceID(t *testing.T) {
 	logsDir := t.TempDir()
 
 	// Act.
-	s, err := openSink(logsDir, dir, id, "daemon", "")
+	s, err := openSink(logsDir, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -690,7 +690,7 @@ func TestOpenSinkKeepsAppendingToADirectoryHashNamedTarget(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(logsDir, dir, id, "daemon", "")
+	s, err := openSink(logsDir, dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestOpenSinkKeepsAppendingToADirectoryHashNamedTarget(t *testing.T) {
 func TestCloseDoesNotPoisonTheSink(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -751,7 +751,7 @@ func TestCloseDoesNotPoisonTheSink(t *testing.T) {
 func TestAClosedSinkRefusesARecordWithoutPoisoning(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "", true)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -779,7 +779,7 @@ func TestAWriteFailureStillPoisonsAfterTheCloseChange(t *testing.T) {
 	// Arrange: a sink at its cap whose canonical link the daemon no longer
 	// owns, so the rotation the next record needs must refuse.
 	dir, id := newWorkspace(t)
-	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", true, 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}

@@ -311,13 +311,16 @@ func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
 	// failure arm on the wire, so the log record IS the store's account of it —
 	// and a reader that cannot tell one refusal from two cannot count either.
 	tests := []struct {
-		name     string
-		run      string
-		wantSite string
-		wantKind string
+		name      string
+		run       string
+		wantSite  string
+		wantKind  string
+		wantLevel string
 	}{
-		{name: "a run the store never saw", run: "never-ran-at-all", wantSite: "unknown_bash_run", wantKind: "invalid_request"},
-		{name: "a run named by nothing", run: "", wantSite: "run_empty", wantKind: "invalid_request"},
+		// A run with no row yet is the race the announcing shim waits out, so
+		// it is the ordinary answer; a run named by nothing is a caller defect.
+		{name: "a run the store never saw", run: "never-ran-at-all", wantSite: "unknown_bash_run", wantKind: "not_found", wantLevel: "info"},
+		{name: "a run named by nothing", run: "", wantSite: "run_empty", wantKind: "invalid_request", wantLevel: "warn"},
 	}
 
 	for _, tc := range tests {
@@ -334,8 +337,13 @@ func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
 			_ = awaitBashRunEnd(t, stream)
 
 			// Assert.
-			rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a refused bash run open")
+			// Counted across every level, then checked for its own: the
+			// exactly-once rule holds whatever severity the class carries.
+			rec := assertExactlyOneNormalRecordAtLevel(t, store.logRecordsAfter(mark), "a refused bash run open", "info", "warn", "error")
 			assertRefusalKeys(t, rec, tc.wantSite, tc.wantKind)
+			if rec.Level != tc.wantLevel {
+				t.Errorf("the refusal record's level is %q, want %q", rec.Level, tc.wantLevel)
+			}
 			if rec.Context["rpc"] == nil {
 				t.Errorf("the refusal record names no rpc: %v", rec.Context)
 			}

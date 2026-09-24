@@ -140,8 +140,9 @@ type TestSurfaces struct {
 	clientRecords []ClientLogCall
 	// evicted records every workspace directory Evict was called with.
 	evicted []string
-	// retired records every workspace directory Retire was called with.
-	retired []string
+	// dirEvents records every DetachDir and AttachDir call, in order, as
+	// "detach <dir>" and "attach <dir>".
+	dirEvents []string
 }
 
 // ClientLogCall is one captured ClientLog call.
@@ -232,20 +233,28 @@ func (s *TestSurfaces) Evict(dir string) error {
 	return nil
 }
 
-// Retire implements Surfaces by capturing the call.
-func (s *TestSurfaces) Retire(dir string) error {
+// DetachDir implements Surfaces by capturing the call.
+func (s *TestSurfaces) DetachDir(dir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.retired = append(s.retired, dir)
+	s.dirEvents = append(s.dirEvents, "detach "+dir)
 	return nil
 }
 
-// Retired returns every directory Retire was called with, in order.
-func (s *TestSurfaces) Retired() []string {
+// AttachDir implements Surfaces by capturing the call.
+func (s *TestSurfaces) AttachDir(dir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, len(s.retired))
-	copy(out, s.retired)
+	s.dirEvents = append(s.dirEvents, "attach "+dir)
+	return nil
+}
+
+// DirEvents returns every DetachDir and AttachDir call, in order.
+func (s *TestSurfaces) DirEvents() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.dirEvents))
+	copy(out, s.dirEvents)
 	return out
 }
 

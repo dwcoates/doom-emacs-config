@@ -976,12 +976,6 @@ type harness struct {
 	stopForces      []bool
 	stopAt          int
 	stopErr         error
-	// retired records the directories the teardown retired from the log
-	// surfaces, retireAt the sequence of the first, and retireErr what Retire
-	// answers.
-	retired   []string
-	retireAt  int
-	retireErr error
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
@@ -1216,28 +1210,8 @@ func (h *harness) deps() Deps {
 		},
 		Rollout: h.rollout,
 		Now:     h.clock,
-		Log:     retiringSurfaces{TestSurfaces: h.logs, h: h},
+		Log:     h.logs,
 	}
-}
-
-// retiringSurfaces is the harness's log surfaces with Retire sequenced on the
-// harness's own clock, so the teardown's order is asserted rather than
-// assumed.
-type retiringSurfaces struct {
-	*dlog.TestSurfaces
-	h *harness
-}
-
-// Retire records the retirement and answers the harness's arranged error.
-func (s retiringSurfaces) Retire(dir string) error {
-	at := s.h.next()
-	s.h.mu.Lock()
-	defer s.h.mu.Unlock()
-	s.h.retired = append(s.h.retired, dir)
-	if s.h.retireAt == 0 {
-		s.h.retireAt = at
-	}
-	return s.h.retireErr
 }
 
 // next stamps the shared sequence.

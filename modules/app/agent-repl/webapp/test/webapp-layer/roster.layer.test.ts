@@ -178,7 +178,7 @@ it(
           // the fixtures' timestamps read sensibly, while the daemon runs on
           // the real wall clock. An instant on the PAGE's clock is decades in
           // the DAEMON's past, so it fires the drain immediately — observed as
-          // a real `daemon.drain.fire` warning and a draining daemon, not as a
+          // a real `daemon.drain.fire` and a draining daemon, not as a
           // scheduled one. The schedule therefore has to be real-clock, and
           // the consequence is that the banner's COUNTDOWN reads absurdly
           // ("expected back in 496795h") on the page's clock — a harness
