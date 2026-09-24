@@ -517,3 +517,161 @@ func TestAPollRefreshDropsTheMissWhenALinkAppeared(t *testing.T) {
 		t.Errorf("after a poll refresh the new link resolved to %+v, want %q from its link file", got, original)
 	}
 }
+
+func TestRefreshIfMovedReadsTheRecordsTheFirstTime(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+
+	// Act.
+	refreshed := idx.RefreshIfMoved()
+
+	// Assert.
+	if !refreshed || idx.Workspaces()[wsKey] != original {
+		t.Fatalf("first RefreshIfMoved refreshed=%t workspaces=%v, want a refresh naming %s", refreshed, idx.Workspaces(), original)
+	}
+}
+
+func TestRefreshIfMovedDoesNothingWhenNoRecordDirectoryMoved(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+
+	// Act.
+	refreshed := idx.RefreshIfMoved()
+
+	// Assert.
+	if refreshed {
+		t.Fatal("RefreshIfMoved re-read records nothing had changed")
+	}
+}
+
+func TestRefreshIfMovedSeesANewWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	writeAgentID(t, stateDir, "deadbeef", stranger)
+
+	// Act.
+	refreshed := idx.RefreshIfMoved()
+
+	// Assert.
+	if !refreshed || idx.Workspaces()["deadbeef"] != stranger {
+		t.Fatalf("refreshed=%t workspaces=%v, want the new workspace deadbeef -> %s", refreshed, idx.Workspaces(), stranger)
+	}
+}
+
+func TestRefreshIfMovedSeesANewLink(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+
+	// Act.
+	refreshed := idx.RefreshIfMoved()
+
+	// Assert.
+	if got := idx.Lookup(rotated); !refreshed || got.Original != original {
+		t.Fatalf("refreshed=%t Lookup(rotated)=%+v, want the link to %s", refreshed, got, original)
+	}
+}
+
+func TestRefreshIfMovedSeesARenamedAgentIdRecord(t *testing.T) {
+	t.Parallel()
+	// Arrange: the shim writes agent-id.json by tmp-and-rename, which is what a
+	// rebind to another conversation looks like on disk.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	scratch := t.TempDir()
+	writeAgentID(t, scratch, wsKey, stranger)
+	if err := os.Rename(filepath.Join(scratch, "shim", wsKey, "agent-id.json"), filepath.Join(stateDir, "shim", wsKey, "agent-id.json")); err != nil {
+		t.Fatalf("renaming the rebound record into place: %v", err)
+	}
+
+	// Act.
+	refreshed := idx.RefreshIfMoved()
+
+	// Assert.
+	if !refreshed || idx.Workspaces()[wsKey] != stranger {
+		t.Fatalf("refreshed=%t workspaces=%v, want %s rebound to %s", refreshed, idx.Workspaces(), wsKey, stranger)
+	}
+}
+
+func TestRefreshIfMovedWithNoStateRootDoesNothing(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	idx, _ := index(t, "")
+
+	// Act.
+	refreshed := idx.RefreshIfMoved()
+
+	// Assert.
+	if refreshed || len(idx.Workspaces()) != 0 {
+		t.Fatalf("refreshed=%t workspaces=%v with no state root, want nothing", refreshed, idx.Workspaces())
+	}
+}
+
+func TestLookupAnswersEveryRecordShapeFromMemory(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		ask        string
+		wantBook   string
+		wantSource Source
+	}{
+		{name: "a linked id names its original", ask: rotated, wantBook: original, wantSource: SourceVendorLink},
+		{name: "an original names itself on the shim's word", ask: original, wantBook: original, wantSource: SourceAgentIDRecord},
+		{name: "an id no record names is unrecorded", ask: stranger, wantBook: stranger, wantSource: SourceUnrecorded},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange.
+			stateDir := t.TempDir()
+			writeAgentID(t, stateDir, wsKey, original)
+			writeVendorLink(t, stateDir, wsKey, rotated, original)
+			idx, _ := index(t, stateDir)
+			idx.Refresh()
+
+			// Act.
+			got := idx.Lookup(tc.ask)
+
+			// Assert.
+			if got.Original != tc.wantBook || got.Source != tc.wantSource {
+				t.Fatalf("Lookup(%s) = %+v, want book %s source %s", tc.ask, got, tc.wantBook, tc.wantSource)
+			}
+		})
+	}
+}
+
+func TestLookupNeverGlobs(t *testing.T) {
+	t.Parallel()
+	// Arrange: a link that landed after the refresh, which Resolve would glob for.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+	before := idx.globs
+
+	// Act.
+	got := idx.Lookup(rotated)
+
+	// Assert.
+	if idx.globs != before || got.Source != SourceUnrecorded {
+		t.Fatalf("Lookup ran %d glob(s) and answered %+v, want none and the in-memory answer", idx.globs-before, got)
+	}
+}
