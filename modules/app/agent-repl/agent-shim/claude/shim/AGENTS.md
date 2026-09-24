@@ -1027,6 +1027,13 @@ npm run smoke         # spawn and dial dist/main.js for real (needs a build firs
 # the vitest configs refuse a run without it, so prefix any bare `npx vitest` with it
 ```
 
+Dependencies come from the SELF-HEALING shared node store, exactly as the
+webapp's do: `node_modules` links `~/.cache/agent-repl/node-store/shim-<lockhash>`,
+every `pre*` hook runs `../../../bin/ensure-deps.sh`, and an entry that exists
+but fails `npm ls --depth=0` is repaired in place under its own lock and swapped
+in atomically, never reinstalled through the link. `webapp/AGENTS.md`
+("Dependencies come from a SELF-HEALING shared store") is the full account.
+
 - `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same
   program `tsc` does, and the rules it adds on top are the ones that catch what
   `tsc` cannot see — a floating promise, a `switch` with neither a missing arm's
