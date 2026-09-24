@@ -868,7 +868,7 @@ function planeOver(overrides: Partial<StoreClient>): Persistence {
 }
 
 describe("a WriteBatch the store answers badly", () => {
-  it("warns once per entry the store skipped as a book conflict, naming the key and both books", async () => {
+  it("reports every entry the store skipped as a book conflict at error, naming the key and both books", async () => {
     // A durable batch that left a row out of the book it named is not a quiet
     // success: the daemon watches that book and will never see the row.
     // Arrange.
@@ -902,7 +902,7 @@ describe("a WriteBatch the store answers badly", () => {
         const context = record.context as Record<string, unknown>;
         return [record.level, context.upsert_key, context.from_book, context.to_book];
       }),
-    ).toEqual([["warn", "activity:msg_1:1", "rotated-book", "book-1"]]);
+    ).toEqual([["error", "activity:msg_1:1", "rotated-book", "book-1"]]);
   });
 
   it("states nothing when the store skipped nothing", async () => {
@@ -920,8 +920,8 @@ describe("a WriteBatch the store answers badly", () => {
     await plane.flush();
 
     // Assert.
-    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
-    expect(warned).toEqual([]);
+    const reported = logRecordsSince(before).filter((record) => record.level === "warn" || record.level === "error");
+    expect(reported).toEqual([]);
   });
 
   it("renders a thrown non-Error as the fault's detail", async () => {
