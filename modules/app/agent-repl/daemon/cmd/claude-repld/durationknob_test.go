@@ -64,6 +64,9 @@ func TestEveryDurationKnobRefusesInTheSharedWords(t *testing.T) {
 			t.Setenv(HoldoutWarnEnv, v)
 			return resolveHoldoutWarnEvery()
 		}},
+		{"worktree reap idle threshold", envWorktreeReapIdle, resolveWorktreeReapIdle},
+		{"worktree reap start delay", envWorktreeReapStartDelay, resolveWorktreeReapStartDelay},
+		{"worktree reap cadence", envWorktreeReapEvery, resolveWorktreeReapEvery},
 	}
 	for _, tc := range cases {
 		for _, value := range []string{"soon", "0s"} {
