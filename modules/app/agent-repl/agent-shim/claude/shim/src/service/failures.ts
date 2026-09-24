@@ -31,6 +31,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, shimv1 } from "../proto.js";
 import type { TitleDigest } from "../convert/title-digest.js";
+import type { LockHolderHow } from "../locks.js";
 import {
   TRANSCRIPT_QUIET_AFTER_MS,
   type TranscriptSummary,
@@ -46,9 +47,9 @@ import {
  *
  * `cold` carries evidence because the daemon needs the context cost and the
  * reason to offer the user a remediation, so a bare "it was cold" is
- * unactionable. `lockHolderUnavailable` carries the binary and the OS error,
- * because "our own lock helper would not start" is fixed by fixing THAT
- * binary, and the reader must not have to dig it out of prose.
+ * unactionable. `lockHolderUnavailable` carries the binary and how it failed,
+ * because "our own lock helper failed" is fixed by fixing THAT binary, and
+ * the reader must not have to dig it out of prose.
  */
 type StartSessionCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
@@ -56,7 +57,7 @@ type StartSessionCause =
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
   | { readonly kind: "conversationOwned" }
-  | { readonly kind: "lockHolderUnavailable"; readonly binary: string; readonly osError: string };
+  | { readonly kind: "lockHolderUnavailable"; readonly binary: string; readonly how: LockHolderHow };
 
 /** The base constructor for `shim.v1.StartSessionFailure`. */
 export function startSessionFailure(
@@ -78,12 +79,32 @@ export function startSessionFailure(
                 ? {
                     case: "lockHolderUnavailable",
                     value: create(shimv1.StartSessionLockHolderUnavailableSchema, {
-                      binary: cause.binary,
-                      osError: cause.osError,
+                      failure: lockHolderFailure(cause.binary, cause.how),
                     }),
                   }
                 : { case: "conversationOwned", value: create(shimv1.StartSessionConversationOwnedSchema, {}) },
   });
+}
+
+/** The base constructor for `conversation.v1.LockHolderFailure`. */
+export function lockHolderFailure(binary: string, how: LockHolderHow): conversationv1.LockHolderFailure {
+  return create(conversationv1.LockHolderFailureSchema, { binary, how: lockHolderHowArm(how) });
+}
+
+/** The `how` arm for one failure. */
+function lockHolderHowArm(how: LockHolderHow): conversationv1.LockHolderFailure["how"] {
+  switch (how.kind) {
+    case "spawnFailed":
+      return { case: "spawnFailed", value: create(conversationv1.LockHolderSpawnFailedSchema, { osError: how.osError }) };
+    case "exited":
+      return { case: "exited", value: create(conversationv1.LockHolderExitedSchema, { code: how.code, stderr: how.stderr }) };
+    case "signaled":
+      return { case: "signaled", value: create(conversationv1.LockHolderSignaledSchema, { signal: how.signal, stderr: how.stderr }) };
+    case "misanswered":
+      return { case: "misanswered", value: create(conversationv1.LockHolderMisansweredSchema, { line: how.line }) };
+    case "silent":
+      return { case: "silent", value: create(conversationv1.LockHolderSilentSchema, { timeoutMs: how.timeoutMs }) };
+  }
 }
 
 /** The refusal as the whole response the handler returns. */

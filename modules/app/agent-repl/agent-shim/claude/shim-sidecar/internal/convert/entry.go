@@ -394,8 +394,6 @@ func rawStruct(raw map[string]any) *structpb.Struct {
 func Describe(e *storev1.StoreEntry) string {
 	item := e.GetAgentUpdate().GetUnservedItem()
 	switch arm := item.GetUnservedItem().(type) {
-	case *storev1.StoreUnservedItem_Keepalive:
-		return "keepalive"
 	case *storev1.StoreUnservedItem_VendorSpecific:
 		return fmt.Sprintf("vendor_specific kind=%q", arm.VendorSpecific.GetKind())
 	case *storev1.StoreUnservedItem_Unknown:

@@ -147,16 +147,16 @@ means the daemon and this build disagree about the contract.
   stdin; the holder takes the real `flock(2)` the daemon probes. The
   predecessor used `open(2)`'s `O_EXLOCK`, which is macOS/BSD only and made the
   shim refuse every session on Linux. `shim-lock` exit 3 is the distinct
-  "another process holds it" answer, and anything else is a hard failure —
-  never `conversation_owned`.
-- **A holder that cannot even be SPAWNED is its own refusal.** A missing or
-  unexecutable `shim-lock` (the synchronous `spawn` throw, or Node's
-  asynchronous `'error'` event before the claim settles) raises
-  `LockHolderUnavailableError`, recorded at ERROR because it is a defect, and
-  `StartSession` answers `lock_holder_unavailable {binary, os_error}`. Nobody
-  owns the conversation in that case, so it must never read as
-  `conversation_owned`; the daemon relays it as
-  `OpenWorkspaceError.lock_holder_unavailable`.
+  "another process holds it" answer (`LockHeldError`), the ONLY path to
+  `conversation_owned`.
+- **Every other holder failure is `lock_holder_unavailable`, saying how.**
+  `LockHolderUnavailableError` carries `conversation.v1.LockHolderFailure`'s
+  `how`: `spawnFailed` (os error), `exited` (code, stderr), `signaled`
+  (signal, stderr), `misanswered` (line) or `silent` (the bound), recorded
+  once at ERROR by `holderFailed`. Nobody owns the conversation then; the
+  daemon relays it as `OpenWorkspaceError.lock_holder_unavailable`. Anything
+  else a claim throws is raised from `StartSession`, never answered as an
+  owner.
 - **`StartSession` ALWAYS ANSWERS.** The verb is unsettled from the moment the
   query is created, and SIX things settle it: the PROVEN-LIVE SIGNAL (below);
   `init`, for a vendor that still announces one first; a hook that comes back
@@ -399,7 +399,8 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!wakeup-stop` | a `ScheduleWakeup` with `stop: true`, answered with `stopped: true` and the cancelled count | the tool_use line, the tool_result line, the closing text line | AgentScheduleWakeup.act=stop outcome=stopped |
 | `!artifact-publish` | an `Artifact` publish answered with the url, the source path, a title and a contract version | the tool_use line, the tool_result line, and a `frame-link` metadata line, the closing text line | AgentArtifact.act=publish outcome=published |
 | `!artifact-list` | an `Artifact` list answered with two rows, one owned and one shared, and `truncated: false` | the tool_use line, the tool_result line, the closing text line | AgentArtifact.act=list outcome=listed |
-| `!unmodeled` | an `mcp__echo__echo` call — a tool NO converter owns — answered with an opaque payload | the tool_use line, the tool_result line, the closing text line | AgentUnmodeled, with `mcp_server` stated from the vendor's own field rather than parsed out of the name |
+| `!mcp-tool` | an `mcp__echo__echo` call — an MCP server's tool — answered with its text | the tool_use line, the tool_result line, the closing text line | AgentMcpToolCall, an ordinary tool call, its address resolved by lookup against the session's `echo` server |
+| `!unmodeled` | a `StructuredOutput` call — an SDK tool NO converter owns and no MCP server serves — answered with an opaque payload | the tool_use line, the tool_result line, the closing text line | AgentUnmodeled |
 | `!hook-success` | `hook_started` and `hook_response{outcome:"success"}` around a `Read` | the tool_use line, a `hook_success` attachment line carrying `toolUseID`, the tool_result line | AgentHook.result=succeeded |
 | `!hook-blocked` | `hook_started` and `hook_response{outcome:"error"}` around an `Edit` the hook BLOCKS | the tool_use line, a `hook_blocking_error` attachment line, the error tool_result line | AgentHook.result=blocking_error; the TURN still succeeds, because a blocked tool is not a stopped turn |
 | `!hook-failed` | a `SessionStart` hook that FAILS without blocking anything: exit 1 on stderr | a `hook_non_blocking_error` attachment line carrying stderr, exitCode, command and durationMs | AgentHook.result=non_blocking_error |

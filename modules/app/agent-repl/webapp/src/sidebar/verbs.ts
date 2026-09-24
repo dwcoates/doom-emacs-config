@@ -49,6 +49,7 @@ import {
   type NukeWorkspaceError,
   type NukeWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
+import type { LockHolderFailure } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import {
   OpenWorkspaceRequestSchema,
   OpenWorkspaceResponseSchema,
@@ -77,7 +78,7 @@ import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { crossCuttingSentence } from "../rpc/refuse.js";
 import type { RefusalCause } from "../rpc/refusal.js";
-import { requireCase, unreachableArm } from "../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
 
@@ -617,18 +618,47 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
       return cause.value.detail
         ? `the vendor failed to start the session (${cause.value.detail})`
         : "the vendor failed to start the session";
-    case "lockHolderUnavailable":
-      // NOBODY OWNS THE CONVERSATION. The shim's own lock helper would not
-      // spawn, and the binary plus the OS error are the whole remediation, so
-      // both are said; an ownership wording would send the reader hunting for
-      // a second process that does not exist.
+    case "lockHolderUnavailable": {
+      // NOBODY OWNS THE CONVERSATION. The shim's own lock helper failed, and
+      // the binary plus how it failed are the whole remediation, so both are
+      // said; an ownership wording would send the reader hunting for a second
+      // process that does not exist.
+      const failure = requireMessage(cause.value.failure, "OpenWorkspaceLockHolderUnavailable.failure");
       return (
-        `the shim's lock helper ${cause.value.binary} failed to start (${cause.value.osError}); ` +
+        `the shim's lock helper ${failure.binary} ${lockHolderHowText(failure)}; ` +
         "no other process owns this conversation"
       );
+    }
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }
+}
+
+/**
+ * How the shim's own lock holder failed, in the words the shim and the daemon
+ * use for the same arm. The arm is the account: each case says what it carries.
+ */
+export function lockHolderHowText(failure: LockHolderFailure): string {
+  const how = requireCase(failure.how, "LockHolderFailure.how");
+  switch (how.case) {
+    case "spawnFailed":
+      return `could not be spawned: ${how.value.osError}`;
+    case "exited":
+      return `exited with code ${how.value.code} before taking the lock${stderrSuffix(how.value.stderr)}`;
+    case "signaled":
+      return `was killed by ${how.value.signal} before taking the lock${stderrSuffix(how.value.stderr)}`;
+    case "misanswered":
+      return `answered ${JSON.stringify(how.value.line)} instead of "locked" and was killed`;
+    case "silent":
+      return `gave no "locked" answer within ${how.value.timeoutMs} ms and was killed`;
+    default:
+      return unreachableArm("LockHolderFailure.how", (how as { case: string }).case);
+  }
+}
+
+/** A lock holder's stderr, parenthesized, only when it said something. */
+function stderrSuffix(stderr: string): string {
+  return stderr === "" ? "" : ` (${stderr})`;
 }
 
 /**

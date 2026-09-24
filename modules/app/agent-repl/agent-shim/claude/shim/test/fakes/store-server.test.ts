@@ -384,7 +384,7 @@ describe("WriteBatch", () => {
     const entry = create(storev1.StoreEntrySchema, {
       plane: streamPlane(),
       writeId: "w-2",
-      upsertKey: "prompt:keepalive",
+      upsertKey: "residue:hook_result",
       entry: {
         case: "agentUpdate",
         value: create(storev1.StoreAgentUpdateSchema, {
@@ -392,8 +392,8 @@ describe("WriteBatch", () => {
             case: "unservedItem",
             value: create(storev1.StoreUnservedItemSchema, {
               unservedItem: {
-                case: "keepalive",
-                value: create(storev1.StoreAgentItemSchema, {}),
+                case: "vendorSpecific",
+                value: create(storev1.StoreVendorSpecificSchema, { kind: "hook_result", raw: {} }),
               },
             }),
           },

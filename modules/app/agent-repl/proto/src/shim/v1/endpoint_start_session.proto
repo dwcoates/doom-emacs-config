@@ -119,14 +119,16 @@ message StartSessionFailure {
     StartSessionUnknownSession unknown_session = 4;
     // A second StartSession on a shim that already holds a session.
     StartSessionAlreadyStarted already_started = 5;
-    // Another shim holds this conversation's kernel lock.
+    // Another shim holds this conversation's kernel lock: the holder exited
+    // with the code reserved for "already held". Nothing else answers this.
     StartSessionConversationOwned conversation_owned = 6;
-    // THIS shim could not spawn its own kernel-lock holder (`shim-lock`), so
-    // no claim was ever attempted and NOBODY is known to own the
+    // THIS shim's own kernel-lock holder (`shim-lock`) FAILED — it could not
+    // be spawned, exited or was killed before holding the lock, answered the
+    // wrong line, or never answered — so NOBODY is known to own the
     // conversation. Distinct from conversation_owned, which is a real
-    // ownership conflict: this one is a defect in this shim's deployment (a
-    // missing or unexecutable binary), and naming it as an ownership conflict
-    // sends the reader hunting for a second process that does not exist.
+    // ownership conflict: this one is a defect in this shim's deployment, and
+    // naming it as an ownership conflict sends the reader hunting for a second
+    // process that does not exist.
     StartSessionLockHolderUnavailable lock_holder_unavailable = 7;
   }
   // The shim's account, for a human and for logs; never switched on.
@@ -137,9 +139,10 @@ message StartSessionUnknownSession {}
 message StartSessionAlreadyStarted {}
 message StartSessionConversationOwned {}
 message StartSessionLockHolderUnavailable {
-  // The lock-holder binary the shim tried to spawn.
-  string binary = 1;
-  // The operating system's account of why the spawn failed (e.g.
-  // `spawn /path/shim-lock ENOENT`).
-  string os_error = 2;
+  // Tags 1 and 2 (`binary`, `os_error`) are RETIRED: they could say only
+  // that the holder would not spawn. `failure` says how it failed.
+  reserved 1, 2;
+  reserved "binary", "os_error";
+  // Which holder failed, and how. Always set.
+  conversation.v1.LockHolderFailure failure = 3;
 }

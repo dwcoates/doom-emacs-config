@@ -9,7 +9,6 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
 import { nextPush } from "../next-push.js";
-import { containing } from "../expect-shapes.js";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +19,7 @@ import { cwdSlug } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
-import { LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
+import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { saidText, textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
@@ -305,7 +304,7 @@ function harness(
       ? {}
       : {
           acquireLock: (sessionId: string): (() => void) => {
-            if (options.lockThrows === true) throw new Error("locked by another shim");
+            if (options.lockThrows === true) throw new LockHeldError("locked by another shim");
             if (options.lockRefusal !== undefined) throw options.lockRefusal;
             locks.push(sessionId);
             return () => {
@@ -320,7 +319,7 @@ function harness(
       ? {}
       : {
           acquireWorkspaceLock: (dir: string): (() => void) => {
-            if (options.workspaceLockThrows === true) throw new Error("locked by another shim");
+            if (options.workspaceLockThrows === true) throw new LockHeldError("locked by another shim");
             if (options.workspaceLockRefusal !== undefined) throw options.workspaceLockRefusal;
             workspaceLocks.push(dir);
             return () => {
@@ -469,8 +468,17 @@ async function started(h: Harness): Promise<shimv1.StartSessionResponse> {
 function unspawnableHolder(): LockHolderUnavailableError {
   return new LockHolderUnavailableError(
     "/missing/shim-lock",
-    "spawn /missing/shim-lock ENOENT",
-    "shim-session-lock: cannot spawn the lock holder /missing/shim-lock: spawn /missing/shim-lock ENOENT",
+    { kind: "spawnFailed", osError: "spawn /missing/shim-lock ENOENT" },
+    "shim-session-lock: the lock holder /missing/shim-lock could not be spawned: spawn /missing/shim-lock ENOENT",
+  );
+}
+
+/** The refusal locks.ts raises when this shim's own lock holder exited 1 before holding the lock. */
+function exitedHolder(): LockHolderUnavailableError {
+  return new LockHolderUnavailableError(
+    "/bin/shim-lock",
+    { kind: "exited", code: 1, stderr: "EACCES" },
+    "shim-session-lock: the lock holder /bin/shim-lock exited with code 1 before taking the lock (EACCES)",
   );
 }
 
@@ -889,7 +897,7 @@ describe("StartSession, fresh", () => {
     expect(failureCause(response)).toBe("lockHolderUnavailable");
   });
 
-  it("carries the holder binary and the OS error on lock_holder_unavailable", async () => {
+  it("carries the holder binary and how it failed on lock_holder_unavailable", async () => {
     // Arrange
     const h = harness({ lockRefusal: unspawnableHolder() });
 
@@ -898,10 +906,36 @@ describe("StartSession, fresh", () => {
 
     // Assert
     const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
-    expect(cause).toEqual({
-      case: "lockHolderUnavailable",
-      value: containing({ binary: "/missing/shim-lock", osError: "spawn /missing/shim-lock ENOENT" }),
+    const failure = cause?.case === "lockHolderUnavailable" ? cause.value.failure : undefined;
+    expect({ binary: failure?.binary, how: failure?.how.case }).toEqual({
+      binary: "/missing/shim-lock",
+      how: "spawnFailed",
     });
+  });
+
+  it("refuses a holder that EXITED before holding the lock as lock_holder_unavailable, never conversation_owned", async () => {
+    // Arrange: exit 1 is the helper failing, not a genuine owner.
+    const h = harness({ lockRefusal: exitedHolder() });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(failureCause(response)).toBe("lockHolderUnavailable");
+  });
+
+  it("words the lock_holder_unavailable detail as the helper failing and nobody owning the conversation", async () => {
+    // Arrange
+    const h = harness({ lockRefusal: exitedHolder() });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.detail : undefined).toBe(
+      "this shim's lock helper /bin/shim-lock exited with code 1 before taking the lock (EACCES); " +
+        "no other process is known to own this conversation",
+    );
   });
 
   it("an unspawnable WORKSPACE holder still releases the session lock it had already taken", async () => {
@@ -7627,26 +7661,18 @@ describe("a vendor failure that is not an Error", () => {
     ).toBe("the vendor binary is not on this box");
   });
 
-  it("logs a bare-string SESSION claim refusal with the words the claim used", async () => {
+  it("raises a SESSION claim failure that names no owner rather than answering conversation_owned", async () => {
+    // Only a holder that found the lock held (LockHeldError) is a genuine
+    // owner; anything else the claim throws is not a refusal the contract names.
     const h = harness({ lockRefusal: "the lock directory is gone" });
-    const before = logCursor();
 
-    await h.engine.startSession(freshRequest());
-
-    expect(
-      logContextFor(before, "holds this conversation's session lock")?.cause,
-    ).toBe("the lock directory is gone");
+    await expect(h.engine.startSession(freshRequest())).rejects.toBe("the lock directory is gone");
   });
 
-  it("logs a bare-string WORKSPACE claim refusal with the words the claim used", async () => {
+  it("raises a WORKSPACE claim failure that names no owner rather than answering conversation_owned", async () => {
     const h = harness({ workspaceLockRefusal: "the lock directory is gone" });
-    const before = logCursor();
 
-    await h.engine.startSession(freshRequest());
-
-    expect(logContextFor(before, "holds this workspace's lock")?.cause).toBe(
-      "the lock directory is gone",
-    );
+    await expect(h.engine.startSession(freshRequest())).rejects.toBe("the lock directory is gone");
   });
 
   it("carries a bare-string setModel rejection into the immediate refusal", async () => {

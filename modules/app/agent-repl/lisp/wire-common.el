@@ -869,6 +869,74 @@ the status cell for exactly that reason."
            :why (agent-repl-wire--decode-string
                     "SessionFaultFinalAnswerUnresolved" 'why object)))))
 
+;;;; ---- conversation.v1.LockHolderFailure ----
+
+(defun agent-repl-wire-decode-lock-holder-spawn-failed (value)
+  "Decode VALUE as `LockHolderSpawnFailed', a plist (`:os-error').
+The shim's lock holder could not be spawned at all."
+  (let ((object (agent-repl-wire--object "LockHolderSpawnFailed" value)))
+    (agent-repl-wire--check-keys "LockHolderSpawnFailed" object '(osError))
+    (agent-repl-wire--decoded
+     "LockHolderSpawnFailed"
+     (list :os-error (agent-repl-wire--decode-string "LockHolderSpawnFailed" 'osError object)))))
+
+(defun agent-repl-wire-decode-lock-holder-exited (value)
+  "Decode VALUE as `LockHolderExited', a plist (`:code' `:stderr').
+The holder exited before it held the lock, with a code other than 3."
+  (let ((object (agent-repl-wire--object "LockHolderExited" value)))
+    (agent-repl-wire--check-keys "LockHolderExited" object '(code stderr))
+    (agent-repl-wire--decoded
+     "LockHolderExited"
+     (list :code (agent-repl-wire--decode-int32 "LockHolderExited" 'code object)
+           :stderr (agent-repl-wire--decode-string "LockHolderExited" 'stderr object)))))
+
+(defun agent-repl-wire-decode-lock-holder-signaled (value)
+  "Decode VALUE as `LockHolderSignaled', a plist (`:signal' `:stderr').
+A signal killed the holder before it held the lock."
+  (let ((object (agent-repl-wire--object "LockHolderSignaled" value)))
+    (agent-repl-wire--check-keys "LockHolderSignaled" object '(signal stderr))
+    (agent-repl-wire--decoded
+     "LockHolderSignaled"
+     (list :signal (agent-repl-wire--decode-string "LockHolderSignaled" 'signal object)
+           :stderr (agent-repl-wire--decode-string "LockHolderSignaled" 'stderr object)))))
+
+(defun agent-repl-wire-decode-lock-holder-misanswered (value)
+  "Decode VALUE as `LockHolderMisanswered', a plist (`:line').
+The holder's first line was not `locked'."
+  (let ((object (agent-repl-wire--object "LockHolderMisanswered" value)))
+    (agent-repl-wire--check-keys "LockHolderMisanswered" object '(line))
+    (agent-repl-wire--decoded
+     "LockHolderMisanswered"
+     (list :line (agent-repl-wire--decode-string "LockHolderMisanswered" 'line object)))))
+
+(defun agent-repl-wire-decode-lock-holder-silent (value)
+  "Decode VALUE as `LockHolderSilent', a plist (`:timeout-ms').
+The holder neither answered nor exited inside the shim's bound."
+  (let ((object (agent-repl-wire--object "LockHolderSilent" value)))
+    (agent-repl-wire--check-keys "LockHolderSilent" object '(timeoutMs))
+    (agent-repl-wire--decoded
+     "LockHolderSilent"
+     (list :timeout-ms (agent-repl-wire--decode-uint32 "LockHolderSilent" 'timeoutMs object)))))
+
+(defun agent-repl-wire-decode-lock-holder-failure (value)
+  "Decode VALUE as `conversation.v1.LockHolderFailure', a plist
+\(`:binary' `:how'), `:how' being (:arm ARM :value V).
+How the shim's own kernel-lock holder failed.  The arm is the account, so
+an unset `how' is a contract breach."
+  (let ((object (agent-repl-wire--object "LockHolderFailure" value)))
+    (agent-repl-wire--check-keys "LockHolderFailure" object
+                                 '(binary spawnFailed exited signaled misanswered silent))
+    (agent-repl-wire--decoded
+     "LockHolderFailure"
+     (list :binary (agent-repl-wire--decode-string "LockHolderFailure" 'binary object)
+           :how (agent-repl-wire--decode-oneof
+                 "LockHolderFailure" "how" object
+                 (list (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-lock-holder-spawn-failed)
+                       (list 'exited :exited #'agent-repl-wire-decode-lock-holder-exited)
+                       (list 'signaled :signaled #'agent-repl-wire-decode-lock-holder-signaled)
+                       (list 'misanswered :misanswered #'agent-repl-wire-decode-lock-holder-misanswered)
+                       (list 'silent :silent #'agent-repl-wire-decode-lock-holder-silent)))))))
+
 (provide 'wire-common)
 
 ;;; wire-common.el ends here

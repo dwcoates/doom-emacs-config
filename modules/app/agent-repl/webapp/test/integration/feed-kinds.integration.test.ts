@@ -67,6 +67,7 @@ import {
   WORKSPACE_ID,
   activityRow,
   agentPromptRow,
+  mcpToolCallUnit,
   artifactUnit,
   coldGateResolvedRow,
   coldGateStandingRow,
@@ -426,6 +427,46 @@ describe.each(TOOL_OUTPUT_FORMS)("a returned tool call with %s output", (form) =
     // Assert: only the capped forms carry an omission field.
     const expected = (TOOL_OUTPUT_FORMS_WITH_OMISSION as readonly string[]).includes(form);
     expect(/omitted|more/.test(row.textContent ?? "")).toBe(expected);
+  });
+});
+
+describe("an MCP server's tool call", () => {
+  it("draws through the ordinary tool card", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(mcpToolCallUnit()));
+    // Assert
+    expect({ state: row.dataset.state, card: row.querySelector(".tool-card") !== null }).toEqual({
+      state: "returned",
+      card: true,
+    });
+  });
+
+  it("draws the qualified tool name as the head, verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(mcpToolCallUnit()));
+    // Assert
+    expect(row.querySelector(".tool-name")?.textContent).toContain("mcp__claude-in-chrome__navigate");
+  });
+
+  it("draws the arguments' JSON as the input line, verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(mcpToolCallUnit()));
+    // Assert
+    expect(row.textContent).toContain('{"tabId":7,"url":"https://example.com"}');
+  });
+
+  it("draws what the tool returned", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(mcpToolCallUnit()));
+    // Assert
+    expect(row.textContent).toContain("Navigated to https://example.com");
+  });
+
+  it("draws a failed call's own account", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(mcpToolCallUnit("failed")));
+    // Assert
+    expect(row.textContent).toContain("Error: Couldn't determine which page this action targets.");
   });
 });
 

@@ -8,6 +8,7 @@ import {
 import {
   OpenWorkspaceErrorSchema,
   OpenWorkspaceResponseSchema,
+  OpenWorkspaceLockHolderUnavailableSchema,
   OpenWorkspaceVendorStartFailedSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
@@ -39,6 +40,7 @@ import {
   SetWorkspacePriorityResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { LockHolderFailureSchema } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   buildAssignWorkspaceTaskRequest,
@@ -58,6 +60,7 @@ import {
   fillAssignSubmenu,
   mergeWorkspaceRefusal,
   nukeWorkspaceRefusal,
+  lockHolderHowText,
   openWorkspaceRefusal,
   restartWorkspaceRefusal,
   fireVerb,
@@ -250,7 +253,9 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
   spawnFailed: { detail: "exec format error" },
   vendorStartFailed: { detail: "the sdk threw before its first message" },
-  lockHolderUnavailable: { binary: "/b/shim-lock", osError: "spawn /b/shim-lock ENOENT" },
+  lockHolderUnavailable: {
+    failure: { binary: "/b/shim-lock", how: { case: "exited", value: { code: 1, stderr: "EACCES" } } },
+  },
   gitFailed: { detail: "worktree is dirty" },
 };
 
@@ -485,14 +490,42 @@ describe("the per-rpc causes, worded at their own site", () => {
     expect(text).toBe("the vendor failed to start the session");
   });
 
-  it("says the shim's lock helper failed to start, naming the binary", async () => {
+  it("says the shim's lock helper failed and how, naming the binary", async () => {
     const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
-    expect(refusal?.textContent).toContain("the shim's lock helper /b/shim-lock failed to start");
+    expect(refusal?.textContent).toContain(
+      "the shim's lock helper /b/shim-lock exited with code 1 before taking the lock (EACCES)",
+    );
   });
 
-  it("carries the OS error of a lock helper that failed to start", async () => {
-    const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
-    expect(refusal?.textContent).toContain("(spawn /b/shim-lock ENOENT)");
+  it("refuses a lock_holder_unavailable arm that carries no failure as malformed", () => {
+    // Arrange / Act / Assert: the contract says the failure is always set.
+    expect(() =>
+      openWorkspaceRefusal({
+        case: "lockHolderUnavailable",
+        value: create(OpenWorkspaceLockHolderUnavailableSchema, {}),
+      } as never),
+    ).toThrow(MalformedView);
+  });
+
+  it.each([
+    ["a spawn failure", { case: "spawnFailed", value: { osError: "spawn ENOENT" } }, "could not be spawned: spawn ENOENT"],
+    ["an exit with stderr", { case: "exited", value: { code: 1, stderr: "EACCES" } }, "exited with code 1 before taking the lock (EACCES)"],
+    ["an exit with no stderr", { case: "exited", value: { code: 2, stderr: "" } }, "exited with code 2 before taking the lock"],
+    ["a signal", { case: "signaled", value: { signal: "SIGSEGV", stderr: "" } }, "was killed by SIGSEGV before taking the lock"],
+    ["a wrong line", { case: "misanswered", value: { line: "ok" } }, 'answered "ok" instead of "locked" and was killed'],
+    ["no answer", { case: "silent", value: { timeoutMs: 5000 } }, 'gave no "locked" answer within 5000 ms and was killed'],
+  ])("words %s as the lock helper failing", (_name, how, want) => {
+    // Arrange
+    const failure = create(LockHolderFailureSchema, { binary: "/b/shim-lock", how } as never);
+    // Act / Assert
+    expect(lockHolderHowText(failure)).toBe(want);
+  });
+
+  it("refuses a LockHolderFailure that states no how as malformed", () => {
+    // Arrange
+    const failure = create(LockHolderFailureSchema, { binary: "/b/shim-lock" });
+    // Act / Assert
+    expect(() => lockHolderHowText(failure)).toThrow(MalformedView);
   });
 
   it("never words an unavailable lock helper as another owner", async () => {

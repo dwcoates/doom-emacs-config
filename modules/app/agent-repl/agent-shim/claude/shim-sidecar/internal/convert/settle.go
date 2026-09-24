@@ -113,6 +113,9 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	c.reportLaunch(call, result, at)
 
 	kind, known := classifyTool(call.name)
+	if !known && call.mcp != nil {
+		return []*storev1.StoreEntry{c.settleMcpToolCall(call, block, failed, at, env, agent)}
+	}
 	if !known {
 		return []*storev1.StoreEntry{c.settleUnmodeled(call, block, failed, at, env, agent)}
 	}

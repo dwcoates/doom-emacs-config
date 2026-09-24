@@ -272,20 +272,38 @@ describe("artifacts", () => {
   });
 });
 
-describe("an unmodeled MCP tool", () => {
-  it("calls a tool no converter owns", async () => {
+describe("an MCP tool", () => {
+  it("calls the echo server's tool", async () => {
     // Arrange + Act
-    const driven = await driveScenario(["!unmodeled"]);
+    const driven = await driveScenario(["!mcp-tool"]);
 
     // Assert
     expect((toolUses(driven)[0] as { name: string }).name).toBe("mcp__echo__echo");
   });
 
-  it("answers with an opaque payload rather than a modeled shape", async () => {
+  it("answers with the server's text payload", async () => {
     // Arrange + Act
-    const echoed = (await results("!unmodeled"))[0];
+    const echoed = (await results("!mcp-tool"))[0];
 
     // Assert
     expect(Object.keys(echoed).sort()).toEqual(["content", "isError"].sort());
+  });
+});
+
+describe("an unmodeled tool", () => {
+  it("calls a tool no converter owns and no MCP server serves", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!unmodeled"]);
+
+    // Assert
+    expect((toolUses(driven)[0] as { name: string }).name).toBe("StructuredOutput");
+  });
+
+  it("answers with an opaque payload rather than a modeled shape", async () => {
+    // Arrange + Act
+    const answered = (await results("!unmodeled"))[0];
+
+    // Assert
+    expect(Object.keys(answered).sort()).toEqual(["content", "isError"].sort());
   });
 });

@@ -375,13 +375,6 @@ func TestDescribeNamesTheResidueArm(t *testing.T) {
 		want string
 	}{
 		{
-			name: "keepalive",
-			item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{
-				Keepalive: &storev1.StoreAgentItem{},
-			}},
-			want: "keepalive",
-		},
-		{
 			name: "vendor specific",
 			item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{
 				VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook_result"},

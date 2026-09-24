@@ -45,17 +45,6 @@ func TestIsResidueNamesEveryArmNobodyReads(t *testing.T) {
 			entry: UnparsedEntry(at, []byte("{"), errTestUnparsed),
 			want:  true,
 		},
-		{
-			// NO PRODUCER MINTS THIS ARM ANY LONGER (keepalive.go), but the arm
-			// is still in the contract and rows written before stand in the store.
-			name: "keepalive — a well-formed fact with no book, not residue",
-			entry: &storev1.StoreEntry{Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
-				AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: &storev1.StoreUnservedItem{
-					UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: &storev1.StoreAgentItem{}},
-				}},
-			}}},
-			want: false,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

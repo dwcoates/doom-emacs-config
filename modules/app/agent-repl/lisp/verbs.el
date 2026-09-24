@@ -243,6 +243,29 @@ appending an empty pair of parentheses would suggest otherwise."
   (let ((fields (plist-get arm :value)))
     (if fields (format " %S" fields) "")))
 
+(defun agent-repl-verbs--lock-holder-how-text (how)
+  "Word HOW, a decoded `LockHolderFailure' `how' oneof, as the helper failing.
+The arm is the account: each case says what that arm carries, the same
+sentence the shim and the daemon word it with."
+  (let ((value (plist-get how :value)))
+    (pcase (plist-get how :arm)
+      (:spawn-failed (format "could not be spawned: %s" (plist-get value :os-error)))
+      (:exited (format "exited with code %d before taking the lock%s"
+                       (plist-get value :code)
+                       (agent-repl-verbs--lock-holder-stderr (plist-get value :stderr))))
+      (:signaled (format "was killed by %s before taking the lock%s"
+                         (plist-get value :signal)
+                         (agent-repl-verbs--lock-holder-stderr (plist-get value :stderr))))
+      (:misanswered (format "answered %S instead of \"locked\" and was killed"
+                            (plist-get value :line)))
+      (:silent (format "gave no \"locked\" answer within %d ms and was killed"
+                       (plist-get value :timeout-ms)))
+      (arm (error "agent-repl-verbs: LockHolderFailure arm %S has no wording" arm)))))
+
+(defun agent-repl-verbs--lock-holder-stderr (stderr)
+  "Return STDERR as a parenthesized suffix, or the empty string when empty."
+  (if (string-empty-p stderr) "" (format " (%s)" stderr)))
+
 (defun agent-repl-verbs--on-refusal (ws op value)
   "Report a daemon-authored refusal of OP for WS, or route it to the handover.
 The two handover arms are silent by design.  Every other arm is logged at
@@ -257,14 +280,16 @@ the user as the verb, the word refused, the arm keyword, and the fields."
       (agent-repl-host-handle-refusal ws arm))
      ((eq keyword :lock-holder-unavailable)
       ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
-      ;; the conversation: the shim's own lock helper would not start, and
-      ;; the binary plus the OS error are the whole remediation, so they
-      ;; are said in words rather than as a raw plist.
-      (let ((fields (plist-get arm :value)))
+      ;; the conversation: the shim's own lock helper failed, and the binary
+      ;; plus how it failed are the whole remediation, so they are said in
+      ;; words rather than as a raw plist.
+      (let* ((fields (plist-get arm :value))
+             (failure (plist-get fields :failure)))
         (agent-repl--warn ws (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
                           ws keyword fields)
-        (message "%s refused: the shim's lock helper %s failed to start (%s); no other process owns this conversation"
-                 op (plist-get fields :binary) (plist-get fields :os-error))))
+        (message "%s refused: the shim's lock helper %s %s; no other process owns this conversation"
+                 op (plist-get failure :binary)
+                 (agent-repl-verbs--lock-holder-how-text (plist-get failure :how)))))
      (t
       ;; THE SLUG NAMES THE VERB: `elisp.verbs.<op>-refused'.  A refusal
       ;; reader wants every refusal of ONE verb, and a slug shared by all of
