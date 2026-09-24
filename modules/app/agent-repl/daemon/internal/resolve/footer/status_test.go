@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
 )
@@ -439,6 +440,73 @@ func TestAQueryDeathKeepsItsLineUnderTheTurnsFailure(t *testing.T) {
 			ExecutionError: &conversationv1.AgentExecutionError{},
 		},
 	})
+
+	// Assert
+	blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
+	if blocked.GetActivity().GetQueryDied().GetText() == "" {
+		t.Fatalf("the dead-query line is missing: activity = %+v", blocked.GetActivity())
+	}
+}
+
+// queryDiedFailure is the terminal the shim owes the open turn when its query
+// dies: AgentFailure's own query_died arm.
+func queryDiedFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	}
+}
+
+// TestAQueryDeathBlocksOnQueryDiedWhicheverStatementArrivesFirst: the session's
+// query_died push and the turn's query_died terminal travel by independent
+// channels, so the substatus must be query_died in either order.
+func TestAQueryDeathBlocksOnQueryDiedWhicheverStatementArrivesFirst(t *testing.T) {
+	died := &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	}
+	cases := []struct {
+		name string
+		act  func(h *harness, turn *ids.TurnID)
+	}{
+		{name: "the terminal first, then the push", act: func(h *harness, turn *ids.TurnID) {
+			h.r.OnAgentTerminal(testWS, mainAgent, turn, nil, queryDiedFailure())
+			h.r.OnSessionUpdate(testWS, died)
+		}},
+		{name: "the push first, then the terminal", act: func(h *harness, turn *ids.TurnID) {
+			h.r.OnSessionUpdate(testWS, died)
+			h.r.OnAgentTerminal(testWS, mainAgent, turn, nil, queryDiedFailure())
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			turn := testTurnID
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			tc.act(h, &turn)
+
+			// Assert
+			blocked := h.view(t).GetStrip().GetStatus().GetBlocked()
+			if blocked.GetQueryDied() == nil {
+				t.Fatalf("substatus = %+v, want query_died", blocked.GetSubstatus())
+			}
+		})
+	}
+}
+
+// TestAQueryDiedTerminalStandsTheDeadQueryLine: the terminal is the death too,
+// so the strip carries the dead-query line before the push lands.
+func TestAQueryDiedTerminalStandsTheDeadQueryLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, nil, queryDiedFailure())
 
 	// Assert
 	blocked := h.view(t).GetStrip().GetStatus().GetBlocked()

@@ -149,13 +149,15 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 
 	delete(s.turnEvidence, string(*turn))
 	delete(s.turnRefusals, string(*turn))
-	delete(s.turnQueryDeaths, string(*turn))
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnInFlight != nil && *s.turnInFlight == *turn"})
 		s.turnInFlight = nil
 	}
-	if s.turnStamp != nil && *s.turnStamp == *turn {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil && *s.turnStamp == *turn"})
+	// A QUERY DEATH STILL OWES ROWS (wsState.turnStamp), and its terminal is
+	// the death as much as the session's push is: whichever of the two lands
+	// first, the stamp stands for the stand-down's denials still to come.
+	if s.turnStamp != nil && *s.turnStamp == *turn && !diedOfQuery(failure) {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnStamp != nil && *s.turnStamp == *turn && !diedOfQuery(failure)"})
 		s.turnStamp = nil
 	}
 }
@@ -267,18 +269,14 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 		sentence      string
 	)
 
-	// A DEAD QUERY OUTRANKS THE TERMINAL THE SHIM OWED FOR IT. The shim
-	// concludes an open turn with AgentFailure.execution_error when the query
-	// dies under it, because conversation.v1 gives a dead query no failure arm
-	// of its own -- but the session already stated the death, feed.proto has
-	// the arm for it, and drawing "the run broke while executing" over it
-	// loses the one fact that says the producer is gone.
-	if died, ok := s.turnQueryDeaths[turn]; ok {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "died, ok := s.turnQueryDeaths[turn]; ok"})
-		errored.Error = queryDiedArm(died)
-		applyHeadline(errored, headline{Text: queryDeathSentence(died)},
-			strings.Join(failure.GetErrors(), "; "))
-		return errored
+	// A TERMINAL THAT SAYS THE QUERY DIED IS DRAWN AS THE DEATH, by the very
+	// builder the session's own query_died push draws with. The two statements
+	// travel by independent channels with no ordering between them, and a
+	// replayed turn has only this one, so the row is the same whichever of
+	// them drew it -- live in either order, and on replay.
+	if died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "died, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied); ok"})
+		return queryDiedErrored(died.QueryDied)
 	}
 
 	var endedOn *conversationv1.ApiRequestFailed
@@ -548,10 +546,7 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 	turn := string(*s.turnInFlight)
 	at := r.outputPlacement(s)
 
-	s.turnQueryDeaths[turn] = died
-
-	errored := &frontendv1.FeedTurnEndedErrored{Error: queryDiedArm(died)}
-	applyHeadline(errored, headline{Text: queryDeathSentence(died)}, queryDeathDetail(died))
+	errored := queryDiedErrored(died)
 
 	row := &frontendv1.FeedRow{
 		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindTurnEnded, ID: turn}),
@@ -568,6 +563,22 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 	r.settleTurnPrompts(s, ids.TurnID(turn))
 	r.breakPlanEpisodes(s, "the query died while plan mode was still open")
 	s.turnInFlight = nil
+}
+
+// queryDiedErrored is THE drawing of a query death, shared by both of its
+// statements: the session's query_died push and the turn terminal's own
+// query_died arm. One builder is what makes the drawn row independent of which
+// of them reached the resolver first.
+func queryDiedErrored(died *conversationv1.SessionQueryDied) *frontendv1.FeedTurnEndedErrored {
+	errored := &frontendv1.FeedTurnEndedErrored{Error: queryDiedArm(died)}
+	applyHeadline(errored, headline{Text: queryDeathSentence(died)}, queryDeathDetail(died))
+	return errored
+}
+
+// diedOfQuery reports whether a turn's failure terminal is a query death.
+func diedOfQuery(failure *conversationv1.AgentFailure) bool {
+	_, ok := failure.GetFailure().(*conversationv1.AgentFailure_QueryDied)
+	return ok
 }
 
 // queryDiedArm builds feed.proto's query-died arm, carrying the cause through

@@ -570,3 +570,22 @@ func TestAPageOfAnUnnamedAgentWithRowsIsReportedUnplaceable(t *testing.T) {
 		t.Fatalf("records = %+v, want the ERROR", h.records())
 	}
 }
+
+// TestAReplayedQueryDeathDrawsQueryDied covers a turn whose query died, served
+// from history: a replay carries no session push, only the stored terminal, so
+// the terminal's own query_died arm is what makes the replay draw the same
+// ending the live turn did.
+func TestAReplayedQueryDeathDrawsQueryDied(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), queryDiedTerminal(iteratorDeath())),
+		promptEntry("turn-1", "!query-fail"),
+	))
+
+	// Assert.
+	errored := h.terminalRow("turn-1").GetErrored()
+	if errored.GetQueryDied().GetIteratorFailure() == nil {
+		t.Fatalf("arm = %q (%v), want query_died.iterator_failure", erroredArmWord(errored), errored)
+	}
+}

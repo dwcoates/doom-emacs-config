@@ -289,6 +289,32 @@ func (h *harness) hasActivityRow(unit string) bool {
 	return false
 }
 
+// TestARowOwedByADeadTurnKeepsThatTurnsStampWhenItsTerminalLandsFirst is the
+// same debt when the turn's own query_died terminal reaches the resolver before
+// the session's push: that terminal is the death too, so it leaves the stamp
+// standing for the stand-down's denials.
+func TestARowOwedByADeadTurnKeepsThatTurnsStampWhenItsTerminalLandsFirst(t *testing.T) {
+	// Arrange: a turn concluded by its query_died terminal.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.terminal("turn-1", nil, queryDiedTerminal(iteratorDeath()))
+
+	// Act: the stand-down's denial arrives after the terminal.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionFailure{})
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetPermission() == nil {
+			continue
+		}
+		if got := row.GetTurn().GetValue(); got != "turn-1" {
+			t.Fatalf("denied ask's turn = %q, want turn-1", got)
+		}
+		return
+	}
+	t.Fatalf("rows = %+v, want the denied ask's row", h.rows(rootFeed()))
+}
+
 // TestARowOwedByADeadTurnKeepsThatTurnsStamp covers the rows a query death
 // OWES: the gate's stand-down denies every pending permission ask, and those
 // denials are drawn AFTER the death's terminal row. They belong to the turn

@@ -13,6 +13,7 @@ import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
+import "conversation/v1/session.proto";
 import "conversation/v1/slash_command.proto";
 import "conversation/v1/user.proto";
 import "conversation/v1/workflow.proto";
@@ -275,6 +276,18 @@ message AgentFailure {
     // transcript vanished or went silent, or one a boot sweep found open with
     // no producer. Not known to have failed; the feed draws "lost".
     DetachedLost lost = 18;
+    // THE QUERY DIED UNDER THE RUN, and this is the run's own account of it:
+    // the same SessionQueryDied the session states on WatchSession, cause
+    // included. The death is DUPLICATED ON PURPOSE (session.proto): a consumer
+    // with no WatchSession open still needs its turn concluded, and a consumer
+    // with no stream open still needs the session-level fact.
+    //
+    // SELF-DESCRIBING, AND THAT IS THE POINT. The two statements travel by
+    // independent channels with no ordering between them, and a replayed turn
+    // has only this one. A terminal that said execution_error instead left
+    // the drawn ending to whichever landed first, and a replay always drew the
+    // weaker account. `errors` above carries the producer's wording.
+    SessionQueryDied query_died = 19;
   }
 }
 

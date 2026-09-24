@@ -2279,40 +2279,29 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           // LOST SESSION. The child exits 1 having said so on stderr; the
           // recovery reopens plainly and re-delivers the prompt.
           if (await recoverFromRewindRefusal("the vendor query ended without being asked to")) return;
-          pushes.push(
-            create(conversationv1.SessionUpdateSchema, {
-              update: {
-                case: "queryDied",
-                value: create(conversationv1.SessionQueryDiedSchema, {
-                  cause: {
-                    case: "unexpectedEof",
-                    value: create(conversationv1.SessionQueryUnexpectedEofSchema, {}),
-                  },
-                }),
+          onQueryLost(
+            create(conversationv1.SessionQueryDiedSchema, {
+              cause: {
+                case: "unexpectedEof",
+                value: create(conversationv1.SessionQueryUnexpectedEofSchema, {}),
               },
             }),
+            "the vendor query ended without being asked to",
           );
-          onQueryLost("the vendor query ended without being asked to");
         }
       } catch (err) {
         if (isStaleLoop(active)) return;
-        if (await recoverFromRewindRefusal(err instanceof Error ? err.message : String(err))) return;
-        pushes.push(
-          create(conversationv1.SessionUpdateSchema, {
-            update: {
-              case: "queryDied",
-              value: create(conversationv1.SessionQueryDiedSchema, {
-                cause: {
-                  case: "iteratorFailure",
-                  value: create(conversationv1.SessionQueryIteratorFailureSchema, {
-                    cause: err instanceof Error ? err.message : String(err),
-                  }),
-                },
-              }),
+        const cause = err instanceof Error ? err.message : String(err);
+        if (await recoverFromRewindRefusal(cause)) return;
+        onQueryLost(
+          create(conversationv1.SessionQueryDiedSchema, {
+            cause: {
+              case: "iteratorFailure",
+              value: create(conversationv1.SessionQueryIteratorFailureSchema, { cause }),
             },
           }),
+          cause,
         );
-        onQueryLost(err instanceof Error ? err.message : String(err));
       }
     })();
   }
@@ -2333,9 +2322,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return true;
   }
 
-  /** The query is gone: settle any pending start, unwedge the callbacks, report. */
-  function onQueryLost(detail: string): void {
+  /**
+   * The query is gone: report it, settle any pending start, unwedge the
+   * callbacks.
+   *
+   * ONE DEATH, TWO STATEMENTS OF IT, ONE MESSAGE. `died` is pushed on
+   * WatchSession AND carried by the open turn's terminal, so the two can
+   * never disagree about the cause — and since they travel by independent
+   * channels with no ordering between them, the terminal must say the death
+   * itself rather than lean on the push arriving first.
+   */
+  function onQueryLost(died: conversationv1.SessionQueryDied, detail: string): void {
     LOGGER.error({ cause: detail, ...vendorDeathFields() }, "the vendor query is gone");
+    pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: { case: "queryDied", value: died },
+      }),
+    );
     // BEFORE ANYTHING ELSE. A start still waiting on `init` has its answer the
     // moment the query it was waiting on ends, and the teardown below would
     // otherwise run while the verb sat out the rest of its bound.
@@ -2351,7 +2354,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // slow one. Duplicated on purpose: a consumer with no stream open still
     // needs the session-level fact, and a consumer with no WatchSession open
     // still needs its turn concluded.
-    writeQueryDeathTerminal(detail);
+    writeQueryDeathTerminal(died, detail);
     setOpen(undefined);
     keepaliveScope.abandon(`the vendor query died: ${detail}`);
     cadence?.stop();
@@ -3440,12 +3443,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * Conclude the open turn with a failure terminal, because the query died.
    *
-   * `execution_error` and not an invented arm: the vendor stated no reason --
-   * its process is simply gone -- and `errors` carries the account. Nothing is
-   * written when no turn was open: a session that lost its query between turns
-   * has no turn to conclude.
+   * THE `query_died` ARM, carrying the very death the session pushed. The
+   * terminal reaches the daemon through the store and the push through
+   * WatchSession, with no ordering between them, and a replayed turn has only
+   * the terminal: an `execution_error` stand-in here let whichever landed
+   * first decide how the turn was drawn. `errors` carries the account. Nothing
+   * is written when no turn was open: a session that lost its query between
+   * turns has no turn to conclude.
    */
-  function writeQueryDeathTerminal(detail: string): void {
+  function writeQueryDeathTerminal(died: conversationv1.SessionQueryDied, detail: string): void {
     const ended = open;
     if (ended === undefined || identity === undefined) return;
     const agentId = identity.agentId;
@@ -3456,7 +3462,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         upsertKey: terminalUpsertKey(agentId, coordinate),
         source: {
           vendorUuid: `${coordinate}-${identity.vendorSessionId}`,
-          discriminator: "agent_frame.failure.execution_error",
+          discriminator: "agent_frame.failure.query_died",
         },
         keepalive: ended.keepalive,
         item: {
@@ -3467,10 +3473,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
               case: "failure",
               value: create(conversationv1.AgentFailureSchema, {
                 errors: [detail],
-                failure: {
-                  case: "executionError",
-                  value: create(conversationv1.AgentExecutionErrorSchema, {}),
-                },
+                failure: { case: "queryDied", value: died },
               }),
             },
           }),
