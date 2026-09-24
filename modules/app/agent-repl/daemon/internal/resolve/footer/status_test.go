@@ -1026,3 +1026,35 @@ func TestAParkThatWasRevivedNoLongerMasksARealDeath(t *testing.T) {
 		t.Fatalf("want disconnected · dead: the park was lifted by the revival")
 	}
 }
+
+// TestAShimsDeathEndsTheTurnTheStripDrew covers the turn a dead shim leaves
+// behind: no terminal is coming for it, so the link coming back (the revived
+// session) is not drawn as that turn still thinking. A severed link whose shim
+// lives on keeps its turn.
+func TestAShimsDeathEndsTheTurnTheStripDrew(t *testing.T) {
+	tests := []struct {
+		name         string
+		lost         shimclient.LinkState
+		wantThinking bool
+	}{
+		{name: "a dead link ends the turn", lost: shimclient.LinkDead},
+		{name: "a severed link keeps the turn", lost: shimclient.LinkRedialing, wantThinking: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+			h.r.OnLink(testWS, tt.lost)
+
+			// Act
+			h.r.OnLink(testWS, shimclient.LinkConnected)
+
+			// Assert
+			if got := h.view(t).GetStrip().GetStatus().GetThinking() != nil; got != tt.wantThinking {
+				t.Fatalf("thinking = %v, want %v; status %v", got, tt.wantThinking, h.view(t).GetStrip().GetStatus())
+			}
+		})
+	}
+}

@@ -560,6 +560,13 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// LinkConnected — is what makes a revival whose spawn then DIES
 			// read `dead` again instead of staying masked as a park.
 			s.parked = false
+			// A DEAD SHIM RUNS NO TURN. The process that ran the vendor
+			// query is gone, so whatever turn the strip was drawing ended
+			// with it and no terminal will ever arrive for it. Kept, it drew
+			// `thinking` over the session brought back in its place.
+			if link == shimclient.LinkDead && s.turn != nil {
+				s.turn = nil
+			}
 		})
 }
 
