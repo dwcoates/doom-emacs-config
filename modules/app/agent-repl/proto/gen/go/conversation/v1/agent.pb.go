@@ -1033,6 +1033,7 @@ type AgentFailure struct {
 	//	*AgentFailure_ExecutionError
 	//	*AgentFailure_ContinuationPrevented
 	//	*AgentFailure_Lost
+	//	*AgentFailure_QueryDied
 	Failure       isAgentFailure_Failure `protobuf_oneof:"failure"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1244,6 +1245,15 @@ func (x *AgentFailure) GetLost() *DetachedLost {
 	return nil
 }
 
+func (x *AgentFailure) GetQueryDied() *SessionQueryDied {
+	if x != nil {
+		if x, ok := x.Failure.(*AgentFailure_QueryDied); ok {
+			return x.QueryDied
+		}
+	}
+	return nil
+}
+
 type isAgentFailure_Failure interface {
 	isAgentFailure_Failure()
 }
@@ -1353,6 +1363,21 @@ type AgentFailure_Lost struct {
 	Lost *DetachedLost `protobuf:"bytes,18,opt,name=lost,proto3,oneof"`
 }
 
+type AgentFailure_QueryDied struct {
+	// THE QUERY DIED UNDER THE RUN, and this is the run's own account of it:
+	// the same SessionQueryDied the session states on WatchSession, cause
+	// included. The death is DUPLICATED ON PURPOSE (session.proto): a consumer
+	// with no WatchSession open still needs its turn concluded, and a consumer
+	// with no stream open still needs the session-level fact.
+	//
+	// SELF-DESCRIBING, AND THAT IS THE POINT. The two statements travel by
+	// independent channels with no ordering between them, and a replayed turn
+	// has only this one. A terminal that said execution_error instead left
+	// the drawn ending to whichever landed first, and a replay always drew the
+	// weaker account. `errors` above carries the producer's wording.
+	QueryDied *SessionQueryDied `protobuf:"bytes,19,opt,name=query_died,json=queryDied,proto3,oneof"`
+}
+
 func (*AgentFailure_ApiRequestFailed) isAgentFailure_Failure() {}
 
 func (*AgentFailure_BlockingLimit) isAgentFailure_Failure() {}
@@ -1388,6 +1413,8 @@ func (*AgentFailure_ExecutionError) isAgentFailure_Failure() {}
 func (*AgentFailure_ContinuationPrevented) isAgentFailure_Failure() {}
 
 func (*AgentFailure_Lost) isAgentFailure_Failure() {}
+
+func (*AgentFailure_QueryDied) isAgentFailure_Failure() {}
 
 // An account-level block stopped the run.
 type AgentStoppedAtBlockingLimit struct {
@@ -2686,7 +2713,7 @@ var File_conversation_v1_agent_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x1bconversation/v1/agent.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a\x19conversation/v1/api.proto\x1a#conversation/v1/detached_work.proto\x1a conversation/v1/permission.proto\x1a\x1econversation/v1/question.proto\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/user.proto\x1a\x1econversation/v1/workflow.proto\"\xc4\x02\n" +
+	"\x1bconversation/v1/agent.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a\x19conversation/v1/api.proto\x1a#conversation/v1/detached_work.proto\x1a conversation/v1/permission.proto\x1a\x1econversation/v1/question.proto\x1a\x1dconversation/v1/session.proto\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/user.proto\x1a\x1econversation/v1/workflow.proto\"\xc4\x02\n" +
 	"\n" +
 	"AgentFrame\x123\n" +
 	"\bagent_id\x18\x04 \x01(\v2\x18.conversation.v1.AgentIdR\aagentId\x126\n" +
@@ -2733,7 +2760,7 @@ const file_conversation_v1_agent_proto_rawDesc = "" +
 	"\rhost_shutdown\x18\x02 \x01(\v2/.conversation.v1.AgentInterruptedByHostShutdownH\x00R\fhostShutdownB\a\n" +
 	"\x05cause\"\x18\n" +
 	"\x16AgentInterruptedByUser\" \n" +
-	"\x1eAgentInterruptedByHostShutdown\"\xd0\f\n" +
+	"\x1eAgentInterruptedByHostShutdown\"\x94\r\n" +
 	"\fAgentFailure\x12\x16\n" +
 	"\x06errors\x18\x1e \x03(\tR\x06errors\x12Q\n" +
 	"\x12api_request_failed\x18\x01 \x01(\v2!.conversation.v1.ApiRequestFailedH\x00R\x10apiRequestFailed\x12U\n" +
@@ -2756,7 +2783,9 @@ const file_conversation_v1_agent_proto_rawDesc = "" +
 	"\x11turn_setup_failed\x18\x0f \x01(\v2%.conversation.v1.AgentTurnSetupFailedH\x00R\x0fturnSetupFailed\x12O\n" +
 	"\x0fexecution_error\x18\x10 \x01(\v2$.conversation.v1.AgentExecutionErrorH\x00R\x0eexecutionError\x12d\n" +
 	"\x16continuation_prevented\x18\x11 \x01(\v2+.conversation.v1.AgentContinuationPreventedH\x00R\x15continuationPrevented\x123\n" +
-	"\x04lost\x18\x12 \x01(\v2\x1d.conversation.v1.DetachedLostH\x00R\x04lostB\t\n" +
+	"\x04lost\x18\x12 \x01(\v2\x1d.conversation.v1.DetachedLostH\x00R\x04lost\x12B\n" +
+	"\n" +
+	"query_died\x18\x13 \x01(\v2!.conversation.v1.SessionQueryDiedH\x00R\tqueryDiedB\t\n" +
 	"\afailure\"\x1d\n" +
 	"\x1bAgentStoppedAtBlockingLimit\"\"\n" +
 	" AgentStoppedByRapidRefillBreaker\"\x14\n" +
@@ -2874,9 +2903,10 @@ var file_conversation_v1_agent_proto_goTypes = []any{
 	(*ApiRequestFailed)(nil),                      // 49: conversation.v1.ApiRequestFailed
 	(*AgentActivityId)(nil),                       // 50: conversation.v1.AgentActivityId
 	(*DetachedLost)(nil),                          // 51: conversation.v1.DetachedLost
-	(*AgentWorkflowStart)(nil),                    // 52: conversation.v1.AgentWorkflowStart
-	(*AgentSubagentStart)(nil),                    // 53: conversation.v1.AgentSubagentStart
-	(*AgentWorkflowSummary)(nil),                  // 54: conversation.v1.AgentWorkflowSummary
+	(*SessionQueryDied)(nil),                      // 52: conversation.v1.SessionQueryDied
+	(*AgentWorkflowStart)(nil),                    // 53: conversation.v1.AgentWorkflowStart
+	(*AgentSubagentStart)(nil),                    // 54: conversation.v1.AgentSubagentStart
+	(*AgentWorkflowSummary)(nil),                  // 55: conversation.v1.AgentWorkflowSummary
 }
 var file_conversation_v1_agent_proto_depIdxs = []int32{
 	40, // 0: conversation.v1.AgentFrame.agent_id:type_name -> conversation.v1.AgentId
@@ -2919,24 +2949,25 @@ var file_conversation_v1_agent_proto_depIdxs = []int32{
 	27, // 37: conversation.v1.AgentFailure.execution_error:type_name -> conversation.v1.AgentExecutionError
 	28, // 38: conversation.v1.AgentFailure.continuation_prevented:type_name -> conversation.v1.AgentContinuationPrevented
 	51, // 39: conversation.v1.AgentFailure.lost:type_name -> conversation.v1.DetachedLost
-	52, // 40: conversation.v1.AgentWorkflow.start:type_name -> conversation.v1.AgentWorkflowStart
-	30, // 41: conversation.v1.AgentWorkflow.update:type_name -> conversation.v1.AgentWorkflowUpdate
-	34, // 42: conversation.v1.AgentWorkflow.success:type_name -> conversation.v1.AgentWorkflowSuccess
-	37, // 43: conversation.v1.AgentWorkflow.failure:type_name -> conversation.v1.AgentWorkflowFailure
-	31, // 44: conversation.v1.AgentWorkflowUpdate.all_subagents:type_name -> conversation.v1.AgentWorkflowSubagent
-	53, // 45: conversation.v1.AgentWorkflowSubagent.agent_start:type_name -> conversation.v1.AgentSubagentStart
-	32, // 46: conversation.v1.AgentWorkflowSubagent.live:type_name -> conversation.v1.AgentWorkflowSubagentLive
-	33, // 47: conversation.v1.AgentWorkflowSubagent.ended:type_name -> conversation.v1.AgentWorkflowSubagentEnded
-	35, // 48: conversation.v1.AgentWorkflowSuccess.completed:type_name -> conversation.v1.AgentWorkflowCompleted
-	36, // 49: conversation.v1.AgentWorkflowSuccess.interrupted:type_name -> conversation.v1.AgentWorkflowInterrupted
-	54, // 50: conversation.v1.AgentWorkflowCompleted.summary:type_name -> conversation.v1.AgentWorkflowSummary
-	38, // 51: conversation.v1.AgentWorkflowFailure.script_rejected:type_name -> conversation.v1.AgentWorkflowScriptRejected
-	39, // 52: conversation.v1.AgentWorkflowFailure.run_ended:type_name -> conversation.v1.AgentWorkflowRunEnded
-	53, // [53:53] is the sub-list for method output_type
-	53, // [53:53] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	52, // 40: conversation.v1.AgentFailure.query_died:type_name -> conversation.v1.SessionQueryDied
+	53, // 41: conversation.v1.AgentWorkflow.start:type_name -> conversation.v1.AgentWorkflowStart
+	30, // 42: conversation.v1.AgentWorkflow.update:type_name -> conversation.v1.AgentWorkflowUpdate
+	34, // 43: conversation.v1.AgentWorkflow.success:type_name -> conversation.v1.AgentWorkflowSuccess
+	37, // 44: conversation.v1.AgentWorkflow.failure:type_name -> conversation.v1.AgentWorkflowFailure
+	31, // 45: conversation.v1.AgentWorkflowUpdate.all_subagents:type_name -> conversation.v1.AgentWorkflowSubagent
+	54, // 46: conversation.v1.AgentWorkflowSubagent.agent_start:type_name -> conversation.v1.AgentSubagentStart
+	32, // 47: conversation.v1.AgentWorkflowSubagent.live:type_name -> conversation.v1.AgentWorkflowSubagentLive
+	33, // 48: conversation.v1.AgentWorkflowSubagent.ended:type_name -> conversation.v1.AgentWorkflowSubagentEnded
+	35, // 49: conversation.v1.AgentWorkflowSuccess.completed:type_name -> conversation.v1.AgentWorkflowCompleted
+	36, // 50: conversation.v1.AgentWorkflowSuccess.interrupted:type_name -> conversation.v1.AgentWorkflowInterrupted
+	55, // 51: conversation.v1.AgentWorkflowCompleted.summary:type_name -> conversation.v1.AgentWorkflowSummary
+	38, // 52: conversation.v1.AgentWorkflowFailure.script_rejected:type_name -> conversation.v1.AgentWorkflowScriptRejected
+	39, // 53: conversation.v1.AgentWorkflowFailure.run_ended:type_name -> conversation.v1.AgentWorkflowRunEnded
+	54, // [54:54] is the sub-list for method output_type
+	54, // [54:54] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_proto_init() }
@@ -2949,6 +2980,7 @@ func file_conversation_v1_agent_proto_init() {
 	file_conversation_v1_detached_work_proto_init()
 	file_conversation_v1_permission_proto_init()
 	file_conversation_v1_question_proto_init()
+	file_conversation_v1_session_proto_init()
 	file_conversation_v1_slash_command_proto_init()
 	file_conversation_v1_user_proto_init()
 	file_conversation_v1_workflow_proto_init()
@@ -3004,6 +3036,7 @@ func file_conversation_v1_agent_proto_init() {
 		(*AgentFailure_ExecutionError)(nil),
 		(*AgentFailure_ContinuationPrevented)(nil),
 		(*AgentFailure_Lost)(nil),
+		(*AgentFailure_QueryDied)(nil),
 	}
 	file_conversation_v1_agent_proto_msgTypes[29].OneofWrappers = []any{
 		(*AgentWorkflow_Start)(nil),
