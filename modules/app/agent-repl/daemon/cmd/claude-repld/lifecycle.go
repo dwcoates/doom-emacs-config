@@ -202,6 +202,12 @@ func (s *lifecycleSink) reportBuild(ws ids.WorkspaceID, build string) {
 	controller.ShimReported(ws, build)
 }
 
+// OnTurnsEndedUnobserved closes, through the queue that owns the turn rows,
+// the turns an adoption found open that the adopted shim no longer runs.
+func (s *lifecycleSink) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
+	s.queue.OnTurnsEndedUnobserved(ws, turns)
+}
+
 // OnFree is the freeness edge: the queue bounces a shim registered for it.
 func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
 	s.queue.OnFree(ws)

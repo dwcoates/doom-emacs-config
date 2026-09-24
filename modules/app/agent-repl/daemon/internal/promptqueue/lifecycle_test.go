@@ -299,3 +299,73 @@ func TestTheTurnEndsDrainExcludesALeaseChangeForTheWholeDelivery(t *testing.T) {
 		t.Fatal("the workspace's drain was free while the turn end's own delivery was in flight")
 	}
 }
+
+// TestOnTurnsEndedUnobservedClosesEachTurnAsOrphaned covers the adoption's
+// reconciliation: each turn ended while no daemon was watching, which is the
+// orphaned close.
+func TestOnTurnsEndedUnobservedClosesEachTurnAsOrphaned(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.q.OnTurnsEndedUnobserved(theWorkspace, []ids.TurnID{"turn-1", "turn-2"})
+	// Assert
+	for _, turn := range []ids.TurnID{"turn-1", "turn-2"} {
+		if got, closed := h.db.closedTurns[turn]; !closed || got != wsm.CloseOrphaned {
+			t.Fatalf("%s close = (%s, closed %v), want orphaned", turn, closeName(got), closed)
+		}
+	}
+}
+
+// TestOnTurnsEndedUnobservedIsRecordedAtInfo covers the record: an ordinary
+// reconciliation, stated per turn at INFO.
+func TestOnTurnsEndedUnobservedIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	beforeRecords := len(h.log.Records())
+	// Act
+	h.q.OnTurnsEndedUnobserved(theWorkspace, []ids.TurnID{"turn-1"})
+	// Assert
+	for _, record := range h.log.Records()[beforeRecords:] {
+		if record.Level == "info" && record.Operation == "daemon.promptqueue.turn_ended" && record.Context["turn"] == "turn-1" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an info daemon.promptqueue.turn_ended naming turn-1", h.log.Records()[beforeRecords:])
+}
+
+// TestOnTurnsEndedUnobservedDeliversNothing covers what the close is not: no
+// turn of these was the session's turn in flight, so nothing held is popped.
+func TestOnTurnsEndedUnobservedDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Interject: false, Reason: "independent"})
+	h.watcher.idle()
+	// Act
+	h.q.OnTurnsEndedUnobserved(theWorkspace, []ids.TurnID{"stale-turn"})
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v after the reconciliation, want nothing delivered", started)
+	}
+}
+
+// TestOnTurnsEndedUnobservedRecordsAFailedCloseAndClosesTheRest covers the
+// error path: a close that fails is ERROR, and the other turns still close.
+func TestOnTurnsEndedUnobservedRecordsAFailedCloseAndClosesTheRest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.closeTurnErrs = map[ids.TurnID]error{"turn-1": errors.New("the store is down")}
+	// Act
+	h.q.OnTurnsEndedUnobserved(theWorkspace, []ids.TurnID{"turn-1", "turn-2"})
+	// Assert
+	failed := false
+	for _, record := range h.log.Records() {
+		failed = failed || (record.Level == "error" && record.Operation == "daemon.promptqueue.turn_ended" && record.Context["turn"] == "turn-1")
+	}
+	if !failed {
+		t.Fatalf("records = %+v, want an error daemon.promptqueue.turn_ended for the failed close", h.log.Records())
+	}
+	if got := h.db.closedTurns["turn-2"]; got != wsm.CloseOrphaned {
+		t.Fatalf("turn-2 close = %s, want orphaned despite turn-1's failure", closeName(got))
+	}
+}

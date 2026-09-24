@@ -962,7 +962,7 @@ func (f *Fleet) sessionUp(
 	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
 		return err
 	}
-	watcher, err := f.startWatcher(ctx, log, ws, client, started)
+	watcher, err := f.startWatcher(ctx, log, ws, client, sessionwatcher.Session{Started: started})
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)

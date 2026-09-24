@@ -207,6 +207,11 @@ type Queue interface {
 	// OnTurnEnded is the LifecycleSink's turn end: pop the queue and deliver
 	// the next prompt.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
+	// OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation:
+	// each turn ended while no daemon was watching, so its durable row is
+	// closed as orphaned. Nothing is popped or delivered: none of them was the
+	// adopted session's turn in flight.
+	OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID)
 	// OnLeaseChanged re-evaluates every hold against the new lease policy.
 	OnLeaseChanged(ws ids.WorkspaceID)
 	// RequestBounce asks the per-workspace BOUNCE REGISTRY to replace what
