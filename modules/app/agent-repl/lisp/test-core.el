@@ -444,6 +444,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("status.el" agent-repl-tabbar-apply-row-count
      "agent-repl: tab-bar set to %d line%s on this frame"
      "confirms the interactive tab-bar layout command")
+    ("verbs.el" agent-repl-verbs--on-refusal
+     "%s refused: the shim's lock helper %s failed to start (%s); no other process owns this conversation"
+     "tells the user the shim's lock helper failed to start, with its binary and error")
     ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s%s"
      "reports a workspace command refusal to its user")
     ("verbs.el" agent-repl-verbs--send
