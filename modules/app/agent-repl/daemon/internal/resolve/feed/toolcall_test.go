@@ -65,7 +65,7 @@ func (h *harness) anyErrors() []string {
 // send pushes one activity through the sink.
 func (h *harness) send(act *conversationv1.AgentActivity) {
 	h.t.Helper()
-	h.resolver.OnActivity(testWorkspace, mainAgent(), act, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, noAddress())
 }
 
 // ---- READ ----
@@ -926,7 +926,7 @@ func TestAnActivityWithNoUnitIdentityIsRefusedLoudly(t *testing.T) {
 	h := newHarness(t)
 	h.resolver.OnActivity(testWorkspace, mainAgent(), &conversationv1.AgentActivity{
 		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{}},
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.activity_without_identity") {

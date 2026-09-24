@@ -59,7 +59,7 @@ func TestAThinkingBlockDrawsABubble(t *testing.T) {
 
 	// Act: a reasoning block opens and streams a fragment.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("weighing options")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("weighing options")), nil, noAddress())
 
 	// Assert: one thinking bubble, marked as thinking.
 	got := h.thinkingRows()
@@ -77,13 +77,13 @@ func TestThinkingTextDeltasAccumulate(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 
 	// Act: two fragments arrive.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("first ")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("first ")), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("second")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("second")), nil, noAddress())
 
 	// Assert: the bubble holds both fragments folded into one.
 	got := h.thinkingRows()
@@ -101,7 +101,7 @@ func TestThinkingSuccessSettlesTheBubble(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("partial")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("partial")), nil, noAddress())
 
 	// Act: the block settles, restating the whole.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
@@ -109,7 +109,7 @@ func TestThinkingSuccessSettlesTheBubble(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
 				Text: &conversationv1.AgentThinkingText{Text: "the whole reasoning"},
 			},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert: the bubble is settled with the whole text.
 	got := h.thinkingRows()
@@ -132,7 +132,7 @@ func TestAThinkingBubbleIsNeverTheConcludedAnswer(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
 				Text: &conversationv1.AgentThinkingText{Text: "reasoning"},
 			},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Act: the turn concludes naming the thinking unit as the answer.
 	h.terminal("turn-1", completedWith("unit-t"), nil)
@@ -157,7 +157,7 @@ func TestWithheldThinkingDrawsNoBubble(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingUpdate_Withheld{
 				Withheld: &conversationv1.AgentThinkingWithheld{},
 			},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert: no thinking bubble is drawn.
 	if got := h.thinkingRows(); len(got) != 0 {
@@ -178,7 +178,7 @@ func TestWithheldThinkingSettlesToNoBubble(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{
 				Withheld: &conversationv1.AgentThinkingWithheld{},
 			},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert: no thinking bubble is drawn.
 	if got := h.thinkingRows(); len(got) != 0 {
@@ -193,11 +193,11 @@ func TestThinkingFailureKeepsPartialReasoning(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("half a thought")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("half a thought")), nil, noAddress())
 
 	// Act: the block fails.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingFailure{}), noAddress())
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingFailure{}), nil, noAddress())
 
 	// Assert: the partial reasoning stays drawn on the broken arm.
 	got := h.thinkingRows()
@@ -220,7 +220,7 @@ func TestAThinkingBubbleCarriesNoUsageStamp(t *testing.T) {
 	// Act: a reasoning block streams, carrying usage on its envelope.
 	act := thinkingResultFrame("unit-t", thinkingTextDelta("reasoning"))
 	act.Usage = misses(18_000, 240)
-	h.resolver.OnActivity(testWorkspace, mainAgent(), act, noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), act, nil, noAddress())
 
 	// Assert: the thinking bubble draws no cost corner.
 	got := h.thinkingRows()
@@ -241,11 +241,11 @@ func TestThinkingAndResponseDrawSeparateBubbles(t *testing.T) {
 
 	// Act: a reasoning block, then a prose block.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("reasoning")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("reasoning")), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-p", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: two response-shaped rows — one flagged thinking, one not.
 	all := h.responseRows()
@@ -279,17 +279,17 @@ func TestAWithheldThinkingLeadingBlockLeavesOnlyTheGreenedProse(t *testing.T) {
 	// Act: block :0 opens as thinking (empty card) then settles WITHHELD; block
 	// :1 is the real prose; the turn concludes naming the prose as its answer.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingSuccess{
 			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
-		}), noAddress())
+		}), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("msg:1", &conversationv1.AgentResponseStart{}, nil), noAddress())
+		responseFrame("msg:1", &conversationv1.AgentResponseStart{}, nil), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("msg:1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the real answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	h.terminal("turn-1", completedWith("msg:1"), nil)
 
 	// Assert: exactly one response-shaped row — the settled prose — and the
@@ -328,11 +328,11 @@ func TestAWithheldThinkingBlockBeforeAToolCallDrawsOnlyTheToolCard(t *testing.T)
 	// Act: block :0 opens as thinking then settles withheld; block :1 is a bash
 	// tool call.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingSuccess{
 			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
-		}), noAddress())
+		}), nil, noAddress())
 	h.send(activityOf("msg:1", &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
 			Command:   &conversationv1.AgentBashCommand{Line: "go test ./..."},
@@ -365,13 +365,13 @@ func TestAWithheldThinkingUpdateAfterStartDrawsNoRow(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 
 	// Act: a withheld update arrives.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingUpdate{
 			Reasoning: &conversationv1.AgentThinkingUpdate_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert: no thinking bubble stands, and nothing was drawn-then-retired.
 	if got := h.thinkingRows(); len(got) != 0 {
@@ -391,7 +391,7 @@ func TestThinkingStartAloneDefersTheBubble(t *testing.T) {
 
 	// Act: a reasoning block opens with a Start and nothing else.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 
 	// Assert: no thinking bubble is drawn.
 	if got := h.thinkingRows(); len(got) != 0 {
@@ -409,11 +409,11 @@ func TestWithheldThinkingStartThenSettleNeverDrawsARow(t *testing.T) {
 
 	// Act: a block opens with a Start, then settles WITHHELD with no content.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingSuccess{
 			Reasoning: &conversationv1.AgentThinkingSuccess_Withheld{Withheld: &conversationv1.AgentThinkingWithheld{}},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert: no bubble ever stands, and nothing was retired — never drawn, not
 	// drawn-then-retired.
@@ -433,14 +433,14 @@ func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("unit-t", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 	if got := h.thinkingRows(); len(got) != 0 {
 		t.Fatalf("thinking rows after Start = %d, want 0 (deferred)", len(got))
 	}
 
 	// Act 1: the first content delta arrives.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("first ")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("first ")), nil, noAddress())
 
 	// Assert 1: the bubble now stands, holding the first fragment.
 	got := h.thinkingRows()
@@ -453,7 +453,7 @@ func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
 
 	// Act 2: a second content delta streams in.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("unit-t", thinkingTextDelta("second")), noAddress())
+		thinkingResultFrame("unit-t", thinkingTextDelta("second")), nil, noAddress())
 
 	// Assert 2: the same bubble updates live.
 	got = h.thinkingRows()
@@ -470,7 +470,7 @@ func TestShownThinkingEmitsOnFirstContentThenStreams(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
 				Text: &conversationv1.AgentThinkingText{Text: "first second"},
 			},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert 3: the bubble finalizes with the whole reasoning.
 	got = h.thinkingRows()
@@ -490,9 +490,9 @@ func TestAShownThinkingBlockSurvivesSettlement(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", thinkingTextDelta("weighing options")), noAddress())
+		thinkingResultFrame("msg:0", thinkingTextDelta("weighing options")), nil, noAddress())
 
 	// Act: the block settles with its whole reasoning text.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
@@ -500,7 +500,7 @@ func TestAShownThinkingBlockSurvivesSettlement(t *testing.T) {
 			Reasoning: &conversationv1.AgentThinkingSuccess_Text{
 				Text: &conversationv1.AgentThinkingText{Text: "weighing options"},
 			},
-		}), noAddress())
+		}), nil, noAddress())
 
 	// Assert: the thinking bubble stands, settled with its text.
 	got := h.thinkingRows()
@@ -520,11 +520,11 @@ func TestAShownThinkingBlockLogsItsEmit(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), noAddress())
+		thinkingResultFrame("msg:0", &conversationv1.AgentThinkingStart{}), nil, noAddress())
 
 	// Act: the block's first content-bearing update draws its bubble.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		thinkingResultFrame("msg:0", thinkingTextDelta("weighing options")), noAddress())
+		thinkingResultFrame("msg:0", thinkingTextDelta("weighing options")), nil, noAddress())
 
 	// Assert: the emit is logged at debug.
 	if !h.hasRecord("debug", "daemon.feed.thinking_emitted") {

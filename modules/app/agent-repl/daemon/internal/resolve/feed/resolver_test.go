@@ -628,7 +628,7 @@ func TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly(t *testing.T) {
 
 	// Act: an activity for an agent whose creation was never seen.
 	h.resolver.OnActivity(testWorkspace, &conversationv1.AgentId{Value: "agent-ghost"},
-		responseSuccessActivity("unit-1", "orphaned prose"), noAddress())
+		responseSuccessActivity("unit-1", "orphaned prose"), nil, noAddress())
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 1 {
@@ -707,7 +707,7 @@ func TestStandingTokenIsRetrievableAndNeverOnTheRow(t *testing.T) {
 			OfferedStanding: standing,
 			StartedAt:       &conversationv1.AgentActivityStartedAt{AtMs: h.nowMs},
 		}},
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Assert: presence on the row, the token held daemon-side.
 	row := h.only(rootFeed())
@@ -868,7 +868,7 @@ func TestAnAgenticTabsRowsNestUnderItByTheOutputAddress(t *testing.T) {
 
 	// Act: the lease session's own conversation.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-1", "fixing TestReconnect"), noAddress())
+		responseSuccessActivity("unit-1", "fixing TestReconnect"), nil, noAddress())
 
 	// Assert: the tab's content IS the sub-feed rows parented to it.
 	rows := h.rows(mergeFeed)

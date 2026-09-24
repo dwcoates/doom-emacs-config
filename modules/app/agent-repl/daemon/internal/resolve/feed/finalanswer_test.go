@@ -264,7 +264,7 @@ func TestATurnThatDidNotLandItsAnswerRaisesTheFault(t *testing.T) {
 			h.resolver.OnActivity(testWorkspace, mainAgent(),
 				responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 					Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-				}, nil), noAddress())
+				}, nil), nil, noAddress())
 
 			// Act.
 			tt.conclude(h)
@@ -296,7 +296,7 @@ func TestATurnThatDidNotLandItsAnswerIsRecordedAtError(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Act.
 	h.concludeWithoutAnswer("turn-1")
@@ -351,7 +351,7 @@ func TestATurnWhoseOnlyProseIsAVendorNoticeRaisesNothing(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
-	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), nil, noAddress())
 
 	// Act.
 	h.concludeWithoutAnswer("turn-1")
@@ -372,11 +372,11 @@ func TestAVendorNoticeBesideModelProseStillRaisesTheFault(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
-	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-2", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Act.
 	h.concludeWithoutAnswer("turn-1")
@@ -398,11 +398,11 @@ func TestAModelSettleOverANoticeMakesTheBlockAnswerProseAgain(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
-	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseFrame("unit-1", apiErrorNotice(), nil), nil, noAddress())
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Act.
 	h.concludeWithoutAnswer("turn-1")
@@ -422,7 +422,7 @@ func TestAContextCutDirectiveTurnRaisesNothing(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "(no content)"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Act.
 	h.concludeWithoutAnswer("turn-1")
@@ -442,7 +442,7 @@ func TestAStandingFinalAnswerFaultIsRetractedWhenTheNextTurnStarts(t *testing.T)
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	h.concludeWithoutAnswer("turn-1")
 	if h.standingAnswerFault() == nil {
 		t.Fatal("arrange: no fault stands to retract")
@@ -466,7 +466,7 @@ func TestAnOpenResponseStallsAtTheWindowNotBefore(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, noAddress())
 
 	// Assert: armed for the owner's window.
 	armed := h.clock.live()
@@ -512,7 +512,7 @@ func TestAStallIsClearedByWhateverFinallyArrives(t *testing.T) {
 			name: "a further frame arrives",
 			arrive: func(h *harness) {
 				h.resolver.OnActivity(testWorkspace, mainAgent(),
-					responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "wer"}, nil), noAddress())
+					responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "wer"}, nil), nil, noAddress())
 			},
 		},
 		{
@@ -530,7 +530,7 @@ func TestAStallIsClearedByWhateverFinallyArrives(t *testing.T) {
 			h := newHarness(t)
 			h.deliverPrompt("turn-1", "do the thing")
 			h.resolver.OnActivity(testWorkspace, mainAgent(),
-				responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), noAddress())
+				responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, noAddress())
 			h.clock.elapse()
 			if h.standingAnswerFault() == nil {
 				t.Fatal("arrange: the stall did not stand")
@@ -558,7 +558,7 @@ func TestASettledResponseArmsNoStallWindow(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: "the answer"},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert.
 	if armed := h.clock.live(); armed != nil {
@@ -574,10 +574,10 @@ func TestAStallWindowThatLostItsRaceRaisesNothing(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, noAddress())
 	stale := h.clock.live()
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "wer"}, nil), noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "wer"}, nil), nil, noAddress())
 
 	// Act: the superseded window fires anyway.
 	stale.f()
@@ -624,7 +624,7 @@ func TestASiblingFoldMovingDoesNotAnswerAnotherFoldsStall(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "do the thing")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), noAddress())
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "half an ans"}, nil), nil, noAddress())
 	h.clock.elapse()
 	if h.standingAnswerFault() == nil {
 		t.Fatal("arrange: the stall did not stand")
@@ -632,7 +632,7 @@ func TestASiblingFoldMovingDoesNotAnswerAnotherFoldsStall(t *testing.T) {
 
 	// Act: a DIFFERENT block of the same turn pays out.
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame("unit-2", &conversationv1.AgentResponseUpdate{NewMarkdown: "a second block"}, nil), noAddress())
+		responseFrame("unit-2", &conversationv1.AgentResponseUpdate{NewMarkdown: "a second block"}, nil), nil, noAddress())
 
 	// Assert: unit-1's stall still stands.
 	fault := h.standingAnswerFault()

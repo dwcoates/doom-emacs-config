@@ -237,6 +237,7 @@ func (o pageOrigin) String() string {
 // agent's identity, which an adopted session has no other source for until
 // its next StartTurn, and the rows that CLOSE AN ACT (routePageClosingsLocked).
 func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage, origin pageOrigin) {
+	w.knowPagePromptsLocked(page)
 	if entries := page.GetEntries(); len(entries) > 0 {
 		if ptr := entries[0].GetAt(); ptr != nil {
 			w.adoptPagePointerLocked(a, ptr, origin)
@@ -285,6 +286,18 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	// reach the views that act was standing in.
 	w.routePageClosingsLocked(a, page, origin)
 	a.paged = true
+}
+
+// knowPagePromptsLocked records every turn a page's PROMPTS open as a turn this
+// watcher knows. Only a prompt opens a turn; a stamp on any other row is that
+// row's claim, and learning a turn from it would excuse the very record that
+// names a turn nobody opened.
+func (w *watcher) knowPagePromptsLocked(page *conversationv1.HistoryPage) {
+	for _, entry := range page.GetEntries() {
+		if turn := entry.GetEntry().GetUserPrompt().GetId().GetValue(); turn != "" {
+			w.knownTurns[ids.TurnID(turn)] = struct{}{}
+		}
+	}
 }
 
 // adoptPagePointerLocked records an opening page's newest pointer as the
@@ -377,7 +390,7 @@ func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentF
 		w.log.Debug("daemon.sessionwatcher.context_cut_history", "a cut on a watch's first page is history: recorded as served, never routed", ctx)
 		return
 	}
-	w.routeContextCutLocked(agent, frame.GetUpdate().GetContextCut(), at, cutCaughtUp)
+	w.routeContextCutLocked(agent, frame.GetUpdate().GetContextCut(), at, nil, cutCaughtUp)
 }
 
 // routeEntryLocked routes one live history entry.
@@ -391,11 +404,11 @@ func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntr
 		return
 	}
 	if frame := entry.GetAgentFrame(); frame != nil {
-		w.routeAgentFrameLocked(a, frame, at.GetAt())
+		w.routeAgentFrameLocked(a, frame, at.GetAt(), at.GetTurn())
 		return
 	}
 	if peer := entry.GetPeerMessage(); peer != nil {
-		w.routePeerMessageLocked(a, peer)
+		w.routePeerMessageLocked(a, peer, at.GetTurn())
 		return
 	}
 	w.log.Warn("daemon.sessionwatcher.entry_unrouted", "a history entry carried no arm", dlog.Context{
@@ -419,6 +432,9 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 		// replayed against the turn the queue stated.
 		w.releaseHeldTerminalLocked()
 	}
+	if turn := prompt.GetId().GetValue(); turn != "" {
+		w.knownTurns[ids.TurnID(turn)] = struct{}{}
+	}
 	w.log.Debug("daemon.sessionwatcher.prompt", "prompt routed to the feed", dlog.Context{
 		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
 	})
@@ -429,7 +445,7 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 // watched agent's conversation. Unlike a live prompt it never opens a turn — it
 // is not this agent's own work and drives no response of its own — so it is
 // simply handed to the feed to draw as the peer bubble.
-func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.PeerMessage) {
+func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId) {
 	if a.id == nil {
 		// A peer message names its recipient (the main agent for a session), so
 		// on a not-yet-adopted watch it is the same first-sight of the main
@@ -439,13 +455,14 @@ func (w *watcher) routePeerMessageLocked(a *agentWatch, peer *conversationv1.Pee
 	w.log.Debug("daemon.sessionwatcher.peer_message", "peer message routed to the feed", dlog.Context{
 		"agent_id": peer.GetAgent().GetValue(), "sender": peer.GetSender(), "peer_id": peer.GetId(),
 	})
-	w.sinks.Feed.OnPeerMessage(w.ws, peer, w.addr)
+	w.sinks.Feed.OnPeerMessage(w.ws, peer, turn, w.addr)
 }
 
 // routeAgentFrameLocked routes one AgentFrame by its arm. THE UNIT UPSERTED IS
 // THE FRAME'S OWN agent_id, whichever stream carried it: frames are flat and
-// nothing here reconstructs ancestry.
-func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) {
+// nothing here reconstructs ancestry. `turn` is the entry's own turn stamp
+// (HistoryEntryAt.turn), unset for an entry no producer stamped.
+func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId) {
 	agent := frame.GetAgentId()
 	if a.id == nil {
 		// EVERY FRAME ON THE MAIN WATCH IS THE MAIN AGENT'S, so it names the
@@ -460,16 +477,16 @@ func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.Age
 	switch {
 	case frame.GetUpdate() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetUpdate() != nil"})
-		w.routeUpdateLocked(agent, frame.GetUpdate(), at)
+		w.routeUpdateLocked(agent, frame.GetUpdate(), at, turn)
 	case frame.GetSuccess() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetSuccess() != nil"})
-		w.routeTerminalLocked(a, agent, frame.GetSuccess(), nil)
+		w.routeTerminalLocked(a, agent, turn, frame.GetSuccess(), nil)
 	case frame.GetFailure() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetFailure() != nil"})
-		w.routeTerminalLocked(a, agent, nil, frame.GetFailure())
+		w.routeTerminalLocked(a, agent, turn, nil, frame.GetFailure())
 	case frame.GetDetachedWork() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "case frame.GetDetachedWork() != nil"})
-		w.routeDetachedWorkLocked(agent, frame.GetDetachedWork())
+		w.routeDetachedWorkLocked(agent, frame.GetDetachedWork(), turn)
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeAgentFrameLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.agent_frame_unrouted", "an AgentFrame carried no result arm", dlog.Context{
@@ -545,18 +562,18 @@ func closingKind(frame *conversationv1.AgentFrame) string {
 }
 
 // routeUpdateLocked routes one AgentUpdate arm.
-func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conversationv1.AgentUpdate, at *conversationv1.HistoryPointer) {
+func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conversationv1.AgentUpdate, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId) {
 	switch {
 	case update.GetActivity() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetActivity() != nil"})
-		w.routeActivityLocked(agent, update.GetActivity())
+		w.routeActivityLocked(agent, update.GetActivity(), turn)
 
 	case update.GetQuestion() != nil:
 		question := update.GetQuestion()
 		w.log.Debug("daemon.sessionwatcher.question", "the agent is blocked on a choice", dlog.Context{
 			"agent_id": agent.GetValue(), "question_id": question.GetId().GetValue(),
 		})
-		w.sinks.Feed.OnQuestion(w.ws, agent, question, w.addr)
+		w.sinks.Feed.OnQuestion(w.ws, agent, question, turn, w.addr)
 		w.sinks.Footer.OnQuestion(w.ws, agent, question)
 		w.notifyQuestionLocked(question)
 
@@ -565,21 +582,21 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Debug("daemon.sessionwatcher.permission", "the agent is blocked on consent", dlog.Context{
 			"agent_id": agent.GetValue(), "permission_id": permission.GetId().GetValue(),
 		})
-		w.sinks.Feed.OnPermission(w.ws, agent, permission, w.addr)
+		w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, w.addr)
 		w.sinks.Footer.OnPermission(w.ws, agent, permission)
 		w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
 		w.notifyPermissionLocked(permission)
 
 	case update.GetContextCut() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetContextCut() != nil"})
-		w.routeContextCutLocked(agent, update.GetContextCut(), at, cutLive)
+		w.routeContextCutLocked(agent, update.GetContextCut(), at, turn, cutLive)
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
 		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
 			"agent_id": agent.GetValue(), "message": update.GetApiError().GetMessage(),
 		})
-		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), w.addr)
+		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, w.addr)
 		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
 
 	case update.GetContextBudgetWarning() != nil:
@@ -623,7 +640,7 @@ func (s cutSource) String() string {
 //
 // THE FEED IS THE ONE DIFFERENCE: a caught-up cut is on the page the feed was
 // just handed whole, and it draws the divider from there.
-func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, source cutSource) {
+func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId, source cutSource) {
 	ctx := dlog.Context{"agent_id": agent.GetValue(), "pointer": at.GetValue(), "source": source.String()}
 	if source == cutCaughtUp {
 		// INFO, NOT DEBUG: an act closed while no stream stood, and this is
@@ -631,7 +648,7 @@ func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conv
 		w.log.Info("daemon.sessionwatcher.context_cut", "a cut written while no stream stood was caught up; the footer and the topbar take it", ctx)
 	} else {
 		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", ctx)
-		w.sinks.Feed.OnContextCut(w.ws, agent, cut, at, w.addr)
+		w.sinks.Feed.OnContextCut(w.ws, agent, cut, at, turn, w.addr)
 	}
 	w.sinks.Footer.OnContextCut(w.ws, agent, cut)
 	w.sinks.Topbar.OnContextCut(w.ws, agent, cut)
@@ -646,10 +663,10 @@ func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conv
 
 // routeActivityLocked routes one unit of a turn's synchronous progress, and
 // records what the unit taught the watcher on the way through.
-func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId) {
 	w.recordActivityLocked(act)
 
-	w.sinks.Feed.OnActivity(w.ws, agent, act, w.addr)
+	w.sinks.Feed.OnActivity(w.ws, agent, act, turn, w.addr)
 	w.sinks.Footer.OnActivity(w.ws, agent, act)
 	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
 	// but it also accumulates the SESSION's token spend from the usage every
@@ -891,7 +908,7 @@ func (w *watcher) watchSpawnedSubagentsOnPageLocked(page *conversationv1.History
 
 // routeTerminalLocked routes how one agent's stream ended, and reaps the watch
 // it was carried on. Exactly one of success and failure is set.
-func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.AgentId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.AgentId, stamp *conversationv1.TurnId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	if a.id == nil && w.mainAgent == nil {
 		// THE MAIN AGENT HAS NOT BEEN NAMED YET, so this terminal cannot be
 		// attributed to the turn. It arrived on the SHIM'S STREAM plane while
@@ -920,16 +937,15 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 				"held_agent_id": w.held.agent.GetValue(), "agent_id": agent.GetValue(),
 			})
 		}
-		w.held = &heldTerminal{agent: agent, success: success, failure: failure}
+		w.held = &heldTerminal{agent: agent, stamp: stamp, success: success, failure: failure}
 		return
 	}
 
 	isMain := w.isMainAgent(agent)
 
 	var turn *ids.TurnID
-	if isMain && w.turn != nil {
-		open := *w.turn
-		turn = &open
+	if isMain {
+		turn = w.terminalTurnLocked(agent, stamp)
 	}
 
 	w.log.Debug("daemon.sessionwatcher.agent_terminal", "an agent's stream ended", dlog.Context{
@@ -954,11 +970,65 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 	}
 }
 
+// terminalTurnLocked answers WHICH TURN a main-agent terminal ends: the turn its
+// own stamp names, never the turn that merely happens to be open.
+//
+//   - Stamped with the open turn: it ends that turn.
+//   - Stamped with a turn this watcher knows but that is not open (one that
+//     already ended, or was refused): it ends nothing that is open. DEBUG — a
+//     second terminal for a finished turn is the producer's to explain, and the
+//     open turn is not its business.
+//   - Stamped with a turn this watcher never knew: it ends nothing. ERROR — a
+//     record names a turn no queue opened and no page carried.
+//   - UNSTAMPED (a producer from before the stamp, or one that could not name
+//     the turn): today's positional answer, the turn in flight, recorded ONCE
+//     per watcher at INFO.
+func (w *watcher) terminalTurnLocked(agent *conversationv1.AgentId, stamp *conversationv1.TurnId) *ids.TurnID {
+	if stamp.GetValue() == "" {
+		if w.turn == nil {
+			return nil
+		}
+		if !w.unstampedTerminalSeen {
+			w.unstampedTerminalSeen = true
+			w.log.Info("daemon.sessionwatcher.terminal_unstamped", "a turn terminal carried no turn id (pre-contract, or a producer that could not name it); it is charged to the turn in flight", dlog.Context{
+				"agent_id": agent.GetValue(), "turn_id": string(*w.turn),
+			})
+		}
+		open := *w.turn
+		return &open
+	}
+	named := ids.TurnID(stamp.GetValue())
+	if w.turn != nil && *w.turn == named {
+		return &named
+	}
+	if w.turnKnownLocked(named) {
+		w.log.Debug("daemon.sessionwatcher.terminal_turn_not_open", "a terminal named a turn that is not in flight; it ends nothing that is open", dlog.Context{
+			"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": turnValue(w.turn),
+		})
+		return nil
+	}
+	w.log.Error("daemon.sessionwatcher.terminal_turn_unknown", "a terminal named a turn this daemon never opened or replayed; it ends nothing", dlog.Context{
+		"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": turnValue(w.turn),
+	})
+	return nil
+}
+
+// turnKnownLocked reports whether this watcher has ever had the turn in hand:
+// stood in flight, closed, or carried by a page or a routed prompt.
+func (w *watcher) turnKnownLocked(turn ids.TurnID) bool {
+	if _, seen := w.knownTurns[turn]; seen {
+		return true
+	}
+	_, closed := w.closedTurns[turn]
+	return closed
+}
+
 // heldTerminal is a main-watch terminal that arrived before the main agent was
 // named. It is the whole terminal, so its replay is indistinguishable from the
 // routing it would have had if the name had come first.
 type heldTerminal struct {
 	agent   *conversationv1.AgentId
+	stamp   *conversationv1.TurnId
 	success *conversationv1.AgentSuccess
 	failure *conversationv1.AgentFailure
 }
@@ -975,7 +1045,7 @@ func (w *watcher) releaseHeldTerminalLocked() {
 	w.log.Debug("daemon.sessionwatcher.turn_end_released", "the held terminal was routed once the main agent was named", dlog.Context{
 		"agent_id": held.agent.GetValue(), "turn_id": turnValue(w.turn),
 	})
-	w.routeTerminalLocked(w.mainWatchLocked(), held.agent, held.success, held.failure)
+	w.routeTerminalLocked(w.mainWatchLocked(), held.agent, held.stamp, held.success, held.failure)
 	// OFF THE CALLER'S GOROUTINE. See flushTurnEndsAsync: the naming arrives on
 	// the prompt queue's own call, and the turn end goes back to that queue.
 	w.flushTurnEndsAsync()
@@ -1040,8 +1110,8 @@ func turnValue(turn *ids.TurnID) string {
 // and opens the watch it names. The OPEN SET IS THE LIVE SET: opening the
 // watch is what makes the item live, and no start/end edges are ever paired to
 // reconstruct membership.
-func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
-	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, w.addr)
+func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId) {
+	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, w.addr)
 	w.sinks.Footer.OnDetachedWork(w.ws, announcer, work)
 	w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work)
 

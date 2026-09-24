@@ -262,7 +262,7 @@ func TestRouteContextCut(t *testing.T) {
 	got := h.routeNow(func(w *watcher) {
 		w.routeUpdateLocked(agentID("main-1"), &conversationv1.AgentUpdate{
 			Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
-		}, &conversationv1.HistoryPointer{Value: "entry-1"})
+		}, &conversationv1.HistoryPointer{Value: "entry-1"}, nil)
 	})
 
 	// Assert.
@@ -278,7 +278,7 @@ func TestRouteContextBudgetWarning(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame(), nil) })
+	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame(), nil, nil) })
 
 	// Assert.
 	assertNames(t, got, []string{"footer.OnContextBudgetWarning"})
@@ -1882,5 +1882,74 @@ func TestAMainWatchPageReachesTheFeedWithItsAgentBeforeStartTurnNamesIt(t *testi
 	e := requireEvent(t, got, "feed.OnHistoryPage")
 	if e.agent != "main-1" {
 		t.Fatalf("the feed replayed the main page as %q, want main-1", e.agent)
+	}
+}
+
+// stampedFrameAt wraps an AgentFrame as one live entry at a pointer, stamped
+// with the turn it was produced within ("" leaves it unstamped).
+func stampedFrameAt(frame *conversationv1.AgentFrame, pointer, turn string) *shimv1.WatchAgentResponse {
+	resp := entryFrameAt(frame, pointer)
+	if turn != "" {
+		resp.GetEntry().Turn = &conversationv1.TurnId{Value: turn}
+	}
+	return resp
+}
+
+// A MAIN TERMINAL ENDS THE TURN ITS STAMP NAMES, never merely the open one.
+// Each case routes one main-agent terminal while turn-1 is in flight.
+func TestAMainTerminalIsChargedToTheTurnItsStampNames(t *testing.T) {
+	tests := []struct {
+		name      string
+		stamp     string
+		wantEnded bool
+		level     string
+		operation string
+	}{
+		{name: "stamped with the open turn, it ends it", stamp: "turn-1", wantEnded: true, level: "info", operation: "daemon.sessionwatcher.turn_ended"},
+		{name: "stamped with a turn nobody opened, it ends nothing and is an error", stamp: "turn-ghost", wantEnded: false, level: "error", operation: "daemon.sessionwatcher.terminal_turn_unknown"},
+		{name: "unstamped, it ends the turn in flight and says so at info", stamp: "", wantEnded: true, level: "info", operation: "daemon.sessionwatcher.terminal_unstamped"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+			h.w.SetMainAgent(agentID("main-1"))
+			h.quiet()
+
+			// Act.
+			got := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-t", tt.stamp))
+
+			// Assert.
+			_, ended := find(got, "lifecycle.OnTurnEnded")
+			if ended != tt.wantEnded {
+				t.Fatalf("turn ended = %v, want %v (events %v)", ended, tt.wantEnded, got)
+			}
+			if !h.hasRecord(tt.level, tt.operation) {
+				t.Fatalf("no %s record %q", tt.level, tt.operation)
+			}
+		})
+	}
+}
+
+func TestATerminalOfAnEndedTurnDoesNotEndTheOpenOne(t *testing.T) {
+	// Arrange: turn-1 ended, turn-2 is in flight.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-1", "turn-1"))
+	h.w.dispatching.Wait()
+	h.w.OnTurnOpening("ws-1", "turn-2")
+	h.drainNow()
+
+	// Act: a second terminal, at a new pointer, names turn-1.
+	h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-2", "turn-1"))
+
+	// Assert.
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-2") {
+		t.Fatalf("turn in flight = %v, want turn-2 still running", turn)
+	}
+	if !h.hasRecord("debug", "daemon.sessionwatcher.terminal_turn_not_open") {
+		t.Fatal("the terminal of an ended turn was not recorded")
 	}
 }
