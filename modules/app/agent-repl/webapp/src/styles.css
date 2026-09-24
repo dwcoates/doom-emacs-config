@@ -2589,6 +2589,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .queued-head { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-bottom: 0.3rem; }
 /* The classifier's one-line reason reads as an aside: muted and italic. */
 .queued-reason { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); font-style: italic; }
+/* A held badge's full sentence, the daemon's words, in the expand-only details. */
+.queued-status-detail { margin-top: 0.3rem; font-size: calc(0.8rem * var(--feed-text-scale)); }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .queued-actions button { cursor: pointer; font: inherit; }
 /* A release the holding arm is likely to refuse: offered, because the daemon

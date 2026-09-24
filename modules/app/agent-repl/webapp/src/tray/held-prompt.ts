@@ -18,10 +18,12 @@
  * src/bubble/draw.ts), shown once the same click that opens the text opens it.
  *
  * EVERY STATUS IS A BADGE, and `HELD_STATUS_BADGES` is the ONE table from a
- * status to the badge's color class. The proto carries no status sentence for
- * a held prompt, only the arm and its fields, so a badge's words are the ones
- * this card already said for that arm, unchanged, with the arm's own fields (a
- * schedule id, a session command) drawn verbatim inside them.
+ * status to the badge's color class. THE WORDS ARE THE DAEMON'S: `badges` on
+ * the wire carries one per standing fact, in the order daemon_hold.proto fixes
+ * (the verdict, its confirmation, the hold). Each label is drawn on its badge
+ * VERBATIM and each detail verbatim in the expand-only details; this card
+ * composes no status sentence of its own. The color is keyed by the FACT the
+ * badge stands for — the arm, or the confirmation — never by its words.
  *
  * TWO INDEPENDENT AXES, TWO INDEPENDENT ARMS. `classification` says WHEN the
  * prompt runs relative to the turn in front of it; `hold` says WHAT ELSE is
@@ -54,6 +56,7 @@
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
+  HeldPromptBadge,
   HeldPromptBuildRefreshHold,
   HeldPromptClassificationError,
   HeldPromptClassifying,
@@ -150,11 +153,19 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   const head = document.createElement("div");
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
-  head.appendChild(verdict.badge);
-  // DAEMON-STATED: the badge stands exactly while the entry carries `editing`.
-  if (u.editing !== undefined) head.appendChild(badge("editing", "editing"));
-  if (verdict.accepted !== null) head.appendChild(verdict.accepted);
-  if (hold !== null) head.appendChild(drawHold(hold, `${path}.hold`));
+  const holdStatus: HeldStatus | null = hold === null ? null : drawHold(hold, `${path}.hold`);
+  const statuses: HeldStatus[] = [verdict.status];
+  // DAEMON-STATED: the editing badge stands exactly while the entry carries `editing`.
+  if (u.editing !== undefined) statuses.push("editing");
+  if (verdict.acceptedState === true) statuses.push("accepted");
+  if (holdStatus !== null) statuses.push(holdStatus);
+  const drawn = drawHeldPromptBadges(u.badges, statuses, `${path}.badges`);
+  for (const pill of drawn.pills) head.appendChild(pill);
+  if (hold !== null && hold.case === "shutdown") {
+    // The schedule id is a HOOK on the hold's badge, not words: it joins this
+    // card to the shutdown it should explain.
+    drawn.pills[drawn.pills.length - 1]?.setAttribute("data-schedule-id", hold.value.scheduleId);
+  }
   const content = drawUserSaid(said, `${path}.said`);
 
   // EVERYTHING ELSE IS EXPAND-ONLY, in ONE element, so a refusal an action
@@ -164,6 +175,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   details.appendChild(
     drawHeldPromptQueuedAt(requireMessage(u.queuedAt, `${path}.queued_at`), tc, `${path}.queued_at`),
   );
+  for (const detail of drawn.details) details.appendChild(detail);
   if (verdict.detail !== null) details.appendChild(verdict.detail);
   details.appendChild(
     drawHeldPromptActions({
@@ -251,11 +263,10 @@ export function drawHeldPromptQueuedAt(
 
 /** What one classification arm contributes to the card. */
 interface Verdict {
-  badge: HTMLElement;
+  /** The status the verdict's badge stands for: the arm. */
+  status: HeldStatus;
   /** Whether this arm's acceptance stands, or null where it has none. */
   acceptedState: boolean | null;
-  /** The confirmed marker, on an accepted hold. */
-  accepted: HTMLElement | null;
   /** The rationale or failure detail, when the arm carries one. */
   detail: HTMLElement | null;
   /** Whether the accept button is this arm's to offer. */
@@ -303,9 +314,8 @@ export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: strin
     context: { path },
   });
   return {
-    badge: badge("queued — classifying", "classifying"),
+    status: "classifying",
     acceptedState: null,
-    accepted: null,
     detail: null,
     offersAccept: false,
   };
@@ -318,9 +328,8 @@ export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): V
     context: { path },
   });
   return {
-    badge: badge("interjects", "interject"),
+    status: "interject",
     acceptedState: null,
-    accepted: null,
     detail: rationale(u.rationale),
     offersAccept: false,
   };
@@ -340,26 +349,18 @@ export function drawHeldPromptHoldForTurnEnd(u: HeldPromptHoldForTurnEnd, path: 
     operation: "tray.held-prompt.hold-for-turn-end",
     context: { path, accepted: confirmed },
   });
-  let accepted: HTMLElement | null = null;
-  if (confirmed) {
-    accepted = badge("confirmed", "accepted");
-    accepted.setAttribute("data-accepted", "true");
-  }
   return {
-    badge: badge("after this turn", "holdForTurnEnd"),
+    status: "holdForTurnEnd",
     acceptedState: confirmed,
-    accepted,
     detail: rationale(u.rationale),
     offersAccept: !confirmed,
   };
 }
 
 /**
- * Behind a context cut: the badge NAMES the cut.
- *
- * The literal comes off the enum value's own `session_command_spec` option, so
- * the word on screen and the word the daemon recognizes are one definition
- * rather than two tables that agree until one is corrected.
+ * Behind a context cut. The badge's words name the cut and are the daemon's;
+ * the command is still read here so an arm that names no command is refused as
+ * a malformed view rather than drawn.
  */
 export function drawHeldPromptUninterruptibleTurn(
   u: HeldPromptUninterruptibleTurn,
@@ -371,9 +372,8 @@ export function drawHeldPromptUninterruptibleTurn(
     context: { path, command: literal },
   });
   return {
-    badge: uninterruptibleBadge(literal),
+    status: "uninterruptibleTurn",
     acceptedState: null,
-    accepted: null,
     detail: null,
     offersAccept: false,
   };
@@ -392,9 +392,8 @@ export function drawHeldPromptClassificationError(
   detail.className = "queued-reason queued-unclassified";
   detail.textContent = u.detail;
   return {
-    badge: badge("unclassified", "classificationError"),
+    status: "classificationError",
     acceptedState: null,
-    accepted: null,
     detail,
     offersAccept: false,
   };
@@ -404,7 +403,7 @@ export function drawHeldPromptClassificationError(
  * The command a cut is running, spelled as the user types it.
  *
  * UNSPECIFIED carries no spec by design — it names no command — so it is a
- * malformed view here rather than a blank in the sentence.
+ * malformed view here rather than a card explaining nothing.
  */
 export function sessionCommandLiteral(command: SessionCommand, path: string): string {
   if (command === SessionCommand.UNSPECIFIED) {
@@ -420,33 +419,11 @@ export function sessionCommandLiteral(command: SessionCommand, path: string): st
   return getOption(value, session_command_spec).literal;
 }
 
-/**
- * The badge that names the cut.
- *
- * The command is its OWN element (`[data-command]`), because it is the turn's
- * own token rather than a word in this sentence — the same hook a command row
- * carries in the feed.
- */
-function uninterruptibleBadge(literal: string): HTMLElement {
-  const element = badge("waits for ", "uninterruptibleTurn");
-  const command = document.createElement("code");
-  command.className = "queued-command";
-  command.setAttribute("data-command", "");
-  command.textContent = literal;
-  element.appendChild(command);
-  element.appendChild(document.createTextNode(" to finish"));
-  return element;
-}
-
-/**
- * The hold's badge, per arm. Its words are the hold's standing sentence as the
- * card has always said it, unchanged: the badge is where that sentence now
- * stands, so it gains no second, shorter name.
- */
+/** The hold's status, per arm. EVERY arm is named; an unknown one is malformed. */
 function drawHold(
   hold: NonNullable<HeldPrompt["hold"]> & { case: string },
   path: string,
-): HTMLElement {
+): HeldStatus {
   switch (hold.case) {
     case "shutdown":
       return drawHeldPromptShutdownHold(hold.value, `${path}.shutdown`);
@@ -463,53 +440,47 @@ function drawHold(
   }
 }
 
-/** Held for the scheduled restart, the schedule named on the badge. */
-export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: string): HTMLElement {
+/** Held for the scheduled restart. */
+export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: string): HeldStatus {
   log.debug("drawing a shutdown hold", {
     operation: "tray.held-prompt.shutdown-hold",
     context: { path, schedule_id: u.scheduleId },
   });
-  // The schedule id is DRAWN, not only titled: it is the token that joins this
-  // card to the shutdown it should explain, and a hover cannot be read back.
-  const pill = badge(`held for the scheduled restart (${u.scheduleId})`, "shutdown");
-  pill.setAttribute("data-schedule-id", u.scheduleId);
-  return pill;
+  return "shutdown";
 }
 
-/** Held behind a keep-alive turn; the turn it waits on rides a title. */
-export function drawHeldPromptKeepAliveHold(u: HeldPromptKeepAliveHold, path: string): HTMLElement {
+/** Held behind a keep-alive turn, which the arm must name. */
+export function drawHeldPromptKeepAliveHold(u: HeldPromptKeepAliveHold, path: string): HeldStatus {
   const turn = requireMessage(u.turn, `${path}.turn`);
   log.debug("drawing a keep-alive hold", {
     operation: "tray.held-prompt.keep-alive-hold",
     context: { path, turn: turn.value },
   });
-  const pill = badge("held behind a keep-alive", "keepAlive");
-  pill.title = `waiting on turn ${turn.value}`;
-  return pill;
+  return "keepAlive";
 }
 
 /** Held until the session is up. Empty on the wire: presence is the fact. */
 export function drawHeldPromptSessionStartingHold(
   _u: HeldPromptSessionStartingHold,
   path: string,
-): HTMLElement {
+): HeldStatus {
   log.debug("drawing a session-starting hold", {
     operation: "tray.held-prompt.session-starting-hold",
     context: { path },
   });
-  return badge("held until the session is up", "sessionStarting");
+  return "sessionStarting";
 }
 
 /** Held for the build refresh. Empty on the wire: presence is the fact. */
 export function drawHeldPromptBuildRefreshHold(
   _u: HeldPromptBuildRefreshHold,
   path: string,
-): HTMLElement {
+): HeldStatus {
   log.debug("drawing a build-refresh hold", {
     operation: "tray.held-prompt.build-refresh-hold",
     context: { path },
   });
-  return badge("held for the build refresh", "buildRefresh");
+  return "buildRefresh";
 }
 
 /** What the actions row needs to know about the entry it acts on. */
@@ -878,13 +849,62 @@ export function heldBadgeClasses(status: string): string {
   return `badge ${HELD_BADGE_CLASS} ${tone}`;
 }
 
-/** The status badge: its words, and the table's color for STATUS. */
+/** The status badge: the daemon's label verbatim, and the table's color for STATUS. */
 function badge(label: string, status: HeldStatus): HTMLElement {
   const pill = document.createElement("span");
   pill.className = heldBadgeClasses(status);
   pill.setAttribute("data-held-status", status);
+  if (status === "accepted") pill.setAttribute("data-accepted", "true");
   pill.textContent = label;
   return pill;
+}
+
+/** The class a badge's detail wears in the expand-only region. */
+export const HELD_BADGE_DETAIL_CLASS = "queued-status-detail";
+
+/**
+ * The wire's badges, paired with the STATUSES the arms stand for, in order.
+ *
+ * A list whose length disagrees with the arms, or a badge with an empty label,
+ * is a malformed view (daemon_hold.proto), logged and thrown, never drawn with
+ * a missing, surplus or blank badge.
+ */
+export function drawHeldPromptBadges(
+  badges: readonly HeldPromptBadge[],
+  statuses: readonly HeldStatus[],
+  path: string,
+): { pills: HTMLElement[]; details: HTMLElement[] } {
+  if (badges.length !== statuses.length) {
+    log.error("a held prompt's badges disagree with its arms", {
+      operation: "tray.held-prompt.badges-mismatch",
+      context: { path, badges: badges.length, statuses: statuses.join(",") },
+    });
+    throw new MalformedView(
+      path,
+      `${badges.length} badges for ${statuses.length} standing facts (${statuses.join(", ")})`,
+    );
+  }
+  const pills: HTMLElement[] = [];
+  const details: HTMLElement[] = [];
+  for (const [index, wire] of badges.entries()) {
+    const status = statuses[index];
+    if (wire.label === "") {
+      log.error("a held prompt's badge carried an empty label", {
+        operation: "tray.held-prompt.badge-empty-label",
+        context: { path: `${path}[${index}]`, status },
+      });
+      throw new MalformedView(`${path}[${index}].label`, "the badge label is empty");
+    }
+    pills.push(badge(wire.label, status));
+    if (wire.detail !== undefined) {
+      const detail = document.createElement("div");
+      detail.className = HELD_BADGE_DETAIL_CLASS;
+      detail.setAttribute("data-held-status", status);
+      detail.textContent = wire.detail;
+      details.push(detail);
+    }
+  }
+  return { pills, details };
 }
 
 /** The classifier quoting itself: an aside, and only when it said something. */
