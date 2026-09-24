@@ -588,6 +588,14 @@ through `beginRead`; anything that writes keeps the DSN's `BEGIN IMMEDIATE`.
   answer and written at ERROR (`store.db.live-work.unscoped`) naming each row,
   on every read that finds it. A live agent with NEITHER spawn column is
   indistinguishable from another session's main agent and is not reportable.
+- **A DETACHED ROW'S SPECIFIC KIND IS FINAL.** `detached_work.kind` changes
+  only out of the unspecific `detached` marker. A later write naming a
+  different specific kind (a shell terminal on a subagent's handle) still
+  lands and still closes the row, but never relabels it, and the disagreement
+  is written at ERROR (`store.db.detached-kind-conflict`) naming both kinds.
+  On 2026-09-23 a shim reconciliation that closed spawn units it could not
+  find with shell terminals had rewritten eight subagents and three monitors
+  as `bash`.
 
 ## Refusal sites
 
