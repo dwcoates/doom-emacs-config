@@ -262,6 +262,23 @@ message AgentToolFailure {
 message AgentActivitySettledAt {
   // Milliseconds since the Unix epoch, as the producer observed the settle.
   int64 at_ms = 1;
+
+  // THE START THIS SETTLE CLOSES, restated so the settled frame alone states
+  // the call's runtime. A call's start and its settle upsert ONE unit, so once
+  // the call settles its start is gone from any store that keeps the latest
+  // frame, and a replay drawing this frame alone must still say how long the
+  // call ran. Same value, same meaning, as the start arm's own instant.
+  //
+  // HERE, ON THE SETTLE INSTANT, RATHER THAN ON EACH SETTLE ARM: every settle
+  // arm that can state a runtime already carries this message (a success arm
+  // directly, a failure through AgentToolFailure), and a runtime needs both
+  // instants, so the one message that holds the end is the one place the start
+  // it measures from belongs. An arm with no settle instant can state no
+  // runtime, live or replayed, and needs no start restated.
+  //
+  // UNSET when the producer knew no start for the call, and on every row
+  // written before AgentActivityContract SETTLES_STAND_ALONE.
+  optional AgentActivityStartedAt started_at = 2;
 }
 
 // ---- Plan mode: the pair of calls around a plan document ----
