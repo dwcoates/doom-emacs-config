@@ -46,6 +46,8 @@ export const MAIN_AGENT = create(conversationv1.AgentIdSchema, { value: "main-ag
 /** What a test wants to vary about the engine's knowledge. */
 export interface ContextOverrides {
   readonly keepalive?: boolean;
+  /** The open turn; `null` folds with no turn open. Defaults to `turn-1`. */
+  readonly turnId?: string | null;
   readonly nowMs?: number;
   readonly pendingAsk?: (toolUseId: string) => PendingAsk | undefined;
   /** Calls the shim denied, so their tool_result settles nothing. */
@@ -65,7 +67,9 @@ export interface ContextOverrides {
 export function foldContext(overrides: ContextOverrides = {}): FoldContext {
   return {
     mainAgentId: MAIN_AGENT,
-    turnId: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+    ...(overrides.turnId === null
+      ? {}
+      : { turnId: create(conversationv1.TurnIdSchema, { value: overrides.turnId ?? "turn-1" }) }),
     keepalive: overrides.keepalive ?? false,
     nowMs: () => overrides.nowMs ?? 1_000,
     pendingAsk: overrides.pendingAsk ?? (() => undefined),

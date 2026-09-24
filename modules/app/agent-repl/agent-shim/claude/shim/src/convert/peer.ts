@@ -119,6 +119,7 @@ export function convertPeerMessage(
     upsertKey: peerUpsertKey(uuid),
     source: { vendorUuid: uuid, discriminator: "peer_message" },
     keepalive: false,
+    turn: context.turnId,
     item: { kind: "peer", peer },
   };
 }

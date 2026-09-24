@@ -152,6 +152,7 @@ function convertDiagnostics(
         discriminator: `activity.${kind}.diagnostics`,
       },
       keepalive: context.keepalive,
+      turn: context.turnId,
       item: { kind: "frame", frame: updateFrame(context.mainAgentId, {
         ...create(conversationv1.AgentUpdateSchema, {
           update: { case: "activity", value: activity },
@@ -254,6 +255,7 @@ function convertContextInjected(
         discriminator: `activity.context_injected.${injected.case}`,
       },
       keepalive: context.keepalive,
+      turn: context.turnId,
       item: {
         kind: "frame",
         frame: updateFrame(
