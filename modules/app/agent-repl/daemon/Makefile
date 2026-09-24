@@ -9,17 +9,23 @@
 # the oversubscription. Override it on the command line for a bigger host.
 GOTEST_PARALLEL ?= 8
 
+# EVERY TEST RECIPE RUNS UNDER $(BACKGROUND), bin/background.sh: the run and
+# every process it starts go to background priority, so test load cannot
+# starve the owner's live runtime. bin/test-background.sh's source scan fails
+# a test recipe that does not.
+BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
+
 .PHONY: test integration coverage
 
 # The unit suite. It is NOT parallelized within a package: it runs in 2.2s wall
 # with a 1.21s slowest package and a 0.19s slowest test, so per-test parallelism
 # would buy nothing measurable.
 test:
-	go build ./... && go vet ./... && test -z "$$(gofmt -l .)" && go test ./... -count=1
+	$(BACKGROUND) sh -c 'go build ./... && go vet ./... && test -z "$$(gofmt -l .)" && go test ./... -count=1'
 
 # The integration suite. TMPDIR=/tmp IS REQUIRED on macOS -- see AGENTS.md.
 integration:
-	TMPDIR=/tmp go test -tags integration ./integration/... -timeout 180s -count=1 -parallel $(GOTEST_PARALLEL)
+	TMPDIR=/tmp $(BACKGROUND) go test -tags integration ./integration/... -timeout 180s -count=1 -parallel $(GOTEST_PARALLEL)
 
 coverage:
-	../bin/report-nonlisp-coverage.sh daemon
+	$(BACKGROUND) ../bin/report-nonlisp-coverage.sh daemon
