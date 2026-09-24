@@ -296,6 +296,20 @@ describe("grepConverter.settle", () => {
       1_700_000_001_000n,
     );
   });
+
+  it("restates the query on the failure arm, so the settled frame stands alone", () => {
+    // Arrange, Act.
+    const item = grepConverter.settle(call({ pattern: "(", path: "src" }), outcome("regex parse error", true));
+
+    // Assert.
+    const failure = (item?.value as conversationv1.AgentGrep).result.value as conversationv1.AgentGrepFailure;
+    expect({ pattern: failure.query?.pattern, path: failure.query?.path }).toEqual({ pattern: "(", path: "src" });
+  });
+
+  it("produces NO failure frame for a call that named no pattern, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(grepConverter.settle(call({}), outcome("pattern required", true))).toBeUndefined();
+  });
 });
 
 describe("grepConverter.progress", () => {

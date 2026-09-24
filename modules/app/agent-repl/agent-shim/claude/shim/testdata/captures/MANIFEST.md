@@ -426,6 +426,12 @@ the narrower/alternate state**:
 - `!query-eof`, `!query-eof-mid-ask`, `!keepalive` — declared
   vendor-process-death and keepalive shapes; unrecordable by definition (a
   capture is, by the harness's own rule, a completed run).
+- `!queue-vendor-turn` — a DECLARED vendor-started turn (the background-task
+  notification turn) ahead of the next send, with no `user_message_uuid` echo
+  anywhere in it. Its shape is grounded in the owner's live shim log of
+  2026-09-23 (a turn's `init` and `result` arriving between a keep-alive's
+  send and its answer), not in a capture: the captures predate the shim
+  sending a client uuid at all.
 - `!query-fail` — PARTIALLY GROUNDED, evidence only, not a golden: a Haiku
   run (2026-09-03, `--only prose-streamed` into a scratch `--out`, not this
   repo's `captures/`) had its spawned vendor child `kill -9`'d mid-stream

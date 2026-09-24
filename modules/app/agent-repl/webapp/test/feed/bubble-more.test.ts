@@ -2,8 +2,8 @@
 /**
  * FIX2 — the "more below" affordance (owner ruling, 2026-09-15).
  *
- * A collapsed response or prompt bubble whose content overruns its cap wears
- * `has-more`, which the stylesheet turns into a bottom fade + chevron. This
+ * A collapsed bubble whose rendered lines run past its cap wears `has-more`,
+ * which the stylesheet turns into a bottom fade (never a chevron). This
  * suite pins the measurement and the toggle: WHEN the class goes on (collapsed,
  * overflowing, a response/prompt bubble) and WHEN it comes off (expanded, no
  * overflow, or a box that is not one of the two speaker bubbles), plus the
@@ -15,37 +15,56 @@ import {
   MORE_BUBBLE_SELECTOR,
   TITLE_FOLD_CLASS,
   TITLE_FOLD_OPEN_SELECTOR,
+  HAS_MORE_UNMEASURABLE,
+  hidesContentBeyondCap,
   installHasMore,
   overflowsCap,
   refreshHasMore,
   shouldShowMore,
-  type MoreBox,
 } from "../../src/feed/bubble-more.js";
+import { BUBBLE_BODY_CLASS } from "../../src/bubble/body.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { BUBBLE_SCROLL_CLASS, bubbleScroll } from "../../src/feed/bubble-scroll.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { stopTicking } from "../../src/feed/ticking.js";
 import { fireResize } from "../resize-observer.js";
 
-/** A fake scroll box: the four facts refreshHasMore reads, all controllable. */
-function fakeBox(opts: {
-  matches: boolean;
+/** Pixels per rendered line in these fixtures. */
+const LINE_PX = 20;
+
+/** A collapsed bubble's line cap in these fixtures (the feed cap is 27.5; any count serves). */
+const CAP_LINES = 25;
+
+/**
+ * A real `.bubble` holding its `.bubble-scroll` box and `.bubble-body`, the box
+ * collapsed at CAP LINES: the body is LINES tall, the box shows at most the cap,
+ * and the box's scrollable overflow is the body plus EXTRAPX (a decoration's
+ * border box hanging past the last line, as the usage corner's hit area does).
+ */
+function bubbleBox(opts: {
+  lines: number;
+  cap?: number;
   expanded?: boolean;
-  scrollHeight: number;
-  clientHeight: number;
-}): MoreBox & { has(name: string): boolean } {
-  const classes = new Set<string>();
-  if (opts.expanded === true) classes.add(EXPANDED_CLASS);
-  return {
-    classList: {
-      add: (name) => classes.add(name),
-      remove: (name) => classes.delete(name),
-      contains: (name) => classes.has(name),
-    },
-    matches: (selector) => selector === MORE_BUBBLE_SELECTOR && opts.matches,
-    scrollHeight: opts.scrollHeight,
-    clientHeight: opts.clientHeight,
-    has: (name) => classes.has(name),
-  };
+  extraPx?: number;
+}): HTMLElement {
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  const scroll = document.createElement("div");
+  scroll.className = BUBBLE_SCROLL_CLASS;
+  if (opts.expanded === true) scroll.classList.add(EXPANDED_CLASS);
+  const body = document.createElement("div");
+  body.className = BUBBLE_BODY_CLASS;
+  scroll.append(body);
+  bubble.append(scroll);
+  const bodyPx = opts.lines * LINE_PX;
+  const shownPx = Math.min(opts.lines, opts.cap ?? CAP_LINES) * LINE_PX;
+  Object.defineProperty(body, "offsetHeight", { configurable: true, value: bodyPx });
+  Object.defineProperty(scroll, "clientHeight", { configurable: true, value: shownPx });
+  Object.defineProperty(scroll, "scrollHeight", {
+    configurable: true,
+    value: Math.max(bodyPx, shownPx) + (opts.extraPx ?? 0),
+  });
+  return scroll;
 }
 
 describe("MORE_BUBBLE_SELECTOR: held to the scroll-box class", () => {
@@ -60,7 +79,7 @@ describe("MORE_BUBBLE_SELECTOR: held to the scroll-box class", () => {
   });
 });
 
-describe("overflowsCap: content taller than the box", () => {
+describe("overflowsCap: a title's text taller than its clamp", () => {
   it("is true when the content overruns the cap", () => {
     // Arrange / Act / Assert
     expect(overflowsCap({ scrollHeight: 900, clientHeight: 540 })).toBe(true);
@@ -72,10 +91,56 @@ describe("overflowsCap: content taller than the box", () => {
   });
 });
 
-describe("shouldShowMore: the four conditions", () => {
-  it("shows on a collapsed, overflowing response/prompt bubble", () => {
+describe("hidesContentBeyondCap: the body's lines against the collapsed cap", () => {
+  it.each([
+    ["a one-line bubble", 1, false],
+    ["a bubble one line under its cap", CAP_LINES - 1, false],
+    ["a bubble exactly at its cap", CAP_LINES, false],
+    ["a bubble one line past its cap", CAP_LINES + 1, true],
+  ] as const)("%s hides content: %s", (_label, lines, hides) => {
     // Arrange
-    const box = fakeBox({ matches: true, scrollHeight: 900, clientHeight: 540 });
+    const box = bubbleBox({ lines });
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(hides);
+  });
+
+  it("ignores a decoration hanging below the last line (the usage corner's hit area)", () => {
+    // Arrange — a one-character answer whose box overflows by the corner's padding.
+    const box = bubbleBox({ lines: 1, extraPx: 6 });
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(false);
+  });
+
+  it("counts every line below a zero-line cap as hidden", () => {
+    // Arrange — a peer message shows its strip and none of its body.
+    const box = bubbleBox({ lines: 1, cap: 0 });
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(true);
+  });
+
+  it("refuses a box that holds no body, and records it at error", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const box = bubbleBox({ lines: 1 });
+    box.replaceChildren();
+
+    // Act
+    const measure = (): boolean => hidesContentBeyondCap(box);
+
+    // Assert
+    expect(measure).toThrow(/has-more unmeasurable/);
+    const record = await forwardedRecord(capture, HAS_MORE_UNMEASURABLE);
+    expect(record.level.case).toBe("error");
+  });
+});
+
+describe("shouldShowMore: the four conditions", () => {
+  it("shows on a collapsed bubble past its cap", () => {
+    // Arrange
+    const box = bubbleBox({ lines: CAP_LINES + 5 });
 
     // Act / Assert
     expect(shouldShowMore(box)).toBe(true);
@@ -83,7 +148,7 @@ describe("shouldShowMore: the four conditions", () => {
 
   it("never shows once expanded, even while it overflows", () => {
     // Arrange — expanded reveals scroll, so there is no hidden 'more' to point at.
-    const box = fakeBox({ matches: true, expanded: true, scrollHeight: 900, clientHeight: 540 });
+    const box = bubbleBox({ lines: CAP_LINES + 5, expanded: true });
 
     // Act / Assert
     expect(shouldShowMore(box)).toBe(false);
@@ -91,43 +156,46 @@ describe("shouldShowMore: the four conditions", () => {
 
   it("never shows when the content fits the cap", () => {
     // Arrange
-    const box = fakeBox({ matches: true, scrollHeight: 540, clientHeight: 540 });
+    const box = bubbleBox({ lines: CAP_LINES });
 
     // Act / Assert
     expect(shouldShowMore(box)).toBe(false);
   });
 
-  it("never shows on a box that is not a response/prompt bubble", () => {
+  it("never shows on a box that is not a bubble's", () => {
     // Arrange — a tool-call section overflows but does not match the selector.
-    const box = fakeBox({ matches: false, scrollHeight: 900, clientHeight: 540 });
+    const section = document.createElement("div");
+    section.className = "tool-output";
+    Object.defineProperty(section, "clientHeight", { configurable: true, value: 540 });
+    Object.defineProperty(section, "scrollHeight", { configurable: true, value: 900 });
 
     // Act / Assert
-    expect(shouldShowMore(box)).toBe(false);
+    expect(shouldShowMore(section)).toBe(false);
   });
 });
 
 describe("refreshHasMore: the class follows the measurement", () => {
   it("adds has-more when the box should show it", () => {
     // Arrange
-    const box = fakeBox({ matches: true, scrollHeight: 900, clientHeight: 540 });
+    const box = bubbleBox({ lines: CAP_LINES + 5 });
 
     // Act
     refreshHasMore(box);
 
     // Assert
-    expect(box.has(HAS_MORE_CLASS)).toBe(true);
+    expect(box.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
   it("drops has-more when the box should not show it", () => {
     // Arrange — an expanded box that already wears the class.
-    const box = fakeBox({ matches: true, expanded: true, scrollHeight: 900, clientHeight: 540 });
+    const box = bubbleBox({ lines: CAP_LINES + 5, expanded: true });
     box.classList.add(HAS_MORE_CLASS);
 
     // Act
     refreshHasMore(box);
 
     // Assert
-    expect(box.has(HAS_MORE_CLASS)).toBe(false);
+    expect(box.classList.contains(HAS_MORE_CLASS)).toBe(false);
   });
 });
 
@@ -136,11 +204,11 @@ function bubble(kind: "assistant" | "user", overflow: boolean): HTMLElement {
   const el = document.createElement("div");
   el.className = `bubble ${kind}`;
   const body = document.createElement("div");
-  body.className = "bubble-body";
+  body.className = BUBBLE_BODY_CLASS;
   const scroll = bubbleScroll(body);
   el.append(scroll);
   Object.defineProperty(scroll, "clientHeight", { configurable: true, value: 540 });
-  Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: overflow ? 900 : 540 });
+  Object.defineProperty(body, "offsetHeight", { configurable: true, value: overflow ? 900 : 540 });
   return el;
 }
 
@@ -181,6 +249,22 @@ describe("installHasMore: the box tracks its own overflow", () => {
 
     // Assert
     expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(false);
+  });
+
+  it("re-measures when the body grows, even with a corner placed before it", async () => {
+    // Arrange — the response's usage corner lands ahead of the body in the box.
+    const el = bubble("assistant", false);
+    const scroll = el.firstElementChild as HTMLElement;
+    const body = scroll.querySelector(`.${BUBBLE_BODY_CLASS}`) as HTMLElement;
+    scroll.prepend(document.createElement("span"));
+    await Promise.resolve();
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: 900 });
+
+    // Act — the box is at its cap and does not resize; only the body does.
+    fireResize(body);
+
+    // Assert
+    expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
   it("tears the observer down when the bubble is discarded", () => {

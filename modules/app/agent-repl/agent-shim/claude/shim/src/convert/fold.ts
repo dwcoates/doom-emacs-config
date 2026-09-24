@@ -620,6 +620,12 @@ function noticeText(message: unknown): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+/** Whether a settled response block is prose the agent produced. */
+function answersWithProse(result: conversationv1.AgentResponse["result"]): boolean {
+  if (result.case === "success") return true;
+  return result.case === "failure" && (result.value.prose?.markdown ?? "") !== "";
+}
+
 /**
  * Remember which unit is the agent's ANSWER.
  *
@@ -627,6 +633,14 @@ function noticeText(message: unknown): string | undefined {
  * a consumer marks it final without deriving finality from position. Only the
  * fold has seen which one that was, and only a TOP-LEVEL one qualifies: a
  * subagent's prose is that agent's answer, not this one's.
+ *
+ * A FAILED BLOCK THAT SAID SOMETHING IS STILL THE PROSE IT PRODUCED. The
+ * contract leaves the answer unset only "when no prose was produced at all (a
+ * refusal with empty content, a token ceiling hit before anything was said)",
+ * so a block cut at the output ceiling after it had spoken is the answer, and
+ * one that failed before saying anything is not. Accepting only settled
+ * successes left a max-tokens turn naming no answer over the prose it drew,
+ * which the daemon rightly raised as `final_answer_unresolved`.
  */
 function rememberAnswer(
   message: Extract<SdkMessage, { type: "assistant" }>,
@@ -640,7 +654,7 @@ function rememberAnswer(
     const update = result.case === "update" ? result.value.update : undefined;
     if (update?.case !== "activity") continue;
     if (update.value.item.case !== "response") continue;
-    if (update.value.item.value.result.case !== "success") continue;
+    if (!answersWithProse(update.value.item.value.result)) continue;
     state.lastAnswer = update.value.activityId;
   }
 }

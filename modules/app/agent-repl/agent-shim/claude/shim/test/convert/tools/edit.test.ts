@@ -153,6 +153,20 @@ describe("editConverter.settle", () => {
       1_700_000_001_000n,
     );
   });
+
+  it("restates the requested path on the failure arm, so the settled frame stands alone", () => {
+    // Arrange, Act.
+    const item = editConverter.settle(call({ file_path: "/tmp/a.ts" }), outcome("String not found", true));
+
+    // Assert.
+    const edit = item?.value as conversationv1.AgentEdit;
+    expect((edit.result.value as conversationv1.AgentEditFailure).path?.path).toBe("/tmp/a.ts");
+  });
+
+  it("produces NO failure frame for a call that named no path, which had no start either", () => {
+    // Arrange, Act, Assert.
+    expect(editConverter.settle(call({}), outcome("String not found", true))).toBeUndefined();
+  });
 });
 
 describe("editConverter.progress", () => {

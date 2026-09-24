@@ -730,14 +730,37 @@ func (w *watcher) detachedAgentKeyLocked(work *conversationv1.DetachedWorkId) (s
 
 // detachedHandleForLocked answers the handle a subagent frame belongs to, or
 // nil when the run it names has not detached.
+//
+// A SPAWN MADE BY THE DETACHED RUN IS NOT THE RUN. A detached subagent's own
+// stream also carries the subagents IT spawns, and their frames are subagent
+// frames too; taking the stream's handle for them addressed a nested spawn's
+// start and launch receipt to the PARENT run, which rewrote the parent's
+// footer row with the child's identity and then retired it, so the parent
+// came back as a minimal "subagent" row (daemon.footer.live_work_taken
+// "added agent:<parent>" within seconds of each nested launch, 2026-09-23).
+// A unit whose own start named a DIFFERENT agent than the stream's is such a
+// spawn: it is addressed by its own handle once it detaches, and by nothing
+// before.
 func (w *watcher) detachedHandleForLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) *conversationv1.DetachedWorkId {
-	if fact, ok := w.facts[act.GetActivityId().GetValue()]; ok && fact.work != nil {
+	unit := act.GetActivityId().GetValue()
+	fact, known := w.facts[unit]
+	if known && fact.work != nil {
 		return fact.work
 	}
-	if entry, ok := w.agents[agent.GetValue()]; ok && entry.work != nil {
-		return entry.work
+	entry, ok := w.agents[agent.GetValue()]
+	if !ok || entry.work == nil {
+		return nil
 	}
-	return nil
+	if known && fact.agent.GetValue() != "" && fact.agent.GetValue() != agent.GetValue() {
+		w.log.Debug("daemon.sessionwatcher.nested_spawn_not_the_run",
+			"a subagent frame on a detached run's stream names a spawn of that run, not the run itself; it is not addressed by the run's handle",
+			dlog.Context{
+				"agent_id": agent.GetValue(), "work_id": entry.work.GetValue(),
+				"activity_id": unit, "spawned_agent": fact.agent.GetValue(),
+			})
+		return nil
+	}
+	return entry.work
 }
 
 // notifyPushLocked raises the host notification a PushNotification send earns.

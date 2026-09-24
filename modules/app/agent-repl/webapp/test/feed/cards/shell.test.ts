@@ -71,10 +71,12 @@ function shell(
       lostHow?: "fileVanished" | "wentSilent" | "sweptUp";
       exit?: number;
     };
+    workId?: string;
   } = {},
 ): FeedShell {
   return create(FeedShellSchema, {
     command: { text: COMMAND },
+    workId: opts.workId === undefined ? undefined : { text: opts.workId },
     runtime: { startedAtMs: opts.startedAtMs ?? 0n },
     spool:
       opts.spool === undefined
@@ -834,5 +836,25 @@ describe("drawFeedShellHead title fold", () => {
     } finally {
       remove();
     }
+  });
+});
+
+describe("drawFeedShellHead: the detached-work id", () => {
+  it.each([
+    { name: "a live head names its work", opts: { workId: "work-3" }, want: "work-3" },
+    {
+      name: "a settled head still names its work",
+      opts: { workId: "work-3", settled: { endedAtMs: 5_000n, outcome: "completed" as const } },
+      want: "work-3",
+    },
+  ])("$name", ({ opts, want }) => {
+    // Arrange
+    const { rc } = ctxFor();
+
+    // Act
+    const el = drawFeedShellHead(shell(opts), rc);
+
+    // Assert
+    expect(el.querySelector(".shell-head .async-work-id")?.textContent).toBe(want);
   });
 });

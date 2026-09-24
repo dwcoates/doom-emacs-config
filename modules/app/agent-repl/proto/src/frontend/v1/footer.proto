@@ -1296,8 +1296,10 @@ message FooterExpandedMonitors {
   repeated FooterMonitorRow rows = 1;
 }
 
-// One live monitor's line: 👁 · description · (persistent) · clock. NOT a
-// jump target: monitors have no feed bubble, unlike the agent and shell rows.
+// One live monitor's line: 👁 · description · (persistent) · clock · ▸. A
+// monitor draws NO feed entry, so its jump is always the `unresolved` arm with
+// the `no_feed_entry` reason: a click says so at the row and records why,
+// rather than doing nothing.
 message FooterMonitorRow {
   // What is being watched, drawn verbatim (the agent's description).
   FooterMonitorRowDescription description = 1;
@@ -1305,6 +1307,10 @@ message FooterMonitorRow {
   FooterMonitorRowRuntime runtime = 2;
   // Present iff the watch is persistent; draws the "persistent" marker.
   optional FooterMonitorRowPersistent persistent = 3;
+  // Which work this row is. NOT DRAWN in the footer; see FooterWorkId.
+  FooterWorkId work = 4;
+  // Where a click on the row lands. See FooterJump.
+  FooterJump jump = 5;
 }
 // The row's description element.
 message FooterMonitorRowDescription {
@@ -1474,8 +1480,7 @@ message FooterTokensLineVerdictInvalid {
 // ---- The agents panel ------------------------------------------------------
 
 // The live agent-spawned subagents — the subagents that ALSO have feed
-// bubbles. One row per live subagent; each row is a jump target to its
-// bubble. Rows leave the list when the subagent's run ends. A TRUE LIST:
+// bubbles. One row per live subagent; each row is a jump row (`FooterJump`). Rows leave the list when the subagent's run ends. A TRUE LIST:
 // every row is the same kind of thing.
 message FooterExpandedAgents {
   // The rows, in the daemon's order (spawn order). Empty when nothing is
@@ -1485,9 +1490,11 @@ message FooterExpandedAgents {
 
 // One live subagent's line: glyph · type · description · tokens · clock · ▸.
 message FooterAgentRow {
-  // Jump target: the subagent bubble's FeedId, exactly as the feed served
-  // it. Echoed into navigation, never parsed.
-  FeedId target = 1;
+  // Tag 1 (`FeedId target`) is RETIRED: a bare target could not say that the
+  // daemon did not know the entry, and a row whose click reached nothing then
+  // did nothing at all. `jump` states it either way.
+  reserved 1;
+  reserved "target";
   // The subagent type ("Explore") — the row's leading label.
   FooterAgentRowLabel label = 2;
   // The commission's description. UNSET when the spawn carried none; the
@@ -1497,6 +1504,10 @@ message FooterAgentRow {
   FooterAgentRowTokens tokens = 4;
   // The row's clock. The client ticks from the instant.
   FooterAgentRowRuntime runtime = 5;
+  // Which work this row is. NOT DRAWN in the footer; see FooterWorkId.
+  FooterWorkId work = 6;
+  // Where a click on the row lands. See FooterJump.
+  FooterJump jump = 7;
 }
 // The row's type label.
 message FooterAgentRowLabel {
@@ -1581,7 +1592,7 @@ message FooterTaskRowCompleted {}
 // ---- The shells panel ------------------------------------------------------
 
 // The live detached shells. One row per running background command; each
-// row jumps to the shell's feed bubble. No token element — a shell has no
+// row is a jump row (`FooterJump`) to the shell's feed bubble. No token element — a shell has no
 // token cost. A TRUE LIST, like the agents panel.
 message FooterExpandedShells {
   // One row per live shell, in the daemon's order. Empty when none.
@@ -1590,13 +1601,74 @@ message FooterExpandedShells {
 
 // One live shell's line: $ · command · clock · ▸.
 message FooterShellRow {
-  // Jump target: the shell bubble's FeedId, exactly as the feed served it.
-  FeedId target = 1;
+  // Tag 1 (`FeedId target`) is RETIRED for the reason FooterAgentRow's is.
+  reserved 1;
+  reserved "target";
   // The command line being run.
   FooterShellRowCommand command = 2;
   // The row's clock. The client ticks from the instant.
   FooterShellRowRuntime runtime = 3;
+  // Which work this row is. NOT DRAWN in the footer; see FooterWorkId.
+  FooterWorkId work = 4;
+  // Where a click on the row lands. See FooterJump.
+  FooterJump jump = 5;
 }
+
+// ---- The detached-work rows' identity and jump ------------------------------
+
+// WHICH WORK A ROW IS: the run's `conversation.v1.DetachedWorkId` value — the
+// same string the daemon keys it by and the feed bubble's head draws
+// (`FeedDetachedWorkId`). For an IN-TURN subagent, which is not detached work
+// yet, it is the spawn unit's `AgentActivityId` value: the contract makes the
+// two one value (`DetachedWorkId.value == AgentActivityId.value`), so the row
+// keeps this identity if the spawn detaches.
+//
+// NOT DRAWN (owner ruling, 2026-09-23: no visual change to the footer). The
+// client carries it only into the record a click writes, and as the key its
+// per-row click outcome is held under across whole-view pushes.
+message FooterWorkId {
+  // The id, exactly as the daemon holds it. Never parsed.
+  string value = 1;
+}
+
+// WHERE A CLICK ON A DETACHED-WORK ROW LANDS, stated by the daemon for every
+// row (owner ruling, 2026-09-23). EXACTLY ONE ARM, so a row whose click
+// reaches nothing and says nothing is unrepresentable:
+//
+//   entry        the feed entry that draws this work is KNOWN: the client
+//                selects that entry and scrolls to it (the scroll module's
+//                `detachedWorkSelected` cause). If the client then cannot
+//                bring it onto the page, it says so at the row — never silence.
+//   unresolved   the daemon does NOT know the entry, and says why: the client
+//                shows the "not on screen" notice at the row and records the
+//                reason, with the row's work id, kind and this arm.
+//
+// An UNSET arm is malformed.
+message FooterJump {
+  oneof target {
+    // The entry's FeedId, exactly as the feed served it — ON THE FEED THAT
+    // DRAWS IT, which for a subagent of a subagent is its parent's sub-feed,
+    // not the root. Echoed into navigation, never parsed.
+    FeedId entry = 1;
+    // The daemon cannot name the entry.
+    FooterJumpUnresolved unresolved = 2;
+  }
+}
+// Why the daemon cannot name a row's feed entry. THE ARM IS THE REASON.
+message FooterJumpUnresolved {
+  oneof reason {
+    // The feed has drawn no entry for this work (yet): no placement for its
+    // unit has reached the footer. Resolves on its own the moment the feed
+    // draws it.
+    FooterJumpNotDrawn not_drawn = 1;
+    // This kind of work draws no feed entry at all (a monitor).
+    FooterJumpNoFeedEntry no_feed_entry = 2;
+  }
+}
+// The entry is not drawn. Empty: the arm is the whole fact.
+message FooterJumpNotDrawn {}
+// The kind draws no entry. Empty: the arm is the whole fact.
+message FooterJumpNoFeedEntry {}
 // The row's command element.
 message FooterShellRowCommand {
   // The command text, drawn verbatim (the daemon may truncate for width —
