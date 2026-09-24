@@ -53,6 +53,14 @@
 #   AGENT_REPL_SUITE_SLOTS=1 bin/suite-slot.sh <cmd>   # serialize everything
 #
 # The command runs in the CURRENT directory; this wraps it, never relocates it.
+#
+# The command, and this gate, run at background priority: every
+# `bin/suite-slot.sh <cmd>` is a test run, so it re-execs once through
+# bin/background.sh like every other test entry point.
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 log() { printf 'suite-slot: %s\n' "$*" >&2; }
