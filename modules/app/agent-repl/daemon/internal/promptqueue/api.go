@@ -203,17 +203,6 @@ type Queue interface {
 	Editing(ws ids.WorkspaceID) (Edit, bool)
 	// SubmitSessionAct sends a session act down the same path.
 	SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Act) error
-	// CancelKeepaliveRedrive cancels a turn that is re-driving behind an
-	// in-flight keep-alive — a turn accepted for delivery but never yet started
-	// on the shim because a keep-alive ping momentarily held the turn slot. It
-	// reports whether it found and cancelled such a re-drive for this turn. An
-	// INTERRUPT calls it FIRST: a user who asks to stop a turn that is still
-	// queued behind a keep-alive is asking for it not to start, so the re-drive
-	// is removed and the durable turn is closed as killed, rather than the
-	// interrupt racing the shim and coming back `not_the_open_turn`. It answers
-	// false — leaving the caller to interrupt the genuinely open turn — when no
-	// re-drive stands for the turn.
-	CancelKeepaliveRedrive(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) bool
 	// OnTurnEnded is the LifecycleSink's turn end: pop the queue and deliver
 	// the next prompt.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
@@ -294,11 +283,6 @@ type Deps struct {
 	ResolveImage feed.ImageResolver
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
-	// After schedules the wait before each re-drive of a StartTurn the shim
-	// refused because a KEEP-ALIVE turn was momentarily in flight. nil means
-	// time.After. It is injected so a test drives the re-drive cadence without
-	// waiting on a real clock.
-	After func(d time.Duration) <-chan time.Time
 	// PublishHost republishes a workspace's host view, which carries the
 	// standing edit the editor fills its input from. REQUIRED.
 	PublishHost func(ws ids.WorkspaceID)

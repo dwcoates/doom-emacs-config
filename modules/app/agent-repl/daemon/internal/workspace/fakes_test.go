@@ -685,11 +685,6 @@ type fakeQueue struct {
 	submitErr   error
 	acts        map[ids.WorkspaceID][]promptqueue.Act
 	actErr      error
-	// cancelledRedrives records every CancelKeepaliveRedrive call, and
-	// redriveCancelled is what the fake answers — true when a re-drive stood
-	// behind the interrupt.
-	cancelledRedrives []ids.TurnID
-	redriveCancelled  bool
 }
 
 func newFakeQueue() *fakeQueue {
@@ -710,11 +705,6 @@ func (q *fakeQueue) SubmitSessionAct(_ context.Context, ws ids.WorkspaceID, act 
 	}
 	q.acts[ws] = append(q.acts[ws], act)
 	return nil
-}
-
-func (q *fakeQueue) CancelKeepaliveRedrive(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) bool {
-	q.cancelledRedrives = append(q.cancelledRedrives, turn)
-	return q.redriveCancelled
 }
 
 // fakeMerge is a merge.Orchestrator.
