@@ -38,7 +38,8 @@ Three rules the protocol rests on, none of them negotiable:
   as proof the claim is made; announcing intent would let a session start over
   a lock nobody holds.
 - **Exit 3 is distinct from exit 1.** The shim turns 3 into a typed
-  `conversation_owned` StartSession refusal and 1 into a hard failure.
+  `conversation_owned` StartSession refusal and 1 into
+  `lock_holder_unavailable` naming the exit code.
   Collapsing them would make an unwritable lock directory look like a live
   duplicate.
 - **stdout is a protocol channel, not a log sink.** Every diagnostic goes to

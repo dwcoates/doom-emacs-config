@@ -32,6 +32,8 @@ import { conversationv1, shimv1 } from "../proto.js";
 import {
   acquireSessionLock,
   acquireWorkspaceLock,
+  describeLockHolderHow,
+  LockHeldError,
   LockHolderUnavailableError,
   workspaceLockPath,
 } from "../locks.js";
@@ -498,14 +500,15 @@ export interface SessionEngine extends Engine {
 }
 
 /**
- * The refusal for a claim this shim could not even ATTEMPT: its own lock holder
- * would not spawn. Nobody is known to own the conversation, so this is never
+ * The refusal for a claim this shim's own lock holder FAILED: it could not be
+ * spawned, died before holding the lock, answered wrongly, or never answered.
+ * Nobody is known to own the conversation, so this is never
  * `conversation_owned`; locks.ts has already recorded the defect at ERROR.
  */
 function lockHolderUnavailable(err: LockHolderUnavailableError): shimv1.StartSessionResponse {
   return startSessionRefused(
-    { kind: "lockHolderUnavailable", binary: err.binary, osError: err.osError },
-    `this shim's lock helper ${err.binary} failed to start (${err.osError}); ` +
+    { kind: "lockHolderUnavailable", binary: err.binary, how: err.how },
+    `this shim's lock helper ${err.binary} ${describeLockHolderHow(err.how)}; ` +
       `no other process is known to own this conversation`,
   );
 }
@@ -2997,8 +3000,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       releaseLock = await acquireLock(inForce);
     } catch (err) {
       if (err instanceof LockHolderUnavailableError) return lockHolderUnavailable(err);
+      // ONLY A GENUINE OWNER IS conversation_owned. Anything else the claim
+      // threw is not a refusal this contract names, and is raised loudly.
+      if (!(err instanceof LockHeldError)) throw err;
       LOGGER.debug(
-        { vendor_session_id: inForce, cause: err instanceof Error ? err.message : String(err) },
+        { vendor_session_id: inForce, cause: err.message },
         "refused StartSession: another shim holds this conversation's session lock",
       );
       return startSessionRefused(
@@ -3017,11 +3023,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       await releaseLock?.();
       releaseLock = undefined;
       if (err instanceof LockHolderUnavailableError) return lockHolderUnavailable(err);
+      if (!(err instanceof LockHeldError)) throw err;
       LOGGER.debug(
         {
           workspace_dir: deps.env.cwd,
           lock_path: workspaceLockPath(deps.env.cwd),
-          cause: err instanceof Error ? err.message : String(err),
+          cause: err.message,
         },
         "refused StartSession: another shim holds this workspace's lock",
       );

@@ -42,8 +42,9 @@
  * Both locks are taken, in a fixed order — session lock first, then workspace
  * lock — so no two shims can ever take them in opposite orders. Failing to take
  * either is a refusal to START THE SESSION: `StartSession` answers
- * `conversation_owned` (or `lock_holder_unavailable`, when this shim could not
- * spawn its own holder) and the process stays inert and serving.
+ * `conversation_owned` when the holder found the lock held (exit 3), or
+ * `lock_holder_unavailable` saying how the holder itself failed, and the
+ * process stays inert and serving.
  *
  * # Mechanism
  *
@@ -193,26 +194,77 @@ export function workspaceLockPath(cwd: string): string {
 }
 
 /**
- * THIS shim could not start its own lock holder, so no claim was attempted.
+ * HOW a lock holder failed, one arm per truthful account — the shape
+ * `conversation.v1.LockHolderFailure.how` carries.
+ */
+export type LockHolderHow =
+  /** It could not be spawned at all; the OS said why. */
+  | { readonly kind: "spawnFailed"; readonly osError: string }
+  /** It exited with a code other than {@link HELD_EXIT_CODE} before holding the lock. */
+  | { readonly kind: "exited"; readonly code: number; readonly stderr: string }
+  /** A signal killed it before it held the lock. */
+  | { readonly kind: "signaled"; readonly signal: string; readonly stderr: string }
+  /** Its first line was not {@link READY_LINE}; it was killed. */
+  | { readonly kind: "misanswered"; readonly line: string }
+  /** It neither answered nor exited inside {@link HOLDER_ANSWER_TIMEOUT_MS}; it was killed. */
+  | { readonly kind: "silent"; readonly timeoutMs: number };
+
+/**
+ * THIS shim's own lock holder failed, so the claim was never completed.
  *
  * It is its own error class because it is its own refusal: a held lock means a
- * live shim owns the conversation (`conversation_owned`), while an unspawnable
- * holder means NOBODY is known to own it and this shim's deployment is broken
- * (a missing or unexecutable `shim-lock`). `StartSession` answers
- * `lock_holder_unavailable` carrying both fields, and nothing else does.
+ * live shim owns the conversation (`conversation_owned`, {@link LockHeldError}),
+ * while a failed holder means NOBODY is known to own it and this shim's
+ * deployment is broken. `StartSession` answers `lock_holder_unavailable`
+ * carrying the binary and {@link LockHolderHow}, and nothing else does.
  */
 export class LockHolderUnavailableError extends Error {
-  /** The holder binary the spawn was asked to run. */
+  /** The holder binary the claim ran. */
   readonly binary: string;
-  /** The operating system's account of why the spawn failed. */
-  readonly osError: string;
+  /** How the holder failed. */
+  readonly how: LockHolderHow;
 
-  constructor(binary: string, osError: string, message: string) {
+  constructor(binary: string, how: LockHolderHow, message: string) {
     super(message);
     this.name = "LockHolderUnavailableError";
     this.binary = binary;
-    this.osError = osError;
+    this.how = how;
   }
+}
+
+/**
+ * Another process holds the lock: the holder exited {@link HELD_EXIT_CODE}.
+ * The ONLY failure `StartSession` answers as `conversation_owned`.
+ */
+export class LockHeldError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LockHeldError";
+  }
+}
+
+/**
+ * The one sentence for how a holder failed, shared by the log record, the
+ * error and the StartSession refusal detail so they cannot drift apart.
+ */
+export function describeLockHolderHow(how: LockHolderHow): string {
+  switch (how.kind) {
+    case "spawnFailed":
+      return `could not be spawned: ${how.osError}`;
+    case "exited":
+      return `exited with code ${how.code} before taking the lock${stderrSuffix(how.stderr)}`;
+    case "signaled":
+      return `was killed by ${how.signal} before taking the lock${stderrSuffix(how.stderr)}`;
+    case "misanswered":
+      return `answered ${JSON.stringify(how.line)} instead of ${JSON.stringify(READY_LINE)} and was killed`;
+    case "silent":
+      return `gave no ${JSON.stringify(READY_LINE)} answer within ${how.timeoutMs} ms and was killed`;
+  }
+}
+
+/** A holder's stderr, appended only when it said something. */
+function stderrSuffix(stderr: string): string {
+  return stderr === "" ? "" : ` (${stderr})`;
 }
 
 /**
@@ -287,9 +339,7 @@ function acquireExclusiveLock(claim: {
     // this process dies however it dies.
     child = spawn(binary, [file], { stdio: ["pipe", "pipe", "pipe"] });
   } catch (err) {
-    return Promise.reject(
-      holderUnavailable(claim, binary, file, err),
-    );
+    return Promise.reject(holderFailed(claim, binary, file, spawnFailed(err)));
   }
 
   return new Promise<LockRelease>((resolve, reject) => {
@@ -310,7 +360,7 @@ function acquireExclusiveLock(claim: {
     const answerDeadline = setTimeout(() => {
       settle(() => {
         child.kill("SIGKILL");
-        reject(holderSilent(claim, binary, file));
+        reject(holderFailed(claim, binary, file, { kind: "silent", timeoutMs: HOLDER_ANSWER_TIMEOUT_MS }));
       });
     }, HOLDER_ANSWER_TIMEOUT_MS);
 
@@ -345,7 +395,7 @@ function acquireExclusiveLock(claim: {
         );
         return;
       }
-      settle(() => reject(holderUnavailable(claim, binary, file, err)));
+      settle(() => reject(holderFailed(claim, binary, file, spawnFailed(err))));
     });
 
     // THE HOLDER'S OWN DIAGNOSTICS, folded into this component's records rather
@@ -353,19 +403,7 @@ function acquireExclusiveLock(claim: {
     // it is what makes a refusal readable.
     const exited = new Promise<void>((exit) => {
       child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
-        settle(() =>
-          reject(
-            code === HELD_EXIT_CODE
-              ? new Error(
-                  `${COMPONENT}: ${claim.subject} is already held by another shim (${file}); ` +
-                    `refusing to start a duplicate`,
-                )
-              : new Error(
-                  `${COMPONENT}: the lock holder for the ${claim.kind} lock ${file} exited ` +
-                    `(code ${code ?? "null"}, signal ${signal ?? "null"}) before taking it: ${stderr.trim()}`,
-                ),
-          ),
-        );
+        settle(() => reject(holderClosed(claim, binary, file, code, signal, stderr.trim())));
         exit();
       });
     });
@@ -377,12 +415,7 @@ function acquireExclusiveLock(claim: {
       if (line !== READY_LINE) {
         settle(() => {
           child.kill("SIGKILL");
-          reject(
-            new Error(
-              `${COMPONENT}: the lock holder for the ${claim.kind} lock ${file} announced ` +
-                `${JSON.stringify(line)}, not ${JSON.stringify(READY_LINE)}`,
-            ),
-          );
+          reject(holderFailed(claim, binary, file, { kind: "misanswered", line }));
         });
         return;
       }
@@ -407,51 +440,64 @@ function acquireExclusiveLock(claim: {
 }
 
 /**
- * A spawned holder that never answered inside {@link HOLDER_ANSWER_TIMEOUT_MS}:
- * recorded at ERROR and refused as `lock_holder_unavailable`, because nobody is
- * known to own the conversation and this shim's holder is broken.
+ * What a holder's exit before `locked` means.
+ *
+ * Exit {@link HELD_EXIT_CODE} is a genuine owner ({@link LockHeldError}); any
+ * other code, or a signal, is the holder failing. Node reports exactly one of
+ * the two for a closed child, so a close stating neither is an invariant
+ * violation, raised loudly rather than guessed into either refusal.
  */
-function holderSilent(
-  claim: { kind: string; context: Record<string, unknown> },
+function holderClosed(
+  claim: { kind: string; subject: string; context: Record<string, unknown> },
   binary: string,
   file: string,
-): LockHolderUnavailableError {
-  const osError = `the lock holder gave no ${JSON.stringify(READY_LINE)} answer within ${HOLDER_ANSWER_TIMEOUT_MS} ms and was killed`;
-  // error: a defect, because a healthy holder answers in milliseconds and this
-  // one neither answered nor exited, so no session can start on it.
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string,
+): Error {
+  if (code === HELD_EXIT_CODE) {
+    return new LockHeldError(
+      `${COMPONENT}: ${claim.subject} is already held by another shim (${file}); refusing to start a duplicate`,
+    );
+  }
+  if (code !== null) return holderFailed(claim, binary, file, { kind: "exited", code, stderr });
+  if (signal !== null) return holderFailed(claim, binary, file, { kind: "signaled", signal, stderr });
   LOGGER.error(
-    { ...claim.context, lock_path: file, lock_binary: binary, os_error: osError, cause: osError, timeout_ms: HOLDER_ANSWER_TIMEOUT_MS },
-    `the ${claim.kind} lock holder ${binary} timed out: ${osError}`,
+    { ...claim.context, lock_path: file, lock_binary: binary, holder_stderr: stderr, detail: "a closed child reported neither an exit code nor a signal" },
+    `invariant violated: the ${claim.kind} lock holder closed with neither an exit code nor a signal`,
   );
-  return new LockHolderUnavailableError(
-    binary,
-    osError,
-    `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} timed out: ${osError}`,
+  return new Error(
+    `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} closed with neither an exit code nor a signal`,
   );
 }
 
+/** A spawn failure's operating-system account. */
+function spawnFailed(err: unknown): LockHolderHow {
+  return { kind: "spawnFailed", osError: err instanceof Error ? err.message : String(err) };
+}
+
 /**
- * The one spelling of "this shim's lock holder would not start", recorded at
- * ERROR and returned as the typed error `StartSession` maps onto
- * `lock_holder_unavailable`. Both spawn-failure branches come through here, so
- * the record and the refusal cannot drift apart.
+ * The one spelling of "this shim's lock holder failed", recorded at ERROR and
+ * returned as the typed error `StartSession` maps onto
+ * `lock_holder_unavailable`. Every failure branch comes through here, so the
+ * record and the refusal cannot drift apart.
  */
-function holderUnavailable(
+function holderFailed(
   claim: { kind: string; context: Record<string, unknown> },
   binary: string,
   file: string,
-  err: unknown,
+  how: LockHolderHow,
 ): LockHolderUnavailableError {
-  const osError = err instanceof Error ? err.message : String(err);
-  // error: a defect, because the shim's own lock helper is missing or cannot
-  // be executed, so no session can start in this deployment at all.
+  const account = describeLockHolderHow(how);
+  // error: a defect, because the shim's own lock helper failed, so no session
+  // can start on it and nobody is known to own the conversation.
   LOGGER.error(
-    { ...claim.context, lock_path: file, lock_binary: binary, os_error: osError, cause: osError },
-    `the ${claim.kind} lock holder ${binary} could not be spawned: ${osError}`,
+    { ...claim.context, lock_path: file, lock_binary: binary, how: how.kind, cause: account },
+    `the ${claim.kind} lock holder ${binary} failed: ${account}`,
   );
   return new LockHolderUnavailableError(
     binary,
-    osError,
-    `${COMPONENT}: cannot spawn the lock holder ${binary} for the ${claim.kind} lock ${file}: ${osError}`,
+    how,
+    `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} ${account}`,
   );
 }
