@@ -207,7 +207,7 @@ function readSuccess(
     );
     return create(conversationv1.AgentReadSuccessSchema, {
       path: readPath(nonTextPath),
-      settledAt: settle(outcome),
+      settledAt: settle(call, outcome),
     });
   }
   if (file === undefined) {
@@ -230,7 +230,7 @@ function readSuccess(
   return create(conversationv1.AgentReadSuccessSchema, {
     path: readPath(path),
     extent,
-    settledAt: settle(outcome),
+    settledAt: settle(call, outcome),
   });
 }
 
@@ -277,7 +277,7 @@ export const readConverter: ToolConverter = {
           result: {
             case: "failure",
             value: create(conversationv1.AgentReadFailureSchema, {
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
               path: readPath(path),
             }),
           },

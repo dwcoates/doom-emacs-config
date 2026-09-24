@@ -129,7 +129,7 @@ export const sendMessageConverter: ToolConverter = {
       return sendItem({
         case: "failure",
         value: create(conversationv1.AgentSendMessageFailureSchema, {
-          error: failureOf(outcome),
+          error: failureOf(call, outcome),
           // RESTATED so the settled frame stands alone: a refused send is
           // still drawn, and its start is gone once the settle upserts over it.
           addressedTo: addressedToOf(call),
@@ -167,7 +167,7 @@ export const sendMessageConverter: ToolConverter = {
               case: "queuedToLive",
               value: create(conversationv1.AgentSendMessageQueuedToLiveSchema, {}),
             },
-        settledAt: settledAt(outcome.settledAtMs),
+        settledAt: settledAt(outcome.settledAtMs, call.startedAtMs),
         // RESTATED so the settled frame stands alone: a replay of the unit's
         // latest frame draws the send from this alone.
         addressedTo: addressedToOf(call),

@@ -110,7 +110,7 @@ function globSuccess(
     query,
     paths,
     extent,
-    settledAt: settle(outcome),
+    settledAt: settle(call, outcome),
   });
 }
 
@@ -163,7 +163,7 @@ export const globConverter: ToolConverter = {
           result: {
             case: "failure",
             value: create(conversationv1.AgentGlobFailureSchema, {
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
               query: globQuery(call, pattern),
             }),
           },

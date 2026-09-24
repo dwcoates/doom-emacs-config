@@ -119,7 +119,7 @@ export const pushNotificationConverter: ToolConverter = {
       return item({
         case: "failure",
         value: create(conversationv1.AgentPushNotificationFailureSchema, {
-          error: failureOf(outcome),
+          error: failureOf(call, outcome),
         }),
       });
     }
@@ -148,7 +148,7 @@ export const pushNotificationConverter: ToolConverter = {
               reason: reasonOf(disabledReason, call.toolUseId),
             }),
           },
-          settledAt: settle(outcome),
+          settledAt: settle(call, outcome),
         }),
       });
     }
@@ -164,7 +164,7 @@ export const pushNotificationConverter: ToolConverter = {
             sentAtMs: sentAtMsOf(output, call.toolUseId),
           }),
         },
-        settledAt: settle(outcome),
+        settledAt: settle(call, outcome),
       }),
     });
   },
