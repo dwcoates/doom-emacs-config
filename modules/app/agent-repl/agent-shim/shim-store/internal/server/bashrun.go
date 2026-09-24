@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
@@ -47,7 +48,8 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	if len(replay.Rows) == 0 {
-		ref := refuse(SiteUnknownBashRun, "run", "watch: this store holds no row for run %q, so there is no run to follow", runID)
+		ref := refuseClass(classUnknownRun, SiteUnknownBashRun, "run",
+			fmt.Sprintf("watch: this store holds no row for run %q, so there is no run to follow", runID))
 		s.logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
 		return connect.NewError(connect.CodeNotFound, ref)
 	}
