@@ -1224,7 +1224,72 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return read.kind === "ok" ? transcriptsRead(read.transcripts) : transcriptsRefused(read);
   }
 
-  async function pushContextUsage(): Promise<void> {
+  /**
+   * THE CONTEXT READINGS ARE SERIAL. Each probe starts only after the one before
+   * it has pushed, so the readings reach the daemon in the order they were
+   * asked for: a turn-end probe can never be overtaken by a slower mid-turn one
+   * and leave a stale figure standing on the topbar's chip and the footer's
+   * cell.
+   */
+  let contextUsageChain: Promise<void> = Promise.resolve();
+  /** Whether a mid-turn refresh is queued and not yet started. */
+  let contextRefreshQueued = false;
+
+  function pushContextUsage(): Promise<void> {
+    return enqueueContextProbe(() => undefined);
+  }
+
+  /**
+   * Queue one probe behind every probe already asked for. The caller holds the
+   * returned promise and so hears the probe's own failure; the chain keeps only
+   * its SETTLEMENT, so one failed probe cannot stop every later one from
+   * running.
+   */
+  function enqueueContextProbe(onStart: () => void): Promise<void> {
+    const next = contextUsageChain.then(async () => {
+      onStart();
+      await probeContextUsage();
+    });
+    contextUsageChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  /**
+   * REFRESH THE CONTEXT READING AFTER A MAIN-AGENT API RESPONSE. The topbar's
+   * chip states the context held and the footer's cell how much the turn has
+   * grown it, both from this one reading, so both move while the turn runs
+   * rather than only at its end. Only the MAIN agent's responses count: a
+   * subagent's never enters the main window. A keep-alive's does not either,
+   * because its exchange is rewound away. Refreshes COALESCE: while one is
+   * queued and not yet started, another response asks for nothing more, since
+   * the queued probe will read the later state anyway.
+   */
+  function noteMainApiResponse(message: SdkMessage): void {
+    if (message.type !== "assistant") return;
+    if (message.parent_tool_use_id !== null) return;
+    if ((message.message as { usage?: unknown } | undefined)?.usage === undefined) return;
+    if (open === undefined || open.keepalive) return;
+    if (contextRefreshQueued) {
+      LOGGER.logVerbose({}, "a context refresh is already queued; this response rides it");
+      return;
+    }
+    contextRefreshQueued = true;
+    const turnId = open.id.value;
+    LOGGER.debug({ turn_id: turnId }, "a main-agent API response landed; refreshing the context reading");
+    void enqueueContextProbe(() => {
+      contextRefreshQueued = false;
+    }).catch((err: unknown) => {
+      LOGGER.error(
+        { turn_id: turnId, cause: err instanceof Error ? err.message : String(err) },
+        "the mid-turn context refresh failed before it could push a reading",
+      );
+    });
+  }
+
+  async function probeContextUsage(): Promise<void> {
     const active = query;
     if (active === undefined) return;
     try {
@@ -1556,6 +1621,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     noteRewindBoundary(message);
     notePreInitMessage(message);
     noteIdentityFacts(message, attribution);
+    noteMainApiResponse(message);
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
     noteDetachedWork(message);

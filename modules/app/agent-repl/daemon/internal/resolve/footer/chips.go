@@ -28,7 +28,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			// whether THIS frame carried usage to decide which API response
 			// the unit belongs to, and folding first would tell it nothing new.
 			s.tok.responses.Observe(unit, act.GetUsage() != nil)
-			s.tok.observeUsage(unit, agent.GetValue(), act.Usage)
+			s.tok.observeUsage(unit, s.usageAgent(agent.GetValue()), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
 			r.applyActivity(ws, s, agent, unit, act)
 		})

@@ -543,6 +543,37 @@ describe("the expanded panels", () => {
     expect(drawn).toContain("180k");
   });
 
+  it("draws the tokens panel's context growth verbatim", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    // Act
+    await harness.click(".footer-tokens");
+    // Assert
+    expect(
+      harness.text('.footer-expanded[data-panel="tokens"] [data-token-line="contextGrowth"] .footer-token-value'),
+    ).toBe("18.2k");
+  });
+
+  it("draws every agent's share in the tokens panel", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    // Act
+    await harness.click(".footer-tokens");
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="tokens"] [data-token-agent="reviewer · review the diff"]')).toBe(
+      "reviewer · review the diff",
+    );
+  });
+
+  it("opens the tokens panel from the idle cell's stated dash", async () => {
+    // Arrange
+    await withFooter({ status: "idle", tokensText: "--" });
+    // Act
+    await harness.click(".footer-tokens");
+    // Assert
+    expect(harness.$('.footer-expanded[data-panel="tokens"]')).not.toBeNull();
+  });
+
   it("draws the tokens panel's verdict text verbatim", async () => {
     // Arrange
     await withFooter({ status: "idle" });
