@@ -2026,4 +2026,88 @@ refusal untouched rather than being overwritten by the canned prompt."
     (should (equal (agent-repl-test-input--composer-text) "my draft"))))
 
 
+;;;; ---- A held-prompt edit ----
+
+(defmacro agent-repl-test-input--editing (&rest body)
+  "Run BODY with the composer standing in a held-prompt edit.
+The edit's own module is recorded rather than run: this suite pins only
+that the send and the discard branch to it."
+  (declare (indent 0))
+  `(let ((commits nil) (cancels nil))
+     (cl-letf (((symbol-function 'agent-repl-held-edit-active-p) (lambda (_ws) t))
+               ((symbol-function 'agent-repl-held-edit-commit)
+                (lambda (ws said snapshot) (push (list ws said snapshot) commits)))
+               ((symbol-function 'agent-repl-held-edit-cancel)
+                (lambda (ws) (push ws cancels))))
+       ,@body)))
+
+(ert-deftest agent-repl-input-an-edit-mode-send-commits-the-edit ()
+  "While a held prompt is edited, the composer's send is the edit's commit."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--editing
+      ;; Arrange
+      (agent-repl-test-input--type "the revision")
+      ;; Act
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should (equal (plist-get (plist-get (car (plist-get (plist-get (nth 1 (car commits)) :content) :blocks))
+                                           :value)
+                                :text)
+                     "the revision")))))
+
+(ert-deftest agent-repl-input-an-edit-mode-send-submits-no-new-prompt ()
+  "The commit replaces the held prompt; nothing new is submitted."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--editing
+      ;; Arrange
+      (agent-repl-test-input--type "the revision")
+      ;; Act
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should (null agent-repl-test-input--submitted)))))
+
+(ert-deftest agent-repl-input-an-edit-mode-send-clears-the-composer ()
+  "The commit clears and records exactly as a send does."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--editing
+      ;; Arrange
+      (agent-repl-test-input--type "the revision")
+      ;; Act
+      (agent-repl--send :user-sent)
+      ;; Assert
+      (should (equal (agent-repl-test-input--composer-text) "")))))
+
+(ert-deftest agent-repl-input-an-edit-mode-canned-send-still-submits ()
+  "A caller-composed send is not the composer's, so it is not a commit."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--editing
+      ;; Act
+      (agent-repl--send :command-rebase "rebase please")
+      ;; Assert
+      (should (and agent-repl-test-input--submitted (null commits))))))
+
+(ert-deftest agent-repl-input-an-edit-mode-discard-cancels-the-edit ()
+  "`C-c C-c' while a held prompt is edited cancels the edit."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--editing
+      ;; Arrange
+      (agent-repl-test-input--type "the revision")
+      ;; Act
+      (with-current-buffer agent-repl-test-input--buffer
+        (agent-repl-discard-input))
+      ;; Assert
+      (should (equal cancels '("ws-one"))))))
+
+(ert-deftest agent-repl-input-a-discard-with-no-edit-cancels-nothing ()
+  "An ordinary discard is only a discard."
+  (agent-repl-test-input--with
+    (let ((cancels nil))
+      (cl-letf (((symbol-function 'agent-repl-held-edit-active-p) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-held-edit-cancel) (lambda (ws) (push ws cancels))))
+        ;; Act
+        (with-current-buffer agent-repl-test-input--buffer
+          (agent-repl-discard-input))
+        ;; Assert
+        (should (null cancels))))))
+
 ;;; test-input.el ends here

@@ -93,6 +93,9 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-response "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-held-edit-active-p "held-edit" (ws))
+(declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
+(declare-function agent-repl-held-edit-cancel "held-edit" (ws))
 (declare-function agent-repl-rpc-adjust-feed-text-scale "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
 (declare-function agent-repl-interrupt-turn "agent-repl-verbs" (&optional ws))
@@ -252,11 +255,16 @@ to cancel, while core's timer boundary reports whether a keyed timer existed."
     (and buf (buffer-live-p buf) buf)))
 
 (defun agent-repl-discard-input ()
-  "Save current input to history, clear the buffer, and enter insert state."
+  "Save current input to history, clear the buffer, and enter insert state.
+While the composer is editing a held prompt this is also the edit's
+CANCEL: the held prompt keeps its content and the queue resumes
+(`agent-repl-held-edit-cancel')."
   (interactive)
   (let ((ws (agent-repl--ws-current-name))
         (input-len (buffer-size)))
     (agent-repl--log ws "elisp.input.discard ws=%s input-len=%d" ws input-len)
+    (when (agent-repl-held-edit-active-p ws)
+      (agent-repl-held-edit-cancel ws))
     (agent-repl--history-push)
     (agent-repl--history-reset)
     (agent-repl--history-save ws)
@@ -1304,6 +1312,9 @@ record their prompt on the ack instead.  When WS is nil the current
 workspace is used.  FORCE-METAPROMPT prepends the on-demand
 read-directive.
 
+While the composer is editing a held prompt, a from-buffer send COMMITS
+the edit instead (`agent-repl-held-edit-commit') and returns nil.
+
 Returns the submission's idempotency key, or nil when nothing was sent."
   (interactive (list :user-sent))
   (unless (memq origin agent-repl--input-origins)
@@ -1326,16 +1337,26 @@ Returns the submission's idempotency key, or nil when nothing was sent."
         (let* ((from-buffer (null prompt))
                (text (agent-repl--prepare-input ws raw force-metaprompt))
                (said (agent-repl--input-said text attachments)))
-          (agent-repl--kickoff-prompt-summary ws raw)
-          ;; `(null prompt)' is the one fact that says the words came out
-          ;; of the composer.  A from-buffer submission clears the composer
-          ;; and records RAW HERE, at dispatch, so a missing or failed ack
-          ;; can never leave the composer full (owner ruling).  `said' and
-          ;; `attachments' were already captured above, so the clear costs
-          ;; the submission nothing.
-          (let ((snapshot (when from-buffer
-                            (agent-repl--input-optimistic-clear ws raw))))
-            (agent-repl--input-submit ws said origin raw nil from-buffer snapshot)))))))
+          ;; A HELD-PROMPT EDIT TURNS THE COMPOSER'S SEND INTO ITS COMMIT:
+          ;; the words replace the held prompt's content rather than going
+          ;; out as a new prompt.  The composer is cleared and the words
+          ;; recorded exactly as a send clears and records them.
+          (if (and from-buffer (agent-repl-held-edit-active-p ws))
+              (progn
+                (agent-repl--info ws "elisp.input.send-commits-held-edit ws=%s origin=%S" ws origin)
+                (agent-repl-held-edit-commit
+                 ws said (agent-repl--input-optimistic-clear ws raw))
+                nil)
+            (agent-repl--kickoff-prompt-summary ws raw)
+            ;; `(null prompt)' is the one fact that says the words came out
+            ;; of the composer.  A from-buffer submission clears the composer
+            ;; and records RAW HERE, at dispatch, so a missing or failed ack
+            ;; can never leave the composer full (owner ruling).  `said' and
+            ;; `attachments' were already captured above, so the clear costs
+            ;; the submission nothing.
+            (let ((snapshot (when from-buffer
+                              (agent-repl--input-optimistic-clear ws raw))))
+              (agent-repl--input-submit ws said origin raw nil from-buffer snapshot))))))))
 
 ;;;; ---- The send sites --------------------------------------------------
 ;;
