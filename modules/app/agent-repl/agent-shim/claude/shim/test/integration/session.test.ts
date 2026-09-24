@@ -17,6 +17,7 @@ import { workspaceLockKey } from "../../src/locks.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { cleanupShims, ITEST_BUILD_SHA, spawnShim } from "../integration-support/harness.js";
 import {
+  awaitAgentEntry,
   freshSession,
   openStream, openSessionUpdates,
   permissionMode,
@@ -1420,14 +1421,13 @@ describe("turn_in_flight, on both messages that carry it", () => {
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    // THE ANNOUNCEMENT IS ON THE PAGE OR THE TAIL, whichever side of the watch's
+    // open the store writer's batch landed on; a tail-only wait hung whenever
+    // the batch won that race.
     const agent = openStream((options) =>
       first.clients.h1.watchAgent(watchAgentRequest(), options),
     );
-    await agent.next();
-    await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
-    });
+    await awaitAgentEntry(agent, (entry) => entryFrame(entry)?.result.case === "detachedWork");
     agent.close();
     first.signal("SIGKILL");
     await first.exited;
@@ -1439,6 +1439,41 @@ describe("turn_in_flight, on both messages that carry it", () => {
 
     // The detached run outlived the shim, so the revived session reports it as
     // live work rather than pretending the conversation is idle.
+    expect(revived.liveWork.length).toBeGreaterThan(0);
+  });
+
+  test("a killed shim's detached announcement already on the opening page still revives as live work", async () => {
+    // Arrange: the interleaving that hung the test above, FORCED. The watch
+    // opens only once the writer has drained everything the turn enqueued, so
+    // the store pins its tail past the announcement and serves it on the PAGE,
+    // never as a tail entry.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    let turnClosed = false;
+    await first.log.record((record) => {
+      if (record.pid !== first.child.pid) return false;
+      if (record.message === "closed a turn") turnClosed = true;
+      return turnClosed && record.message === "batch is durable" && record.context.backlog_rows === 0;
+    });
+    const agent = openStream((options) =>
+      first.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+
+    // Act
+    await awaitAgentEntry(agent, (entry) => entryFrame(entry)?.result.case === "detachedWork");
+    const pulled = agent.frames().length;
+    agent.close();
+    first.signal("SIGKILL");
+    await first.exited;
+    const second = await spawnShim({ reuse: first.dirs });
+    const revived = sessionStarted(
+      await second.clients.h1.startSession(resumeSession(started.vendorSessionId, remediationPay())),
+    );
+
+    // Assert: the wait settled on the page alone (one frame pulled), and the
+    // revival still reports the run as live work.
+    expect(pulled).toBe(1);
     expect(revived.liveWork.length).toBeGreaterThan(0);
   });
 
