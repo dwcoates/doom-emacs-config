@@ -773,6 +773,27 @@ pass; a test has no clock to wait on, so `EngineDeps.onHibernationCompactionSett
 is injected the way the scheduler and the identity store are. Production leaves
 it absent and reads the compaction's own records instead.
 
+## A settle stands alone
+
+A unit's start and its settle upsert one store row, so a replay serves the
+settle alone, and every settle restates what its start carried. Two structural
+doors keep that from depending on each converter remembering:
+
+- `convert/entries.ts` `agentActivity` stamps every activity
+  `AgentActivity.contract = SETTLES_STAND_ALONE`. It is the ONE activity
+  constructor (the boot sweep's closings build through it too); the daemon grades
+  a bare settle by this stamp, so it must never move into per-kind code.
+- `settledAt(atMs, startedAtMs)` and `toolFailure(content, atMs, startedAtMs)`
+  take the start as a REQUIRED argument; `failureOf(call, outcome)` and
+  `settle(call, outcome)` read it off the call. Prose and reasoning blocks
+  announce no instant and pass `undefined`.
+
+A detached spawn's notification carries neither prompt nor start, so the task
+table (`TaskKindRegistry.rememberCall`) keeps the spawning call from the moment
+it is seen open; its terminals and running beats restate the prompt from it and
+the created agent by the minting rule. The boot sweep's spawn closing restates
+what the agent's book records for the unit.
+
 ## Validation and errors
 
 - **One base validate function per request message** (`service/validate/

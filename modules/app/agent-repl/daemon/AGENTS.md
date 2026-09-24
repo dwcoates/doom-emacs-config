@@ -426,6 +426,34 @@ open of the workspace: its feed holds nothing, so it still replays the first
 page. Whether it should instead carry the incumbent's feed is an owner
 question, recorded in `docs/REMEDIATION-CHANGELOG.md` (`replay-first-page-only`).
 
+## A settle stands alone, and a bare one is graded by its producer's stamp
+
+A unit's start and settle upsert one store row, so a replay serves the settle
+alone. Every settle arm restates what its start carried, and the feed draws from
+the restatement: the input line, a send's address and summary, a spawn's
+commission and created agent (so its sub-feed is addressable), an artifact
+call's act, and the start instant on the settle instant
+(`AgentActivitySettledAt.started_at`), which is what a replayed card's runtime
+counts from when no start was held. A start this process held outranks the
+restated start, so a live clock never jumps.
+
+A settle that restates nothing is graded by `AgentActivity.contract`, the stamp
+each producer writes at its ONE activity constructor (`feed.standsAlone`):
+
+- STAMPED (`SETTLES_STAND_ALONE`): an invariant violation. ERROR
+  `daemon.feed.settle_not_restated` when a held start draws it, ERROR
+  `daemon.feed.activity_undrawable` (`errSettleNotRestated`) when nothing does.
+- UNSTAMPED: a row written before the contract, expected old data. INFO
+  `daemon.feed.settle_predates_contract`, drawn exactly as before (from a held
+  start, or not at all via `errSettlePredatesContract`).
+
+The stamp is the discriminator because it cannot misgrade a new defect as old:
+it is written by the envelope constructor, never by the per-kind code that
+restates, so a new arm that forgets to restate is still stamped. A missing
+restated start costs a card only its runtime chip, so the card still draws. A
+subagent hold of nothing but pre-contract frames retires at INFO; one holding a
+stamped frame keeps the WARN `daemon.feed.subagent_without_start`.
+
 ## Deploy chain
 
 `bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →

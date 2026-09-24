@@ -1211,6 +1211,18 @@ run; the conversion decides what a record MEANS. Everything crossing between the
 crosses `tail.Handler`, `tail.Context`, and the two optional methods in
 `internal/handler/seam.go`.
 
+### A settle stands alone
+
+Every settled arm restates what its start carried, read through the start's own
+reader. `activityFrame` (`internal/convert/frames.go`) is the one place a unit
+becomes a frame and stamps `AgentActivity.contract = SETTLES_STAND_ALONE`, which
+the daemon grades a bare settle by; it must never move into per-kind code.
+`settledAt(ms, startMs)` and `toolFailure(block, ts, startMs)` take the call
+record's timestamp as a required argument. A detached spawn's later settles (a
+TaskStop's stop, a reader-concluded loss) restate the commission its launch
+recorded (`Converter.spawns`) and the created agent by the minting rule; a loss
+whose launch this reader never read restates an empty commission.
+
 ### The four outcomes a record can have
 
 A page line, a detached run's frame, an unserved item, or a drop. There is no
