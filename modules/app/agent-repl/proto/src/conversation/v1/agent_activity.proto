@@ -69,6 +69,29 @@ message AgentActivity {
   // it is making a presentation choice.
   optional AgentActivityAttribution attribution = 20;
 
+  // WHICH REVISION OF THIS VOCABULARY'S STANDS-ALONE CONTRACT the producer
+  // wrote this unit under — the evidence a consumer grades a settled frame
+  // that restates nothing by.
+  //
+  // THE SETTLE STANDS ALONE: a call's start and its settle upsert ONE unit, and
+  // a store that keeps the latest frame of a unit serves the settle with no
+  // start beside it, so every settled arm restates what its start carried.
+  // Rows written BEFORE that contract restate nothing, and they are EXPECTED
+  // OLD DATA; a producer bound by the contract that fails to restate is a
+  // DEFECT. Only the row can say which it is, and this is how it says so.
+  //
+  // STAMPED AT THE PRODUCER'S ONE ACTIVITY CONSTRUCTOR, on every unit it
+  // writes, never by the per-kind code that does the restating. That is what
+  // keeps the grading honest in the one direction that matters: a new arm that
+  // forgets to restate is still stamped, so it is still graded a defect, and
+  // no new defect can pass for old data. A stale producer build that predates
+  // the stamp writes none, which is exactly the old data it is.
+  //
+  // UNSPECIFIED means the producer predates the stamp. A consumer compares
+  // revisions by order: a later revision carries every guarantee of an earlier
+  // one.
+  AgentActivityContract contract = 33;
+
   // WHICH unit this concerns, so a later update reaches the same one rather
   // than appearing as a new one. A unit is identified per THING: the agent's
   // reasoning and its prose are separate units, each holding its identity
@@ -166,6 +189,20 @@ message AgentActivity {
     // that would otherwise be invisible in the transcript.
     AgentPushNotification push_notification = 32;
   }
+}
+
+// The revision of the stands-alone contract a producer wrote a unit under.
+// Ordered: each revision keeps every guarantee of the ones before it.
+enum AgentActivityContract {
+  // The producer predates the stamp: its settled frames may restate nothing
+  // of their start, and a consumer reads such a frame as expected old data.
+  AGENT_ACTIVITY_CONTRACT_UNSPECIFIED = 0;
+  // Every settled arm restates what its start carried — the call's input
+  // (path, query, command, skill, address and summary), a spawn's prompt and
+  // created agent, an artifact call's act — and every settle instant carries
+  // the start instant it closes, so a settled frame alone draws its card, its
+  // sub-feed and its runtime.
+  AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE = 1;
 }
 
 // What a unit of work is attributable to beyond its agent.
