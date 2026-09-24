@@ -1385,18 +1385,19 @@ func requireContextBudgetWarning(t *testing.T, scenario string, entries []*store
 	t.Errorf("%s: no AgentUpdate.context_budget_warning page line was produced", scenario)
 }
 
-// requireKeepAliveNeverReachesAPage: a keep-alive turn's records land on
-// `unserved_item.keepalive`, which is structurally unable to appear in a page.
-func requireKeepAliveNeverReachesAPage(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+// requireKeepAliveStoresNothing: a keep-alive turn's records are read and
+// converted, and not one of them becomes a page line — nor an entry on the
+// retired keepalive arm, which no producer mints any longer.
+func requireKeepAliveStoresNothing(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
 	t.Helper()
-	if len(keepalivesOf(entries)) == 0 {
-		t.Errorf("%s: the keep-alive marker produced no unserved_item.keepalive entries at all", scenario)
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetUnservedItem().GetKeepalive() != nil {
+			t.Errorf("%s: entry %q landed on the keepalive arm; a keep-alive stores nothing", scenario, e.GetUpsertKey())
+		}
 	}
 	for _, line := range pageLinesOf(entries) {
-		if frameOf(line).GetUpdate().GetActivity() != nil {
-			t.Errorf("%s: a keep-alive turn produced a page line (unit %s); keep-alive work is never served",
-				scenario, activityOf(line).GetActivityId().GetValue())
-		}
+		t.Errorf("%s: a keep-alive turn produced a page line of book %q; a keep-alive stores nothing",
+			scenario, line.GetPageAgentId().GetValue())
 	}
 }
 

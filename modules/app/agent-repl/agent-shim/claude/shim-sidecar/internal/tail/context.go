@@ -1,6 +1,10 @@
 package tail
 
-import storev1 "agentrepl/proto/store/v1"
+import (
+	"io"
+
+	storev1 "agentrepl/proto/store/v1"
+)
 
 // Kind classifies a watched file so the reader picks the right codec + handler.
 type Kind int
@@ -157,4 +161,18 @@ type Context struct {
 // through this interface.
 type Handler interface {
 	Handle(frames []Frame, ctx *Context) []*storev1.StoreEntry
+}
+
+// Primer is a Handler whose classification of a record can depend on records
+// BEFORE it in the file — a keep-alive's reply names its prompt, which a
+// restarted reader resumed past. A tailer hands a Primer the file's bytes
+// before the first frame it will deliver, exactly once and before the first
+// Handle, so the handler knows what it would have known had it read the file
+// from byte 0.
+//
+// AN ERROR FAILS THE POLL. The prefix is read from the same file the poll is
+// about to read, so a failure is the same failure a read would be: nothing is
+// handled, nothing is committed, and the next poll primes again.
+type Primer interface {
+	Prime(prefix io.Reader, ctx *Context) error
 }

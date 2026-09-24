@@ -488,3 +488,153 @@ func TestTailerFrameBoundCountsOnlyTheFramesItKept(t *testing.T) {
 		t.Fatalf("bytes observed = %d, want the bounded batch's end %d", h.lastCtx.BytesObserved, 2*lineTwoAt)
 	}
 }
+
+// ---- the Primer: the bytes before the first delivered frame ----
+
+// primerHandler is a stubHandler that records every prime and the order of
+// primes and handles, and can be told to fail its prime.
+type primerHandler struct {
+	stubHandler
+	primes  []string
+	events  []string
+	failure error
+}
+
+func (p *primerHandler) Prime(prefix io.Reader, ctx *Context) error {
+	p.events = append(p.events, "prime")
+	if p.failure != nil {
+		return p.failure
+	}
+	b, err := io.ReadAll(prefix)
+	if err != nil {
+		return err
+	}
+	p.primes = append(p.primes, string(b))
+	return nil
+}
+
+func (p *primerHandler) Handle(fr []Frame, ctx *Context) []*storev1.StoreEntry {
+	p.events = append(p.events, "handle")
+	return p.stubHandler.Handle(fr, ctx)
+}
+
+// newPrimedTailer builds a tailer over a Primer resumed at `offset` with `carry`.
+func newPrimedTailer(t *testing.T, path string, offset int64, carry string) (*Tailer, *primerHandler) {
+	t.Helper()
+	h := &primerHandler{}
+	tr := New(path, JSONLCodec{}, h, &Context{SessionID: "s1"}, testLog())
+	id, err := Identity(path)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	tr.Restore(&storev1.CursorState{FileId: id, Path: path, Offset: offset, Carry: []byte(carry)})
+	return tr, h
+}
+
+func TestAPrimerResumedPastByteZeroIsHandedThePrefixBeforeItsFirstHandle(t *testing.T) {
+	// Arrange
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	prefix := `{"a":1}` + "\n" + `{"b":2}` + "\n"
+	writeFile(t, p, prefix+`{"c":3}`+"\n")
+	tr, h := newPrimedTailer(t, p, int64(len(prefix)), "")
+
+	// Act
+	if _, err := tr.Poll(); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	// Assert
+	if len(h.primes) != 1 || h.primes[0] != prefix {
+		t.Fatalf("primes = %q, want exactly the %d prefix byte(s) %q", h.primes, len(prefix), prefix)
+	}
+	if strings.Join(h.events, ",") != "prime,handle" {
+		t.Fatalf("events = %v, want the prime before the first handle", h.events)
+	}
+}
+
+func TestAPrimerIsPrimedOnlyOnce(t *testing.T) {
+	// Arrange
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	prefix := `{"a":1}` + "\n"
+	writeFile(t, p, prefix+`{"b":2}`+"\n")
+	tr, h := newPrimedTailer(t, p, int64(len(prefix)), "")
+	r1, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll1: %v", err)
+	}
+	tr.Commit(r1)
+	appendFile(t, p, `{"c":3}`+"\n")
+
+	// Act
+	if _, err := tr.Poll(); err != nil {
+		t.Fatalf("poll2: %v", err)
+	}
+
+	// Assert
+	if len(h.primes) != 1 {
+		t.Fatalf("primes = %d, want 1: after the first delivery the handler reads every byte itself", len(h.primes))
+	}
+}
+
+func TestAPrimerReadFromByteZeroIsNeverPrimed(t *testing.T) {
+	// Arrange
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	writeFile(t, p, `{"a":1}`+"\n")
+	h := &primerHandler{}
+	tr := New(p, JSONLCodec{}, h, &Context{SessionID: "s1"}, testLog())
+
+	// Act
+	if _, err := tr.Poll(); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	// Assert
+	if len(h.events) != 1 || h.events[0] != "handle" {
+		t.Fatalf("events = %v, want a handle and no prime: there is no prefix", h.events)
+	}
+}
+
+func TestAPrimersPrefixEndsBeforeTheRestoredCarry(t *testing.T) {
+	// Arrange: the cursor sits past a partial line whose bytes ride the carry,
+	// so the first decoded byte is the carry's, not the cursor's.
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	prefix := `{"a":1}` + "\n"
+	carry := `{"b":`
+	writeFile(t, p, prefix+carry+`2}`+"\n")
+	tr, h := newPrimedTailer(t, p, int64(len(prefix)+len(carry)), carry)
+
+	// Act
+	if _, err := tr.Poll(); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	// Assert
+	if len(h.primes) != 1 || h.primes[0] != prefix {
+		t.Fatalf("primes = %q, want only the bytes before the carry %q", h.primes, prefix)
+	}
+}
+
+func TestAFailedPrimeFailsThePollAndIsRetried(t *testing.T) {
+	// Arrange
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	prefix := `{"a":1}` + "\n"
+	writeFile(t, p, prefix+`{"b":2}`+"\n")
+	tr, h := newPrimedTailer(t, p, int64(len(prefix)), "")
+	h.failure = io.ErrUnexpectedEOF
+
+	// Act
+	_, err := tr.Poll()
+	h.failure = nil
+	_, retryErr := tr.Poll()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "priming the handler") || !strings.Contains(err.Error(), io.ErrUnexpectedEOF.Error()) {
+		t.Fatalf("poll error = %v, want the prime failure named and wrapped", err)
+	}
+	if retryErr != nil {
+		t.Fatalf("retry poll: %v", retryErr)
+	}
+	if strings.Join(h.events, ",") != "prime,prime,handle" {
+		t.Fatalf("events = %v, want a failed prime handling nothing, then a prime and a handle", h.events)
+	}
+}
