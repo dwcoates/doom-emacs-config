@@ -120,9 +120,9 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 		{Subscription: "roster", Request: &agentreplv1.SubscribePageRequest_Roster{
 			Roster: &agentreplv1.WatchWorkspaceRosterRequest{}}},
 		{Subscription: "web", Request: &agentreplv1.SubscribePageRequest_WebWorkspace{
-			WebWorkspace: &agentreplv1.WatchWebWorkspaceRequest{Workspace: f.ws}}},
+			WebWorkspace: &agentreplv1.WatchWebWorkspaceRequest{Workspace: f.ws, WebappBuild: harness.FakeWebappEntry}}},
 		{Subscription: "daemon", Request: &agentreplv1.SubscribePageRequest_Daemon{
-			Daemon: &agentreplv1.WatchDaemonRequest{}}},
+			Daemon: &agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Webview{Webview: &agentreplv1.WatchDaemonWebview{}}}}},
 		{Subscription: "topbar", Request: &agentreplv1.SubscribePageRequest_Topbar{
 			Topbar: &agentreplv1.WatchTopbarRequest{Workspace: f.ws}}},
 		{Subscription: "footer", Request: &agentreplv1.SubscribePageRequest_Footer{

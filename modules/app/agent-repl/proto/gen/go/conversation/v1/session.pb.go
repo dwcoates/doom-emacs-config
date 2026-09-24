@@ -274,10 +274,9 @@ func (x *SessionStarted) GetLiveWork() []*AgentDetachedWork {
 // The shim and the SDK it drives. Fixed for the process; stated once.
 type SessionRuntime struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The shim's build commit. THE STALENESS-BOUNCE CARRIER: the daemon
-	// compares this against its current deploy stamp and relaunches a
-	// stale surviving shim at freeness (the rollout's build-staleness
-	// bounce).
+	// The shim's build: the content hash of its bundle, the same value
+	// SessionDiagnostics.shim_build reports on every watch (which is the
+	// staleness authority, because it is reported before any session exists).
 	ShimBuildSha string `protobuf:"bytes,1,opt,name=shim_build_sha,json=shimBuildSha,proto3" json:"shim_build_sha,omitempty"`
 	// The vendor SDK package version the shim embeds.
 	SdkVersion string `protobuf:"bytes,2,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"`
@@ -3539,8 +3538,17 @@ type SessionDiagnostics struct {
 	// closed, oldest first. Kept so a daemon that asks after the fact still
 	// learns what was lost.
 	DegradedWindows []*SessionDegradedWindow `protobuf:"bytes,3,rep,name=degraded_windows,json=degradedWindows,proto3" json:"degraded_windows,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// THE BUILD THIS SHIM PROCESS RUNS: the content hash (lowercase hex SHA-256)
+	// of the bundle it was spawned from, as its spawner stated it. REQUIRED on
+	// every frame. It rides the diagnostics because diagnostics are the opening
+	// frame of EVERY WatchSession — an inert shim with no session, and a
+	// survivor a new daemon adopts, report it the moment they are attached,
+	// which SessionRuntime (stated only once a session starts) cannot. The
+	// daemon's deploy compares it against the freshly built bundle's hash and
+	// bounces a shim that differs; a frame without it is a malformed frame.
+	ShimBuild     string `protobuf:"bytes,4,opt,name=shim_build,json=shimBuild,proto3" json:"shim_build,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SessionDiagnostics) Reset() {
@@ -3603,6 +3611,13 @@ func (x *SessionDiagnostics) GetDegradedWindows() []*SessionDegradedWindow {
 		return x.DegradedWindows
 	}
 	return nil
+}
+
+func (x *SessionDiagnostics) GetShimBuild() string {
+	if x != nil {
+		return x.ShimBuild
+	}
+	return ""
 }
 
 type isSessionDiagnostics_Health interface {
@@ -5815,11 +5830,13 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\x1dSessionUsageWindowUnavailable\"$\n" +
 	"\"SessionUsageUtilizationUnavailable\"3\n" +
 	"\x1bSessionUsageSamplingFailure\x12\x14\n" +
-	"\x05cause\x18\x01 \x01(\tR\x05cause\"\xf1\x01\n" +
+	"\x05cause\x18\x01 \x01(\tR\x05cause\"\x90\x02\n" +
 	"\x12SessionDiagnostics\x12;\n" +
 	"\ahealthy\x18\x01 \x01(\v2\x1f.conversation.v1.SessionHealthyH\x00R\ahealthy\x12A\n" +
 	"\tunhealthy\x18\x02 \x01(\v2!.conversation.v1.SessionUnhealthyH\x00R\tunhealthy\x12Q\n" +
-	"\x10degraded_windows\x18\x03 \x03(\v2&.conversation.v1.SessionDegradedWindowR\x0fdegradedWindowsB\b\n" +
+	"\x10degraded_windows\x18\x03 \x03(\v2&.conversation.v1.SessionDegradedWindowR\x0fdegradedWindows\x12\x1d\n" +
+	"\n" +
+	"shim_build\x18\x04 \x01(\tR\tshimBuildB\b\n" +
 	"\x06health\"\x10\n" +
 	"\x0eSessionHealthy\"I\n" +
 	"\x10SessionUnhealthy\x125\n" +

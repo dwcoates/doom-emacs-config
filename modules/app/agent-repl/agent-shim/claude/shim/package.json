@@ -6,7 +6,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "ensure-deps": "npm ls --depth=0 >/dev/null 2>&1 || npm ci",
+    "ensure-deps": "../../../bin/ensure-deps.sh",
     "prebuild": "npm run ensure-deps",
     "build": "node build.mjs",
     "pretest": "../../../bin/background.sh npm run ensure-deps",

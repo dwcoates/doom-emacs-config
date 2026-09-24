@@ -94,9 +94,6 @@ type tokenState struct {
 	alarmTripped bool
 	// alarmLine is the composed alarm sentence.
 	alarmLine string
-	// coldKeepalive marks a turn the daemon ran as a cache keep-alive, which
-	// the alarm sentence phrases differently.
-	coldKeepalive bool
 }
 
 // tokenGroup is one panel entry's name and place.
@@ -479,12 +476,6 @@ func (t *tokenState) evaluateAlarm(threshold uint64) {
 	}
 	t.alarmTripped = true
 	over := misses - threshold
-	if t.coldKeepalive {
-		t.alarmLine = fmt.Sprintf(
-			"expensive keep-alive — %s over %s, a cache keep-alive that came back cold",
-			figures.Tokens(over), figures.Tokens(threshold))
-		return
-	}
 	t.alarmLine = fmt.Sprintf("expensive turn — %s over %s",
 		figures.Tokens(over), figures.Tokens(threshold))
 }

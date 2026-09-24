@@ -561,6 +561,48 @@ func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	}
 }
 
+// TestPromptDuringKeepAliveTurnsOnce — a real prompt submitted the moment the
+// shim has sent its own keep-alive (2026-09-23). The keep-alive is invisible
+// outside the shim: a StartTurn landing while it runs waits INSIDE the shim and
+// opens its turn once the keep-alive leaves the slot, so the daemon sees no
+// refusal, re-drives nothing, and holds nothing.
+//
+// SYNCHRONIZATION: the shim's own "keepalive_submitted" record is the moment
+// the prompt is submitted after. Whether the StartTurn then lands inside the
+// keep-alive or just after it is the vendor's timing, and every assertion here
+// holds either way: SubmitPrompt fails the test on any refusal, the turn must
+// end, and the feed must carry exactly the real turns, each once.
+func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
+	// Arrange
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+	}})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive to be submitted",
+		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
+
+	// Act
+	during := SubmitPrompt(t, w, ws, "during the keep-alive")
+	AwaitTurnEnded(t, w, ws, during)
+
+	// Assert: exactly the two real turns, and the prompt drawn once.
+	rows := feedRows(t, w, ws)
+	if got, want := distinctTurnIDs(rows), (map[string]bool{turn1.GetValue(): true, during.GetValue(): true}); !reflect.DeepEqual(got, want) {
+		t.Errorf("feed turns = %v, want exactly %v", got, want)
+	}
+	var drawn int
+	for _, row := range rows {
+		if row.GetUserPrompt() != nil && strings.Contains(row.String(), "during the keep-alive") {
+			drawn++
+		}
+	}
+	if drawn != 1 {
+		t.Errorf("the prompt submitted during the keep-alive was drawn %d time(s), want exactly once", drawn)
+	}
+}
+
 // TestRevivalAfterHibernate — SPEC.md #46. Contract: the yield obligation
 // (docs/overhaul/shim.md: "a real prompt submitted after trailing keep-alive
 // turns → the served context excludes them") combined with daemon.md's

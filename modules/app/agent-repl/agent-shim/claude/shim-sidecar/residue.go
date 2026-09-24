@@ -88,5 +88,5 @@ func (h *declaredResidueHandler) Handle(frames []tail.Frame, ctx *tail.Context) 
 //
 // IT REFUSES ONLY WHAT RunOutput REFUSES — a stop naming no spawning call.
 func (h *declaredResidueHandler) CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry {
-	return h.RunOutput.Cancelled(taskID, run, ownerAgentID, settledAtMs)
+	return h.Cancelled(taskID, run, ownerAgentID, settledAtMs)
 }

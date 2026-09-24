@@ -133,6 +133,25 @@ describe("StartSession, fresh", () => {
 });
 
 describe("WatchSession's opening frames", () => {
+  test("an INERT shim (no session started) still opens with diagnostics carrying its build", async () => {
+    // The daemon's deploy compares SessionDiagnostics.shim_build against a
+    // freshly built bundle's hash BEFORE any session exists — a prelaunched
+    // replacement shim sitting beside a live one, or a survivor a new daemon
+    // adopts cold. That comparison only works if an inert shim answers
+    // WatchSession at all, and stamps its build on the very first frame.
+    const shim = await spawnShim();
+
+    const watch = watchSession(shim);
+    const first = await watch.next();
+
+    const update = sessionUpdate(first);
+    expect(update.update.case).toBe("diagnostics");
+    expect(update.update.case === "diagnostics" ? update.update.value.shimBuild : undefined).toBe(
+      ITEST_BUILD_SHA,
+    );
+    watch.close();
+  });
+
   test("the FIRST frame is diagnostics, immediately on open", async () => {
     // READINESS IS THE FIRST HEALTHY DIAGNOSTICS PUSH: connect-go surfaces a
     // server-stream refusal only at the first Receive, so a silent WatchSession
@@ -143,7 +162,11 @@ describe("WatchSession's opening frames", () => {
     const watch = watchSession(shim);
     const first = await watch.next();
 
-    expect(sessionUpdate(first).update.case).toBe("diagnostics");
+    const update = sessionUpdate(first);
+    expect(update.update.case).toBe("diagnostics");
+    expect(update.update.case === "diagnostics" ? update.update.value.shimBuild : undefined).toBe(
+      ITEST_BUILD_SHA,
+    );
     watch.close();
   });
 

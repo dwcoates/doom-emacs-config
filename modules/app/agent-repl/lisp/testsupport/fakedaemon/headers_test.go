@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -40,7 +39,7 @@ func TestRecordedStreamCallKeepsItsOwnContentType(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
-		baseURL+"/agentrepl.v1.AgentRepl/WatchDaemon", bytes.NewBufferString("\x00\x00\x00\x00\x02{}"))
+		baseURL+"/agentrepl.v1.AgentRepl/WatchDaemon", connectStreamBody(emacsWatchDaemonJSON))
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}

@@ -220,7 +220,8 @@ type Deps struct {
 	// ParkedRoute delivers a parked submission to the resolution agent as
 	// guidance, landing it in the parked tab.
 	ParkedRoute ParkedRouter
-	// Rollout is triggered ONLY after lease release and terminal publication.
+	// Rollout is the deploy, told of a landing ONLY after lease release and
+	// terminal publication.
 	Rollout Trigger
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
@@ -308,13 +309,14 @@ type DisplacedCapture func(ctx context.Context, ws ids.WorkspaceID) (Displaced, 
 // timer.
 type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error)
 
-// Trigger is the slice of the rollout controller merge uses: the self-reload
-// trigger, invoked with what landed. It is a narrow interface so merge does
-// not import the rollout controller (the two never import each other).
+// Trigger is the slice of the daemon's deploy merge uses: the self-reload,
+// told what landed. It is a narrow interface so merge imports neither the
+// deploy nor the rollout.
 type Trigger interface {
-	// Trigger classifies the landed commits by subsystem and runs the
-	// deploy-and-bounce sequence.
-	Trigger(ctx context.Context, landed []gitclient.Commit) error
+	// Landed reports ONE COMPLETE CHANGE landed on the daemon's own checkout —
+	// however many commits it carries — and the deploy runs ONCE for it, off
+	// the caller: a merge never waits on a build.
+	Landed(ctx context.Context, landed []gitclient.Commit)
 }
 
 // LoadBrief reads one brief by name from dir at use time. It exists so every

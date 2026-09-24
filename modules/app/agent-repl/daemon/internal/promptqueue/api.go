@@ -14,6 +14,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -203,22 +204,22 @@ type Queue interface {
 	Editing(ws ids.WorkspaceID) (Edit, bool)
 	// SubmitSessionAct sends a session act down the same path.
 	SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Act) error
-	// CancelKeepaliveRedrive cancels a turn that is re-driving behind an
-	// in-flight keep-alive — a turn accepted for delivery but never yet started
-	// on the shim because a keep-alive ping momentarily held the turn slot. It
-	// reports whether it found and cancelled such a re-drive for this turn. An
-	// INTERRUPT calls it FIRST: a user who asks to stop a turn that is still
-	// queued behind a keep-alive is asking for it not to start, so the re-drive
-	// is removed and the durable turn is closed as killed, rather than the
-	// interrupt racing the shim and coming back `not_the_open_turn`. It answers
-	// false — leaving the caller to interrupt the genuinely open turn — when no
-	// re-drive stands for the turn.
-	CancelKeepaliveRedrive(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) bool
 	// OnTurnEnded is the LifecycleSink's turn end: pop the queue and deliver
 	// the next prompt.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
 	// OnLeaseChanged re-evaluates every hold against the new lease policy.
 	OnLeaseChanged(ws ids.WorkspaceID)
+	// RequestBounce asks the per-workspace BOUNCE REGISTRY to replace what
+	// serves a workspace (bounce.go): at once when nothing is in flight or the
+	// request is forced, else when the workspace's work ends. The queue owns
+	// the decision because it owns dispatch: both are taken under one
+	// per-workspace lock, and a decided bounce DRAINS the workspace — nothing is
+	// dispatched until it has finished, and what was queued is then delivered
+	// to the new shim. Queued prompts never block a bounce.
+	RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error)
+	// OnFree is the watcher's freeness edge: the last turn or detached item
+	// ended. It takes a registered bounce.
+	OnFree(ws ids.WorkspaceID)
 	// Reviving reports whether a background revival this queue started for
 	// the workspace is still in flight: from before its bring-up spawns a shim
 	// until the prompt it holds has been handed to that shim. The idle sweep
@@ -292,13 +293,11 @@ type Deps struct {
 	// the person attached. REQUIRED -- a nil default here is what made an
 	// attached image invisible for a whole live session.
 	ResolveImage feed.ImageResolver
+	// Lifetime is the daemon's serving lifetime, which a bounce the registry
+	// runs is bounded by. nil leaves it bounded by the process alone.
+	Lifetime context.Context
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
-	// After schedules the wait before each re-drive of a StartTurn the shim
-	// refused because a KEEP-ALIVE turn was momentarily in flight. nil means
-	// time.After. It is injected so a test drives the re-drive cadence without
-	// waiting on a real clock.
-	After func(d time.Duration) <-chan time.Time
 	// PublishHost republishes a workspace's host view, which carries the
 	// standing edit the editor fills its input from. REQUIRED.
 	PublishHost func(ws ids.WorkspaceID)
@@ -371,6 +370,9 @@ type WatcherFunc func(ws ids.WorkspaceID) (Watcher, bool)
 type Watcher interface {
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
+	// LiveWork is the live detached work: what a bounce registered on the
+	// workspace waits on besides the turn.
+	LiveWork() sessionwatcher.LiveWorkSet
 	// SetMainAgent names the session's main agent from an accepted turn.
 	SetMainAgent(agent *conversationv1.AgentId)
 	// OnTurnOpening records a turn BEFORE StartTurn is dispatched, so a

@@ -354,26 +354,10 @@ type fakeSender struct {
 	// startHook runs inside StartTurn, so a test can observe what the queue
 	// holds while a delivery is in flight.
 	startHook func()
-	// startScript, when non-empty, is consumed one entry per StartTurn call: a
-	// nil entry succeeds, a non-nil entry is returned as that call's error.
-	// Once it is exhausted StartTurn falls back to startErr. It is how a test
-	// scripts a keep-alive collision that clears after N attempts.
-	startScript []error
-	// attempts counts every StartTurn call, script entry or not, so a re-drive
-	// test can assert how many times the queue re-drove the prompt.
+	// attempts counts every StartTurn call, so a test can assert the queue
+	// delivered a prompt exactly once.
 	attempts int
 }
-
-// keepaliveCollisionErr is the fake's stand-in for the workspace package's
-// ShimRefusal reporting a transient keep-alive collision. It is matched
-// structurally by the queue's isKeepaliveCollision, exactly as the real
-// refusal is, without the test importing internal/workspace.
-type keepaliveCollisionErr struct{ keepalive bool }
-
-func (e keepaliveCollisionErr) Error() string {
-	return "shim StartTurn refused: turn_already_open: turn keepalive-1-2 is already in flight"
-}
-func (e keepaliveCollisionErr) KeepaliveTurnAlreadyOpen() bool { return e.keepalive }
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
 
@@ -384,14 +368,7 @@ func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *convers
 	if s.startHook != nil {
 		s.startHook()
 	}
-	if len(s.startScript) > 0 {
-		next := s.startScript[0]
-		s.startScript = s.startScript[1:]
-		if next != nil {
-			return nil, next
-		}
-		// A nil script entry falls through to the ordinary success below.
-	} else if s.startErr != nil {
+	if s.startErr != nil {
 		return nil, s.startErr
 	}
 	s.turns = append(s.turns, turn)
@@ -462,6 +439,14 @@ func (s *fakeSender) started() []ids.TurnID {
 	return out
 }
 
+func (s *fakeSender) modelsSet() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.models))
+	copy(out, s.models)
+	return out
+}
+
 func (s *fakeSender) startAttempts() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -481,6 +466,7 @@ type fakeWatcher struct {
 	mu sync.Mutex
 
 	inFlight   *ids.TurnID
+	live       sessionwatcher.LiveWorkSet
 	mainAgents []string
 	opened     []*conversationv1.AgentPrompt
 	opening    []ids.TurnID
@@ -491,6 +477,19 @@ func (w *fakeWatcher) TurnInFlight() *ids.TurnID {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.inFlight
+}
+
+func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.live
+}
+
+// detached sets the live detached work the watcher reports.
+func (w *fakeWatcher) detached(live sessionwatcher.LiveWorkSet) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.live = live
 }
 
 func (w *fakeWatcher) SetMainAgent(agent *conversationv1.AgentId) {
@@ -859,18 +858,6 @@ func (h *harness) hostPublished() int {
 
 // waitRevivals joins every background revival the queue started.
 func (h *harness) waitRevivals() { h.q.reviving.Wait() }
-
-// waitRedrives joins every background keep-alive re-drive the queue started.
-func (h *harness) waitRedrives() { h.q.redriving.Wait() }
-
-// instantRedrive makes every re-drive backoff fire at once, so a re-drive test
-// drives the cadence without waiting on a real clock. A receive from a closed
-// channel returns immediately, so the loop never sleeps.
-func (h *harness) instantRedrive() {
-	fired := make(chan time.Time)
-	close(fired)
-	h.q.deps.After = func(time.Duration) <-chan time.Time { return fired }
-}
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()

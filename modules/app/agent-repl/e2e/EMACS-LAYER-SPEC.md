@@ -430,7 +430,7 @@ So the Go side does NOT call `harness.StartDaemon` for this layer:
 
 - It builds the same binaries `main_test.go` already builds, reusing
   `requireNode`, `requireShimBundle`, `requireStoreBinary`,
-  `requireSidecarBinary` and `buildIdentityEnv` verbatim, and it starts the
+  `requireSidecarBinary` verbatim, and it starts the
   **store** and **sidecar** itself with the existing `startStore` /
   `startSidecar` helpers. Neither is Emacs's to launch.
 - The **daemon** is started by Emacs through `agent-repl-frontend-daemon-ensure`
@@ -459,11 +459,14 @@ So the Go side does NOT call `harness.StartDaemon` for this layer:
   told the SAME two account roots the launcher was given, resolved for
   symlinks first -- `SPEC.md` §B's "One string per config root" invariant
   applies here unchanged and is the reason `resolveConfigRoots` exists.
-- `buildIdentityEnv()`'s three variables (`AGENT_REPL_CHECKOUT`,
-  `SHIM_BUILD_SHA`, `AGENT_REPL_DEPLOY_STAMP`) are exported into the Emacs
-  process's environment so the daemon Emacs spawns inherits them.
-  `SPEC.md` §B's "One build identity, in both roles" invariant would
-  otherwise bounce every session on a stale-shim check.
+- The deploy's seams are exported into the Emacs process's environment so the
+  daemon Emacs spawns inherits them: `AGENT_REPL_CHECKOUT` (the module root,
+  whose elisp the real Emacs loads), `AGENT_REPL_DEPLOY_BUILDER` (the world's
+  `harness.DeployBuilder`, `EmacsWorld.Deploy`), `AGENT_REPL_LAUNCHCTL` (a
+  recording fake, `EmacsWorld.Launchctl`) and `AGENT_REPL_LAUNCH_AGENTS_DIR`.
+  The store and the sidecar report their builds into the world's lock dir and
+  the fake build stages copies of their binaries, so `SPEC.md` §B's "A deploy
+  judges what really runs" invariant holds here unchanged.
 - `AGENT_REPL_FORBID_VENDOR_CALLS=1` is in the Emacs process's environment,
   so the daemon, the shim, the store and the sidecar all inherit it.
 

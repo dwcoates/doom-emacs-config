@@ -57,12 +57,16 @@ func splitPath(path string) []string {
 	return out
 }
 
-func transcriptCWD(path string) (string, error) {
+func transcriptCWD(path string) (cwd string, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open transcript %q for workspace attribution: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close transcript %q after reading its cwd: %w", path, closeErr))
+		}
+	}()
 	reader := bufio.NewReader(file)
 	for {
 		line, readErr := reader.ReadBytes('\n')

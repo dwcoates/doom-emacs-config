@@ -123,14 +123,7 @@ func (s *sender) StartTurn(ctx context.Context, turn ids.TurnID, said *conversat
 		return nil, err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		refusal := &ShimRefusal{Verb: "StartTurn", Arm: startTurnArm(failure), Detail: failure.GetDetail()}
-		// A KEEP-ALIVE COLLISION IS TRANSIENT. The shim marks a turn_already_open
-		// whose open turn is one of its own keep-alive pings; the queue re-drives
-		// that one rather than surfacing it as a terminal daemon-double-submit bug.
-		if tao := failure.GetTurnAlreadyOpen(); tao != nil && tao.GetKeepalive() {
-			refusal.TransientKeepalive = true
-		}
-		return nil, refusal
+		return nil, &ShimRefusal{Verb: "StartTurn", Arm: startTurnArm(failure), Detail: failure.GetDetail()}
 	}
 	success := response.GetSuccess()
 	if success == nil {

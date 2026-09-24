@@ -93,6 +93,30 @@ than served and hoped about, and a configured surface that cannot bind is a
 hard error. Both outcomes are recorded (`store.pprof.disabled` /
 `store.pprof.enabled`).
 
+## Build reporting
+
+The store has no connection to the daemon at all, so it reports the build it
+is running through a FILE: `reportBuild` (`buildreport.go`) writes
+`<run dir>/shim-store.build.json` — this process's pid and the content hash
+of its own executable — as soon as the canonical logger exists and before
+the store starts serving. The run dir is `agentrepl/logging/buildreport`'s
+`ResolveDir` (`$AGENT_REPL_LOCK_DIR`, else `~/.cache/agent-repl/run`), the
+same directory the kernel locks already live under.
+
+The daemon's deploy reads this file and compares it against the build it just
+made to decide whether the launchd-managed store is stale and needs a
+restart. A failure at any step (resolving the process's own build, resolving
+the run dir, or writing the file) is logged once at `error` through the
+canonical logger and swallowed: the store keeps booting regardless, because a
+service that cannot report its own build still has every reason to keep
+serving the one it has. The daemon simply reads the missing or stale report
+as "not running the fresh build".
+
+**Every harness that boots a real store must set `AGENT_REPL_LOCK_DIR` to a
+private directory.** Without it, a real `shim-store` spawned by a test
+resolves the run dir to the developer's actual `~/.cache/agent-repl/run` and
+overwrites their real `shim-store.build.json`.
+
 ## The tables
 
 - `agent` — one row per `AgentId`, main agent included. THE home of agent
@@ -252,8 +276,8 @@ stored shape on durable-compatibility grounds, is forbidden.
 **THE NUKE IS AN UNLINK, NEVER A `DROP TABLE`.** Emptying a foreign schema in
 place walks every page of what it discards: on 2026-09-09 the store met an
 11.5 GB `events.db` at a superseded version, ran the DROP for minutes with no
-socket listening, and `deploy-all.sh` gave up waiting for `store.sock` and left
-the sidecar and the runtime un-bounced. Unlinking costs the same whatever the
+socket listening, and the deploy of the day gave up waiting for `store.sock` and
+left the sidecar and the runtime un-bounced. Unlinking costs the same whatever the
 file weighs, so `ensureSchema` never drops: it returns a `schemaMismatchError`
 naming what it found, and `Open` — the layer that owns the file — closes the
 handle, removes the file with its siblings, and reopens onto an empty one. The
@@ -281,8 +305,8 @@ to carry is THROWN AWAY, never pruned: `../../bin/store-reset.sh` stops the
 sidecar and the store, removes `events.db` with its `-wal`/`-shm` siblings, then
 starts the store, waits for `store.sock`, and starts the sidecar.
 
-- **THE SIDECAR GOES DOWN FIRST AND COMES UP LAST**, which is `deploy-all.sh`'s
-  recorded safe order. The sidecar's reader positions live in the `cursor` table
+- **THE SIDECAR GOES DOWN FIRST AND COMES UP LAST**, which is the daemon's
+  deploy's recorded safe order (`daemon/internal/deploy/services.go`). The sidecar's reader positions live in the `cursor` table
   IN THIS FILE: one left running across the unlink writes into a deleted inode
   and holds positions for a database that never saw the records they claim.
 - **THE STOP POLLS UNTIL LAUNCHD REPORTS NO PID.** `launchctl kill` returns when

@@ -2,6 +2,8 @@ package integration
 
 import (
 	"testing"
+
+	"agentrepl/shim-claude-sidecar/internal/testclose"
 )
 
 // exitMarker is the vendor's own spool terminator: a line-start,
@@ -43,7 +45,7 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 
 	// ...then ONE stream, opened on what the store already holds...
 	stream, first := awaitBashRunStream(ctx, t, store.Client, fx.CallID)
-	defer stream.Close()
+	defer testclose.OrFail(t, stream)
 
 	// ...and the rest of the run appended while it follows.
 	spool.AppendRaw([]byte(after))
@@ -90,7 +92,7 @@ func TestABashRunsStreamEndsAfterItsTerminalRow(t *testing.T) {
 	awaitCursorAtLeast(ctx, t, store.Client, fx.SpoolPath, spool.Offset())
 
 	stream, first := awaitBashRunStream(ctx, t, store.Client, fx.CallID)
-	defer stream.Close()
+	defer testclose.OrFail(t, stream)
 	rows := drainBashRunToTerminal(t, fx.CallID, stream, first)
 
 	// Assert: the terminal came last, and the stream sent nothing after it.
