@@ -1,4 +1,5 @@
-// held.go decides what to do with a spool nobody has claimed yet.
+// held.go decides whether a spool is READ at all, and what to do with one
+// nobody has claimed yet.
 //
 // A spool materializes before — sometimes long before — the transcript line
 // naming the call that spawned it is read. Until that line arrives the spool's
@@ -6,19 +7,32 @@
 // reading the spool path's runtime id as an identity. So it is HELD: discovered,
 // re-checked every rescan, and not tailed.
 //
-// AN AGED UNOWNED SPOOL IS NEVER DROPPED. The launch line naming an owner is
-// written when the task starts, so a hold normally clears within a rescan tick;
-// one that outlives the bounded wait means the mapping is genuinely missing —
-// which is a REASON TO INGEST THE BYTES AS RESIDUE, not a reason to discard
-// them. After the window the spool is tailed as KindResidueSpool: its bytes land
-// whole as StoreUnparsed naming the spool as their source, with a warning, and
-// it KEEPS BEING TAILED so nothing appended later is lost either.
+// ONLY WHAT IS RENDERED IS READ (owner rule, 2026-09-23: "anything not needed
+// for rendering isn't needed at all"). A spool is read for the rows a claimed
+// run renders from it — a shell run's `bash:<run>` deltas and terminal, a
+// claimed workflow run's terminal — and for nothing else:
+//
+//   - AN UNCLAIMED SPOOL IS NEVER READ. Past the hold window its lapse is stated
+//     once, and it stays held: nothing renders a spool no call claimed, and its
+//     bytes used to be read whole, tailed forever and dropped at the write path
+//     as residue — large, growing test logs costing a read and a cursor write
+//     per poll for rows no one ever stored. It is still re-checked every
+//     rescan, so a launch read later (a restart catching up on a backlog)
+//     CLAIMS it and it is read from its start like any other claimed spool.
+//   - AN a* SPOOL THAT IS A SYMLINK IS NEVER READ THROUGH THE SPOOL. It points at
+//     the subagent's own `subagents/agent-<id>.jsonl`, which discovery ingests as
+//     that agent's transcript; reading the link as well copies the transcript
+//     twice.
+//   - A SPOOL WHOSE TASK ID HAS NO a/b/w PREFIX IS NEVER READ. No conversion can
+//     be selected for it, so nothing could render it; discovery states the
+//     unrecognized prefix loudly, once.
 package main
 
 import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/discover"
@@ -66,7 +80,7 @@ func (s *sidecar) isBacklog(itemMs int64) bool {
 //
 // THE SUMMARIES ARE INFO, NOT WARN: each is an account of PRE-EXISTING backlog a
 // restart re-derived — transcripts without workspace attribution, unclaimed
-// spools ingested as residue, and records the store already holds under a
+// spools left unread, and records the store already holds under a
 // different book — not a fault the owner must act on, so a strict harvest must
 // not trip on them. The newly-arising per-item conditions these summarize away
 // keep their own WARN level.
@@ -84,8 +98,8 @@ func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 		age := time.Duration(nowMs-s.catchupSpools.oldestMs) * time.Millisecond
 		s.log.With(logging.Context{
 			Operation: "catchup-summary", Level: "info",
-			Reason: "spool_unclaimed", Repeat: logging.Repeat(s.catchupSpools.count),
-		}).Log("startup catch-up ingested %d pre-existing unclaimed spool(s) as residue; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
+			Reason: reasonSpoolUnclaimed, Repeat: logging.Repeat(s.catchupSpools.count),
+		}).Log("startup catch-up left %d pre-existing unclaimed spool(s) unread; the oldest was last written %s ago — these predate this sidecar and are summarized here, not stated one by one",
 			s.catchupSpools.count, age)
 		s.catchupSpools.reset()
 	}
@@ -100,16 +114,40 @@ func (s *sidecar) flushCatchupSummaries(nowMs int64) {
 	}
 }
 
-// UnownedSpoolWindow is how long a spool may sit unclaimed before its bytes are
-// ingested as residue rather than waited on any longer. It is the DEFAULT:
-// --unowned-spool-window replaces it, so the residue path can be exercised in
-// milliseconds instead of waited out.
+// UnownedSpoolWindow is how long a spool may sit unclaimed before its lapse is
+// stated. It is the DEFAULT: --unowned-spool-window replaces it, so the lapse
+// can be exercised in milliseconds instead of waited out.
+//
+// THE WINDOW DECIDES WHAT IS SAID, NEVER WHAT IS READ. A spool is read only once
+// a spawning call claims it, before the window lapses or after.
 const UnownedSpoolWindow = 60 * time.Second
 
-// heldSpools remembers when each unclaimed spool was first seen.
+// The `reason` a spool decision is stated under. THE REASON IS THE DECISION'S
+// IDENTITY, so a reader filters for one kind of skip without reading prose.
+const (
+	// reasonSpoolUnclaimed — no spawning call has claimed the spool within the
+	// hold window, so nothing renders it and it is not read.
+	reasonSpoolUnclaimed = "spool_unclaimed"
+	// reasonTranscriptSymlink — an a* spool that is a link to the subagent's own
+	// transcript, which is ingested through its config-root path.
+	reasonTranscriptSymlink = "transcript_symlink"
+	// reasonUnrecognizedPrefix — the task id carries no a/b/w kind prefix, so no
+	// conversion, and no renderer, could be selected for it.
+	reasonUnrecognizedPrefix = "unrecognized_prefix"
+	// reasonSpoolVanished — the spool was gone before it could be examined.
+	reasonSpoolVanished = "spool_vanished"
+)
+
+// heldSpools remembers when each unclaimed spool was first seen, and which
+// spool decisions have already been stated.
+//
+// A DECISION IS A CONDITION, NOT AN EVENT. Every rescan re-resolves every
+// unwatched spool, so each map below is what keeps a decision to one record per
+// path rather than one per pass.
 type heldSpools struct {
 	firstSeen map[string]time.Time // by resolved path
-	demoted   map[string]bool      // paths already ingested as residue
+	lapsed    map[string]bool      // paths whose hold window lapse was stated
+	skipped   map[string]bool      // paths whose never-read decision was stated
 	window    time.Duration
 	log       *logging.Bound
 }
@@ -122,26 +160,29 @@ func newHeldSpools(window time.Duration, log *logging.Bound) *heldSpools {
 	}
 	return &heldSpools{
 		firstSeen: map[string]time.Time{},
-		demoted:   map[string]bool{},
+		lapsed:    map[string]bool{},
+		skipped:   map[string]bool{},
 		window:    window,
 		log:       log,
 	}
 }
 
-// hold records an unclaimed spool and reports whether its wait has expired.
-func (h *heldSpools) hold(path string, now time.Time) (expired bool) {
+// hold records an unclaimed spool and reports whether its hold window lapsed
+// on THIS call — true exactly once per path, so the lapse is stated once.
+func (h *heldSpools) hold(path string, now time.Time) (lapsedNow bool) {
 	first, seen := h.firstSeen[path]
 	if !seen {
 		h.firstSeen[path] = now
 		h.log.With(logging.Context{Operation: "hold-spool", Path: path}).
-			Log("spool held: no spawning call has claimed it yet, so it is re-checked every rescan and not tailed")
+			Log("spool held: no spawning call has claimed it yet, so it is re-checked every rescan and not read")
 		return false
 	}
-	if now.Sub(first) < h.window {
+	if now.Sub(first) < h.window || h.lapsed[path] {
 		h.log.With(logging.Context{Operation: "hold-spool", Path: path}).
 			LogVerbose("spool still held after %s", now.Sub(first))
 		return false
 	}
+	h.lapsed[path] = true
 	return true
 }
 
@@ -151,33 +192,64 @@ func (h *heldSpools) release(path string) {
 		return
 	}
 	delete(h.firstSeen, path)
+	delete(h.lapsed, path)
 	h.log.With(logging.Context{Operation: "hold-spool", Path: path}).Log("spool released: its spawning call was observed")
 }
 
-// demote records that a spool's bytes are being ingested as residue, and
-// reports whether that is the first time it is being said.
-func (h *heldSpools) demote(path string) bool {
-	if h.demoted[path] {
-		return false
+// skip states, once per path, that a spool is never read and why.
+func (h *heldSpools) skip(target discover.Target, reason, why string) {
+	bound := h.log.With(logging.Context{Operation: "spool-skip", Path: target.Path, TaskID: target.TaskID, Reason: reason})
+	if h.skipped[target.Path] {
+		bound.LogVerbose("spool still not read; the decision was already stated for this path")
+		return
 	}
-	h.demoted[path] = true
-	return true
+	h.skipped[target.Path] = true
+	bound.Log("spool not read: %s", why)
+}
+
+// unrenderedSpool answers whether a spool is never read whoever claims it, and
+// why. ok is false when the answer could not be established this pass; the
+// failure is already stated and the spool is examined again next rescan.
+func (s *sidecar) unrenderedSpool(target discover.Target) (reason, why string, skip, ok bool) {
+	switch target.Kind {
+	case tail.KindResidueSpool:
+		return reasonUnrecognizedPrefix, "its task id carries no a/b/w kind prefix, so no conversion could be selected and nothing renders it", true, true
+	case tail.KindAgentTranscript:
+		info, err := os.Lstat(target.Path)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return reasonSpoolVanished, "it was gone before it could be examined; nothing was skipped because nothing was read", true, true
+			}
+			s.log.With(logging.Context{
+				Operation: "spool-skip", Path: target.Path, TaskID: target.TaskID, Level: "warn",
+			}).Log("not reading this agent spool yet: whether it is a link to the agent's own transcript could not be established, and reading a link would copy that transcript twice: %v", err)
+			return "", "", false, false
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return reasonTranscriptSymlink, "it is a link to the subagent's own transcript, which is ingested through its config-root path; reading the link would copy it twice", true, true
+		}
+	}
+	return "", "", false, true
 }
 
 // resolveTarget decides whether a discovered target may be tailed, and as what.
 //
 // A CONFIG-ROOT PATH NAMES ITS OWN SESSION — the transcript IS that session's
-// record — so it answers immediately. A spool does not, and is held until its
-// spawning call is observed or the bounded wait expires.
+// record — so it answers immediately. A spool does not: it is read only for a
+// claimed run, and only when what it holds is rendered from nowhere else.
 func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover.Target, bool) {
 	if target.SessionID != "" {
 		return s.resolveTranscriptWorkspace(target)
 	}
-	if target.Kind == tail.KindResidueSpool {
-		// Its task-id prefix already failed classification, so no owner would
-		// change what happens to it: the bytes go to residue either way.
-		return target, true
+	reason, why, skip, ok := s.unrenderedSpool(target)
+	if !ok {
+		return discover.Target{}, false
 	}
+	if skip {
+		s.held.skip(target, reason, why)
+		return discover.Target{}, false
+	}
+	s.followRename(target)
 	if obs, ok := s.owners.resolve(target); ok {
 		s.held.release(target.Path)
 		// AN a* SPOOL IS AN AGENT'S OWN TRANSCRIPT, so its book is that agent —
@@ -198,38 +270,35 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 			}).Log("spool owner carries no complete workspace/session attribution; the spool is not watched")
 			return discover.Target{}, false
 		}
+		s.log.With(logging.Context{
+			Operation: "spool-claim", Path: target.Path, TaskID: target.TaskID, ActivityID: obs.activityID,
+			WorkspaceDir: target.WorkspaceDir, WorkspaceID: target.WorkspaceID, ClaudeSessionID: target.ClaudeSessionID,
+		}).Log("spool claimed by its spawning call: it is read as %s for the rows that call's run renders", target.Kind)
 		return target, true
 	}
 	if !s.held.hold(target.Path, now) {
 		return discover.Target{}, false
 	}
-	// The wait expired. The bytes are ingested as residue rather than waited on
-	// forever, and the file keeps being tailed.
-	if s.held.demote(target.Path) {
-		mtimeMs := fileActivityMs(target.Path, now.UnixMilli())
-		if s.isBacklog(mtimeMs) {
-			// A spool that already existed unclaimed before this sidecar started
-			// is backlog: its spawning session is long gone and it will never be
-			// claimed. A restart re-derives hundreds of these at once, so it is
-			// accumulated and summarized by flushCatchupSummaries rather than
-			// warned per file. The demotion itself still happens; only its record
-			// is leveled to debug.
-			s.catchupSpools.add(mtimeMs)
-			s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Reason: "spool_unclaimed", Level: "debug"}).
-				LogVerbose("spool unclaimed after %s during startup catch-up: its bytes are ingested as unparsed residue and it keeps being tailed; it is summarized rather than stated on its own", s.held.window)
-		} else {
-			// A spool that appeared while the sidecar was already running and then
-			// aged out unclaimed is a newly-arising condition, stated per file.
-			// IT IS INFO, NOT WARN (owner ruling 4, 2026-09-13): the mandated
-			// behavior — ingest as residue, keep tailing, never drop — is working
-			// exactly as specified, so the record states a fact, not a fault.
-			s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Level: "info"}).
-				Log("spool unclaimed after %s: its bytes are ingested as unparsed residue naming the spool as their source, and it keeps being tailed", s.held.window)
-		}
+	// The window lapsed with no claim. The spool stays held and UNREAD: it is
+	// re-checked every rescan and read the moment a launch claims it.
+	mtimeMs := fileActivityMs(target.Path, now.UnixMilli())
+	if s.isBacklog(mtimeMs) {
+		// A spool that already existed unclaimed before this sidecar started
+		// is backlog: its spawning session is usually long gone and it will
+		// never be claimed. A restart re-derives hundreds of these at once, so
+		// it is accumulated and summarized by flushCatchupSummaries rather than
+		// stated per file.
+		s.catchupSpools.add(mtimeMs)
+		s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Reason: reasonSpoolUnclaimed, Level: "debug"}).
+			LogVerbose("spool unclaimed after %s during startup catch-up: nothing renders it, so it is not read; it is summarized rather than stated on its own", s.held.window)
+		return discover.Target{}, false
 	}
-	target.Kind = tail.KindResidueSpool
-	target.Raw = true
-	return target, true
+	// A spool that appeared while the sidecar was already running and then
+	// aged out unclaimed is a newly-arising condition, stated per file. It is
+	// INFO, not WARN: not reading what nothing renders is the rule working.
+	s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Reason: reasonSpoolUnclaimed, Level: "info"}).
+		Log("spool unclaimed after %s: nothing renders it, so it is not read; it stays held and is read from its start if a spawning call claims it later", s.held.window)
+	return discover.Target{}, false
 }
 
 // reasonTranscriptVanished is the `resolve-transcript-workspace` record's

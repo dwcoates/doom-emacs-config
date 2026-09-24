@@ -40,6 +40,32 @@
            "overrides).  Run the suite via `emacs -batch' instead.")
    :warning))
 
+;;;; ---- Background priority ----
+;;
+;; Every test run happens at the host's BACKGROUND priority, so test load
+;; can never starve the owner's live runtime (daemon, shim, store,
+;; sidecar, Emacs).  `bin/background.sh' demotes a run and exports
+;; AGENT_REPL_BACKGROUND_PRIORITY; a bare `emacs -batch -l lisp/test-*.el'
+;; skips it, so the batch harness refuses to load without the marker
+;; rather than run at normal priority.  Reading the environment is all
+;; this does: the priority itself is the helper's to set and verify.
+
+(defun agent-repl-test--require-background-priority (marker batch-p)
+  "Signal unless a BATCH-P run carries the background-priority MARKER.
+MARKER is the value of AGENT_REPL_BACKGROUND_PRIORITY.  An interactive
+load (BATCH-P nil) is already inert and is never refused."
+  (when (and batch-p (or (null marker) (string-empty-p marker)))
+    (error (concat "agent-repl tests REFUSED TO START: tests run only at "
+                   "background priority, through bin/background.sh.  Run "
+                   "`bin/background.sh emacs -batch -Q -l ert -l "
+                   "lisp/test-<module>.el -f ert-run-tests-batch-and-exit' "
+                   "from modules/app/agent-repl/.  "
+                   "AGENT_REPL_BACKGROUND_PRIORITY is unset, so this run "
+                   "was never demoted"))))
+
+(agent-repl-test--require-background-priority
+ (getenv "AGENT_REPL_BACKGROUND_PRIORITY") noninteractive)
+
 ;;;; ---- Stub layer ----
 ;; Provide no-op stubs for Doom/vterm/evil/persp APIs so we can load
 ;; config.el in a vanilla Emacs -Q environment.
