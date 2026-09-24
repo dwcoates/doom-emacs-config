@@ -1345,7 +1345,7 @@ func promptLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentPrompt)
 	}
 }
 
-// keepaliveLine is a well-formed fact with NO book: held, never served.
+// keepaliveLine is the RETIRED keep-alive arm, which the store refuses.
 func keepaliveLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentPrompt) *storev1.StoreAgentUpdate {
 	return &storev1.StoreAgentUpdate{
 		TopLevel: topLevel,

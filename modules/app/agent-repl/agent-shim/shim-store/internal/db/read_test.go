@@ -408,12 +408,12 @@ func pageValues(page *storev1.AgentSessionPage) []string {
 	return out
 }
 
-func TestOpenPageNeverReturnsAKeepAliveRow(t *testing.T) {
-	// Arrange: a keep-alive is a well-formed fact with NO BOOK, and the NULL
-	// book is what makes it structurally unreachable from a page query.
+func TestOpenPageNeverReturnsAnUnservedRow(t *testing.T) {
+	// Arrange: an unserved row carries NO BOOK, and the NULL book is what makes
+	// it structurally unreachable from a page query.
 	d, _ := newStore(t)
 	writeOK(t, d, unservedEntry("w-k", "u-k", &storev1.StoreUnservedItem{
-		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")},
+		UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}},
 	}))
 	seedBook(t, d, "agent-1", 1)
 
@@ -586,12 +586,12 @@ func TestLinesSinceStreamsAnUpsertedOldRowAtItsOriginalPointer(t *testing.T) {
 	}
 }
 
-func TestLinesSinceNeverReplaysAKeepAliveRow(t *testing.T) {
+func TestLinesSinceNeverReplaysAnUnservedRow(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
 	seedBook(t, d, "agent-1", 1)
 	writeOK(t, d, unservedEntry("w-k", "u-k", &storev1.StoreUnservedItem{
-		UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")},
+		UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}},
 	}))
 
 	// Act

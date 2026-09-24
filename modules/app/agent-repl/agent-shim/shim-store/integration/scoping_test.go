@@ -1,10 +1,11 @@
-// scoping_test.go — SUBJECT 7: keep-alive exclusion and logical-session
+// scoping_test.go — SUBJECT 7: never-served exclusion and logical-session
 // scoping.
 //
-// Two facts the store must hold across the whole read surface: a keep-alive is
-// first-class as NEVER-SERVED (it has no book at all, so nothing can return
-// it), and the store scopes by OUR main-agent id — the vendor's session id is
-// a mutable attribute, so its rotation must never split an agent's book.
+// Three facts the store must hold across the whole read surface: an unserved
+// row is first-class as NEVER-SERVED (it has no book at all, so nothing can
+// return it), a keep-alive is not stored at all (the arm is retired), and the
+// store scopes by OUR main-agent id — the vendor's session id is a mutable
+// attribute, so its rotation must never split an agent's book.
 package integration
 
 import (
@@ -14,9 +15,10 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 )
 
-// TestKeepAliveBetweenTwoRealRowsNeverAppears: the keep-alive sits in the same
-// position space as the lines around it and is still invisible to every read.
-func TestKeepAliveBetweenTwoRealRowsNeverAppears(t *testing.T) {
+// TestAnUnservedRowBetweenTwoRealRowsNeverAppears: the unserved row sits in the
+// same position space as the lines around it and is still invisible to every
+// read.
+func TestAnUnservedRowBetweenTwoRealRowsNeverAppears(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
@@ -27,13 +29,13 @@ func TestKeepAliveBetweenTwoRealRowsNeverAppears(t *testing.T) {
 	// Act.
 	shim.write(ctx, t,
 		shim.agentEntry("w-ka-before", "u-ka-before", frameLine(agentID("main"), responseFrame("main", "act-1", "before"))),
-		shim.agentEntry("w-ka", "u-ka-turn", keepaliveLine(agentID("main"), promptFact("turn-keepalive", "main", "keep the cache warm"))),
+		shim.agentEntry("w-ka", "u-ka-turn", vendorSpecificLine("vendor_only_thing")),
 		shim.agentEntry("w-ka-after", "u-ka-after", frameLine(agentID("main"), responseFrame("main", "act-2", "after"))),
 	)
 
 	// Assert: the page is the two real rows, adjacent.
 	opened := openSession(ctx, t, cli, "main", 10, nil)
-	assertTexts(t, "a book straddling a keep-alive", pageTexts(opened.GetPage()), []string{"after", "before"})
+	assertTexts(t, "a book straddling an unserved row", pageTexts(opened.GetPage()), []string{"after", "before"})
 	assertPageFloor(t, opened.GetPage())
 
 	// And a page sized to exactly the real rows is complete, not short.
@@ -103,24 +105,24 @@ func TestRotationDoesNotSplitTheWatchedTail(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-// TestAKeepAlivesRowItselfSurvivesARestart proves the ROW, not the ledger.
+// TestAnUnservedRowItselfSurvivesARestart proves the ROW, not the ledger.
 //
 // Absorption alone became a weak proof once write_ids got their own ledger
 // table: a replay is absorbed because the LEDGER remembers the write, which
 // would still hold if the entry row itself had been lost. What cannot happen
 // unless the row survived is an identity refusal — the store can only object
 // that this upsert_key would change KIND if it still holds a row under that key.
-// A keepalive becoming a page line is a KIND change (keepalive → page_line), and
-// a kind change stays a batch-fatal refusal even though a mere book move is now a
-// per-entry skip: nothing legitimate ever re-ingests a row as a different kind.
-func TestAKeepAlivesRowItselfSurvivesARestart(t *testing.T) {
+// An unserved row becoming a page line is a KIND change (vendor_specific →
+// page_line), and a kind change stays a batch-fatal refusal even though a mere
+// book move is now a per-entry skip: nothing legitimate ever re-ingests a row as
+// a different kind.
+func TestAnUnservedRowItselfSurvivesARestart(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	shim := streamProducer(store.client())
-	shim.write(ctx, t, shim.agentEntry("w-ka-row", "u-ka-row",
-		keepaliveLine(agentID("main"), promptFact("turn-ka-row", "main", "warm"))))
+	shim.write(ctx, t, shim.agentEntry("w-ka-row", "u-ka-row", vendorSpecificLine("vendor_only_thing")))
 
 	// Act: after a restart, claim the same key for a PAGE LINE.
 	store.restart()
@@ -129,29 +131,29 @@ func TestAKeepAlivesRowItselfSurvivesARestart(t *testing.T) {
 	revived := streamProducer(store.client())
 	failure := revived.writeExpectingFailure(after, t, nil,
 		revived.agentEntry("w-ka-row-2", "u-ka-row",
-			frameLine(agentID("main"), responseFrame("main", "act-1", "would overwrite the keep-alive"))))
+			frameLine(agentID("main"), responseFrame("main", "act-1", "would overwrite the unserved row"))))
 
 	// Assert: the refusal can only exist because the row is still there. It is
-	// the KIND half of the identity check that fires — the stored row is a
-	// keepalive and this write claims the key for a page line, which is checked
-	// before the book move (never-served NULL → the agent) that also holds here.
+	// the KIND half of the identity check that fires — the stored row is
+	// vendor_specific and this write claims the key for a page line, which is
+	// checked before the book move (never-served NULL → the agent) that also
+	// holds here.
 	assertWriteInvalidRequest(t, failure, "entries[0].agent_update")
-	// A keep-alive is never an agent's first sight, so the refused page line
+	// An unserved row is never an agent's first sight, so the refused page line
 	// left the store with no agent row for "main" at all.
 	openUnknownAgent(after, t, store.client(), "main")
 }
 
-// TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed: never-served is not
+// TestAnUnservedRowIsHeldDurablyEvenThoughItIsNeverServed: never-served is not
 // dropped — the write is still absorbed after a restart, so the store kept it.
-func TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed(t *testing.T) {
+func TestAnUnservedRowIsHeldDurablyEvenThoughItIsNeverServed(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	shim := streamProducer(store.client())
-	keepalive := shim.agentEntry("w-ka-durable", "u-ka-durable",
-		keepaliveLine(agentID("main"), promptFact("turn-ka-durable", "main", "warm")))
-	shim.write(ctx, t, keepalive)
+	unserved := shim.agentEntry("w-ka-durable", "u-ka-durable", vendorSpecificLine("vendor_only_thing"))
+	shim.write(ctx, t, unserved)
 
 	// Act: the same write_id replayed after a restart must be ABSORBED, which
 	// is only possible if the row was actually kept.
@@ -159,15 +161,35 @@ func TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed(t *testing.T) {
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
 	replayed := streamProducer(store.client())
-	resp, err := replayed.attempt(after, &storev1.EntryBatch{Entries: []*storev1.StoreEntry{keepalive}})
+	resp, err := replayed.attempt(after, &storev1.EntryBatch{Entries: []*storev1.StoreEntry{unserved}})
 	if err != nil {
-		t.Fatalf("replaying a keep-alive after restart: %v", err)
+		t.Fatalf("replaying an unserved row after restart: %v", err)
 	}
 
 	// Assert.
 	if resp.GetSuccess() == nil {
-		t.Fatalf("replaying a durable keep-alive was refused: %s", resp.GetFailure().GetDetail())
+		t.Fatalf("replaying a durable unserved row was refused: %s", resp.GetFailure().GetDetail())
 	}
 	openUnknownAgent(after, t, store.client(), "main")
 	store.assertNoErrorRecords()
+}
+
+// TestAKeepAliveIsRefusedAsRetired: nothing of a keep-alive is stored on either
+// plane, so the arm is refused on its own field and recorded at its own site.
+func TestAKeepAliveIsRefusedAsRetired(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	mark := store.logMark()
+
+	// Act.
+	failure := shim.writeExpectingFailure(ctx, t, nil, shim.agentEntry("w-ka-retired", "u-ka-retired",
+		keepaliveLine(agentID("main"), promptFact("turn-ka-retired", "main", "warm"))))
+
+	// Assert.
+	assertWriteInvalidRequest(t, failure, "entries[0].agent_update.unserved_item.keepalive")
+	rec := assertExactlyOneNormalRecord(t, recordsAtOperation(store.logRecordsAfter(mark), "store.rpc.write-batch"), "the refused keep-alive")
+	assertRefusalKeys(t, rec, "keepalive_retired", "invalid_request")
 }
