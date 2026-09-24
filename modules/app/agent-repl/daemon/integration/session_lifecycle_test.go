@@ -2050,11 +2050,7 @@ func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
-	pid := shim.Info().PID
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		t.Fatalf("kill the fake shim process %d: %v", pid, err)
-	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	killShim(t, f, shim)
 
 	// Act
 	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -2474,10 +2470,7 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 
 	// Arrange: the shim is killed out from under the daemon.
 	pid := f.shim.Info().PID
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		t.Fatalf("kill the fake shim process %d: %v", pid, err)
-	}
-	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	killShim(t, f, f.shim)
 	awaitRoster(t, f.d, roster, "the roster row dead after the shim was killed", statusIs(func(row *frontendv1.RosterRow) bool {
 		return row.GetDead() != nil
 	}))

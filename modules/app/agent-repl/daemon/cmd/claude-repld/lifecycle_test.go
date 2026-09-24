@@ -80,6 +80,14 @@ type fakeFreeQueue struct {
 	promptqueue.Queue
 	frees      []ids.WorkspaceID
 	departures []departedAt
+	unobserved map[ids.WorkspaceID][]ids.TurnID
+}
+
+func (f *fakeFreeQueue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
+	if f.unobserved == nil {
+		f.unobserved = map[ids.WorkspaceID][]ids.TurnID{}
+	}
+	f.unobserved[ws] = append(f.unobserved[ws], turns...)
 }
 
 func (f *fakeFreeQueue) OnFree(ws ids.WorkspaceID) { f.frees = append(f.frees, ws) }
@@ -318,5 +326,19 @@ func TestTheDepartureEdgeReachesTheQueueNamingItsWatcher(t *testing.T) {
 	got := queue.departures[0]
 	if got.ws != "ws-1" || got.departure != departure || got.departed != promptqueue.Watcher(watcher) {
 		t.Fatalf("departure = %+v, want ws-1's, naming the watcher that departed", got)
+	}
+}
+
+func TestTheTurnsAnAdoptionFoundEndedUnobservedReachTheQueue(t *testing.T) {
+	// Arrange
+	queue := &fakeFreeQueue{}
+	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.OnTurnsEndedUnobserved("ws-1", []ids.TurnID{"turn-1", "turn-2"})
+
+	// Assert
+	if got := queue.unobserved["ws-1"]; len(got) != 2 || got[0] != "turn-1" || got[1] != "turn-2" {
+		t.Fatalf("unobserved turns handed to the queue = %v, want ws-1's [turn-1 turn-2]", queue.unobserved)
 	}
 }

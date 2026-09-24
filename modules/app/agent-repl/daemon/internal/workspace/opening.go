@@ -3,8 +3,6 @@ package workspace
 import (
 	"context"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
-
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
@@ -76,14 +74,16 @@ func (f *Fleet) forgetPointers(ws ids.WorkspaceID) {
 
 // startWatcher opens a workspace's watch fleet with the opening openingFor
 // decides, and remembers the watcher so its successor can resume from it. It
-// is the ONE way the fleet starts a watcher.
+// is the ONE way the fleet starts a watcher. The caller states the session's
+// facts and what an adoption found open; the opening is always decided here.
 //
 // Its context is DETACHED from the caller's: the watch fleet outlives the verb
 // that brought the session up, and every stream it opens -- now and on every
 // redial -- is opened against this context.
-func (f *Fleet) startWatcher(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, started *conversationv1.SessionStarted) (sessionwatcher.Watcher, error) {
+func (f *Fleet) startWatcher(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, session sessionwatcher.Session) (sessionwatcher.Watcher, error) {
 	opening := f.openingFor(ws)
-	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started, Opening: opening}, f.deps.Sinks, log)
+	session.Opening = opening
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, session, f.deps.Sinks, log)
 	if err != nil {
 		return nil, err
 	}

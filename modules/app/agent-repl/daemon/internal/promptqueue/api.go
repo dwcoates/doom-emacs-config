@@ -9,6 +9,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -207,6 +208,11 @@ type Queue interface {
 	// OnTurnEnded is the LifecycleSink's turn end: pop the queue and deliver
 	// the next prompt.
 	OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose)
+	// OnTurnsEndedUnobserved is the LifecycleSink's adoption reconciliation:
+	// each turn ended while no daemon was watching, so its durable row is
+	// closed as orphaned. Nothing is popped or delivered: none of them was the
+	// adopted session's turn in flight.
+	OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID)
 	// OnLeaseChanged re-evaluates every hold against the new lease policy.
 	OnLeaseChanged(ws ids.WorkspaceID)
 	// RequestBounce asks the per-workspace BOUNCE REGISTRY to replace what
@@ -306,6 +312,10 @@ type Deps struct {
 	Lifetime context.Context
 	// Now supplies the instants the queue stamps. nil means time.Now.
 	Now func() time.Time
+	// Stat reads a workspace directory before a dead shim's session is
+	// brought back: a workspace whose directory is gone has nothing to serve.
+	// nil means os.Stat.
+	Stat func(name string) (fs.FileInfo, error)
 	// PublishHost republishes a workspace's host view, which carries the
 	// standing edit the editor fills its input from. REQUIRED.
 	PublishHost func(ws ids.WorkspaceID)

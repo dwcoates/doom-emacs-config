@@ -909,6 +909,14 @@ func (w *watcher) watchSpawnedSubagentsOnPageLocked(page *conversationv1.History
 // routeTerminalLocked routes how one agent's stream ended, and reaps the watch
 // it was carried on. Exactly one of success and failure is set.
 func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.AgentId, stamp *conversationv1.TurnId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+	// A TURN THE SHIM WAS ALREADY RUNNING WHEN THIS WATCHER ATTACHED has no
+	// StartTurn answer coming to name the main agent: this watcher never sent
+	// it one. Held, its terminal would wait for a name that never arrives and
+	// the adopted turn would never end. The MAIN watch carries the main
+	// agent's frames alone, so its terminal names the main agent itself.
+	if a.id == nil && w.mainAgent == nil && w.turn != nil && *w.turn == w.factsTurn {
+		w.adoptMainAgentLocked(agent, "adopted_turn_terminal")
+	}
 	if a.id == nil && w.mainAgent == nil {
 		// THE MAIN AGENT HAS NOT BEEN NAMED YET, so this terminal cannot be
 		// attributed to the turn. It arrived on the SHIM'S STREAM plane while
