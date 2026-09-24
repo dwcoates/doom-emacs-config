@@ -304,12 +304,13 @@ export function resolveWatcherConclusionBudgetMs(
  *
  * Only the delays are overridable, and deliberately so. The contractual facts
  * about a store outage are the ones the outage scenarios assert: how many
- * attempts a batch gets, that the buffer is bounded, that exhaustion drops
- * LOUDLY and names the lost keys, and that order survives. None of those is a
- * function of how long the process idles between attempts, so `bufferCapacity`
- * and `maxAttempts` stay fixed at {@link DEFAULT_RETRY_POLICY} and cannot be
- * reached from the environment at all — an override able to shorten the
- * attempt count would weaken exactly the assertions this exists to keep.
+ * attempts a batch gets before its failure is declared persistent, that
+ * exhaustion is LOUD and names the held keys, that nothing is dropped, and that
+ * order survives. None of those is a function of how long the process idles
+ * between attempts, so `maxAttempts` stays fixed at {@link DEFAULT_RETRY_POLICY}
+ * and cannot be reached from the environment at all — an override able to
+ * shorten the attempt count would weaken exactly the assertions this exists to
+ * keep. The batch and backlog bounds are not reachable from it either.
  *
  * Refused for a real session: a production shim told to retry with no backoff
  * would hammer a store that is merely restarting.
@@ -365,8 +366,12 @@ export function resolveRetryPolicy(
     },
     "a fake session took its store retry backoff from the environment",
   );
-  // The attempt count and buffer depth are NOT overridable; only the waiting is.
-  return { ...DEFAULT_RETRY_POLICY, backoffMs: parsed };
+  // The attempt count is NOT overridable; only the waiting is. The held
+  // batch's cadence is waiting too, and it takes the schedule's LAST step, so a
+  // fake session's recovery from a persistent outage scales with the override.
+  // `parsed` is never empty here (an empty override was answered above), and
+  // `reduce` with no seed THROWS on an empty list rather than inventing a value.
+  return { ...DEFAULT_RETRY_POLICY, backoffMs: parsed, heldRetryMs: parsed.reduce((_last, ms) => ms) };
 }
 
 /** Everything the process reads from its environment, resolved and checked. */

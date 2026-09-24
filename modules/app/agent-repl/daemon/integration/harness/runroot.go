@@ -33,25 +33,48 @@ import (
 // with one non-blocking flock — not a pid that may have been recycled, not an
 // age guess. reclaimDeadRuns, the first thing MainAt does, kills every process
 // still running out of a dead run's root and removes the root.
-const runRootGlob = "/tmp/arrun*"
 
 const ownerLockName = "owner.lock"
 
-// creationLockPath serializes a root's BIRTH against every reclaim.
-//
-// A root is created, then its owner lock is opened, then taken: three steps,
-// and a reclaim that looked in between saw a root with no lock file, or with
-// one nobody held yet, and read it as dead. `go test ./...` starts this
-// package's suite and the harness package's own tests at the same instant,
-// so one run's reclaim removed the other's brand-new root out from under it.
-// Holding this one fixed, never-removed lock across both the birth and the
-// scan makes that window unobservable: a reclaim sees a root only before it
-// exists or after its owner holds it.
-const creationLockPath = "/tmp/agent-repl-itest-runroot.lock"
+// runRootPrefix names every run root; reclaim considers only this prefix.
+const runRootPrefix = "arrun"
 
-// withCreationLock runs body holding creationLockPath exclusively.
-func withCreationLock(body func() error) error {
-	f, err := os.OpenFile(creationLockPath, os.O_CREATE|os.O_RDWR, 0o666)
+// A runRootSpace is ONE directory's population of run roots and the lock that
+// serializes their births against every reclaim of them. A reclaim only ever
+// sees the roots of its own space.
+//
+// WHY THERE IS MORE THAN ONE. Every run on the host shares hostRunRoots, which
+// is what lets the next run reclaim a dead one. The harness's own reclaim
+// tests have to MAKE dead roots, and made in the host space those fixtures are
+// indistinguishable from a real dead run: every concurrent run's reclaim --
+// another worktree's suite starting up -- killed the fixture's leftover and
+// removed its root while the test that owned it was still asserting, which
+// was observed in a traced run. A test's fixtures live in a private space
+// under its own temp dir instead, so no other run can ever see them and the
+// test's own reclaim never touches another run's roots.
+type runRootSpace struct {
+	// base is the directory the roots are created in.
+	base string
+	// creationLock serializes a root's BIRTH against every reclaim.
+	//
+	// A root is created, then its owner lock is opened, then taken: three
+	// steps, and a reclaim that looked in between saw a root with no lock
+	// file, or with one nobody held yet, and read it as dead. `go test ./...`
+	// starts this package's suite and the harness package's own tests at the
+	// same instant, so one run's reclaim removed the other's brand-new root
+	// out from under it. Holding this one fixed, never-removed lock across
+	// both the birth and the scan makes that window unobservable: a reclaim
+	// sees a root only before it exists or after its owner holds it.
+	creationLock string
+}
+
+// hostRunRoots is the space every real run lives in: under /tmp and short, so
+// the state roots beneath it carry unix sockets under a 103-byte budget.
+var hostRunRoots = runRootSpace{base: "/tmp", creationLock: "/tmp/agent-repl-itest-runroot.lock"}
+
+// withCreationLock runs body holding the space's creation lock exclusively.
+func (s runRootSpace) withCreationLock(body func() error) error {
+	f, err := os.OpenFile(s.creationLock, os.O_CREATE|os.O_RDWR, 0o666)
 	if err != nil {
 		return fmt.Errorf("open the run-root creation lock: %w", err)
 	}
@@ -65,20 +88,19 @@ func withCreationLock(body func() error) error {
 // runRoot is this process's run root; empty until MainAt lays it out.
 var runRoot string
 
-// newRunRoot creates this run's root under /tmp — short on purpose, since the
-// state roots beneath it carry unix sockets under a 103-byte budget — and takes
-// its owner lock. The returned file IS the lock: it must stay open for the
-// whole run, and is never inherited by a child (Go opens with O_CLOEXEC).
-func newRunRoot() (dir string, lock *os.File, err error) {
-	err = withCreationLock(func() error {
-		dir, lock, err = newRunRootLocked()
+// newRunRoot creates a run root in the space and takes its owner lock. The
+// returned file IS the lock: it must stay open for the whole run, and is never
+// inherited by a child (Go opens with O_CLOEXEC).
+func (s runRootSpace) newRunRoot() (dir string, lock *os.File, err error) {
+	err = s.withCreationLock(func() error {
+		dir, lock, err = s.newRunRootLocked()
 		return err
 	})
 	return dir, lock, err
 }
 
-func newRunRootLocked() (string, *os.File, error) {
-	dir, err := os.MkdirTemp("/tmp", "arrun")
+func (s runRootSpace) newRunRootLocked() (string, *os.File, error) {
+	dir, err := os.MkdirTemp(s.base, runRootPrefix)
 	if err != nil {
 		return "", nil, fmt.Errorf("mkdir the run root: %w", err)
 	}
@@ -93,19 +115,19 @@ func newRunRootLocked() (string, *os.File, error) {
 	return dir, lock, nil
 }
 
-// reclaimDeadRuns removes every run root whose owner is gone, after killing
-// every process still running out of it. A root whose lock is HELD belongs to
-// a live run — this suite's parallel sibling in another package, or another
-// worktree's — and is left strictly alone.
+// reclaimDeadRuns removes every run root in the space whose owner is gone,
+// after killing every process still running out of it. A root whose lock is
+// HELD belongs to a live run — this suite's parallel sibling in another
+// package, or another worktree's — and is left strictly alone.
 //
 // Every reclaim is reported on stderr, because a reclaim is evidence that an
 // earlier run died without cleaning up, and that is worth seeing.
-func reclaimDeadRuns() error {
-	return withCreationLock(reclaimDeadRunsLocked)
+func (s runRootSpace) reclaimDeadRuns() error {
+	return s.withCreationLock(s.reclaimDeadRunsLocked)
 }
 
-func reclaimDeadRunsLocked() error {
-	roots, err := filepath.Glob(runRootGlob)
+func (s runRootSpace) reclaimDeadRunsLocked() error {
+	roots, err := filepath.Glob(filepath.Join(s.base, runRootPrefix+"*"))
 	if err != nil {
 		return fmt.Errorf("list the run roots: %w", err)
 	}

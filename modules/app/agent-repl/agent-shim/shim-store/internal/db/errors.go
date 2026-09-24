@@ -62,6 +62,10 @@ const (
 	// SiteResidueRawUnset is residue that carries no verbatim record, which is
 	// the only thing it exists to carry.
 	SiteResidueRawUnset = "residue_raw_unset"
+	// SiteBashTailOverCap is a detached run's tail carrying more than the
+	// contract's AgentBashTailCap: output beyond what is rendered is never
+	// stored (owner ruling 2026-09-23), so the store refuses to hold it.
+	SiteBashTailOverCap = "bash_tail_over_cap"
 	// SiteUnknownAgent is a well-formed agent id the store holds no agent row
 	// for. An agent the store HAS heard of but that has said nothing yet is not
 	// this: it is a legal, empty book.

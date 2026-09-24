@@ -1,9 +1,11 @@
 package handler
 
-// shell_test.go — the detached shell spool: deltas, the three terminators it
+// shell_test.go — the detached shell spool: its rendered tail, the three terminators it
 // can carry, and the LOST terminal the reader asks for.
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -27,29 +29,154 @@ func spoolFrames(text string, offset int64) []tail.Frame {
 	return []tail.Frame{{Raw: []byte(text), Offset: offset}}
 }
 
-func TestSpoolBytesBecomeADeltaCarryingTheirStartOffset(t *testing.T) {
-	// Arrange. from_offset is a GAP DETECTOR: it must equal the bytes the
-	// consumer already holds, so a hole is refused rather than concatenated over.
-	h := NewShellOutputHandler(testLogger(t))
-
-	// Act.
-	entries := h.Handle(spoolFrames("second chunk", 512), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
-
-	// Assert.
-	delta := entryByKey(t, entries, convert.BashDeltaKey("toolu_run1", 512))
-	update := delta.GetAgentUpdate().GetBash().GetFrame().GetUpdate()
-	if update == nil {
-		t.Fatal("spool bytes must land on the bash update arm")
-	}
-	if got := update.GetNewOutput(); got != "second chunk" {
-		t.Fatalf("new_output = %q, want the appended bytes verbatim", got)
-	}
-	if got := update.GetFromOffset(); got != 512 {
-		t.Fatalf("from_offset = %d, want 512", got)
+// prefixOf answers a readPrefix that serves the first bytes of file, so a
+// batch that does not continue the window reseeds from a known spool without
+// touching the filesystem.
+func prefixOf(file string) func(string, int64, func([]byte)) error {
+	return func(_ string, upTo int64, sink func([]byte)) error {
+		sink([]byte(file[:upTo]))
+		return nil
 	}
 }
 
-func TestSpoolDeltaNamesTheRunAndIsNotPaginatable(t *testing.T) {
+func TestSpoolBytesBecomeTheRunsTail(t *testing.T) {
+	// Arrange. Output past what is rendered is not stored, so a batch lands as
+	// the run's one tail row, carrying the window as it is drawn.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("first chunk\n", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if got == nil {
+		t.Fatal("spool bytes must land on the bash tail arm")
+	}
+	if got.GetText() != "first chunk\n" || got.GetBytesOmitted() != 0 || got.GetLinesOmitted() != 0 {
+		t.Fatalf("tail = {%q, %d, %d}, want the whole output and nothing omitted", got.GetText(), got.GetBytesOmitted(), got.GetLinesOmitted())
+	}
+}
+
+func TestALaterBatchSupersedesTheTailWithTheWholeWindow(t *testing.T) {
+	// Arrange. The tail is a snapshot of the run, not of the batch: the second
+	// batch's row states everything drawn so far.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("first\n", 0), ctx)
+
+	// Act.
+	entries := h.Handle(spoolFrames("second\n", 6), ctx)
+
+	// Assert.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if got.GetText() != "first\nsecond\n" {
+		t.Fatalf("tail text = %q, want the run's whole window", got.GetText())
+	}
+}
+
+func TestTheTailIsCappedAtTheRenderersBoundAndCountsWhatItOmits(t *testing.T) {
+	// Arrange. A run far past the cap: the row holds at most the cap and states
+	// how many bytes and lines came before it.
+	h := NewShellOutputHandler(testLogger(t))
+	line := strings.Repeat("y", 99) + "\n"
+	spool := strings.Repeat(line, 1000)
+
+	// Act.
+	entries := h.Handle(spoolFrames(spool, 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if len(got.GetText()) > maxRememberedOutput {
+		t.Fatalf("tail text = %d bytes, want at most the cap %d", len(got.GetText()), maxRememberedOutput)
+	}
+	if got.GetBytesOmitted()+uint64(len(got.GetText())) != uint64(len(spool)) {
+		t.Fatalf("bytes_omitted %d + text %d != the %d bytes written", got.GetBytesOmitted(), len(got.GetText()), len(spool))
+	}
+	if want := uint64(1000 - strings.Count(got.GetText(), "\n")); got.GetLinesOmitted() != want {
+		t.Fatalf("lines_omitted = %d, want %d", got.GetLinesOmitted(), want)
+	}
+}
+
+func TestAResumedSpoolReseedsItsTailFromTheFile(t *testing.T) {
+	// Arrange. A restarted sidecar resumes mid-file; the tail it writes must
+	// supersede the stored one with the SAME window, not with only the bytes
+	// read since the restart.
+	file := "before the restart\nafter\n"
+	h := NewShellOutputHandler(testLogger(t))
+	h.readPrefix = prefixOf(file)
+
+	// Act.
+	entries := h.Handle(spoolFrames("after\n", 19), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if got.GetText() != file {
+		t.Fatalf("tail text = %q, want the whole file %q", got.GetText(), file)
+	}
+}
+
+func TestAReReadBatchDoesNotCountItsBytesTwice(t *testing.T) {
+	// Arrange. A batch whose write was never acknowledged is polled again from
+	// the committed cursor; the window must not hold its bytes twice.
+	file := "one\ntwo\n"
+	h := NewShellOutputHandler(testLogger(t))
+	h.readPrefix = prefixOf(file)
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.Handle(spoolFrames("one\n", 0), ctx)
+	h.Handle(spoolFrames("two\n", 4), ctx)
+
+	// Act.
+	entries := h.Handle(spoolFrames("two\n", 4), ctx)
+
+	// Assert.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if got.GetText() != file {
+		t.Fatalf("tail text = %q, want %q exactly once", got.GetText(), file)
+	}
+}
+
+func TestATailThatCannotBeReseededIsWithheldAndLoggedAsAnError(t *testing.T) {
+	// Arrange. A window missing the file's prefix would state wrong omitted
+	// counts for the rest of the run, so it is withheld rather than guessed.
+	sink, log := capturingLogger()
+	h := NewShellOutputHandler(log)
+	h.readPrefix = func(string, int64, func([]byte)) error { return errors.New("spool unreadable") }
+
+	// Act.
+	entries := h.Handle(spoolFrames("after\n", 19), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	for _, e := range entries {
+		if e.GetUpsertKey() == convert.BashTailKey("toolu_run1") {
+			t.Fatal("a tail was written from a window missing the file's prefix")
+		}
+	}
+	if got := levelForMessage(t, sink, "could not be rebuilt from its spool"); got != "error" {
+		t.Fatalf("the withheld tail was recorded at %q, want error", got)
+	}
+}
+
+func TestTheBatchAfterAFailedReseedReseedsAgain(t *testing.T) {
+	// Arrange. The withheld batch's bytes are in the prefix the next reseed
+	// reads, so nothing is lost once the file can be read.
+	file := "before\nfailed\nnext\n"
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/t/b1.output", "bbkq1", "toolu_run1")
+	h.readPrefix = func(string, int64, func([]byte)) error { return errors.New("spool unreadable") }
+	h.Handle(spoolFrames("failed\n", 7), ctx)
+	h.readPrefix = prefixOf(file)
+
+	// Act.
+	entries := h.Handle(spoolFrames("next\n", 14), ctx)
+
+	// Assert.
+	got := entryByKey(t, entries, convert.BashTailKey("toolu_run1")).GetAgentUpdate().GetBash().GetFrame().GetTail()
+	if got.GetText() != file {
+		t.Fatalf("tail text = %q, want the whole file %q", got.GetText(), file)
+	}
+}
+
+func TestSpoolTailNamesTheRunAndIsNotPaginatable(t *testing.T) {
 	// Arrange.
 	h := NewShellOutputHandler(testLogger(t))
 
@@ -57,11 +184,11 @@ func TestSpoolDeltaNamesTheRunAndIsNotPaginatable(t *testing.T) {
 	entries := h.Handle(spoolFrames("output", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
-	delta := entryByKey(t, entries, convert.BashDeltaKey("toolu_run1", 0))
-	if got := delta.GetAgentUpdate().GetBash().GetRun().GetValue(); got != "toolu_run1" {
+	row := entryByKey(t, entries, convert.BashTailKey("toolu_run1"))
+	if got := row.GetAgentUpdate().GetBash().GetRun().GetValue(); got != "toolu_run1" {
 		t.Fatalf("run = %q, want the spawning call's unit id", got)
 	}
-	if delta.GetAgentUpdate().GetServeableFrame() != nil {
+	if row.GetAgentUpdate().GetServeableFrame() != nil {
 		t.Fatal("a run frame must not be a page line: the spawning CALL is already one")
 	}
 }
@@ -236,11 +363,11 @@ func TestSpoolFramesAreKeyedByTheSpawningCallRatherThanTheVendorTaskId(t *testin
 
 	// Assert.
 	for _, e := range entries {
-		if e.GetUpsertKey() == convert.BashDeltaKey("bbkq1", 0) {
+		if e.GetUpsertKey() == convert.BashTailKey("bbkq1") {
 			t.Fatalf("entry keyed by the vendor task id %q; the run is the spawning call", "bbkq1")
 		}
 	}
-	entryByKey(t, entries, convert.BashDeltaKey("toolu_run1", 0))
+	entryByKey(t, entries, convert.BashTailKey("toolu_run1"))
 }
 
 func TestATerminalCarriesTheWholeRunsOutputRatherThanTheLastBatch(t *testing.T) {
@@ -415,12 +542,12 @@ func TestAFourDigitExitIsNotReadAsTheMarker(t *testing.T) {
 	// Act: the marker-shaped line begins the file, so it genuinely starts a line.
 	entries := h.Handle(spoolFrames("EXIT=1234\n", 0), spoolContext("/t/b4.output", "b4", "toolu_run4"))
 
-	// Assert: the bytes land as a delta and NOTHING settles the run.
+	// Assert: the bytes land as the tail and NOTHING settles the run.
 	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want exactly the delta: a four-digit EXIT= is output, not the terminator (keys: %v)", len(entries), allKeys(entries))
+		t.Fatalf("entries = %d, want exactly the tail: a four-digit EXIT= is output, not the terminator (keys: %v)", len(entries), allKeys(entries))
 	}
-	if got := entries[0].GetUpsertKey(); got != convert.BashDeltaKey("toolu_run4", 0) {
-		t.Fatalf("upsert_key = %q, want the run's delta key", got)
+	if got := entries[0].GetUpsertKey(); got != convert.BashTailKey("toolu_run4") {
+		t.Fatalf("upsert_key = %q, want the run's tail key", got)
 	}
 }
 

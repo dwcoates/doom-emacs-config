@@ -859,9 +859,9 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
-	case *conversationv1.AgentBash_Update:
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Update"})
-		// A foreground call reports no growth; an update here belongs to the
+	case *conversationv1.AgentBash_Tail:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Tail"})
+		// A foreground call reports no growth; a tail here belongs to the
 		// work's own detached stream and is drawn there.
 		return nil, errNotARow
 	case *conversationv1.AgentBash_Success:

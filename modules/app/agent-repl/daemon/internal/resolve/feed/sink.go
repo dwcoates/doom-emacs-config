@@ -132,6 +132,9 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	case *conversationv1.AgentActivity_Worktree:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Worktree"})
 		row, err = r.drawWorktree(s, at, act, item.Worktree)
+	case *conversationv1.AgentActivity_Monitor:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Monitor"})
+		row, err = r.drawMonitor(s, at, act, item.Monitor)
 	case *conversationv1.AgentActivity_SendMessage:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SendMessage"})
 		// A send IS an agent-addressed prompt, drawn on the SENDER's feed with
@@ -140,15 +143,14 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	default:
 		// An unmodeled tool is NOT a failure and NEVER a feed row: its home is
 		// the topbar's warning dropdown. Every other kind that draws nowhere
-		// (task acts, monitors, wakeups, cron, notifications, injected context)
-		// answers the same way. THINKING now draws its own bubble above, so it
-		// is no longer in this list.
+		// (task acts, wakeups, cron, notifications, injected context) answers
+		// the same way. THINKING and MONITORS draw their own rows above, so
+		// they are no longer in this list.
 		//
 		// THE KIND IS RECORDED, because a detachment naming this unit has to
 		// be able to tell "nothing has drawn it YET" from "nothing will ever
-		// draw it". A monitor is always detached and is footer-only by the
-		// proto's own word, so its announcement would otherwise sit held
-		// until the turn's terminal reported it as work detached from a unit
+		// draw it", so an announcement naming it is retired rather than held
+		// until the turn's terminal reports it as work detached from a unit
 		// the resolver never drew.
 		s.markUndrawable(unit)
 		r.retireDetachment(s, unit)
@@ -359,13 +361,14 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	r.drawDetachedWork(s, agent, work)
 }
 
-// OnLiveWorkChanged settles every detached shell that left the live set
-// without its own terminal having settled it.
+// OnLiveWorkChanged settles every detached shell, and every monitor's card,
+// that left the live set without its own terminal having settled it.
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live sessionwatcher.LiveWorkSet) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
 	r.settleShellsLeftLive(s, live)
+	r.settleMonitorsLeftLive(s, live)
 }
 
 // OnBash draws one detached shell's progress.

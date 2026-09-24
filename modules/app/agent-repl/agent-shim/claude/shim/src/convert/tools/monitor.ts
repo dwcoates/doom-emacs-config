@@ -88,11 +88,36 @@ function item(result: conversationv1.AgentMonitor["result"]): conversationv1.Age
  * The watch left the live set.
  *
  * Exported for whatever observes the detached watch's end: no cause taxonomy is
- * claimed, because the vendor reports only that it is gone.
+ * claimed, because the vendor reports only that it is gone. CALL is the start
+ * the watch was armed with, RESTATED so the settled frame stands alone (the
+ * store keeps one row per unit, and the daemon draws the monitor's tool-call
+ * card from it on a replay); undefined when nothing recorded the start.
  */
-export function monitorEnded(): conversationv1.AgentActivity["item"] {
-  LOGGER.logVerbose({}, "a monitor left the live set; the watch's unit is settled as ended");
-  return item({ case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, {}) });
+export function monitorEnded(
+  call: conversationv1.AgentMonitorStart | undefined,
+): conversationv1.AgentActivity["item"] {
+  LOGGER.logVerbose(
+    { restated: call !== undefined },
+    "a monitor left the live set; the watch's unit is settled as ended",
+  );
+  return item({ case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call }) });
+}
+
+/** The watch as the call armed it: the start frame's body, and every settle's restatement. */
+function armedAs(call: PendingCall): conversationv1.AgentMonitorStart {
+  const description = str(call.input, "description");
+  if (description === undefined) {
+    LOGGER.debug(
+      { tool_use_id: call.toolUseId },
+      "a monitor call carries no description; the footer row has nothing to draw",
+    );
+  }
+  return create(conversationv1.AgentMonitorStartSchema, {
+    description: description ?? "",
+    lifetime: lifetimeOf(call),
+    source: sourceOf(call),
+    startedAtMs: BigInt(Math.trunc(call.startedAtMs)),
+  });
 }
 
 export const monitorConverter: ToolConverter = {
@@ -102,23 +127,8 @@ export const monitorConverter: ToolConverter = {
   carriesProgress: false,
 
   start(call) {
-    const description = str(call.input, "description");
-    if (description === undefined) {
-      LOGGER.debug(
-        { tool_use_id: call.toolUseId },
-        "a monitor call carries no description; the footer row has nothing to draw",
-      );
-    }
     LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a monitor was armed");
-    return item({
-      case: "start",
-      value: create(conversationv1.AgentMonitorStartSchema, {
-        description: description ?? "",
-        lifetime: lifetimeOf(call),
-        source: sourceOf(call),
-        startedAtMs: BigInt(Math.trunc(call.startedAtMs)),
-      }),
-    });
+    return item({ case: "start", value: armedAs(call) });
   },
 
   settle(call: PendingCall, outcome: ToolOutcome) {
@@ -126,7 +136,12 @@ export const monitorConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "the monitor never armed");
       return item({
         case: "failure",
-        value: create(conversationv1.AgentMonitorFailureSchema, { failure: failureOf(call, outcome) }),
+        // THE CALL IS RESTATED: the failure replaces the start in the store,
+        // and a replay draws the monitor's card from this frame alone.
+        value: create(conversationv1.AgentMonitorFailureSchema, {
+          failure: failureOf(call, outcome),
+          call: armedAs(call),
+        }),
       });
     }
     LOGGER.logVerbose(

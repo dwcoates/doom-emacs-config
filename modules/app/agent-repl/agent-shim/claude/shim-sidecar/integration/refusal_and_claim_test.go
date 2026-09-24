@@ -268,7 +268,7 @@ func TestAStopArrivingBeforeTheSpoolIsClaimedCancelsItOnClaim(t *testing.T) {
 		t.Errorf("the remembered stop settled with cause %v, wanted by_user; a TaskStop is a person's decision however late it is applied",
 			interrupted.GetCause())
 	}
-	if want := requireContiguousDeltas(t, capturedBashCall1, rows); interrupted.GetOutput().GetText().GetStdout() != want {
+	if want := requireLatestTail(t, capturedBashCall1, rows); interrupted.GetOutput().GetText().GetStdout() != want {
 		t.Errorf("the cancelled terminal carries stdout %q, wanted exactly the run's joined deltas %q",
 			interrupted.GetOutput().GetText().GetStdout(), want)
 	}

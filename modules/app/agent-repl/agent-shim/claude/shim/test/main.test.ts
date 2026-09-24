@@ -783,17 +783,15 @@ describe("the store retry backoff override", () => {
     expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "0" }, true).backoffMs).toEqual([0]);
   });
 
+  it("takes the held batch's retry cadence from the override's last step", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1,2,3,4" }, true).heldRetryMs).toBe(4);
+  });
+
   it("leaves the ATTEMPT COUNT at the production value", () => {
     // Only the waiting is overridable: an override that could shorten the
     // attempt count would weaken the exhaustion assertions this exists to keep.
     expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1" }, true).maxAttempts).toBe(
       DEFAULT_RETRY_POLICY.maxAttempts,
-    );
-  });
-
-  it("leaves the BUFFER DEPTH at the production value", () => {
-    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1" }, true).bufferCapacity).toBe(
-      DEFAULT_RETRY_POLICY.bufferCapacity,
     );
   });
 

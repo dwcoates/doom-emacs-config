@@ -8199,9 +8199,9 @@ func (x *FooterExpandedMonitors) GetRows() []*FooterMonitorRow {
 }
 
 // One live monitor's line: 👁 · description · (persistent) · clock · ▸. A
-// monitor draws NO feed entry, so its jump is always the `unresolved` arm with
-// the `no_feed_entry` reason: a click says so at the row and records why,
-// rather than doing nothing.
+// monitor's feed entry is its Monitor call's tool-call card, drawn in its
+// owner's feed at the call's position (owner ruling, 2026-09-23), so its jump
+// names that card exactly as a shell row's names its head.
 type FooterMonitorRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What is being watched, drawn verbatim (the agent's description).
@@ -10346,7 +10346,6 @@ type FooterJumpUnresolved struct {
 	// Types that are valid to be assigned to Reason:
 	//
 	//	*FooterJumpUnresolved_NotDrawn
-	//	*FooterJumpUnresolved_NoFeedEntry
 	Reason        isFooterJumpUnresolved_Reason `protobuf_oneof:"reason"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -10398,15 +10397,6 @@ func (x *FooterJumpUnresolved) GetNotDrawn() *FooterJumpNotDrawn {
 	return nil
 }
 
-func (x *FooterJumpUnresolved) GetNoFeedEntry() *FooterJumpNoFeedEntry {
-	if x != nil {
-		if x, ok := x.Reason.(*FooterJumpUnresolved_NoFeedEntry); ok {
-			return x.NoFeedEntry
-		}
-	}
-	return nil
-}
-
 type isFooterJumpUnresolved_Reason interface {
 	isFooterJumpUnresolved_Reason()
 }
@@ -10418,14 +10408,7 @@ type FooterJumpUnresolved_NotDrawn struct {
 	NotDrawn *FooterJumpNotDrawn `protobuf:"bytes,1,opt,name=not_drawn,json=notDrawn,proto3,oneof"`
 }
 
-type FooterJumpUnresolved_NoFeedEntry struct {
-	// This kind of work draws no feed entry at all (a monitor).
-	NoFeedEntry *FooterJumpNoFeedEntry `protobuf:"bytes,2,opt,name=no_feed_entry,json=noFeedEntry,proto3,oneof"`
-}
-
 func (*FooterJumpUnresolved_NotDrawn) isFooterJumpUnresolved_Reason() {}
-
-func (*FooterJumpUnresolved_NoFeedEntry) isFooterJumpUnresolved_Reason() {}
 
 // The entry is not drawn. Empty: the arm is the whole fact.
 type FooterJumpNotDrawn struct {
@@ -10464,43 +10447,6 @@ func (*FooterJumpNotDrawn) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{159}
 }
 
-// The kind draws no entry. Empty: the arm is the whole fact.
-type FooterJumpNoFeedEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FooterJumpNoFeedEntry) Reset() {
-	*x = FooterJumpNoFeedEntry{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[160]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FooterJumpNoFeedEntry) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FooterJumpNoFeedEntry) ProtoMessage() {}
-
-func (x *FooterJumpNoFeedEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[160]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FooterJumpNoFeedEntry.ProtoReflect.Descriptor instead.
-func (*FooterJumpNoFeedEntry) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{160}
-}
-
 // The row's command element.
 type FooterShellRowCommand struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -10513,7 +10459,7 @@ type FooterShellRowCommand struct {
 
 func (x *FooterShellRowCommand) Reset() {
 	*x = FooterShellRowCommand{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[161]
+	mi := &file_frontend_v1_footer_proto_msgTypes[160]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10525,7 +10471,7 @@ func (x *FooterShellRowCommand) String() string {
 func (*FooterShellRowCommand) ProtoMessage() {}
 
 func (x *FooterShellRowCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[161]
+	mi := &file_frontend_v1_footer_proto_msgTypes[160]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10538,7 +10484,7 @@ func (x *FooterShellRowCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRowCommand.ProtoReflect.Descriptor instead.
 func (*FooterShellRowCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{161}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *FooterShellRowCommand) GetText() string {
@@ -10560,7 +10506,7 @@ type FooterShellRowRuntime struct {
 
 func (x *FooterShellRowRuntime) Reset() {
 	*x = FooterShellRowRuntime{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[162]
+	mi := &file_frontend_v1_footer_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10572,7 +10518,7 @@ func (x *FooterShellRowRuntime) String() string {
 func (*FooterShellRowRuntime) ProtoMessage() {}
 
 func (x *FooterShellRowRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[162]
+	mi := &file_frontend_v1_footer_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10585,7 +10531,7 @@ func (x *FooterShellRowRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterShellRowRuntime.ProtoReflect.Descriptor instead.
 func (*FooterShellRowRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{162}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *FooterShellRowRuntime) GetStartedAtMs() int64 {
@@ -11150,13 +11096,11 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\n" +
 	"unresolved\x18\x02 \x01(\v2!.frontend.v1.FooterJumpUnresolvedH\x00R\n" +
 	"unresolvedB\b\n" +
-	"\x06target\"\xaa\x01\n" +
+	"\x06target\"u\n" +
 	"\x14FooterJumpUnresolved\x12>\n" +
-	"\tnot_drawn\x18\x01 \x01(\v2\x1f.frontend.v1.FooterJumpNotDrawnH\x00R\bnotDrawn\x12H\n" +
-	"\rno_feed_entry\x18\x02 \x01(\v2\".frontend.v1.FooterJumpNoFeedEntryH\x00R\vnoFeedEntryB\b\n" +
-	"\x06reason\"\x14\n" +
-	"\x12FooterJumpNotDrawn\"\x17\n" +
-	"\x15FooterJumpNoFeedEntry\"+\n" +
+	"\tnot_drawn\x18\x01 \x01(\v2\x1f.frontend.v1.FooterJumpNotDrawnH\x00R\bnotDrawnB\b\n" +
+	"\x06reasonJ\x04\b\x02\x10\x03R\rno_feed_entry\"\x14\n" +
+	"\x12FooterJumpNotDrawn\"+\n" +
 	"\x15FooterShellRowCommand\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\";\n" +
 	"\x15FooterShellRowRuntime\x12\"\n" +
@@ -11174,7 +11118,7 @@ func file_frontend_v1_footer_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_footer_proto_rawDescData
 }
 
-var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 163)
+var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 162)
 var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterView)(nil),                                  // 0: frontend.v1.FooterView
 	(*FooterStrip)(nil),                                 // 1: frontend.v1.FooterStrip
@@ -11336,10 +11280,9 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterJump)(nil),                                  // 157: frontend.v1.FooterJump
 	(*FooterJumpUnresolved)(nil),                        // 158: frontend.v1.FooterJumpUnresolved
 	(*FooterJumpNotDrawn)(nil),                          // 159: frontend.v1.FooterJumpNotDrawn
-	(*FooterJumpNoFeedEntry)(nil),                       // 160: frontend.v1.FooterJumpNoFeedEntry
-	(*FooterShellRowCommand)(nil),                       // 161: frontend.v1.FooterShellRowCommand
-	(*FooterShellRowRuntime)(nil),                       // 162: frontend.v1.FooterShellRowRuntime
-	(*FeedId)(nil),                                      // 163: frontend.v1.FeedId
+	(*FooterShellRowCommand)(nil),                       // 160: frontend.v1.FooterShellRowCommand
+	(*FooterShellRowRuntime)(nil),                       // 161: frontend.v1.FooterShellRowRuntime
+	(*FeedId)(nil),                                      // 162: frontend.v1.FeedId
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	1,   // 0: frontend.v1.FooterView.strip:type_name -> frontend.v1.FooterStrip
@@ -11553,19 +11496,18 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	153, // 208: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
 	152, // 209: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
 	155, // 210: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	161, // 211: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	162, // 212: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	160, // 211: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	161, // 212: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
 	156, // 213: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
 	157, // 214: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
-	163, // 215: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	162, // 215: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
 	158, // 216: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
 	159, // 217: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
-	160, // 218: frontend.v1.FooterJumpUnresolved.no_feed_entry:type_name -> frontend.v1.FooterJumpNoFeedEntry
-	219, // [219:219] is the sub-list for method output_type
-	219, // [219:219] is the sub-list for method input_type
-	219, // [219:219] is the sub-list for extension type_name
-	219, // [219:219] is the sub-list for extension extendee
-	0,   // [0:219] is the sub-list for field type_name
+	218, // [218:218] is the sub-list for method output_type
+	218, // [218:218] is the sub-list for method input_type
+	218, // [218:218] is the sub-list for extension type_name
+	218, // [218:218] is the sub-list for extension extendee
+	0,   // [0:218] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -11777,7 +11719,6 @@ func file_frontend_v1_footer_proto_init() {
 	}
 	file_frontend_v1_footer_proto_msgTypes[158].OneofWrappers = []any{
 		(*FooterJumpUnresolved_NotDrawn)(nil),
-		(*FooterJumpUnresolved_NoFeedEntry)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -11785,7 +11726,7 @@ func file_frontend_v1_footer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_footer_proto_rawDesc), len(file_frontend_v1_footer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   163,
+			NumMessages:   162,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

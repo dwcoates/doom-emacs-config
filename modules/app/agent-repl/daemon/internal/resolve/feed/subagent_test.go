@@ -2,6 +2,7 @@ package feed
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -480,8 +481,9 @@ func TestASubagentCreatedDetachedDrawsThroughTheWrapperAtOnce(t *testing.T) {
 	}
 }
 
-func TestAMonitorDrawsNoFeedRow(t *testing.T) {
-	// Arrange, Act: a monitor is FOOTER-ONLY.
+func TestACreatedMonitorsAnnouncementDrawsNoRowOfItsOwn(t *testing.T) {
+	// Arrange, Act: a monitor's entry is its call's own card, drawn from the
+	// call's frames; the announcement describes the watch for the footer.
 	h := newHarness(t)
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
 		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
@@ -495,10 +497,10 @@ func TestAMonitorDrawsNoFeedRow(t *testing.T) {
 
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 for a monitor", len(rows))
+		t.Fatalf("rows = %d, want 0 from a monitor's announcement", len(rows))
 	}
-	if !h.hasRecord("debug", "daemon.feed.detached_draws_nothing") {
-		t.Fatalf("records = %+v, want the not-a-row branch recorded", h.records())
+	if !h.hasRecord("debug", "daemon.feed.detached_monitor_card_is_entry") {
+		t.Fatalf("records = %+v, want the card-is-entry branch recorded", h.records())
 	}
 }
 
@@ -587,8 +589,8 @@ func (h *harness) bashUnplaced(work string, result any) {
 	switch r := result.(type) {
 	case *conversationv1.AgentBashStart:
 		item.Result = &conversationv1.AgentBash_Start{Start: r}
-	case *conversationv1.AgentBashUpdate:
-		item.Result = &conversationv1.AgentBash_Update{Update: r}
+	case *conversationv1.AgentBashTail:
+		item.Result = &conversationv1.AgentBash_Tail{Tail: r}
 	case *conversationv1.AgentToolCallProgress:
 		item.Result = &conversationv1.AgentBash_Progress{Progress: r}
 	case *conversationv1.AgentBashSuccess:
@@ -631,7 +633,7 @@ func TestABornDetachedShellMintsItsOwnCanonicalBubble(t *testing.T) {
 		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 
 	// Assert: exactly ONE head bubble on the root feed, and NO top-level
 	// detached-shell (spool body) row beside it.
@@ -685,14 +687,14 @@ func TestABornDetachedShellMintsItsOwnCanonicalBubble(t *testing.T) {
 }
 
 // TestAShellSeenFirstWithoutAStartCountsFromWhenItWasObserved covers the
-// two-plane race: the sidecar's spool tail delivers an `update` before the
+// two-plane race: the sidecar's spool tail delivers a `tail` before the
 // shim's re-announced `start`, so the run's first frame carries no start
 // instant. The clock must count from the daemon's first-observed instant, never
 // from the epoch (which drew the run as ~56 years old).
 func TestAShellSeenFirstWithoutAStartCountsFromWhenItWasObserved(t *testing.T) {
-	// Arrange, Act: the first frame the daemon ever sees is an update.
+	// Arrange, Act: the first frame the daemon ever sees is a tail.
 	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 
 	// Assert: the runtime is stamped with the observed instant, not zero.
 	if got := h.shellHead().GetRuntime().GetStartedAtMs(); got != h.nowMs {
@@ -706,7 +708,7 @@ func TestAShellSeenFirstWithoutAStartCountsFromWhenItWasObserved(t *testing.T) {
 func TestAnAuthoritativeStartReplacesTheObservedFallback(t *testing.T) {
 	// Arrange: an update-first shell drew its fallback clock.
 	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 
 	// Act: the run's own `start` re-announcement arrives, naming the true start.
 	h.bash("work-1", &conversationv1.AgentBashStart{
@@ -726,12 +728,12 @@ func TestAnAuthoritativeStartReplacesTheObservedFallback(t *testing.T) {
 func TestTheObservedFallbackIsStampedOnce(t *testing.T) {
 	// Arrange: an update-first shell was first observed at the initial clock.
 	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 	first := h.shellHead().GetRuntime().GetStartedAtMs()
 
-	// Act: time moves and another update lands, still with no authoritative start.
+	// Act: time moves and another tail lands, still with no authoritative start.
 	h.nowMs += 5_000
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 10})
+	h.bash("work-1", tailOf("compiling\nready\n"))
 
 	// Assert: the observed instant did not creep with the clock.
 	if got := h.shellHead().GetRuntime().GetStartedAtMs(); got != first {
@@ -753,77 +755,6 @@ func TestASpoolWithNoOutputYetIsUnsetRatherThanEmpty(t *testing.T) {
 	}
 }
 
-func TestSpoolUpdatesAccumulateAndStampTheBeat(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashStart{
-		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
-		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
-	})
-
-	// Act: two deltas, each continuing the sequence.
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 10})
-
-	// Assert: spool growth IS the beat.
-	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\nready\n" {
-		t.Fatalf("spool = %q", got)
-	}
-	if got := h.shellHead().GetLive().GetLastProgress().GetAtMs(); got != h.nowMs {
-		t.Fatalf("last_progress = %d, want the observed append", got)
-	}
-}
-
-func TestASpoolGapIsRefusedRatherThanConcatenatedAcross(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashStart{
-		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
-		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
-	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
-
-	// Act: an offset that does not continue the sequence — bytes were lost.
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 999})
-
-	// Assert: output that never existed is never drawn.
-	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
-		t.Fatalf("spool = %q, want the frame refused", got)
-	}
-	if !h.hasRecord("error", "daemon.feed.spool_gap") {
-		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_gap", h.records())
-	}
-}
-
-func TestACappedSpoolKeepsItsTailAndSaysWhatItDropped(t *testing.T) {
-	// Arrange: more output than the daemon carries.
-	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashStart{
-		Command:   &conversationv1.AgentBashCommand{Line: "yes"},
-		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
-	})
-	var offset uint64
-	line := "a line of output\n"
-	for i := 0; i < 2_000; i++ {
-		h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: line, FromOffset: offset})
-		offset += uint64(len(line))
-	}
-
-	// Act.
-	spool := h.shellBody("work-1").GetSpool()
-
-	// Assert: the TAIL, cut on a line boundary, with the drop stated.
-	if len(spool.GetText()) > spoolCap {
-		t.Fatalf("spool = %d bytes, want at most the cap %d", len(spool.GetText()), spoolCap)
-	}
-	if spool.GetText()[0] != 'a' {
-		t.Fatalf("spool begins %q, want a line boundary", spool.GetText()[:20])
-	}
-	if spool.GetOmitted() == nil || !contains(spool.GetOmitted().GetText(), "earlier lines not shown") {
-		t.Fatalf("omitted = %+v, want the truncation line", spool.GetOmitted())
-	}
-}
-
 func TestAnUncappedSpoolStatesNoTruncation(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
@@ -831,7 +762,7 @@ func TestAnUncappedSpoolStatesNoTruncation(t *testing.T) {
 		Command:   &conversationv1.AgentBashCommand{Line: "echo hi"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "hi\n", FromOffset: 0})
+	h.bash("work-1", tailOf("hi\n"))
 
 	// Assert.
 	if h.shellBody("work-1").GetSpool().GetOmitted() != nil {
@@ -1020,7 +951,7 @@ func TestOutputObservedBeforeAnUnobservedSettleIsStillDrawn(t *testing.T) {
 		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 
 	// Act: the settle states no observed output of its own.
 	h.bash("work-1", &conversationv1.AgentBashSuccess{
@@ -1148,7 +1079,7 @@ func settledShell(h *harness, work string) {
 		Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bash(work, &conversationv1.AgentBashUpdate{FromOffset: 0, NewOutput: "line-1\n"})
+	h.bash(work, tailOf("line-1\n"))
 	h.bash(work, &conversationv1.AgentBashSuccess{
 		Command: &conversationv1.AgentBashCommand{Line: "npm test"},
 		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
@@ -1194,7 +1125,7 @@ func TestASpoolReplayDoesNotUnsettleASettledShell(t *testing.T) {
 	settledShell(h, "work-1")
 
 	// Act
-	h.bash("work-1", &conversationv1.AgentBashUpdate{FromOffset: 0, NewOutput: "line-1\n"})
+	h.bash("work-1", tailOf("line-1\n"))
 
 	// Assert
 	if h.shellHead().GetSettled() == nil {
@@ -1224,7 +1155,7 @@ func TestASettledShellKeepsTheEXITBytesAReplayDelivers(t *testing.T) {
 	settledShell(h, "work-1")
 
 	// Act
-	h.bash("work-1", &conversationv1.AgentBashUpdate{FromOffset: 7, NewOutput: "EXIT=0\n"})
+	h.bash("work-1", tailOf("line-1\nEXIT=0\n"))
 
 	// Assert
 	if h.shellHead().GetSettled() == nil {
@@ -1694,11 +1625,21 @@ func monitorActivity(unit string) *conversationv1.AgentActivity {
 	}
 }
 
+// wakeupActivity is a self-wakeup's start: a kind that draws no feed row.
+func wakeupActivity(unit string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_ScheduleWakeup{ScheduleWakeup: &conversationv1.AgentScheduleWakeup{
+			Result: &conversationv1.AgentScheduleWakeup_Start{Start: &conversationv1.AgentScheduleWakeupStart{}},
+		}},
+	}
+}
+
 func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T) {
-	// Arrange: the monitor's own unit arrives first, then its detachment.
+	// Arrange: the footer-only unit arrives first, then a detachment naming it.
 	h := newHarness(t)
-	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("monitor-1"), noAddress())
-	h.detachWork("work-1", "monitor-1")
+	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), noAddress())
+	h.detachWork("work-1", "wakeup-1")
 
 	// Act.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
@@ -1715,10 +1656,10 @@ func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T
 func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 	// Arrange: the announcement beats the unit, so it is held first.
 	h := newHarness(t)
-	h.detachWork("work-1", "monitor-1")
+	h.detachWork("work-1", "wakeup-1")
 
 	// Act: the unit arrives, and its kind draws no row.
-	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("monitor-1"), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(), wakeupActivity("wakeup-1"), noAddress())
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
 		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
 	}, nil)
@@ -1729,49 +1670,6 @@ func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 	}
 	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
 		t.Fatalf("records = %+v, want NO detached_unplaceable once the mark is retired", h.records())
-	}
-}
-
-func TestARedeliveredSpoolPrefixIsAReplayRatherThanAGap(t *testing.T) {
-	// Arrange: the stream plane's first chunk is already held.
-	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashStart{
-		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
-		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
-	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
-
-	// Act: the file plane re-delivers the same bytes and carries the next
-	// ones with them.
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\nready\n", FromOffset: 0})
-
-	// Assert: the overlap is dropped, the new tail lands, and nothing errors.
-	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\nready\n" {
-		t.Fatalf("spool = %q, want the replayed prefix folded rather than doubled", got)
-	}
-	if h.hasRecord("error", "daemon.feed.spool_gap") {
-		t.Fatalf("records = %+v, want NO spool_gap for a re-delivered prefix", h.records())
-	}
-}
-
-func TestASpoolFrameThatRestatesHeldBytesDifferentlyIsRefused(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.bash("work-1", &conversationv1.AgentBashStart{
-		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
-		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
-	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
-
-	// Act: a frame that overlaps the held bytes but disagrees with them.
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "COMPILING\nready\n", FromOffset: 0})
-
-	// Assert: a disagreement is real loss, so the frame is refused loudly.
-	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
-		t.Fatalf("spool = %q, want the frame refused", got)
-	}
-	if !h.hasRecord("error", "daemon.feed.spool_gap") {
-		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_gap", h.records())
 	}
 }
 
@@ -2191,7 +2089,7 @@ func TestABeatCarryingAnOlderProducerInstantDoesNotWindTheShellsAgeBackwards(t *
 		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", tailOf("compiling\n"))
 	appended := h.nowMs
 
 	// Act: a liveness beat whose PRODUCER instant predates that append, which
@@ -2378,7 +2276,7 @@ func TestShellEndingRendersNothingForAFrameThatIsNotATerminal(t *testing.T) {
 	}{
 		{name: "no frame at all", bash: nil},
 		{name: "a start", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{}}}},
-		{name: "an update", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{}}}},
+		{name: "a tail", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{}}}},
 		{name: "a beat", bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Progress{Progress: &conversationv1.AgentToolCallProgress{}}}},
 	}
 	for _, tt := range tests {
@@ -2824,25 +2722,26 @@ func TestTheUnplaceableRecordNamesTheWorkKindOwnerAnnouncerAndReason(t *testing.
 	t.Fatalf("records = %+v, want the ERROR record", h.records())
 }
 
-func TestASubagentsMonitorDrawsNothingInAnyFeed(t *testing.T) {
-	// Arrange: a monitor is footer-only, whoever arms it.
+func TestASubagentsMonitorDrawsItsCardInTheSubagentsFeed(t *testing.T) {
+	// Arrange: the monitor's card is drawn where its owner's call stands.
 	h := newHarness(t)
 	sub := &conversationv1.AgentId{Value: "agent-sub"}
 	h.send(spawnCall("toolu_spawn", sub))
 	h.sendAs(sub, monitorActivity("toolu_monitor"))
 
-	// Act.
+	// Act: the task stream announces it on the MAIN book.
 	h.announceDetachment(mainAgent(), nil, "toolu_monitor", "toolu_monitor")
 
-	// Assert.
+	// Assert: the card stays a card in the subagent's feed, and the root holds
+	// only the spawn.
 	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"subagent"}) {
 		t.Fatalf("root rows = %v, want the spawn's bubble alone", got)
 	}
-	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt"}) {
-		t.Fatalf("subagent rows = %v, want the commission alone", got)
+	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt", "tool_card"}) {
+		t.Fatalf("subagent rows = %v, want the commission then the monitor's card", got)
 	}
 	if len(h.warnings.keys()) != 0 {
-		t.Fatalf("raised = %v, want nothing: a monitor drawing no row is its design", h.warnings.keys())
+		t.Fatalf("raised = %v, want nothing", h.warnings.keys())
 	}
 }
 
@@ -2925,7 +2824,7 @@ func TestAnUnplacedShellsFramesPublishNothing(t *testing.T) {
 		Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 	})
-	h.bashUnplaced("work-1", &conversationv1.AgentBashUpdate{NewOutput: "PASS\n", FromOffset: 0})
+	h.bashUnplaced("work-1", tailOf("PASS\n"))
 
 	// Assert: nothing on any feed — and never on the root in its place.
 	if rows := h.everyRow(); len(rows) != 0 {
@@ -2940,7 +2839,7 @@ func TestAnUnplacedShellsSpoolIsDrawnWholeOnceItsCallPlacesIt(t *testing.T) {
 	// Arrange: output arrives on the run's stream before its call's card.
 	h := newHarness(t)
 	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
-	h.bashUnplaced("toolu_bash", &conversationv1.AgentBashUpdate{NewOutput: "PASS\n", FromOffset: 0})
+	h.bashUnplaced("toolu_bash", tailOf("PASS\n"))
 
 	// Act.
 	h.send(bashCall("toolu_bash", "npm test"))
@@ -3048,7 +2947,7 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 					Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
 					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
 				})
-				h.bash("work-3", &conversationv1.AgentBashUpdate{NewOutput: "ok\n", FromOffset: 0})
+				h.bash("work-3", tailOf("ok\n"))
 				return h.shellBody("work-3").GetWorkId()
 			},
 			want: "",
@@ -3350,5 +3249,154 @@ func TestABoundSettledSpawnRestatingNoStartIsRecordedAtError(t *testing.T) {
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+	}
+}
+
+// tailOf is a run's rendered tail holding its whole output so far.
+func tailOf(text string) *conversationv1.AgentBashTail {
+	return &conversationv1.AgentBashTail{Text: text}
+}
+
+func TestASupersedingTailIsDrawnWholeAndStampsTheBeat(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", tailOf("compiling\n"))
+	h.nowMs += 5_000
+
+	// Act: the run grew, and its newest tail carries the whole window.
+	h.bash("work-1", tailOf("compiling\nready\n"))
+
+	// Assert: drawn verbatim, never concatenated with the tail it supersedes,
+	// and spool growth IS the beat.
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\nready\n" {
+		t.Fatalf("spool = %q, want the newest tail verbatim", got)
+	}
+	if got := h.shellHead().GetLive().GetLastProgress().GetAtMs(); got != h.nowMs {
+		t.Fatalf("last_progress = %d, want the observed growth at %d", got, h.nowMs)
+	}
+}
+
+func TestATailPastTheContractsCapIsRefused(t *testing.T) {
+	// Arrange: a tail the renderer already drew.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "yes"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", tailOf("compiling\n"))
+
+	// Act: a producer that no longer agrees with the renderer on the cap.
+	h.bash("work-1", tailOf(strings.Repeat("y", spoolCap+1)))
+
+	// Assert: refused loudly, and the drawn tail stands.
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "compiling\n" {
+		t.Fatalf("spool = %d bytes, want the over-cap frame refused", len(got))
+	}
+	if !h.hasRecord("error", "daemon.feed.spool_over_cap") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_over_cap", h.records())
+	}
+}
+
+func TestTheRendererDrawsByTheContractsCap(t *testing.T) {
+	// Arrange. The sidecar bounds the stored tail by the same constant; a
+	// local 16 KiB here is how the writer and the renderer would drift apart.
+	want := int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
+
+	// Act.
+	got := spoolCap
+
+	// Assert.
+	if got != want {
+		t.Fatalf("spoolCap = %d, want the contract's AGENT_BASH_TAIL_CAP_BYTES %d", got, want)
+	}
+}
+
+func TestACappedTailIsDrawnVerbatimWithTheLinesItOmitted(t *testing.T) {
+	// Arrange: a run past the cap, its tail already cut by the producer.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "yes"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.bash("work-1", &conversationv1.AgentBashTail{Text: "a line of output\n", BytesOmitted: 34_000, LinesOmitted: 2_000})
+
+	// Assert: the text as stated, and the drop stated in the renderer's words.
+	spool := h.shellBody("work-1").GetSpool()
+	if spool.GetText() != "a line of output\n" {
+		t.Fatalf("spool = %q, want the tail verbatim", spool.GetText())
+	}
+	if got := spool.GetOmitted().GetText(); got != "2,000 earlier lines not shown" {
+		t.Fatalf("omitted = %q, want the lines the producer counted", got)
+	}
+}
+
+func TestATailCutToNothingStillStatesWhatItOmitted(t *testing.T) {
+	// Arrange: a window whose only line break was its last byte, which the
+	// renderer's cut leaves empty.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "yes"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.bash("work-1", &conversationv1.AgentBashTail{Text: "", BytesOmitted: 20_000, LinesOmitted: 1})
+
+	// Assert: the body is drawn, stating the omission, as it always was.
+	if !h.hasShellBody("work-1") {
+		t.Fatal("no spool body row, want one stating the omitted line")
+	}
+	if got := h.shellBody("work-1").GetSpool().GetOmitted().GetText(); got != "1 earlier lines not shown" {
+		t.Fatalf("omitted = %q, want the one omitted line stated", got)
+	}
+}
+
+func TestARedeliveredTailIsAReplayRatherThanGrowth(t *testing.T) {
+	// Arrange: a tail already drawn at the first instant.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", tailOf("compiling\n"))
+	drawnAt := h.nowMs
+
+	// Act: a re-opened watch replays the same tail later.
+	h.nowMs += 5_000
+	h.bash("work-1", tailOf("compiling\n"))
+
+	// Assert: the run said nothing new, so the beat stands where it was.
+	if got := h.shellHead().GetLive().GetLastProgress().GetAtMs(); got != drawnAt {
+		t.Fatalf("last_progress = %d, want the growth at %d, not the replay", got, drawnAt)
+	}
+	if !h.hasRecord("debug", "daemon.feed.spool_replay") {
+		t.Fatalf("records = %+v, want a debug daemon.feed.spool_replay", h.records())
+	}
+}
+
+func TestATailAccountingForFewerBytesIsASpoolThatStartedOver(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", tailOf("compiling\nready\n"))
+
+	// Act: a truncated spool's window restarted with the file.
+	h.bash("work-1", tailOf("new\n"))
+
+	// Assert: the newest window is what the run now says, stated at INFO.
+	if got := h.shellBody("work-1").GetSpool().GetText(); got != "new\n" {
+		t.Fatalf("spool = %q, want the restarted window", got)
+	}
+	if !h.hasRecord("info", "daemon.feed.spool_restarted") {
+		t.Fatalf("records = %+v, want an INFO daemon.feed.spool_restarted", h.records())
 	}
 }

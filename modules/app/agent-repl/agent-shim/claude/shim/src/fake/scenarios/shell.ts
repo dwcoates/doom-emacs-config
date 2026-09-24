@@ -10,7 +10,7 @@
  *
  * # Every byte of DETACHED shell output comes from the spool
  *
- * `AgentBashUpdate` is structurally detach-only, and the sidecar produces it by
+ * `AgentBashTail` is structurally detach-only, and the sidecar produces it by
  * TAILING the vendor's `tasks/<id>.output`. The detached scenarios therefore
  * write the spool incrementally, one append at a time, and terminate it with
  * `EXIT=<code>`. That file — not any SDK message — is the whole test.
@@ -214,7 +214,7 @@ const BASH_DETACH = scenario({
   writes:
     "the tool_use and tool_result lines, and `<spool-root>/<slug>/<session>/tasks/b<hex>.output` written " +
     "INCREMENTALLY (the first line before any detach gate, the rest after it) and terminated by `EXIT=0`",
-  arms: "AgentBash detached_work + AgentBashUpdate deltas fed by the sidecar tailing the spool",
+  arms: "AgentBash detached_work + the AgentBashTail snapshot fed by the sidecar tailing the spool",
   async run(ctx) {
     ctx.log.debug({ turn: ctx.turn, branch: "bash-detach" }, "fake detached-bash turn");
     const command = ctx.args === "" ? "for i in 1 2 3; do echo line-$i; sleep 1; done" : ctx.args;

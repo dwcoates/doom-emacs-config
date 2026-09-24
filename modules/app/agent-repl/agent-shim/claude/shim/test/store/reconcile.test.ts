@@ -15,6 +15,7 @@ import { producerId } from "../../src/store/keys.js";
 import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import {
   closingMonitorTerminal,
+  findMonitorCall,
   announceLiveWork,
   createReconciler,
   findBashStart,
@@ -557,9 +558,65 @@ describe("closingAgentTerminal", () => {
   });
 });
 
+/** A monitor unit recorded in BOOK under RUN, in the given result arm. */
+function recordedMonitor(result: conversationv1.AgentMonitor["result"]): conversationv1.HistoryEntryAt {
+  return create(conversationv1.HistoryEntryAtSchema, {
+    at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+    entry: create(conversationv1.HistoryEntrySchema, {
+      entry: {
+        case: "agentFrame",
+        value: create(conversationv1.AgentFrameSchema, {
+          agentId: BOOK,
+          result: {
+            case: "update",
+            value: create(conversationv1.AgentUpdateSchema, {
+              update: {
+                case: "activity",
+                value: create(conversationv1.AgentActivitySchema, {
+                  activityId: RUN,
+                  item: { case: "monitor", value: create(conversationv1.AgentMonitorSchema, { result }) },
+                }),
+              },
+            }),
+          },
+        }),
+      },
+    }),
+  });
+}
+
+const ARMED = create(conversationv1.AgentMonitorStartSchema, {
+  description: "watch the log",
+  source: { case: "command", value: create(conversationv1.AgentMonitorCommandSchema, { command: "tail -f log" }) },
+});
+
+describe("findMonitorCall", () => {
+  it("answers the recorded start", () => {
+    expect(findMonitorCall([recordedMonitor({ case: "start", value: ARMED })], RUN)).toEqual(ARMED);
+  });
+
+  it("answers the call a settled arm restated", () => {
+    const ended = create(conversationv1.AgentMonitorEndedSchema, { call: ARMED });
+    expect(findMonitorCall([recordedMonitor({ case: "ended", value: ended })], RUN)).toEqual(ARMED);
+  });
+
+  it("answers nothing for a unit that is not a monitor", () => {
+    expect(findMonitorCall([recordedBashStart("sleep 1")], RUN)).toBeUndefined();
+  });
+});
+
 describe("closingMonitorTerminal", () => {
+  it("restates the call it was handed", () => {
+    const entry = closingMonitorTerminal(BOOK, RUN, ARMED);
+
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const monitor = (update.value as conversationv1.AgentActivity).item.value as conversationv1.AgentMonitor;
+    expect((monitor.result.value as conversationv1.AgentMonitorEnded).call).toEqual(ARMED);
+  });
+
   it("ends the watch with the monitor's own ended arm", () => {
-    const entry = closingMonitorTerminal(BOOK, RUN);
+    const entry = closingMonitorTerminal(BOOK, RUN, undefined);
 
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
     const update = (frame?.result.value as conversationv1.AgentUpdate).update;
@@ -569,7 +626,7 @@ describe("closingMonitorTerminal", () => {
   });
 
   it("stamps the closed monitor unit with the stands-alone contract", () => {
-    const entry = closingMonitorTerminal(BOOK, RUN);
+    const entry = closingMonitorTerminal(BOOK, RUN, undefined);
 
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
     const activity = (frame?.result.value as conversationv1.AgentUpdate).update
@@ -578,7 +635,7 @@ describe("closingMonitorTerminal", () => {
   });
 
   it("keys the row by the monitor's own unit, so the unit concludes in place", () => {
-    const entry = closingMonitorTerminal(BOOK, RUN);
+    const entry = closingMonitorTerminal(BOOK, RUN, undefined);
 
     expect(entry.upsertKey).toBe(`activity:${RUN.value}`);
   });
@@ -905,9 +962,9 @@ describe("findBashStart on a unit that is not at its start", () => {
                       case: "bash",
                       value: create(conversationv1.AgentBashSchema, {
                         result: {
-                          case: "update",
-                          value: create(conversationv1.AgentBashUpdateSchema, {
-                            newOutput: "working\n",
+                          case: "tail",
+                          value: create(conversationv1.AgentBashTailSchema, {
+                            text: "working\n",
                           }),
                         },
                       }),

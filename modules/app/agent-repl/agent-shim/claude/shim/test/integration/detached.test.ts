@@ -50,7 +50,7 @@ import {
   bashCompleted,
   bashRowEntry,
   bashStart,
-  bashUpdate,
+  bashTail,
   createStoreClient,
   seedBashLifecycle,
   seedDetachedAnnouncement,
@@ -244,7 +244,7 @@ describe("a detached shell's announcement", () => {
 });
 
 describe("WatchBash serves the SIDECAR's rows", () => {
-  test("it opens with start carrying the ORIGINAL instant, then updates, then the terminal", async () => {
+  test("it opens with start carrying the ORIGINAL instant, then the tail, then the terminal", async () => {
     // Every byte of detached shell output comes from the sidecar tailing the
     // vendor's spool — foreground output is observable nowhere while running —
     // so the rows are seeded here and the shim must serve them back in order.
@@ -280,7 +280,9 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     const arms = frames.map((frame) => bashFrame(frame).result.case);
     expect(arms[0]).toBe("start");
     expect(arms[arms.length - 1]).toBe("success");
-    expect(arms.filter((arm) => arm === "update").length).toBe(2);
+    // ONE tail row, superseded by the second write: the replay draws the
+    // newest window, which holds both chunks.
+    expect(arms.filter((arm) => arm === "tail").length).toBe(1);
     const first = bashFrame(frames[0]);
     if (first.result.case === "start") {
       // A RE-ANNOUNCEMENT REPEATS THE ORIGINAL INSTANT: drawn clocks must not
@@ -290,9 +292,9 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     stream.close();
   });
 
-  test("the update frames carry offsets and deltas, never a settled whole", async () => {
-    // Bash keeps offset+delta because its spool has no settled whole; prose does
-    // not, because its terminal carries the text and self-corrects.
+  test("the tail frames carry the rendered window, never the whole spool", async () => {
+    // Output beyond what is rendered is not stored (owner ruling 2026-09-23):
+    // a run's output is one snapshot superseded whole, never a delta sequence.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
@@ -321,12 +323,14 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     );
     const frames = await bash.drain();
 
-    const updates = frames
+    // The store holds ONE tail row, superseded by each write, so a replay
+    // opened after both writes serves the newest window and nothing before it.
+    const tails = frames
       .map(bashFrame)
-      .filter((frame) => frame.result.case === "update")
-      .map((frame) => (frame.result.case === "update" ? frame.result.value : null));
-    expect(updates.map((update) => Number(update?.fromOffset ?? -1))).toEqual([0, 3]);
-    expect(updates.map((update) => update?.newOutput)).toEqual(["abc", "de"]);
+      .filter((frame) => frame.result.case === "tail")
+      .map((frame) => (frame.result.case === "tail" ? frame.result.value : null));
+    expect(tails.map((tail) => tail?.text)).toEqual(["abcde"]);
+    expect(tails.map((tail) => Number(tail?.bytesOmitted ?? -1))).toEqual([0]);
     stream.close();
   });
 
@@ -400,7 +404,7 @@ describe("WatchBash and the rows it relays", () => {
     stream.close();
   });
 
-  test("it FOLLOWS: deltas and the terminal seeded after the open still arrive, in order", async () => {
+  test("it FOLLOWS: tails and the terminal seeded after the open still arrive, in order", async () => {
     // The same obligation stated as an ordering: the stream is opened first and
     // the rows are written afterwards, so nothing here can be served from a
     // snapshot taken at the open.
@@ -432,30 +436,32 @@ describe("WatchBash and the rows it relays", () => {
     );
     const frames = await bash.drain();
 
-    expect(frames.map((frame) => bashFrame(frame).result.case)).toEqual([
+    // A tail SUPERSEDES the one before it, so whether the watcher met the
+    // first window live or only the newest on its replay depends on when its
+    // open was answered; what is owed either way is the order, and the newest
+    // window holding every chunk.
+    const arms = frames.map((frame) => bashFrame(frame).result.case);
+    expect(arms.filter((arm, index) => arm !== "tail" || arms[index - 1] !== "tail")).toEqual([
       "start",
-      "update",
-      "update",
+      "tail",
       "success",
     ]);
-    // And the deltas arrived in the order they were written.
-    expect(
-      frames
-        .map(bashFrame)
-        .filter((frame) => frame.result.case === "update")
-        .map((frame) => (frame.result.case === "update" ? frame.result.value.newOutput : "")),
-    ).toEqual(["one\n", "two\n"]);
+    const tails = frames
+      .map(bashFrame)
+      .filter((frame) => frame.result.case === "tail")
+      .map((frame) => (frame.result.case === "tail" ? frame.result.value.text : ""));
+    expect(tails.at(-1)).toBe("one\ntwo\n");
     stream.close();
   });
 
-  test("the terminal is served ONCE and ENDS the run's stream; a later delta is not served", async () => {
+  test("the terminal is served ONCE and ENDS the run's stream; a later tail is not served", async () => {
     // A RUN'S STREAM ENDS AT ITS TERMINAL. The terminal is served exactly once
     // and is the last thing on the stream — a second would have a consumer draw
     // the run finishing twice, and anything after it would arrive on a stream
     // the consumer has already closed.
     //
     // THE OBLIGATION THIS PUTS ON THE SIDECAR: a last chunk must be written
-    // BEFORE the terminal row, never after it. A delta written afterwards is
+    // BEFORE the terminal row, never after it. A tail written afterwards is
     // durable in the record and reaches no watcher, which is asserted here so
     // the ordering is a stated rule rather than a surprise.
     const shim = await spawnShim();
@@ -478,15 +484,17 @@ describe("WatchBash and the rows it relays", () => {
         run,
         frame: bashCompleted("echo", 0, "early\n"),
         writeId: `${run}-terminal`,
+        upsertKey: `bash:${run}:terminal`,
         topLevel: started.vendorSessionId,
       }),
     ]);
-    // ...and a delta after it.
+    // ...and a tail after it.
     await writeEntries(store, producer, [
       bashRowEntry({
         run,
-        frame: bashUpdate("trailing\n", 6),
+        frame: bashTail("early\ntrailing\n"),
         writeId: `${run}-late`,
+        upsertKey: `bash:${run}:tail`,
         topLevel: started.vendorSessionId,
       }),
     ]);
@@ -502,7 +510,7 @@ describe("WatchBash and the rows it relays", () => {
     const arms = frames.map((frame) => bashFrame(frame).result.case);
     expect(arms.filter((arm) => arm === "success").length).toBe(1);
     expect(arms.at(-1)).toBe("success");
-    expect(arms).not.toContain("update");
+    expect(arms).not.toContain("tail");
     expect(bash.isEnded()).toBe(true);
     stream.close();
   });
@@ -845,10 +853,16 @@ describe("subagents", () => {
     const child = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest({ target: agentId(created) }), options),
     );
-    await child.next();
-    const own = await child.until((frame) => frame.frame.case === "entry");
+    // THE CHILD'S FRAMES ARE ON ITS PAGE OR ITS TAIL, whichever the writer's
+    // pace put them on: the store writer lands a backlog in merged batches, so
+    // a synchronous subagent's rows can all be durable before this watch opens.
+    const opening = watchAgentPage(await child.next());
+    const own =
+      opening.entries.length > 0
+        ? opening.entries[0]
+        : watchAgentEntry(await child.until((frame) => frame.frame.case === "entry"));
 
-    expect(entryFrame(watchAgentEntry(own))?.agentId?.value).toBe(created);
+    expect(entryFrame(own)?.agentId?.value).toBe(created);
     // AND NOTHING OF THE CHILD'S IS ON THE PARENT'S STREAM: every frame the
     // spawning agent's book served names the spawning agent.
     for (const frame of stream.frames()) {
@@ -970,9 +984,16 @@ describe("subagents", () => {
     stream.close();
   });
 
-  test("WatchAgent(created_agent_id) opens with that agent's own page and tails its frames", async () => {
+  test("WatchAgent(created_agent_id) opens with that agent's own page, serving its own frames", async () => {
     // ONE API whether the agent is the main thread or a subagent: the created
     // agent id is the key a consumer draws a container under.
+    //
+    // ITS FRAMES ARE ON THE PAGE OR THE TAIL, whichever the writer's pace put
+    // them on. This used to wait for a TAIL entry, which only held because the
+    // writer once spent a store round trip per vendor message; it lands a
+    // backlog in merged batches now, so the agent's rows can all be durable
+    // before this watch opens. The tail itself is proven by the main-book and
+    // reader suites with rows written after the open.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
@@ -986,10 +1007,13 @@ describe("subagents", () => {
       shim.clients.h1.watchAgent(watchAgentRequest({ target: agentId(created) }), options),
     );
     const page = watchAgentPage(await child.next());
-    const tailed = await child.until((frame) => frame.frame.case === "entry");
+    const own =
+      page.entries.length > 0
+        ? page.entries[0]
+        : watchAgentEntry(await child.until((frame) => frame.frame.case === "entry"));
 
     expect(page.boundary.case).not.toBeUndefined();
-    expect(entryFrame(watchAgentEntry(tailed))?.agentId?.value).toBe(created);
+    expect(entryFrame(own)?.agentId?.value).toBe(created);
     stream.close();
     child.close();
   });

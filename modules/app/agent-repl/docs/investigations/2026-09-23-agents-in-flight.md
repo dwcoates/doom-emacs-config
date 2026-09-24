@@ -12,12 +12,10 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a47129c3ca68414a3` (the e2e port in `feat/dod-e2e`, then it merges into this branch) | 21:xx (REVIVED after the session restart) |
-| `fix/shim-writer-never-drops` | `~/.config/doom-worktrees/shim-writer-never-drops` | The shim's store writer never drops writes (it was "DROPPING store writes" at 256 batches); it uses backpressure, bounded batches, and latency-critical frames not stuck behind a backlog. | `a81508fcefcb60065` | 22:10 |
-| `fix/store-checkpoint-and-cache` | `~/.config/doom-worktrees/store-checkpoint-and-cache` | Checkpoints become bulk-tier jobs (autocheckpoint off, `journal_size_limit`), plus a larger page cache (and maybe mmap), measured before and after. | `a959c0a4401ddeef2` | 22:10 |
-| `fix/shell-output-tail-only` | `~/.config/doom-worktrees/shell-output-tail-only` | Shell output is stored as a rolling tail at the renderer's 16 KiB cap (one shared constant) instead of contiguous deltas from 0; live and replay show what they show today. | `a11d136b2405a419b` | 22:10 |
-| `fix/fake-git-killed-flake` | `~/.config/doom-worktrees/fake-git-killed-flake` | Root-cause the flake `TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal` (fake git SIGKILLed under load; suspect cross-run stray reaping). Make ownership-scoped reaping structural. | `af0db7ff97ed4c775` | 22:35 |
 | `fix/e2e-load-flakes` | `~/.config/doom-worktrees/e2e-load-flakes` | Root-cause the e2e flakes `TestWebappLayerRoster` (ClientLog/lease ERRORs during a drain) and `TestClearRotatesIdentity` (the separation row timed out; `final_answer_unresolved`). | `a3cc32b3e6611f35f` | 22:55 |
+| `fix/restate-rest-and-old-row-level` | `~/.config/doom-worktrees/restate-rest-and-old-row-level` | Pre-contract unrestated rows log INFO (a new defect stays ERROR). Subagent and artifact failures restate; every settle carries `started_at`. | `aa95f06fc74ba5cf4` | 23:05 |
+| `fix/shim-open-call-leak` | `~/.config/doom-worktrees/shim-open-call-leak` | The shim's in-flight tool registry leaks (full at 512; an interrupt cut 493 phantom calls). Settle and remove every call on its settling path; reaching the bound is an ERROR. | `a90cb0143868c171b` | 23:55 |
+| `integrate/deploys-and-keepalive` | `~/.config/doom-worktrees/integrate-deploys-keepalive` | Integrate `feat/daemon-owned-deploys` (e2e ported, `deploy_script_failed` removed) and `fix/remove-keepalive-hold` onto master; fix stale deploy docs and the `ensure-deps` shared-node-store wipe; write the one-time bootstrap from the old runtime. | `a47129c3ca68414a3` | 00:05 |
 
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
@@ -26,20 +24,23 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
-- Old store rows: settles written before the restate change now log an ERROR and draw nothing on replay, instead of an empty card. That's ERROR noise until the store ages out. Accept it, or treat pre-change rows at a lower level?
-- Restating for a Subagent failure (prompt and created agent id) and an Artifact failure (the publish act) needs a contract shape. Should every settle also carry `started_at`, so replayed cards show their runtime?
-- The proto keeps a `DaemonFault.deploy_script_failed` arm with no raise site now that the script is gone. Remove it?
+- The shared `~/.cache/agent-repl/node-store` webapp entry was emptied by a worktree's `npm ci`. Repopulating it is outside the project: the owner runs it, or approves.
+- The shim reports "another process owns this conversation" when it can't even spawn its lock holder. A new refusal arm?
+- Ordering contract: a turn's ending still waits behind every row produced before it (the store gets rows in exact production order, which subagent consumers rely on). Should a terminal ever overtake? That's an ordering-contract change.
+- Harness stray reaping still selects by argv path, not a kernel mark (a session id would break handover successors and Emacs-launched e2e daemons). Keep it as is?
+- `DaemonFault.deploy_script_failed` removal is folded into the deploy branch's finishing agent.
+- `SPC TAB f` retry: needs a deploy, and the owner must OK the bounce.
 - The scrollbar gutter: WebKit reserves the SYSTEM scrollbar's width (0 with overlay scrollbars, 14px with "always"), not our 8px. Should we fix it, and how?
-- Background priority vs. the tight test timeouts: under `taskpolicy -b` on a loaded machine, suites time out (900ms tests, 1800ms cold boot). Which gives way?
-- Proto: footer rows retired field tag 1 (`FeedId target`), a removal rather than an addition. Confirm.
-- Monitor rows are now clickable and always show "not on screen" (a small visible change). Confirm.
-- The selected-row mark is a 3px bar at the feed's far left, away from a centered card. Should it be restyled?
-- The keep-alive hold is still visible to the daemon through the proto-ruled `turn_already_open.keepalive` refusal. Remove it (a proto change)?
-- The new name for "Release" (suggested: "Send now").
 - A retry of `SPC TAB f`, which now logs.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- A Monitor call draws the ordinary tool-call card in its owner's feed; its footer row centers and rings it; the monitor's settles restate its call (`no_feed_entry` reserved) (`feat/monitor-feed-card`, all suites green).
+- Shell output is stored as one rolling tail at the shared 16 KiB cap (`AgentBashTail`; `update` retired); live and replay draw the same body; old delta rows are skipped at INFO (`fix/shell-output-tail-only`).
+- Store: checkpoints are a bulk-tier job (autocheckpoint off, `journal_size_limit` 16 MiB), and the page cache is 64/16 MiB plus a 256 MiB mmap (`fix/store-checkpoint-and-cache`).
+- The shim's store writer never drops a row: bounded batches, backpressure on the vendor loop, persistent failures held and loud, batches ending at every prompt or terminal (`fix/shim-writer-never-drops`, 5734 unit and 339 integration tests pass).
+- The fake-git SIGKILL flake: the test's own teardown `kill(-pgid)` isn't atomic, so the daemon saw its child die first. The harness now freezes the group, then kills. Reclaim tests use private spaces, and strays match whole paths (`fix/fake-git-killed-flake`; 10/10 concurrent integration runs green twice).
+- A selected entry is ringed on its own card (one `.entry-selected` for footer jumps and reply selection), and "Release" reads "Send now" (`fix/selected-mark-and-send-now`, 5695 tests pass).
 - Keep-alive rows are stored by neither plane (nothing that runs or rewinds a keep-alive reads them). The sidecar classifies keep-alive records by promptId and parent chain, primed across restarts by reading earlier bytes (a one-time pass of up to 166 MB per resumed transcript). Known gap: a keep-alive turn that spawns a subagent (`fix/keepalive-rows-unstored`).
 - Held-prompt badges carry daemon-written short labels plus an expand-only detail (`HeldPrompt.badges`), drawn verbatim; an "editing" badge too (`feat/held-badge-short-labels`, 5672 webapp tests).
 - Detached work is drawn only in its owner's feed, at its spawning call's row (the announcement names the owner). Unplaceable work draws nothing and raises an ERROR plus a topbar warning; the root fallbacks are gone. Also: the sidecar reads a shell launch from the vendor's sentence when `toolUseResult` is missing, and a caller-cancelled open-faults read is DEBUG (`fix/detached-work-in-owning-feed`, daemon suite green on master).

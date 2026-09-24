@@ -53,20 +53,23 @@ const (
 	LostSweptUp LostReason = "swept_up"
 )
 
-// BashDelta converts a batch of spool bytes into the run's update frame.
+// BashTail converts the run's rendered output so far into its tail frame: the
+// most recent bytes, bounded by conversation.v1 AgentBashTailCap, and how many
+// bytes and lines came before them.
 //
-// `fromOffset` is a GAP DETECTOR, not addressing: it MUST equal the number of
-// bytes the consumer has already accumulated for this unit, and anything else
-// means bytes were lost and the consumer refuses the frame rather than
-// concatenating across a hole.
-func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int64) *storev1.StoreEntry {
-	c.log.With(at.ctxFor("bash-delta")).With(logging.Context{
-		ActivityID: run, UpsertKey: BashDeltaKey(run, fromOffset), Offset: logging.Off(fromOffset),
-	}).LogVerbose("spool delta bytes=%d from_offset=%d", len(output), fromOffset)
-	return BashRun(at, "bash_delta:"+itoa(int(fromOffset)), BashDeltaKey(run, fromOffset), run, &conversationv1.AgentBash{
-		Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{
-			NewOutput:  output,
-			FromOffset: uint64(fromOffset),
+// A SNAPSHOT THAT SUPERSEDES THE LAST WHOLE, under the run's one tail key, so
+// the store holds exactly what a reader is drawn and nothing before it. There
+// is no offset: the gap detector the delta model needed is retired, because a
+// snapshot that states its own omitted count cannot have a hole.
+func (c *Converter) BashTail(at Attribution, run, text string, bytesOmitted, linesOmitted uint64) *storev1.StoreEntry {
+	c.log.With(at.ctxFor("bash-tail")).With(logging.Context{
+		ActivityID: run, UpsertKey: BashTailKey(run), Offset: logging.Off(at.Offset),
+	}).LogVerbose("spool tail bytes=%d bytes_omitted=%d lines_omitted=%d", len(text), bytesOmitted, linesOmitted)
+	return BashRun(at, "bash_tail", BashTailKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{
+			Text:         text,
+			BytesOmitted: bytesOmitted,
+			LinesOmitted: linesOmitted,
 		}},
 	})
 }

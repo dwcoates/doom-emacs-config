@@ -67,8 +67,10 @@ func TestATruncatedSpoolIsReReadFromItsNewStart(t *testing.T) {
 	}
 	// And the new content actually reached the store, so the reset was a
 	// RE-READ rather than the reader simply forgetting the file.
-	fake.awaitEntry(ctx, t, "a delta carrying the truncated spool's new content", func(e *storev1.StoreEntry) bool {
-		return e.GetAgentUpdate().GetBash().GetFrame().GetUpdate().GetNewOutput() == after
+	// The window restarts with the file: the tail is the new life alone.
+	fake.awaitEntry(ctx, t, "a tail carrying only the truncated spool's new content", func(e *storev1.StoreEntry) bool {
+		tail := e.GetAgentUpdate().GetBash().GetFrame().GetTail()
+		return tail.GetText() == after && tail.GetBytesOmitted() == 0
 	})
 }
 

@@ -260,19 +260,16 @@ export function bashStartEntry(book = agent("book-1")): PersistEntry {
   );
 }
 
-/** One delta of the run's output — the rows only the sidecar can write. */
-export function bashDeltaEntry(book = agent("book-1")): PersistEntry {
+/** The run's rendered tail — the row only the sidecar can write. */
+export function bashTailEntry(book = agent("book-1")): PersistEntry {
   return bashRow(
     create(conversationv1.AgentBashSchema, {
       result: {
-        case: "update",
-        value: create(conversationv1.AgentBashUpdateSchema, {
-          newOutput: "working\n",
-          fromOffset: 0n,
-        }),
+        case: "tail",
+        value: create(conversationv1.AgentBashTailSchema, { text: "working\n" }),
       },
     }),
-    "agent_bash.update",
+    "agent_bash.tail",
     book,
   );
 }
@@ -309,4 +306,29 @@ export function bashTerminalEntry(book = agent("book-1")): PersistEntry {
     "agent_bash.success",
     book,
   );
+}
+
+/**
+ * An agent terminal: the `success` frame a turn ends on in `book`. A TURN EDGE
+ * for the writer's priority rule when `book` is the main agent's.
+ */
+export function terminalEntry(book: conversationv1.AgentId, turnValue: string): PersistEntry {
+  return {
+    agentId: book,
+    upsertKey: `terminal:${turnValue}`,
+    source: { vendorUuid: `uuid-result-${turnValue}`, discriminator: "agent_frame.success.completed" },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: book,
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentSuccessSchema, {
+            outcome: { case: "completed", value: create(conversationv1.AgentCompletedSchema, {}) },
+          }),
+        },
+      }),
+    },
+  };
 }

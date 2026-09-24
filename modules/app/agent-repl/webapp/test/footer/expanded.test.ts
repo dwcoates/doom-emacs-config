@@ -82,7 +82,7 @@ function toEntry(id: string) {
 }
 
 /** A jump the daemon could not resolve, for REASON. */
-function unresolvedFor(reason: "notDrawn" | "noFeedEntry") {
+function unresolvedFor(reason: "notDrawn") {
   return { target: { case: "unresolved" as const, value: { reason: { case: reason, value: {} } } } };
 }
 
@@ -753,7 +753,7 @@ describe("the shells panel", () => {
 
 const MONITOR_ROW = {
   work: { value: "work-m" },
-  jump: unresolvedFor("noFeedEntry"),
+  jump: toEntry("monitor-card"),
   description: { text: "watching the deploy" },
   runtime: { startedAtMs: BigInt(NOW - 90_000) },
 };
@@ -781,9 +781,14 @@ describe("the monitors panel", () => {
     expect(panel.querySelector("[data-marker]")).toBeNull();
   });
 
-  it("is a jump row whose unresolved reason is the daemon's: a monitor draws no feed entry", () => {
+  it("is a jump row naming its Monitor call's tool-call card", () => {
     const { panel } = drawPanel("monitors", { monitors: [MONITOR_ROW] });
-    expect(panel.querySelector("[data-jump-unresolved]")?.getAttribute("data-jump-unresolved")).toBe("noFeedEntry");
+    expect(panel.querySelector("[data-jump]")?.getAttribute("data-jump")).toBe("monitor-card");
+  });
+
+  it("states the daemon's unresolved reason for a monitor whose card is not placed", () => {
+    const { panel } = drawPanel("monitors", { monitors: [{ ...MONITOR_ROW, jump: unresolvedFor("notDrawn") }] });
+    expect(panel.querySelector("[data-jump-unresolved]")?.getAttribute("data-jump-unresolved")).toBe("notDrawn");
   });
 
   it("draws its empty line when nothing is live", () => {
@@ -966,8 +971,16 @@ describe("the click invariant: exactly one outcome, never neither", () => {
       want: { selected: false, notice: true },
     },
     {
-      name: "a monitor, which draws no entry, shows the notice without asking the feed",
+      name: "a monitor's card that lands is selected and draws no notice",
       row: MONITOR_ROW,
+      panel: "monitors",
+      select: async () => true,
+      reached: true,
+      want: { selected: true, notice: false },
+    },
+    {
+      name: "an unplaced monitor shows the notice without asking the feed",
+      row: { ...MONITOR_ROW, jump: unresolvedFor("notDrawn") },
       panel: "monitors",
       select: async () => true,
       reached: false,
@@ -1046,11 +1059,11 @@ describe("the not-on-screen record", () => {
       level: "warn",
     },
     {
-      name: "a monitor names why it has no entry",
-      row: MONITOR_ROW,
+      name: "an unplaced monitor names its work, kind and the missing card",
+      row: { ...MONITOR_ROW, jump: unresolvedFor("notDrawn") },
       panel: "monitors" as const,
-      want: { work_id: "work-m", kind: "monitors", feed_id: "unresolved", jump: "noFeedEntry", reason: "noFeedEntry" },
-      level: "info",
+      want: { work_id: "work-m", kind: "monitors", feed_id: "unresolved", jump: "notDrawn", reason: "notDrawn" },
+      level: "warn",
     },
   ])("$name", async ({ row, panel, want, level }) => {
     // Arrange

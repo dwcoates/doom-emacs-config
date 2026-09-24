@@ -226,8 +226,8 @@ last user-prompt record within it.
   rather than duplicated.
 - The store's cursor row is NOT rewritten; only the in-memory position moves,
   and the next successful batch advances the durable cursor normally.
-- Spools are never rewound: they carry no turns and their deltas already carry
-  offsets. When the window holds no turn start the store's cursor stands —
+- Spools are never rewound: they carry no turns, and a resumed spool's tail
+  reseeds its window from the file's prefix (see "Detached shell spools"). When the window holds no turn start the store's cursor stands —
   reading from an arbitrary older position would be worse than not rewinding.
 
 ### It is for files that can carry a turn in flight, not for the corpus
@@ -444,8 +444,8 @@ because neither spelling may make a spool invisible.
 The prefix is HOW a spool's conversion is selected, and each of the four cases
 is a different thing:
 
-- `b*` — a detached SHELL spool. Raw bytes, `KindShellSpool`, deltas keyed
-  `bash:<run>` under the spawning call's tool_use_id.
+- `b*` — a detached SHELL spool. Raw bytes, `KindShellSpool`, its rendered
+  tail keyed `bash:<run>:tail` under the spawning call's tool_use_id.
 - `a*` — a backgrounded SUBAGENT's transcript, delivered through the task
   spool. JSONL, `KindAgentTranscript`, and its BOOK is the SPAWNING CALL's
   tool_use_id, resolved from the owner index. The spool's path names a task and
@@ -522,7 +522,7 @@ spool is decided never-read, each decision stated once per path as
   reason but absence) is not read this pass, stated at WARN, and examined again
   next rescan.
 
-A claimed `b*` spool is read for its `bash:<run>` deltas and terminal, which the
+A claimed `b*` spool is read for its `bash:<run>:tail` and terminal, which the
 daemon's detached-shell bubble renders. Residue rows are unchanged: none is
 written, and none already stored is touched.
 
@@ -1660,22 +1660,38 @@ launch it observed and hands it over as `tail.Context.RunActivityID`; a spool
 that reaches the handler without one is a reader defect (an unclaimed spool is
 HELD, not read), refused loudly.
 
-ONE ROW PER WRITE, never one row superseded:
+ONE ROW PER KIND OF FACT, and ONLY WHAT IS RENDERED IS STORED (owner ruling
+2026-09-23: output beyond what is rendered is not stored):
 
 - `bash:<run>:start` — a start row, if a producer ever mints one. The sidecar
   does not: a spool exists only after the STREAM plane announced the launch.
-- `bash:<run>:<from_offset>` — one per delta. The offset IS the delta's
-  identity, so the same bytes re-read after a restart supersede their own row
-  instead of appending a second copy of the run's output.
+- `bash:<run>:tail` — the run's RENDERED TAIL, `AgentBash.tail`, superseded
+  WHOLE by every batch. It holds at most `AGENT_BASH_TAIL_CAP_BYTES`
+  (conversation.v1 `AgentBashTailCap`, the one constant the daemon draws by
+  too) and states the `bytes_omitted` and `lines_omitted` before it. The
+  handler cuts it exactly as the renderer draws it (a line start once anything
+  is omitted), so the daemon draws it verbatim and nothing past what is drawn
+  is ever written.
 - `bash:<run>:terminal` — the single terminal, however often it is restated.
 
-A single `bash:<run>` key would leave the run holding only its most recent
-delta, every earlier chunk erased by the next; store.v1 `WatchBashRun` replays a
-run's rows in write order, which is only possible if each write is a row.
+THERE IS NO OFFSET AND NO GAP DETECTOR. The retired delta model keyed one row
+per delta by `from_offset` and needed the deltas contiguous from 0, so a
+claimed spool's WHOLE file was stored; a snapshot that states its own omitted
+count cannot have a hole. Rows under the retired `bash:<run>:<from_offset>`
+spelling are left in the store as outmoded.
 
-`from_offset` is a GAP DETECTOR, not addressing: it must equal what the consumer
-has already accumulated, and a mismatch means the consumer REFUSES the frame
-rather than concatenating across a hole.
+THE WINDOW IS A PURE FUNCTION OF THE FILE'S PREFIX (`RunOutput.Absorb`). A batch
+that does not begin where the window ends — a restarted process's first batch,
+a batch re-read after an unacknowledged write, a file reset to zero — RESEEDS
+the window by streaming the file's prefix (64 KiB at a time), so the tail it
+writes is the one it supersedes, never one started over from the resumed
+cursor and never one holding a re-read batch twice. The tail row's write
+identity is digested from where the window ENDS, so a re-read mints the same
+identity and the same bytes. A reseed that cannot read the file WITHHOLDS the
+batch's tail (ERROR) and the next batch reseeds; a window missing the prefix
+would state wrong omitted counts for the rest of the run.
+
+The bound firing is recorded ONCE PER RUN at INFO (`run-output-bound`).
 
 `EXIT=<code>` → `AgentBash.success.completed` with `termination.exited`. The
 matching is strict (last line of the batch, newline-terminated, line-start, at
@@ -1686,11 +1702,11 @@ on a newline — which the handler alone knows, and without which a marker
 arriving on its own poll (the ordinary case) was never detected at all.
 
 A TERMINAL CARRIES THE RUN'S OUTPUT, not the batch's: the handler holds the
-run's TAIL, bounded at 16 KiB (`maxRememberedOutput`, the daemon's own
-`spoolCap`), and states `partial{bytes_omitted}` past the bound rather than
-claiming `whole`. The daemon draws a detached run's ending from the terminal
-(exit, cancel, lost) and its body from the deltas' tail, never the terminal's
-output, so a larger bound stored bytes for nobody.
+run's window, bounded at `AGENT_BASH_TAIL_CAP_BYTES` (`maxRememberedOutput`),
+and states `partial{bytes_omitted}` past the bound rather than claiming
+`whole`. The daemon draws a detached run's ending from the terminal (exit,
+cancel, lost) and its body from the tail row, never the terminal's output, so a
+larger bound stored bytes for nobody.
 
 ### Bounded writes
 
@@ -1699,9 +1715,9 @@ sized by the file (one held the store 163s on 2026-09-23). `internal/tail`
 bounds each Poll at `MaxBatchBytes` (1 MiB) and `MaxBatchFrames` (128); the
 cursor stops at the first frame past the bound. A bounded batch reports
 `PollResult.More` (never for a batch holding a frame) and `pollAll` re-polls
-that file at the head of the pass, inside the same slice deadline. Deltas stay
-CONTIGUOUS: `from_offset` is the renderer's gap detector, so a claimed spool's
-deltas join to the whole file.
+that file at the head of the pass, inside the same slice deadline. Each bounded
+batch supersedes the run's one tail row, so a long spool costs one bounded row
+per batch and the store never holds more than the tail.
 
 LOST (`file_vanished` | `went_silent` | `swept_up`) →
 `AgentBash.success.interrupted` with `cause.lost` naming the arm (landing 3).
