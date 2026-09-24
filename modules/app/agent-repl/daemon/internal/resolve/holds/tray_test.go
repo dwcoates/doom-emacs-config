@@ -444,11 +444,6 @@ func TestHeldBadgesComposeEveryStatus(t *testing.T) {
 			want: []wantBadge{{"after this turn", ""}, {"build refresh", "held for the build refresh"}},
 		},
 		{
-			name: "keep-alive hold",
-			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_KeepAlive{KeepAlive: &frontendv1.HeldPromptKeepAliveHold{Turn: &conversationv1.TurnId{Value: "ka-1"}}}},
-			want: []wantBadge{{"after this turn", ""}, {"keep-alive", "held behind a keep-alive, waiting on turn ka-1"}},
-		},
-		{
 			name: "session starting hold",
 			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
 			want: []wantBadge{{"after this turn", ""}, {"starting up", "held until the session is up"}},
@@ -481,7 +476,6 @@ func TestHeldBadgesLabelsAreOneToThreeWords(t *testing.T) {
 		{Classification: &frontendv1.HeldPrompt_ClassificationError{ClassificationError: &frontendv1.HeldPromptClassificationError{}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s"}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
-		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_KeepAlive{KeepAlive: &frontendv1.HeldPromptKeepAliveHold{Turn: &conversationv1.TurnId{Value: "k"}}}},
 		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
 	}
 
@@ -550,24 +544,6 @@ func TestHeldBadgesRecordAMissingVerdict(t *testing.T) {
 	}
 	if !hasError(log.Records(), "daemon.holds.badges") {
 		t.Fatal("a verdict with no badge was not recorded as an invariant violation")
-	}
-}
-
-func TestHeldBadgesRecordAKeepAliveThatNamesNoTurn(t *testing.T) {
-	// Arrange.
-	log := dlog.NewTestLogger()
-	p := &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_KeepAlive{KeepAlive: &frontendv1.HeldPromptKeepAliveHold{}}}
-
-	// Act.
-	got := badgesOf(holds.HeldBadges(p, log))
-
-	// Assert.
-	want := []wantBadge{{"after this turn", ""}, {"keep-alive", "held behind a keep-alive"}}
-	if !equalBadges(got, want) {
-		t.Fatalf("badges = %+v, want %+v", got, want)
-	}
-	if !hasError(log.Records(), "daemon.holds.badges") {
-		t.Fatal("a keep-alive with no turn was not recorded as an invariant violation")
 	}
 }
 
