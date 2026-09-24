@@ -33,6 +33,9 @@ import (
 type fakeClient struct {
 	shimclient.Client
 
+	// detached counts Detach calls: the link let go, the process left running.
+	detached int
+
 	requests []*shimv1.StartSessionRequest
 	response *shimv1.StartSessionResponse
 	startErr error
@@ -3499,3 +3502,5 @@ func TestABringUpSurfacesAFailedTerminalRetirement(t *testing.T) {
 		t.Fatalf("Start = %v, want the failed retirement surfaced", err)
 	}
 }
+
+func (c *fakeClient) Detach() { c.detached++ }
