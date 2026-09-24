@@ -2986,6 +2986,8 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
 				h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
 					Work: &conversationv1.DetachedWorkId{Value: "work-7"},
+					// The producer states the owner of work created detached.
+					Owner: mainAgent(),
 					Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 						WorkCreated: &conversationv1.DetachableWork{
 							Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
