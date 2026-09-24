@@ -282,12 +282,12 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 		"turns": len(displaced)})
 	for _, t := range displaced {
 		fields := dlog.Context{"workspace": string(t.Workspace), "turn": string(t.ID)}
-		claimed, err := o.deps.DB.ClaimDisplacedTurn(ctx, t.ID, o.deps.Now())
+		claimed, err := o.deps.Queue.ClaimDisplacedTurn(ctx, t.Workspace, t.ID)
 		if err != nil {
 			o.deps.Log.Global().Error(op, "a displaced turn could not be claimed", withField(fields, "error", err.Error()))
 			return fmt.Errorf("merge: claim the displaced turn %q: %w", t.ID, err)
 		}
-		if !claimed.Claimed {
+		if !claimed {
 			o.deps.Log.Global().Debug(op, "a displaced turn was already put back by its merge", fields)
 			continue
 		}
