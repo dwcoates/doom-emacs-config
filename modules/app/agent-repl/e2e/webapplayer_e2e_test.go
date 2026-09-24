@@ -16,7 +16,8 @@
 // WHY THE LIFECYCLE STAYS HERE: bring-up in this suite is not "start four
 // processes", it is NewWorld — the store's short socket and log, the one spool
 // root the fake SDK writes and the sidecar globs, the forced
-// ShimNode/ShimMain/StoreSocket, buildIdentityEnv's one sha in both roles,
+// ShimNode/ShimMain/StoreSocket, the real services reporting their builds
+// into the daemon's lock dir,
 // resolveConfigRoots' symlink resolution, assertOneSpoolRoot,
 // preserveLogsOnFailure, and a LIFO teardown whose order is load-bearing. Two
 // of those invariants fail SILENTLY when broken (SPEC.md section B). A
@@ -536,8 +537,8 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 //     no assumption about how long a vitest boot takes.
 //   - The handover itself is the SUITE'S EXISTING MACHINERY, reused verbatim
 //     from adoption_e2e_test.go: adSelfRepoWorld (a fake-git SelfRepo with a
-//     passing merge gate), adTriggerSelfMergeRollout (a real landed commit
-//     firing the real blue-green self-rollout), adDial (reaching the
+//     passing merge gate), adTriggerDeploy (a real landed commit whose one
+//     deploy finds the daemon stale and hands it over blue-green), adDial (reaching the
 //     successor at the address the announcement carried). There is no second
 //     way to replace a daemon in this package.
 //   - THE ADOPTS ARE ISSUED FROM HERE, not from the page, and that is the
@@ -595,7 +596,7 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 
 	// Act: a real landed commit on the daemon's own checkout fires the real
 	// self-merge rollout.
-	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced",
 		func(r *agentreplv1.WatchDaemonResponse) bool { return r.GetShutdownAnnounced() != nil },
 	).GetShutdownAnnounced()

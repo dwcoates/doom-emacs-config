@@ -403,13 +403,15 @@ func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.Reposit
 	return ws
 }
 
-// adTriggerSelfMergeRollout lands one fake-git-scripted commit touching
-// `path` on selfRepo through a real created child workspace and a real
-// MergeWorkspace call, firing the rollout classified by that path's
-// subsystem prefix (mirrors daemon/integration/drain_rollout_test.go's
-// drainTriggerRollout).
-func adTriggerSelfMergeRollout(t *testing.T, w *World, selfRepo *harness.Repo, path string) {
+// adTriggerDeploy stages a deploy build that changes one component, then
+// lands one fake-git-scripted commit on selfRepo through a real created child
+// workspace and a real MergeWorkspace call: the landing runs the daemon's ONE
+// deploy for it, which finds that component out of date (mirrors
+// daemon/integration/drain_rollout_test.go's drainTriggerDeploy).
+func adTriggerDeploy(t *testing.T, w *World, selfRepo *harness.Repo, build harness.DeployBuild) {
 	t.Helper()
+	w.StageDeployBuild(build)
+	path := adSelfMergeTriggerPath
 	// THE TRIGGER WORKSPACE'S SHIM IS STOOD DOWN BY THE MERGE before its
 	// worktree is removed, and its link severing is the evidence of that stop
 	// rather than a fault. The trigger is gone before the handover begins, so
@@ -477,9 +479,10 @@ func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 	}
 }
 
-// adSelfMergeTriggerPath is the daemon-subsystem-prefixed path
-// daemon/integration/drain_rollout_test.go's own handover tests commit to
-// classify the landed range as a self-merge rollout worth handing over for.
+// adSelfMergeTriggerPath is the path a trigger commit touches on the daemon's
+// own checkout, the same one daemon/integration/drain_rollout_test.go's
+// drainTriggerDeploy commits. What the landing's deploy changes is the staged
+// build's, never the path's.
 const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
 
 func TestHandoverTransfersAtFreeness(t *testing.T) {
@@ -500,7 +503,7 @@ func TestHandoverTransfersAtFreeness(t *testing.T) {
 	// Act: land a real, fake-git-scripted commit on the daemon's own
 	// checkout, driven through a real created child workspace and a real
 	// MergeWorkspace call.
-	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
 
 	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
@@ -555,7 +558,7 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	defer daemonStream.Close()
 
 	// Act
-	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
