@@ -101,11 +101,17 @@ const READY_LINE = "locked";
  * healthy answer is one exec plus one flock. Measured spawn-to-`locked` on the
  * deployed binary (darwin, 2026-09-24): 300 serial claims max 4.3 ms (p50
  * 1.9 ms, first exec of a fresh copy included); 32 concurrent max 16.0 ms; 128
- * concurrent (a spawn storm far past any real fleet) max 59.6 ms. The bound is
- * ~4x that worst observed case. Without it a holder that spawned but neither
- * answered nor exited would hang StartSession forever.
+ * concurrent (a spawn storm far past any real fleet) max 59.6 ms. Without a
+ * bound, a holder that spawned but neither answered nor exited would hang
+ * StartSession forever.
+ *
+ * THE BOUND IS SIZED FOR A LOADED HOST, NOT THE BENCH (lead, 2026-09-24). This
+ * host has shown multi-second scheduling stalls under load, and an expiry
+ * REFUSES A REAL SESSION START, while a holder that stays silent is a rare
+ * defect. So a false expiry costs far more than a late one: 5 s is ~80x the
+ * worst benched spawn and still ends the hang the bound exists for.
  */
-export const HOLDER_ANSWER_TIMEOUT_MS = 250;
+export const HOLDER_ANSWER_TIMEOUT_MS = 5_000;
 
 /**
  * The environment variable that names the lock-holder binary.
