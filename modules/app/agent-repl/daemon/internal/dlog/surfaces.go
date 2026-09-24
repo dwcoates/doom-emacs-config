@@ -506,17 +506,11 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		// A DETACHED DIRECTORY IS NOT STAT-ED: the daemon is removing it, so
 		// its absence is the expected answer and not a reason to refuse. Its
 		// records still reach the workspace's own targets under logsDir.
-		id, err := s.mintedIDLocked(clean)
+		entry, err := s.newWorkspaceEntryLocked(clean, true)
 		if err != nil {
 			return nil, nil, err
 		}
-		hash, err := WorkspaceDirHash(clean)
-		if err != nil {
-			return nil, nil, err
-		}
-		ws = &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames)), detached: true}
-		s.workspaces[clean] = ws
-		ok = true
+		ws, ok = entry, true
 	}
 	if !ok {
 		// THE DIRECTORY IS STAT-ED ONCE, ON THE FIRST RESOLVE, AND NEVER
@@ -535,16 +529,11 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		if !info.IsDir() {
 			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: not a directory", clean)
 		}
-		id, err := s.mintedIDLocked(clean)
+		entry, err := s.newWorkspaceEntryLocked(clean, false)
 		if err != nil {
 			return nil, nil, err
 		}
-		hash, err := WorkspaceDirHash(clean)
-		if err != nil {
-			return nil, nil, err
-		}
-		ws = &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames))}
-		s.workspaces[clean] = ws
+		ws = entry
 	}
 	if sk, ok := ws.sinks[name]; ok {
 		return ws, sk, nil
@@ -559,6 +548,23 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	ws.sinks[name] = sk
 	s.reportSinkOpened(ws, name, sk, remembered)
 	return ws, sk, nil
+}
+
+// newWorkspaceEntryLocked mints and records one workspace's sink entry: its
+// minted id, its directory hash, and whether its directory is detached. It is
+// the ONE place an entry is built, for a detached directory and a live one alike.
+func (s *surfaces) newWorkspaceEntryLocked(clean string, detached bool) (*workspaceSinks, error) {
+	id, err := s.mintedIDLocked(clean)
+	if err != nil {
+		return nil, err
+	}
+	hash, err := WorkspaceDirHash(clean)
+	if err != nil {
+		return nil, err
+	}
+	ws := &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames)), detached: detached}
+	s.workspaces[clean] = ws
+	return ws, nil
 }
 
 // mintedIDLocked resolves a workspace directory to its daemon-minted
