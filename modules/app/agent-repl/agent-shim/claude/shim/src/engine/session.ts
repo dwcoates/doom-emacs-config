@@ -29,7 +29,12 @@ import { randomUUID } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { bindLog, clearRequestId, onLogSinkPoisoned, setClaudeSessionId, setRequestId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
-import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../locks.js";
+import {
+  acquireSessionLock,
+  acquireWorkspaceLock,
+  LockHolderUnavailableError,
+  workspaceLockPath,
+} from "../locks.js";
 import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
@@ -490,6 +495,19 @@ export interface SessionEngine extends Engine {
    * owed or no session is bound.
    */
   resetKeepalives(): Promise<void>;
+}
+
+/**
+ * The refusal for a claim this shim could not even ATTEMPT: its own lock holder
+ * would not spawn. Nobody is known to own the conversation, so this is never
+ * `conversation_owned`; locks.ts has already recorded the defect at ERROR.
+ */
+function lockHolderUnavailable(err: LockHolderUnavailableError): shimv1.StartSessionResponse {
+  return startSessionRefused(
+    { kind: "lockHolderUnavailable", binary: err.binary, osError: err.osError },
+    `this shim's lock helper ${err.binary} failed to start (${err.osError}); ` +
+      `no other process is known to own this conversation`,
+  );
 }
 
 export function createEngine(deps: EngineDeps): SessionEngine {
@@ -2970,6 +2988,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       releaseLock = await acquireLock(inForce);
     } catch (err) {
+      if (err instanceof LockHolderUnavailableError) return lockHolderUnavailable(err);
       LOGGER.debug(
         { vendor_session_id: inForce, cause: err instanceof Error ? err.message : String(err) },
         "refused StartSession: another shim holds this conversation's session lock",
@@ -2989,6 +3008,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       await releaseLock?.();
       releaseLock = undefined;
+      if (err instanceof LockHolderUnavailableError) return lockHolderUnavailable(err);
       LOGGER.debug(
         {
           workspace_dir: deps.env.cwd,

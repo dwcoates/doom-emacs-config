@@ -9,6 +9,7 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
 import { nextPush } from "../next-push.js";
+import { containing } from "../expect-shapes.js";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +20,7 @@ import { cwdSlug } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
-import { workspaceLockKey } from "../../src/locks.js";
+import { LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { saidText, textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
@@ -464,6 +465,15 @@ async function started(h: Harness): Promise<shimv1.StartSessionResponse> {
   return pending;
 }
 
+/** The refusal locks.ts raises when this shim's own lock holder would not spawn. */
+function unspawnableHolder(): LockHolderUnavailableError {
+  return new LockHolderUnavailableError(
+    "/missing/shim-lock",
+    "spawn /missing/shim-lock ENOENT",
+    "shim-session-lock: cannot spawn the lock holder /missing/shim-lock: spawn /missing/shim-lock ENOENT",
+  );
+}
+
 function failureCause(response: shimv1.StartSessionResponse): string | undefined {
   return response.result.case === "failure" ? response.result.value.cause.case : undefined;
 }
@@ -854,6 +864,54 @@ describe("StartSession, fresh", () => {
 
     await h.engine.startSession(freshRequest());
 
+    expect(h.released).toEqual(h.locks);
+  });
+
+  it("refuses lock_holder_unavailable when the SESSION lock holder cannot be spawned", async () => {
+    // Arrange: nobody owns the conversation; the shim's own helper is missing.
+    const h = harness({ lockRefusal: unspawnableHolder() });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(failureCause(response)).toBe("lockHolderUnavailable");
+  });
+
+  it("refuses lock_holder_unavailable when the WORKSPACE lock holder cannot be spawned", async () => {
+    // Arrange
+    const h = harness({ workspaceLockRefusal: unspawnableHolder() });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(failureCause(response)).toBe("lockHolderUnavailable");
+  });
+
+  it("carries the holder binary and the OS error on lock_holder_unavailable", async () => {
+    // Arrange
+    const h = harness({ lockRefusal: unspawnableHolder() });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
+    expect(cause).toEqual({
+      case: "lockHolderUnavailable",
+      value: containing({ binary: "/missing/shim-lock", osError: "spawn /missing/shim-lock ENOENT" }),
+    });
+  });
+
+  it("an unspawnable WORKSPACE holder still releases the session lock it had already taken", async () => {
+    // Arrange
+    const h = harness({ workspaceLockRefusal: unspawnableHolder() });
+
+    // Act
+    await h.engine.startSession(freshRequest());
+
+    // Assert
     expect(h.released).toEqual(h.locks);
   });
 
