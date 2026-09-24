@@ -76,6 +76,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "case *conversationv1.AgentResponse_Start"})
 		fold.markdown = ""
 		fold.settled = false
+		fold.notice = false
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: ""},
 		}}
@@ -144,7 +145,11 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.markdown = state.Success.GetProse().GetMarkdown()
 		fold.settled = true
 		r.stampSettled(fold, state.Success.GetSettledAt().GetAtMs())
-		if notice, ok := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice); ok {
+		notice, isNotice := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice)
+		// THE SETTLED WHOLE DECIDES AUTHORSHIP, so a later settle restating the
+		// block from the other store plane re-decides it rather than inheriting.
+		fold.notice = isNotice
+		if isNotice {
 			// THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT PROSE. Drawing
 			// one as the agent's answer would present an outage as something
 			// the agent said, so the daemon states the authorship in the
@@ -179,6 +184,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true
+		fold.notice = false
 		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
