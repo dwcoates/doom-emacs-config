@@ -423,6 +423,39 @@ func findAccount(roster []account.Account, configDir string) (account.Account, b
 	return account.Account{}, false
 }
 
+// BindViews binds every registered workspace whose directory exists, before
+// the boot reconciliation publishes anything for it.
+//
+// IT WRITES NOTHING, so a joining successor's read-only handle can run it: a
+// workspace whose directory is gone is passed over here, and closing its row is
+// left to the boot's own missing-directory step (or PublishRegistry, for a
+// successor). A stat that does not say "not exist" is never read as gone.
+func (v *verbs) BindViews(ctx context.Context) error {
+	global := v.deps.Log.Global()
+	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		global.Error(opRegister, "could not list the workspaces to bind their views", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("bind the views: list the workspaces: %w", err)
+	}
+	bound := 0
+	for _, ws := range workspaces {
+		if _, err := os.Stat(ws.Dir); errors.Is(err, fs.ErrNotExist) {
+			global.Debug(opRegister, "the workspace's directory is gone; its views are not bound", dlog.Context{
+				"workspace": string(ws.ID), "dir": ws.Dir,
+			})
+			continue
+		}
+		if err := v.bindResolvers(global, ws.ID, ws.Dir); err != nil {
+			return fmt.Errorf("bind the views: %w", err)
+		}
+		bound++
+	}
+	global.Debug(opRegister, "bound every registered workspace's views before the boot reconciliation", dlog.Context{
+		"workspaces": len(workspaces), "bound": bound,
+	})
+	return nil
+}
+
 // PublishRegistry publishes the roster's durable half once, from what the
 // registry holds right now.
 //

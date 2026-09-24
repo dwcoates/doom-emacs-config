@@ -818,6 +818,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Log:              p.Surfaces,
 		},
 		Boot: boot.Deps{
+			BindViews:      verbs.BindViews,
 			Layout:         p.Layout,
 			DB:             p.DB,
 			Supervisor:     supervisor,

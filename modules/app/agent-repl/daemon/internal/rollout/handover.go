@@ -149,6 +149,10 @@ func (c *controller) beginHandover(ctx context.Context, force bool) (*handoverPl
 		return nil, err
 	}
 	fields := dlog.Context{"self_address": c.deps.SelfAddress, "forced": force}
+	if err := c.clearStaleManifest(fields); err != nil {
+		c.abandonHandover(ctx, slot, fields, err)
+		return nil, err
+	}
 	successor, err := c.deps.Spawner.Spawn(ctx, c.deps.SelfAddress)
 	if successor != nil {
 		slot.successor = successor

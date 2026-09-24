@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -56,7 +57,9 @@ const (
 	// DispositionRolled is a session meant to end that did: its lock is free.
 	DispositionRolled DispositionKind = "ROLLED"
 	// DispositionDied is a session meant to survive whose lock is free — it
-	// died silently, and this record is the only place that says so.
+	// died silently, and this record is the only place that says so. It is
+	// recorded RESOLVED: the free lock proves the process owns nothing, and
+	// the workspace takes the ordinary dead-shim path.
 	DispositionDied DispositionKind = "DIED"
 	// DispositionUnknown is a probe that could not tell, or a session meant to
 	// end whose lock is still held. Never read as either of the other two.
@@ -228,20 +231,46 @@ func ReadManifest(path string) (Manifest, bool, error) {
 //	stand_down + held    → UNKNOWN     (meant to end; something still holds it)
 //	any        + unknown → UNKNOWN     (the probe could not tell)
 //
-// PRESERVED and ROLLED are recorded as ALREADY-RESOLVED faults, so the record
-// exists per session without polluting the open-fault set; DIED and UNKNOWN
-// stay OPEN, because each is a workspace whose session state needs a human.
+// PRESERVED, ROLLED and DIED are recorded as ALREADY-RESOLVED faults, so the
+// record exists per session without polluting the open-fault set: a DIED
+// session's free lock is the kernel's proof its shim is gone, and the boot's
+// ordinary client-less path takes the workspace from there. Only UNKNOWN
+// stays OPEN, because the probe could not say what became of the session.
+//
+// A MANIFEST IS CONSUMED EXACTLY ONCE. It is one outgoing daemon's statement
+// about one bounce, so once every disposition it names is durably recorded it
+// is retired (retireManifest) and no later boot reads it again. Nothing used
+// to remove it: a manifest written 2026-09-23 12:30 was reconciled again on
+// every boot for a day, re-opening a bounce_died fault and a WARN each time for
+// a shim that had died once, long before.
 func (c *controller) Reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, error) {
+	out, _, landed, err := c.reconcile(ctx, adopted)
+	if err != nil {
+		return nil, err
+	}
+	if landed {
+		c.retireManifest("every disposition it names is recorded")
+	}
+	return out, nil
+}
+
+// reconcile is Reconcile without the retirement, so a joining daemon can arm
+// its rendezvous from the manifest before the file goes away. It reports
+// whether a manifest was found and whether every disposition it named LANDED
+// durably — false when any record failed, or was deferred behind a read-only
+// handle, which is exactly when the manifest must be kept.
+func (c *controller) reconcile(ctx context.Context, adopted []AdoptedSession) ([]Disposition, bool, bool, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opReconcile, "could not read the intent manifest",
 			withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
-		return nil, err
+		return nil, false, false, err
 	}
 	if !found {
-		return c.reconcileWithoutManifest(ctx, adopted), nil
+		return c.reconcileWithoutManifest(ctx, adopted), false, false, nil
 	}
 	out := make([]Disposition, 0, len(m.Sessions))
+	landed := true
 	for _, session := range m.Sessions {
 		state := sessionlock.StateUnknown
 		if c.deps.LockProbe != nil {
@@ -270,11 +299,102 @@ func (c *controller) Reconcile(ctx context.Context, adopted []AdoptedSession) ([
 			Kind:      disposition(intent, state),
 		}
 		out = append(out, d)
-		c.recordDisposition(ctx, session, d)
+		if gone, why := c.workspaceGone(ctx, session.Workspace); gone {
+			c.log.Info(opReconcile, "the manifest names a workspace nothing can serve any more; its disposition is recorded here only", dlog.Context{
+				"workspace": string(session.Workspace), "intent": string(d.Intent), "lock": d.Lock.String(),
+				"disposition": string(d.Kind), "shim_pid": session.ShimPID,
+				"vendor_session_id": session.VendorSessionID, "why": why,
+			})
+			continue
+		}
+		if !c.recordDisposition(ctx, session, d) {
+			landed = false
+		}
 	}
 	c.log.Info(opReconcile, "reconciled the stand-down intent manifest against the kernel locks",
-		dlog.Context{"outgoing_daemon": string(m.Daemon), "sessions": len(out)})
-	return out, nil
+		dlog.Context{"outgoing_daemon": string(m.Daemon), "sessions": len(out), "recorded": landed})
+	return out, true, landed, nil
+}
+
+// workspaceGone reports whether a manifest entry names a workspace no view can
+// ever be served for: one the registry no longer holds, or one whose worktree
+// is gone (the boot closes those first, and their views are never bound,
+// because the workspace's log sink lives inside the directory). A fault
+// recorded for one reaches a footer with no bound directory, which is an
+// invariant violation, and reaches nobody who could read it; so its
+// disposition is logged and nothing is opened.
+//
+// A LOOKUP THAT DOES NOT SAY "NOT FOUND" IS NEVER READ AS GONE, and neither is
+// a stat that does not say "not exist": the entry is then recorded as usual,
+// where a failure is its own ERROR.
+func (c *controller) workspaceGone(ctx context.Context, ws ids.WorkspaceID) (bool, string) {
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if errors.Is(err, wsm.ErrNotFound) {
+		return true, "the registry no longer holds the workspace"
+	}
+	if err != nil {
+		return false, ""
+	}
+	if _, err := os.Stat(record.Dir); errors.Is(err, os.ErrNotExist) {
+		return true, "the workspace's directory is gone"
+	}
+	return false, ""
+}
+
+// retireManifest removes the intent manifest once what it states is recorded.
+//
+// A MANIFEST THAT CANNOT BE REMOVED IS RECORDED AT ERROR AND LEFT. The boot is
+// not failed for it: everything the manifest names is already accounted for,
+// and the cost of the leftover is that the next boot accounts for it again —
+// which this record is the explanation of.
+func (c *controller) retireManifest(why string) {
+	fields := dlog.Context{"path": c.deps.IntentManifest, "why": why}
+	err := os.Remove(c.deps.IntentManifest)
+	switch {
+	case err == nil:
+		c.log.Info(opManifest, "retired the stand-down intent manifest; no later boot reads it again", fields)
+	case errors.Is(err, os.ErrNotExist):
+		c.log.Debug(opManifest, "the stand-down intent manifest was already retired", fields)
+	default:
+		c.log.Error(opManifest, "could not retire the stand-down intent manifest; the next boot will account for it again",
+			withCause(fields, err))
+	}
+}
+
+// clearStaleManifest removes a manifest left over from an EARLIER bounce before
+// this daemon spawns a successor. A joining successor takes the first manifest
+// it finds as its incumbent's, and it starts looking the moment it boots —
+// before this daemon has written anything — so a leftover would be read as
+// this handover's intent. The leftover is one no daemon finished accounting
+// for, and its evidence is recorded here before it goes.
+func (c *controller) clearStaleManifest(fields dlog.Context) error {
+	// NOTHING IS AT THE PATH when it, or a directory on the way to it, does
+	// not exist; a path whose parent is a FILE holds no manifest either, and
+	// the write that follows reports that path's own failure.
+	if _, err := os.Lstat(c.deps.IntentManifest); errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil
+	}
+	m, found, readErr := ReadManifest(c.deps.IntentManifest)
+	if !found && readErr == nil {
+		return nil
+	}
+	evidence := merge(fields, dlog.Context{"path": c.deps.IntentManifest})
+	if readErr == nil {
+		evidence = merge(evidence, dlog.Context{
+			"stale_outgoing_daemon": string(m.Daemon),
+			"stale_written_at":      m.WrittenAt.Format(time.RFC3339Nano),
+			"stale_sessions":        len(m.Sessions),
+		})
+	} else {
+		evidence = merge(evidence, dlog.Context{"stale_read_error": readErr.Error()})
+	}
+	if err := os.Remove(c.deps.IntentManifest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		c.log.Error(opHandover, "could not remove a stale intent manifest; a successor would read it as this handover's",
+			withCause(evidence, err))
+		return fmt.Errorf("rollout: remove the stale intent manifest %s: %w", c.deps.IntentManifest, err)
+	}
+	c.log.Info(opHandover, "removed an intent manifest an earlier bounce left unconsumed, before spawning the successor", evidence)
+	return nil
 }
 
 // reconcileWithoutManifest accounts for a boot that found NO manifest.
@@ -362,18 +482,28 @@ func (c *controller) flushDispositions(ctx context.Context) {
 		c.logTransition(opReconcile, p.session.Workspace, "disposition_deferred", true, false,
 			dlog.Context{"disposition": string(p.d.Kind)})
 	}
+	landed := true
 	for _, p := range pending {
-		c.recordDisposition(ctx, p.session, p.d)
+		if !c.recordDisposition(ctx, p.session, p.d) {
+			landed = false
+		}
 	}
 	if len(pending) > 0 {
 		c.log.Debug(opReconcile, "wrote the bounce dispositions deferred by the read-only window",
-			dlog.Context{"dispositions": len(pending)})
+			dlog.Context{"dispositions": len(pending), "recorded": landed})
+		// THE DEFERRED ACCOUNTING IS WHAT KEPT THE MANIFEST: once it is
+		// written, the manifest has been consumed.
+		if landed {
+			c.retireManifest("the dispositions deferred by the read-only window are recorded")
+		}
 	}
 }
 
 // recordDisposition writes one session's disposition as a WSM fault. It is
 // never collapsed into a count: one record per session, naming the workspace.
-func (c *controller) recordDisposition(ctx context.Context, session ManifestSession, d Disposition) {
+// It reports whether the record LANDED: false when it was deferred behind a
+// read-only handle or its write failed (which is recorded at ERROR here).
+func (c *controller) recordDisposition(ctx context.Context, session ManifestSession, d Disposition) bool {
 	ws := session.Workspace
 	// A READ-ONLY HANDLE IS NOT A FAILURE HERE, it is the joining successor's
 	// ordinary state: the incumbent is still the sole writer. The accounting
@@ -388,7 +518,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 			dlog.Context{"disposition": string(d.Kind)})
 		c.log.Debug(opReconcile, "deferred a bounce disposition until the state handle writes",
 			dlog.Context{"workspace": string(ws), "disposition": string(d.Kind)})
-		return
+		return false
 	}
 	fields := dlog.Context{
 		"workspace":   string(ws),
@@ -413,18 +543,32 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 	})
 	if err != nil {
 		c.log.Error(opReconcile, "could not record a session's bounce disposition", withCause(fields, err))
-		return
+		return false
 	}
-	if d.Kind == DispositionPreserved || d.Kind == DispositionRolled {
+	if d.Kind == DispositionPreserved || d.Kind == DispositionRolled || d.Kind == DispositionDied {
 		// The record exists; nothing needs doing about it. Closing it here is
 		// what keeps the OPEN fault set meaningful without losing the per
 		// session accounting.
 		if err := c.deps.DB.CloseFault(ctx, id, c.deps.Clock.Now()); err != nil {
 			c.log.Error(opReconcile, "could not resolve an ordinary bounce disposition", withCause(fields, err))
-			return
+			return false
+		}
+		if d.Kind == DispositionDied {
+			// A DEAD SHIM WITH A FREE LOCK IS THE ORDINARY DEAD-SHIM PATH, not
+			// a question for a human. The lock being free is the kernel's
+			// proof the process is gone and owns nothing; the boot's own steps
+			// already treat the workspace as client-less (its in-flight turns
+			// are closed, and an open one's session is brought back up). No
+			// verb could close an open fault here, so one stood on the
+			// footer's strip and the host view for good: seven of them for one
+			// workspace on 2026-09-24. The record stays, resolved, under
+			// health.KindBounceDied with the manifest's pid and vendor session.
+			c.log.Info(opReconcile, "a session the bounce meant to preserve had died; its record is resolved and the workspace takes the ordinary dead-shim path", fields)
+			return true
 		}
 		c.log.Debug(opReconcile, "recorded an ordinary bounce disposition", fields)
-		return
+		return true
 	}
 	c.log.Warn(opReconcile, "a session's bounce disposition needs a human", fields)
+	return true
 }
