@@ -3122,3 +3122,71 @@ func TestADetachedShellsFailureNamesTheCommandItRestated(t *testing.T) {
 		t.Fatalf("command = %q, want the restated command", got)
 	}
 }
+
+// THE FOOTER'S JUMP ADDRESS IS THE ONE THE FEED ANNOUNCES (Deps.EntryPlaced),
+// so a subagent's shell must be announced at its head on the subagent's own
+// sub-feed. It used to be addressed on the root for every shell, a row the root
+// never held once the head was drawn where it belongs.
+func TestADetachedShellsHeadIsAnnouncedOnItsOwnersFeed(t *testing.T) {
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	nested := &conversationv1.AgentId{Value: "agent-nested"}
+	for _, tc := range []struct {
+		name string
+		// arrange draws the call's card, answering the agent that carried it.
+		arrange func(h *harness) *conversationv1.AgentId
+		want    func(carrier *conversationv1.AgentId) feedid.Feed
+	}{
+		{
+			name: "the main agent's shell is announced on the root",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(bashCall("toolu_bash", "npm test"))
+				return mainAgent()
+			},
+			want: func(*conversationv1.AgentId) feedid.Feed { return rootFeed() },
+		},
+		{
+			name: "a subagent's shell is announced on the subagent's sub-feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, bashCall("toolu_bash", "npm test"))
+				return sub
+			},
+			want: agentFeed,
+		},
+		{
+			name: "a nested subagent's shell is announced on the nested subagent's sub-feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, spawnCall("toolu_spawn_nested", nested))
+				h.sendAs(nested, bashCall("toolu_bash", "npm test"))
+				return nested
+			},
+			want: agentFeed,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			carrier := tc.arrange(h)
+
+			// Act: the task stream announces it on the MAIN agent's book.
+			h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash")
+
+			// Assert: the last address announced for the work is its head on
+			// the owner's feed.
+			want := testEncode(feedid.Ref{
+				WS: testWorkspace, Feed: tc.want(carrier),
+				Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: "toolu_bash"},
+			}).GetValue()
+			var got string
+			for _, placed := range h.placed {
+				if placed.unit == "toolu_bash" {
+					got = placed.row
+				}
+			}
+			if got != want {
+				t.Fatalf("toolu_bash announced at %q, want %q (placed = %+v)", got, want, h.placed)
+			}
+		})
+	}
+}
