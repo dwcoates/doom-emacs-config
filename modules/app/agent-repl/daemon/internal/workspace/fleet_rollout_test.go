@@ -936,6 +936,29 @@ func TestAnInstallWhoseClaimIsRefusedHoldsNothing(t *testing.T) {
 	}
 }
 
+// TestAnInstallOfADeadShimIsRefusedAndHoldsNothing is the relaunch that
+// installed a replacement thirty seconds after it had exited.
+func TestAnInstallOfADeadShimIsRefusedAndHoldsNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.reaped = true
+
+	// Act.
+	err := f.fleet.Install(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	if !errors.Is(err, ErrInstallDeadShim) {
+		t.Fatalf("Install() = %v, want ErrInstallDeadShim", err)
+	}
+	f.fleet.mu.RLock()
+	_, held := f.fleet.sessions[ws.ID]
+	f.fleet.mu.RUnlock()
+	if held {
+		t.Fatal("the fleet holds a dead client")
+	}
+}
+
 func TestAnAdoptionWhoseClaimIsRefusedLetsTheDialedShimGo(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

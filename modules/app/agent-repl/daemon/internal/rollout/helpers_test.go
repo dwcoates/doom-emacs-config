@@ -360,6 +360,12 @@ type fakeShim struct {
 	// order records the engine's steps against this shim, so a test asserts the
 	// SEQUENCE and not merely that each happened.
 	order *steps
+	// died is the exit Reaped answers once the test has killed the process
+	// out from under the engine; nil while it runs.
+	died *shimclient.ExitInfo
+	// onKillSession, when set, runs as KillSession is asked, so a test acts
+	// at the point of no return.
+	onKillSession func()
 }
 
 func newFakeShim(pid int, order *steps) *fakeShim {
@@ -392,6 +398,9 @@ func (s *fakeShim) KillSession(_ context.Context, req *shimv1.KillSessionRequest
 	answer, err := s.killAnswer, s.killErr
 	s.mu.Unlock()
 	s.order.record("kill_session")
+	if s.onKillSession != nil {
+		s.onKillSession()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -434,6 +443,24 @@ func (s *fakeShim) ForceKills() []shimclient.KillAttribution {
 }
 
 func (s *fakeShim) Exited() <-chan shimclient.ExitInfo { return s.exited }
+
+// Reaped answers the exit Die recorded.
+func (s *fakeShim) Reaped() (shimclient.ExitInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.died == nil {
+		return shimclient.ExitInfo{}, false
+	}
+	return *s.died, true
+}
+
+// Die records the process as exited on its own, as a shim that could not
+// bind its socket does.
+func (s *fakeShim) Die() {
+	s.mu.Lock()
+	s.died = &shimclient.ExitInfo{PID: s.pid, Code: 1}
+	s.mu.Unlock()
+}
 
 // Reap makes the process observably gone, which is what the engine's gate
 // waits for.
