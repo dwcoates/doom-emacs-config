@@ -15,8 +15,10 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `feat/daemon-owned-deploys` | `~/.config/doom-worktrees/daemon-owned-deploys` | REVIVED (13 commits plus uncommitted work before the bounce): daemon-owned builds and deploys, bounce registry, Deploy{force}, one deploy per merge, `deploy-all.sh` removed. | `a47129c3ca68414a3` (the e2e port in `feat/dod-e2e`, then it merges into this branch) | 21:xx (REVIVED after the session restart) |
 | `fix/detached-work-in-owning-feed` | `~/.config/doom-worktrees/detached-work-in-owning-feed` | Detached work is drawn only in its owner's feed (main to root, a subagent's to its sub-feed), at the spawning call's position. No root fallback: an unplaceable item logs an ERROR and a topbar warning. Also why a subagent's shell output isn't in the store. | `acd09641d23117b76` | 21:xx (REVIVED after the session restart) |
 | `fix/footer-turn-context-delta` | `~/.config/doom-worktrees/footer-turn-context-delta` | The footer token cell is the in-flight turn's growth of the MAIN context window, from the topbar's source. No subagent usage (that's in the clickable panel). Idle shows `--` and stays clickable. | `aadc0c20cfa7ba7b5` (verify and report) | 21:xx (REVIVED after the session restart) |
-| `feat/edit-held-prompt` | `~/.config/doom-worktrees/edit-held-prompt` | An Edit button on the held card. The editing claim holds that prompt and everything after it. The content goes to the Emacs input (existing text saved to history), and a send replaces it and reclassifies. | `ad0dcaa09e6a00bcb` | 21:xx (REVIVED after the session restart) |
 | `fix/shim-writer-never-drops` | `~/.config/doom-worktrees/shim-writer-never-drops` | The shim's store writer never drops writes (it was "DROPPING store writes" at 256 batches); it uses backpressure, bounded batches, and latency-critical frames not stuck behind a backlog. | `a81508fcefcb60065` | 22:10 |
+| `fix/store-checkpoint-and-cache` | `~/.config/doom-worktrees/store-checkpoint-and-cache` | Checkpoints become bulk-tier jobs (autocheckpoint off, `journal_size_limit`), plus a larger page cache (and maybe mmap), measured before and after. | `a959c0a4401ddeef2` | 22:10 |
+| `fix/shell-output-tail-only` | `~/.config/doom-worktrees/shell-output-tail-only` | Shell output is stored as a rolling tail at the renderer's 16 KiB cap (one shared constant) instead of contiguous deltas from 0; live and replay show what they show today. | `a11d136b2405a419b` | 22:10 |
+| `fix/keepalive-rows-unstored` | `~/.config/doom-worktrees/keepalive-rows-unstored` | Stop storing keep-alive rows (shim and sidecar) if running and rewinding them don't need it; the purpose table decides. | `a7a271a7c6c5b3e92` | 22:10 |
 
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
@@ -26,9 +28,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Still waiting on the owner
 
-- Store tuning (reported, not changed): run WAL checkpoints as a bulk job (`wal_autocheckpoint(0)`), and raise the 2 MB SQLite page cache on the 1.1 GB DB (a memory trade-off).
-- Shell output: a claimed shell spool is still stored whole, because the proto needs contiguous deltas from offset 0, though the daemon shows only the last 16 KiB. Storing only the tail is a proto/store change. Do it?
-- Keep-alive rows are persisted but never rendered, under a standing ruling. Stop storing them under the new "not rendered, not needed" rule?
 - Old store rows: settles written before the restate change now log an ERROR and draw nothing on replay, instead of an empty card. That's ERROR noise until the store ages out. Accept it, or treat pre-change rows at a lower level?
 - Restating for a Subagent failure (prompt and created agent id) and an Artifact failure (the publish act) needs a contract shape. Should every settle also carry `started_at`, so replayed cards show their runtime?
 - The proto keeps a `DaemonFault.deploy_script_failed` arm with no raise site now that the script is gone. Remove it?
@@ -44,6 +43,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- Editing a held prompt: Edit claims it under the delivery lock (it and everything after it stay held); Emacs takes it into the input (existing text saved to history); a send replaces and reclassifies; the claim ends with the editor's host stream; cancel is `C-c C-c` (`feat/edit-held-prompt`, daemon/webapp/ERT green on master).
 - Store: one writer takes interactive before bulk (bulk granted after 8 interactive grants in a row); bulk is split at 64 rows, 1 MiB or 100ms; ledger sweeps are paged (they had held the writer 137s and 848s); an unclassified write is refused; the shim writes interactive and the sidecar bulk (`fix/store-interactive-writes-first`). DEPLOY NOTE: the store, shim and sidecar must deploy together, because the new store refuses unclassified writes.
 - Every test entry point runs at `nice -n 19` through `bin/background.sh`, and suites refuse to start without it. Webapp integration passes 1765/1765 twice under it, in about 22s (`fix/tests-background-priority`). CLAUDE.md's ERT line is updated. Still open: plain `go test` in shim-store, shim-sidecar and shim-lock isn't enforced (it needs a `TestMain` gate).
 - Sidecar: it never reads a spool nothing renders (unclaimed, unmapped, or transcript symlinks); writes are bounded at 1 MiB and 128 frames; terminals keep the 16 KiB spool cap (`fix/sidecar-no-unrendered-spools`, sidecar/store/daemon/e2e green).
