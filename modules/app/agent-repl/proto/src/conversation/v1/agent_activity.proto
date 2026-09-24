@@ -134,9 +134,10 @@ message AgentActivity {
     // prompt it was given, its progress, and the report and totals it settles
     // with.
     AgentSubagent subagent = 12;
-    // A tool this contract does not model — an MCP server's tool, or one added
-    // after this schema was written. Present so unmodelled work is still
-    // visible rather than silently absent.
+    // A tool this contract does not model: one the vendor added after this
+    // schema was written. Present so unmodelled work is still visible rather
+    // than silently absent. An MCP server's tool is NOT this: it is
+    // `mcp_tool_call`.
     AgentUnmodeled unmodeled = 14;
     // The agent sending a message to another agent.
     AgentSendMessage send_message = 15;
@@ -188,6 +189,9 @@ message AgentActivity {
     // The agent sent the user a push notification — an outbound action
     // that would otherwise be invisible in the transcript.
     AgentPushNotification push_notification = 32;
+    // The agent calling a tool an MCP server provides. An ordinary tool
+    // call, drawn as the ordinary tool card.
+    AgentMcpToolCall mcp_tool_call = 34;
   }
 }
 
@@ -3253,6 +3257,88 @@ message AgentArtifactFailure {
   }
 }
 
+// ---- An MCP server's tool: an ordinary tool call ----
+
+// The agent calling a tool an MCP server provides (`mcp__<server>__<tool>`).
+//
+// AN ORDINARY TOOL CALL, like Read or Bash, not a special unit: it starts,
+// may beat while it runs, and settles with what it returned or how it failed.
+// What makes it its own arm is only that its schema belongs to the server,
+// which registers it at runtime, so the input is carried untyped — the same
+// Struct AgentUnmodeled carries — and NOTHING BRANCHES ON A KEY INSIDE IT.
+//
+// THE SETTLE STANDS ALONE: both settled arms restate the tool and the
+// arguments their start carried (AgentActivityContract SETTLES_STAND_ALONE).
+message AgentMcpToolCall {
+  oneof result {
+    // This stream is now carrying this call. Sent ONCE per stream, at issue.
+    AgentMcpToolCallStart start = 1;
+    // The vendor's liveness beat while the call runs; not an update.
+    AgentToolCallProgress progress = 2;
+    // The tool returned.
+    AgentMcpToolCallSuccess success = 3;
+    // The tool failed.
+    AgentMcpToolCallFailure failure = 4;
+  }
+}
+
+// Which MCP tool was called.
+message AgentMcpTool {
+  // The tool as the agent named it — the vendor's qualified name
+  // (`mcp__claude-in-chrome__navigate`), or the bare name an API-side MCP
+  // block carries. The value a consumer draws as the card's head.
+  string name = 1;
+
+  // THE SERVER AND ITS TOOL, when the producer RESOLVED them. The qualified
+  // name is the vendor's grammar and a server whose own name contains the
+  // separator would split wrongly, so a producer states the pair only when it
+  // matched the name against a server the session knows, or the vendor named
+  // the server on the block. UNSET otherwise; never guessed by splitting.
+  optional AgentMcpToolAddress address = 2;
+}
+
+// An MCP tool's server and its own name on that server.
+message AgentMcpToolAddress {
+  // The MCP server, as the session names it (`claude-in-chrome`).
+  string server = 1;
+  // The tool's own name on that server (`navigate`).
+  string tool = 2;
+}
+
+// A call this stream has begun carrying.
+message AgentMcpToolCallStart {
+  // Which tool.
+  AgentMcpTool tool = 1;
+  // The arguments as the agent supplied them. UNTYPED BY NECESSITY: the
+  // producer holds no schema for a server's tool. UNSET when the input could
+  // not be represented as a Struct.
+  google.protobuf.Struct arguments = 2;
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 3;
+}
+
+// The tool returned.
+message AgentMcpToolCallSuccess {
+  // Which tool, restated from the start.
+  AgentMcpTool tool = 1;
+  // The arguments, restated from the start.
+  google.protobuf.Struct arguments = 2;
+  // What it returned: text and image blocks, whichever server produced them.
+  ToolResultContent content = 3;
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 4;
+}
+
+// The tool failed.
+message AgentMcpToolCallFailure {
+  // Which tool, restated from the start.
+  AgentMcpTool tool = 1;
+  // The arguments, restated from the start.
+  google.protobuf.Struct arguments = 2;
+  // What it said when it failed, and when it settled.
+  AgentToolFailure error = 3;
+}
+
 // ---- The unmodeled tool: work this contract does not describe ----
 
 // ---- Tool result content: what any tool returned, by block ----
@@ -3280,8 +3366,8 @@ message ToolResultContentBlock {
   }
 }
 
-// A tool call this contract does not model — an MCP server's tool, or one the
-// vendor added after this schema was written.
+// A tool call this contract does not model — one the vendor added after this
+// schema was written. An MCP server's tool is AgentMcpToolCall, never this.
 //
 // NOT A FALLBACK. This arm is for a tool whose schema genuinely cannot be known
 // to the producer, never for one whose modelling was merely inconvenient or
@@ -3316,8 +3402,8 @@ message AgentUnmodeled {
 
 // A call this stream has begun carrying.
 message AgentUnmodeledStart {
-  // The tool as the agent named it — an MCP tool's qualified name, or a built-in
-  // this schema has not caught up with.
+  // The tool as the agent named it — a built-in this schema has not caught up
+  // with.
   //
   // A PLAIN STRING BECAUSE THE SET IS GENUINELY OPEN: servers register tools at
   // runtime, so no closed vocabulary can exist. This is the value a consumer
@@ -3337,14 +3423,10 @@ message AgentUnmodeledStart {
   // When the call was issued.
   AgentActivityStartedAt started_at = 3;
 
-  // WHICH MCP SERVER SERVED THE TOOL, when one did.
-  //
-  // The tool name above is qualified and a consumer COULD split it — but the
-  // qualification grammar is the vendor's and a server whose own name contains
-  // the separator would be split wrongly. Stated rather than parsed. UNSET for
-  // a built-in this schema has not caught up with, which is the other reason a
-  // call lands here.
-  optional string mcp_server = 4;
+  // Tag 4 (`mcp_server`) is RETIRED: an MCP server's tool is
+  // AgentMcpToolCall, so no call that lands here was served by one.
+  reserved 4;
+  reserved "mcp_server";
 }
 
 // The tool returned.
@@ -3358,8 +3440,10 @@ message AgentUnmodeledSuccess {
   // on this side.
   ToolResultContent content = 2;
 
-  // Which MCP server served the tool, when one did. UNSET for a built-in.
-  optional string mcp_server = 3;
+  // Tag 3 (`mcp_server`) is RETIRED: an MCP server's tool is
+  // AgentMcpToolCall.
+  reserved 3;
+  reserved "mcp_server";
 
   // When the call settled. UNSET when the producer observed no instant.
   optional AgentActivitySettledAt settled_at = 4;
@@ -3375,9 +3459,10 @@ message AgentUnmodeledFailure {
   string tool_name = 1;
   // What it said when it failed, verbatim.
   ToolResultContent content = 2;
-  // Which MCP server served the tool, when one did. UNSET for a built-in this
-  // schema has not caught up with.
-  optional string mcp_server = 3;
+  // Tag 3 (`mcp_server`) is RETIRED: an MCP server's tool is
+  // AgentMcpToolCall.
+  reserved 3;
+  reserved "mcp_server";
   // When the call settled as failed. UNSET when no instant was observed.
   optional AgentActivitySettledAt settled_at = 4;
 }
