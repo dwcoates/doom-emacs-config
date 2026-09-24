@@ -226,6 +226,14 @@ func (r *reporter) OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.
 	log := r.log.Global()
 	out, err := r.db.OpenFaults(ctx, scope)
 	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			// THE CALLER WITHDREW THE ASK — its request ended, or the daemon is
+			// stopping — so the read was abandoned, not failed. An ordinary
+			// outcome that carries no defect; the error still reaches the
+			// caller, which is the party that cancelled.
+			log.Debug(opOpenFaults, "the caller cancelled the open-faults read before it finished", dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("health: read open faults: %w", err)
+		}
 		log.Error(opOpenFaults, "could not read the open faults", dlog.Context{"cause": err.Error()})
 		return nil, fmt.Errorf("health: read open faults: %w", err)
 	}
