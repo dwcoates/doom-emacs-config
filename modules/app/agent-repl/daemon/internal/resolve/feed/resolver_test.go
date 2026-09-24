@@ -74,6 +74,8 @@ func (f *fakeSurfaces) ClientLog(dir string, record dlog.ClientRecord) error { r
 // Evict implements dlog.Surfaces.
 func (f *fakeSurfaces) Evict(dir string) error { return nil }
 
+// Retire implements dlog.Surfaces.
+
 // Close implements dlog.Surfaces.
 func (f *fakeSurfaces) Close() error { return nil }
 

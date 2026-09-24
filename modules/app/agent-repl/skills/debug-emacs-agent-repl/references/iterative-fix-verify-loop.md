@@ -61,19 +61,20 @@ be reading the same files — STOP clearing and surface the situation to the
 user. Do not keep clearing on the assumption it is fine, and do not silently
 abandon the step either; either way the user is owed the finding.
 
-Run the full deploy chain so that no later observation can be blamed on a
-stale artifact:
+Deploy, so that no later observation can be blamed on a stale artifact:
 
 ```sh
-modules/app/agent-repl/bin/deploy-all.sh
+modules/app/agent-repl/daemon/bin/claude-repld deploy
 ```
 
-The script owns its own ordering and its own failure semantics. In summary it
-regenerates protobufs, runs `build-frontend.sh`, forces the daemon build,
-builds and kickstarts the store and then the sidecar with a wait on
-`store.sock` between them, bounces the daemon through `emacsclient`, and
-refreshes the mounted webviews. Never reorder the store and sidecar by hand;
-see the restart-safety section of `health-and-readiness.md`.
+The daemon owns the deploy's ordering and its failure semantics. It builds
+every component into staging (a build failure deploys nothing), judges each by
+content hash against what the running process reported, restarts the store and
+then the sidecar with a wait on `store.sock` between them, hands a stale daemon
+over, bounces stale shims through the bounce registry (never mid-turn unless
+`-force`), and pushes `reload_elisp` / `reload_webapp` to the stale Emacs and
+webviews. Never reorder the store and sidecar by hand; see the restart-safety
+section of `health-and-readiness.md`.
 
 Then bounce Emacs itself. A daemon bounce does not re-prove Emacs-side
 startup, and Emacs-side startup is what this loop measures.

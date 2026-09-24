@@ -32,7 +32,6 @@ var AllSuites = []string{
 	"coverage-harness",
 	"logging-density-harness",
 	"build-frontend-harness",
-	"deploy-harness",
 	"readiness-harness",
 	"doctor-harness",
 	"precommit-harness",
@@ -55,7 +54,6 @@ var scriptHarnessSuites = []string{
 	"coverage-harness",
 	"logging-density-harness",
 	"build-frontend-harness",
-	"deploy-harness",
 	"readiness-harness",
 }
 

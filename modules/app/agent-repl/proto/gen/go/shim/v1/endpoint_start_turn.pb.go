@@ -29,7 +29,9 @@ const (
 
 // The prompt the daemon is handing over NOW. Nothing here is a queue entry:
 // by the time this is sent the daemon has already decided no turn is in
-// flight, and the shim submits it to the agent binary immediately.
+// flight, and the shim submits it to the agent binary immediately — or, when
+// the shim's own cache keep-alive is running, the moment that keep-alive ends.
+// The call simply takes that much longer; nothing about the wait is stated.
 type StartTurnRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The turn's identity, MINTED BY THE DAEMON and adopted by the shim: every
@@ -363,10 +365,11 @@ type isStartTurnFailure_Kind interface {
 }
 
 type StartTurnFailure_TurnAlreadyOpen struct {
-	// A turn is already open. Ordinarily the DAEMON's fault (it is the only
-	// queue) — EXCEPT when the open turn is one of the shim's own keep-alive
-	// pings, which the shim opens internally and no daemon queue can see. That
-	// case is TRANSIENT, not a daemon bug: see `turn_already_open.keepalive`.
+	// A turn is already open, or another StartTurn is still being started.
+	// Always the DAEMON's fault: it is the only queue. The shim's own cache
+	// keep-alive NEVER produces this arm — a StartTurn that arrives while a
+	// keep-alive runs waits inside the shim for the keep-alive to end and then
+	// opens its turn, so no keep-alive is ever visible on this wire.
 	TurnAlreadyOpen *StartTurnTurnAlreadyOpen `protobuf:"bytes,2,opt,name=turn_already_open,json=turnAlreadyOpen,proto3,oneof"`
 }
 
@@ -376,7 +379,8 @@ type StartTurnFailure_NoSession struct {
 }
 
 type StartTurnFailure_VendorRefused struct {
-	// The agent binary refused the prompt; `detail` carries its wording.
+	// The agent binary refused the prompt, or never became free to take it
+	// within the shim's bound; `detail` carries the account.
 	VendorRefused *StartTurnVendorRefused `protobuf:"bytes,4,opt,name=vendor_refused,json=vendorRefused,proto3,oneof"`
 }
 
@@ -395,15 +399,7 @@ func (*StartTurnFailure_VendorRefused) isStartTurnFailure_Kind() {}
 func (*StartTurnFailure_QueryDead) isStartTurnFailure_Kind() {}
 
 type StartTurnTurnAlreadyOpen struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// True when the open turn is one of the shim's OWN keep-alive pings rather
-	// than a daemon turn. A keep-alive collision is TRANSIENT — the ping normally
-	// closes on its own in milliseconds, but a vendor 5xx storm can hold it open
-	// for tens of seconds — so the daemon RE-DRIVES the queued prompt (same
-	// idempotency key) until the keep-alive closes and the turn starts, rather
-	// than surfacing a terminal error. False keeps the historical meaning: a
-	// genuine daemon double-submit, which stays the daemon's own bug.
-	Keepalive     bool `protobuf:"varint,1,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -436,13 +432,6 @@ func (x *StartTurnTurnAlreadyOpen) ProtoReflect() protoreflect.Message {
 // Deprecated: Use StartTurnTurnAlreadyOpen.ProtoReflect.Descriptor instead.
 func (*StartTurnTurnAlreadyOpen) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_turn_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *StartTurnTurnAlreadyOpen) GetKeepalive() bool {
-	if x != nil {
-		return x.Keepalive
-	}
-	return false
 }
 
 type StartTurnNoSession struct {
@@ -580,9 +569,8 @@ const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"\x0evendor_refused\x18\x04 \x01(\v2\x1f.shim.v1.StartTurnVendorRefusedH\x00R\rvendorRefused\x12<\n" +
 	"\n" +
 	"query_dead\x18\x05 \x01(\v2\x1b.shim.v1.StartTurnQueryDeadH\x00R\tqueryDeadB\x06\n" +
-	"\x04kind\"8\n" +
-	"\x18StartTurnTurnAlreadyOpen\x12\x1c\n" +
-	"\tkeepalive\x18\x01 \x01(\bR\tkeepalive\"\x14\n" +
+	"\x04kind\"+\n" +
+	"\x18StartTurnTurnAlreadyOpenJ\x04\b\x01\x10\x02R\tkeepalive\"\x14\n" +
 	"\x12StartTurnNoSession\"\x18\n" +
 	"\x16StartTurnVendorRefused\"\x14\n" +
 	"\x12StartTurnQueryDeadB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"

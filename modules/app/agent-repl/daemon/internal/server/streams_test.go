@@ -170,7 +170,7 @@ func TestWatchDaemonServesEveryClient(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}}}))
 	if dialErr != nil {
 		t.Fatalf("open the stream: %v", dialErr)
 	}
@@ -199,7 +199,7 @@ func TestShutdownAnnouncedReachesAClientBeforeTheSurfaceCloses(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}}}))
 	if dialErr != nil {
 		t.Fatalf("open the stream: %v", dialErr)
 	}
@@ -231,7 +231,7 @@ func TestShutdownAnnouncedDoesNotWaitOnAStreamThatHasGone(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}}}))
 	if dialErr != nil {
 		t.Fatalf("open the stream: %v", dialErr)
 	}
@@ -435,7 +435,7 @@ func TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent(t *tes
 	// Act: a late subscriber replays each topic's latest.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test"}}}))
 	if err != nil {
 		t.Fatalf("open the stream: %v", err)
 	}

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
-	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -63,70 +61,6 @@ func (s *server) UpdateShutdownSchedule(
 	resp.Result = &agentreplv1.UpdateShutdownScheduleResponse_Success{
 		Success: &agentreplv1.UpdateShutdownScheduleSuccess{},
 	}
-	return connect.NewResponse(resp), nil
-}
-
-// RollOutBuild puts a build the deploy chain already produced into service.
-// It answers the rollout's ACCEPTANCE: what follows waits on each workspace's
-// freeness and ends no turn, which is the whole reason a deploy calls this and
-// never UpdateShutdownSchedule{now}.
-func (s *server) RollOutBuild(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.RollOutBuildRequest],
-) (*connect.Response[agentreplv1.RollOutBuildResponse], error) {
-	const rpc = "RollOutBuild"
-	if err := validateRollOutBuildRequest(req.Msg); err != nil {
-		return nil, err
-	}
-	resp := &agentreplv1.RollOutBuildResponse{}
-
-	accepted, err := s.deps.Rollout.RollOut(ctx, rollout.Rebuilt{
-		Daemon: req.Msg.GetDaemon() != nil,
-		Shim:   req.Msg.GetShim() != nil,
-		Webapp: req.Msg.GetWebapp() != nil,
-	})
-	var inFlight *rollout.ErrAlreadyRollingOut
-	switch {
-	case errors.As(err, &inFlight):
-		// THE ARM CARRIES WHAT THE ROLLOUT IN FLIGHT IS WAITING ON, which the
-		// shared refusal filler has no field for, so it is built here.
-		waiting := make([]string, 0, len(inFlight.WaitingOn))
-		for _, ws := range inFlight.WaitingOn {
-			waiting = append(waiting, string(ws))
-		}
-		s.log.Info("daemon.server.roll_out_build", "answered a typed refusal",
-			dlog.Context{"arm": "already_rolling_out", "waiting_on": waiting})
-		resp.Result = &agentreplv1.RollOutBuildResponse_Error{Error: &agentreplv1.RollOutBuildError{
-			Cause: &agentreplv1.RollOutBuildError_AlreadyRollingOut{
-				AlreadyRollingOut: &agentreplv1.RollOutBuildAlreadyRollingOut{WaitingOn: waiting},
-			},
-		}}
-		return connect.NewResponse(resp), nil
-	case err != nil:
-		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
-	}
-
-	success := &agentreplv1.RollOutBuildSuccess{}
-	switch accepted.Action {
-	case rollout.ActionHandover:
-		success.Action = &agentreplv1.RollOutBuildSuccess_Handover{Handover: &agentreplv1.RollOutBuildHandover{
-			Workspaces: uint32(accepted.Workspaces), Busy: uint32(accepted.Busy),
-		}}
-	case rollout.ActionShimRelaunch:
-		success.Action = &agentreplv1.RollOutBuildSuccess_ShimRelaunch{ShimRelaunch: &agentreplv1.RollOutBuildShimRelaunch{
-			Workspaces: uint32(accepted.Workspaces), Busy: uint32(accepted.Busy),
-		}}
-	case rollout.ActionWebappReload:
-		success.Action = &agentreplv1.RollOutBuildSuccess_WebappReload{WebappReload: &agentreplv1.RollOutBuildWebappReload{
-			Webviews: uint32(accepted.Workspaces),
-		}}
-	default:
-		return nil, fail(s.log, rpc, fmt.Errorf("the rollout controller accepted with an action this handler cannot answer: %q", accepted.Action))
-	}
-	s.log.Info("daemon.server.roll_out_build", "accepted a rollout of the deployed build", dlog.Context{
-		"action": string(accepted.Action), "workspaces": accepted.Workspaces, "busy": accepted.Busy,
-	})
-	resp.Result = &agentreplv1.RollOutBuildResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 

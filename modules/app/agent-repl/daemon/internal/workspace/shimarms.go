@@ -85,30 +85,14 @@ type ShimRefusal struct {
 	Arm string
 	// Detail is the shim's own sentence, kept as evidence.
 	Detail string
-	// TransientKeepalive is set only on a StartTurn turn_already_open refusal
-	// whose open turn is one of the shim's OWN keep-alive pings. Such a
-	// collision is transient — the ping closes on its own — so the queue
-	// re-drives the prompt rather than surfacing a terminal error. It stays
-	// false for a genuine daemon double-submit, which is the daemon's own bug.
-	TransientKeepalive bool
-}
-
-// KeepaliveTurnAlreadyOpen reports that this refusal is a StartTurn that a
-// KEEP-ALIVE turn momentarily blocked — the one turn_already_open case the
-// queue re-drives rather than treating as terminal. It is the method the
-// prompt queue matches structurally (via a package-local interface) so it can
-// classify the refusal without importing this package.
-func (r *ShimRefusal) KeepaliveTurnAlreadyOpen() bool {
-	return r.Verb == "StartTurn" && r.Arm == "turn_already_open" && r.TransientKeepalive
 }
 
 // KillRefusedLive reports that this refusal is a KillTurn the shim declined
 // because the turn is still LIVE. The shim no longer produces it: an unforced
 // kill interrupts the synchronous turn and leaves detached work running. So
 // one arriving is a CONTRACT BREACH, and the prompt queue matches it
-// structurally (via a package-local interface, as it does
-// KeepaliveTurnAlreadyOpen) to name the breach rather than bury it among
-// ordinary refusals.
+// structurally (via a package-local interface) to name the breach rather than
+// bury it among ordinary refusals.
 func (r *ShimRefusal) KillRefusedLive() bool {
 	return r.Verb == "KillTurn" && r.Arm == ArmShimTurnLive
 }

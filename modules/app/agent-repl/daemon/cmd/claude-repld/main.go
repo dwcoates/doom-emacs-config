@@ -128,6 +128,14 @@ const envStoreSocket = "AGENT_REPL_STORE_SOCKET"
 const defaultStoreSocket = ".cache/agent-repl/sock/store.sock"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == deployVerb {
+		// THE VERB STARTS NOTHING: it asks the serving daemon to deploy and
+		// prints the daemon's decisions.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		code := runDeployVerb(ctx, os.Args[2:], dialDaemon, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	opts, err := parseFlags(os.Args[0], os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_web_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_web_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGFdhdGNoV2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIqgBChlXYXRjaFdlYldvcmtzcGFjZVJlc3BvbnNlEjwKC3RyYW5zZmVycmVkGAEgASgLMiUuYWdlbnRyZXBsLnYxLldlYldvcmtzcGFjZVRyYW5zZmVycmVkSAASRQoQc2Vzc2lvbl9pZGVudGl0eRgCIAEoCzIpLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VTZXNzaW9uSWRlbnRpdHlIAEIGCgRwdXNoIioKF1dlYldvcmtzcGFjZVRyYW5zZmVycmVkEg8KB2FkZHJlc3MYASABKAkiVwobV2ViV29ya3NwYWNlU2Vzc2lvbklkZW50aXR5Eh0KFWFnZW50X3JlcGxfc2Vzc2lvbl9pZBgBIAEoCRIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIl8KGFdhdGNoV2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHdlYmFwcF9idWlsZBgCIAEoCSKoAQoZV2F0Y2hXZWJXb3Jrc3BhY2VSZXNwb25zZRI8Cgt0cmFuc2ZlcnJlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkUKEHNlc3Npb25faWRlbnRpdHkYAiABKAsyKS5hZ2VudHJlcGwudjEuV2ViV29ya3NwYWNlU2Vzc2lvbklkZW50aXR5SABCBgoEcHVzaCIqChdXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJlZBIPCgdhZGRyZXNzGAEgASgJIlcKG1dlYldvcmtzcGFjZVNlc3Npb25JZGVudGl0eRIdChVhZ2VudF9yZXBsX3Nlc3Npb25faWQYASABKAkSGQoRY2xhdWRlX3Nlc3Npb25faWQYAiABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.WatchWebWorkspaceRequest
@@ -37,6 +37,20 @@ export type WatchWebWorkspaceRequest = Message<"agentrepl.v1.WatchWebWorkspaceRe
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * THE WEBAPP BUILD THIS PAGE IS RUNNING, because every process reports its
+   * build when it connects: a deploy pushes `reload_webapp` to exactly the
+   * webviews whose build is not the one it just built. REQUIRED — a watch
+   * without it is refused.
+   *
+   * It is the CONTENT HASH Vite gives the entry bundle: the `<hash>` in the
+   * page's own `assets/index-<hash>.js`, read from the running module's URL.
+   * The daemon reads the fresh build's from the `index.html` it serves.
+   *
+   * @generated from field: string webapp_build = 2;
+   */
+  webappBuild: string;
 };
 
 /**

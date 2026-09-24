@@ -380,7 +380,11 @@ export interface ShimEnvironment {
   readonly claudeConfigDir: string;
   /** The one state root every agent-repl process shares. */
   readonly stateDir: string;
-  /** The build identity the daemon compares against its deploy stamp. */
+  /**
+   * The content hash (lowercase hex SHA-256) of the `dist/main.js` bundle the
+   * daemon spawned this process from. The daemon states it at spawn time and
+   * compares it, at deploy, against the freshly built bundle's own hash.
+   */
   readonly shimBuildSha: string;
   /** Where the store is listening. */
   readonly storeSocket: string;
@@ -393,11 +397,14 @@ export interface ShimEnvironment {
  *
  * EVERY REQUIRED VARIABLE IS A REFUSAL, not a default. `CLAUDE_CONFIG_DIR`
  * names which ACCOUNT the session runs as, and guessing it could run a
- * workspace's conversation under the wrong identity. `SHIM_BUILD_SHA` is what
- * the daemon compares against its deploy stamp to bounce a stale survivor;
- * defaulting it would make every shim look current. `AGENT_REPL_OWNED=1` is the
- * daemon's own mark — a shim started by hand has no daemon to serve, no session
- * facts coming, and no business taking the workspace lock a real one needs.
+ * workspace's conversation under the wrong identity. `SHIM_BUILD_SHA` is the
+ * content hash (lowercase hex SHA-256) of the bundle the daemon spawned this
+ * process from, stated by the daemon at spawn time; the daemon's deploy
+ * compares it against a freshly built bundle's own hash to bounce a stale
+ * survivor, and defaulting it would make every shim look current.
+ * `AGENT_REPL_OWNED=1` is the daemon's own mark — a shim started by hand has
+ * no daemon to serve, no session facts coming, and no business taking the
+ * workspace lock a real one needs.
  */
 export function resolveEnvironment(
   env: NodeJS.ProcessEnv,
@@ -418,7 +425,8 @@ export function resolveEnvironment(
   const buildSha = env.SHIM_BUILD_SHA;
   if (buildSha === undefined || buildSha === "") {
     throw new Error(
-      "shim: SHIM_BUILD_SHA is required; the daemon compares it against the deploy stamp to bounce a stale survivor",
+      "shim: SHIM_BUILD_SHA is required; it is the content hash of the bundle the daemon spawned, " +
+        "which the daemon's deploy compares against a freshly built bundle to bounce a stale survivor",
     );
   }
   // THE FLAG BEATS THE ENV. A caller that stated the socket explicitly meant

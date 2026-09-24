@@ -1,0 +1,223 @@
+// endpoint_deploy.proto — Deploy: put the checkout's current source into
+// service. DAEMON ADMIN section.
+//
+// THE DAEMON OWNS DEPLOYS (owner design, 2026-09-23). There is no deploy
+// script. A caller asks — the `claude-repld deploy` CLI verb, Emacs's
+// `agent-repl-deploy`, or the daemon itself once per COMPLETE change landing on
+// master through its own merge (one landing, one deploy, never one per
+// commit) — and the daemon does the rest:
+//
+//   1. BUILD every component — protobufs, the shim bundle, the webapp, the
+//      daemon, the store and the sidecar — into a STAGING location. A build
+//      failure deploys NOTHING: no artifact is installed and nothing is
+//      restarted, and the failure is this call's `build_failed` answer.
+//   2. DECIDE WHAT IS OUT OF DATE BY CONTENT HASH: each running process's
+//      reported build (every process reports it when it connects) against the
+//      freshly built one. Never "did this build change the file".
+//   3. INSTALL the staged artifacts, then restart exactly what is out of date,
+//      each WHEN it may:
+//        - store and sidecar at once, in the recorded safe order (they hold no
+//          turn state);
+//        - an out-of-date shim with nothing in flight at once; one with a turn
+//          or detached work in flight is REGISTERED and bounced when that work
+//          ends. Queued prompts never block a bounce: they are delivered to the
+//          new shim;
+//        - an out-of-date daemon by the blue-green handover, whose successor
+//          adopts the shims and bounces the stale ones the same way;
+//        - elisp and the webapp by a pushed reload (WatchDaemon's
+//          `reload_elisp`, the host stream's `reload_webapp`).
+//
+// AN UNFORCED DEPLOY ENDS NO TURN. That is the whole difference from
+// UpdateShutdownSchedule{now}, the operator's emergency stop. `force` is the
+// one way to not wait.
+//
+// THE ANSWER IS THE DEPLOY'S DECISIONS, NOT ITS COMPLETION. A registered
+// bounce waits on its workspace's work for as long as that takes, so
+// completion has no bound this call could hold open. What follows arrives on
+// the surfaces that already carry it: a handover on WatchDaemon's
+// shutdown_announced, a shim bounce on the host stream's shim_attached, a
+// reload on reload_elisp / reload_webapp.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message DeployRequest {
+  // FORCED: do not wait for in-flight work. Every out-of-date shim is bounced
+  // at once — its turn, its monitors, its background shells and background
+  // subagents run inside its vendor child and end with it — and an
+  // out-of-date daemon hands every workspace to its successor at once.
+  // Unset (the default) ends no turn.
+  bool force = 1;
+}
+
+message DeployResponse {
+  oneof result {
+    DeploySuccess success = 1;
+    DeployError error = 2;
+  }
+}
+
+// Every component was built and every decision was taken.
+message DeploySuccess {
+  // One outcome per component, in build order. EVERY component is listed,
+  // an up-to-date one included, so the answer names what was checked.
+  repeated DeployComponentOutcome components = 1;
+}
+
+// A deployable part of the stack.
+enum DeployComponent {
+  // Never sent; an unset component is a malformed outcome.
+  DEPLOY_COMPONENT_UNSPECIFIED = 0;
+  DEPLOY_COMPONENT_DAEMON = 1;
+  DEPLOY_COMPONENT_SHIM = 2;
+  DEPLOY_COMPONENT_WEBAPP = 3;
+  DEPLOY_COMPONENT_STORE = 4;
+  DEPLOY_COMPONENT_SIDECAR = 5;
+  DEPLOY_COMPONENT_ELISP = 6;
+}
+
+// What the deploy decided for one component.
+message DeployComponentOutcome {
+  // Which component. REQUIRED.
+  DeployComponent component = 1;
+  // The FRESH build's content hash — what every running instance is compared
+  // against. REQUIRED.
+  string build = 2;
+  // THE ARM IS THE DECISION.
+  oneof outcome {
+    // Every running instance already reports this build.
+    DeployUpToDate up_to_date = 3;
+    // A launchd service (store, sidecar) was restarted onto the fresh build.
+    DeployServiceRestarted restarted = 4;
+    // The daemon is being replaced by a blue-green handover.
+    DeployHandingOver handing_over = 5;
+    // Out-of-date shims, each bounced now or registered.
+    DeployShimBounces shims = 6;
+    // A reload was pushed to the clients running an older build.
+    DeployReloadPushed reload_pushed = 7;
+    // The daemon is being handed over, and its SUCCESSOR takes this component
+    // onto the fresh build: it bounces the shims it adopts through its own
+    // bounce registry, and a handed-over webview's fresh attach loads the
+    // fresh assets.
+    DeployDeferredToSuccessor deferred_to_successor = 8;
+  }
+}
+
+// Presence is the fact.
+message DeployUpToDate {}
+
+// Presence is the fact: the service was restarted and is serving again.
+message DeployServiceRestarted {}
+
+// A blue-green handover began.
+message DeployHandingOver {
+  // How many workspaces this daemon serves and will transfer.
+  uint32 workspaces = 1;
+  // How many of them were NOT free at the decision. A forced handover
+  // transfers them anyway.
+  uint32 busy = 2;
+  // The handover does not wait for freeness.
+  bool forced = 3;
+}
+
+// The out-of-date shims and what became of each.
+message DeployShimBounces {
+  repeated DeployShimBounce bounces = 1;
+}
+
+// One out-of-date shim.
+message DeployShimBounce {
+  // The workspace the shim serves, by id. REQUIRED.
+  string workspace = 1;
+  // THE ARM IS WHEN.
+  oneof when {
+    // Bounced at once: nothing was in flight, or the deploy was forced.
+    DeployBouncedNow bounced_now = 2;
+    // Work is in flight, so the shim is in its workspace's bounce registry and
+    // is bounced when that work ends.
+    DeployBounceRegistered registered = 3;
+  }
+}
+
+message DeployBouncedNow {
+  // The deploy was forced and the shim had work in flight, which ended with it.
+  bool forced = 1;
+}
+
+// What the registered bounce is waiting on.
+message DeployBounceRegistered {
+  // A turn is in flight.
+  bool turn_in_flight = 1;
+  // How many detached items (background subagents, background shells,
+  // monitors) are live. They run inside the shim's vendor child and would die
+  // with it.
+  uint32 detached_work = 2;
+}
+
+// A reload push.
+message DeployReloadPushed {
+  // How many clients were told to reload: Emacs for elisp, one per open
+  // webview for the webapp.
+  uint32 recipients = 1;
+}
+
+// Presence is the fact.
+message DeployDeferredToSuccessor {}
+
+message DeployError {
+  oneof cause {
+    DeployBuildFailed build_failed = 1;
+    DeployAlreadyDeploying already_deploying = 2;
+    DeployAlreadyRollingOut already_rolling_out = 3;
+    DeployJoining joining = 4;
+    DeployServiceRestartFailed service_restart_failed = 5;
+    DeployInstallFailed install_failed = 6;
+  }
+}
+
+// A build step failed. NOTHING WAS DEPLOYED: no artifact was installed and
+// nothing was restarted.
+message DeployBuildFailed {
+  // The step that failed (`proto`, `shim`, `webapp`, `daemon`, `store`,
+  // `sidecar`, `lock`). REQUIRED.
+  string step = 1;
+  // The step's own words: the tail of its output. REQUIRED.
+  string detail = 2;
+  // Where the whole build output is archived.
+  string log = 3;
+}
+
+// A deploy is already running. Deploys are never run beside each other: the
+// caller waits for the one in flight and asks again.
+message DeployAlreadyDeploying {}
+
+// A handover is already in flight — typically waiting on a busy workspace —
+// and its successor was spawned from the build that was installed THEN.
+// Starting a second would stand a second successor beside the first.
+message DeployAlreadyRollingOut {
+  // The workspaces the handover in flight is still waiting on, by id.
+  repeated string waiting_on = 1;
+}
+
+// This daemon is itself a successor still JOINING — it serves nothing yet.
+message DeployJoining {}
+
+// A launchd service did not come back onto the fresh build. The artifacts are
+// installed; what is named here is not running them.
+message DeployServiceRestartFailed {
+  // The service (`store`, `sidecar`). REQUIRED.
+  DeployComponent component = 1;
+  // What went wrong, in the restart's own words. REQUIRED.
+  string detail = 2;
+}
+
+// The staged artifacts could not be installed. Nothing was restarted.
+message DeployInstallFailed {
+  // The component whose artifact could not be installed. REQUIRED.
+  DeployComponent component = 1;
+  // Why. REQUIRED.
+  string detail = 2;
+}

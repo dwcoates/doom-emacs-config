@@ -237,8 +237,21 @@ export interface Harness extends MountedApp {
   startSecondDaemon(): Promise<FakeDaemon>;
 }
 
-/** The body of the real index.html, so the shell under test is the shipped one. */
-function installShell(doc: Document): void {
+/**
+ * The webapp build a harness page states when its caller names none.
+ *
+ * A served page states its build through its built entry tag
+ * (`src/webapp-build.ts`), and the lifecycle refuses to open its watch
+ * without one. The fake daemon judges no build, so any well-formed entry
+ * serves; a real daemon's caller names the entry its daemon serves.
+ */
+export const HARNESS_WEBAPP_BUILD = "integration";
+
+/**
+ * The body of the real index.html, so the shell under test is the shipped one,
+ * stating BUILD the way a built page does.
+ */
+function installShell(doc: Document, build: string): void {
   // RESOLVED OFF THE PROJECT ROOT, not off `import.meta.url`. Under the jsdom
   // environment the module's own url is an http one (jsdom's document base),
   // and `fileURLToPath` refuses it — vitest runs from `webapp/`, so the shell
@@ -249,6 +262,14 @@ function installShell(doc: Document): void {
   // Drop the module script tag: the harness mounts components itself rather
   // than letting main.ts boot, so that a test can script the daemon first.
   doc.body.innerHTML = body[1].replace(/<script[\s\S]*?<\/script>/gi, "");
+  // THE BUILT ENTRY TAG, in place of the dev one: `npm run build` rewrites
+  // `/src/main.ts` to `/assets/index-<hash>.js`, and that tag is the only
+  // place a page's build is read from. jsdom neither fetches nor runs it.
+  for (const stale of doc.head.querySelectorAll('script[type="module"]')) stale.remove();
+  const entry = doc.createElement("script");
+  entry.setAttribute("type", "module");
+  entry.setAttribute("src", `/assets/index-${build}.js`);
+  doc.head.append(entry);
 }
 
 /**
@@ -322,6 +343,12 @@ export interface HarnessOptions {
    * call `installClientLogSink()` instead.
    */
   clientLog?: boolean;
+  /**
+   * The webapp build the page states through its built entry tag. Default
+   * `HARNESS_WEBAPP_BUILD`; a real daemon's caller names the build that daemon
+   * serves, so the page is judged current.
+   */
+  webappBuild?: string;
 }
 
 /** Where the app's transport points, and how a request gets routed there. */
@@ -486,7 +513,7 @@ async function mountApp(
   };
   if (fake !== undefined) options.arrange?.(fake);
 
-  installShell(document);
+  installShell(document, options.webappBuild ?? HARNESS_WEBAPP_BUILD);
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.

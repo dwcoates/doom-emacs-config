@@ -416,23 +416,28 @@ sub-feed (`feedid.Feed{Merge{leaseID}}`), append-only, round-numbered.
 Briefs are read from `prompts/` at use time (`merge-conflict-resolve.md`,
 `merge-test-failure-resolve.md`). Post-merge worktree removal after
 terminal publication. The displaced user turn is captured durably and
-resubmitted exactly once at lease release. Self-reload trigger:
-`rollout.Trigger(landed []Commit)` only after release + terminal.
+resubmitted exactly once at lease release. A landing on the daemon's own
+checkout tells the deploy ONCE (`Trigger.Landed(landed []Commit)`, which
+`deploy.Deployer` implements) only after release + terminal, and never waits
+on the build.
 
 ### rollout (`internal/rollout`)
 
-`Controller` with: `Trigger(landed)` (classify by subsystem prefix, invoke
-`bin/deploy-all.sh --no-bounce` once, then per-subsystem action),
-`Handover(ctx)` (spawn successor with `--joining`, announce on WatchDaemon,
-per-workspace transfer at freeness with quiesce + intent manifest +
-`transferred` pushes, adoption window timing, wait-forever with 10-minute
-holdout warnings), `AdoptHost(ws)`/`AdoptWeb(ws)` (rendezvous against the
-expected-participant set recorded at announcement; completes when all have
-called; headless = zero participants), `RelaunchShim(ws, reason)` (the one
-engine for self-merge shim change and the build-staleness bounce: prelaunch
-inert → wait freeness → restart-pending hold → stand down old (Hibernate is
-NOT used here; graceful KillSession{force:false} then reap) → reap gate →
-StartSession(resume) → drain holds), `ReloadWebapp(ws)` push. Asset origin:
+`Controller` with: `HandOver(ctx, force)` (spawn successor with `--joining`,
+announce on WatchDaemon, intent manifest, then ask the prompt queue's BOUNCE
+REGISTRY for every workspace's transfer at once — each taken on its own
+freeness edge, or at once when forced — with quiesce + `transferred` pushes,
+adoption window timing, and holdout warnings), `AdoptHost(ws)`/`AdoptWeb(ws)`
+(rendezvous against the expected-participant set recorded at announcement;
+completes when all have called; headless = zero participants),
+`BounceShim(ws, reason, force, done)` (the one shim-bounce engine, run by the
+registry: prelaunch inert → restart-pending hold → stand down old (Hibernate
+is NOT used here; `KillSession{force}` then reap) → reap gate →
+StartSession(resume) → the queue delivers what it held), `ShimReported(ws,
+build)` / `CheckStaleness(ws, force)` (a shim's reported content hash against
+the installed bundle's; a stale shim goes to the registry), and the
+`ReloadWebapp(ws)` push. The DEPLOY (`internal/deploy`) builds, judges and
+installs, and acts through this controller; see daemon/AGENTS.md "Deploy". Asset origin:
 `server` serves `webapp/dist` with the entry point re-stat'd per request
 and `Cache-Control: no-store` on it only. Image origin (`internal/imageorigin`,
 mounted at `/feed-images/`): a prompt's `ImageBlock{path}` names a file on
@@ -617,19 +622,14 @@ generated arms when the landing merges (one place each):
   is collected in ERROR-ARMS.md and sent by the teamlead once the server
   handlers expose the sites.
 
-## Deploy chain adaptation (wave 3)
+## Deploy (daemon-owned, 2026-09-23)
 
-- `bin/deploy-all.sh` step 5 evaluates an elisp restart hook via emacsclient;
-  the function it names today, `agent-repl-frontend-daemon-restart-await`,
-  is DEAD on overhaul/elisp. The successor is
-  `(agent-repl-runtime-restart-await)` in `lisp/services.el` (build script +
-  store/sidecar bounce + UpdateShutdownSchedule{now} + re-ensure, pumping
-  until DaemonHealth answers). The rewritten chain calls that name; the
-  elisp lead edits nothing under bin/.
-- The chain's order stays proto → bindings → shim → webapp → daemon →
-  store/sidecar; `build-frontend.sh` builds `daemon/bin/claude-repld` from
-  `./cmd/claude-repld`; the daemon's self-reload invokes the ONE chain with
-  `--no-bounce`.
+- There is no deploy chain script: the daemon builds into staging with
+  `bin/build-frontend.sh --out`, judges staleness by content hash, installs,
+  and restarts what is out of date (`internal/deploy`; daemon/AGENTS.md
+  "Deploy").
+- `build-frontend.sh` without `--out` builds `daemon/bin/claude-repld` from
+  `./cmd/claude-repld` for Emacs's cold start.
 - `agent-shim/wire` is deleted with the rewrite (nothing in the daemon
   imports it) and its `bin/test-all.sh` roster entry dropped.
 

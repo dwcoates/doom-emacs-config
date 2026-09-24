@@ -320,9 +320,10 @@ function isTopLevelReply(message: SdkMessage): boolean {
  * above, turned around.
  *
  * ONE SEND AT A TIME, CONSTANT SIZE. The keep-alive is only ever submitted into
- * an idle session and a real prompt is refused while it is pending
- * (`turn_already_open.keepalive`), so at most one keep-alive uuid is ever
- * outstanding.
+ * an idle session, and a real prompt that arrives while it is pending waits
+ * inside the shim for it to leave the turn slot (engine/turn.ts,
+ * `waitOutKeepalive`), so at most one keep-alive uuid is ever outstanding and
+ * no real send is ever pushed while one is.
  */
 export class KeepaliveScope {
   private send: PendingKeepalive | undefined;

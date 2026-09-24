@@ -13,8 +13,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
@@ -245,21 +245,14 @@ func (p *fakeParticipants) Set(ws ids.WorkspaceID, participants Participants) {
 	p.by[ws] = participants
 }
 
-// fakeFreeness answers freeness and lets a test release a pending wait through
-// a channel rather than a sleep.
+// fakeFreeness answers freeness right now.
 type fakeFreeness struct {
-	mu      sync.Mutex
-	free    map[ids.WorkspaceID]bool
-	release map[ids.WorkspaceID]chan struct{}
-	calls   chan ids.WorkspaceID
+	mu   sync.Mutex
+	free map[ids.WorkspaceID]bool
 }
 
 func newFakeFreeness() *fakeFreeness {
-	return &fakeFreeness{
-		free:    make(map[ids.WorkspaceID]bool),
-		release: make(map[ids.WorkspaceID]chan struct{}),
-		calls:   make(chan ids.WorkspaceID, 32),
-	}
+	return &fakeFreeness{free: make(map[ids.WorkspaceID]bool)}
 }
 
 func (f *fakeFreeness) Free(ws ids.WorkspaceID) bool {
@@ -272,34 +265,6 @@ func (f *fakeFreeness) SetFree(ws ids.WorkspaceID, free bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.free[ws] = free
-}
-
-// Gate installs a channel a pending AwaitFree for ws blocks on.
-func (f *fakeFreeness) Gate(ws ids.WorkspaceID) chan struct{} {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	gate := make(chan struct{})
-	f.release[ws] = gate
-	return gate
-}
-
-func (f *fakeFreeness) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error {
-	f.mu.Lock()
-	gate := f.release[ws]
-	f.mu.Unlock()
-	select {
-	case f.calls <- ws:
-	default:
-	}
-	if gate == nil {
-		return nil
-	}
-	select {
-	case <-gate:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // fakeShim is a shimclient.Client the test drives. Everything the relaunch
@@ -547,50 +512,93 @@ func (f *fakeFleet) Adoptions() []ids.WorkspaceID {
 	return append([]ids.WorkspaceID(nil), f.adoptions...)
 }
 
-// fakeRunner is the deploy script runner.
-type fakeRunner struct {
-	mu   sync.Mutex
-	runs [][]string
-	dirs []string
-	code int
-	err  error
+// fakeRegistry stands in for the prompt queue's bounce registry. It models the
+// one behavior the rollout relies on: a request on a FREE workspace (or a
+// forced one) runs at once, on a goroutine of its own; a request on a busy one
+// is REGISTERED until the test frees the workspace. The real registry's lock
+// discipline is the prompt queue's to test; this fake lets the rollout's own
+// engine be driven step by step.
+type fakeRegistry struct {
+	mu       sync.Mutex
+	freeness *fakeFreeness
+	requests []registryCall
+	pending  map[ids.WorkspaceID]bounce.Request
+	err      error
+	running  sync.WaitGroup
 }
 
-func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, int, error) {
+// registryCall is one recorded request.
+type registryCall struct {
+	WS  ids.WorkspaceID
+	Req bounce.Request
+}
+
+func newFakeRegistry(freeness *fakeFreeness) *fakeRegistry {
+	return &fakeRegistry{freeness: freeness, pending: make(map[ids.WorkspaceID]bounce.Request)}
+}
+
+func (r *fakeRegistry) RequestBounce(_ context.Context, ws ids.WorkspaceID, req bounce.Request) (bounce.Decision, error) {
+	r.mu.Lock()
+	r.requests = append(r.requests, registryCall{WS: ws, Req: req})
+	if r.err != nil {
+		err := r.err
+		r.mu.Unlock()
+		return bounce.Decision{}, err
+	}
+	free := r.freeness.Free(ws)
+	if !free && !req.Force {
+		r.pending[ws] = req
+		r.mu.Unlock()
+		return bounce.Decision{TurnInFlight: true}, nil
+	}
+	r.mu.Unlock()
+	r.run(ws, req)
+	return bounce.Decision{Now: true, Forced: !free}, nil
+}
+
+// run performs one bounce the way the queue does: its own goroutine, then the
+// completion callback.
+func (r *fakeRegistry) run(ws ids.WorkspaceID, req bounce.Request) {
+	r.running.Add(1)
+	go func() {
+		defer r.running.Done()
+		err := req.Run(context.Background(), ws)
+		if req.Done != nil {
+			req.Done(err)
+		}
+	}()
+}
+
+// free marks a workspace free and takes its registered bounce, as the queue
+// does on a freeness edge. It reports whether a bounce was registered.
+func (r *fakeRegistry) free(ws ids.WorkspaceID) bool {
+	r.freeness.SetFree(ws, true)
+	r.mu.Lock()
+	req, ok := r.pending[ws]
+	delete(r.pending, ws)
+	r.mu.Unlock()
+	if ok {
+		r.run(ws, req)
+	}
+	return ok
+}
+
+// wait joins every bounce the fake started.
+func (r *fakeRegistry) wait() { r.running.Wait() }
+
+// Requests answers every request, in order.
+func (r *fakeRegistry) Requests() []registryCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.runs = append(r.runs, append([]string(nil), argv...))
-	r.dirs = append(r.dirs, dir)
-	return "the deploy chain's output", r.code, r.err
+	return append([]registryCall(nil), r.requests...)
 }
 
-func (r *fakeRunner) Runs() [][]string {
+// Pending reports whether a bounce is registered for ws.
+func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([][]string(nil), r.runs...)
-}
-
-// fakeGit answers ChangedPaths from a fixture. GIT IS NEVER CALLED DURING
-// TESTING: this is the whole of the git contact this package's tests make.
-type fakeGit struct {
-	gitclient.Git
-	mu     sync.Mutex
-	paths  []string
-	err    error
-	ranges []string
-}
-
-func (g *fakeGit) ChangedPaths(_ context.Context, _ string, rangeSpec string) ([]string, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.ranges = append(g.ranges, rangeSpec)
-	return g.paths, g.err
-}
-
-func (g *fakeGit) Ranges() []string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return append([]string(nil), g.ranges...)
+	_, ok := r.pending[ws]
+	return ok
 }
 
 // harness is one controller under test with every fake reachable.
@@ -604,8 +612,7 @@ type harness struct {
 	participants *fakeParticipants
 	freeness     *fakeFreeness
 	fleet        *fakeFleet
-	runner       *fakeRunner
-	git          *fakeGit
+	registry     *fakeRegistry
 	order        *steps
 	log          *dlog.TestSurfaces
 	state        string
@@ -619,9 +626,8 @@ type harness struct {
 	exits        chan struct{}
 	lockStates   map[string]sessionlock.State
 	lockErr      map[string]error
-	deployedSHA  string
-	deployErr    error
-	sessionSHA   map[ids.WorkspaceID]string
+	shimBuild    string
+	shimBuildErr error
 	coldGateCall []ids.WorkspaceID
 }
 
@@ -631,16 +637,20 @@ type harness struct {
 // behavior is made of.
 func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	t.Helper()
-	t.Setenv(DeployScriptEnv, "")
 	log := dlog.NewTestSurfaces()
 	state := t.TempDir()
 	db, err := wsm.Open(context.Background(), filepath.Join(state, "wsm.db"), wsm.WithLogger(log.Global()))
 	if err != nil {
 		t.Fatalf("wsm.Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close the test's state client: %v", err)
+		}
+	})
 
 	order := &steps{}
+	freeness := newFakeFreeness()
 	h := &harness{
 		db:           db,
 		clock:        newFakeClock(instant),
@@ -648,29 +658,23 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		announcer:    &fakeAnnouncer{},
 		pusher:       &fakePusher{},
 		participants: newFakeParticipants(),
-		freeness:     newFakeFreeness(),
+		freeness:     freeness,
 		fleet:        newFakeFleet(order),
-		runner:       &fakeRunner{},
-		git:          &fakeGit{},
+		registry:     newFakeRegistry(freeness),
 		order:        order,
 		log:          log,
 		state:        state,
 		exits:        make(chan struct{}, 4),
 		lockStates:   make(map[string]sessionlock.State),
 		lockErr:      make(map[string]error),
-		sessionSHA:   make(map[ids.WorkspaceID]string),
-		deployedSHA:  "deadbeef",
+		shimBuild:    "installed-build",
 	}
 	deps := Deps{
-		DeployScript:   "bin/deploy-all.sh",
-		Deploy:         h.runner,
 		SelfExe:        filepath.Join(state, "claude-repld"),
-		SelfRepoDir:    state,
 		SelfAddress:    "127.0.0.1:7777",
 		Instance:       selfInstance,
 		StateDir:       state,
 		IntentManifest: filepath.Join(state, "intent", "manifest.json"),
-		Git:            h.git,
 		DB:             db,
 		Spawner:        h.spawner,
 		Announcer:      h.announcer,
@@ -696,6 +700,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			h.leaseChanged = append(h.leaseChanged, ws)
 			h.mu.Unlock()
 		},
+		Bounces:  h.registry,
 		Freeness: h.freeness,
 		Shims:    h.fleet,
 		LockProbe: func(dir string) (sessionlock.State, error) {
@@ -716,16 +721,10 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			h.mu.Unlock()
 			return nil
 		},
-		DeployStamp: func() (string, error) {
+		ShimBuild: func() (string, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			return h.deployedSHA, h.deployErr
-		},
-		SessionBuildSHA: func(ws ids.WorkspaceID) (string, bool) {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			sha, ok := h.sessionSHA[ws]
-			return sha, ok
+			return h.shimBuild, h.shimBuildErr
 		},
 		ColdGate: func(_ context.Context, ws ids.WorkspaceID, _ *conversationv1.SessionCold) error {
 			order.record("cold_gate")

@@ -654,6 +654,27 @@ guarded_daemon_line() {
         "$1" "$(cd "$2/.." && pwd)"
 }
 
+# The refusal hands the owner the one command that clears it: the daemon owns
+# deploys, so the remedy is its `deploy` subcommand.
+test_declining_names_the_daemon_deploy_remedy() {
+    local name="the not-deployed refusal names claude-repld deploy as the remedy"
+    local dir out status=0
+    dir="$(scratch_bin not-deployed-remedy)"
+    prepare_home
+    stale_json > "$SCRATCH/readiness.json"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -qF 'run daemon/bin/claude-repld deploy, then try again'; then
+        fail "$name" "the refusal does not name the deploy remedy: $out"
+        return
+    fi
+    pass "$name"
+}
+
 test_declines_when_a_system_is_not_deployed() {
     local name="the script DECLINES when a deployed system is not at this checkout"
     local dir out status=0
@@ -838,6 +859,31 @@ test_declines_when_a_listening_shim_lacks_the_guard() {
     fi
     if [ -f "$SCRATCH/slot-reached" ]; then
         fail "$name" "the run was reached despite the refusal"
+        return
+    fi
+    pass "$name"
+}
+
+# The shim scan looks under the OWNER's state root whatever the caller's shell
+# says. An agent session inherits AGENT_REPL_STATE_DIR from the daemon that
+# spawned it; honoring it here once pointed the scan at another directory, and
+# an unguarded shim under the owner's root went unseen.
+test_declines_on_an_owner_shim_whatever_the_callers_state_dir() {
+    local name="the unguarded-shim scan ignores the caller's AGENT_REPL_STATE_DIR"
+    local dir out status=0
+    dir="$(scratch_bin caller-state-dir)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+    printf '94292 node /opt/agent-shim/claude/shim/dist/main.js --listen %s/.claude-emacs/sock/0100059cb65649bc.n1.sock PATH=/usr/bin\n' \
+        "$SCRATCH/home" > "$SCRATCH/procs"
+
+    out="$(run_script "$dir" env AGENT_REPL_STATE_DIR="$SCRATCH/elsewhere")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q '94292'; then
+        fail "$name" "the refusal does not name the owner's unguarded shim: $out"
         return
     fi
     pass "$name"
@@ -2215,6 +2261,7 @@ test_prune_deletes_wal_and_shm_siblings
 test_prune_defaults_to_keeping_three
 test_prune_returns_success_when_nothing_to_prune
 test_declines_when_a_system_is_not_deployed
+test_declining_names_the_daemon_deploy_remedy
 test_declines_when_emacs_is_running_without_a_takeover
 test_backs_up_before_refusing_the_takeover
 test_declines_when_the_backup_copy_totally_fails
@@ -2225,6 +2272,7 @@ test_the_unguarded_daemon_refusal_names_the_consent
 test_the_unguarded_daemon_is_stopped_under_the_consent
 test_the_editor_is_quit_before_the_unguarded_daemon_is_stopped
 test_declines_when_a_listening_shim_lacks_the_guard
+test_declines_on_an_owner_shim_whatever_the_callers_state_dir
 test_runs_when_every_listening_shim_carries_the_guard
 test_ignores_a_shim_listening_under_another_state_directory
 test_declines_when_a_shim_lock_lacks_the_guard
