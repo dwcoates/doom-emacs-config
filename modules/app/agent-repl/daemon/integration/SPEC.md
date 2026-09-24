@@ -425,6 +425,12 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   running shim (new WatchSession, no second StartSession), and the cold
   daemon exits 0
 
+### takeover_recovery_test.go
+- a joining successor handed nothing (its incumbent SIGKILLed with a live
+  session and no manifest) promotes its read-only state handle at the
+  takeover, adopts the shim nobody serves, writes its serving claim with no
+  ERROR, and opens a new WatchSession on it
+
 ### health_clientlog_login_test.go
 - DaemonHealth healthy; with an open fault record unhealthy{faults}
 - SessionHealth for a live session healthy; with the fake pushing
