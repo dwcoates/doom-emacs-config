@@ -98,6 +98,13 @@ export interface FeedHandle extends Handle {
    * (`detachedWorkSelected`, one of the closed set of scroll causes).
    */
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
+  /**
+   * A held prompt's card was drawn in the hold tray for the FIRST time: park
+   * the feed at its tail and follow (`promptHeld`, one of the closed set of
+   * scroll causes). The tray hangs in this feed's scroll box, after the rows,
+   * so the tail is where the card is.
+   */
+  readonly promptHeld: (turn: string) => void;
 }
 
 /** Mount the root feed into HOST. */
@@ -178,7 +185,29 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
 
   openWatch();
 
-  return { selectDetachedWork, dispose };
+  return { selectDetachedWork, promptHeld, dispose };
+
+  /**
+   * A HELD PROMPT JUST LANDED PUTS THE READER AT THE TAIL (owner ruling,
+   * 2026-09-23), as a sent prompt does: called only after the tray drew the
+   * card, and only on its first draw. It parks at the TAIL rather than on the
+   * card, so whatever was drawn after it is included and the follow keeps
+   * tracking. A fixture feed with no scroll box has no tail to park.
+   */
+  function promptHeld(turn: string): void {
+    if (tail === null) {
+      log.debug(`a newly held prompt ${turn} found no scroll box to park`, {
+        operation: "feed.held-prompt-unparked",
+        context: { turn },
+      });
+      return;
+    }
+    log.debug(`a newly held prompt ${turn} parked the feed at its tail`, {
+      operation: "feed.held-prompt-parked",
+      context: { turn },
+    });
+    tail.promptHeld();
+  }
 
   /**
    * A context standing for THE FEED ITSELF, which is not a row.

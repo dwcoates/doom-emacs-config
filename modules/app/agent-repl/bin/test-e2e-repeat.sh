@@ -8,6 +8,10 @@
 # stub `suite-slot.sh` and `e2e-sandbox.sh` on the paths the script resolves.
 #
 # Run with:   bash bin/test-e2e-repeat.sh
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
@@ -2249,6 +2250,9 @@ func TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding(t *testing.T)
 		name       string
 		content    string
 		removeTree bool
+		// spent makes every poll pass yield after one batch, as a pass whose
+		// slice ran out does, so a file longer than one batch is left mid-tail.
+		spent      bool
 		wantReason string // "" = the record keeps its warning
 	}{
 		{
@@ -2262,11 +2266,13 @@ func TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding(t *testing.T)
 			wantReason: reasonFullyRead,
 		},
 		{
-			// One poll reads at most 4 MiB, so a longer line leaves the tailer
-			// mid-tail: the last size it saw is past everything it committed,
-			// and those bytes went with the file.
+			// One poll reads at most tail.MaxBatchBytes, and a pass whose slice
+			// is spent yields before re-reading the rest, so a longer spool
+			// leaves the tailer mid-tail: the last size it saw is past
+			// everything it committed, and those bytes went with the file.
 			name:    "bytes past the committed offset could have existed",
-			content: strings.Repeat("a", 5<<20) + "\n",
+			content: strings.Repeat("a", 2*tail.MaxBatchBytes) + "\n",
+			spent:   true,
 		},
 		{
 			name:       "the whole directory went with it",
@@ -2280,6 +2286,9 @@ func TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: a claimed spool, read once, and then removed.
 			h := newHarness(t, &fakeStore{})
+			if tc.spent {
+				h.sc.options.PollInterval = time.Nanosecond
+			}
 			spool := h.spoolFile(t, "b1", tc.content)
 			h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
 			if err := h.sc.beginCycle(); err != nil {
@@ -2662,5 +2671,104 @@ func TestANewTranscriptIsReadWhileTheCorpusIsStillBeingWalked(t *testing.T) {
 	}
 	if !picked {
 		t.Fatal("the new transcript's records did not reach the store within two poll ticks of it appearing")
+	}
+}
+
+// --- bounded writes -----------------------------------------------------------
+
+// boundedSpool arranges a claimed shell spool longer than two batches and
+// drives one poll tick over it, answering the store and the spool's content.
+func boundedSpool(t *testing.T) (*fakeStore, string) {
+	t.Helper()
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	content := strings.Repeat("line of test output\n", (2*tail.MaxBatchBytes)/20+7)
+	h.spoolFile(t, "b1", content)
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	return store, content
+}
+
+// deltasOf answers the bash deltas a store was handed, in write order.
+func deltasOf(store *fakeStore) []*conversationv1.AgentBashUpdate {
+	var out []*conversationv1.AgentBashUpdate
+	for _, batch := range store.writes {
+		for _, e := range batch.GetEntries() {
+			if up := e.GetAgentUpdate().GetBash().GetFrame().GetUpdate(); up != nil {
+				out = append(out, up)
+			}
+		}
+	}
+	return out
+}
+
+func TestAClaimedSpoolLongerThanOneBatchIsWrittenInBoundedBatches(t *testing.T) {
+	// Arrange, Act.
+	store, _ := boundedSpool(t)
+
+	// Assert: no single write carries more than one batch's bytes.
+	if len(store.writes) < 3 {
+		t.Fatalf("the spool reached the store in %d write(s), want it split across at least 3 bounded batches", len(store.writes))
+	}
+	for i, up := range deltasOf(store) {
+		if n := len(up.GetNewOutput()); n > tail.MaxBatchBytes {
+			t.Fatalf("delta %d carries %d bytes, past the %d-byte batch bound", i, n, tail.MaxBatchBytes)
+		}
+	}
+}
+
+func TestAClaimedSpoolsBoundedDeltasJoinToTheWholeFile(t *testing.T) {
+	// Arrange, Act.
+	store, content := boundedSpool(t)
+
+	// Assert: the renderer accumulates deltas contiguously, so every one must
+	// continue exactly where the last ended and together they must be the file.
+	var joined strings.Builder
+	for i, up := range deltasOf(store) {
+		if got := up.GetFromOffset(); got != uint64(joined.Len()) {
+			t.Fatalf("delta %d starts at %d, want %d: the renderer refuses a frame across a hole", i, got, joined.Len())
+		}
+		joined.WriteString(up.GetNewOutput())
+	}
+	if joined.String() != content {
+		t.Fatalf("the deltas join to %d bytes, want the spool's %d", joined.Len(), len(content))
+	}
+}
+
+func TestABoundedBatchIsReadAgainOnTheSameTick(t *testing.T) {
+	// Arrange, Act: one pollAll.
+	store, content := boundedSpool(t)
+
+	// Assert: the pass re-read the file until it was drained, rather than
+	// leaving the rest for later ticks.
+	last := store.writes[len(store.writes)-1].GetCursorAdvance().GetOffset()
+	if last != int64(len(content)) {
+		t.Fatalf("one tick committed the cursor to %d, want the file's end %d", last, len(content))
+	}
+}
+
+func TestASpentSliceYieldsABoundedFileToTheNextTick(t *testing.T) {
+	// Arrange: every pass yields after one batch.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.sc.options.PollInterval = time.Nanosecond
+	h.spoolFile(t, "b1", strings.Repeat("x", 2*tail.MaxBatchBytes))
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: one bounded write, and the rest waits for the next tick.
+	if len(store.writes) != 1 {
+		t.Fatalf("a spent slice still made %d write(s), want 1", len(store.writes))
+	}
+	if got := store.writes[0].GetCursorAdvance().GetOffset(); got != tail.MaxBatchBytes {
+		t.Fatalf("cursor = %d, want the first batch's bound %d", got, tail.MaxBatchBytes)
 	}
 }
