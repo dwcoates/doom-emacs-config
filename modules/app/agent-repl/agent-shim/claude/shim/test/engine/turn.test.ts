@@ -470,6 +470,46 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     expect([killed.result.case, h.query.calls.includes("interrupt"), h.open]).toEqual(["success", true, undefined]);
   });
 
+  it("answers a KillTurn that finds only the keep-alive open as no_turn_open", async () => {
+    // Arrange: the consumer's own turn ended; the keep-alive holds the slot.
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const response = await h.turns.killTurn(create(shimv1.KillTurnRequestSchema, { turn: TURN }));
+
+    // Assert
+    expect(failureKind(response)).toBe("noTurnOpen");
+  });
+
+  it("never interrupts the keep-alive for a KillTurn", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    await h.turns.killTurn(create(shimv1.KillTurnRequestSchema, { turn: TURN }));
+
+    // Assert
+    expect([h.query.calls.includes("interrupt"), h.open?.keepalive]).toEqual([false, true]);
+  });
+
+  it("answers a main-agent stop that finds only the keep-alive open as nothing running", async () => {
+    // Arrange
+    const h = await harness();
+    openKeepalive(h);
+
+    // Act
+    const response = await h.turns.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, { input: { case: "stop", value: create(conversationv1.AgentStopSchema, {}) } }),
+      }),
+    );
+
+    // Assert
+    expect([failureKind(response), h.query.calls.includes("interrupt")]).toEqual(["nothingRunning", false]);
+  });
+
   it("keeps a KillTurn for the waiting turn waiting past the ordinary start budget", async () => {
     // Arrange: the clock is the suite's, so the 1s budget can be passed
     // without waiting on it.
