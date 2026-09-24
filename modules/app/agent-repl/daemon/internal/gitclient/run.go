@@ -109,6 +109,11 @@ type invocation struct {
 	// ONLY for a death nobody in this process asked for: a cancellation is
 	// classified before this and carries no exit status at all.
 	signal string
+	// pid is the git child's process id, zero when git never started. A
+	// signalled git names no cause of its own, so the pid is what ties the
+	// record to whoever sent the signal: a killer can name the pids it
+	// signalled, never the daemon operation it interrupted.
+	pid int
 }
 
 // fail shapes the invocation as the leaf's evidence-carrying error.
@@ -145,6 +150,9 @@ func (in invocation) logContext() dlog.Context {
 	if in.signal != "" {
 		fields["signal"] = in.signal
 	}
+	if in.pid != 0 {
+		fields["pid"] = in.pid
+	}
 	return fields
 }
 
@@ -162,7 +170,11 @@ func (c *client) invoke(ctx context.Context, dir string, args ...string) (invoca
 	cmd.Stderr = &stderr
 
 	in := invocation{args: args, dir: dir}
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		in.pid = cmd.Process.Pid
+		err = cmd.Wait()
+	}
 	in.stdout = stdout.String()
 	in.stderr = stderr.String()
 
@@ -232,14 +244,19 @@ func (c *client) runRaw(ctx context.Context, operation, dir string, args ...stri
 			// At most INFO: a cancelled git is the daemon exiting or an
 			// operation being called off, not a fault. The error is still
 			// returned unchanged, so nothing is swallowed.
-			c.log.Global().Info(operation, "git was cancelled before it finished", dlog.Context{
+			fields := dlog.Context{
 				"dir":        in.dir,
 				"args":       in.args,
 				"subcommand": cancelled.Subcommand(),
 				"stdout":     in.stdout,
 				"stderr":     in.stderr,
 				"cause":      cancelled.Cause.Error(),
-			})
+			}
+			// A context that ended before the spawn leaves no process to name.
+			if in.pid != 0 {
+				fields["pid"] = in.pid
+			}
+			c.log.Global().Info(operation, "git was cancelled before it finished", fields)
 			return in, err
 		}
 		if in.signal != "" {
