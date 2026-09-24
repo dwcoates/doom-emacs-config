@@ -1765,7 +1765,8 @@ type FeedTurnActivity_Response struct {
 type FeedTurnActivity_SimpleToolCall struct {
 	// The grey tool-call bubble: one shared shell (headline, badge,
 	// arguments, output), with a per-tool arm inside for what only that
-	// tool draws. Read, write, edit, grep, glob, and a FOREGROUND shell.
+	// tool draws. Read, write, edit, grep, glob, a FOREGROUND shell, and a
+	// monitor (its card is the footer monitor row's jump target).
 	SimpleToolCall *FeedSimpleToolCall `protobuf:"bytes,2,opt,name=simple_tool_call,json=simpleToolCall,proto3,oneof"`
 }
 
