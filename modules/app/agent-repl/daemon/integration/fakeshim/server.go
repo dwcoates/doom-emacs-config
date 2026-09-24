@@ -175,6 +175,11 @@ type server struct {
 	// watch RE-ANNOUNCES it right after the opening diagnostics (landing 7),
 	// which is what lets an adopting daemon attach purely.
 	started *conversationv1.SessionStarted
+	// turnInFlight is the turn a StartTurn opened and no main-agent terminal
+	// has ended yet. The re-announcement states it as turn_in_flight, as the
+	// real shim's reannounceStart does, so an adopting daemon learns from the
+	// shim which of its open turn rows are still running.
+	turnInFlight *conversationv1.TurnId
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
@@ -402,11 +407,38 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 }
 
 // startedSession answers the SessionStarted this fake last announced, nil
-// before any session has started.
+// before any session has started, stating the turn in flight RIGHT NOW rather
+// than the one StartSession answered with.
 func (s *server) startedSession() *conversationv1.SessionStarted {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.started
+	if s.started == nil {
+		return nil
+	}
+	started := proto.Clone(s.started).(*conversationv1.SessionStarted)
+	started.TurnInFlight = s.turnInFlight
+	return started
+}
+
+// openTurn records the turn a successful StartTurn opened.
+func (s *server) openTurn(turn *conversationv1.TurnId) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.turnInFlight = turn
+}
+
+// settleTurn ends the turn in flight when a pushed frame is the MAIN agent's
+// terminal. A subagent's terminal, or any other frame, leaves it standing.
+func (s *server) settleTurn(agent string, frame *conversationv1.AgentFrame) {
+	if agent != MainAgentID {
+		return
+	}
+	switch frame.GetResult().(type) {
+	case *conversationv1.AgentFrame_Success, *conversationv1.AgentFrame_Failure:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.turnInFlight = nil
+	}
 }
 
 // claimFirstSessionStream reports whether this open is the FIRST session
@@ -698,8 +730,12 @@ func (s *server) StartTurn(ctx context.Context, req *connect.Request[shimv1.Star
 		s.writeTranscript(id)
 	}
 	if resp, done, err := scripted[shimv1.StartTurnResponse, *shimv1.StartTurnResponse](s, RPCStartTurn); done {
+		if err == nil && resp.Msg.GetSuccess() != nil {
+			s.openTurn(req.Msg.GetTurn())
+		}
 		return resp, err
 	}
+	s.openTurn(req.Msg.GetTurn())
 	return connect.NewResponse(&shimv1.StartTurnResponse{
 		Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{
 			Prompt: &conversationv1.AgentPrompt{
@@ -741,15 +777,18 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 	// A KILLED TURN ENDS ON THE STREAM, as the real shim's does: the daemon
 	// learns a turn is over from the agent's terminal frame and from nothing
 	// else, so a fake that only ANSWERED would leave every waiter on freeness
-	// blocked forever.
-	s.agents.publish(agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{
+	// blocked forever. And the turn is no longer in flight to any later
+	// re-announcement.
+	terminal := &conversationv1.AgentFrame{
 		AgentId: &conversationv1.AgentId{Value: MainAgentID},
 		Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{
 			Outcome: &conversationv1.AgentSuccess_Interrupted{Interrupted: &conversationv1.AgentInterrupted{
 				Cause: &conversationv1.AgentInterrupted_ByUser{ByUser: &conversationv1.AgentInterruptedByUser{}},
 			}},
 		}},
-	}})
+	}
+	s.settleTurn(MainAgentID, terminal)
+	s.agents.publish(agentFrame{agent: MainAgentID, frame: terminal})
 	return connect.NewResponse(&shimv1.KillTurnResponse{
 		Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{
 			Killed: &conversationv1.TurnKilled{How: &conversationv1.TurnKilled_AgentOnly{AgentOnly: &conversationv1.TurnKilledAgentOnly{}}},

@@ -338,6 +338,16 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	if err := f.claimServing(ctx, f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}), ws); err != nil {
 		return err
 	}
+	// THE TURNS OPEN AT ATTACH ARE READ BEFORE THE CLIENT CAN BE SERVED. An
+	// installed shim ran while no daemon of this process watched it, so a
+	// turn row left open may have ended unobserved; the watcher compares this
+	// set with the shim's own turn_in_flight once its facts arrive. Read
+	// before the map write, no turn this daemon delivers to the new client can
+	// be in it, and a read that fails leaves the fleet as it was.
+	openAtAttach, err := f.openTurnIDs(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("workspace: install a shim for %q: %w", ws, err)
+	}
 	f.mu.Lock()
 	previous := f.sessions[ws]
 	// An INSTALL rotates the process, never the session: the adopted client
@@ -390,7 +400,7 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 		return err
 	}
 
-	if err := f.watchInstalled(ctx, ws, c); err != nil {
+	if err := f.watchInstalled(ctx, ws, c, openAtAttach); err != nil {
 		return err
 	}
 
@@ -405,6 +415,19 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// attachment and its generation.
 	f.publishHost(ws)
 	return nil
+}
+
+// openTurnIDs names the workspace's turn rows that have no terminal.
+func (f *Fleet) openTurnIDs(ctx context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+	open, err := f.deps.DB.OpenTurns(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read the turns open at attach: %w", err)
+	}
+	turns := make([]ids.TurnID, 0, len(open))
+	for _, t := range open {
+		turns = append(turns, t.ID)
+	}
+	return turns, nil
 }
 
 // retireTerminal retires the workspace's terminal session record for a caller
@@ -489,7 +512,7 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 // for ONE decision only — whether there is a conversation here at all — because
 // a workspace with no session record has nothing to watch. Every FACT about the
 // session comes from the shim's re-announcement on the watch itself.
-func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) error {
+func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client, openAtAttach []ids.TurnID) error {
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return fmt.Errorf("workspace: install a shim for %q: %w", ws, err)
@@ -509,7 +532,7 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 		return nil
 	}
 
-	watcher, err := f.startWatcher(ctx, log, ws, c, nil)
+	watcher, err := f.startWatcher(ctx, log, ws, c, sessionwatcher.Session{OpenAtAttach: openAtAttach})
 	if err != nil {
 		log.Error(opFleetRollout, "could not open the adopted session's watches", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("workspace: install a shim for %q: start the watcher: %w", ws, err)
@@ -604,7 +627,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	// (realtest sweep 2026-09-12T15:23:03.338). Both other sites that open a
 	// fleet already detach the context for exactly this reason; this one did
 	// not.
-	watcher, err := f.startWatcher(ctx, log, ws, c, started)
+	watcher, err := f.startWatcher(ctx, log, ws, c, sessionwatcher.Session{Started: started})
 	if err != nil {
 		log.Error(opFleetRollout, "could not re-open the session's watches after a resume", dlog.Context{
 			"cause": err.Error(),

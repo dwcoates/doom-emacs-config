@@ -977,3 +977,72 @@ func TestAdoptDialsTheNewestLiveSocketGeneration(t *testing.T) {
 		t.Fatalf("adoptions = %+v, want exactly one of %q", f.supervisor.adopts, generation)
 	}
 }
+
+// ---- the turns open at attach ----
+
+// TestAnInstallHandsTheWatcherTheTurnsOpenAtAttach covers the adoption's
+// snapshot: the workspace's open turn rows reach the watcher, which compares
+// them with the shim's own turn_in_flight when its facts arrive.
+func TestAnInstallHandsTheWatcherTheTurnsOpenAtAttach(t *testing.T) {
+	// Arrange: an adopted conversation with two turn rows left open.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.db.openTurns = []wsm.Turn{{ID: "turn-1", Workspace: ws.ID}, {ID: "turn-2", Workspace: ws.ID}}
+
+	// Act.
+	if err := f.fleet.Install(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	// Assert.
+	if len(f.openAtAttach) != 1 {
+		t.Fatalf("watchers started = %d, want exactly one", len(f.openAtAttach))
+	}
+	if got := f.openAtAttach[0]; len(got) != 2 || got[0] != "turn-1" || got[1] != "turn-2" {
+		t.Fatalf("OpenAtAttach = %v, want [turn-1 turn-2]", got)
+	}
+}
+
+// TestAnInstallWhoseOpenTurnsCannotBeReadHoldsNothing covers the read's
+// failure: it happens before the map write, so the fleet is left as it was
+// and the caller still owns the client it passed.
+func TestAnInstallWhoseOpenTurnsCannotBeReadHoldsNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.openTurnsErr = errFake
+
+	// Act.
+	err := f.fleet.Install(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("Install() = %v, want the failed read surfaced", err)
+	}
+	if _, held := f.fleet.Client(ws.ID); held {
+		t.Fatal("the fleet holds the client of an install whose open turns could not be read")
+	}
+}
+
+// TestABringUpHandsTheWatcherNoTurnsOpenAtAttach pins the snapshot's scope to
+// an ADOPTION. A bring-up's own StartSession answers for a session this daemon
+// is starting, and a turn row already written for it (a created workspace's
+// first prompt, recorded before its session exists) is not one that ended
+// unobserved.
+func TestABringUpHandsTheWatcherNoTurnsOpenAtAttach(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.openTurns = []wsm.Turn{{ID: "turn-1", Workspace: ws.ID}}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.openAtAttach) != 1 || len(f.openAtAttach[0]) != 0 {
+		t.Fatalf("OpenAtAttach per watcher start = %v, want one start carrying none", f.openAtAttach)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
@@ -194,6 +195,9 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 	case pending == nil:
 		state.drain.Unlock()
 		log.Debug(opBounce, "the shim departed with no bounce registered", fields)
+		if !departure.Ordered {
+			q.reviveAfterDeath(ws, state, record, recordErr, log)
+		}
 		return
 	case pending.draining:
 		state.drain.Unlock()
@@ -269,6 +273,50 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 	}
 	q.startBounceLocked(ws, state, log)
 	state.drain.Unlock()
+}
+
+// reviveAfterDeath brings back the session of a shim that DIED ON ITS OWN.
+//
+// AN OPEN WORKSPACE IS NEVER SESSION-LESS (owner ruling, 2026-09-13): the
+// boot brings every open workspace's session up, and a live death is the same
+// condition met while serving. Waiting for the user's next prompt left the
+// workspace drawn dead on the roster and the footer until they typed. The
+// revival is the one a prompt runs (reviveInBackground), so a prompt sent
+// during it joins it and is delivered once the session is up, and the new
+// shim resumes the same conversation.
+//
+// ONE UNATTENDED REVIVAL UNTIL A TURN ENDS. A shim that dies again before any
+// turn has ended since the last one cannot hold a session; respawning it would
+// loop. That second death is left down, loudly, and the next prompt revives it.
+func (q *queue) reviveAfterDeath(ws ids.WorkspaceID, state *wsState, record wsm.Workspace, recordErr error, log dlog.Logger) {
+	switch {
+	case errors.Is(recordErr, wsm.ErrNotFound):
+		log.Debug(opRevive, "the shim died with its workspace no longer registered; nothing is brought back", nil)
+		return
+	case recordErr != nil:
+		log.Error(opRevive, "the shim died and its workspace could not be read; its session is not brought back", dlog.Context{"cause": recordErr.Error()})
+		return
+	case record.Closed:
+		log.Debug(opRevive, "the shim of a closed workspace died; nothing is brought back", nil)
+		return
+	}
+	// A DIRECTORY THAT IS GONE HAS NOTHING TO SERVE, which is also why the
+	// boot closes such a workspace. A stat that does not say "not exist" is
+	// never read as gone: the revival runs, and fails loudly if it must.
+	if _, err := q.deps.Stat(record.Dir); errors.Is(err, fs.ErrNotExist) {
+		log.Info(opRevive, "the shim died with its workspace directory gone; nothing is brought back", dlog.Context{"cause": err.Error()})
+		return
+	}
+	q.mu.Lock()
+	again := state.unattendedRevival
+	state.unattendedRevival = true
+	q.mu.Unlock()
+	if again {
+		log.Warn(opRevive, "the shim died again before any turn ended since the daemon last brought it back; it is left down until the next prompt", nil)
+		return
+	}
+	log.Info(opRevive, "the shim died on its own; its session is brought back now", nil)
+	q.reviveInBackground(q.lifetime(), ws, log)
 }
 
 // unregisterLocked drops the workspace's registered bounce unrun and answers

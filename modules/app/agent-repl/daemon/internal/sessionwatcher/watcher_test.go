@@ -2151,3 +2151,257 @@ func TestADepartureIsToldOnlyOnceAcrossItsEdges(t *testing.T) {
 	}
 	h.noMoreDepartures(t)
 }
+
+// ---------------------------------------------------------------------------
+// The adoption's open turns against the shim's own turn_in_flight
+// ---------------------------------------------------------------------------
+
+// unobservedTurns answers the turns every OnTurnsEndedUnobserved in seen
+// carried, in order.
+func unobservedTurns(seen []event) []ids.TurnID {
+	var out []ids.TurnID
+	for _, e := range seen {
+		if e.name() == "lifecycle.OnTurnsEndedUnobserved" {
+			out = append(out, e.turns...)
+		}
+	}
+	return out
+}
+
+// sameTurns reports whether two turn lists are equal, element for element.
+func sameTurns(got, want []ids.TurnID) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns covers the comparison a
+// pure attach makes when the shim re-announces itself: every turn the
+// adoption found open that the shim does not name ended while no daemon was
+// watching, and the one it names stays open.
+func TestAnAdoptionClosesTheOpenTurnsTheShimNoLongerRuns(t *testing.T) {
+	tests := []struct {
+		name         string
+		openAtAttach []ids.TurnID
+		inFlight     string
+		wantClosed   []ids.TurnID
+		wantInFlight string
+	}{
+		{
+			name:         "a turn that finished unobserved is closed",
+			openAtAttach: []ids.TurnID{"turn-1"},
+			wantClosed:   []ids.TurnID{"turn-1"},
+		},
+		{
+			name:         "the turn the shim still runs stays open",
+			openAtAttach: []ids.TurnID{"turn-1"},
+			inFlight:     "turn-1",
+			wantInFlight: "turn-1",
+		},
+		{
+			name:         "only the turns the shim does not name are closed",
+			openAtAttach: []ids.TurnID{"turn-1", "turn-2"},
+			inFlight:     "turn-2",
+			wantClosed:   []ids.TurnID{"turn-1"},
+			wantInFlight: "turn-2",
+		},
+		{
+			name:     "an adoption that found nothing open closes nothing",
+			inFlight: "turn-3",
+			// The shim's own turn is in flight; nothing was open to close.
+			wantInFlight: "turn-3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a pure attach carrying the adoption's snapshot.
+			h := startHarness(t, Session{OpenAtAttach: tt.openAtAttach}, nil)
+			h.session = h.client.nextSessionOpen(t)
+
+			// Act.
+			h.sendSessionStarted(t, sessionStarted(tt.inFlight))
+			h.sendSessionUpdate(t, compactingUpdate())
+			seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+			// Assert.
+			if got := unobservedTurns(seen); !sameTurns(got, tt.wantClosed) {
+				t.Fatalf("turns handed over as ended unobserved = %v, want %v", got, tt.wantClosed)
+			}
+			got := ""
+			if turn := h.w.TurnInFlight(); turn != nil {
+				got = string(*turn)
+			}
+			if got != tt.wantInFlight {
+				t.Fatalf("TurnInFlight() = %q, want %q", got, tt.wantInFlight)
+			}
+		})
+	}
+}
+
+// TestAnAdoptionTellsNoTurnEndForATurnThatEndedUnobserved covers what the
+// close is NOT: none of those turns was this watcher's turn in flight, so no
+// turn end is told for it and nothing is delivered on its account.
+func TestAnAdoptionTellsNoTurnEndForATurnThatEndedUnobserved(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+	h.sendSessionUpdate(t, compactingUpdate())
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if hasEvent(seen, "lifecycle.OnTurnEnded") {
+		t.Fatalf("the reconciliation told %v, want no turn end", names(seen))
+	}
+}
+
+// TestAnAdoptionReconcilesItsOpenTurnsOnce covers the snapshot's lifetime: it
+// describes the moment of attaching, so a later re-announcement (a re-opened
+// session watch) compares nothing again.
+func TestAnAdoptionReconcilesItsOpenTurnsOnce(t *testing.T) {
+	// Arrange: the first re-announcement has already been reconciled.
+	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h.session = h.client.nextSessionOpen(t)
+	h.sendSessionStarted(t, sessionStarted(""))
+	h.sendSessionUpdate(t, compactingUpdate())
+	h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+	h.sendSessionUpdate(t, compactingUpdate())
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if got := unobservedTurns(seen); len(got) != 0 {
+		t.Fatalf("a second re-announcement closed %v, want nothing", got)
+	}
+}
+
+// TestFactsHandedToStartReconcileTheOpenTurnsAtOnce covers the other way the
+// facts arrive: with Start itself, where the closes are handed over before
+// Start returns.
+func TestFactsHandedToStartReconcileTheOpenTurnsAtOnce(t *testing.T) {
+	// Arrange, Act.
+	h := startHarness(t, Session{Started: sessionStarted(""), OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+
+	// Assert.
+	if got := unobservedTurns(h.rec.drain()); !sameTurns(got, []ids.TurnID{"turn-1"}) {
+		t.Fatalf("turns handed over as ended unobserved = %v, want [turn-1]", got)
+	}
+}
+
+// TestATurnThatEndedUnobservedIsRecordedAtInfo covers the record: the close
+// is an ordinary reconciliation, so it is stated at INFO and never warned.
+func TestATurnThatEndedUnobservedIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+	h.sendSessionUpdate(t, compactingUpdate())
+	h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_ended_unobserved")["turn_id"]; got != "turn-1" {
+		t.Fatalf("the INFO record names turn %v, want turn-1", got)
+	}
+}
+
+// TestATurnStillInFlightAtAttachIsRecordedAtInfo covers the other record: a
+// kept turn is said to be kept, so "why is it still open" has an answer.
+func TestATurnStillInFlightAtAttachIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{OpenAtAttach: []ids.TurnID{"turn-1"}}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-1"))
+	h.sendSessionUpdate(t, compactingUpdate())
+	h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_open_at_attach")["turn_id"]; got != "turn-1" {
+		t.Fatalf("the INFO record names turn %v, want turn-1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A shim that dies on its own ends the turn it was running
+// ---------------------------------------------------------------------------
+
+// TestAShimDeathEndsTheTurnItCut covers what a death does to the turn in
+// flight: an unordered death ends it truthfully (the feed draws the query's
+// death, the queue hears a failed close) BEFORE the departure is told; a death
+// this daemon ordered, or one with nothing running, ends nothing here.
+func TestAShimDeathEndsTheTurnItCut(t *testing.T) {
+	tests := []struct {
+		name      string
+		turn      string
+		standDown bool
+		wantCut   bool
+	}{
+		{name: "a death under a running turn ends it", turn: "turn-1", wantCut: true},
+		{name: "a death this daemon ordered ends nothing here", turn: "turn-1", standDown: true},
+		{name: "a death with no turn running ends nothing", turn: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted(tt.turn)})
+			h.quiet()
+			if tt.standDown {
+				h.client.StandDown()
+			}
+			h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+
+			// Act.
+			h.client.links <- shimclient.LinkDead
+			h.awaitDeparture(t)
+
+			// Assert: everything the death told was told before its departure.
+			seen := h.rec.drain()
+			ended, cut := find(seen, "lifecycle.OnTurnEnded")
+			if cut != tt.wantCut {
+				t.Fatalf("turn end told = %v, want %v; saw %v", cut, tt.wantCut, names(seen))
+			}
+			if hasEvent(seen, "feed.OnSessionUpdate") != tt.wantCut {
+				t.Fatalf("the feed's query-death account drawn = %v, want %v", !tt.wantCut, tt.wantCut)
+			}
+			if !tt.wantCut {
+				return
+			}
+			if ended.turn == nil || *ended.turn != ids.TurnID(tt.turn) || ended.close != wsm.CloseFailed {
+				t.Fatalf("turn end = (%v, %v), want %s failed", ended.turn, ended.close, tt.turn)
+			}
+			if h.w.TurnInFlight() != nil {
+				t.Fatal("the cut turn still stands in flight")
+			}
+		})
+	}
+}
+
+// TestACutTurnIsRecordedAtInfo covers the watcher's record of the cut.
+func TestACutTurnIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 1})
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+	h.awaitDeparture(t)
+
+	// Assert.
+	if got := h.recordContext(t, "info", "daemon.sessionwatcher.turn_cut")["turn_id"]; got != "turn-1" {
+		t.Fatalf("the INFO record names turn %v, want turn-1", got)
+	}
+}

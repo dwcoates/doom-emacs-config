@@ -957,6 +957,11 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 
+	// The daemon brings a shim that died on its own straight back; the
+	// revived shim HOLDS its StartSession, so the dead state this test is
+	// about stands for as long as the test looks at it.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{HangStartSession: true})
+
 	// Act: the fake shim process exits outright.
 	f.shim.Exit(1, "simulated crash")
 
@@ -970,8 +975,22 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	})
 
 	// Assert: no further churn — a dead shim gets no more redial attempts, so
-	// the footer settles rather than cycling.
-	harness.ExpectNoPush(t, footer, harness.ProbeWindow, "no further footer churn once the shim is dead (redials stop)")
+	// the footer settles on dead rather than cycling. The revival the daemon
+	// starts for it may retract the death's fault line as its new shim
+	// attaches (held at StartSession above), so a push may come; none of
+	// them leaves dead for a redial's severed or dialing step.
+	probe := time.NewTimer(harness.ProbeWindow)
+	defer probe.Stop()
+	for waiting := true; waiting; {
+		select {
+		case v, ok := <-footer.C:
+			if ok && v.GetStrip().GetStatus().GetDisconnected().GetDead() == nil {
+				t.Fatalf("footer push %v, want it still disconnected.dead: no further churn once the shim is dead (redials stop)", v.GetStrip().GetStatus())
+			}
+		case <-probe.C:
+			waiting = false
+		}
+	}
 	// The exit was not attributed to a daemon-requested kill, so
 	// publishExit's ELSE branch fires: daemon.shimclient.exit at ERROR
 	// ("shim died"). Nothing else observes this exit (no query_died update

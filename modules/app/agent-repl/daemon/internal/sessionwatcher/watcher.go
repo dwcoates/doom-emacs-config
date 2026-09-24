@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/wsm"
 )
 
 // openingPageSize is the budget every watch's opening catch-up page is opened
@@ -131,7 +132,12 @@ type watcher struct {
 	linkNow atomic.Int32
 	addr    OutputAddress
 
-	turn      *ids.TurnID
+	turn *ids.TurnID
+	// factsTurn is the turn a PURE ATTACH's re-announced facts stood in
+	// flight: one the shim was already running when this watcher attached. No StartTurn of this
+	// watcher's will ever name the main agent for it, so its main-watch
+	// terminal is attributed from the watch itself (routeTerminalLocked).
+	factsTurn ids.TurnID
 	mainAgent *conversationv1.AgentId
 	// viewsMain is the main agent the FEED was last told
 	// (nameMainForViewsLocked). It is learned from StartTurn's naming AND from
@@ -156,6 +162,13 @@ type watcher struct {
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
 	// to the lifecycle sink, which is told only once mu is released.
 	pendingTurnEnds []endedTurn
+	// openAtAttach is Session.OpenAtAttach, held until the session facts
+	// arrive and then consumed ONCE: see reconcileOpenAtAttachLocked.
+	openAtAttach []ids.TurnID
+	// pendingUnobserved are the turns the facts showed ended unobserved, not
+	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
+	// the turn ends.
+	pendingUnobserved []ids.TurnID
 
 	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
 	// can join it. It is a WaitGroup rather than a sleep.
@@ -341,6 +354,8 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		seenClosings: map[string]struct{}{},
 		retiredWork:  map[string]struct{}{},
 		unseenAsks:   map[string]struct{}{},
+
+		openAtAttach: session.OpenAtAttach,
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	// A RESUME STARTS FROM ITS PREDECESSOR'S POINTERS, so every watch it opens
@@ -366,6 +381,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		// says whether its opening pages are first pages or catch-ups.
 		"opening":          session.Opening.String(),
 		"resumed_pointers": len(w.known),
+		"open_at_attach":   len(session.OpenAtAttach),
 	})
 
 	if session.Started != nil {
@@ -380,6 +396,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	}
 	w.publishLiveWorkLocked()
 	w.mu.Unlock()
+	// Facts handed to Start may already have closed turns the adoption found
+	// open; they are handed over now, off the lock, as every turn end is.
+	w.flushTurnEnds()
 
 	go w.runLink()
 	return w, nil
@@ -742,6 +761,32 @@ func (w *watcher) Close() error {
 	return nil
 }
 
+// endCutTurnLocked ends the turn a shim that DIED ON ITS OWN was running. The
+// turn ran inside the shim's vendor query, which is gone with it, and no
+// terminal will ever arrive for it: left standing, its prompt row spun as
+// working forever and its durable row stayed open until the next boot closed
+// it as an orphan. The feed draws the truthful account, the query's death
+// under the turn it cut, and the turn's end reaches the queue as a failure,
+// which closes its row. The footer and the roster are told nothing here:
+// they draw the link, and the bring-up that follows is what they show.
+func (w *watcher) endCutTurnLocked() {
+	if w.turn == nil {
+		return
+	}
+	turn := *w.turn
+	w.log.Info("daemon.sessionwatcher.turn_cut", "the shim died with a turn in flight; the turn ended with it", dlog.Context{
+		"turn_id": string(turn),
+	})
+	w.flushHeldTerminalLocked()
+	w.sinks.Feed.OnTurnOpened(w.ws, turn)
+	w.sinks.Feed.OnSessionUpdate(w.ws, &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_QueryDied{
+		QueryDied: &conversationv1.SessionQueryDied{Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
+			UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
+		}},
+	}})
+	w.turnEndedLocked(turn, wsm.CloseFailed)
+}
+
 // Departed implements Watcher.
 func (w *watcher) Departed() (Departure, bool) {
 	w.mu.Lock()
@@ -893,8 +938,14 @@ func (w *watcher) runLink() {
 		var departed *Departure
 		if w.link == shimclient.LinkDead {
 			departed = w.departLocked(DepartureLinkDead)
+			if departed != nil && !departed.Ordered {
+				w.endCutTurnLocked()
+			}
 		}
 		w.mu.Unlock()
+		// The cut turn's end reaches the queue BEFORE the departure does, so
+		// its row is closed before anything brings the session back.
+		w.flushTurnEnds()
 		w.tellDeparted(departed)
 	}
 	w.log.Debug("daemon.sessionwatcher.link_feed_ended", "the shim client stopped publishing connectivity", nil)
@@ -1328,6 +1379,11 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted) {
 			"live_work":         len(started.GetLiveWork()),
 		})
 	w.applySessionStartedLocked(started)
+	// A PURE ATTACH'S TURN IN FLIGHT was started by no StartTurn of this
+	// watcher's, so none will ever name the main agent for it.
+	if t := started.GetTurnInFlight(); t != nil && w.turn != nil && *w.turn == ids.TurnID(t.GetValue()) {
+		w.factsTurn = *w.turn
+	}
 	// THE FACTS ARE THE OCCASION FOR THE AGENT WATCH. A pure attach deferred
 	// it precisely until now: the shim has just named the session, so the main
 	// agent it resolves an unset target to exists.
@@ -1354,6 +1410,34 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	if t := started.GetTurnInFlight(); t != nil {
 		w.standTurnLocked(ids.TurnID(t.GetValue()), "daemon.sessionwatcher.state_transition", "the session's facts name the turn already in flight")
 	}
+	w.reconcileOpenAtAttachLocked(started)
+}
+
+// reconcileOpenAtAttachLocked compares the turns the adoption found open with
+// the shim's own answer, the facts' turn_in_flight. The shim is the authority
+// on its own session: a turn it no longer names ended while no daemon was
+// watching, and is queued for the lifecycle sink; the one it names is running
+// and stays open, to be closed by its own terminal. It runs ONCE, on the first
+// facts this watcher takes up, because the snapshot describes the moment of
+// attaching and nothing after it.
+func (w *watcher) reconcileOpenAtAttachLocked(started *conversationv1.SessionStarted) {
+	if len(w.openAtAttach) == 0 {
+		return
+	}
+	inFlight := ids.TurnID(started.GetTurnInFlight().GetValue())
+	for _, turn := range w.openAtAttach {
+		if turn == inFlight {
+			w.log.Info("daemon.sessionwatcher.turn_open_at_attach", "a turn open when this daemon attached is still in flight on the shim; it stays open", dlog.Context{
+				"turn_id": string(turn),
+			})
+			continue
+		}
+		w.log.Info("daemon.sessionwatcher.turn_ended_unobserved", "a turn open when this daemon attached had ended while no daemon was watching; it is closed", dlog.Context{
+			"turn_id": string(turn), "turn_in_flight": string(inFlight),
+		})
+		w.pendingUnobserved = append(w.pendingUnobserved, turn)
+	}
+	w.openAtAttach = nil
 }
 
 // adoptLiveWorkLocked opens a watch for every item the session says is already
@@ -1415,7 +1499,9 @@ func (w *watcher) flushTurnEnds() {
 	w.mu.Lock()
 	pending := w.pendingTurnEnds
 	w.pendingTurnEnds = nil
-	if len(pending) > 0 {
+	unobserved := w.pendingUnobserved
+	w.pendingUnobserved = nil
+	if len(pending) > 0 || len(unobserved) > 0 {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -1425,6 +1511,9 @@ func (w *watcher) flushTurnEnds() {
 		defer w.dispatching.Done()
 	}
 	w.mu.Unlock()
+	if len(unobserved) > 0 {
+		w.sinks.Lifecycle.OnTurnsEndedUnobserved(w.ws, unobserved)
+	}
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 		// A COMPLETED TURN means a new prompt was processed, so the title

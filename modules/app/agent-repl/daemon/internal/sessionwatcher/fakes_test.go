@@ -375,9 +375,11 @@ type event struct {
 	detail string
 	turn   *ids.TurnID
 	close  TurnClose
-	live   *LiveWorkSet
-	note   *HostNotification
-	link   LinkState
+	// turns is the lifecycle sink's batch of turns that ended unobserved.
+	turns []ids.TurnID
+	live  *LiveWorkSet
+	note  *HostNotification
+	link  LinkState
 	// attached is the lifecycle sink's bare shim-attachment edge.
 	attached *bool
 	// linkFault is the lost-link evidence the lifecycle sink was handed.
@@ -697,6 +699,10 @@ type lifecycleSink struct{ rec *recorder }
 func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how TurnClose) {
 	held := turn
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnEnded", turn: &held, close: how})
+}
+
+func (s *lifecycleSink) OnTurnsEndedUnobserved(_ ids.WorkspaceID, turns []ids.TurnID) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnTurnsEndedUnobserved", turns: append([]ids.TurnID(nil), turns...)})
 }
 
 func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
