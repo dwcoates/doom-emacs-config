@@ -25,7 +25,7 @@ import { producerId } from "../../src/store/keys.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import {
   agent,
-  bashDeltaEntry,
+  bashTailEntry,
   bashStartEntry,
   bashTerminalEntry,
   promptEntry,
@@ -647,10 +647,10 @@ describe("openBashRun", () => {
     ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 
-  it("replays the run's stored rows, so a growing spool has no hole in the middle", async () => {
+  it("replays the run's stored rows: its start, then its rendered tail", async () => {
     const { plane } = await seeded("bash-rows", 0);
     // No join to establish: the handle IS the run's own identity.
-    plane.write([bashStartEntry(), bashDeltaEntry()]);
+    plane.write([bashStartEntry(), bashTailEntry()]);
     await plane.flush();
 
     const run = await plane.openBashRun(
@@ -662,7 +662,7 @@ describe("openBashRun", () => {
       if (seen.length === 2) break;
     }
 
-    expect(seen).toEqual(["start", "update"]);
+    expect(seen).toEqual(["start", "tail"]);
   });
 
   it("ends the run's stream after the terminal row, as a bounded stream owes", async () => {
