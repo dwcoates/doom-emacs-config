@@ -12,16 +12,13 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
+| `feat/turn-id-everywhere` | `~/.config/doom-worktrees/turn-id-everywhere` | Owner ruling: every record within a turn carries its turn id; the daemon and webapp resolve by id, not position (old data falls back at INFO). | `a5725a8963cf032ff` | 09-24 |
+| `feat/mcp-card-keepalive-retire-lock-arms` | `~/.config/doom-worktrees/mcp-card-keepalive-retire-lock-arms` | Owner rulings: MCP calls get an ordinary tool-call arm and card; `keepalive` is retired in the proto (`reserved`, no UX change); every lock-holder failure gets a truthful typed refusal (`conversation_owned` only for exit 3). | `afda9bea961f51280` | 09-24 |
+| `fix/dead-shim-recovery-and-adopted-turns` | `~/.config/doom-worktrees/dead-shim-recovery-and-adopted-turns` | Prove a self-died shim recovers with no user-facing interruption (the owner's condition for dropping `bounce_died`), fixing it if not; the daemon closes open turn rows at adoption when the shim reports them finished. | `a22842cfb7f22f1e8` | 09-24 |
 
 ## Still waiting on the owner
 
-- Retiring the `keepalive` kind in the PROTO (`reserved`) is a breaking change; the store refuses it for now.
-- `HostFault.bounce_died` is no longer opened by anything (a DIED shim with a free lock resolves at INFO). Want an open record kept?
-- On replay, a terminal is charged to a turn by position (a stored terminal carries no turn id). Add a turn identity to the terminal frame or `HistoryEntryAt`? (proto)
-- An adopted session's open turn rows aren't checked against what its shim reports. Which component should own closing such a row?
-- Lock-holder failures other than a failed spawn (exits with a non-3 code, a signal, a wrong ready line) still read as `conversation_owned`, although the shim's AGENTS.md says they never should. Split them too?
-- MCP tools (`mcp__*`) are unmodeled: WARN `daemon.sessionwatcher.unmodeled_activity` for each (102 in one session) and no card. Model them generically?
-- `AGENT_REPL_STORE_PPROF_ADDR` is set via `launchctl setenv`, so the store WARNs `store.pprof.enabled` at every start. Keep profiling on?
+- (none open) Store profiling stays on per the owner; the lead watches its results this session.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
