@@ -3195,6 +3195,21 @@ message AgentArtifactListed {}
 message AgentArtifactFailure {
   // Why, in the shared vocabulary.
   AgentToolFailure failure = 1;
+
+  // WHICH ACT FAILED, restated whole from the start so the settled frame
+  // stands alone: a call's start and its settle upsert ONE unit, so once the
+  // call settles its start is gone from any store that keeps the latest frame,
+  // and a replay drawing this frame alone must still draw a failed publish's
+  // card — its favicon, title and file. The same arms, with the same meaning,
+  // as AgentArtifactStart's act: a failed list is still a quiet read, drawn
+  // nowhere. UNSET only on a row written before AgentActivityContract
+  // SETTLES_STAND_ALONE.
+  oneof act {
+    // A publish (or redeploy) that failed.
+    AgentArtifactPublish publish = 2;
+    // A listing that failed.
+    AgentArtifactList list = 3;
+  }
 }
 
 // ---- The unmodeled tool: work this contract does not describe ----
