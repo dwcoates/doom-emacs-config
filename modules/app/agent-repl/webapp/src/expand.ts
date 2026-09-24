@@ -115,6 +115,14 @@ export function cappedSectionAt<
 export const BUBBLE_STRIP_CLASS = "bubble-strip";
 
 /**
+ * The class every element of a bubble's EXPAND-ONLY region wears (src/bubble/
+ * draw.ts stamps it): chrome after the scroll box that the stylesheet hides
+ * until the toggle below marks that scroll box `.expanded`. It is the same one
+ * toggle opening it, so it needs no click wiring of its own.
+ */
+export const BUBBLE_EXPAND_ONLY_CLASS = "bubble-expand-only";
+
+/**
  * The section a click at START toggles, stopping below FEED: the innermost
  * capped section at or above it, or — when a bubble's header strip is met
  * first — that bubble's own scroll box. ONE toggle for every bubble kind: a
