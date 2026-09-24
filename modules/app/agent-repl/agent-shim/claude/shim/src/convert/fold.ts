@@ -23,7 +23,8 @@
  *   - the CALLS IN FLIGHT, so a tool result can restate its call's own facts —
  *     held only on the streams this plane can settle (a backgrounded agent's
  *     calls never), each entry dropped at its result, its handoff or its
- *     agent's end, the whole table drained at every turn terminal, and capped;
+ *     agent's end, the whole table drained at every turn terminal and at the
+ *     query's end, and capped as an invariant rather than a working limit;
  *   - the HOOK FIRINGS in flight, for the same reason and on the same terms;
  *   - the KINDS OF THE TASKS in flight, on the same terms again: `task_started`
  *     is the only message that says whether a detached task is an agent run or
@@ -106,6 +107,7 @@ import {
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
 import {
   createCallRegistry,
+  endQueryCalls,
   endTurnCalls,
   type CallRegistry,
   type PendingCall,
@@ -168,6 +170,11 @@ interface Fold {
    * drains, and a diagnostic can say which calls it holds and why.
    */
   inFlightCalls(): readonly PendingCall[];
+  /**
+   * The QUERY this fold was reading is over — it died, or the engine replaced
+   * it — so nothing it announced can settle: every call still held is let go.
+   */
+  endQuery(why: string): void;
 }
 
 /** Everything the fold remembers. Each field is named in this file's header. */
@@ -226,6 +233,9 @@ export function createFold(): Fold {
       }
     },
     inFlightCalls: () => state.calls.open(),
+    endQuery(why) {
+      endQueryCalls(state.calls, why);
+    },
   };
 }
 

@@ -1337,6 +1337,35 @@ describe("the vendor's own facts", () => {
   });
 });
 
+describe("the fold's calls at a query's end", () => {
+  it("lets the fold go of everything when the query dies", async () => {
+    // Arrange: nothing the dead query announced can settle any more.
+    const h = harness();
+    await started(h);
+
+    // Act
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(h.fold.queryEnds).toEqual(["the vendor query died: the vendor query ended without being asked to"]);
+  });
+
+  it("lets the fold go of everything when the query is replaced", async () => {
+    // Arrange: the keep-alive rewind replaces the query before the next prompt.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-assistant-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect(h.fold.queryEnds).toEqual(["the query was replaced"]);
+  });
+});
+
 /** Let pending microtasks and I/O settle, up to a bound, until `done` holds. */
 async function settledUntil(done: () => boolean): Promise<void> {
   for (let index = 0; index < 1_000 && !done(); index++) {

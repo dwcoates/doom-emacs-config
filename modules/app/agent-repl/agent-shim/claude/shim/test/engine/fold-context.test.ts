@@ -46,3 +46,9 @@ describe("the scaffold fold", () => {
     expect(output.turnEnded?.frame.result.case).toBeUndefined();
   });
 });
+
+describe("the scaffold fold at a query's end", () => {
+  it("has nothing to let go", () => {
+    expect(turnBoundaryOnlyFold().endQuery("the vendor query died")).toBeUndefined();
+  });
+});
