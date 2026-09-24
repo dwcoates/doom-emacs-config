@@ -105,6 +105,27 @@ func TestPrePromptFailureFailsTheRun(t *testing.T) {
 	}
 }
 
+// TestAPrePromptWhoseAgentProcessDiedFailsTheRun covers the other failed
+// close: a before-action whose turn the agent process cut by dying did not
+// complete either.
+func TestAPrePromptWhoseAgentProcessDiedFailsTheRun(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.emacsRepo()
+	h.configureActions([]string{"before"}, nil)
+	h.briefs["before"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseAgentDied}
+	enqueue(t, h)
+
+	// Act
+	_ = h.admit(context.Background())
+
+	// Assert
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
+		t.Fatalf("the merge is %q, want %q", facts.State, StateFailed)
+	}
+}
+
 // TestPostPromptFailureRidesTheTerminal covers the configured after-action:
 // every commit has landed by the time it runs, so there is nothing left to
 // refuse and its failure never fails the run.

@@ -765,10 +765,11 @@ func (w *watcher) Close() error {
 // turn ran inside the shim's vendor query, which is gone with it, and no
 // terminal will ever arrive for it: left standing, its prompt row spun as
 // working forever and its durable row stayed open until the next boot closed
-// it as an orphan. The feed draws the truthful account, the query's death
-// under the turn it cut, and the turn's end reaches the queue as a failure,
-// which closes its row. The footer and the roster are told nothing here:
-// they draw the link, and the bring-up that follows is what they show.
+// it as an orphan. The turn's end reaches the queue as the agent process
+// dying (wsm.CloseAgentDied), and the queue's door closes its row and draws
+// that ending in the feed; the feed is only told the turn, so the door has a
+// turn to end. The footer and the roster are told nothing here: they draw the
+// link, and the bring-up that follows is what they show.
 func (w *watcher) endCutTurnLocked() {
 	if w.turn == nil {
 		return
@@ -779,12 +780,7 @@ func (w *watcher) endCutTurnLocked() {
 	})
 	w.flushHeldTerminalLocked()
 	w.sinks.Feed.OnTurnOpened(w.ws, turn)
-	w.sinks.Feed.OnSessionUpdate(w.ws, &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_QueryDied{
-		QueryDied: &conversationv1.SessionQueryDied{Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
-			UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
-		}},
-	}})
-	w.turnEndedLocked(turn, wsm.CloseFailed)
+	w.turnEndedLocked(turn, wsm.CloseAgentDied)
 }
 
 // Departed implements Watcher.
