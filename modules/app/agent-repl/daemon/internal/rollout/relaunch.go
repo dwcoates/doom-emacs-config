@@ -6,6 +6,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
@@ -22,132 +23,160 @@ import (
 // all and put a HostFault with an unset oneof on the wire.
 const FaultRelaunchFailed = health.KindResumeFailed
 
-// RelaunchShim bounces one workspace's shim. It is the ONE engine for a
-// self-merge shim change, the build-staleness bounce and the operator's restart
-// verb — one path, three reasons.
+// BounceShim implements Controller: the ONE shim bounce, for every reason —
+// a stale build, the operator's restart verb, a shim log at its hard ceiling.
+//
+// WHEN IS THE BOUNCE REGISTRY'S DECISION, never this package's: the prompt
+// queue owns dispatch, so it decides "free" and "bounce now" as one step and
+// drains the workspace while the engine below runs. What this package owns is
+// the engine itself (shimBounce).
+func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
+	fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
+	decision, err := c.deps.Bounces.RequestBounce(ctx, ws, bounce.Request{
+		Reason: string(reason),
+		Force:  force,
+		Run:    c.shimBounce(reason, force),
+		Done: func(err error) {
+			if err != nil {
+				c.log.Error(opBounce, "the shim bounce failed; the workspace is served as it was", withCause(fields, err))
+			} else {
+				c.log.Info(opBounce, "the shim bounce finished; the workspace runs the installed build", fields)
+			}
+			if done != nil {
+				done(err)
+			}
+		},
+	})
+	if err != nil {
+		c.log.Error(opBounce, "the bounce registry refused the shim bounce", withCause(fields, err))
+		return bounce.Decision{}, fmt.Errorf("rollout: bounce the shim of %q: %w", ws, err)
+	}
+	switch {
+	case decision.Now && decision.Forced:
+		c.log.Info(opBounce, "bouncing the shim now over its work in flight (forced)", merge(fields, dlog.Context{
+			"turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
+		}))
+	case decision.Now:
+		c.log.Info(opBounce, "bouncing the shim now; nothing was in flight", fields)
+	default:
+		c.log.Info(opBounce, "registered the shim bounce behind the workspace's work in flight", merge(fields, dlog.Context{
+			"turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
+			"already_registered": decision.AlreadyPending,
+		}))
+	}
+	return decision, nil
+}
+
+// shimBounce is the bounce engine, run by the registry once it has DRAINED the
+// workspace. Every step is load-bearing:
+//
+//  1. PRELAUNCH the new shim, INERT BY CONSTRUCTION — no session started, so no
+//     vendor process, no store writes, no keep-alives. A prelaunch that fails
+//     leaves the old shim untouched and serving.
+//  2. TAKE THE RESTART-PENDING HOLD, which is what the tray and the composer's
+//     `restarting` arm draw.
+//  3. STAND THE OLD SHIM DOWN — gracefully, or FORCED (which ends its turn and
+//     every detached item in its vendor child) — force-killing only when the
+//     stand-down window expires, and saying so loudly.
+//  4. THE REAP IS THE GATE: the old process is confirmed GONE before anything
+//     else, which is the guarantee that at most one vendor binary ever touches
+//     the session's transcript.
+//  5. GREEDY REATTACH: StartSession(resume) at once, the cold gate only on a
+//     genuinely lapsed TTL.
+//  6. RELEASE THE HOLD. The registry's finish then delivers what was queued.
 //
 // It deliberately does NOT use Hibernate: hibernation is the IDLE SWEEP's
 // directive and compacts the transcript, which is exactly wrong for a bounce
 // that means to resume the same context moments later.
-//
-// The order is the settled flow and every step is load-bearing:
-//
-//  1. PRELAUNCH the new shim, INERT BY CONSTRUCTION — no session started, so no
-//     vendor process, no store writes, no keep-alives — so it coexists with the
-//     old one indefinitely.
-//  2. WAIT FOR FREENESS, forever if need be. Freeness at the kill is an
-//     INVARIANT of the design: nothing is running under the vendor process when
-//     it dies, so killing the CLI is inconsequential by construction.
-//  3. TAKE THE RESTART-PENDING HOLD, which is what the tray draws.
-//  4. STAND THE OLD SHIM DOWN gracefully; force-kill only when the stand-down
-//     window expires, and say so loudly.
-//  5. THE REAP IS THE GATE: the old process is confirmed GONE before anything
-//     else, which is the guarantee that at most one vendor binary ever touches
-//     the session's transcript.
-//  6. GREEDY REATTACH: StartSession(resume) at once, the cold gate only on a
-//     genuinely lapsed TTL.
-//  7. RELEASE THE HOLD, which drains the held intake.
-func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason) error {
-	fields := dlog.Context{"workspace": string(ws), "reason": string(reason)}
+func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
+	return func(ctx context.Context, ws ids.WorkspaceID) error {
+		fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
 
-	if reason == ReasonBuildStale {
-		stale, reported, err := c.stale(ctx, ws, fields)
+		old, hasOld := c.deps.Shims.Client(ws)
+
+		// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
+		// kernel lock -- by ruling the shim takes both inside StartSession, not
+		// at startup -- so a second process for one workspace comes up beside
+		// the first, costing nothing until the swap.
+		fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
 		if err != nil {
-			return err
+			c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
+			return fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
 		}
-		if !stale {
-			c.log.Debug(opRelaunch, "the shim is on the deployed build; nothing to bounce", fields)
-			return nil
+		c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
+
+		lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
+		if err != nil {
+			c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
+			c.retirePrelaunch(ctx, fresh, reason, fields)
+			return fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
 		}
-		// THE BOUNCE FIRES ONCE PER OBSERVED STAMP. A shim that comes back
-		// still reporting the stamp it was bounced for cannot be fixed by
-		// bouncing it again -- the deployed build simply is not what this
-		// workspace's shim reports -- and re-bouncing spawns a process per
-		// mount forever. The disagreement is stated once, loudly, and the
-		// session is served on the build it has.
-		if !c.claimStaleBounce(ws, reported) {
-			c.log.Debug(opStaleness, "this stamp was already bounced for; leaving the shim alone",
-				merge(fields, dlog.Context{"reported_sha": reported}))
-			return nil
+		fields["lease"] = string(lease.ID)
+		c.deps.LeaseChanged(ws)
+		c.publishHost(ws)
+		c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
+
+		if hasOld {
+			if err := c.standDown(ctx, old, ws, reason, force, fields); err != nil {
+				c.retirePrelaunch(ctx, fresh, reason, fields)
+				c.release(ctx, ws, lease.ID, fields)
+				return err
+			}
+		} else {
+			c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
 		}
-	}
 
-	old, hasOld := c.deps.Shims.Client(ws)
-
-	// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
-	// kernel lock -- by ruling the shim takes both inside StartSession, not at
-	// startup -- so a second process for one workspace comes up beside the
-	// first and waits there, costing nothing until the swap.
-	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
-	if err != nil {
-		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
-		return fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
-	}
-	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
-
-	// THE HOLD IS TAKEN BEFORE THE WAIT, not after it. The wait is the window
-	// the hold exists for: a graceful restart asked for while a turn runs
-	// waits out that turn, and every prompt arriving meanwhile would otherwise
-	// be delivered to the very shim about to be stood down.
-	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
-	if err != nil {
-		c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
-		return fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
-	}
-	fields["lease"] = string(lease.ID)
-	c.publishHost(ws)
-	c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
-
-	if err := c.awaitFreeForever(ctx, ws, opRelaunch, fields); err != nil {
-		c.release(ctx, ws, lease.ID, fields)
-		return err
-	}
-
-	if hasOld {
-		if err := c.standDown(ctx, old, ws, reason, fields); err != nil {
+		// THE REAP HAS PASSED, so both of the old shim's kernel locks are free
+		// and the prelaunched one takes them at its StartSession.
+		if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
+			c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
+			c.retirePrelaunch(ctx, fresh, reason, fields)
 			c.release(ctx, ws, lease.ID, fields)
-			return err
+			return fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
 		}
-	} else {
-		c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
-	}
 
-	// THE REAP HAS PASSED, so both of the old shim's kernel locks are free and
-	// the prelaunched one takes them at its StartSession.
-	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
-		c.release(ctx, ws, lease.ID, fields)
-		c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
-		return fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
-	}
-
-	resumed, err := c.deps.Shims.Resume(ctx, ws, fresh)
-	if err != nil {
-		c.recordRelaunchFault(ctx, ws, err, fields)
-		c.release(ctx, ws, lease.ID, fields)
-		return fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
-	}
-	if resumed.Cold != nil {
-		// THE ORDINARY COLD GATE. A fast swap stays warm because the context
-		// cache is server-side, so this fires only on a genuinely lapsed TTL.
-		c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
-		if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
-			c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
+		resumed, err := c.deps.Shims.Resume(ctx, ws, fresh)
+		if err != nil {
+			c.recordRelaunchFault(ctx, ws, err, fields)
 			c.release(ctx, ws, lease.ID, fields)
-			return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
+			return fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
 		}
-	}
-
-	if pid := fresh.PID(); pid > 0 {
-		if err := c.deps.DB.SetShimPID(ctx, ws, &pid); err != nil {
-			c.log.Warn(opRelaunch, "could not record the new shim's pid", withCause(fields, err))
+		if resumed.Cold != nil {
+			// THE ORDINARY COLD GATE. A fast swap stays warm because the context
+			// cache is server-side, so this fires only on a genuinely lapsed TTL.
+			c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
+			if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
+				c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
+				c.release(ctx, ws, lease.ID, fields)
+				return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
+			}
 		}
-	}
 
-	// RELEASING THE HOLD IS WHAT DRAINS THE INTAKE: the queue re-evaluates its
-	// holds against the lease that is no longer there.
-	c.release(ctx, ws, lease.ID, fields)
-	c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
-	return nil
+		if pid := fresh.PID(); pid > 0 {
+			if err := c.deps.DB.SetShimPID(ctx, ws, &pid); err != nil {
+				c.log.Warn(opRelaunch, "could not record the new shim's pid", withCause(fields, err))
+			}
+		}
+
+		c.release(ctx, ws, lease.ID, fields)
+		c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
+		return nil
+	}
+}
+
+// retirePrelaunch stops an inert prelaunched shim a failed bounce will never
+// install, so the failure does not leave an orphan process holding a socket.
+// It holds no session and no lock, so the kill costs nothing.
+func (c *controller) retirePrelaunch(ctx context.Context, fresh shimclient.Client, reason RelaunchReason, fields dlog.Context) {
+	if err := fresh.Kill(ctx, shimclient.KillAttribution{
+		Actor:  "rollout.relaunch",
+		Reason: fmt.Sprintf("a %s bounce failed before the prelaunched shim was installed", reason),
+		Force:  true,
+	}); err != nil {
+		c.log.Error(opRelaunch, "could not stop the prelaunched shim the failed bounce leaves behind", withCause(fields, err))
+		return
+	}
+	c.log.Info(opRelaunch, "stopped the prelaunched shim the failed bounce will not install", fields)
 }
 
 // publishHost republishes the workspace's host view when a surface is wired.
@@ -159,22 +188,25 @@ func (c *controller) publishHost(ws ids.WorkspaceID) {
 	c.deps.PublishHost(ws)
 }
 
-// standDown ends the old shim and PASSES THE REAP GATE. A stand-down window
-// that expires is force-killed and logged LOUDLY: the stream-only residue of
-// the window is lost, which is accepted rather than an invariant.
-func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws ids.WorkspaceID, reason RelaunchReason, fields dlog.Context) error {
+// standDown ends the old shim and PASSES THE REAP GATE. A FORCED stand-down
+// asks the shim to end everything live at once; an unforced one asks it to end
+// a session with nothing live (the registry decided that it is free). A
+// stand-down window that expires is force-killed and logged LOUDLY: the
+// stream-only residue of the window is lost, which is accepted rather than an
+// invariant.
+func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws ids.WorkspaceID, reason RelaunchReason, force bool, fields dlog.Context) error {
 	exited := old.Exited()
 
-	answer, err := old.KillSession(ctx, &shimv1.KillSessionRequest{Force: false})
+	answer, err := old.KillSession(ctx, &shimv1.KillSessionRequest{Force: force})
 	switch {
 	case err != nil:
-		c.log.Warn(opRelaunch, "the graceful stand-down call failed; waiting out the window before forcing",
+		c.log.Warn(opRelaunch, "the stand-down call failed; waiting out the window before forcing",
 			withCause(fields, err))
 	case answer.GetFailure() != nil:
-		c.log.Warn(opRelaunch, "the shim refused the graceful stand-down; waiting out the window before forcing",
+		c.log.Warn(opRelaunch, "the shim refused the stand-down; waiting out the window before forcing",
 			merge(fields, dlog.Context{"refusal": killRefusal(answer.GetFailure())}))
 	default:
-		c.log.Debug(opRelaunch, "the shim accepted the graceful stand-down", fields)
+		c.log.Debug(opRelaunch, "the shim accepted the stand-down", fields)
 	}
 
 	select {
@@ -225,16 +257,16 @@ func killRefusal(failure *shimv1.KillSessionFailure) string {
 }
 
 // release drops the restart-pending hold and TELLS THE QUEUE, which is what
-// lets the held intake drain: the release alone changes a row the queue is not
+// un-stamps the held intake: the release alone changes a row the queue is not
 // watching, so a bounce without this leaves the intake held forever.
 func (c *controller) release(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) {
 	if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
-		c.log.Warn(opRelaunch, "could not release the restart-pending hold", withCause(fields, err))
+		c.log.Error(opRelaunch, "could not release the restart-pending hold", withCause(fields, err))
 		return
 	}
 	c.deps.LeaseChanged(ws)
 	c.publishHost(ws)
-	c.log.Debug(opRelaunch, "released the restart-pending hold; the held intake drains", fields)
+	c.log.Debug(opRelaunch, "released the restart-pending hold", fields)
 }
 
 // recordRelaunchFault records a resume that failed hard as the WORKSPACE'S OWN
@@ -253,40 +285,115 @@ func (c *controller) recordRelaunchFault(ctx context.Context, ws ids.WorkspaceID
 	}
 }
 
-// CheckStaleness compares a session's reported shim build against the deploy
-// stamp and bounces it at freeness when they disagree. It is the second trigger
-// of the ONE relaunch engine; the first is a self-merge that landed a shim
-// change.
-func (c *controller) CheckStaleness(ctx context.Context, ws ids.WorkspaceID, reportedSHA string) error {
-	fields := dlog.Context{"workspace": string(ws), "reported_sha": reportedSHA}
-	deployed, err := c.deployStamp()
-	if err != nil {
-		c.log.Warn(opStaleness, "could not read the deploy stamp; leaving the shim alone", withCause(fields, err))
-		return nil
+// ShimReported implements Controller. The judgement runs OFF the caller's
+// goroutine — the caller is a stream router holding its own lock, and the
+// registry reads that same router under the queue's — and is joinable through
+// staleChecks.
+func (c *controller) ShimReported(ws ids.WorkspaceID, build string) {
+	c.mu.Lock()
+	before, known := c.reported[ws]
+	c.reported[ws] = build
+	c.mu.Unlock()
+	if known && before == build {
+		return
 	}
-	fields["deployed_sha"] = deployed
-	if deployed == "" || reportedSHA == "" || deployed == reportedSHA {
-		c.log.Debug(opStaleness, "the shim is on the deployed build", fields)
-		return nil
+	c.logTransition(opStaleness, ws, "reported_shim_build", before, build, nil)
+	if build == "" {
+		// A SHIM THAT REPORTS NO BUILD CANNOT BE PROVEN CURRENT. The field is
+		// required on every diagnostics frame, so this is a shim from before
+		// the contract said so — exactly the shim a deploy must not leave
+		// alone. It is said out loud, and judged stale below.
+		c.log.Error(opStaleness, "the shim reported no build; it cannot be proven current, so it is judged stale",
+			dlog.Context{"workspace": string(ws)})
 	}
-	c.log.Info(opStaleness, "the shim is on an older build; bouncing it at freeness", fields)
-	return c.RelaunchShim(ctx, ws, ReasonBuildStale)
+	c.staleChecks.Add(1)
+	go func() {
+		defer c.staleChecks.Done()
+		ctx := c.lifetime(context.Background())
+		if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
+			c.log.Error(opStaleness, "the reported shim build could not be judged", withCause(dlog.Context{"workspace": string(ws)}, err))
+		}
+	}()
 }
 
-// stale reports whether the workspace's recorded session is on an older build
-// than the deploy stamp. A stamp that cannot be read leaves the shim ALONE:
-// bouncing a session on a guess is worse than serving it on an older build.
+// takeoverForce reports whether a stale shim in this workspace is bounced at
+// once because the handover that brought it here was forced.
+func (c *controller) takeoverForce(ws ids.WorkspaceID) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.forcedTakeover && c.joining[ws]
+}
+
+// CheckStaleness implements Controller.
+func (c *controller) CheckStaleness(ctx context.Context, ws ids.WorkspaceID, force bool) (StaleCheck, error) {
+	return c.checkStale(ctx, ws, force)
+}
+
+// checkStale judges a workspace's last reported shim build against the
+// installed bundle and bounces a stale shim through the registry.
+//
+// ONLY A WORKSPACE THIS DAEMON SERVES IS BOUNCED. A joining successor learns a
+// shim's build the moment it attaches — before its adoption has finished — and
+// a bounce started then would race the adoption for the shim; the adoption's
+// own end re-runs this check.
+func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force bool) (StaleCheck, error) {
+	fields := dlog.Context{"workspace": string(ws), "force": force}
+	if standing := c.Standing(ws); standing != StandingOwned {
+		c.log.Debug(opStaleness, "the workspace is not this daemon's to bounce yet; its adoption re-checks it",
+			merge(fields, dlog.Context{"standing": standing.String()}))
+		return StaleCheck{}, nil
+	}
+	if _, live := c.deps.Shims.Client(ws); !live {
+		c.log.Debug(opStaleness, "the workspace has no live shim; its next spawn runs the installed build", fields)
+		return StaleCheck{}, nil
+	}
+	c.mu.Lock()
+	reported, known := c.reported[ws]
+	c.mu.Unlock()
+	if !known {
+		c.log.Debug(opStaleness, "the live shim has not reported its build yet; its report is judged when it arrives", fields)
+		return StaleCheck{}, nil
+	}
+	installed, err := c.deps.ShimBuild()
+	if err != nil {
+		c.log.Error(opStaleness, "could not read the installed shim build; nothing is bounced on a guess", withCause(fields, err))
+		return StaleCheck{}, fmt.Errorf("rollout: judge the shim build of %q: %w", ws, err)
+	}
+	check := StaleCheck{Reported: reported, Installed: installed}
+	fields["reported_build"] = reported
+	fields["installed_build"] = installed
+	if reported != "" && reported == installed {
+		c.log.Debug(opStaleness, "the shim runs the installed build", fields)
+		return check, nil
+	}
+	check.Stale = true
+	if !c.claimStaleBounce(ws, reported) {
+		// THE BOUNCE FIRES ONCE PER OBSERVED BUILD. A shim that comes back
+		// still reporting the build it was bounced for cannot be fixed by
+		// bouncing it again, and re-bouncing spawns a process per report
+		// forever. The disagreement is stated loudly, and the session is
+		// served on the build it has.
+		check.Skipped = "already_bounced_for_this_build"
+		c.log.Error(opStaleness, "the shim still reports the build it was already bounced for; not bouncing it again", fields)
+		return check, nil
+	}
+	c.log.Info(opStaleness, "the shim runs an older build than the installed one; bouncing it", fields)
+	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, nil)
+	if err != nil {
+		return check, err
+	}
+	check.Bounce = decision
+	return check, nil
+}
+
 // claimStaleBounce records that this workspace is being bounced for `reported`
-// and answers whether that stamp is NEW. A stamp already bounced for answers
-// false, which is what makes the build-staleness bounce fire once per stamp
-// rather than once per mount.
+// and answers whether that build is NEW. A build already bounced for answers
+// false, which is what makes the build-staleness bounce fire once per build
+// rather than once per report.
 func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) bool {
 	c.mu.Lock()
-	if c.bouncedStamp == nil {
-		c.bouncedStamp = map[ids.WorkspaceID]string{}
-	}
-	previous := c.bouncedStamp[ws]
-	if previous == reported {
+	previous, seen := c.bouncedStamp[ws]
+	if seen && previous == reported {
 		c.mu.Unlock()
 		c.logTransition(opStaleness, ws, "bounced_build_stamp", previous, previous,
 			dlog.Context{"changed": false})
@@ -299,51 +406,12 @@ func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) bool 
 	return true
 }
 
-func (c *controller) stale(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (bool, string, error) {
-	deployed, err := c.deployStamp()
-	if err != nil {
-		c.log.Warn(opStaleness, "could not read the deploy stamp; leaving the shim alone", withCause(fields, err))
-		return false, "", nil
-	}
-	if deployed == "" {
-		c.log.Debug(opStaleness, "the deploy stamp is empty; leaving the shim alone", fields)
-		return false, "", nil
-	}
-	if c.deps.SessionBuildSHA == nil {
-		c.log.Debug(opStaleness, "no session build is reported; leaving the shim alone", fields)
-		return false, "", nil
-	}
-	reported, known := c.deps.SessionBuildSHA(ws)
-	fields["reported_sha"] = reported
-	fields["deployed_sha"] = deployed
-	if !known || reported == "" {
-		c.log.Debug(opStaleness, "the session reports no build; leaving the shim alone", fields)
-		return false, "", nil
-	}
-	if reported == deployed {
-		c.log.Debug(opStaleness, "the session is on the deployed build", fields)
-		return false, reported, nil
-	}
-	c.log.Info(opStaleness, "the session is on an older build than the deploy stamp", fields)
-	_ = ctx
-	return true, reported, nil
-}
-
-// deployStamp reads the deployed build's sha, or an empty answer when no reader
-// is wired.
-func (c *controller) deployStamp() (string, error) {
-	if c.deps.DeployStamp == nil {
-		return "", nil
-	}
-	return c.deps.DeployStamp()
-}
-
 // ReloadWebapp pushes the EMPTY reload_webapp arm: Emacs reloads this
 // workspace's xwidget against the SAME daemon, and the reloaded page's default
 // first-page load is the whole of the recovery. No address rides it, because
-// the daemon is not changing — and a combined daemon-and-webapp rollout never
-// sends it at all, since the handover's fresh attach pulls the new assets as a
-// side effect.
+// the daemon is not changing — and a deploy that hands the daemon over never
+// sends it at all, since the handover's fresh attach pulls the new assets as
+// a side effect.
 func (c *controller) ReloadWebapp(_ context.Context, ws ids.WorkspaceID) error {
 	c.deps.Pusher.PushReloadWebapp(ws)
 	c.log.Info(opReloadWebap, "pushed the webapp reload", dlog.Context{"workspace": string(ws)})

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging/buildreport"
+
 	"claude-repld/integration/harness"
 )
 
@@ -31,6 +33,15 @@ type EmacsWorld struct {
 	// Git is the SCRIPTED fake git every process below inherits. No real
 	// git runs anywhere in this suite, per SPEC.md's mocking ruling.
 	Git *harness.GitWorld
+
+	// Deploy is the daemon's deploy build (AGENT_REPL_DEPLOY_BUILDER). It
+	// stages exactly what this world runs, so a deploy changes nothing unless
+	// a scenario stages another build first (Deploy.Stage). No deploy in this
+	// layer ever builds for real.
+	Deploy *harness.DeployBuilder
+	// Launchctl is the launchctl a service restart would drive
+	// (AGENT_REPL_LAUNCHCTL), so no deploy here reaches a launchd.
+	Launchctl *harness.Recorder
 }
 
 // EmacsWorldOption tunes one EmacsWorld. There is exactly one option, and
@@ -94,10 +105,23 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		t.Fatalf("e2e: mkdir %s: %v", logsDir, err)
 	}
 
+	// The kernel-lock run directory, redirected. `sessionlock.Probe` creates
+	// it when it is missing -- nobody can hold a lock in a directory that
+	// does not exist -- but it is created here too, so this world's tree is
+	// complete before anything runs rather than as a side effect of the first
+	// probe. It is settled before the store because the store and the
+	// sidecar write their build reports into it, where the daemon's deploy
+	// reads them.
+	lockDir := filepath.Join(box.Scratch(), "locks")
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		t.Fatalf("e2e: mkdir %s: %v", lockDir, err)
+	}
+
 	store := startStore(t,
 		shortSocketPath(t, "store"),
 		filepath.Join(box.Scratch(), "store.db"),
-		filepath.Join(logsDir, "store.log"))
+		filepath.Join(logsDir, "store.log"),
+		lockDir)
 
 	// ONE spool root, for the same reason NewWorld gives: the fake SDK's own
 	// default is the REAL vendor location /tmp/claude-<uid>, so leaving it
@@ -124,17 +148,21 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		t.Fatalf("e2e: install the fake git: %v", err)
 	}
 
-	// The kernel-lock run directory, redirected. `sessionlock.Probe` creates
-	// it when it is missing -- nobody can hold a lock in a directory that
-	// does not exist -- but it is created here too, so this world's tree is
-	// complete before anything runs rather than as a side effect of the first
-	// probe.
-	lockDir := filepath.Join(box.Scratch(), "locks")
-	if err := os.MkdirAll(lockDir, 0o755); err != nil {
-		t.Fatalf("e2e: mkdir %s: %v", lockDir, err)
-	}
+	// THE DEPLOY'S SEAMS. Emacs starts the daemon here, so nothing states
+	// them unless this layer does, and a daemon without them would run the
+	// REAL build and drive the REAL launchctl on any deploy — a landing on
+	// its own checkout or `agent-repl-deploy'. The fake build stages what
+	// this world runs: the bundle, the served dist, and copies of the very
+	// store and sidecar binaries whose own reports sit in lockDir.
+	deployBin := filepath.Join(box.Scratch(), "deploybin")
+	deploy := harness.NewFakeDeployBuilder(t, deployBin, harness.DeploySources{
+		ShimMain: shimMain, WebappDist: webappDist,
+		Store: store.bin, Sidecar: sidecarBin,
+	})
+	deploy.Stage(harness.DeployCurrent)
+	launchctl := harness.NewFakeLaunchctl(t, deployBin)
 
-	extraEnv := append([]string{
+	extraEnv := []string{
 		"PATH=" + fakeBin + ":" + os.Getenv("PATH"),
 		"AGENT_REPL_LOCK_DIR=" + lockDir,
 		// THE LOCK HOLDER. Node cannot take a flock, so the shim spawns
@@ -155,7 +183,15 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		// the shim is real and only the SDK behind it is not.
 		"AGENT_REPL_FAKE=1",
 		"AGENT_REPL_FAKE_SPOOL_ROOT=" + spoolRoot,
-	}, buildIdentityEnv()...)
+		// THE MODULE ROOT IS THE CHECKOUT: the real Emacs loads the elisp
+		// beneath it, so a deploy's fresh elisp build is the one Emacs runs.
+		// The sandbox's working copy is a throwaway, so what a deploy
+		// installs there touches nothing of the host's (see checkoutEnv).
+		checkoutEnv + "=" + repo.repoDir,
+		"AGENT_REPL_DEPLOY_BUILDER=" + deploy.Path,
+		"AGENT_REPL_LAUNCHCTL=" + launchctl.Path,
+		"AGENT_REPL_LAUNCH_AGENTS_DIR=" + filepath.Join(box.Scratch(), "LaunchAgents"),
+	}
 	// LAST, so a scenario's own statement is the one the process carries.
 	extraEnv = append(extraEnv, cfg.extraEnv...)
 
@@ -206,7 +242,12 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		// defaulted, because the default is the developer's own
 		// ~/.claude-emacs.
 		StateDir: e.StateDir,
+		LockDir:  lockDir,
 	})
+	// A deploy reads the sidecar as current only once it has reported.
+	reportCtx, cancelReport := context.WithTimeout(context.Background(), DefaultTimeout)
+	awaitBuildReport(t, reportCtx, lockDir, buildreport.ServiceSidecar, sidecar.cmd.Process.Pid)
+	cancelReport()
 
 	// Registered LAST, so LIFO runs it FIRST: it observes what died on its
 	// OWN, before this world's own teardown killed anything on purpose.
@@ -229,7 +270,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	// Workspace-owned records go to each repo's .claude/emacs, which a test
 	// adds once it has a repo.
 	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir)
-	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git}
+	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git, Deploy: deploy, Launchctl: launchctl}
 }
 
 // webappDistOnce checks the staged webapp dist at most once per test binary.

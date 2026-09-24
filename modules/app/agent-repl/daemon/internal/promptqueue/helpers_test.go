@@ -462,6 +462,14 @@ func (s *fakeSender) started() []ids.TurnID {
 	return out
 }
 
+func (s *fakeSender) modelsSet() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.models))
+	copy(out, s.models)
+	return out
+}
+
 func (s *fakeSender) startAttempts() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -481,6 +489,7 @@ type fakeWatcher struct {
 	mu sync.Mutex
 
 	inFlight   *ids.TurnID
+	live       sessionwatcher.LiveWorkSet
 	mainAgents []string
 	opened     []*conversationv1.AgentPrompt
 	opening    []ids.TurnID
@@ -491,6 +500,19 @@ func (w *fakeWatcher) TurnInFlight() *ids.TurnID {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.inFlight
+}
+
+func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.live
+}
+
+// detached sets the live detached work the watcher reports.
+func (w *fakeWatcher) detached(live sessionwatcher.LiveWorkSet) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.live = live
 }
 
 func (w *fakeWatcher) SetMainAgent(agent *conversationv1.AgentId) {

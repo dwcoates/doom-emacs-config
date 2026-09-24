@@ -145,6 +145,9 @@ type watcher struct {
 	// freeWaiters are the standing AwaitFree calls. They are answered by the
 	// stream edges — a turn end and a live-work change — never by a poll.
 	freeWaiters []chan error
+	// busy is what the last freeness judgement found: work in flight. The
+	// lifecycle sink's OnFree fires on its true-to-false edge alone.
+	busy bool
 	// turnWaiters are the standing AwaitTurnEnd calls, keyed by the turn.
 	turnWaiters map[ids.TurnID][]chan turnEnd
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed

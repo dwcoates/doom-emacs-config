@@ -49,6 +49,18 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		}
 	}
 
+	// THE DISPATCH DECISION IS TAKEN UNDER THE WORKSPACE'S DELIVERY LOCK, the
+	// same lock a turn end, a lease change and the bounce registry decide
+	// under. Without it a submission could start a turn in the instant after
+	// the registry judged the workspace free and before the bounce began.
+	drain := &q.state(sub.WS).drain
+	drain.Lock()
+	defer drain.Unlock()
+	if q.isDraining(sub.WS) {
+		log.Info(opSubmit, "the workspace is draining for a bounce; the submission is held for the new shim", nil)
+		return q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldBuildRefresh}, log)
+	}
+
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The prompt is its revival,
@@ -76,13 +88,10 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	if running := watcher.TurnInFlight(); running != nil {
 		return q.hold(ctx, sub, *running, nil, log)
 	}
-	// A SUBMISSION GOING STRAIGHT TO THE SHIM IS A DELIVERY DECISION, so it is
-	// taken under the delivery lock, where a standing edit is read: a prompt
-	// submitted while an edit stands is queued after the edited one and is
-	// withheld with it.
-	drain := &q.state(sub.WS).drain
-	drain.Lock()
-	defer drain.Unlock()
+	// A SUBMISSION GOING STRAIGHT TO THE SHIM IS A DELIVERY DECISION, taken
+	// under the delivery lock held since the bounce check above, where a
+	// standing edit is read: a prompt submitted while an edit stands is queued
+	// after the edited one and is withheld with it.
 	if claim, editing := q.Editing(sub.WS); editing {
 		return q.holdBehindEdit(ctx, sub, claim, log)
 	}

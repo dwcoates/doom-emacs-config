@@ -61,6 +61,11 @@ type wsState struct {
 	// "the session is still coming up", never "there is no session".
 	bringUps int
 
+	// bounce is the workspace's standing bounce: registered while work is in
+	// flight, DRAINING once decided (bounce.go). nil when none stands. Guarded
+	// by q.mu; DECIDED only under drain.
+	bounce *pendingBounce
+
 	head         *ids.TurnID
 	interrupting bool
 
@@ -102,6 +107,10 @@ type queue struct {
 	// behind a keep-alive turn. It is a WaitGroup rather than a sleep so a test
 	// can join them, and so Drain waits them out before the state client closes.
 	redriving sync.WaitGroup
+
+	// bouncing tracks the bounces running on their own goroutines, so Drain
+	// joins them rather than closing the state client under one.
+	bouncing sync.WaitGroup
 
 	// redrives holds a per-workspace handle to the in-flight keep-alive
 	// re-drive so an INTERRUPT can cancel the queued turn before it ever starts.
@@ -224,7 +233,8 @@ func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.T
 func (q *queue) waitForClassifications() { q.classifying.Wait() }
 
 // Drain implements Queue: a BOUNDED join of the classification verdicts, the
-// background revivals, and the background keep-alive re-drives. It reports
+// background revivals, the background keep-alive re-drives, and the bounces
+// the registry is running. It reports
 // whether they all left, so the caller decides
 // what an overrun means rather than this package guessing — and it is bounded
 // because an unbounded wait is a daemon that does not exit.
@@ -234,6 +244,7 @@ func (q *queue) Drain(bound time.Duration) bool {
 		q.classifying.Wait()
 		q.reviving.Wait()
 		q.redriving.Wait()
+		q.bouncing.Wait()
 		close(left)
 	}()
 	select {

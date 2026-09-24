@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/boot"
+	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/commandfile"
@@ -421,7 +421,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	var queue promptqueue.Queue
 	healthRef := &healthForwarder{}
-	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, log: log}
+	rolloutRef := &rolloutForwarder{}
+	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, builds: rolloutRef, log: log}
+
+	// THE INSTALLED SHIM BUNDLE, guarded: a spawn holds it from the hash it
+	// stamps the shim with until the shim has answered, and a deploy replaces
+	// it only while no spawn holds it. SHIM_BUILD_SHA answers only while no
+	// bundle is installed (every harness runs a fake shim with no bundle).
+	shimBundle := buildid.NewShimBundle(paths.ShimMain, os.Getenv(buildid.EnvShimBuild))
 
 	// The title synthesizer rides the fleet's OWN session-watch sinks, so it is
 	// built before the fleet and its digest call reaches back through a
@@ -459,7 +466,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StoreSocket:  p.Opts.storeSocket,
 		NodeBin:      p.Opts.node,
 		MainJS:       paths.ShimMain,
-		ShimBuildSHA: paths.ShimBuildSHA,
+		ShimBundle:   shimBundle,
 		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		StartBound:   startBound,
@@ -541,14 +548,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	rolloutController, err := rollout.New(rollout.Deps{
 		HoldoutWarnEvery: holdoutWarnEvery,
 		PublishHost:      relay.PublishHostWorkspace,
-		Deploy:           scripts,
 		SelfExe:          selfExe,
-		SelfRepoDir:      paths.SelfRepo,
 		SelfAddress:      p.Claim.Address(),
 		Instance:         p.Instance,
 		StateDir:         p.Layout.Dir(),
 		IntentManifest:   p.Layout.IntentManifest(),
-		Git:              git,
 		DB:               p.DB,
 		Spawner:          rollout.NewProcessSpawner(selfExe, p.Layout.Dir()),
 		Announcer:        pushes,
@@ -557,13 +561,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Quiesce:          intake.Quiesce,
 		DrainIntake:      intake.DrainIntake,
 		LeaseChanged:     queue.OnLeaseChanged,
+		Bounces:          queue,
 		Freeness:         fleet.Freeness(),
 		Shims:            fleet,
 		LockProbe:        fleet.ProbeLock,
 		PublishViews:     views.PublishViews,
 		WriteDaemonAddr:  func(context.Context) error { return p.Claim.Publish() },
-		DeployStamp:      deployStamp(paths.BuiltSHA),
-		SessionBuildSHA:  fleet.SessionBuildSHA,
+		ShimBuild:        shimBundle.Build,
 		ColdGate:         fleet.RaiseColdGate,
 		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
 		// adopts.
@@ -573,6 +577,29 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the rollout controller: %w", err)
+	}
+	rolloutRef.bind(rolloutController)
+
+	// ---- the deploy ----
+
+	clients := &deployClientsForwarder{}
+	deployer, err := buildDeployer(ctx, deployerParams{
+		Surfaces:   p.Surfaces,
+		Checkout:   paths.Checkout,
+		ShimMain:   paths.ShimMain,
+		WebappDist: paths.WebappDist,
+		StateDir:   p.Layout.Dir(),
+		SelfExe:    selfExe,
+		Bundle:     shimBundle,
+		Rollout:    rolloutController,
+		Clients:    clients,
+		Runner:     scripts,
+		Store:      p.Opts.storeSocket,
+		Workspace:  fleet.Workspaces,
+		Getenv:     os.Getenv,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	drainController, err = drain.New(drain.Deps{
@@ -656,7 +683,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PauseAfterCapture: capturePause(p.Surfaces.Global()),
 		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),
 		ParkedRoute:       guidanceRoute(fleet, mergeRef),
-		Rollout:           rolloutController,
+		Rollout:           deployer,
 		Log:               p.Surfaces,
 	})
 	if err != nil {
@@ -768,6 +795,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Merge:            mergeOrchestrator,
 			Drain:            drainController,
 			Rollout:          rolloutController,
+			Deploy:           deployer,
 			Health:           healthReporter,
 			Login:            loginManager,
 			Commands:         ingress,
@@ -823,6 +851,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)
 			relay.bind(srv.Relay())
+			clients.bind(srv)
 		},
 		Background: []backgroundLoop{
 			{Name: "drain", Run: drainController.Run},
@@ -854,42 +883,10 @@ type paths struct {
 	// SelfRepo is the daemon's OWN checkout identity, which the merge
 	// orchestrator's two methods key on.
 	SelfRepo string
-	// BuiltSHA is daemon/bin/.built-sha, the stamp the deploy chain writes.
+	// BuiltSHA is daemon/bin/.built-sha, the source-revision stamp the build
+	// writes beside the daemon binary: the version the health and status
+	// surfaces show.
 	BuiltSHA string
-	// ShimBuildSHA is the bundle sha every shim spawn is stamped with,
-	// resolved from the shim's own build stamp or the environment override.
-	ShimBuildSHA string
-}
-
-// envShimBuildSHA overrides the shim bundle's build sha when the shim's build
-// stamp is absent — a checkout that has not built the shim, and every test
-// harness, which runs a fake shim that has no bundle at all.
-const envShimBuildSHA = "SHIM_BUILD_SHA"
-
-// resolveShimBuildSHA answers the sha every shim spawn is stamped with. The
-// shim's own build stamp answers first, because that is the bundle the daemon
-// actually launches; the environment answers when the stamp is absent. With
-// neither, the boot REFUSES: an unstamped spawn cannot be checked for
-// staleness, and a blank stamp would silently call every shim current.
-func resolveShimBuildSHA(stampPath, fromEnv string) (string, error) {
-	raw, err := os.ReadFile(stampPath)
-	switch {
-	case err == nil:
-		sha := strings.TrimSpace(string(raw))
-		if sha == "" {
-			return "", fmt.Errorf("claude-repld: the shim build stamp %s is empty", stampPath)
-		}
-		return sha, nil
-	case errors.Is(err, fs.ErrNotExist):
-		if sha := strings.TrimSpace(fromEnv); sha != "" {
-			return sha, nil
-		}
-		return "", fmt.Errorf(
-			"claude-repld: the shim build sha is unresolvable: the shim build stamp %s does not exist and %s is unset",
-			stampPath, envShimBuildSHA)
-	default:
-		return "", fmt.Errorf("claude-repld: read the shim build stamp %s: %w", stampPath, err)
-	}
 }
 
 // envSelfRepo overrides the daemon's own-checkout identity for tests. The flag
@@ -918,11 +915,6 @@ func resolvePaths(opts options) (paths, error) {
 		SelfRepo:   firstNonEmpty(opts.selfRepo, os.Getenv(envSelfRepo), root),
 		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
 	}
-	sha, err := resolveShimBuildSHA(checkout.ShimBuildStamp(root), os.Getenv(envShimBuildSHA))
-	if err != nil {
-		return paths{}, err
-	}
-	out.ShimBuildSHA = sha
 	return out, nil
 }
 
@@ -959,9 +951,6 @@ func lockDir() string {
 	return workspace.DefaultLockDir
 }
 
-// deployStamp reads the deployed build's sha from the stamp the deploy chain
-// writes. A missing stamp is an ERROR rather than an empty sha: a staleness
-// check against nothing would call every shim current.
 // hostSessionFacts adapts the session fleet to server.SessionFacts. The
 // conversion lives HERE because internal/workspace sits below internal/server
 // and cannot name its types: the composition root is the one place that knows
@@ -1003,12 +992,13 @@ func sentinelStripper(log dlog.Logger) func(string) string {
 	}
 }
 
-// DeployStampEnv overrides the deploy stamp file. It is the counterpart of
-// rollout.DeployScriptEnv: a test that must make a shim's reported build
-// disagree with the deployed one has no other way to state the deployed one,
-// because the stamp file lives beside a binary the harness builds itself.
+// DeployStampEnv overrides the daemon's source-revision stamp, which the
+// harness needs because the stamp file lives beside a binary it builds itself.
 const DeployStampEnv = "AGENT_REPL_DEPLOY_STAMP"
 
+// deployStamp reads the daemon's source-revision stamp: the version the health
+// and status surfaces show. It is NOT a staleness authority — a deploy judges
+// every component by content hash (internal/buildid).
 func deployStamp(path string) func() (string, error) {
 	return func() (string, error) {
 		if fromEnv := os.Getenv(DeployStampEnv); fromEnv != "" {

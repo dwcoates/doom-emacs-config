@@ -50,7 +50,6 @@
 (declare-function agent-repl-daemon-observe-identity "daemon" (conn on-answer on-failure))
 (declare-function agent-repl-frontend-daemon-stop "daemon" (&optional on-done))
 (declare-function agent-repl-link-primary "daemon-link" ())
-(declare-function agent-repl-rpc-roll-out-build "rpc" (conn request &rest keys))
 (declare-function agent-repl-link-teardown "daemon-link" ())
 
 (defcustom agent-repl-shim-services-launchctl-program "launchctl"
@@ -62,11 +61,6 @@
   "Seconds to wait for the store's socket after a kickstart.
 The sidecar dials that socket, so it must not be started against a store
 that is not serving yet."
-  :type 'number
-  :group 'agent-repl)
-
-(defcustom agent-repl-runtime-restart-await-timeout 300.0
-  "Seconds `agent-repl-runtime-restart-await' waits for the whole bounce."
   :type 'number
   :group 'agent-repl)
 
@@ -107,10 +101,6 @@ daemon's.")
 (defun agent-repl--shim-services-run-timer (seconds callback)
   "Integration boundary: run CALLBACK after SECONDS without blocking Emacs."
   (run-with-timer seconds nil callback))
-
-(defun agent-repl--runtime-pump-events (seconds)
-  "Integration boundary: process Emacs events for at most SECONDS."
-  (accept-process-output nil seconds))
 
 (defun agent-repl--launchctl-call (args)
   "External-boundary wrapper: run launchctl with ARGS and capture its output."
@@ -532,141 +522,6 @@ it (a request, never a kill) and ensure a fresh one."
    #'ignore
    (lambda (detail)
      (agent-repl--warn '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-restart-failed detail=%s" detail))))
-
-(defun agent-repl-runtime-restart-await (&optional timeout)
-  "Restart the runtime and return only after terminal completion.
-TIMEOUT overrides `agent-repl-runtime-restart-await-timeout'.  Reserved
-for deployment orchestration reaching Emacs over emacsclient: it pumps
-process output and timers while the asynchronous coordinator runs, then
-returns the exact string `runtime-restart-complete'.  A failure or a
-timeout is logged and SIGNALLED, so a caller cannot mistake the initial
-dispatch for a completed deployment."
-  (let ((limit (or timeout agent-repl-runtime-restart-await-timeout)))
-    (unless (and (numberp limit) (> limit 0))
-      (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-invalid-timeout timeout=%S" limit))
-    (let ((started (float-time))
-          (deadline (+ (float-time) limit))
-          (state :pending)
-          (failure nil))
-      (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-begin timeout=%.3f" limit)
-      (agent-repl--runtime-prepare
-       (lambda () (setq state :complete))
-       (lambda (detail) (setq failure detail state :failed)))
-      (while (and (eq state :pending) (< (float-time) deadline))
-        (agent-repl--runtime-pump-events 0.05))
-      (pcase state
-        (:complete
-         (agent-repl--info '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-complete elapsed=%.3f"
-                           (- (float-time) started))
-         "runtime-restart-complete")
-        (:failed
-         (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-failed elapsed=%.3f detail=%s"
-                            (- (float-time) started) failure))
-        (_
-         (agent-repl--fatal '(:agent-repl-central "host service management spans workspaces") "elisp.services.runtime-await-timeout timeout=%.3f elapsed=%.3f"
-                            limit (- (float-time) started)))))))
-
-;;;; ---- Rolling out a deployed build ------------------------------------
-
-(defcustom agent-repl-runtime-rollout-await-timeout 30.0
-  "Seconds `agent-repl-runtime-rollout-await' waits for the daemon's ANSWER.
-This bounds the rollout's ACCEPTANCE only — the successor's spawn and the
-announcement — never its completion, which waits on every busy
-workspace's freeness for as long as that takes."
-  :type 'number
-  :group 'agent-repl)
-
-(defun agent-repl--runtime-rollout-summary (value)
-  "Render a RollOutBuildSuccess VALUE as the deploy surface's one-line token."
-  (let* ((action (plist-get value :action))
-         (arm (plist-get action :arm))
-         (counts (plist-get action :value)))
-    (pcase arm
-      (:handover
-       (format "runtime-rollout-accepted action=handover workspaces=%d busy=%d"
-               (plist-get counts :workspaces) (plist-get counts :busy)))
-      (:shim-relaunch
-       (format "runtime-rollout-accepted action=shim-relaunch workspaces=%d busy=%d"
-               (plist-get counts :workspaces) (plist-get counts :busy)))
-      (:webapp-reload
-       (format "runtime-rollout-accepted action=webapp-reload webviews=%d"
-               (plist-get counts :webviews))))))
-
-(defun agent-repl--runtime-rollout-refusal (value)
-  "Render a RollOutBuildError VALUE as the sentence its refusal is reported by."
-  (let* ((cause (plist-get value :cause))
-         (arm (plist-get cause :arm)))
-    (pcase arm
-      (:already-rolling-out
-       (format "a rollout is already in flight, waiting on %s"
-               (or (mapconcat #'identity (plist-get (plist-get cause :value) :waiting-on) ", ")
-                   "no workspace")))
-      (:joining "the daemon is a successor still joining a handover")
-      (_ (format "the daemon refused with %S" arm)))))
-
-(defun agent-repl-runtime-rollout-await (rebuilt &optional timeout)
-  "Roll out the build the deploy chain produced, and return its ACCEPTANCE.
-REBUILT is a plist (:daemon B :shim B :webapp B) naming what the chain
-rebuilt.  The daemon rolls it out at each workspace's FREENESS and ends
-no turn: this is what a deploy calls, and `agent-repl-runtime-restart'
-— which forces every session down — is what it never calls.
-
-Reserved for deployment orchestration reaching Emacs over emacsclient.
-It pumps process output and timers until the daemon ANSWERS, then
-returns a string beginning `runtime-rollout-accepted' that names the
-action and what it still waits on.  A refusal, a transport failure or a
-timeout is logged and SIGNALLED with `not rolled out:' in its text, so a
-caller cannot mistake a refused rollout for an accepted one.  TIMEOUT
-overrides `agent-repl-runtime-rollout-await-timeout'."
-  (let ((limit (or timeout agent-repl-runtime-rollout-await-timeout))
-        (scope '(:agent-repl-central "host service management spans workspaces"))
-        (conn (agent-repl-link-primary)))
-    (unless (and (numberp limit) (> limit 0))
-      (agent-repl--fatal scope "elisp.services.rollout-await-invalid-timeout timeout=%S" limit))
-    (unless conn
-      (agent-repl--fatal scope "elisp.services.rollout-await-failed detail=%s"
-                         "not rolled out: no daemon link is available"))
-    (let ((started (float-time))
-          (deadline (+ (float-time) limit))
-          (state :pending)
-          (detail nil))
-      (agent-repl--info scope "elisp.services.rollout-await-begin rebuilt=%S timeout=%.3f"
-                        rebuilt limit)
-      (agent-repl-rpc-roll-out-build
-       conn rebuilt
-       :timeout limit
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            (setq detail (agent-repl--runtime-rollout-summary (plist-get response :value))
-                  state (if detail :accepted :failed))
-            (unless detail
-              (setq detail "not rolled out: the daemon accepted with an action this editor does not know")))
-           (_
-            (setq detail (format "not rolled out: %s"
-                                 (agent-repl--runtime-rollout-refusal
-                                  (plist-get response :value)))
-                  state :failed))))
-       :on-failure
-       (lambda (failure)
-         (setq detail (format "not rolled out: %s"
-                              (or (plist-get failure :message) failure))
-               state :failed)))
-      (while (and (eq state :pending) (< (float-time) deadline))
-        (agent-repl--runtime-pump-events 0.05))
-      (pcase state
-        (:accepted
-         (agent-repl--info scope "elisp.services.rollout-await-accepted elapsed=%.3f detail=%s"
-                           (- (float-time) started) detail)
-         detail)
-        (:failed
-         (agent-repl--fatal scope "elisp.services.rollout-await-failed elapsed=%.3f detail=%s"
-                            (- (float-time) started) detail))
-        (_
-         (agent-repl--fatal scope "elisp.services.rollout-await-timeout detail=%s timeout=%.3f elapsed=%.3f"
-                            "not rolled out: the daemon did not answer"
-                            limit (- (float-time) started)))))))
 
 (provide 'services)
 

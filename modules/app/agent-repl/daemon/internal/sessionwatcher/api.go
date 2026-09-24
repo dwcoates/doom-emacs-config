@@ -283,6 +283,13 @@ type LifecycleSink interface {
 	// OnLiveWorkChanged republishes the live-work set; combined with the
 	// in-flight turn it is the freeness answer every lease holder waits on.
 	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)
+	// OnFree is the FREENESS EDGE: the workspace just went from having work in
+	// flight (a turn, or live detached work) to having none. It is told OFF the
+	// watcher's lock, on a goroutine of its own that Close joins, because the
+	// sink is the prompt queue's bounce registry, which reads this watcher
+	// under its own delivery lock. It is told once per transition, never while
+	// the workspace simply stays free.
+	OnFree(ws ids.WorkspaceID)
 	// OnNotification raises a host notification and the roster's attention
 	// marker.
 	OnNotification(ws ids.WorkspaceID, note HostNotification)

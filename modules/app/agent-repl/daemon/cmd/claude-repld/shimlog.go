@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
@@ -18,7 +19,7 @@ type shimLogWorkspaceStore interface {
 }
 
 type shimLogRelauncher interface {
-	RelaunchShim(context.Context, ids.WorkspaceID, rollout.RelaunchReason) error
+	BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error)
 }
 
 // runShimLogRolls consumes hard-ceiling requests for the serving lifetime.
@@ -70,11 +71,35 @@ func forceShimLogRoll(
 		return
 	}
 	fields["workspace"] = string(workspace.ID)
-	req.Log.Info(shimLogRollOperation, "forcing the workspace's shim to roll at freeness", fields)
-	if err := relauncher.RelaunchShim(ctx, workspace.ID, rollout.ReasonShimLogCeiling); err != nil {
+	req.Log.Info(shimLogRollOperation, "asking the bounce registry to roll the workspace's shim at freeness", fields)
+	done := func(err error) {
+		ended := copyFields(fields)
+		if err != nil {
+			ended["cause"] = err.Error()
+			req.Log.Error(shimLogRollOperation, "could not roll the shim whose log reached its hard ceiling", ended)
+			return
+		}
+		req.Log.Info(shimLogRollOperation, "rolled the shim whose log reached its hard ceiling", ended)
+	}
+	decision, err := relauncher.BounceShim(ctx, workspace.ID, rollout.ReasonShimLogCeiling, false, done)
+	if err != nil {
 		fields["cause"] = err.Error()
-		req.Log.Error(shimLogRollOperation, "could not roll the shim whose log reached its hard ceiling", fields)
+		req.Log.Error(shimLogRollOperation, "the bounce registry refused the shim-log roll", fields)
 		return
 	}
-	req.Log.Info(shimLogRollOperation, "rolled the shim whose log reached its hard ceiling", fields)
+	fields["bounced_now"] = decision.Now
+	fields["turn_in_flight"] = decision.TurnInFlight
+	fields["detached_work"] = decision.DetachedWork
+	fields["already_pending"] = decision.AlreadyPending
+	req.Log.Info(shimLogRollOperation, "the bounce registry took the shim-log roll", fields)
+}
+
+// copyFields copies a record's context, so a callback that runs later never
+// shares a map with the caller that built it.
+func copyFields(fields dlog.Context) dlog.Context {
+	out := make(dlog.Context, len(fields)+1)
+	for k, v := range fields {
+		out[k] = v
+	}
+	return out
 }

@@ -130,7 +130,9 @@ func serveLogged(t *testing.T, store *fakeStore) (*Client, *[]string) {
 		_ = server.Serve(listener)
 	}()
 	t.Cleanup(func() {
-		server.Close()
+		if err := server.Close(); err != nil {
+			t.Errorf("closing the fake store's server: %v", err)
+		}
 		<-served
 	})
 	var lines []string

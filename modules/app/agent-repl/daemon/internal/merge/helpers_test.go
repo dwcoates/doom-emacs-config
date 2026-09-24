@@ -14,6 +14,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
@@ -620,6 +621,14 @@ func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
 }
 func (q *fakeQueue) RestoreHolds(context.Context) error { return nil }
 
+// RequestBounce is never reached by the merge orchestrator; answering it
+// loudly keeps a new caller from passing silently.
+func (q *fakeQueue) RequestBounce(context.Context, ids.WorkspaceID, bounce.Request) (bounce.Decision, error) {
+	return bounce.Decision{}, errors.New("fakeQueue: the merge orchestrator never asks for a bounce")
+}
+
+func (q *fakeQueue) OnFree(ids.WorkspaceID) {}
+
 // Drain: this fake runs nothing in the background, so its work is always
 // already done.
 func (q *fakeQueue) Drain(time.Duration) bool { return true }
@@ -967,6 +976,12 @@ type harness struct {
 	stopForces      []bool
 	stopAt          int
 	stopErr         error
+	// retired records the directories the teardown retired from the log
+	// surfaces, retireAt the sequence of the first, and retireErr what Retire
+	// answers.
+	retired   []string
+	retireAt  int
+	retireErr error
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
@@ -1039,10 +1054,9 @@ type fakeRollout struct {
 	// which is how "only after release" is asserted.
 	leasesAtFire int
 	db           *fakeDB
-	err          error
 }
 
-func (t *fakeRollout) Trigger(_ context.Context, landed []gitclient.Commit) error {
+func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
 	t.mu.Lock()
 	t.fired++
 	t.landed = landed
@@ -1050,7 +1064,6 @@ func (t *fakeRollout) Trigger(_ context.Context, landed []gitclient.Commit) erro
 	t.leasesAtFire = len(t.db.releasedLeases)
 	t.db.mu.Unlock()
 	t.mu.Unlock()
-	return t.err
 }
 
 // theWorkspace is the workspace every harness merges.
@@ -1203,8 +1216,28 @@ func (h *harness) deps() Deps {
 		},
 		Rollout: h.rollout,
 		Now:     h.clock,
-		Log:     h.logs,
+		Log:     retiringSurfaces{TestSurfaces: h.logs, h: h},
 	}
+}
+
+// retiringSurfaces is the harness's log surfaces with Retire sequenced on the
+// harness's own clock, so the teardown's order is asserted rather than
+// assumed.
+type retiringSurfaces struct {
+	*dlog.TestSurfaces
+	h *harness
+}
+
+// Retire records the retirement and answers the harness's arranged error.
+func (s retiringSurfaces) Retire(dir string) error {
+	at := s.h.next()
+	s.h.mu.Lock()
+	defer s.h.mu.Unlock()
+	s.h.retired = append(s.h.retired, dir)
+	if s.h.retireAt == 0 {
+		s.h.retireAt = at
+	}
+	return s.h.retireErr
 }
 
 // next stamps the shared sequence.

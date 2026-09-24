@@ -25,7 +25,7 @@ import (
 // roster, host composer) against a daemon whose own-checkout identity is
 // injected via harness.Opts.SelfRepo, with a FAKE bin/test-all.sh
 // (harness.NewTestAllScript) pointed at through AGENT_REPL_TEST_ALL_SCRIPT in
-// harness.Opts.ExtraEnv, and the deploy script at d.Deploy. Conflicts are
+// harness.Opts.ExtraEnv, and the deploy's fake build at d.Deploy. Conflicts are
 // scripted with repo.ScriptConflict; there is no real git anywhere.
 //
 // A workspace registered by RegisterWorkspace alone carries no creation job,
@@ -761,7 +761,7 @@ func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Landed: success, footer, roster, worktree removal, and the self-repo
-// rollout trigger.
+// landing's one deploy.
 // ---------------------------------------------------------------------------
 
 func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing.T) {
@@ -829,10 +829,11 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	d.AwaitFileGone(dir)
 }
 
-func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testing.T) {
+func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	t.Parallel()
-	// Arrange
+	// Arrange: the deploy's build fails, which is the landing's loud answer.
 	f, d, repo, script := mergeCleanRepo(t)
+	d.StageDeployBuild(harness.DeployFails)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	// THE BRANCH HAS TO CARRY A COMMIT. The self-reload fires off what the
@@ -854,17 +855,23 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 
-	// Assert: the fake deploy script was invoked. The self-reload trigger
-	// fires after the terminal push as part of teardown, so wait for a log
-	// record rather than racing the push. THE TRIGGER'S OWN RECORD IS NOT
-	// AVAILABLE HERE: it is workspace-scoped, and a landed merge's workspace
-	// sink is reached through a symlink in the worktree the same teardown has
-	// already removed. The deploy chain runs BEYOND the trigger call anyway,
-	// so its global record is the synchronization point; the trigger's would
-	// only have said it was asked for.
-	d.AwaitRunLogOperation("daemon.rollout.deploy")
-	if got := len(d.Deploy.Invocations()); got != 1 {
-		t.Fatalf("deploy script invocations = %d, want EXACTLY 1 from the self-repo landing's rollout trigger (no double-fire)", got)
+	// Assert: the landing asked for ONE deploy, whose build the test fails,
+	// so nothing was installed or restarted. The deploy runs off the merge, so
+	// its global record is the synchronization point: the landing's own
+	// workspace sink is reached through the worktree the teardown removed.
+	d.ExpectWarnings("daemon.scriptrunner.run", "daemon.deploy.build", "daemon.deploy.run", "daemon.deploy.landing")
+	d.AwaitLogRecord(d.RunLogPath(), "the landing's deploy failing its build", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.landing" && r.Message == "the landing's deploy failed"
+	})
+	invocations := d.Deploy.Invocations()
+	if got := len(invocations); got != 1 {
+		t.Fatalf("deploy builds = %d, want EXACTLY 1 for the one landing (never one per commit)", got)
+	}
+	if argv := invocations[0].Argv; len(argv) != 2 || argv[0] != "--out" {
+		t.Fatalf("deploy build argv = %v, want --out <staging>", argv)
+	}
+	if got := len(d.Launchctl.Invocations()); got != 0 {
+		t.Fatalf("launchctl invocations = %d, want none: a failed build restarts nothing", got)
 	}
 }
 
@@ -946,7 +953,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	// Assert: the deploy never fires -- the target was a SIBLING worktree of
 	// the self repo, not the daemon's own checkout.
 	if got := len(d.Deploy.Invocations()); got != 0 {
-		t.Fatalf("deploy script invocations = %d, want 0: a sibling worktree of the self repo is not the self checkout", got)
+		t.Fatalf("deploy builds = %d, want 0: a sibling worktree of the self repo is not the self checkout", got)
 	}
 }
 
@@ -992,7 +999,7 @@ func TestAOneShotMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 	// Assert: the deploy never fires -- the merge target is not this
 	// daemon's self repo at all.
 	if got := len(d.Deploy.Invocations()); got != 0 {
-		t.Fatalf("deploy script invocations = %d, want 0: the merge target is not this daemon's self repo", got)
+		t.Fatalf("deploy builds = %d, want 0: the merge target is not this daemon's self repo", got)
 	}
 }
 
