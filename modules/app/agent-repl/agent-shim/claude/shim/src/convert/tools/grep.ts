@@ -188,7 +188,7 @@ function grepSuccess(
   return create(conversationv1.AgentGrepSuccessSchema, {
     query,
     matches,
-    settledAt: settle(outcome),
+    settledAt: settle(call, outcome),
   });
 }
 
@@ -241,7 +241,7 @@ export const grepConverter: ToolConverter = {
           result: {
             case: "failure",
             value: create(conversationv1.AgentGrepFailureSchema, {
-              error: failureOf(outcome),
+              error: failureOf(call, outcome),
               query: grepQuery(call, pattern),
             }),
           },

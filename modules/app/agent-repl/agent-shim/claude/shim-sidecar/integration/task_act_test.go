@@ -36,7 +36,7 @@ func seedTaskUpdate(
 	input map[string]any,
 	structured map[string]any,
 	failed bool,
-) {
+) int64 {
 	t.Helper()
 	captured := loadCapturedSession(t)
 	slug := cwdSlug(cwd)
@@ -57,6 +57,9 @@ func seedTaskUpdate(
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, call))
 	g.AppendLine(encodeRecord(t, result))
+	// THE WHOLE FILE'S LENGTH, which is what a caller awaits: a cursor at 0 is
+	// durable the moment the file is discovered, before either line is read.
+	return g.Offset()
 }
 
 // setToolResultError marks the record's tool_result block an error, which is
@@ -117,11 +120,11 @@ func TestARejectedTaskUpdateNeverResolvesTheStatusItAskedFor(t *testing.T) {
 
 	// Act: the tracker refused `TaskUpdate(9, completed)` and echoed no task.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	seedTaskUpdate(t, tree, cwd, session, callID,
+	end := seedTaskUpdate(t, tree, cwd, session, callID,
 		map[string]any{"taskId": "9", "status": "completed"},
 		map[string]any{"success": false, "taskId": "9", "error": "no task with id 9"},
 		true)
-	awaitCursorInBatches(ctx, t, fake, tree.sessionPath(cwdSlug(cwd), session), 0)
+	awaitCursorInBatches(ctx, t, fake, tree.sessionPath(cwdSlug(cwd), session), end)
 
 	// Assert.
 	act := lastTaskAct(t, fake, callID)
@@ -149,11 +152,11 @@ func TestAnEdgeOnlyTaskUpdateLeavesTheStatusUnset(t *testing.T) {
 
 	// Act: an update that links one task behind another and says nothing else.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	seedTaskUpdate(t, tree, cwd, session, callID,
+	end := seedTaskUpdate(t, tree, cwd, session, callID,
 		map[string]any{"taskId": "2", "blockedBy": []any{"1"}},
 		map[string]any{"success": true, "taskId": "2", "updatedFields": []any{"blockedBy"}},
 		false)
-	awaitCursorInBatches(ctx, t, fake, tree.sessionPath(cwdSlug(cwd), session), 0)
+	awaitCursorInBatches(ctx, t, fake, tree.sessionPath(cwdSlug(cwd), session), end)
 
 	// Assert.
 	act := lastTaskAct(t, fake, callID)

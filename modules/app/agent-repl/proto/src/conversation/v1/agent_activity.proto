@@ -69,6 +69,29 @@ message AgentActivity {
   // it is making a presentation choice.
   optional AgentActivityAttribution attribution = 20;
 
+  // WHICH REVISION OF THIS VOCABULARY'S STANDS-ALONE CONTRACT the producer
+  // wrote this unit under — the evidence a consumer grades a settled frame
+  // that restates nothing by.
+  //
+  // THE SETTLE STANDS ALONE: a call's start and its settle upsert ONE unit, and
+  // a store that keeps the latest frame of a unit serves the settle with no
+  // start beside it, so every settled arm restates what its start carried.
+  // Rows written BEFORE that contract restate nothing, and they are EXPECTED
+  // OLD DATA; a producer bound by the contract that fails to restate is a
+  // DEFECT. Only the row can say which it is, and this is how it says so.
+  //
+  // STAMPED AT THE PRODUCER'S ONE ACTIVITY CONSTRUCTOR, on every unit it
+  // writes, never by the per-kind code that does the restating. That is what
+  // keeps the grading honest in the one direction that matters: a new arm that
+  // forgets to restate is still stamped, so it is still graded a defect, and
+  // no new defect can pass for old data. A stale producer build that predates
+  // the stamp writes none, which is exactly the old data it is.
+  //
+  // UNSPECIFIED means the producer predates the stamp. A consumer compares
+  // revisions by order: a later revision carries every guarantee of an earlier
+  // one.
+  AgentActivityContract contract = 33;
+
   // WHICH unit this concerns, so a later update reaches the same one rather
   // than appearing as a new one. A unit is identified per THING: the agent's
   // reasoning and its prose are separate units, each holding its identity
@@ -168,6 +191,20 @@ message AgentActivity {
   }
 }
 
+// The revision of the stands-alone contract a producer wrote a unit under.
+// Ordered: each revision keeps every guarantee of the ones before it.
+enum AgentActivityContract {
+  // The producer predates the stamp: its settled frames may restate nothing
+  // of their start, and a consumer reads such a frame as expected old data.
+  AGENT_ACTIVITY_CONTRACT_UNSPECIFIED = 0;
+  // Every settled arm restates what its start carried — the call's input
+  // (path, query, command, skill, address and summary), a spawn's prompt and
+  // created agent, an artifact call's act — and every settle instant carries
+  // the start instant it closes, so a settled frame alone draws its card, its
+  // sub-feed and its runtime.
+  AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE = 1;
+}
+
 // What a unit of work is attributable to beyond its agent.
 message AgentActivityAttribution {
   // The skill whose instructions were in view when the work happened. UNSET
@@ -225,6 +262,23 @@ message AgentToolFailure {
 message AgentActivitySettledAt {
   // Milliseconds since the Unix epoch, as the producer observed the settle.
   int64 at_ms = 1;
+
+  // THE START THIS SETTLE CLOSES, restated so the settled frame alone states
+  // the call's runtime. A call's start and its settle upsert ONE unit, so once
+  // the call settles its start is gone from any store that keeps the latest
+  // frame, and a replay drawing this frame alone must still say how long the
+  // call ran. Same value, same meaning, as the start arm's own instant.
+  //
+  // HERE, ON THE SETTLE INSTANT, RATHER THAN ON EACH SETTLE ARM: every settle
+  // arm that can state a runtime already carries this message (a success arm
+  // directly, a failure through AgentToolFailure), and a runtime needs both
+  // instants, so the one message that holds the end is the one place the start
+  // it measures from belongs. An arm with no settle instant can state no
+  // runtime, live or replayed, and needs no start restated.
+  //
+  // UNSET when the producer knew no start for the call, and on every row
+  // written before AgentActivityContract SETTLES_STAND_ALONE.
+  optional AgentActivityStartedAt started_at = 2;
 }
 
 // ---- Plan mode: the pair of calls around a plan document ----
@@ -2505,6 +2559,21 @@ message AgentSubagentFailure {
     // silent; not known to have failed. Draws as "lost".
     DetachedLost lost = 3;
   }
+
+  // What it was asked to do, restated so the settled frame stands alone,
+  // exactly as the success arm restates it: a spawn's start and its settle
+  // upsert ONE unit, so once the spawn settles its start is gone from any
+  // store that keeps the latest frame, and a replay drawing this frame alone
+  // must still draw the spawn's label, description and commission. UNSET only
+  // on a row written before AgentActivityContract SETTLES_STAND_ALONE.
+  AgentSubagentPrompt prompt = 4;
+
+  // THE AGENT THIS SPAWN CREATED, restated on the failure for the reason the
+  // success arm restates it: a replay hands a consumer this frame and no
+  // start, and without the created agent the bubble it draws addresses no
+  // sub-feed. The SAME identity the start states, never a derivation; UNSET
+  // only on a row written before AgentActivityContract SETTLES_STAND_ALONE.
+  AgentId created_agent_id = 5;
 }
 
 // A person stopped the subagent by hand.
@@ -3167,6 +3236,21 @@ message AgentArtifactListed {}
 message AgentArtifactFailure {
   // Why, in the shared vocabulary.
   AgentToolFailure failure = 1;
+
+  // WHICH ACT FAILED, restated whole from the start so the settled frame
+  // stands alone: a call's start and its settle upsert ONE unit, so once the
+  // call settles its start is gone from any store that keeps the latest frame,
+  // and a replay drawing this frame alone must still draw a failed publish's
+  // card — its favicon, title and file. The same arms, with the same meaning,
+  // as AgentArtifactStart's act: a failed list is still a quiet read, drawn
+  // nowhere. UNSET only on a row written before AgentActivityContract
+  // SETTLES_STAND_ALONE.
+  oneof act {
+    // A publish (or redeploy) that failed.
+    AgentArtifactPublish publish = 2;
+    // A listing that failed.
+    AgentArtifactList list = 3;
+  }
 }
 
 // ---- The unmodeled tool: work this contract does not describe ----

@@ -139,7 +139,7 @@ export const reportFindingsConverter: ToolConverter = {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a findings report failed");
       return findingsItem({
         case: "failure",
-        value: create(conversationv1.AgentReportFindingsFailureSchema, { error: failureOf(outcome) }),
+        value: create(conversationv1.AgentReportFindingsFailureSchema, { error: failureOf(call, outcome) }),
       });
     }
     const structured = asRecord(outcome.structured);
@@ -166,7 +166,7 @@ export const reportFindingsConverter: ToolConverter = {
       value: create(conversationv1.AgentReportFindingsSuccessSchema, {
         findings,
         level: effortLevelOf(str(structured, "level") ?? str(call.input, "level")),
-        settledAt: settledAt(outcome.settledAtMs),
+        settledAt: settledAt(outcome.settledAtMs, call.startedAtMs),
       }),
     });
   },

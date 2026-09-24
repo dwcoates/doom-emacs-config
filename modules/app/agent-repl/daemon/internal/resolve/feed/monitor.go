@@ -44,7 +44,7 @@ func (r *resolver) drawMonitor(s *wsState, at placement, act *conversationv1.Age
 		}
 	case *conversationv1.AgentMonitor_Ended:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Ended"})
-		if err := r.restateMonitor(s, u, unitID, state.Ended.GetCall()); err != nil {
+		if err := r.restateMonitor(s, act, u, state.Ended.GetCall()); err != nil {
 			return nil, err
 		}
 		// The watch left the live set: an ordinary ending, with no output of its
@@ -53,12 +53,12 @@ func (r *resolver) drawMonitor(s *wsState, at placement, act *conversationv1.Age
 		row = r.toolRow(s, at, unitID, monitorName, returnedOutcome(u, true, nil, 0))
 	case *conversationv1.AgentMonitor_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Failure"})
-		if err := r.restateMonitor(s, u, unitID, state.Failure.GetCall()); err != nil {
+		if err := r.restateMonitor(s, act, u, state.Failure.GetCall()); err != nil {
 			return nil, err
 		}
 		failure := state.Failure.GetFailure()
 		row = r.toolRow(s, at, unitID, monitorName,
-			returnedOutcome(u, false, r.failureForm(s, failure), failureSettledMs(failure)))
+			r.settledOutcome(s, act, u, "monitor", false, r.failureForm(s, failure), failure.GetSettledAt()))
 	default:
 		return nil, errNotARow
 	}
@@ -90,14 +90,14 @@ func monitorInput(start *conversationv1.AgentMonitorStart) (string, inputForm) {
 
 // restateMonitor takes the call a settled monitor frame RESTATES, the settle
 // standing alone as every other call's does. A settle that restated no call is
-// its producer's invariant violation (restatedOrHeld): drawn from the held
-// start and recorded at ERROR, or, with no start held, no row at all.
-func (r *resolver) restateMonitor(s *wsState, u *unitState, unitID string, call *conversationv1.AgentMonitorStart) error {
+// graded by its producer's contract (restatedOrHeld): drawn from the held start
+// and recorded, or, with no start held, no row at all.
+func (r *resolver) restateMonitor(s *wsState, act *conversationv1.AgentActivity, u *unitState, call *conversationv1.AgentMonitorStart) error {
 	if call != nil {
 		armMonitor(u, call)
 		return nil
 	}
-	input, err := r.restatedOrHeld(s, u, unitID, "monitor", "", u.input)
+	input, err := r.restatedOrHeld(s, act, u, "monitor", "", u.input)
 	if err != nil {
 		return err
 	}

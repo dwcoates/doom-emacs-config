@@ -2,7 +2,11 @@ package convert
 
 // subagent_test.go — the spawn, and the agent it created.
 
-import "testing"
+import (
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+)
 
 const agentResult = `{"agentId":"aef975b7bc3422d4b","agentType":"general-purpose","status":"completed",` +
 	`"content":[{"type":"text","text":"the report"}],"prompt":"do the thing","resolvedModel":"claude-opus-5",` +
@@ -230,5 +234,47 @@ func TestASubagentSpawnFailureIsRecordedAtDebug(t *testing.T) {
 	// ...and only the severity of its trace drops.
 	if got := levelForMessage(t, sink, "subagent spawn failed"); got != "debug" {
 		t.Fatalf("the subagent-spawn-failed record was recorded at %q, want debug (faithful conversion of recorded content)", got)
+	}
+}
+
+func TestAFailedSpawnRestatesItsCommissionAndCreatedAgent(t *testing.T) {
+	tests := []struct {
+		name     string
+		restated func(*conversationv1.AgentSubagentFailure) string
+		want     string
+	}{
+		{
+			name:     "the description",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetPrompt().GetDescription() },
+			want:     "tidy the docs",
+		},
+		{
+			name:     "the instruction",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetPrompt().GetText() },
+			want:     "Tidy every doc.",
+		},
+		{
+			name:     "the created agent",
+			restated: func(f *conversationv1.AgentSubagentFailure) string { return f.GetCreatedAgentId().GetValue() },
+			want:     "toolu_spawn",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a spawn the vendor answered with an error.
+			c := newTestConverter(t)
+			call := assistantWith("a1", "msg_1", ts1,
+				toolCall("toolu_spawn", "Agent", `{"description":"tidy the docs","prompt":"Tidy every doc."}`))
+			result := toolResultLineWithError("u1", "toolu_spawn", ts2, `"Error: refused"`, `null`, true)
+
+			// Act
+			entries := convertLines(t, c, call, result)
+
+			// Assert
+			failure := activityOf(lastEntryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetFailure()
+			if got := tt.restated(failure); got != tt.want {
+				t.Fatalf("restated = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

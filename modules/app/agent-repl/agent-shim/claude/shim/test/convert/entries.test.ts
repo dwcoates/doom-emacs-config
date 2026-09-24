@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
+  ACTIVITY_CONTRACT,
   activityEntry,
   agentActivity,
   agentFrame,
@@ -50,7 +51,15 @@ describe("instants", () => {
   });
 
   it("truncates a fractional clock rather than rejecting it", () => {
-    expect(settledAt(1_700.9).atMs).toBe(1_700n);
+    expect(settledAt(1_700.9, undefined).atMs).toBe(1_700n);
+  });
+
+  it("restates the start a settle closes, so the settled frame alone states a runtime", () => {
+    expect(settledAt(1_700, 1_200).startedAt?.atMs).toBe(1_200n);
+  });
+
+  it("leaves the restated start UNSET when the settle's arm knows no start", () => {
+    expect(settledAt(1_700, undefined).startedAt).toBeUndefined();
   });
 
   it("relays a progress beat as the instant the vendor last reported alive", () => {
@@ -77,16 +86,20 @@ describe("content", () => {
 
 describe("toolFailure", () => {
   it("carries the account the tool gave and when it settled", () => {
-    const failure = toolFailure(toolResultText("boom"), 9);
+    const failure = toolFailure(toolResultText("boom"), 9, 4);
 
     expect(failure.content?.blocks).toHaveLength(1);
     expect(failure.settledAt?.atMs).toBe(9n);
   });
 
+  it("restates the failed call's start beside its settle instant", () => {
+    expect(toolFailure(toolResultText("boom"), 9, 4).settledAt?.startedAt?.atMs).toBe(4n);
+  });
+
   it("leaves content UNSET for a failure with no error content at all", () => {
     // Different from an empty text block: a consumer draws the failure with no
     // detail rather than an empty card.
-    expect(toolFailure(undefined, 9).content).toBeUndefined();
+    expect(toolFailure(undefined, 9, 4).content).toBeUndefined();
   });
 });
 
@@ -110,6 +123,25 @@ describe("the activity envelope", () => {
     });
 
     expect(activity.effort).toBe(conversationv1.AgentEffortLevel.HIGH);
+  });
+
+  it("stamps the stands-alone contract on a start, where no per-kind code restates anything", () => {
+    const activity = agentActivity(UNIT, readStart());
+
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
+  });
+
+  it("stamps the stands-alone contract on a settle whatever its arm restated", () => {
+    const bare: conversationv1.AgentActivity["item"] = {
+      case: "read",
+      value: create(conversationv1.AgentReadSchema, {
+        result: { case: "failure", value: create(conversationv1.AgentReadFailureSchema, {}) },
+      }),
+    };
+
+    const activity = agentActivity(UNIT, bare);
+
+    expect(activity.contract).toBe(ACTIVITY_CONTRACT);
   });
 });
 

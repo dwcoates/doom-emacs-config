@@ -76,7 +76,7 @@ export const webFetchConverter: ToolConverter = {
         case: "failure",
         value: create(conversationv1.AgentWebFetchFailureSchema, {
           target: targetOf(call),
-          failure: failureOf(outcome),
+          failure: failureOf(call, outcome),
         }),
       });
     }

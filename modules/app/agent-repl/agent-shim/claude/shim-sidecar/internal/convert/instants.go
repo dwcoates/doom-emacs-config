@@ -36,11 +36,23 @@ func startedAt(ms int64) *conversationv1.AgentActivityStartedAt {
 }
 
 // settledAt builds the settle instant, UNSET when the producer observed none.
-func settledAt(ms int64) *conversationv1.AgentActivitySettledAt {
+//
+// IT RESTATES THE START IT CLOSES, so the settled frame alone states the call's
+// runtime: the start and the settle upsert one unit, and a replay serves the
+// settle with no start beside it. `startMs` is REQUIRED, so every settle site
+// decides — the call's own start instant (read off the same record the start
+// arm read, so the two cannot disagree), or 0 for an arm whose start carries no
+// instant (a prose block) or a call this reader never saw announced, which
+// leaves the restated start UNSET rather than a zero a consumer would draw.
+func settledAt(ms, startMs int64) *conversationv1.AgentActivitySettledAt {
 	if ms == 0 {
 		return nil
 	}
-	return &conversationv1.AgentActivitySettledAt{AtMs: ms}
+	settled := &conversationv1.AgentActivitySettledAt{AtMs: ms}
+	if startMs != 0 {
+		settled.StartedAt = startedAt(startMs)
+	}
+	return settled
 }
 
 // ---------------------------------------------------------------------------
