@@ -104,7 +104,7 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		Report:               subagentReport(result),
 		Totals:               subagentTotals(result),
 		ResolvedSubagentType: optionalString(pick(result, "agentType", "resolvedSubagentType")),
-		SettledAt:            settledAt(ts),
+		SettledAt:            settledAt(ts, call.startedAt),
 	}
 	if model := str(pick(result, "resolvedModel", "model")); model != "" {
 		success.ModelsUsed = []*conversationv1.AgentModel{{Name: model}}

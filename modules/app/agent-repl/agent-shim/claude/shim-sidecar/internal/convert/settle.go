@@ -144,9 +144,10 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 }
 
 // toolFailure builds the ONE shape every tool's failure arm carries: what the
-// call said when it failed, and when it settled.
-func toolFailure(block map[string]any, ts int64) *conversationv1.AgentToolFailure {
-	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(ts)}
+// call said when it failed, and when it settled — with the call's own start
+// restated beside the settle instant.
+func toolFailure(block map[string]any, ts, startMs int64) *conversationv1.AgentToolFailure {
+	failure := &conversationv1.AgentToolFailure{SettledAt: settledAt(ts, startMs)}
 	if content := resultContent(block["content"]); content != nil {
 		failure.Content = content
 	}

@@ -280,7 +280,9 @@ func (c *Converter) textBlock(block map[string]any, index int, messageID string,
 		// record's OWN timestamp, exactly as every sibling terminal stamps it,
 		// so a re-compose from this record reproduces the same instant rather
 		// than the daemon's compose-time clock.
-		SettledAt: settledAt(env.timestampMs),
+		//
+		// NO START IS RESTATED: a prose block's start arm carries no instant.
+		SettledAt: settledAt(env.timestampMs, 0),
 	}
 	if notice := synthesizedNotice(record, text); notice != nil {
 		c.log.With(at.ctxFor("response")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
