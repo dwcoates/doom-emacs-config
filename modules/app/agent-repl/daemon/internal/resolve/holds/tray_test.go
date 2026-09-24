@@ -1,13 +1,16 @@
 package holds_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/wsm"
 )
 
@@ -349,4 +352,288 @@ func holdName(p *frontendv1.HeldPrompt) string {
 	default:
 		return ""
 	}
+}
+
+// wantBadge is one expected badge; an empty detail means none is carried.
+type wantBadge struct {
+	label, detail string
+}
+
+// badgesOf flattens a badge list for comparison.
+func badgesOf(bs []*frontendv1.HeldPromptBadge) []wantBadge {
+	out := make([]wantBadge, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, wantBadge{label: b.GetLabel(), detail: b.GetDetail()})
+	}
+	return out
+}
+
+func equalBadges(a, b []wantBadge) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestHeldBadgesComposeEveryStatus(t *testing.T) {
+	turn := &conversationv1.TurnId{Value: "t1"}
+	tests := []struct {
+		name string
+		p    *frontendv1.HeldPrompt
+		want []wantBadge
+	}{
+		{
+			name: "classifying",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: &frontendv1.HeldPrompt_Classifying{Classifying: &frontendv1.HeldPromptClassifying{}}},
+			want: []wantBadge{{"classifying", "queued — classifying"}},
+		},
+		{
+			name: "interject",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: &frontendv1.HeldPrompt_Interject{Interject: &frontendv1.HeldPromptInterject{}}},
+			want: []wantBadge{{"interrupting", "interjects"}},
+		},
+		{
+			name: "hold for turn end",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(false)},
+			want: []wantBadge{{"after this turn", ""}},
+		},
+		{
+			name: "accepted hold for turn end",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(true)},
+			want: []wantBadge{{"after this turn", ""}, {"confirmed", ""}},
+		},
+		{
+			name: "uninterruptible compact",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: uninterruptibleArm(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)},
+			want: []wantBadge{{"after /compact", "waits for /compact to finish"}},
+		},
+		{
+			name: "uninterruptible clear",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: uninterruptibleArm(conversationv1.SessionCommand_SESSION_COMMAND_CLEAR)},
+			want: []wantBadge{{"after /clear", "waits for /clear to finish"}},
+		},
+		{
+			name: "classification error",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: &frontendv1.HeldPrompt_ClassificationError{ClassificationError: &frontendv1.HeldPromptClassificationError{Detail: "x"}}},
+			want: []wantBadge{{"unclassified", ""}},
+		},
+		{
+			name: "editing",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(false), Editing: &frontendv1.HeldPromptEditing{}},
+			want: []wantBadge{{"after this turn", ""}, {"editing", ""}},
+		},
+		{
+			name: "every fact at once, in the proto's order",
+			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(true), Editing: &frontendv1.HeldPromptEditing{},
+				Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
+			want: []wantBadge{{"after this turn", ""}, {"editing", ""}, {"confirmed", ""}, {"build refresh", "held for the build refresh"}},
+		},
+		{
+			name: "shutdown hold",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s-1"}}},
+			want: []wantBadge{{"after this turn", ""}, {"restart hold", "held for the scheduled restart (s-1)"}},
+		},
+		{
+			name: "build refresh hold",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
+			want: []wantBadge{{"after this turn", ""}, {"build refresh", "held for the build refresh"}},
+		},
+		{
+			name: "keep-alive hold",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_KeepAlive{KeepAlive: &frontendv1.HeldPromptKeepAliveHold{Turn: &conversationv1.TurnId{Value: "ka-1"}}}},
+			want: []wantBadge{{"after this turn", ""}, {"keep-alive", "held behind a keep-alive, waiting on turn ka-1"}},
+		},
+		{
+			name: "session starting hold",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
+			want: []wantBadge{{"after this turn", ""}, {"starting up", "held until the session is up"}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+
+			// Act.
+			got := badgesOf(holds.HeldBadges(tc.p, log))
+
+			// Assert.
+			if !equalBadges(got, tc.want) {
+				t.Fatalf("badges = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHeldBadgesLabelsAreOneToThreeWords(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	all := []*frontendv1.HeldPrompt{
+		{Classification: &frontendv1.HeldPrompt_Classifying{Classifying: &frontendv1.HeldPromptClassifying{}}},
+		{Classification: &frontendv1.HeldPrompt_Interject{Interject: &frontendv1.HeldPromptInterject{}}},
+		{Classification: holdForTurnEnd(true)},
+		{Classification: uninterruptibleArm(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)},
+		{Classification: &frontendv1.HeldPrompt_ClassificationError{ClassificationError: &frontendv1.HeldPromptClassificationError{}}},
+		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s"}}},
+		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
+		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_KeepAlive{KeepAlive: &frontendv1.HeldPromptKeepAliveHold{Turn: &conversationv1.TurnId{Value: "k"}}}},
+		&frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_SessionStarting{SessionStarting: &frontendv1.HeldPromptSessionStartingHold{}}},
+	}
+
+	for _, p := range all {
+		// Act.
+		for _, b := range holds.HeldBadges(p, log) {
+			// Assert.
+			if n := len(strings.Fields(b.GetLabel())); n < 1 || n > 3 {
+				t.Fatalf("label %q has %d words, want 1 to 3", b.GetLabel(), n)
+			}
+		}
+	}
+}
+
+func TestTruncateLabel(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{name: "short literal is kept whole", in: "/compact", want: "/compact"},
+		{name: "exactly the limit is kept whole", in: strings.Repeat("a", 24), want: strings.Repeat("a", 24)},
+		{name: "a longer literal is cut to the limit with an ellipsis", in: "/" + strings.Repeat("x", 40), want: "/" + strings.Repeat("x", 22) + "…"},
+		{name: "multibyte runes are counted as characters", in: strings.Repeat("é", 30), want: strings.Repeat("é", 23) + "…"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := holds.TruncateLabel(tc.in, 24)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("TruncateLabel(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHeldBadgesRecordAnUninterruptibleBadgeThatNamesNoCommand(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	p := &frontendv1.HeldPrompt{Classification: uninterruptibleArm(conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED)}
+
+	// Act.
+	got := badgesOf(holds.HeldBadges(p, log))
+
+	// Assert: the prompt stays visible, and the defect is recorded loudly.
+	want := []wantBadge{{"after a context cut", "waits for a context cut to finish"}}
+	if !equalBadges(got, want) {
+		t.Fatalf("badges = %+v, want %+v", got, want)
+	}
+	if !hasError(log.Records(), "daemon.holds.badges") {
+		t.Fatal("a badge with no command literal was not recorded as an invariant violation")
+	}
+}
+
+func TestHeldBadgesRecordAMissingVerdict(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	p := &frontendv1.HeldPrompt{}
+
+	// Act.
+	got := holds.HeldBadges(p, log)
+
+	// Assert: no words are invented; the frontend refuses the short list.
+	if len(got) != 0 {
+		t.Fatalf("badges = %+v, want none for a verdict that does not exist", badgesOf(got))
+	}
+	if !hasError(log.Records(), "daemon.holds.badges") {
+		t.Fatal("a verdict with no badge was not recorded as an invariant violation")
+	}
+}
+
+func TestHeldBadgesRecordAKeepAliveThatNamesNoTurn(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	p := &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_KeepAlive{KeepAlive: &frontendv1.HeldPromptKeepAliveHold{}}}
+
+	// Act.
+	got := badgesOf(holds.HeldBadges(p, log))
+
+	// Assert.
+	want := []wantBadge{{"after this turn", ""}, {"keep-alive", "held behind a keep-alive"}}
+	if !equalBadges(got, want) {
+		t.Fatalf("badges = %+v, want %+v", got, want)
+	}
+	if !hasError(log.Records(), "daemon.holds.badges") {
+		t.Fatal("a keep-alive with no turn was not recorded as an invariant violation")
+	}
+}
+
+func TestHeldBadgesShutdownWithNoScheduleOmitsTheId(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	p := &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{}}}
+
+	// Act.
+	got := badgesOf(holds.HeldBadges(p, log))
+
+	// Assert: the projection already logged the missing schedule.
+	want := []wantBadge{{"after this turn", ""}, {"restart hold", "held for the scheduled restart"}}
+	if !equalBadges(got, want) {
+		t.Fatalf("badges = %+v, want %+v", got, want)
+	}
+}
+
+func TestHeldBadgesNeverEmitAnEmptyLabel(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	held := []wsm.HeldPrompt{
+		hold("t0", "a"),
+		verdict(hold("t1", "b"), wsm.ArmInterject, ""),
+		verdict(hold("t2", "c"), wsm.ArmHoldForTurnEnd, ""),
+		verdict(hold("t3", "d"), wsm.ArmClassificationError, ""),
+		uninterruptible(hold("t4", "e"), conversationv1.SessionCommand_SESSION_COMMAND_COMPACT),
+	}
+
+	// Act.
+	r.SetHeldPrompts(testWS, held)
+
+	// Assert.
+	for _, p := range prompts(t, latest(t, r)) {
+		for _, b := range p.GetBadges() {
+			if b.GetLabel() == "" {
+				t.Fatalf("turn %s carried an empty badge label", p.GetTurn().GetValue())
+			}
+		}
+	}
+}
+
+func TestTrayCarriesTheComposedBadges(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	held := verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency")
+	held.Accepted = true
+	held.Hold = kindOf(wsm.HoldShutdown)
+	held.ScheduleID = "s-7"
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+	// Assert.
+	got := badgesOf(onlyPrompt(t, latest(t, r)).GetBadges())
+	want := []wantBadge{{"after this turn", ""}, {"confirmed", ""}, {"restart hold", "held for the scheduled restart (s-7)"}}
+	if !equalBadges(got, want) {
+		t.Fatalf("badges = %+v, want %+v", got, want)
+	}
+}
+
+func holdForTurnEnd(accepted bool) *frontendv1.HeldPrompt_HoldForTurnEnd {
+	return &frontendv1.HeldPrompt_HoldForTurnEnd{HoldForTurnEnd: &frontendv1.HeldPromptHoldForTurnEnd{
+		Accepted: &frontendv1.HeldPromptAccepted{Accepted: accepted}}}
+}
+
+func uninterruptibleArm(command conversationv1.SessionCommand) *frontendv1.HeldPrompt_UninterruptibleTurn {
+	return &frontendv1.HeldPrompt_UninterruptibleTurn{UninterruptibleTurn: &frontendv1.HeldPromptUninterruptibleTurn{Command: command}}
 }
