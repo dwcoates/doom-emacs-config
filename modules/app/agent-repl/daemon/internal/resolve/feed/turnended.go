@@ -18,7 +18,6 @@ import (
 // drawTerminal draws how one agent's stream ended.
 func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	log := r.logger(s.id)
-	at := r.place(s, agent)
 
 	if turn == nil {
 		// A SUBAGENT's stream ending is its bubble's business, not a turn
@@ -29,6 +28,11 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 			dlog.Context{"agent": agent.GetValue()})
 		return
 	}
+
+	// AN UNPLACEABLE TERMINAL STILL ENDS ITS TURN. Only its row is not drawn
+	// (place has reported why); the turn's bookkeeping below — its stalls, its
+	// prompts, its held detachments — is owed whether or not a row can land.
+	at, placed := r.place(s, agent)
 
 	turnID := &conversationv1.TurnId{Value: string(*turn)}
 	ended := &frontendv1.FeedTurnEnded{EndedAtMs: r.deps.Now().UnixMilli()}
@@ -93,11 +97,16 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		Turn: turnID,
 		Row:  &frontendv1.FeedRow_TurnEnded{TurnEnded: ended},
 	}
-	if suppress {
+	switch {
+	case suppress:
 		log.Debug("daemon.feed.turn_ended",
 			"a /clear turn's terminal row was suppressed",
 			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
-	} else {
+	case !placed:
+		log.Debug("daemon.feed.turn_ended",
+			"a turn's terminal row has no feed to land on and was not drawn",
+			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended), "agent": agent.GetValue()})
+	default:
 		log.Debug("daemon.feed.turn_ended",
 			"a turn's terminal row was upserted",
 			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
@@ -113,13 +122,29 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	// the created agent.
 	r.retireHeldSpawns(s, "the turn ended")
 
-	// A DETACHMENT THAT NEVER FOUND ITS UNIT is a producer fault, and the turn
-	// ending is the last moment it could still have been claimed.
-	for unit := range s.detachedUnits {
-		log.Warn("daemon.feed.detached_unknown_unit",
-			"work detached from a unit this resolver never drew",
-			dlog.Context{"unit": unit, "turn": string(*turn)})
+	// A DETACHMENT THAT NEVER FOUND ITS UNIT is unplaceable: its head belongs
+	// at the spawning call's row, in the spawner's feed, and no such row was
+	// ever drawn. The turn ending is the last moment it could still have been
+	// claimed, so it is reported here — at ERROR and on the topbar — and
+	// nothing is drawn for it.
+	//
+	// A DETACHMENT REPLAYED FROM HISTORY IS NOT ONE. A replay serves the newest
+	// page of a book, and a detachment's own row sits at its LAST upsert while
+	// its call's row can sit further back than the page reaches: the work is
+	// long over, its call simply was not replayed, and nothing was lost. That
+	// is recorded at DEBUG; only a detachment that arrived LIVE is a failure.
+	for unit, work := range s.detachedUnits {
+		said := s.heldDetachments[unit]
+		if said.plane == planeLive {
+			r.reportUnplaceableWork(s, work, "unit "+unit, said.owner, said.announcer,
+				"the spawning call was never drawn in any feed, as of the end of turn "+string(*turn))
+		} else {
+			log.Debug("daemon.feed.replayed_detachment_unclaimed",
+				"a detachment replayed from history named a call the replay never reached; nothing is drawn for it",
+				dlog.Context{"unit": unit, "work": work, "owner": said.owner, "announcer": said.announcer, "turn": string(*turn)})
+		}
 		delete(s.detachedUnits, unit)
+		delete(s.heldDetachments, unit)
 	}
 
 	delete(s.turnEvidence, string(*turn))
@@ -521,7 +546,7 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 		return
 	}
 	turn := string(*s.turnInFlight)
-	at := r.place(s, nil)
+	at := r.outputPlacement(s)
 
 	s.turnQueryDeaths[turn] = died
 

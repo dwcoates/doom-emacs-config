@@ -1594,8 +1594,11 @@ func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
 	})
 	feed := f.watchRootFeed() // subscribed BEFORE open, so nothing races the restore
 
-	// Act
+	// Act: the session comes up restoring the item, and the main agent's book
+	// serves the call that launched it — the card the head is drawn in place
+	// of, on the feed of the agent that owns the work.
 	f.open()
+	f.shim.PushAgentFrame(mainAgent, shellCallFrame("restored-shell-1", "sleep 100"))
 
 	// Assert: the restored item's row lands on the ROOT feed. A shell's row
 	// there is its HEAD (FeedRow.shell_head) — `detached_shell` is the spool
@@ -1634,7 +1637,7 @@ func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
 	// The feed resolver states the same unresolvable item a second time, from
 	// its own side, which is the second half of what the test asserts.
 	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown",
-		"daemon.feed.detached_unknown_unit")
+		"daemon.feed.detached_unplaceable")
 }
 
 // ---- critique 17 (this agent's share): AnswerColdGate{clear} ----

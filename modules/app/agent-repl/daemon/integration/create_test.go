@@ -830,7 +830,7 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 	// nil AND live work remains, answering "live_work" instead).
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-close-1", "sleep 100")))
+	pushDetachedShell(f.shim, "work-close-1", "sleep 100")
 	awaitLiveWork(t, f, 1)
 
 	// Act

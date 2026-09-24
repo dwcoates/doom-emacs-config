@@ -28,6 +28,10 @@ func subFeed() feedid.Feed { return feedid.Feed{Agent: subAgent()} }
 func (h *harness) reset() {
 	h.t.Helper()
 	h.resolver.ResetWorkspace(testWorkspace, "the workspace was bound to a different conversation")
+	// THE NEW SESSION'S WATCHER NAMES ITS MAIN AGENT before its first frame,
+	// exactly as the first one did; the reset forgot the old naming with
+	// everything else of the old conversation.
+	h.resolver.OnMainAgent(testWorkspace, mainAgent())
 }
 
 func TestAResetLeavesNoRowOfThePreviousConversationOnTheRootFeed(t *testing.T) {
@@ -379,18 +383,20 @@ func TestAResetRedrawsAForksPortedConversation(t *testing.T) {
 }
 
 func TestAResetOfAWorkspaceThatDrewNothingRecordsItAndChangesNothing(t *testing.T) {
-	// Arrange: a workspace the resolver has never seen.
+	// Arrange: a workspace the resolver has never seen. (The harness's own
+	// workspace is not one: its main agent was named at construction.)
 	h := newHarness(t)
+	unseen := ids.WorkspaceID("ws-unseen")
 
 	// Act.
-	h.reset()
+	h.resolver.ResetWorkspace(unseen, "the workspace was bound to a different conversation")
 
 	// Assert: the reset is a fact worth a record, and it invented no state.
 	if !h.hasRecord("info", opWorkspaceReset) {
 		t.Fatalf("records = %+v, want an INFO %s", h.records(), opWorkspaceReset)
 	}
 	h.resolver.mu.Lock()
-	_, held := h.resolver.workspaces[testWorkspace]
+	_, held := h.resolver.workspaces[unseen]
 	h.resolver.mu.Unlock()
 	if held {
 		t.Fatal("the reset minted state for a workspace that had drawn nothing")

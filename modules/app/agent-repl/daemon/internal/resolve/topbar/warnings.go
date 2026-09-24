@@ -26,6 +26,7 @@ func (r *resolver) warningStrip(s *wsState) *frontendv1.TopbarWarningStrip {
 	collected = append(collected, r.detachedUnmodeledWarnings(s)...)
 	collected = append(collected, r.faultWarnings(s)...)
 	collected = append(collected, r.windowWarnings(s)...)
+	collected = append(collected, r.raisedWarnings(s)...)
 
 	sort.SliceStable(collected, func(i, j int) bool { return collected[i].seq > collected[j].seq })
 	if len(collected) > r.opts.warningCap {
@@ -242,6 +243,26 @@ func (r *resolver) windowWarnings(s *wsState) []warning {
 				return &frontendv1.TopbarWarning{
 					Line:   &frontendv1.TopbarWarningLine{Text: truncate(line, DefaultLineWidth)},
 					Detail: &frontendv1.TopbarWarning_DegradedWindow{DegradedWindow: detail},
+				}
+			},
+		})
+	}
+	return out
+}
+
+// raisedWarnings are the conditions the daemon raised about its own
+// resolution, one line each and no overlay: the raising site's own record
+// carries the full context, and the line is what puts it in front of the
+// reader.
+func (r *resolver) raisedWarnings(s *wsState) []warning {
+	out := make([]warning, 0, len(s.raised))
+	for key, record := range s.raised {
+		record := record
+		out = append(out, warning{
+			kind: warnRaised, key: "raised:" + key, seq: record.seq, line: record.line,
+			detail: func() *frontendv1.TopbarWarning {
+				return &frontendv1.TopbarWarning{
+					Line: &frontendv1.TopbarWarningLine{Text: truncate(record.line, DefaultLineWidth)},
 				}
 			},
 		})

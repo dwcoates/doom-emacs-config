@@ -266,6 +266,12 @@ type Deps struct {
 	// reaches it by. nil leaves the condition recorded in the log alone, which
 	// is what a test that is not about the footer wants.
 	Faults FaultRecorder
+	// Warnings puts a resolution failure — a row that could not be placed —
+	// on the topbar's warning chip, the webapp's one error surface. The raising
+	// site logs the failure with its full context either way; nil leaves the
+	// log as the only record, which is what a test that is not about the topbar
+	// wants.
+	Warnings WarningRaiser
 	// EntryPlaced is told the FeedId of every detached-work-capable entry the
 	// moment the feed first draws it, and again whenever that FeedId changes:
 	// a subagent bubble keyed by its spawn unit, a shell bubble's head keyed by
@@ -283,6 +289,13 @@ type Deps struct {
 	// TailRetention is how many published rows a feed retains for a tail's
 	// replay. Defaults to DefaultTailRetention.
 	TailRetention int
+}
+
+// WarningRaiser is the topbar's raised-warning channel, as this resolver needs
+// it (topbar.Resolver.RaiseWarning).
+type WarningRaiser interface {
+	// RaiseWarning puts one keyed line on the warning strip.
+	RaiseWarning(ws ids.WorkspaceID, key, line string)
 }
 
 // DefaultPageSize is the page size the daemon picks when Deps names none. The

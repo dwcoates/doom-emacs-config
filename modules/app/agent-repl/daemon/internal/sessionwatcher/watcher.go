@@ -130,6 +130,12 @@ type watcher struct {
 
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
+	// viewsMain is the main agent the FEED was last told
+	// (nameMainForViewsLocked). It is learned from StartTurn's naming AND from
+	// the main watch itself — every frame that watch carries is the main
+	// agent's — so the views know the root's owner before they route the first
+	// frame that needs it, whichever plane arrives first.
+	viewsMain *conversationv1.AgentId
 	// held is a main-watch terminal that arrived BEFORE the main agent was
 	// named — the stream plane outrunning StartTurn's answer. It is replayed
 	// in full at the naming, so a turn is never left standing in flight with
@@ -479,6 +485,7 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		w.log.Debug("daemon.sessionwatcher.main_agent", "main agent named", dlog.Context{
 			"agent_id": agent.GetValue(), "state": "main_agent", "before": before, "after": agent.GetValue(), "source": source,
 		})
+		w.nameMainForViewsLocked(agent, source, true)
 		// THE RELEASE IS NOT DONE HERE. Naming is a precondition for it, not
 		// the moment for it: the caller may still owe the views the turn's
 		// OPEN edge, and a terminal replayed before that edge leaves the
@@ -497,7 +504,42 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		w.log.Debug("daemon.sessionwatcher.state_transition", "the main-agent identity changed", dlog.Context{
 			"state": "main_agent", "before": before, "after": agent.GetValue(), "source": source,
 		})
+		w.nameMainForViewsLocked(agent, source, true)
 	}
+}
+
+// nameMainForViewsLocked tells the feed which agent is the
+// session's main one, once per distinct naming.
+//
+// THE ROOT IS THE MAIN AGENT'S FEED AND NOTHING ELSE'S. The feed used to latch
+// the first agent it ever saw a frame for as the main one, which is a default:
+// a subagent's frame arriving first would have put the whole conversation on a
+// sub-feed. The naming is stated instead, from the two places that know —
+// StartTurn's answer (adoptMainAgentLocked) and the main watch, whose frames
+// are the main agent's — before the frame that needs it is routed.
+//
+// ONLY THE AUTHORITATIVE NAMING RENAMES. A main-watch row names the main agent
+// when nothing has yet; once one stands, a row on that watch naming another
+// agent is that agent's own frame, placed by its own feed, and never a rename.
+func (w *watcher) nameMainForViewsLocked(agent *conversationv1.AgentId, source string, authoritative bool) {
+	if agent.GetValue() == "" || w.viewsMain.GetValue() == agent.GetValue() {
+		return
+	}
+	if !authoritative && w.viewsMain != nil {
+		return
+	}
+	before := w.viewsMain.GetValue()
+	w.viewsMain = agent
+	if before != "" {
+		w.log.Warn("daemon.sessionwatcher.views_main_agent_changed", "the views' main agent was renamed", dlog.Context{
+			"previous_agent_id": before, "agent_id": agent.GetValue(), "source": source,
+		})
+	} else {
+		w.log.Info("daemon.sessionwatcher.views_main_agent", "the feed was told the session's main agent", dlog.Context{
+			"agent_id": agent.GetValue(), "source": source,
+		})
+	}
+	w.sinks.Feed.OnMainAgent(w.ws, agent)
 }
 
 // OnTurnOpening records the turn a caller is about to hand to the shim. See

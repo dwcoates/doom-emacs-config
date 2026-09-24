@@ -1247,3 +1247,63 @@ func TestInterruptedTerminalDrawsForAUserStopButNotAClear(t *testing.T) {
 			h.terminalRow("stop-turn").GetOutcome())
 	}
 }
+
+// TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive pins the line between
+// a failure and replay: a LIVE detachment whose call never drew is
+// unplaceable (ERROR, topbar); one REPLAYED from history names a call the
+// replay simply did not reach, and is recorded at DEBUG.
+func TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		arrange    func(h *harness)
+		wantError  bool
+		wantRecord string
+	}{
+		{
+			name:       "a live detachment is reported unplaceable",
+			arrange:    func(h *harness) { h.detachWork("work-1", "never-seen") },
+			wantError:  true,
+			wantRecord: "daemon.feed.detached_unplaceable",
+		},
+		{
+			name: "a replayed detachment is recorded at debug",
+			arrange: func(h *harness) {
+				h.replay(historyPage(&conversationv1.HistoryMore{}, frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+					Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+					Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+						DetachedFromId: &conversationv1.AgentActivityId{Value: "never-seen"},
+						Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+					}},
+				})))
+			},
+			wantError:  false,
+			wantRecord: "daemon.feed.replayed_detachment_unclaimed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act.
+			h.terminal("turn-1", &conversationv1.AgentSuccess{
+				Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+			}, nil)
+
+			// Assert.
+			if got := h.hasRecord("error", "daemon.feed.detached_unplaceable"); got != tc.wantError {
+				t.Fatalf("ERROR recorded = %v, want %v; records = %+v", got, tc.wantError, h.records())
+			}
+			if got := len(h.warnings.keys()) > 0; got != tc.wantError {
+				t.Fatalf("raised = %v, want raised %v", h.warnings.keys(), tc.wantError)
+			}
+			level := "debug"
+			if tc.wantError {
+				level = "error"
+			}
+			if !h.hasRecord(level, tc.wantRecord) {
+				t.Fatalf("records = %+v, want %s %s", h.records(), level, tc.wantRecord)
+			}
+		})
+	}
+}

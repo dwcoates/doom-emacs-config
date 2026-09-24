@@ -38,6 +38,7 @@ import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { detachedWorkId, subagentId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
+import type { CallRegistry } from "./tool-calls.js";
 import { activityEntry, agentActivity } from "./entries.js";
 
 const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
@@ -149,6 +150,13 @@ interface DetachmentFacts {
   readonly outputPath?: string;
   /** Whether this reader may open that file. */
   readonly outputReadable?: boolean;
+  /**
+   * WHOSE WORK IT IS: the agent that made the spawning call, when this fold
+   * observed that call. UNDEFINED when it did not — a backgrounded subagent's
+   * own calls never reach this stream — and then the announcement leaves the
+   * owner unset rather than naming the agent whose book it happens to ride.
+   */
+  readonly owner?: conversationv1.AgentId;
 }
 
 /**
@@ -168,6 +176,7 @@ function detachmentEntry(
   const work = detachedWorkId(facts.detachedFromToolUseId);
   const announcement = create(conversationv1.AgentDetachedWorkSchema, {
     work,
+    owner: facts.owner,
     output:
       facts.outputPath === undefined
         ? undefined
@@ -238,6 +247,9 @@ export function bashDetachmentEntry(
   return detachmentEntry(context, agentId, vendorUuid, {
     detachedFromToolUseId: toolUseId,
     cause,
+    // THE CALL'S OWN AGENT OWNS IT: this result settles a call the fold
+    // registered under the agent that made it.
+    owner: agentId,
     timeoutMs: typeof timedOut === "number" ? timedOut : undefined,
     // WHERE THE OUTPUT PATH ACTUALLY COMES FROM. `toolUseResult` on a
     // backgrounded Bash carries `backgroundTaskId` and NOTHING ELSE — the
@@ -367,6 +379,18 @@ export interface TaskKindRegistry {
   /** The spawning call remembered for a task, or `undefined` if none was stated. */
   toolUseFor(taskId: string): string | undefined;
   /**
+   * Remember WHOSE work a task is: the agent that made its spawning call.
+   *
+   * LEARNED ONCE, while the call is still open. The task stream names no agent
+   * at all, and the call registry forgets a call the moment its result lands —
+   * which, for a backgrounded launch, is long before the `task_notification`
+   * that upserts the announcement with its output path. Without this the
+   * closing upsert could not restate the owner the opening one stated.
+   */
+  rememberOwner(taskId: string, owner: conversationv1.AgentId): void;
+  /** The owner remembered for a task, or `undefined` if the fold never saw its call. */
+  ownerOf(taskId: string): conversationv1.AgentId | undefined;
+  /**
    * Whether a settling task is an AGENT run, and so owns a subagent terminal.
    *
    * A task whose kind was never stated answers `true`: the subagent terminal is
@@ -395,7 +419,13 @@ export interface TaskKindRegistry {
 export function createTaskKindRegistry(): TaskKindRegistry {
   const facts = new Map<
     string,
-    { kind?: string; cause?: DetachCause; toolUseId?: string; foreground?: boolean }
+    {
+      kind?: string;
+      cause?: DetachCause;
+      toolUseId?: string;
+      foreground?: boolean;
+      owner?: conversationv1.AgentId;
+    }
   >();
   /** Make room for one more task, forgetting the oldest when the cap is hit. */
   const reserve = (): void => {
@@ -428,6 +458,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     toolUseFor(taskId) {
       return facts.get(taskId)?.toolUseId;
     },
+    rememberOwner(taskId, owner) {
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), owner });
+    },
+    ownerOf(taskId) {
+      return facts.get(taskId)?.owner;
+    },
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
       facts.delete(taskId);
@@ -451,6 +488,7 @@ export function convertDetached(
   message: Extract<SdkMessage, { type: "system" }>,
   context: FoldContext,
   taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
 ): readonly PersistEntry[] {
   const raw = message as unknown as RawTask;
   const uuid = (message as { uuid: string }).uuid;
@@ -489,6 +527,16 @@ export function convertDetached(
   }
   const toolUseId = statedToolUse ?? taskKinds.toolUseFor(taskId);
   const agentId = known?.agentId ?? context.mainAgentId;
+  // WHOSE WORK THIS IS, which is NOT the book above: the task stream is
+  // session-wide, so every announcement it yields rides the main agent's book
+  // whoever spawned the work. The owner is the agent that made the spawning
+  // call, read off the call registry while that call is still open and
+  // remembered for the task's later messages. A call this fold never saw — a
+  // backgrounded subagent's own calls never reach this stream — leaves it
+  // UNDEFINED, and the announcement says so rather than naming the main agent.
+  const openCall = toolUseId === undefined || toolUseId === "" ? undefined : calls.peek(toolUseId);
+  if (openCall !== undefined) taskKinds.rememberOwner(taskId, openCall.agentId);
+  const owner = openCall?.agentId ?? taskKinds.ownerOf(taskId);
 
   switch (raw.subtype) {
     case "task_started": {
@@ -555,6 +603,7 @@ export function convertDetached(
         detachmentEntry(context, agentId, uuid, {
           detachedFromToolUseId: toolUseId,
           cause: "requested",
+          owner,
         }),
       ];
     }
@@ -584,6 +633,7 @@ export function convertDetached(
         detachmentEntry(context, agentId, uuid, {
           detachedFromToolUseId: toolUseId,
           cause: "by_user",
+          owner,
         }),
       ];
     }
@@ -634,6 +684,7 @@ export function convertDetached(
             cause: taskKinds.causeOf(taskId) ?? "requested",
             outputPath: raw.output_file,
             outputReadable: true,
+            owner,
           }),
         );
       }

@@ -218,7 +218,7 @@ func TestAnInterjectionDeliversThePromptWhileTheTurnsDetachedWorkRunsOn(t *testi
 	f.submit("start the long task", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-2", "sleep 5")))
+	pushDetachedShell(f.shim, "work-2", "sleep 5")
 	awaitLiveWork(t, f, 2)
 
 	// Act
@@ -1638,7 +1638,7 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
+	pushDetachedShell(f.shim, "work-1", "sleep 5")
 	awaitLiveWork(t, f, 1)
 
 	// Act
@@ -1695,7 +1695,7 @@ func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedW
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
+	pushDetachedShell(f.shim, "work-1", "sleep 5")
 	// THE HEAD'S OWN FeedId IS THE HANDLE. It addresses the bubble's sub-feed,
 	// and it is what Interrupt{detached} names; `detached_shell` is the spool
 	// BODY row on that sub-feed and never appears on the root feed at all.

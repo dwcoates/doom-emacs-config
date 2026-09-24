@@ -56,6 +56,11 @@ const (
 	warnDetachedUnmodeled
 	warnSessionFault
 	warnDegradedWindow
+	// warnRaised is a condition the DAEMON raised about its own resolution —
+	// detached work it could not place, say. Like the session-less line it
+	// carries NO detail arm: the sentence is the whole warning, and the full
+	// context is in the record the raising site logged beside it.
+	warnRaised
 )
 
 // warning is one accumulated concern plus the order it takes in the dropdown.
@@ -79,6 +84,14 @@ type unmodeledCall struct {
 	toolName string
 	// argumentLines are the daemon's abbreviated account of the call.
 	argumentLines []string
+	// seq is the observation order.
+	seq int
+}
+
+// raisedRecord is one warning the daemon raised about its own resolution.
+type raisedRecord struct {
+	// line is the dropdown row's sentence.
+	line string
 	// seq is the observation order.
 	seq int
 }
@@ -258,6 +271,10 @@ type wsState struct {
 	// accountingSeq is the accounting warning's observation order, zero until
 	// it has ever been raised.
 	accountingSeq int
+	// raised are the warnings the daemon raised about its own resolution, by
+	// the key the raising site named. Never retracted: each is a thing that
+	// already went wrong, and the record of it stays in front of the reader.
+	raised map[string]*raisedRecord
 
 	// seq mints observation orders.
 	seq int
@@ -272,6 +289,7 @@ func newWSState() *wsState {
 		unmodeled: map[string]*unmodeledCall{},
 		faults:    map[string]*faultRecord{},
 		windows:   map[string]*windowRecord{},
+		raised:    map[string]*raisedRecord{},
 	}
 }
 

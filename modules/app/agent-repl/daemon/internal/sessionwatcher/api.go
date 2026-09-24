@@ -131,6 +131,12 @@ type FeedSink interface {
 	// OnAgentTerminal is how one agent's stream ended: exactly one of success
 	// and failure is set, and turn is set when the agent belonged to a turn.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, addr OutputAddress)
+	// OnMainAgent names the session's MAIN agent: the one whose work is drawn
+	// on the root feed. It is stated before any frame that agent's watch
+	// carries is routed, and again whenever the naming changes. Nothing else
+	// puts an agent on the root: an agent the feed has not been told is the
+	// main one and never saw created is unplaceable, never defaulted.
+	OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId)
 	// OnDetachedWork is work leaving the stream, which is what makes a bubble
 	// outlive its turn.
 	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, addr OutputAddress)

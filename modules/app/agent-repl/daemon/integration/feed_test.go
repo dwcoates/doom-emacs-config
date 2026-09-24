@@ -1924,7 +1924,7 @@ func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-detachshell", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-shell-1", "tail -f build.log")))
+	pushDetachedShell(f.shim, "work-shell-1", "tail -f build.log")
 	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 	if got := head.GetShellHead().GetCommand().GetText(); got != "tail -f build.log" {
 		t.Fatalf("the head's command = %q, want the announced command", got)
@@ -1953,7 +1953,7 @@ func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-detachshellend", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-shell-2", "make")))
+	pushDetachedShell(f.shim, "work-shell-2", "make")
 	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
 	// Act
@@ -1988,7 +1988,7 @@ func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testin
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notobserved", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-notobs-1", "long-forgotten")))
+	pushDetachedShell(f.shim, "work-notobs-1", "long-forgotten")
 	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
 	// Act: the run settles, but nothing observed its output at all -- no
@@ -2026,7 +2026,7 @@ func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-spoolgap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-gap-1", "long-build")))
+	pushDetachedShell(f.shim, "work-gap-1", "long-build")
 	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 
 	// Act: a delta whose from_offset does not match what has accumulated
@@ -2936,7 +2936,7 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-shell-resettle", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-resettle-1", "make")))
+	pushDetachedShell(f.shim, "work-resettle-1", "make")
 	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
 	f.shim.PushBash("work-resettle-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
 		Success: &conversationv1.AgentBashSuccess{

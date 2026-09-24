@@ -3,6 +3,7 @@ package feed
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"fmt"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -32,11 +33,22 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		state = &subagentState{}
 		s.subagents[unitID] = state
 	}
+	// A SPAWN HAS ONE HOME: the feed its first frame was drawn in. A later frame
+	// of the same unit carried on another agent's book (the task stream's
+	// progress and terminal ride the main agent's) restates the unit and never
+	// moves it — moving it would mint a second bubble on another feed.
+	if state.feed.feed != (feedid.Feed{}) && state.feed.feed != at.feed {
+		r.logger(s.id).Debug("daemon.feed.subagent_home_kept",
+			"a spawn's frame arrived through another feed; the bubble stays in the feed it was first drawn in",
+			dlog.Context{"unit": unitID})
+		at = state.feed
+	}
 	// THE MARK IS CLAIMED UNCONDITIONALLY, never behind the flag: a detachment
 	// announced before this unit drew is exactly the case the flag cannot
 	// carry, and leaving the mark standing would report the unit as one
 	// nothing ever drew.
 	announcedWork, announcedDetached := s.claimDetached(unitID)
+	delete(s.heldDetachments, unitID)
 	if detached || announcedDetached {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "detached || announcedDetached"})
 		state.detached = true
@@ -479,76 +491,40 @@ func bubbleLabel(bubble *frontendv1.FeedSubagent) string {
 
 // ---- DETACHED WORK: the announcement, and the shell's own bubble ----
 
+// DETACHED WORK IS DRAWN ONLY IN THE FEED IT BELONGS TO: the main agent's on
+// the root, a subagent's in that subagent's own feed, at the spawning call's
+// own row. REGRESSION FIX (2026-09-23, a subagent's background shell drawn on
+// the root): the placement used to be the ANNOUNCER's, and the shim announces
+// every task-stream item on the main agent's book whoever spawned it, so a
+// subagent's `npm test` landed on the root feed under the last final answer,
+// with no turn. The owner is now the announcement's stated owner or the agent
+// whose stream carried the spawning call, the head is drawn where that call's
+// card stood, and anything that cannot be placed so draws NOTHING and is
+// reported (reportUnplaceableWork) — never defaulted to the root.
+
 // drawDetachedWork draws work that left the stream. It is announced HERE and
 // nowhere else, so this is where a bubble first becomes a detached one.
-func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
 	log := r.logger(s.id)
-	at := r.place(s, agent)
 	workID := work.GetWork().GetValue()
+	stated := work.GetOwner().GetValue()
 
 	switch origin := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
 		// ONE IDENTITY SPANS THE MOVE: the element already on screen continues
 		// as a detached one rather than being replaced by a second drawing.
-		unitID := origin.Detached.GetDetachedFromId().GetValue()
-		if state, ok := s.subagents[unitID]; ok {
-			state.detached = true
-			state.work = workID
-			r.republishSubagent(s, unitID, state)
-			log.Debug("daemon.feed.detached_subagent",
-				"a subagent bubble moved to its detached placement",
-				dlog.Context{"unit": unitID, "work": workID})
-			return
-		}
-		if r.detachForegroundShell(s, at, unitID, workID) {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.detachForegroundShell(s, at, unitID, workID)"})
-			return
-		}
-		// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
-		// A monitor is footer-only and always detached, so its announcement
-		// has no row to continue and never will; holding it would report the
-		// footer's own bookkeeping as a producer fault at the turn's
-		// terminal.
-		if s.undrawable(unitID) {
-			log.Debug("daemon.feed.detachment_draws_nothing",
-				"a detachment named a unit whose kind draws no feed row; the footer carries the work",
-				dlog.Context{"unit": unitID, "work": workID})
-			return
-		}
-		// THE UNIT MAY SIMPLY NOT HAVE DRAWN YET. The announcement is held
-		// against its identity so the unit lands through the detached
-		// placement when it does draw; a mark still standing when the turn
-		// ends is what earns the warning, in drawTerminal.
-		s.markDetached(unitID, workID)
-		log.Debug("daemon.feed.detachment_held",
-			"a detachment named a unit this resolver has not drawn yet; it is held until the unit draws",
-			dlog.Context{"unit": unitID, "work": workID})
+		r.detachUnit(s, announcer, origin.Detached.GetDetachedFromId().GetValue(), workID, stated)
 	case *conversationv1.AgentDetachedWork_Created:
 		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
 		case *conversationv1.DetachableWork_Subagent:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedWork", "branch": "case *conversationv1.DetachableWork_Subagent"})
-			act := &conversationv1.AgentActivity{
-				ActivityId: &conversationv1.AgentActivityId{Value: workID},
-				Item:       &conversationv1.AgentActivity_Subagent{Subagent: created.Subagent},
-			}
-			row, err := r.drawSubagent(s, at, act, created.Subagent, true)
-			if err != nil {
-				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "err != nil"})
-				return
-			}
-			if row == nil {
-				r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row == nil"})
-				// HELD: the announcement carried a frame that is not the
-				// spawn's start, so nothing names the created agent yet.
-				return
-			}
-			r.stampTurn(s, row, nil)
-			r.upsert(s, at, row, true)
+			r.drawCreatedSubagent(s, announcer, workID, stated, created.Subagent)
 		case *conversationv1.DetachableWork_Bash:
+			// A CREATED SHELL IS STILL A CALL'S WORK. The announcement describes
+			// it, but the head is drawn only where its spawning card stands —
+			// which is the same move a detachment makes, keyed by the same bytes.
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedWork", "branch": "case *conversationv1.DetachableWork_Bash"})
-			sh := s.shell(workID)
-			sh.feed = at
-			r.drawDetachedShell(s, work.GetWork(), created.Bash)
+			r.detachUnit(s, announcer, workID, workID, stated)
 		default:
 			// A workflow is kicked this wave, and a monitor is FOOTER-ONLY:
 			// neither has a feed row.
@@ -558,39 +534,186 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 	}
 }
 
+// detachUnit moves the unit a detachment names to its detached drawing, in its
+// owner's feed at its own row — or holds the detachment until that unit draws.
+func (r *resolver) detachUnit(s *wsState, announcer *conversationv1.AgentId, unitID, workID, stated string) {
+	log := r.logger(s.id)
+	if state, ok := s.subagents[unitID]; ok {
+		if _, err := feedid.DetachedOwner(stated, state.carrier); err != nil {
+			r.reportUnplaceableWork(s, workID, "subagent", stated, announcer.GetValue(), err.Error())
+			return
+		}
+		state.detached = true
+		state.work = workID
+		r.republishSubagent(s, unitID, state)
+		log.Debug("daemon.feed.detached_subagent",
+			"a subagent bubble moved to its detached placement",
+			dlog.Context{"unit": unitID, "work": workID})
+		return
+	}
+	if u, ok := s.units[unitID]; ok && u.input != "" && u.at.feed != (feedid.Feed{}) {
+		if _, err := feedid.DetachedOwner(stated, u.carrier); err != nil {
+			r.reportUnplaceableWork(s, workID, "shell", stated, announcer.GetValue(), err.Error())
+			return
+		}
+		r.detachForegroundShell(s, unitID, workID)
+		return
+	}
+	// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
+	// A monitor is footer-only and always detached, so its announcement
+	// has no row to continue and never will; holding it would report the
+	// footer's own bookkeeping as a producer fault at the turn's
+	// terminal.
+	if s.undrawable(unitID) {
+		log.Debug("daemon.feed.detachment_draws_nothing",
+			"a detachment named a unit whose kind draws no feed row; the footer carries the work",
+			dlog.Context{"unit": unitID, "work": workID})
+		return
+	}
+	// THE UNIT MAY SIMPLY NOT HAVE DRAWN YET. The announcement is held
+	// against its identity so the unit lands through the detached
+	// placement when it does draw — in the feed of the agent that carries
+	// it; a mark still standing when the turn ends is reported as
+	// unplaceable, in drawTerminal.
+	s.markDetached(unitID, workID)
+	s.heldDetachments[unitID] = heldDetachment{work: workID, owner: stated, announcer: announcer.GetValue(), plane: s.plane}
+	log.Debug("daemon.feed.detachment_held",
+		"a detachment named a unit this resolver has not drawn yet; it is held until the unit draws",
+		dlog.Context{"unit": unitID, "work": workID, "owner": stated, "announcer": announcer.GetValue()})
+}
+
+// drawCreatedSubagent draws a subagent that was detached from birth, in the
+// feed of the agent that spawned it.
+func (r *resolver) drawCreatedSubagent(s *wsState, announcer *conversationv1.AgentId, workID, stated string, spawn *conversationv1.AgentSubagent) {
+	var at placement
+	if state, ok := s.subagents[workID]; ok && state.feed.feed != (feedid.Feed{}) {
+		// THE BUBBLE ALREADY HAS A HOME: its spawn was drawn, and the
+		// announcement names the same unit.
+		if _, err := feedid.DetachedOwner(stated, state.carrier); err != nil {
+			r.reportUnplaceableWork(s, workID, "subagent", stated, announcer.GetValue(), err.Error())
+			return
+		}
+		at = state.feed
+	} else {
+		placed, err := r.ownerPlacement(s, stated)
+		if err != nil {
+			r.reportUnplaceableWork(s, workID, "subagent", stated, announcer.GetValue(), err.Error())
+			return
+		}
+		at = placed
+	}
+	act := &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: workID},
+		Item:       &conversationv1.AgentActivity_Subagent{Subagent: spawn},
+	}
+	row, err := r.drawSubagent(s, at, act, spawn, true)
+	if err != nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "err != nil"})
+		return
+	}
+	if state, ok := s.subagents[workID]; ok && state.carrier == "" {
+		state.carrier = stated
+	}
+	if row == nil {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "row == nil"})
+		// HELD: the announcement carried a frame that is not the
+		// spawn's start, so nothing names the created agent yet.
+		return
+	}
+	r.stampTurn(s, row, nil)
+	r.upsert(s, at, row, true)
+}
+
+// ownerPlacement is where an owner's detached work goes when no row of it has
+// been drawn yet: the owner's own feed, by the one rule (feedid.AgentFeed),
+// and never a default.
+func (r *resolver) ownerPlacement(s *wsState, owner string) (placement, error) {
+	if s.address != nil {
+		return r.outputPlacement(s), nil
+	}
+	feed, err := feedid.AgentFeed(owner, s.mainAgent)
+	if err != nil {
+		return placement{}, err
+	}
+	if feed.Agent != nil {
+		if _, minted := s.agentFeeds[owner]; !minted {
+			return placement{}, errAgentFeedUnminted
+		}
+	}
+	return placement{feed: feed}, nil
+}
+
+// reportUnplaceableWork records detached work that could not be placed in its
+// owner's feed — nothing was drawn for it — at ERROR with the whole context,
+// and puts it on the topbar's warning chip.
+func (r *resolver) reportUnplaceableWork(s *wsState, workID, kind, owner, announcer, reason string) {
+	r.logger(s.id).Error("daemon.feed.detached_unplaceable",
+		"detached work could not be placed in the feed it belongs to; nothing was drawn for it",
+		dlog.Context{
+			"work": workID, "kind": kind, "owner": owner, "announcer": announcer,
+			"main_agent": s.mainAgent, "reason": reason,
+		})
+	r.raiseWarning(s, "detached_unplaceable:"+workID,
+		fmt.Sprintf("detached %s %s could not be placed in its feed: %s", kind, workID, reason))
+}
+
 // detachForegroundShell turns an already-drawn foreground shell into its
 // canonical detached bubble, answering whether there was one to turn.
 //
-// RETIRE THEN REDRAW. The foreground call drew a running tool card
+// RETIRE THEN REDRAW, IN PLACE. The foreground call drew a running tool card
 // (KindActivity); its work has now moved to the background, where the shell
 // bubble is its head. The head's kind (KindShellHead) differs from the card's,
 // so the card cannot simply change arm under one identity the way a subagent
 // bubble does — it is RETIRED, and the KindShellHead bubble is drawn in its
-// place. The unit is marked moved so every later frame of it (the vendor's
-// launch receipt, the other plane's replay, the next turn's live-work
+// place: on the card's own feed, at the card's own ordering key, carrying the
+// card's own turn. The unit is marked moved so every later frame of it (the
+// vendor's launch receipt, the other plane's replay, the next turn's live-work
 // reconciliation) draws nothing rather than a second, stale card beside the
 // bubble.
-func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workID string) bool {
+func (r *resolver) detachForegroundShell(s *wsState, unitID, workID string) bool {
 	u, ok := s.units[unitID]
-	if !ok || u.input == "" {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok || u.input == \"\""})
+	if !ok || u.input == "" || u.at.feed == (feedid.Feed{}) {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok || u.input == \"\" || u.at.feed == (feedid.Feed{})"})
 		return false
 	}
-	cardID := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID})
-	retired := r.retire(s, at.feed, cardID.GetValue())
+	if u.moved && u.movedTo == workID {
+		// A RESTATEMENT OF A MOVE ALREADY MADE — the next turn's live-work
+		// reconciliation, the other plane's replay. The head already stands in
+		// the card's place with the card's turn; it is republished as it is,
+		// and nothing about where or when it was spawned is re-read from a card
+		// that no longer exists.
+		r.publishShell(s, workID, s.shell(workID), nil)
+		r.logger(s.id).Debug("daemon.feed.detached_shell_restated",
+			"a detachment restated a shell already drawn in its card's place; the head was republished as it stands",
+			dlog.Context{"unit": unitID, "work": workID})
+		return true
+	}
+	at := u.at
+	f := r.feed(s, at.feed)
+	cardID := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID}).GetValue()
+	if rank, ranked := f.rank[cardID]; ranked {
+		at.inherit = &rank
+	}
+	var turn *conversationv1.TurnId
+	if card, drawn := f.rows[cardID]; drawn {
+		turn = card.GetTurn()
+	}
+	retired := r.retire(s, at.feed, cardID)
 	u.moved = true
 	u.movedTo = workID
 	sh := s.shell(workID)
 	sh.command = u.input
 	sh.startedAtMs = u.startedAtMs
 	sh.feed = at
+	sh.turn = turn
 	// THE CALL MAY HAVE ENDED ALREADY. Its result and its move are separate
 	// records, and a result drawn first is still the work's ending: the head
 	// is drawn settled from it rather than live.
 	r.publishShell(s, workID, sh, shellEnding(r.logger(s.id), workID, u.ending))
 	r.logger(s.id).Debug("daemon.feed.detached_shell",
-		"a foreground shell's running card was retired and redrawn as its detached shell bubble",
-		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired, "ended": u.ending != nil})
+		"a foreground shell's running card was retired and redrawn as its detached shell bubble in its place",
+		dlog.Context{"unit": unitID, "work": workID, "card_retired": retired, "ended": u.ending != nil,
+			"feed": f.key, "owner": u.carrier, "turn": turn.GetValue()})
 	return true
 }
 
@@ -598,20 +721,30 @@ func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workI
 // unit it named had drawn. A subagent claims its own mark while composing its
 // bubble, because the mark decides which wrapper the bubble rides; a shell has
 // no such choice, so its held detachment is applied once its foreground row
-// exists.
-func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) {
+// exists — in the feed of the agent that carried it, provided that agent is
+// the owner the announcement stated.
+func (r *resolver) applyHeldDetachment(s *wsState, unitID string) {
 	work, held := s.claimDetached(unitID)
 	if !held {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!held"})
 		return
 	}
-	if r.detachForegroundShell(s, at, unitID, work) {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.detachForegroundShell(s, at, unitID, work)"})
+	said := s.heldDetachments[unitID]
+	delete(s.heldDetachments, unitID)
+	if u, ok := s.units[unitID]; ok {
+		if _, err := feedid.DetachedOwner(said.owner, u.carrier); err != nil {
+			r.reportUnplaceableWork(s, work, "shell", said.owner, said.announcer, err.Error())
+			return
+		}
+	}
+	if r.detachForegroundShell(s, unitID, work) {
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.detachForegroundShell(s, unitID, work)"})
 		return
 	}
 	// NOT DRAWABLE AS A SHELL AND NOT A SPAWN: the mark goes back, so the
 	// turn's terminal still reports a detachment that never found its unit.
 	s.markDetached(unitID, work)
+	s.heldDetachments[unitID] = said
 }
 
 // retireDetachment drops a detachment held against a unit whose kind draws no
@@ -624,6 +757,7 @@ func (r *resolver) retireDetachment(s *wsState, unitID string) {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!held"})
 		return
 	}
+	delete(s.heldDetachments, unitID)
 	r.logger(s.id).Debug("daemon.feed.detachment_retired",
 		"a held detachment named a unit whose kind draws no feed row; the mark is retired",
 		dlog.Context{"unit": unitID, "work": work})
@@ -653,10 +787,6 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	log := r.logger(s.id)
 	workID := work.GetValue()
 	sh := s.shell(workID)
-	if sh.feed.feed == (feedid.Feed{}) {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "sh.feed.feed == (feedid.Feed{})"})
-		sh.feed = placement{feed: feedid.Feed{Root: true}}
-	}
 
 	var settled *frontendv1.FeedShellSettled
 	switch frame := bash.GetResult().(type) {
@@ -874,6 +1004,18 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 		sh.settled = settled
 	}
 
+	// A HEAD WITH NOWHERE TO LAND IS NOT DRAWN, and never drawn on the root in
+	// its place. The run's frames are still folded — its spool, its ending —
+	// so the head is drawn whole the moment its spawning card places it
+	// (detachForegroundShell); until then, and for good if the work is
+	// unplaceable (already reported), nothing is published.
+	if sh.feed.feed == (feedid.Feed{}) {
+		r.logger(s.id).Debug("daemon.feed.detached_shell_unplaced",
+			"a detached shell's frame was folded; its head has no placement yet and nothing was published",
+			dlog.Context{"work": workID, "spooled": len(sh.spool), "settled": sh.settled != nil})
+		return
+	}
+
 	head := &frontendv1.FeedShell{
 		Command: &frontendv1.FeedShellCommand{Text: sh.command},
 		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: r.shellStart(sh)},
@@ -901,7 +1043,11 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 		Id:  headID,
 		Row: &frontendv1.FeedRow_ShellHead{ShellHead: head},
 	}
-	r.stampTurn(s, headRow, nil)
+	// THE HEAD IS THE SPAWNING TURN'S, the turn the card it replaced was
+	// stamped with — never whatever turn happens to be running when the move
+	// lands. A card drawn outside any turn (a subagent working between the
+	// main agent's turns) hands its head no turn either.
+	headRow.Turn = sh.turn
 	r.upsert(s, sh.feed, headRow, true)
 
 	// The head's own FeedId IS the sub-feed's address; recording it is what

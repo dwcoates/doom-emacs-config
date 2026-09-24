@@ -3651,7 +3651,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // conversation's. Nothing is written for it -- an announcement with an
     // invented description is worse than a missing one -- but it is stated as
     // the record-plane loss it is.
-    const readopted = announceLiveWork(book, open.liveDetached.filter(survives), (handle) => {
+    const readopted = announceLiveWork(book, open.liveDetached.filter(survives), agentId, (handle) => {
       reportUndescribableWork(handle);
     });
 
@@ -4041,7 +4041,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         handles.map((handle) => handle.value),
       );
       const undescribed: conversationv1.DetachedWorkId[] = [];
-      const announcements = announceLiveWork(book, handles, (handle) => {
+      const announcements = announceLiveWork(book, handles, agentId, (handle) => {
         undescribed.push(handle);
       });
       for (const handle of undescribed) await recordUndescribedHandle(handle);

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -9,6 +10,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/figures"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionwatcher"
 )
 
@@ -422,7 +424,11 @@ func TestDetachingMovesTheSameBubbleIntoItsPlacementWrapper(t *testing.T) {
 	}
 }
 
-func TestWorkDetachedFromAUnitWeNeverDrewIsWarnedWhenTheTurnEnds(t *testing.T) {
+// TestWorkDetachedFromAUnitWeNeverDrewIsReportedUnplaceableWhenTheTurnEnds:
+// the head belongs at the spawning call's row and no such row was ever drawn,
+// so the work is UNPLACEABLE (owner's rule, 2026-09-23) — an ERROR naming the
+// work, and a line on the topbar — and nothing is drawn for it.
+func TestWorkDetachedFromAUnitWeNeverDrewIsReportedUnplaceableWhenTheTurnEnds(t *testing.T) {
 	// Arrange: a detachment naming a unit nothing ever draws.
 	h := newHarness(t)
 	h.detachWork("work-1", "never-seen")
@@ -434,8 +440,16 @@ func TestWorkDetachedFromAUnitWeNeverDrewIsWarnedWhenTheTurnEnds(t *testing.T) {
 	}, nil)
 
 	// Assert.
-	if !h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.detached_unknown_unit", h.records())
+	if !h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.detached_unplaceable", h.records())
+	}
+	if got := h.warnings.keys(); !slices.Equal(got, []string{"detached_unplaceable:work-1"}) {
+		t.Fatalf("raised = %v, want the unplaceable work on the topbar", got)
+	}
+	for _, row := range h.everyRow() {
+		if row.GetShellHead() != nil {
+			t.Fatalf("rows = %+v, want no shell head for unplaceable work", h.everyRow())
+		}
 	}
 }
 
@@ -444,7 +458,8 @@ func TestASubagentCreatedDetachedDrawsThroughTheWrapperAtOnce(t *testing.T) {
 	h := newHarness(t)
 	created := &conversationv1.AgentId{Value: "agent-remote"}
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Owner: mainAgent(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{
 				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
@@ -469,7 +484,8 @@ func TestAMonitorDrawsNoFeedRow(t *testing.T) {
 	// Arrange, Act: a monitor is FOOTER-ONLY.
 	h := newHarness(t)
 	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+		Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+		Owner: mainAgent(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{
 				Work: &conversationv1.DetachableWork_Monitor{Monitor: &conversationv1.AgentMonitor{}},
@@ -544,8 +560,28 @@ func (h *harness) everyRow() []*frontendv1.FeedRow {
 	return out
 }
 
-// bash sends one frame on a detached shell's own stream.
+// bash sends one frame on a detached shell's own stream, first ARRANGING the
+// run's head on the root feed when nothing has placed it yet.
+//
+// THE ARRANGEMENT IS EXPLICIT STATE, NOT AN INVENTED CALL. The tests that send
+// through here are about the shell bubble's own rendering — its command, clock,
+// spool and ending — and placement is what drawDetachedWork decides from the
+// spawning card, which placement_test-style cases below exercise through
+// bashUnplaced. A run with no placement draws nothing at all.
 func (h *harness) bash(work string, result any) {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	sh := h.resolver.state(testWorkspace).shell(work)
+	if sh.feed.feed == (feedid.Feed{}) {
+		sh.feed = placement{feed: rootFeed()}
+	}
+	h.resolver.mu.Unlock()
+	h.bashUnplaced(work, result)
+}
+
+// bashUnplaced sends one frame on a detached shell's own stream exactly as the
+// watcher would, arranging nothing.
+func (h *harness) bashUnplaced(work string, result any) {
 	h.t.Helper()
 	item := &conversationv1.AgentBash{}
 	switch r := result.(type) {
@@ -1389,8 +1425,8 @@ func TestAClaimedDetachmentIsNotReportedAsUnknownWhenTheTurnEnds(t *testing.T) {
 	}, nil)
 
 	// Assert.
-	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
-		t.Fatalf("records = %+v, want no unknown-unit warning for a claimed detachment", h.records())
+	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want no unplaceable report for a claimed detachment", h.records())
 	}
 }
 
@@ -1671,8 +1707,8 @@ func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T
 
 	// Assert: the footer carries the watch, so nothing was lost and the
 	// terminal reports no producer fault.
-	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
-		t.Fatalf("records = %+v, want NO detached_unknown_unit for a footer-only unit", h.records())
+	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want NO detached_unplaceable for a footer-only unit", h.records())
 	}
 }
 
@@ -1691,8 +1727,8 @@ func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 	if !h.hasRecord("debug", "daemon.feed.detachment_retired") {
 		t.Fatalf("records = %+v, want the held mark retired", h.records())
 	}
-	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
-		t.Fatalf("records = %+v, want NO detached_unknown_unit once the mark is retired", h.records())
+	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want NO detached_unplaceable once the mark is retired", h.records())
 	}
 }
 
@@ -2471,6 +2507,447 @@ func TestAShellHeldBeforeItWasDrawnIsSettledLostWhenItLeavesAfterDrawing(t *test
 	}
 }
 
+// ---- DETACHED WORK IS DRAWN ONLY IN THE FEED IT BELONGS TO ----
+//
+// Owner's rule (2026-09-23): work spawned by the main agent is drawn on the
+// root; work a subagent spawned is drawn in that subagent's own feed; each at
+// its spawning call's row, and never anywhere by default. The regression these
+// pin: a subagent's `npm test`, announced on the main agent's book, drawn on the
+// root under the last final answer with no turn.
+
+// sendAs pushes one activity as the given agent's own frame.
+func (h *harness) sendAs(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, agent, act, noAddress())
+}
+
+// bashCall is a Bash call's running card, as the calling agent's stream states it.
+func bashCall(unit, command string) *conversationv1.AgentActivity {
+	return activityOf(unit, &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: command},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 2_000},
+	}}})
+}
+
+// spawnCall is an Agent call's start, naming the agent it created.
+func spawnCall(unit string, created *conversationv1.AgentId) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go"},
+				StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}},
+		}},
+	}
+}
+
+// announceDetachment announces, on the announcer's book, that the unit's work
+// left — naming its owner when owner is non-nil.
+func (h *harness) announceDetachment(announcer, owner *conversationv1.AgentId, work, unit string) {
+	h.t.Helper()
+	h.resolver.OnDetachedWork(testWorkspace, announcer, &conversationv1.AgentDetachedWork{
+		Work:  &conversationv1.DetachedWorkId{Value: work},
+		Owner: owner,
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}, noAddress())
+}
+
+// agentFeed is one agent's sub-feed.
+func agentFeed(agent *conversationv1.AgentId) feedid.Feed { return feedid.Feed{Agent: agent} }
+
+// rowKinds names each row of a feed by its arm, in order, for an assertion on
+// where a head landed among its neighbours.
+func (h *harness) rowKinds(feed feedid.Feed) []string {
+	h.t.Helper()
+	var out []string
+	for _, row := range h.rows(feed) {
+		switch {
+		case row.GetShellHead() != nil:
+			out = append(out, "shell_head")
+		case row.GetActivity().GetSimpleToolCall() != nil:
+			out = append(out, "tool_card")
+		case row.GetActivity().GetResponse() != nil:
+			out = append(out, "response")
+		case row.GetActivity().GetSubagent() != nil:
+			out = append(out, "subagent")
+		case row.GetDetachedSubagent() != nil:
+			out = append(out, "detached_subagent")
+		case row.GetAgentPrompt() != nil:
+			out = append(out, "agent_prompt")
+		default:
+			out = append(out, "other")
+		}
+	}
+	return out
+}
+
+// shellHeadFeeds answers every feed a shell head was drawn on, by its test
+// spelling.
+func (h *harness) shellHeadFeeds() []string {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	defer h.resolver.mu.Unlock()
+	s := h.resolver.state(testWorkspace)
+	var out []string
+	for key, f := range s.feeds {
+		for _, id := range f.order {
+			if f.rows[id].GetShellHead() != nil {
+				out = append(out, testFeedValue(s.feedAddrs[key]))
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestADetachedShellIsDrawnInItsOwnersFeedAtItsCallsRow(t *testing.T) {
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	nested := &conversationv1.AgentId{Value: "agent-nested"}
+	for _, tc := range []struct {
+		name string
+		// arrange draws the call's card and a row after it, answering the
+		// agent that carried the call.
+		arrange func(h *harness) *conversationv1.AgentId
+		// owner is what the announcement states; nil states none.
+		owner     func(carrier *conversationv1.AgentId) *conversationv1.AgentId
+		wantFeed  func(carrier *conversationv1.AgentId) feedid.Feed
+		wantKinds []string
+	}{
+		{
+			name: "the main agent's shell, its owner stated, is drawn on the root in its card's place",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(bashCall("toolu_bash", "npm test"))
+				h.send(responseSuccessActivity("unit-later", "still working"))
+				return mainAgent()
+			},
+			owner:     func(c *conversationv1.AgentId) *conversationv1.AgentId { return c },
+			wantFeed:  func(*conversationv1.AgentId) feedid.Feed { return rootFeed() },
+			wantKinds: []string{"shell_head", "response"},
+		},
+		{
+			name: "the main agent's shell, no owner stated, is placed by its call's carrier",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(bashCall("toolu_bash", "npm test"))
+				h.send(responseSuccessActivity("unit-later", "still working"))
+				return mainAgent()
+			},
+			owner:     func(*conversationv1.AgentId) *conversationv1.AgentId { return nil },
+			wantFeed:  func(*conversationv1.AgentId) feedid.Feed { return rootFeed() },
+			wantKinds: []string{"shell_head", "response"},
+		},
+		{
+			name: "a subagent's shell announced on the main book, no owner stated, is drawn in the subagent's feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, bashCall("toolu_bash", "npm test"))
+				h.sendAs(sub, responseSuccessActivity("unit-later", "still working"))
+				return sub
+			},
+			owner:     func(*conversationv1.AgentId) *conversationv1.AgentId { return nil },
+			wantFeed:  agentFeed,
+			wantKinds: []string{"agent_prompt", "shell_head", "response"},
+		},
+		{
+			name: "a subagent's shell whose announcement names the subagent is drawn in the subagent's feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, bashCall("toolu_bash", "npm test"))
+				h.sendAs(sub, responseSuccessActivity("unit-later", "still working"))
+				return sub
+			},
+			owner:     func(c *conversationv1.AgentId) *conversationv1.AgentId { return c },
+			wantFeed:  agentFeed,
+			wantKinds: []string{"agent_prompt", "shell_head", "response"},
+		},
+		{
+			name: "a nested subagent's shell is drawn in the nested subagent's feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, spawnCall("toolu_spawn_nested", nested))
+				h.sendAs(nested, bashCall("toolu_bash", "npm test"))
+				h.sendAs(nested, responseSuccessActivity("unit-later", "still working"))
+				return nested
+			},
+			owner:     func(*conversationv1.AgentId) *conversationv1.AgentId { return nil },
+			wantFeed:  agentFeed,
+			wantKinds: []string{"agent_prompt", "shell_head", "response"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			carrier := tc.arrange(h)
+
+			// Act: the task stream announces it on the MAIN agent's book.
+			h.announceDetachment(mainAgent(), tc.owner(carrier), "toolu_bash", "toolu_bash")
+
+			// Assert: one head, on the owner's feed only, where the card stood.
+			want := testFeedValue(tc.wantFeed(carrier))
+			if got := h.shellHeadFeeds(); !slices.Equal(got, []string{want}) {
+				t.Fatalf("shell heads on %v, want exactly one on %s", got, want)
+			}
+			if got := h.rowKinds(tc.wantFeed(carrier)); !slices.Equal(got, tc.wantKinds) {
+				t.Fatalf("rows of %s = %v, want %v: the head replaces its card in place", want, got, tc.wantKinds)
+			}
+			if len(h.warnings.keys()) != 0 {
+				t.Fatalf("raised = %v, want nothing raised for placeable work", h.warnings.keys())
+			}
+		})
+	}
+}
+
+func TestADetachedShellHeadCarriesItsSpawningTurn(t *testing.T) {
+	// Arrange: the call was made in turn-1; turn-2 is running when it moves.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "run the tests")
+	h.send(bashCall("toolu_bash", "npm test"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act.
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetShellHead() != nil {
+			if got := row.GetTurn().GetValue(); got != "turn-1" {
+				t.Fatalf("head turn = %q, want the spawning turn turn-1", got)
+			}
+			return
+		}
+	}
+	t.Fatal("no shell head on the root feed")
+}
+
+func TestADetachedSubagentShellHeadNeverTakesTheRunningTurn(t *testing.T) {
+	// Arrange: a subagent's card drawn between turns carries no turn; a turn
+	// is running when its work moves.
+	h := newHarness(t)
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	h.send(spawnCall("toolu_spawn", sub))
+	h.sendAs(sub, bashCall("toolu_bash", "npm test"))
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-later"))
+
+	// Act.
+	h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash")
+
+	// Assert.
+	for _, row := range h.rows(agentFeed(sub)) {
+		if row.GetShellHead() != nil {
+			if got := row.GetTurn().GetValue(); got == "turn-later" {
+				t.Fatalf("head turn = %q, want the card's own turn, never the one running", got)
+			}
+			return
+		}
+	}
+	t.Fatal("no shell head on the subagent's feed")
+}
+
+func TestADetachmentWhoseOwnerContradictsItsCallsCarrierDrawsNothing(t *testing.T) {
+	// Arrange: the main agent made the call; the announcement names another.
+	h := newHarness(t)
+	h.send(bashCall("toolu_bash", "npm test"))
+
+	// Act.
+	h.announceDetachment(mainAgent(), &conversationv1.AgentId{Value: "agent-other"}, "toolu_bash", "toolu_bash")
+
+	// Assert.
+	if got := h.shellHeadFeeds(); len(got) != 0 {
+		t.Fatalf("shell heads on %v, want none for contradictory ownership", got)
+	}
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"tool_card"}) {
+		t.Fatalf("root rows = %v, want the card left as it stood", got)
+	}
+	if !h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.detached_unplaceable", h.records())
+	}
+	if got := h.warnings.keys(); !slices.Equal(got, []string{"detached_unplaceable:toolu_bash"}) {
+		t.Fatalf("raised = %v, want the work on the topbar", got)
+	}
+}
+
+func TestTheUnplaceableRecordNamesTheWorkKindOwnerAnnouncerAndReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(bashCall("toolu_bash", "npm test"))
+
+	// Act.
+	h.announceDetachment(mainAgent(), &conversationv1.AgentId{Value: "agent-other"}, "toolu_bash", "toolu_bash")
+
+	// Assert.
+	for _, record := range h.records() {
+		if record.Level != "error" || record.Operation != "daemon.feed.detached_unplaceable" {
+			continue
+		}
+		for field, want := range map[string]string{
+			"work": "toolu_bash", "kind": "shell", "owner": "agent-other", "announcer": "agent-main",
+		} {
+			if got := record.Context[field]; got != want {
+				t.Errorf("%s = %v, want %q", field, got, want)
+			}
+		}
+		if reason, _ := record.Context["reason"].(string); reason == "" {
+			t.Error("reason is empty, want why the work could not be placed")
+		}
+		return
+	}
+	t.Fatalf("records = %+v, want the ERROR record", h.records())
+}
+
+func TestASubagentsMonitorDrawsNothingInAnyFeed(t *testing.T) {
+	// Arrange: a monitor is footer-only, whoever arms it.
+	h := newHarness(t)
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	h.send(spawnCall("toolu_spawn", sub))
+	h.sendAs(sub, monitorActivity("toolu_monitor"))
+
+	// Act.
+	h.announceDetachment(mainAgent(), nil, "toolu_monitor", "toolu_monitor")
+
+	// Assert.
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"subagent"}) {
+		t.Fatalf("root rows = %v, want the spawn's bubble alone", got)
+	}
+	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt"}) {
+		t.Fatalf("subagent rows = %v, want the commission alone", got)
+	}
+	if len(h.warnings.keys()) != 0 {
+		t.Fatalf("raised = %v, want nothing: a monitor drawing no row is its design", h.warnings.keys())
+	}
+}
+
+func TestANestedSubagentsDetachmentKeepsItsBubbleInItsSpawnersFeed(t *testing.T) {
+	// Arrange: a subagent spawned a subagent of its own.
+	h := newHarness(t)
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	nested := &conversationv1.AgentId{Value: "agent-nested"}
+	h.send(spawnCall("toolu_spawn", sub))
+	h.sendAs(sub, spawnCall("toolu_nested", nested))
+
+	// Act: the task stream announces the move on the MAIN book, then reports
+	// the run's progress there too.
+	h.announceDetachment(mainAgent(), nil, "toolu_nested", "toolu_nested")
+	h.progressBeat("toolu_nested", 1_200)
+
+	// Assert.
+	if got := h.rowKinds(agentFeed(sub)); !slices.Equal(got, []string{"agent_prompt", "detached_subagent"}) {
+		t.Fatalf("spawner's rows = %v, want the nested bubble there, detached", got)
+	}
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"subagent"}) {
+		t.Fatalf("root rows = %v, want only the first spawn's bubble", got)
+	}
+}
+
+func TestACreatedSubagentWithNoKnownOwnerDrawsNothing(t *testing.T) {
+	// Arrange, Act: work detached from birth, naming no owner, whose spawn
+	// was never drawn.
+	h := newHarness(t)
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Subagent{
+				Subagent: spawnCall("work-1", &conversationv1.AgentId{Value: "agent-remote"}).GetSubagent(),
+			}},
+		}},
+	}, noAddress())
+
+	// Assert.
+	if rows := h.everyRow(); len(rows) != 0 {
+		t.Fatalf("rows = %+v, want nothing drawn for work with no known owner", rows)
+	}
+	if !h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.detached_unplaceable", h.records())
+	}
+	if got := h.warnings.keys(); !slices.Equal(got, []string{"detached_unplaceable:work-1"}) {
+		t.Fatalf("raised = %v, want the work on the topbar", got)
+	}
+}
+
+func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
+	// Arrange: a re-announced live shell whose call the feed has not drawn.
+	h := newHarness(t)
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work:  &conversationv1.DetachedWorkId{Value: "toolu_bash"},
+		Owner: mainAgent(),
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Bash{
+				Bash: bashCall("toolu_bash", "npm test").GetBash(),
+			}},
+		}},
+	}, noAddress())
+	if got := h.shellHeadFeeds(); len(got) != 0 {
+		t.Fatalf("shell heads on %v before the call drew, want none", got)
+	}
+
+	// Act: the call's card draws.
+	h.send(bashCall("toolu_bash", "npm test"))
+
+	// Assert.
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"shell_head"}) {
+		t.Fatalf("root rows = %v, want the head in the card's place", got)
+	}
+}
+
+func TestAnUnplacedShellsFramesPublishNothing(t *testing.T) {
+	// Arrange, Act: the run's own stream reports before anything placed it.
+	h := newHarness(t)
+	h.bashUnplaced("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bashUnplaced("work-1", &conversationv1.AgentBashUpdate{NewOutput: "PASS\n", FromOffset: 0})
+
+	// Assert: nothing on any feed — and never on the root in its place.
+	if rows := h.everyRow(); len(rows) != 0 {
+		t.Fatalf("rows = %+v, want nothing published for an unplaced run", rows)
+	}
+	if !h.hasRecord("debug", "daemon.feed.detached_shell_unplaced") {
+		t.Fatalf("records = %+v, want the fold recorded", h.records())
+	}
+}
+
+func TestAnUnplacedShellsSpoolIsDrawnWholeOnceItsCallPlacesIt(t *testing.T) {
+	// Arrange: output arrives on the run's stream before its call's card.
+	h := newHarness(t)
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+	h.bashUnplaced("toolu_bash", &conversationv1.AgentBashUpdate{NewOutput: "PASS\n", FromOffset: 0})
+
+	// Act.
+	h.send(bashCall("toolu_bash", "npm test"))
+
+	// Assert.
+	if got := h.shellBody("toolu_bash").GetSpool().GetText(); got != "PASS\n" {
+		t.Fatalf("spool = %q, want the output folded while unplaced", got)
+	}
+}
+
+func TestARestatedMoveKeepsTheHeadWhereAndWhenItWasSpawned(t *testing.T) {
+	// Arrange: the move landed, and turn-2 is running when it is restated.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "run the tests")
+	h.send(bashCall("toolu_bash", "npm test"))
+	h.send(responseSuccessActivity("unit-later", "still working"))
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
+
+	// Act: the next turn's reconciliation restates the same move.
+	h.announceDetachment(mainAgent(), mainAgent(), "toolu_bash", "toolu_bash")
+
+	// Assert.
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"other", "shell_head", "response"}) {
+		t.Fatalf("root rows = %v, want the head still in its card's place", got)
+	}
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetShellHead() != nil && row.GetTurn().GetValue() != "turn-1" {
+			t.Fatalf("head turn = %q, want the spawning turn kept", row.GetTurn().GetValue())
+		}
+	}
+}
+
 // ---- the detached-work id and the entry placement ---------------------------
 
 func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
@@ -2509,6 +2986,8 @@ func TestTheDetachedWorkIdIsOnEveryAsyncHeadAndNoSyncOne(t *testing.T) {
 			act: func(h *harness) *frontendv1.FeedDetachedWorkId {
 				h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
 					Work: &conversationv1.DetachedWorkId{Value: "work-7"},
+					// The producer states the owner of work created detached.
+					Owner: mainAgent(),
 					Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 						WorkCreated: &conversationv1.DetachableWork{
 							Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
@@ -2641,5 +3120,73 @@ func TestADetachedShellsFailureNamesTheCommandItRestated(t *testing.T) {
 	// Assert.
 	if got := h.shellHead().GetCommand().GetText(); got != "npm run dev" {
 		t.Fatalf("command = %q, want the restated command", got)
+	}
+}
+
+// THE FOOTER'S JUMP ADDRESS IS THE ONE THE FEED ANNOUNCES (Deps.EntryPlaced),
+// so a subagent's shell must be announced at its head on the subagent's own
+// sub-feed. It used to be addressed on the root for every shell, a row the root
+// never held once the head was drawn where it belongs.
+func TestADetachedShellsHeadIsAnnouncedOnItsOwnersFeed(t *testing.T) {
+	sub := &conversationv1.AgentId{Value: "agent-sub"}
+	nested := &conversationv1.AgentId{Value: "agent-nested"}
+	for _, tc := range []struct {
+		name string
+		// arrange draws the call's card, answering the agent that carried it.
+		arrange func(h *harness) *conversationv1.AgentId
+		want    func(carrier *conversationv1.AgentId) feedid.Feed
+	}{
+		{
+			name: "the main agent's shell is announced on the root",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(bashCall("toolu_bash", "npm test"))
+				return mainAgent()
+			},
+			want: func(*conversationv1.AgentId) feedid.Feed { return rootFeed() },
+		},
+		{
+			name: "a subagent's shell is announced on the subagent's sub-feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, bashCall("toolu_bash", "npm test"))
+				return sub
+			},
+			want: agentFeed,
+		},
+		{
+			name: "a nested subagent's shell is announced on the nested subagent's sub-feed",
+			arrange: func(h *harness) *conversationv1.AgentId {
+				h.send(spawnCall("toolu_spawn", sub))
+				h.sendAs(sub, spawnCall("toolu_spawn_nested", nested))
+				h.sendAs(nested, bashCall("toolu_bash", "npm test"))
+				return nested
+			},
+			want: agentFeed,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			carrier := tc.arrange(h)
+
+			// Act: the task stream announces it on the MAIN agent's book.
+			h.announceDetachment(mainAgent(), nil, "toolu_bash", "toolu_bash")
+
+			// Assert: the last address announced for the work is its head on
+			// the owner's feed.
+			want := testEncode(feedid.Ref{
+				WS: testWorkspace, Feed: tc.want(carrier),
+				Row: feedid.RowKey{Kind: feedid.KindShellHead, ID: "toolu_bash"},
+			}).GetValue()
+			var got string
+			for _, placed := range h.placed {
+				if placed.unit == "toolu_bash" {
+					got = placed.row
+				}
+			}
+			if got != want {
+				t.Fatalf("toolu_bash announced at %q, want %q (placed = %+v)", got, want, h.placed)
+			}
+		})
 	}
 }

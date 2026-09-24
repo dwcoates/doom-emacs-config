@@ -150,6 +150,12 @@ type Resolver interface {
 	// warning each. Nothing on the shim's streams announces them —
 	// DetachableWork has no unmodeled arm — so the daemon states the set.
 	SetDetachedUnmodeled(ws ids.WorkspaceID, items []DetachedUnmodeled)
+	// RaiseWarning puts a condition the DAEMON raised about its own resolution
+	// on the warning strip — the webapp's one error surface — as one line with
+	// no overlay. key identifies the condition, so raising it again updates
+	// the line rather than adding a second one. The raising site logs the full
+	// context itself; this only makes it visible.
+	RaiseWarning(ws ids.WorkspaceID, key, line string)
 	// Topic is the workspace's topbar publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView]
 	// StatusFacts answers the session facts the /status panel splices —

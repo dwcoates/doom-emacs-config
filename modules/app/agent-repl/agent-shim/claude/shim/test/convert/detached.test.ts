@@ -29,6 +29,7 @@ import {
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
+import { createCallRegistry, type CallRegistry } from "../../src/convert/tool-calls.js";
 import { activityOf, foldContext, MAIN_AGENT } from "./fold-harness.js";
 
 /**
@@ -212,8 +213,8 @@ describe("a settling task's KIND decides whether it settles a subagent", () => {
     const entries =
       taskType === undefined
         ? []
-        : [...convertDetached(taskStarted(taskType), context, registry)];
-    entries.push(...convertDetached(taskNotification(), context, registry));
+        : [...convertDetached(taskStarted(taskType), context, registry, createCallRegistry())];
+    entries.push(...convertDetached(taskNotification(), context, registry, createCallRegistry()));
     return entries.map((entry) => entry.source.discriminator);
   }
 
@@ -228,10 +229,10 @@ describe("a settling task's KIND decides whether it settles a subagent", () => {
     // Arrange.
     const registry = createTaskKindRegistry();
     const context = foldContext();
-    drain(convertDetached(taskStarted("local_agent"), context, registry));
+    drain(convertDetached(taskStarted("local_agent"), context, registry, createCallRegistry()));
 
     // Act.
-    const entries = [...convertDetached(taskNotification(), context, registry)];
+    const entries = [...convertDetached(taskNotification(), context, registry, createCallRegistry())];
     const settled = entries.find(
       (entry) => entry.source.discriminator === "activity.subagent.success",
     );
@@ -380,6 +381,25 @@ describe("bashDetachmentEntry", () => {
     expect(announcement(entry).output?.readability.case).toBe("readable");
   });
 
+  it("names the call's own agent as the work's OWNER", () => {
+    // Arrange: the call was made by a subagent, whose book the result rides.
+    const subagent = create(conversationv1.AgentIdSchema, { value: "toolu_spawn" });
+
+    // Act.
+    const entry = bashDetachmentEntry(
+      foldContext(),
+      subagent,
+      "uuid-result",
+      "toolu_bash",
+      { backgroundTaskId: "bt-1" },
+      undefined,
+      undefined,
+    );
+
+    // Assert.
+    expect(announcement(entry).owner?.value).toBe("toolu_spawn");
+  });
+
   it("remembers the stated cause so the later notification cannot overwrite it", () => {
     const registry = createTaskKindRegistry();
     bashDetachment({ backgroundTaskId: "bt-1", backgroundedByUser: true }, undefined, registry);
@@ -446,8 +466,9 @@ function convert(
   fields: Record<string, unknown>,
   overrides: Parameters<typeof foldContext>[0] = {},
   registry = createTaskKindRegistry(),
+  calls: CallRegistry = createCallRegistry(),
 ): readonly PersistEntry[] {
-  return convertDetached(taskMessage(fields), foldContext(overrides), registry);
+  return convertDetached(taskMessage(fields), foldContext(overrides), registry, calls);
 }
 
 describe("convertDetached: the level and the ambient task", () => {
@@ -952,5 +973,83 @@ describe("convertDetached: foreground work", () => {
 
     // Assert.
     expect(detachedOrigin(entries[0]).cause.case).toBe("timedOut");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WHOSE WORK IT IS: the owner is the spawning call's agent, never the book
+// ---------------------------------------------------------------------------
+
+describe("convertDetached: the owner of task-stream work", () => {
+  const SUBAGENT = create(conversationv1.AgentIdSchema, { value: "toolu_parent_spawn" });
+
+  /** A call registry holding one open call, made by `agent`. */
+  function callsWith(toolUseId: string, agent: conversationv1.AgentId): CallRegistry {
+    const calls = createCallRegistry();
+    calls.remember({ toolUseId, toolName: "Agent", input: {}, startedAtMs: 1, agentId: agent });
+    return calls;
+  }
+
+  /** The announcement a converted batch carries. */
+  function announced(entries: readonly PersistEntry[]): conversationv1.AgentDetachedWork | undefined {
+    const row = entries.find((entry) => entry.source.discriminator.startsWith("agent_frame.detached_work"));
+    return row === undefined ? undefined : announcement(row);
+  }
+
+  const STARTED = { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "local_agent" };
+
+  it("names the agent that made the spawning call as the owner", () => {
+    // Arrange.
+    const calls = callsWith("toolu_1", SUBAGENT);
+
+    // Act.
+    const entries = convert(STARTED, {}, createTaskKindRegistry(), calls);
+
+    // Assert.
+    expect(announced(entries)?.owner?.value).toBe(SUBAGENT.value);
+  });
+
+  it("still rides the main agent's book, which is the announcer and not the owner", () => {
+    // Arrange.
+    const calls = callsWith("toolu_1", SUBAGENT);
+
+    // Act.
+    const entries = convert(STARTED, {}, createTaskKindRegistry(), calls);
+
+    // Assert.
+    expect(entries[0]?.agentId.value).toBe(MAIN_AGENT.value);
+  });
+
+  it("restates the owner on the closing notification after the call itself was forgotten", () => {
+    // Arrange: the start saw the open call; by the notification it is gone.
+    const registry = createTaskKindRegistry();
+    drain(convert(STARTED, {}, registry, callsWith("toolu_1", SUBAGENT)));
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", status: "completed", output_file: "/tmp/t1.output" },
+      {},
+      registry,
+      createCallRegistry(),
+    );
+
+    // Assert.
+    expect(announced(entries)?.owner?.value).toBe(SUBAGENT.value);
+  });
+
+  it("leaves the owner UNSET for a call the fold never saw, rather than naming the main agent", () => {
+    // Arrange: a backgrounded subagent's own call never reaches this stream.
+    const calls = createCallRegistry();
+
+    // Act.
+    const entries = convert(
+      { subtype: "task_notification", task_id: "t9", tool_use_id: "toolu_unseen", status: "completed", output_file: "/tmp/t9.output" },
+      {},
+      createTaskKindRegistry(),
+      calls,
+    );
+
+    // Assert.
+    expect(announced(entries)?.owner).toBeUndefined();
   });
 });

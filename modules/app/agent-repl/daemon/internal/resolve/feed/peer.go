@@ -21,7 +21,10 @@ import (
 func (r *resolver) drawPeerMessage(s *wsState, peer *conversationv1.PeerMessage) {
 	log := r.logger(s.id)
 	recipient := peer.GetAgent()
-	at := r.place(s, recipient)
+	at, ok := r.place(s, recipient)
+	if !ok {
+		return
+	}
 	// THE IDENTITY IS THE MESSAGE'S OWN STABLE id (the vendor record uuid),
 	// which BOTH planes spell identically — so the live row and the adopted row
 	// for one message resolve to one FeedId and upsert in place rather than

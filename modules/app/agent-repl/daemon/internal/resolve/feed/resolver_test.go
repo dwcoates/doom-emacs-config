@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,8 +117,34 @@ type harness struct {
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
 	// by the test, never waited on.
 	clock *fakeStallClock
+	// warnings is the fake topbar every raised warning lands on.
+	warnings *fakeWarnings
 	// placed are the entry placements Deps.EntryPlaced was told, in order.
 	placed []placedEntry
+}
+
+// fakeWarnings records every warning the resolver raised on the topbar.
+type fakeWarnings struct {
+	mu     sync.Mutex
+	raised []string
+}
+
+// RaiseWarning implements WarningRaiser, recording "<key>: <line>".
+func (f *fakeWarnings) RaiseWarning(_ ids.WorkspaceID, key, line string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.raised = append(f.raised, key+": "+line)
+}
+
+// keys answers the key of every warning raised, in order.
+func (f *fakeWarnings) keys() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.raised))
+	for _, raised := range f.raised {
+		out = append(out, strings.SplitN(raised, ": ", 2)[0])
+	}
+	return out
 }
 
 // placedEntry is one Deps.EntryPlaced call.
@@ -133,7 +162,7 @@ func newHarness(t *testing.T) *harness {
 	painter := &fakePainter{}
 	h := &harness{
 		t: t, log: log, painter: painter, nowMs: 1_700_000_000_000,
-		faults: &fakeFaults{}, clock: &fakeStallClock{},
+		faults: &fakeFaults{}, clock: &fakeStallClock{}, warnings: &fakeWarnings{},
 	}
 
 	resolver, err := newResolver(Deps{
@@ -151,6 +180,7 @@ func newHarness(t *testing.T) *harness {
 		Now:       func() time.Time { return time.UnixMilli(h.nowMs) },
 		AfterFunc: h.clock.AfterFunc,
 		Faults:    h.faults,
+		Warnings:  h.warnings,
 		PageSize:  3,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
@@ -160,6 +190,9 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("newResolver: %v", err)
 	}
 	h.resolver = resolver
+	// THE SESSION WATCHER NAMES THE MAIN AGENT before it routes a frame, and
+	// the harness stands in for it: nothing else puts an agent on the root.
+	h.resolver.OnMainAgent(testWorkspace, mainAgent())
 	return h
 }
 
@@ -577,9 +610,13 @@ func TestClearedOutputAddressRestoresTheRootFeed(t *testing.T) {
 	}
 }
 
-func TestUnplaceableAgentLandsOnTheRootWithAWarning(t *testing.T) {
-	// Arrange: the main agent is established first, so a second unknown agent
-	// really is unplaceable rather than merely first.
+// TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly pins the owner's rule
+// (2026-09-23): there is NO fallback that sends an unplaceable row to the main
+// feed. It used to land on the root with a WARN, which is the path a
+// subagent's background shell took to the root. Now nothing is drawn, the
+// failure is an ERROR, and the topbar's warning chip says so.
+func TestAnUnplaceableAgentDrawsNothingAndIsReportedLoudly(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "hello")
 
@@ -587,12 +624,62 @@ func TestUnplaceableAgentLandsOnTheRootWithAWarning(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, &conversationv1.AgentId{Value: "agent-ghost"},
 		responseSuccessActivity("unit-1", "orphaned prose"), noAddress())
 
-	// Assert: drawn on the root, and loudly.
-	if rows := h.rows(rootFeed()); len(rows) != 2 {
-		t.Fatalf("root rows = %d, want 2 — an unplaceable row is never dropped", len(rows))
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 1 {
+		t.Fatalf("root rows = %d, want only the prompt: an unplaceable row is never drawn on the root", len(rows))
 	}
-	if !h.hasRecord("warn", "daemon.feed.unplaceable_agent") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.unplaceable_agent", h.records())
+	if !h.hasRecord("error", "daemon.feed.unplaceable_agent") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.unplaceable_agent", h.records())
+	}
+	if got := h.warnings.keys(); !slices.Equal(got, []string{"unplaceable_agent:agent-ghost"}) {
+		t.Fatalf("raised = %v, want the unplaceable agent on the topbar", got)
+	}
+}
+
+// TestPlaceHasNoRootFallback pins every way a row reaches the root: the named
+// main agent's, and nothing else — no empty agent, no unnamed main, no agent
+// whose spawn was never drawn.
+func TestPlaceHasNoRootFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mainAgent string
+		agent     string
+		subFeeds  []string
+		wantOK    bool
+		wantFeed  feedid.Feed
+	}{
+		{name: "the named main agent is the root's", mainAgent: "m", agent: "m", wantOK: true, wantFeed: rootFeed()},
+		{name: "a spawned agent is its own sub-feed's", mainAgent: "m", agent: "s", subFeeds: []string{"s"}, wantOK: true,
+			wantFeed: feedid.Feed{Agent: &conversationv1.AgentId{Value: "s"}}},
+		{name: "an empty agent is unplaceable", mainAgent: "m", agent: ""},
+		{name: "an unnamed main agent places nobody, not even the first agent seen", mainAgent: "", agent: "m"},
+		{name: "an agent never spawned is unplaceable", mainAgent: "m", agent: "ghost"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.resolver.mu.Lock()
+			s := h.resolver.state(testWorkspace)
+			s.mainAgent = tc.mainAgent
+			for _, sub := range tc.subFeeds {
+				s.agentFeeds[sub] = "sub-feed-key"
+			}
+
+			// Act.
+			at, ok := h.resolver.place(s, &conversationv1.AgentId{Value: tc.agent})
+			h.resolver.mu.Unlock()
+
+			// Assert.
+			if ok != tc.wantOK {
+				t.Fatalf("placed = %v, want %v", ok, tc.wantOK)
+			}
+			if testFeedValue(at.feed) != testFeedValue(tc.wantFeed) || at.feed.Root != tc.wantFeed.Root {
+				t.Fatalf("feed = %+v, want %+v", at.feed, tc.wantFeed)
+			}
+			if !ok && !h.hasRecord("error", "daemon.feed.unplaceable_agent") {
+				t.Fatalf("records = %+v, want the refusal at ERROR", h.records())
+			}
+		})
 	}
 }
 
@@ -846,8 +933,9 @@ func TestEachWorkspaceHoldsItsOwnFeedUniverse(t *testing.T) {
 	h := newHarness(t)
 	other := ids.WorkspaceID("ws-2")
 
-	// Act.
+	// Act: ws-2's own watcher names its main agent, as ws-1's did.
 	h.deliverPrompt("turn-1", "on ws-1")
+	h.resolver.OnMainAgent(other, mainAgent())
 	h.resolver.OnPrompt(other, mainAgent(), &conversationv1.AgentPrompt{
 		Id:     &conversationv1.TurnId{Value: "turn-9"},
 		Agent:  mainAgent(),

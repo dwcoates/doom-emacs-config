@@ -96,6 +96,17 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 		return nil
 	}
 
+	// A SUBAGENT'S TRANSCRIPT SOMETIMES CARRIES NO toolUseResult AT ALL, and
+	// the vendor's backgrounding sentence is then its only statement that a
+	// shell left. See backgroundLaunchFromProse.
+	if kind, _ := classifyTool(call.name); result == nil && kind == kindBash {
+		if launch, ok := backgroundLaunchFromProse(block); ok {
+			c.log.With(at.ctxFor("launch-from-prose")).With(logging.Context{ActivityID: call.activityID, TaskID: str(launch["backgroundTaskId"])}).
+				Log("the shell result carries no structured result; its backgrounding sentence names the launched task")
+			result = launch
+		}
+	}
+
 	// A launch tells owner resolution which spool belongs to which call. It is
 	// reported before the settle so the root package can attach a spool that is
 	// already being written.

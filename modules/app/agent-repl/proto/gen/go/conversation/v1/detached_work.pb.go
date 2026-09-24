@@ -48,6 +48,23 @@ type AgentDetachedWork struct {
 	// is also what a reader that RESTARTED needs in order to re-open the spool
 	// it was following, since the handle above addresses live work only.
 	Output *DetachedWorkOutput `protobuf:"bytes,4,opt,name=output,proto3,oneof" json:"output,omitempty"`
+	// WHOSE WORK THIS IS: the agent that made the spawning call. Detached work
+	// is drawn ONLY in its owner's feed — the main agent's work on the root
+	// feed, a subagent's in that subagent's own feed — at the spawning call's
+	// own row.
+	//
+	// THE OWNER IS NOT THE ANNOUNCER. The book this announcement rides is the
+	// agent that happened to state it, which is frequently the main agent even
+	// for a subagent's work: the vendor's task stream is session-wide and names
+	// no agent at all. Reading the announcer as the owner drew a subagent's
+	// background shell on the root feed.
+	//
+	// UNSET when the producer never observed the spawning call — a backgrounded
+	// subagent's own calls never reach the stream plane. A consumer then takes
+	// the owner from the agent whose stream carried the spawning call, and when
+	// neither states one the work is unplaceable: it is reported, never
+	// defaulted to the main agent.
+	Owner *AgentId `protobuf:"bytes,5,opt,name=owner,proto3" json:"owner,omitempty"`
 	// HOW it came to be detached. The two are genuinely different situations for
 	// a consumer: one continues an element it is already drawing, the other has
 	// no element yet and must be told what the work IS.
@@ -101,6 +118,13 @@ func (x *AgentDetachedWork) GetWork() *DetachedWorkId {
 func (x *AgentDetachedWork) GetOutput() *DetachedWorkOutput {
 	if x != nil {
 		return x.Output
+	}
+	return nil
+}
+
+func (x *AgentDetachedWork) GetOwner() *AgentId {
+	if x != nil {
+		return x.Owner
 	}
 	return nil
 }
@@ -821,10 +845,11 @@ var File_conversation_v1_detached_work_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_detached_work_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/detached_work.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1econversation/v1/workflow.proto\"\xa6\x02\n" +
+	"#conversation/v1/detached_work.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1econversation/v1/workflow.proto\"\xd6\x02\n" +
 	"\x11AgentDetachedWork\x123\n" +
 	"\x04work\x18\x01 \x01(\v2\x1f.conversation.v1.DetachedWorkIdR\x04work\x12@\n" +
-	"\x06output\x18\x04 \x01(\v2#.conversation.v1.DetachedWorkOutputH\x01R\x06output\x88\x01\x01\x12C\n" +
+	"\x06output\x18\x04 \x01(\v2#.conversation.v1.DetachedWorkOutputH\x01R\x06output\x88\x01\x01\x12.\n" +
+	"\x05owner\x18\x05 \x01(\v2\x18.conversation.v1.AgentIdR\x05owner\x12C\n" +
 	"\bdetached\x18\x02 \x01(\v2%.conversation.v1.DetachedWorkDetachedH\x00R\bdetached\x12@\n" +
 	"\acreated\x18\x03 \x01(\v2$.conversation.v1.DetachedWorkCreatedH\x00R\acreatedB\b\n" +
 	"\x06originB\t\n" +
@@ -885,33 +910,35 @@ var file_conversation_v1_detached_work_proto_goTypes = []any{
 	(*DetachedWorkCreated)(nil),          // 8: conversation.v1.DetachedWorkCreated
 	(*DetachableWork)(nil),               // 9: conversation.v1.DetachableWork
 	(*DetachedWorkId)(nil),               // 10: conversation.v1.DetachedWorkId
-	(*AgentActivityId)(nil),              // 11: conversation.v1.AgentActivityId
-	(*AgentSubagent)(nil),                // 12: conversation.v1.AgentSubagent
-	(*AgentBash)(nil),                    // 13: conversation.v1.AgentBash
-	(*AgentWorkflowStart)(nil),           // 14: conversation.v1.AgentWorkflowStart
-	(*AgentMonitor)(nil),                 // 15: conversation.v1.AgentMonitor
+	(*AgentId)(nil),                      // 11: conversation.v1.AgentId
+	(*AgentActivityId)(nil),              // 12: conversation.v1.AgentActivityId
+	(*AgentSubagent)(nil),                // 13: conversation.v1.AgentSubagent
+	(*AgentBash)(nil),                    // 14: conversation.v1.AgentBash
+	(*AgentWorkflowStart)(nil),           // 15: conversation.v1.AgentWorkflowStart
+	(*AgentMonitor)(nil),                 // 16: conversation.v1.AgentMonitor
 }
 var file_conversation_v1_detached_work_proto_depIdxs = []int32{
 	10, // 0: conversation.v1.AgentDetachedWork.work:type_name -> conversation.v1.DetachedWorkId
 	1,  // 1: conversation.v1.AgentDetachedWork.output:type_name -> conversation.v1.DetachedWorkOutput
-	4,  // 2: conversation.v1.AgentDetachedWork.detached:type_name -> conversation.v1.DetachedWorkDetached
-	8,  // 3: conversation.v1.AgentDetachedWork.created:type_name -> conversation.v1.DetachedWorkCreated
-	2,  // 4: conversation.v1.DetachedWorkOutput.readable:type_name -> conversation.v1.DetachedWorkOutputReadable
-	3,  // 5: conversation.v1.DetachedWorkOutput.unreadable:type_name -> conversation.v1.DetachedWorkOutputUnreadable
-	11, // 6: conversation.v1.DetachedWorkDetached.detached_from_id:type_name -> conversation.v1.AgentActivityId
-	5,  // 7: conversation.v1.DetachedWorkDetached.requested:type_name -> conversation.v1.DetachedCauseRequested
-	6,  // 8: conversation.v1.DetachedWorkDetached.by_user:type_name -> conversation.v1.DetachedCauseByUser
-	7,  // 9: conversation.v1.DetachedWorkDetached.timed_out:type_name -> conversation.v1.DetachedCauseTimedOut
-	9,  // 10: conversation.v1.DetachedWorkCreated.work_created:type_name -> conversation.v1.DetachableWork
-	12, // 11: conversation.v1.DetachableWork.subagent:type_name -> conversation.v1.AgentSubagent
-	13, // 12: conversation.v1.DetachableWork.bash:type_name -> conversation.v1.AgentBash
-	14, // 13: conversation.v1.DetachableWork.workflow:type_name -> conversation.v1.AgentWorkflowStart
-	15, // 14: conversation.v1.DetachableWork.monitor:type_name -> conversation.v1.AgentMonitor
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	11, // 2: conversation.v1.AgentDetachedWork.owner:type_name -> conversation.v1.AgentId
+	4,  // 3: conversation.v1.AgentDetachedWork.detached:type_name -> conversation.v1.DetachedWorkDetached
+	8,  // 4: conversation.v1.AgentDetachedWork.created:type_name -> conversation.v1.DetachedWorkCreated
+	2,  // 5: conversation.v1.DetachedWorkOutput.readable:type_name -> conversation.v1.DetachedWorkOutputReadable
+	3,  // 6: conversation.v1.DetachedWorkOutput.unreadable:type_name -> conversation.v1.DetachedWorkOutputUnreadable
+	12, // 7: conversation.v1.DetachedWorkDetached.detached_from_id:type_name -> conversation.v1.AgentActivityId
+	5,  // 8: conversation.v1.DetachedWorkDetached.requested:type_name -> conversation.v1.DetachedCauseRequested
+	6,  // 9: conversation.v1.DetachedWorkDetached.by_user:type_name -> conversation.v1.DetachedCauseByUser
+	7,  // 10: conversation.v1.DetachedWorkDetached.timed_out:type_name -> conversation.v1.DetachedCauseTimedOut
+	9,  // 11: conversation.v1.DetachedWorkCreated.work_created:type_name -> conversation.v1.DetachableWork
+	13, // 12: conversation.v1.DetachableWork.subagent:type_name -> conversation.v1.AgentSubagent
+	14, // 13: conversation.v1.DetachableWork.bash:type_name -> conversation.v1.AgentBash
+	15, // 14: conversation.v1.DetachableWork.workflow:type_name -> conversation.v1.AgentWorkflowStart
+	16, // 15: conversation.v1.DetachableWork.monitor:type_name -> conversation.v1.AgentMonitor
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_detached_work_proto_init() }
