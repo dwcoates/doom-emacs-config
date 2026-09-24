@@ -61,6 +61,7 @@ assertions.**
    | `AGENT_REPL_E2E_DAEMON_URL` | `http://<daemon.addr>` | the transport's base url |
    | `AGENT_REPL_E2E_WORKSPACE_ID` | the registered ref's id | `workspaceRef(...)` |
    | `AGENT_REPL_E2E_WORKSPACE_DIR` | the registered ref's dir | `workspaceRef(...)` |
+   | `AGENT_REPL_E2E_WEBAPP_BUILD` | the entry the daemon's served dist names (`harness.FakeWebappEntry`) | the harness shell's built entry tag, which the page reads as its webapp build |
    | `AGENT_REPL_FORBID_VENDOR_CALLS` | `1` | standing tripwire, as in the fake-daemon integration config |
 
    The child's stdout/stderr are streamed into the Go test's log, so a vitest
