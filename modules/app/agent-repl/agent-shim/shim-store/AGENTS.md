@@ -327,14 +327,15 @@ database is locked (5) (SQLITE_BUSY)", each one a batch handed back to its
 caller's retry, plus five `store.db.slow-query` warnings whose whole 5199ms was
 the timeout being burned before the refusal.
 
-So there is a PROCESS-WIDE WRITE SLOT (`DB.writeGate`, `internal/db/writer.go`)
+So there is a PROCESS-WIDE WRITE SLOT (`DB.writes`, `internal/db/writer.go`)
 and **`beginWrite` is the only way a write transaction is opened in this
 package** — grep for `BeginTx` to check it. A batch WAITS ITS TURN, bounded only
 by its own request context, and then writes; it is never refused for a BUSY
 caused by a sibling.
 
-- **The slot is a one-slot channel, not a `sync.Mutex`**, precisely so it can be
-  selected against `ctx.Done()`. A caller that hangs up while queued gets its own
+- **The slot is a scheduler with a per-waiter grant channel, not a
+  `sync.Mutex`**, precisely so a queued writer can be selected against
+  `ctx.Done()`. A caller that hangs up while queued gets its own
   `context.Canceled` back — an `info` "abandoned" record, not an `error` — rather
   than a storage failure its producer would retry for a caller that is gone.
 - **The release is deferred BEFORE the rollback**, so it runs after it. Handing
@@ -346,6 +347,36 @@ caused by a sibling.
   now always ends in a turn. Durations are read from `DB.mono`, an injectable
   monotonic clock, so a test asserts an exact wait by advancing it rather than
   by sleeping.
+- **THE QUEUE HAS TWO TIERS, AND INTERACTIVE ALWAYS GOES FIRST** (owner's rule,
+  2026-09-23: an interactive write never queues behind a bulk one). Every
+  `WriteBatchRequest` carries `write_class` — INTERACTIVE from the shim, BULK
+  from the sidecar — and an unset class (message or arm) is REFUSED at
+  `write_class_unset`, never defaulted. The store's own writes state theirs in
+  code: the ledger sweep and schema creation are BULK. `DB.writes`
+  (`writeScheduler`, `internal/db/writer.go`) hands a released slot DIRECTLY to
+  the next waiter under its lock: the oldest interactive waiter, else the
+  oldest bulk one.
+- **THE FAIRNESS RULE.** Once a bulk writer is waiting, it is granted the slot
+  after `InteractiveBurstBeforeBulk` (8) consecutive interactive grants, and
+  the count restarts after each bulk grant and whenever no bulk writer is left
+  waiting. So bulk gets at least one grant in nine under any interactive load,
+  and the most an interactive write can wait on bulk is ONE bounded bulk
+  transaction.
+- **A BULK BATCH IS SPLIT BY THE STORE, AND THE STORE'S SPLIT IS
+  AUTHORITATIVE.** `bulkBounds` (`internal/db/write.go`: 64 rows, 1 MiB of
+  frames, 100ms of execution, whichever comes first, checked after each entry so
+  a transaction always makes progress) caps one bulk transaction whatever size
+  the producer sends, and the writer is yielded between them. The cursor
+  advance and the shapes ride the LAST transaction, so a failure part-way may
+  leave leading entries committed but never the advance past them; the re-read
+  replays them into ledger absorption, and the server still publishes the lines
+  that did commit. An interactive batch is one transaction, as before.
+- **EVERY WRITE IS TIMED BY CLASS.** `store.db.write-timing` (verbose) records
+  each write transaction's `write_class`, `lock_wait_ms` (the queue) and
+  `exec_ms` (the rest); the
+  slow-query record carries the same three and names the class in its message,
+  and its budget window is kept per class so a bulk backlog cannot make an
+  interactive spike read as persistent.
 - **THE REFUSAL PATH SURVIVES FOR AN OUTSIDE WRITER.** Nothing else is supposed
   to open the file, but `sqlite3` at a shell, a stray second store racing the
   socket singleton check, or a backup tool all still can, and the DSN's
@@ -566,7 +597,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `token_empty`, `unknown_watch_token`, `file_id_empty`, `run_empty`,
 `unknown_bash_run`, `store_refused_request`, `upsert_changes_identity`,
 `page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
-`session_empty`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
+`session_empty`, `write_class_unset`, `database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
 `listen_occupied`.
 
 - **THE SITE IS NOT THE ARM.** A site says which of the store's many checks said

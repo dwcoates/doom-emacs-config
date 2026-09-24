@@ -758,6 +758,23 @@ func fileProducer(cli storev1connect.ShimStoreClient) *producer {
 	return &producer{name: fileProducerName, file: true, cli: cli}
 }
 
+// writeClass is the queue this producer's writes take, as the real producer
+// states it: the shim writes interactive, the sidecar writes bulk.
+func (p *producer) writeClass() *storev1.WriteClass {
+	if p.file {
+		return bulkClass()
+	}
+	return interactiveClass()
+}
+
+func interactiveClass() *storev1.WriteClass {
+	return &storev1.WriteClass{WriteClass: &storev1.WriteClass_Interactive{Interactive: &storev1.WriteClassInteractive{}}}
+}
+
+func bulkClass() *storev1.WriteClass {
+	return &storev1.WriteClass{WriteClass: &storev1.WriteClass_Bulk{Bulk: &storev1.WriteClassBulk{}}}
+}
+
 func (p *producer) plane() *storev1.Plane {
 	if p.file {
 		return &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}}
@@ -788,8 +805,9 @@ func (p *producer) sessionEntry(writeID, upsertKey string, update *conversationv
 // attempt sends one batch and returns whatever came back, refusals included.
 func (p *producer) attempt(ctx context.Context, batch *storev1.EntryBatch) (*storev1.WriteBatchResponse, error) {
 	req := connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: p.name,
-		Batch:    batch,
+		Producer:   p.name,
+		Batch:      batch,
+		WriteClass: p.writeClass(),
 	})
 	if p.requestID != "" {
 		req.Header().Set(requestIDHeader, p.requestID)

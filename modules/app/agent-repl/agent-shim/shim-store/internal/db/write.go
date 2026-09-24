@@ -68,20 +68,78 @@ type WriteResult struct {
 	Shapes int
 }
 
-// WriteBatch commits one producer's batch — records and cursor advance — as ONE
-// transaction, and returns the page lines it wrote.
+// bulkBounds bound ONE bulk transaction. A bulk batch whose entries exceed any
+// of them is committed as several transactions, and the writer is yielded
+// between them — so an interactive write that arrives while a bulk batch is
+// being written waits for at most one of these, never for the whole batch.
 //
-// DURABLE OR NOTHING. Every validation refusal happens BEFORE the transaction
-// opens and every storage failure rolls it back, so a caller that received a
-// failure knows with certainty that no row and no cursor moved. That certainty
-// is what lets the producer hold the batch in a bounded in-memory buffer with
-// no durable spill behind it.
-func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error) {
+// ALL THREE ARE NEEDED. Rows bound the index maintenance, bytes bound the WAL a
+// transaction appends (one frame can be large), and time bounds what neither
+// can predict: a loaded host, a cold page cache, a checkpoint. The time bound
+// is checked AFTER each entry, so a transaction always applies at least one
+// entry and a batch always makes progress.
+//
+// THE STORE'S SPLIT IS AUTHORITATIVE. A producer may bound its own batches too,
+// and the sidecar does; nothing here depends on it, and nothing a producer sends
+// can make a bulk transaction larger than this.
+type bulkBounds struct {
+	rows  int
+	bytes int
+	time  time.Duration
+}
+
+// The shipped bulk bounds. A healthy row costs ~3.5ms on the owner's largest
+// measured database, so 64 rows is ~220ms of work on a quiet host and the
+// 100ms time bound is what keeps a loaded one to a short hold.
+const (
+	DefaultBulkChunkRows  = 64
+	DefaultBulkChunkBytes = 1 << 20
+	DefaultBulkChunkTime  = 100 * time.Millisecond
+)
+
+func resolveBulkBounds(opts Options) bulkBounds {
+	b := bulkBounds{rows: opts.BulkChunkRows, bytes: opts.BulkChunkBytes, time: opts.BulkChunkTime}
+	if b.rows <= 0 {
+		b.rows = DefaultBulkChunkRows
+	}
+	if b.bytes <= 0 {
+		b.bytes = DefaultBulkChunkBytes
+	}
+	if b.time <= 0 {
+		b.time = DefaultBulkChunkTime
+	}
+	return b
+}
+
+// WriteBatch commits one producer's batch — records and cursor advance — and
+// returns what it wrote. The CLASS decides how it is committed, and the caller
+// states it; the store never infers it from content.
+//
+// AN INTERACTIVE BATCH IS DURABLE OR NOTHING: one transaction. Every validation
+// refusal happens BEFORE it opens and every storage failure rolls it back, so a
+// caller that received a failure knows no row and no cursor moved. That
+// certainty is what lets the shim hold the batch in a bounded in-memory buffer
+// with no durable spill behind it.
+//
+// A BULK BATCH IS COMMITTED IN BOUNDED TRANSACTIONS (bulkBounds), yielding the
+// writer between them so a queued interactive write goes next. The cursor
+// advance and the shape observations ride the LAST transaction, so they still
+// commit with the final entries they describe. A failure may therefore leave
+// LEADING entries committed, never the cursor advance: the producer re-reads
+// from its unadvanced cursor and the write ledger absorbs what already landed.
+// On failure the result still carries what DID commit, so the caller can
+// publish those lines to live watchers — a durable line nobody was told about
+// would be absorbed on the retry and never streamed.
+func (d *DB) WriteBatch(ctx context.Context, producer string, class WriteClass, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error) {
 	var result WriteResult
-	base := logging.Fields{Operation: "store.db.write-batch", Table: "entry", Producer: producer}
+	base := logging.Fields{Operation: "store.db.write-batch", Table: "entry", Producer: producer, WriteClass: class.String()}
 
 	if producer == "" {
 		return result, d.refuse(base, invalidFieldf("producer", "producer is empty — every write is attributed"))
+	}
+	if !class.valid() {
+		return result, d.refuse(base, invalidSitef(SiteWriteClassUnset, "write_class",
+			"write_class is unset — every write states whether it is interactive or bulk, and the store never guesses"))
 	}
 	if batch == nil {
 		return result, d.refuse(base, invalidFieldf("batch", "batch is unset"))
@@ -110,7 +168,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			return result, d.refuse(base, err)
 		}
 	}
-	// THE SHAPE CATALOG IS VALIDATED WITH EVERYTHING ELSE, before the
+	// THE SHAPE CATALOG IS VALIDATED WITH EVERYTHING ELSE, before any
 	// transaction opens, so a malformed observation refuses the batch whole
 	// rather than half-committing the records beside it.
 	for i, shape := range shapes {
@@ -119,33 +177,71 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		}
 	}
 
+	remaining := routes
+	for transaction := 1; ; transaction++ {
+		part, consumed, err := d.writeTransaction(ctx, base, class, transaction, remaining, cursor, shapes)
+		if err != nil {
+			if transaction > 1 {
+				// THE LEADING TRANSACTIONS STAY COMMITTED, and the record says so,
+				// because a reader of the refusal alone would conclude nothing
+				// moved. The cursor did not advance, so the re-read replays them
+				// into the ledger's absorption.
+				d.log.LogVerbose(base, "bulk batch failed after %d committed transaction(s) written=%d absorbed=%d; the cursor advance did not commit and the leading entries will be absorbed on the re-read",
+					transaction-1, result.Written, result.Absorbed)
+			}
+			return result, err
+		}
+		result.merge(part)
+		remaining = remaining[consumed:]
+		if len(remaining) == 0 {
+			return result, nil
+		}
+	}
+}
+
+// merge folds one committed transaction's outcome into the batch's.
+func (r *WriteResult) merge(part WriteResult) {
+	r.Written += part.Written
+	r.Absorbed += part.Absorbed
+	r.Skipped = append(r.Skipped, part.Skipped...)
+	r.Lines = append(r.Lines, part.Lines...)
+	r.BashRows = append(r.BashRows, part.BashRows...)
+	r.Shapes += part.Shapes
+}
+
+// writeTransaction commits ONE transaction of a batch: every remaining entry
+// for an interactive write, or a bounded prefix of them for a bulk one. It
+// reports how many entries it consumed, and applies the shapes and the cursor
+// advance only when it consumed the last of them. Its outcome is returned only
+// once it has COMMITTED; a rolled-back transaction contributes nothing.
+func (d *DB) writeTransaction(ctx context.Context, base logging.Fields, class WriteClass, transaction int, routes []routed,
+	cursor *storev1.CursorState, shapes []*storev1.ShapeObservation) (WriteResult, int, error) {
+	var result WriteResult
+	consumed := 0
+
 	// THE CLOCK STARTS BEFORE THE TRANSACTION, AND THE WAIT IS MEASURED APART
 	// FROM THE WORK. A batch queues on the process-wide write slot behind
-	// whatever else this store is writing, and Timing only the total made that
+	// whatever else this store is writing, and timing only the total made that
 	// queue look like a slow statement: the owner's store reported a 3822ms
-	// `write_batch` for SIX rows whose statements are all single indexed seeks,
-	// and the record blamed index maintenance for time no index spent.
-	// `lock_wait_ms` is the half an operator can act on — it says to look at
-	// what ELSE is writing, not for a missing index.
-	//
-	// WHAT IT MEASURES IS NOW THE IN-PROCESS QUEUE, which is the same number an
-	// operator wanted and a truthful one: before the gate it was time spent
-	// inside SQLite's busy handler, which ended either in a write or — nine
-	// times on 2026-09-13 — in a SQLITE_BUSY refusal after the whole 5s
-	// timeout. A wait here always ends in a turn.
+	// `write_batch` for SIX rows whose statements are all single indexed seeks.
+	// `lock_wait_ms` is the queue — the half that says to look at what ELSE is
+	// writing — and `exec_ms` is the rest, the half that says to look at this
+	// transaction or at the host it ran on.
 	started := d.mono()
 	var lockWait time.Duration
 	defer func() {
-		base.LockWait = lockWait
-		d.observeQuery(StatementWriteBatch, "entry", base, started, int64(len(entries)))
-		d.traceStatement(ctx, StatementWriteBatch, "entry", base, int64(len(entries)))
+		fields := base
+		fields.LockWait = lockWait
+		d.observeQuery(StatementWriteBatch, "entry", fields, started, int64(consumed))
+		d.traceStatement(ctx, StatementWriteBatch, "entry", fields, int64(consumed))
+		d.traceWriteTiming(StatementWriteBatch, fields, started, int64(consumed), transaction)
 	}()
 
 	d.log.LogVerbose(logging.Fields{
-		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
-	}, "starting transaction entries=%d shapes=%d cursor_advance=%t", len(entries), len(shapes), cursor != nil)
+		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
+	}, "starting transaction %d entries_remaining=%d shapes=%d cursor_advance=%t", transaction, len(routes), len(shapes), cursor != nil)
 
-	tx, release, err := d.beginWrite(ctx)
+	tx, release, err := d.beginWrite(ctx, class)
 	lockWait = d.mono().Sub(started)
 	if err != nil {
 		// A CALLER THAT HUNG UP WHILE QUEUED GETS ITS OWN CANCELLATION BACK.
@@ -154,126 +250,160 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		// to retry a batch its own caller has already abandoned — and would
 		// write an error record for a healthy store.
 		if isContextError(err) {
-			return WriteResult{}, d.refuse(base, err)
+			return WriteResult{}, 0, d.refuse(base, err)
 		}
-		return WriteResult{}, d.refuse(base, storagef(err, "begin write transaction"))
+		return WriteResult{}, 0, d.refuse(base, storagef(err, "begin write transaction"))
 	}
 	// LIFO: the rollback runs first, then the slot is released. Releasing
 	// before the transaction ended would let the next writer begin against a
 	// lock this one still holds, which is the contention the gate removes.
 	defer release()
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+	began := d.mono()
 
 	nextSeq, err := d.currentWriteSeq(ctx, tx)
 	if err != nil {
-		return WriteResult{}, d.refuse(base, err)
+		return WriteResult{}, 0, d.refuse(base, err)
 	}
 	now := d.now()
 
+	frameBytes := 0
 	for i, r := range routes {
-		fields := base
-		fields.WriteID = r.writeID
-		fields.UpsertKey = r.upsertKey
-		if r.book.Valid {
-			fields.BookAgentID = r.book.String
+		if class == WriteBulk && i > 0 && d.bulkFull(i, frameBytes, began) {
+			break
 		}
-
-		absorbed, err := d.absorbedBefore(ctx, tx, r.writeID)
-		if err != nil {
-			return WriteResult{}, d.refuse(fields, err)
+		consumed = i + 1
+		frameBytes += len(r.frame)
+		if err := d.applyEntry(ctx, tx, base, r, cursor, &nextSeq, now, &result); err != nil {
+			return WriteResult{}, 0, err
 		}
-		if absorbed {
-			result.Absorbed++
-			d.log.LogVerbose(fields, "write absorbed: this write_id already landed entries_index=%d", i)
-			continue
+		if class == WriteBulk && d.bulkEntryApplied != nil {
+			d.bulkEntryApplied()
 		}
-
-		skip, err := d.applyIdentityPolicy(ctx, tx, r)
-		if err != nil {
-			return WriteResult{}, d.refuse(fields, err)
-		}
-		if skip != nil {
-			// A LEGACY BOOK-CONFLICT IS A SKIP, NOT A BATCH-FATAL REFUSAL. The
-			// stored row is kept, this entry lands nothing (no upsert, no ledger
-			// row, so a later replay skips it again — idempotent), and the
-			// batch's other entries still commit.
-			//
-			// THE STORE LOGS THE PER-ENTRY SKIP AT DEBUG. A skip is a benign
-			// idempotency outcome the store cannot contextualize; it still
-			// RETURNS the skipped entry in result.Skipped so the sidecar — which
-			// knows the ingest context — summarizes and decides. Left at warn,
-			// re-ingesting the corpus emitted one warn per already-stored entry
-			// and flooded a cold re-scan's strict harvest. The skip is still
-			// reported to the caller; only the store's own severity drops.
-			result.Skipped = append(result.Skipped, *skip)
-			d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
-				skip.FromBook, skip.ToBook, i)
-			continue
-		}
-
-		if r.workflowNotImplemented {
-			// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing
-			// is lost, and the warning says why nothing serves it yet.
-			warn := fields
-			warn.Level = "warn"
-			d.log.Log(warn, "workflow ingestion not implemented this wave — the entry is stored as never-served residue and the workflow table is untouched entries_index=%d", i)
-		}
-
-		nextSeq++
-		position, err := d.upsertEntry(ctx, tx, r, nextSeq, now)
-		if err != nil {
-			return WriteResult{}, d.refuse(fields, err)
-		}
-		if err := d.recordApplied(ctx, tx, r, cursor, nextSeq, now); err != nil {
-			return WriteResult{}, d.refuse(fields, err)
-		}
-		if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
-			return WriteResult{}, d.refuse(fields, err)
-		}
-		result.Written++
-		switch r.kind {
-		case kindPageLine:
-			result.Lines = append(result.Lines, LineWritten{
-				AgentID:  r.book.String,
-				Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine},
-				WriteSeq: nextSeq,
-			})
-		case kindBash:
-			result.BashRows = append(result.BashRows, BashRowWritten{
-				RunID:    r.runID.String,
-				Row:      r.bashRow,
-				WriteSeq: nextSeq,
-			})
-		}
-		verbose := fields
-		verbose.Position = encodePointer(position).GetValue()
-		verbose.WriteSeq = nextSeq
-		d.log.LogVerbose(verbose, "entry written kind=%s entries_index=%d", r.kind, i)
 	}
+	final := consumed == len(routes)
 
-	// THE CATALOG COMMITS WITH THE CURSOR ADVANCE THAT CONSUMED THE LINES IT
-	// DESCRIBES. Split them and an advance that survived a lost catalog write
-	// takes the shape with it: the bytes are past the cursor, nothing re-reads
-	// them, and the shape is gone for good.
-	if err := d.applyShapes(ctx, tx, shapes); err != nil {
-		return WriteResult{}, d.refuse(base, err)
-	}
-	result.Shapes = len(shapes)
-
-	if cursor != nil {
-		if err := d.upsertCursor(ctx, tx, cursor, now); err != nil {
-			return WriteResult{}, d.refuse(base, err)
+	if final {
+		// THE CATALOG COMMITS WITH THE CURSOR ADVANCE THAT CONSUMED THE LINES IT
+		// DESCRIBES. Split them and an advance that survived a lost catalog
+		// write takes the shape with it: the bytes are past the cursor, nothing
+		// re-reads them, and the shape is gone for good. Both ride the LAST
+		// transaction of a split bulk batch for the same reason.
+		if err := d.applyShapes(ctx, tx, shapes); err != nil {
+			return WriteResult{}, 0, d.refuse(base, err)
+		}
+		result.Shapes = len(shapes)
+		if cursor != nil {
+			if err := d.upsertCursor(ctx, tx, cursor, now); err != nil {
+				return WriteResult{}, 0, d.refuse(base, err)
+			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return WriteResult{}, d.refuse(base, storagef(err, "commit write transaction"))
+		return WriteResult{}, 0, d.refuse(base, storagef(err, "commit write transaction"))
+	}
+	if d.transactionCommitted != nil {
+		d.transactionCommitted(class)
 	}
 	d.log.LogVerbose(logging.Fields{
-		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
-	}, "transaction committed written=%d absorbed=%d skipped=%d lines=%d shapes=%d cursor_advance=%t",
-		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), result.Shapes, cursor != nil)
-	return result, nil
+		Operation: "store.db.write-batch", Table: "entry", Producer: base.Producer, WriteClass: class.String(), Transaction: "BEGIN IMMEDIATE",
+	}, "transaction %d committed written=%d absorbed=%d skipped=%d lines=%d shapes=%d cursor_advance=%t final=%t",
+		transaction, result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), result.Shapes, final && cursor != nil, final)
+	return result, consumed, nil
+}
+
+// bulkFull reports whether a bulk transaction that has applied `applied`
+// entries carrying `frameBytes` bytes, and began executing at `began`, must
+// commit before taking another.
+func (d *DB) bulkFull(applied, frameBytes int, began time.Time) bool {
+	return applied >= d.bulk.rows || frameBytes >= d.bulk.bytes || d.mono().Sub(began) >= d.bulk.time
+}
+
+// applyEntry applies one validated entry inside an open write transaction:
+// absorb it, skip it, or upsert it and record it in the ledger.
+func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r routed, cursor *storev1.CursorState,
+	nextSeq *uint64, now int64, result *WriteResult) error {
+	fields := base
+	fields.WriteID = r.writeID
+	fields.UpsertKey = r.upsertKey
+	if r.book.Valid {
+		fields.BookAgentID = r.book.String
+	}
+
+	absorbed, err := d.absorbedBefore(ctx, tx, r.writeID)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+	if absorbed {
+		result.Absorbed++
+		d.log.LogVerbose(fields, "write absorbed: this write_id already landed entries_index=%d", r.index)
+		return nil
+	}
+
+	skip, err := d.applyIdentityPolicy(ctx, tx, r)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+	if skip != nil {
+		// A LEGACY BOOK-CONFLICT IS A SKIP, NOT A BATCH-FATAL REFUSAL. The
+		// stored row is kept, this entry lands nothing (no upsert, no ledger
+		// row, so a later replay skips it again — idempotent), and the batch's
+		// other entries still commit.
+		//
+		// THE STORE LOGS THE PER-ENTRY SKIP AT DEBUG. A skip is a benign
+		// idempotency outcome the store cannot contextualize; it still RETURNS
+		// the skipped entry in result.Skipped so the sidecar — which knows the
+		// ingest context — summarizes and decides. Left at warn, re-ingesting
+		// the corpus emitted one warn per already-stored entry and flooded a
+		// cold re-scan's strict harvest. The skip is still reported to the
+		// caller; only the store's own severity drops.
+		result.Skipped = append(result.Skipped, *skip)
+		d.log.LogVerbose(fields, "entry skipped: upsert_key already names a row under book %q; the stored row is kept and this entry (book %q) is not applied — re-ingesting already-stored content is idempotent entries_index=%d",
+			skip.FromBook, skip.ToBook, r.index)
+		return nil
+	}
+
+	if r.workflowNotImplemented {
+		// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing is
+		// lost, and the warning says why nothing serves it yet.
+		warn := fields
+		warn.Level = "warn"
+		d.log.Log(warn, "workflow ingestion not implemented this wave — the entry is stored as never-served residue and the workflow table is untouched entries_index=%d", r.index)
+	}
+
+	*nextSeq++
+	seq := *nextSeq
+	position, err := d.upsertEntry(ctx, tx, r, seq, now)
+	if err != nil {
+		return d.refuse(fields, err)
+	}
+	if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {
+		return d.refuse(fields, err)
+	}
+	if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
+		return d.refuse(fields, err)
+	}
+	result.Written++
+	switch r.kind {
+	case kindPageLine:
+		result.Lines = append(result.Lines, LineWritten{
+			AgentID:  r.book.String,
+			Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine},
+			WriteSeq: seq,
+		})
+	case kindBash:
+		result.BashRows = append(result.BashRows, BashRowWritten{
+			RunID:    r.runID.String,
+			Row:      r.bashRow,
+			WriteSeq: seq,
+		})
+	}
+	verbose := fields
+	verbose.Position = encodePointer(position).GetValue()
+	verbose.WriteSeq = seq
+	d.log.LogVerbose(verbose, "entry written kind=%s entries_index=%d", r.kind, r.index)
+	return nil
 }
 
 // refuse records one refusal and hands the error back for the server to shape
