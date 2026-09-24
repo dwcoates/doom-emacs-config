@@ -21,6 +21,7 @@ import {
   UNMODELED_KEY,
   createCallRegistry,
   dispositionOf,
+  endQueryCalls,
   endTurnCalls,
   environmentOf,
   type PendingCall,
@@ -73,6 +74,7 @@ const STREAM_MISMATCH =
   "invariant violated: a tool result's stream is not its call's; settling by the vendor's call id";
 const TURN_RELEASED =
   "the turn ended with calls held that no record on this stream will settle; they are released";
+const QUERY_RELEASED = "the query ended with calls held; they are released and nothing is written for them";
 
 /** One settled outcome. */
 function outcome(): ToolOutcome {
@@ -580,6 +582,48 @@ describe("the turn's end", () => {
 
     // Assert
     expect(entries.map((entry) => entry.source.blockIndex)).toEqual([0, 1]);
+  });
+});
+
+describe("the query's end", () => {
+  it("releases every call still held", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember({ ...call("toolu_bash", "Bash"), input: { command: "sleep 600" } });
+
+    // Act
+    endQueryCalls(registry, "the vendor query died");
+
+    // Assert
+    expect(registry.open()).toEqual([]);
+  });
+
+  it("logs what it released at info", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_read", "Read"));
+
+    // Act
+    const records = recordsDuring(() => endQueryCalls(registry, "the vendor query died"));
+
+    // Assert
+    expect(records.filter((record) => record.message === QUERY_RELEASED)).toMatchObject([
+      {
+        level: "info",
+        context: { why: "the vendor query died", released: 1 },
+      },
+    ]);
+  });
+
+  it("logs nothing when nothing was held", () => {
+    // Arrange
+    const registry = createCallRegistry();
+
+    // Act
+    const records = recordsDuring(() => endQueryCalls(registry, "the vendor query died"));
+
+    // Assert
+    expect(records.filter((record) => record.message === QUERY_RELEASED)).toEqual([]);
   });
 });
 

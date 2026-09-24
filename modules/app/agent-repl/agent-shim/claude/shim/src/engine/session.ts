@@ -2252,6 +2252,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // otherwise run while the verb sat out the rest of its bound.
     settleStartOnQueryEnd(detail);
     gate.standDown(`the vendor query died: ${detail}`);
+    // NOTHING THE DEAD QUERY ANNOUNCED CAN SETTLE, so the fold lets go of it.
+    deps.fold.endQuery(`the vendor query died: ${detail}`);
     query = undefined;
     // THE STREAM OWNER GETS ITS OWN TERMINAL. `query_died` is a SESSION fact,
     // and a consumer watching the agent -- which is the consumer actually
@@ -2602,6 +2604,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     abort?.abort();
     previousPrompts?.close();
     previous?.close();
+    // THE REPLACED QUERY ANSWERS NOTHING MORE, so nothing it announced can
+    // settle; the fold lets go of it before the new query's first message.
+    deps.fold.endQuery("the query was replaced");
     await startQuery(options.binding, options.resumeSessionAt);
   }
 

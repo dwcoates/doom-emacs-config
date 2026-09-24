@@ -159,6 +159,12 @@ export interface EngineFoldOutput {
 /** The fold, as the engine drives it: one call per message, in arrival order. */
 export interface EngineFold {
   onSdkMessage(message: SdkMessage, context: FoldContext): EngineFoldOutput;
+  /**
+   * The query the fold was reading is OVER — it died, or the engine replaced
+   * it. Nothing that query announced can settle any more, so whatever the fold
+   * still holds for it is let go (convert/fold.ts `endQuery`).
+   */
+  endQuery(why: string): void;
 }
 
 /**
@@ -186,5 +192,7 @@ export function turnBoundaryOnlyFold(): EngineFold {
             },
           }
         : { entries: [] },
+    // HOLDS NOTHING, so a query's end has nothing to let go.
+    endQuery: (): void => undefined,
   };
 }

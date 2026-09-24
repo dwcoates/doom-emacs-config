@@ -239,10 +239,10 @@ export const ENGINE_OWNED_TOOLS: ReadonlySet<string> = new Set(["AskUserQuestion
  *
  * AN INVARIANT, NOT A WORKING LIMIT. The registry holds only what is
  * genuinely open on this plane — every call leaves it at its result, at a
- * detached handoff, with its agent's end or at the turn's end — so it drains
- * to empty at every turn terminal, and reaching the bound means a path
- * registered calls and never let them go. That is logged at error, and the
- * oldest call is still forgotten, because the shim's
+ * detached handoff, with its agent's end, at the turn's end or at the query's
+ * end — so it drains to empty at every turn terminal, and reaching the bound
+ * means a path registered calls and never let them go. That is logged at
+ * error, and the oldest call is still forgotten, because the shim's
  * statelessness is not a preference: an unbounded table would be a second
  * record growing beside the store's.
  */
@@ -272,7 +272,8 @@ export const CALL_REGISTRY_CAPACITY = 512;
  *   - its AGENT ENDS: a spawning call's own settle releases every call its
  *     stream still held, since no record for them can follow;
  *   - the TURN ENDS ({@link drain}): whatever the turn left open is released,
- *     and a stop cuts it first.
+ *     and a stop cuts it first;
+ *   - the QUERY ENDS ({@link drain} again): nothing it announced can settle.
  */
 export interface CallRegistry {
   /**
@@ -303,8 +304,8 @@ export interface CallRegistry {
   /** Every call still held, oldest first, as a snapshot; nothing is settled. */
   open(): readonly PendingCall[];
   /**
-   * Release EVERY call, oldest first, and answer them — the turn's end, the
-   * moment nothing still held can settle on this stream.
+   * Release EVERY call, oldest first, and answer them — the turn's end and the
+   * query's end, the two moments nothing still held can settle on this stream.
    * Each answered call carries whether its work was handed off.
    */
   drain(): readonly { readonly call: PendingCall; readonly detached: boolean }[];
@@ -747,4 +748,20 @@ export function endTurnCalls(
     );
   }
   return entries;
+}
+
+/**
+ * Release every call because the QUERY that announced them is over.
+ *
+ * A query that died, or one the engine replaced, answers nothing more, so no
+ * call it announced can settle on this stream; no frame is minted, because a
+ * query's end is not a stop anyone made and a cut would say one was.
+ */
+export function endQueryCalls(registry: CallRegistry, why: string): void {
+  const drained = registry.drain();
+  if (drained.length === 0) return;
+  LOGGER.info(
+    { why, released: drained.length, tool_use_ids: drained.map(({ call }) => call.toolUseId) },
+    "the query ended with calls held; they are released and nothing is written for them",
+  );
 }
