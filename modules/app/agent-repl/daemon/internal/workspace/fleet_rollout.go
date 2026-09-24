@@ -370,6 +370,12 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// without recording any either. Retiring here is what keeps a workspace
 	// whose shim is serving from reading killed to every surface that composes
 	// off the record. See retireTerminalRecord.
+	// AN INSTALLED CLIENT IS SERVED BY THIS DAEMON: the boot's adoption of a
+	// survivor and the handover's adoption both arrive here, and neither may
+	// leave the serving row naming a daemon that is gone. See claimServing.
+	if err := f.claimServing(ctx, f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)}), ws); err != nil {
+		return err
+	}
 	if err := f.retireTerminal(ctx, ws); err != nil {
 		return err
 	}
