@@ -702,6 +702,93 @@ that tells its three cases apart."
                      "M" 'scale (agent-repl-test-wire-common--parse "{\"scale\":\"NaN\"}"))))
                  '("M" scale "expected a double"))))
 
+;;;; ---- TurnId encode, uint64, and UserSaid decode (a held-prompt edit) ----
+
+(ert-deftest agent-repl-test-wire-common-turn-id-encodes-its-echo-token ()
+  "A TurnId encodes its opaque value verbatim."
+  (should (equal (agent-repl-test-wire-common--quiet
+                   (agent-repl-wire-encode-turn-id '(:value "turn-42")))
+                 '((value . "turn-42")))))
+
+(ert-deftest agent-repl-test-wire-common-turn-id-encode-refuses-a-non-string ()
+  "A TurnId with no string value is refused before the wire."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda () (agent-repl-wire-encode-turn-id '(:value 7))))
+                 '("TurnId" value "expected a string"))))
+
+(ert-deftest agent-repl-test-wire-common-uint64-reads-the-decimal-string ()
+  "protojson emits a uint64 as a decimal string."
+  (should (equal (agent-repl-test-wire-common--quiet
+                   (agent-repl-wire--decode-uint64
+                    "M" 'edit (agent-repl-test-wire-common--parse "{\"edit\":\"12\"}")))
+                 12)))
+
+(ert-deftest agent-repl-test-wire-common-uint64-absent-is-zero ()
+  "An absent uint64 is the proto3 default."
+  (should (equal (agent-repl-test-wire-common--quiet
+                   (agent-repl-wire--decode-uint64 "M" 'edit nil))
+                 0)))
+
+(ert-deftest agent-repl-test-wire-common-uint64-refuses-a-negative ()
+  "A negative value is a breach for an unsigned field."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-uint64
+                     "M" 'edit (agent-repl-test-wire-common--parse "{\"edit\":\"-1\"}"))))
+                 '("M" edit "expected a non-negative integer"))))
+
+(ert-deftest agent-repl-test-wire-common-user-said-decodes-text-and-a-path-image ()
+  "A UserSaid decodes its blocks in order, words and a path image."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-user-said
+                  "{\"content\":{\"blocks\":[{\"text\":{\"text\":\"hi\"}},{\"image\":{\"path\":{\"path\":\"/i.png\"},\"mediaType\":\"image/png\"}}]}}")
+                 '(:content (:blocks ((:arm :text :value (:text "hi"))
+                                      (:arm :image
+                                       :value (:location (:arm :path :value (:path "/i.png"))
+                                               :media-type "image/png"))))))))
+
+(ert-deftest agent-repl-test-wire-common-user-said-decodes-a-url-image ()
+  "An image by URL decodes under its own arm."
+  (should (equal (plist-get
+                  (car (plist-get (plist-get (agent-repl-test-wire-common--decode
+                                              #'agent-repl-wire-decode-user-said
+                                              "{\"content\":{\"blocks\":[{\"image\":{\"url\":{\"url\":\"https://x/i.png\"}}}]}}")
+                                             :content)
+                                  :blocks))
+                  :value)
+                 '(:location (:arm :url :value (:url "https://x/i.png")) :media-type ""))))
+
+(ert-deftest agent-repl-test-wire-common-user-said-decodes-an-unsupported-block ()
+  "An unsupported block keeps its kind and its raw payload."
+  (should (equal (car (plist-get (plist-get (agent-repl-test-wire-common--decode
+                                             #'agent-repl-wire-decode-user-said
+                                             "{\"content\":{\"blocks\":[{\"unsupported\":{\"kind\":\"doc\"}}]}}")
+                                            :content)
+                                 :blocks))
+                 '(:arm :unsupported :value (:kind "doc" :raw nil)))))
+
+(ert-deftest agent-repl-test-wire-common-user-said-without-content-is-a-breach ()
+  "`content' is REQUIRED on a UserSaid."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-user-said (agent-repl-test-wire-common--parse "{}"))))
+                 '("UserSaid" content "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-common-user-content-block-unset-is-a-breach ()
+  "A UserContentBlock with no arm set is a breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-user-content-block (agent-repl-test-wire-common--parse "{}"))))
+                 '("UserContentBlock" block "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-common-image-block-refuses-an-unknown-field ()
+  "An unknown field on an ImageBlock is refused."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-image-block
+                     (agent-repl-test-wire-common--parse "{\"path\":{\"path\":\"/i\"},\"bytes\":\"x\"}"))))
+                 '("ImageBlock" bytes "unknown field"))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here

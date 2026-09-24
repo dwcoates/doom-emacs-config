@@ -237,7 +237,9 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
     case: "acceptNotApplicable";
   } | {
     /**
-     * A force-through on an uninterruptible or session_starting hold.
+     * A force-through on an uninterruptible or session_starting hold, or on
+     * a prompt that is being edited or queued after one that is
+     * (EditHeldPrompt): an edit keeps it and everything after it held.
      *
      * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefused release_refused = 8;
      */

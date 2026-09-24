@@ -263,6 +263,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; loaded above.  Named `clipboard-image', NOT `image', so its `provide'
 ;; never shadows Emacs's built-in `image' feature.
 (agent-repl--load-module "clipboard-image")
+;; WHY: held-edit.el turns the composer's send into a held-prompt edit's
+;; commit and its discard into the edit's cancel; it reads input.el's
+;; composer and clipboard-image.el's marker, both loaded above, and hooks
+;; the host view's update (host.el, above).
+(agent-repl--load-module "held-edit")
 (agent-repl--load-module "commands")
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")

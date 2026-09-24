@@ -284,8 +284,11 @@ func decoyEntry(upsertKey, writeID, source string) *storev1.StoreEntry {
 func seedDecoyRow(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, producer string, entry *storev1.StoreEntry) {
 	t.Helper()
 	res, err := c.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
-		Producer: producer,
-		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{entry}},
+		// The decoy stands in for the shim's live write, so it states the
+		// shim's class.
+		WriteClass: &storev1.WriteClass{WriteClass: &storev1.WriteClass_Interactive{Interactive: &storev1.WriteClassInteractive{}}},
+		Producer:   producer,
+		Batch:      &storev1.EntryBatch{Entries: []*storev1.StoreEntry{entry}},
 	}))
 	if err != nil {
 		t.Fatalf("seeding the decoy row: %v", err)

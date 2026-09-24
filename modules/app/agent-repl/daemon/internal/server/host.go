@@ -5,6 +5,7 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
@@ -154,6 +155,18 @@ func (s *server) composeHostWorkspace(
 	}
 
 	view := &agentreplv1.HostWorkspace{Naming: hostNaming(record)}
+	// THE STANDING HELD-PROMPT EDIT is state, so it rides every composition:
+	// a subscriber always reads the edit that stands now, and its absence is
+	// what tells the editor the edit ended.
+	if edit, editing := s.deps.Queue.Editing(ws); editing {
+		view.HeldPromptEdit = &agentreplv1.HostHeldPromptEdit{
+			Turn: &conversationv1.TurnId{Value: string(edit.Turn)},
+			Said: edit.Said,
+			Edit: edit.ID,
+		}
+		log.Debug(op, "the host view carries the standing held-prompt edit",
+			dlog.Context{"turn": string(edit.Turn), "edit": edit.ID})
+	}
 
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)
 	switch {

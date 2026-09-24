@@ -267,7 +267,7 @@ func TestNextDeliverablePrefersTheSemanticHead(t *testing.T) {
 	h.q.waitForClassifications()
 	h.q.state(theWorkspace).head = &head
 	// Act
-	got, ok, err := h.q.nextDeliverable(context.Background(), theWorkspace)
+	got, ok, _, err := h.q.nextDeliverable(context.Background(), theWorkspace)
 	// Assert
 	if err != nil || !ok {
 		t.Fatalf("nextDeliverable: %v, ok=%v", err, ok)

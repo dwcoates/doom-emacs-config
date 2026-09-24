@@ -39,6 +39,12 @@
  * click and achieves nothing is worse than no button, so the card draws no
  * release there and says why in the actions row's title instead.
  *
+ * EDIT BEGINS A DAEMON-OWNED EDIT (EditHeldPrompt). The card's Edit control
+ * asks the daemon to claim the prompt; the editor's input takes its content
+ * off the host view, and the card says it is being edited only because the
+ * daemon's tray entry carries `editing`. A refused or failed begin is filed on
+ * the topbar's warning chip (owner spec, 2026-09-23), never drawn at the row.
+ *
  * WHY DROP RAISES A DOM EVENT. Dropping a held prompt discards text the user
  * typed and never got to send. Losing it silently is the exact failure the old
  * `heldPromptUnsentFailure` stub existed to prevent, so the text is handed
@@ -82,6 +88,12 @@ import {
   UpdateHeldPromptResponseSchema,
   type UpdateHeldPromptError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
+import {
+  EditHeldPromptResponseSchema,
+  type EditHeldPromptBeingEdited,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
+import { ConnectError } from "@connectrpc/connect";
+import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
 import { markdownSlot } from "../bubble/body.js";
 import { drawBubble } from "../bubble/draw.js";
@@ -90,7 +102,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { guardMalformed } from "../rpc/guard.js";
-import { crossCuttingSentence } from "../rpc/refuse.js";
+import { callFailure, crossCuttingSentence, refusalOf, type SentenceTable } from "../rpc/refuse.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
 
@@ -132,6 +144,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
       turn: turn.value,
       classification: classification.case,
       hold: hold === null ? "none" : hold.case,
+      editing: u.editing !== undefined,
     },
   });
 
@@ -142,6 +155,8 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   const verdict = drawClassification(classification, `${path}.classification`);
   const holdStatus: HeldStatus | null = hold === null ? null : drawHold(hold, `${path}.hold`);
   const statuses: HeldStatus[] = [verdict.status];
+  // DAEMON-STATED: the editing badge stands exactly while the entry carries `editing`.
+  if (u.editing !== undefined) statuses.push("editing");
   if (verdict.acceptedState === true) statuses.push("accepted");
   if (holdStatus !== null) statuses.push(holdStatus);
   const drawn = drawHeldPromptBadges(u.badges, statuses, `${path}.badges`);
@@ -191,6 +206,8 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext, previous?: HTMLEl
   card.setAttribute("data-held-turn", turn.value);
   card.setAttribute("data-arm", classification.case);
   card.setAttribute("data-hold", hold === null ? "none" : hold.case);
+  if (u.editing === undefined) card.removeAttribute("data-editing");
+  else card.setAttribute("data-editing", "true");
   // The acceptance is STATE OF THE CARD, not of a marker that only exists once
   // it is true: the arm that has an acceptance says which way it stands, and
   // the arms that have none say nothing at all.
@@ -513,6 +530,8 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
     release.classList.add("queued-action-unlikely");
   }
   actions.appendChild(release);
+  // EDIT sits between Release and Cancel (owner spec, 2026-09-23).
+  actions.appendChild(editButton(spec));
   // The drop is LABELLED "Cancel" (owner ruling, 2026-09-23): to the reader it
   // takes back a prompt they sent, and the text comes back to the composer. The
   // wire verb is still `drop`, and so are the hooks it is found by.
@@ -587,6 +606,100 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     if (row !== null && row.parentElement?.querySelector(".queued-refusal") != null) {
       setRowDisabled(row, false);
     }
+  }
+}
+
+/** What the warning chip names a failed or refused Edit as. */
+export const EDIT_REQUEST = "edit a held prompt";
+
+/**
+ * What each of EditHeldPrompt's OWN arms says, when a begin is refused.
+ * The cross-cutting four are worded once in `rpc/refusal.ts`.
+ */
+export const EDIT_REFUSALS: SentenceTable = {
+  noSuchHold: () => "no prompt was ever held under this card",
+  notHeld: () => "this prompt is no longer held",
+  alreadyDelivered: () => "this prompt has already been delivered",
+  beingEdited: (value: EditHeldPromptBeingEdited) =>
+    `another held prompt is already being edited (turn ${value.editingTurn?.value ?? ""})`,
+  notEditing: () => "no edit stands on this prompt",
+  noEditor: () => "no editor is attached to edit this prompt in",
+};
+
+/** The Edit control: it begins a daemon-owned edit of this prompt. */
+function editButton(spec: ActionSpec): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "queued-action queued-action-edit";
+  button.setAttribute("data-held-action", "edit");
+  button.textContent = "Edit";
+  button.addEventListener("click", (event: MouseEvent) => {
+    event.preventDefault();
+    void guardMalformed(spec.tc.ctx, "tray.held-prompt.edit", beginEdit(spec, button));
+  });
+  return button;
+}
+
+/**
+ * Ask the daemon to begin an edit. Success changes nothing here: the tray's
+ * push draws the editing badge, and the host view hands the editor the words.
+ * A refusal or a failure is filed on the warning chip and logged.
+ */
+async function beginEdit(spec: ActionSpec, button: HTMLButtonElement): Promise<void> {
+  const row = button.parentElement;
+  log.info("beginning an edit of a held prompt", {
+    operation: "tray.held-prompt.edit",
+    context: { turn: spec.turn.value },
+  });
+  setRowDisabled(row, true);
+  try {
+    let response;
+    try {
+      response = await callUnary(
+        spec.tc.ctx,
+        "EditHeldPrompt",
+        (client) =>
+          client.editHeldPrompt({
+            workspace: spec.tc.ctx.workspace,
+            turn: spec.turn,
+            action: { case: "begin", value: {} },
+          }),
+        EditHeldPromptResponseSchema,
+      );
+    } catch (err) {
+      if (!(err instanceof ConnectError)) throw err;
+      const failed = callFailure(err);
+      log.error(`EditHeldPrompt failed for a begin: ${failed.text}`, {
+        operation: "tray.held-prompt.edit-failed",
+        context: { turn: spec.turn.value, arm: failed.arm },
+      });
+      spec.tc.ctx.failures.report(controlPlaneFailed(EDIT_REQUEST, failed.text));
+      return;
+    }
+    const result = requireCase(response.result, "EditHeldPromptResponse.result");
+    switch (result.case) {
+      case "success":
+        log.info("the daemon began the edit; its pushes draw it", {
+          operation: "tray.held-prompt.edit-begun",
+          context: { turn: spec.turn.value },
+        });
+        return;
+      case "error": {
+        const said = refusalOf(result.value.cause, EDIT_REFUSALS, "EditHeldPromptError.cause");
+        log.info(`EditHeldPrompt refused a begin: ${said.text}`, {
+          operation: "tray.held-prompt.edit-refused",
+          context: { turn: spec.turn.value, arm: said.arm, sentence: said.text },
+        });
+        spec.tc.ctx.failures.report(controlPlaneFailed(EDIT_REQUEST, said.text));
+        return;
+      }
+      default: {
+        const other: { case: string } = result;
+        return unreachableArm("EditHeldPromptResponse.result", other.case);
+      }
+    }
+  } finally {
+    setRowDisabled(row, false);
   }
 }
 
@@ -682,7 +795,8 @@ function clearRowRefusal(row: Element | null): void {
 export type HeldStatus =
   | NonNullable<HeldPrompt["classification"]["case"]>
   | NonNullable<HeldPrompt["hold"]["case"]>
-  | "accepted";
+  | "accepted"
+  | "editing";
 
 /** The semantic color a held badge takes: a class on the shared `.badge`. */
 export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
@@ -698,7 +812,9 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - accepted: a quiet acknowledgement that changes nothing about delivery;
  *   - a shutdown or build-refresh hold: coordinated daemon work, the merge amber;
  *   - a keep-alive or session-starting hold: the machinery keeping a session
- *     up, the hibernation teal.
+ *     up, the hibernation teal;
+ *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
+ *     the in-flight orange.
  */
 export const HELD_STATUS_BADGES = {
   classifying: "run",
@@ -711,6 +827,7 @@ export const HELD_STATUS_BADGES = {
   buildRefresh: "amber",
   keepAlive: "teal",
   sessionStarting: "teal",
+  editing: "run",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
 
 /** The class every held badge wears beside the shared `.badge`. */

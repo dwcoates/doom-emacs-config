@@ -108,6 +108,9 @@ would abort the very branch a test is asserting."
     ("SubmitPrompt" agent-repl-rpc-submit-prompt
      agent-repl-wire-encode-submit-prompt-request
      agent-repl-wire-decode-submit-prompt-response)
+    ("EditHeldPrompt" agent-repl-rpc-edit-held-prompt
+     agent-repl-wire-encode-edit-held-prompt-request
+     agent-repl-wire-decode-edit-held-prompt-response)
     ("SelectResponse" agent-repl-rpc-select-response
      agent-repl-wire-encode-select-response-request
      agent-repl-wire-decode-select-response-response)

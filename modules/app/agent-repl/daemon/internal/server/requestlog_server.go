@@ -530,6 +530,23 @@ func (s *requestLoggingServer) UpdateHeldPrompt(
 	return s.server.UpdateHeldPrompt(ctx, req)
 }
 
+func (s *requestLoggingServer) EditHeldPrompt(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.EditHeldPromptRequest],
+) (resp *connect.Response[agentreplv1.EditHeldPromptResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "EditHeldPrompt", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	boundary.log.Debug("daemon.server.edit_held_prompt", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.edit_held_prompt", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.EditHeldPrompt(ctx, req)
+}
+
 func (s *requestLoggingServer) AnswerHeldOffer(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.AnswerHeldOfferRequest],

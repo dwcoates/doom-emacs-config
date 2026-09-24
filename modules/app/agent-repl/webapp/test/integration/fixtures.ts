@@ -1491,6 +1491,7 @@ export function footerView(init?: FooterInit): FooterView {
 function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
   return {
     tokens: {
+      contextGrowth: { value: "18.2k" },
       input: { value: "42.1k" },
       cacheRead: { value: "180k" },
       cacheWrite: { value: "3.2k" },
@@ -1499,6 +1500,22 @@ function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
       firstToken: { value: "1.2 s" },
       alarm: { text: "context is nearly full" },
       verdict: { verdict: { case: "incomplete" as const, value: { text: "usage still arriving" } } },
+      agents: [
+        {
+          label: "main",
+          input: { value: "40k" },
+          cacheRead: { value: "170k" },
+          cacheWrite: { value: "3k" },
+          output: { value: "1k" },
+        },
+        {
+          label: "reviewer · review the diff",
+          input: { value: "2.1k" },
+          cacheRead: { value: "10k" },
+          cacheWrite: { value: "200" },
+          output: { value: "100" },
+        },
+      ],
     },
     agents: {
       rows: [

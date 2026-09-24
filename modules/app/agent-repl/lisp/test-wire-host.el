@@ -413,7 +413,8 @@ unknown-arm refusal at runtime."
                                                :opened-at-ms 1756400000000
                                                :kind (:arm :link-severed
                                                       :value nil)))))))
-                   :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")))))
+                   :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")
+                   :held-prompt-edit nil))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
   "A terminal session states whether reopening can rehydrate it."
@@ -450,6 +451,44 @@ unknown-arm refusal at runtime."
                              "{\"slug\":\"\"}")
                             :slug)
                  "")))
+
+(ert-deftest agent-repl-test-wire-host-workspace-decodes-the-standing-held-prompt-edit ()
+  "A standing held-prompt edit decodes whole: its turn, its content, its id."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace
+                             "{\"none\":{},\"naming\":{},\"heldPromptEdit\":{\"turn\":{\"value\":\"t-1\"},\"said\":{\"content\":{\"blocks\":[{\"text\":{\"text\":\"fix it\"}}]}},\"edit\":\"3\"}}")
+                            :held-prompt-edit)
+                 '(:turn (:value "t-1")
+                   :said (:content (:blocks ((:arm :text :value (:text "fix it")))))
+                   :edit 3))))
+
+(ert-deftest agent-repl-test-wire-host-workspace-without-an-edit-carries-none ()
+  "An absent held_prompt_edit is the fact that no edit stands."
+  (should (null (plist-get (agent-repl-test-wire-host--decode
+                            #'agent-repl-wire-decode-host-workspace
+                            "{\"none\":{},\"naming\":{}}")
+                           :held-prompt-edit))))
+
+(ert-deftest agent-repl-test-wire-host-held-prompt-edit-without-a-turn-is-a-breach ()
+  "The edit's turn is REQUIRED: a commit and a cancel echo it."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-held-prompt-edit
+                  "{\"said\":{\"content\":{}},\"edit\":\"1\"}")
+                 '("HostHeldPromptEdit" turn "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-held-prompt-edit-without-content-is-a-breach ()
+  "The edit's content is REQUIRED: it is what the composer is filled with."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-held-prompt-edit
+                  "{\"turn\":{\"value\":\"t\"},\"edit\":\"1\"}")
+                 '("HostHeldPromptEdit" said "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-held-prompt-edit-refuses-an-unknown-field ()
+  "An unknown key on HostHeldPromptEdit is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-held-prompt-edit
+                  "{\"turn\":{\"value\":\"t\"},\"said\":{\"content\":{}},\"owner\":\"x\"}")
+                 '("HostHeldPromptEdit" owner "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-refuses-an-unknown-field ()
   "An unknown key on HostWorkspace is refused at that level."

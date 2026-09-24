@@ -34,6 +34,14 @@ type (
 	SkippedEntry   = db.SkippedEntry
 	OpenedPage     = db.OpenedPage
 	BashRunReplay  = db.BashRunReplay
+	// WriteClass is which queue a write takes into the store's one writer.
+	WriteClass = db.WriteClass
+)
+
+// The write classes, re-exported under this package's own names.
+const (
+	WriteInteractive = db.WriteInteractive
+	WriteBulk        = db.WriteBulk
 )
 
 // Store is the durable half of the store, as this package needs it.
@@ -42,7 +50,11 @@ type (
 // sentinels below; the server maps the sentinel to a failure detail and logs it
 // exactly once.
 type Store interface {
-	WriteBatch(ctx context.Context, producer string, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error)
+	// WriteBatch writes one batch in the stated class. ON FAILURE THE RESULT
+	// STILL CARRIES WHAT COMMITTED: a bulk batch is split into bounded
+	// transactions, and the lines its leading ones made durable must still be
+	// published to live watchers.
+	WriteBatch(ctx context.Context, producer string, class WriteClass, batch *storev1.EntryBatch, shapes []*storev1.ShapeObservation) (WriteResult, error)
 	OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error)
 	ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error)
 	LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error)

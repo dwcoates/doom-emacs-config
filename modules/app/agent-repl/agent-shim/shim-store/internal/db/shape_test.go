@@ -22,7 +22,7 @@ func observation(hash, kind, structure, example string, seenMs int64) *storev1.S
 // because a catalog observation is a durable contribution of its own.
 func writeShapes(t *testing.T, d *DB, shapes ...*storev1.ShapeObservation) WriteResult {
 	t.Helper()
-	result, err := d.WriteBatch(ctx(), "test-producer", &storev1.EntryBatch{}, shapes)
+	result, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, &storev1.EntryBatch{}, shapes)
 	if err != nil {
 		t.Fatalf("WriteBatch with %d shape(s): %v", len(shapes), err)
 	}
@@ -233,7 +233,7 @@ func TestAMalformedObservationRefusesTheWholeBatch(t *testing.T) {
 	for _, tc := range table {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			_, err := d.WriteBatch(ctx(), "test-producer", &storev1.EntryBatch{}, []*storev1.ShapeObservation{tc.shape})
+			_, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, &storev1.EntryBatch{}, []*storev1.ShapeObservation{tc.shape})
 
 			// Assert.
 			if err == nil {
@@ -266,7 +266,7 @@ func TestABatchOfNothingAtAllIsStillRefused(t *testing.T) {
 	d, _ := newStore(t)
 
 	// Act.
-	_, err := d.WriteBatch(ctx(), "test-producer", &storev1.EntryBatch{}, nil)
+	_, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, &storev1.EntryBatch{}, nil)
 
 	// Assert.
 	if err == nil {
