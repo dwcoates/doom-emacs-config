@@ -88,6 +88,7 @@ it, and AN EXPLICIT FLAG ALWAYS BEATS THE ENV.
 | `--log` | — | `~/.cache/agent-repl/log/shim-claude-sidecar.log` |
 | `--poll-interval` | — | `1s` |
 | `--rescan-interval` | — | `30s` |
+| `--pprof` | `AGENT_REPL_SIDECAR_PPROF_ADDR` | OFF |
 | `--stale-grace` | `AGENT_REPL_STALE_GRACE` | `30s` |
 | `--stale-shell-silence` | `AGENT_REPL_STALE_SHELL_SILENCE` | `30m` |
 | `--stale-agent-silence` | `AGENT_REPL_STALE_AGENT_SILENCE` | `60m` |
@@ -113,6 +114,12 @@ sidecar, so the injected clock the cycle's unit tests advance does not reach it
 EFFECTIVE FLOOR IS REFUSED, not clamped: it describes a ladder that cannot
 climb, and the check is against the effective pair, so a floor above the
 DEFAULT ceiling is refused as well.
+
+`--pprof` mirrors the store's surface (`internal/pprofsurface`): a unix socket
+path or loopback `host:port`, opened before the boot walk, recorded once as a
+`pprof.enabled` WARN; an unsafe bind is refused. No plist names it: on the live
+system run `launchctl setenv AGENT_REPL_SIDECAR_PPROF_ADDR <addr>` and restart
+the sidecar agent (`launchctl unsetenv` turns it back off).
 
 ## Build reporting
 
