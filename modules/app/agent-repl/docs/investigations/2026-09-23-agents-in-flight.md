@@ -12,7 +12,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/query-death-terminal-race` | `~/.config/doom-worktrees/query-death-terminal-race` | e2e flake `TestWebappLayerQueryDeath`: the shim's store-served `execution_error` stand-in can beat the `queryDied` push, and the feed then draws `executionError`. Make the drawn turn error `queryDied` whichever arrives first, and on replay. | `a1e232cfb5c241968` | 09-24 |
 | `fix/post-bootstrap-log-defects` | `~/.config/doom-worktrees/post-bootstrap-log-defects` | Post-bootstrap log defects (plus realtest 7's case-duplicate workspace dirs crossing log sinks and a dangling emacs.log link): legacy `keepalive` rows block sidecar upserts (files parked); a DIED shim stays in the stand-down manifest forever; the script runner WARNs on caller-judged exits (launchctl 113); `final_answer_unresolved` after the stop; the restore_holds orphan. | `af712ab9121aecd4b` | 09-24 |
 
 ## Still waiting on the owner
@@ -23,6 +22,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- A query death's turn terminal is self-describing: `AgentFailure.query_died` (tag 19, carrying the pushed `SessionQueryDied`) replaces the `execution_error` stand-in, so the feed, footer and replay draw the death whichever statement lands first (`fix/query-death-terminal-race`; the e2e flake `TestWebappLayerQueryDeath` passed 3 of 3 full runs). CONTRACT ADDITION, lead-approved as a defect fix; the owner may revisit it.
 - A lock holder that can't be spawned answers `lock_holder_unavailable {binary, os_error}` (typed `StartSessionFailure` and `OpenWorkspaceError` arms, drawn truthfully by Emacs and the webapp); the shared node store repairs a broken entry in place (`bin/lib-node-store.sh`: a per-entry mkdir lock, a fresh tree, an atomic symlink swap), and `ensure-deps` goes private only if the repair fails (`fix/lock-spawn-refusal-and-store-self-heal`). Realtest 7 (`SPC TAB f`): the fork works with real keys; the run failed only on log findings, which were handed to the log-defects branch.
 - The system default scrollbar everywhere (custom `::-webkit-scrollbar` rules and the 8px token gone), `scrollbar-gutter: stable` on the bubble scroll box, and the tree budget measures the real gutter (`fix/system-scrollbar-stable-gutter`, webapp 5679 unit + 1773 integration). Supersedes the 09-14 always-visible bar. Deployed 13:53 (a clean handover, no WARN or ERROR).
 - 09-24: the BOOTSTRAP onto daemon-owned deploys is done (lead, owner-authorized: stop, Emacs restart, deploy restarted store+sidecar, a second deploy all up-to-date); the ONE-TIME AGENTS.md section is deleted. The daily landed-worktree reaper landed (`feat/daemon-reaps-landed-worktrees`, daemon unit+integration green on master). Owner rulings: no terminal overtake; no successor-retraction arm.
