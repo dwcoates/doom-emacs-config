@@ -12,7 +12,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/killed-shim-revive-hang` | `~/.config/doom-worktrees/killed-shim-revive-hang` | A rare hang (5000ms against a healthy 340ms) in shim integration "SessionStarted.turn_in_flight names the turn a killed shim left open": a revived shim waits on a SIGKILLed predecessor, likely its lock holder. | `a9e20ec0a60a0af89` | 09-24 |
+| `fix/revive-warn-and-lock-bound` | `~/.config/doom-worktrees/revive-warn-and-lock-bound` | A healthy revive WARNs "a task was backgrounded by hand but names no originating call" (fake or real vendor?); `acquireExclusiveLock` gets a bound on the holder's `locked` line that refuses `lock_holder_unavailable`. | `a3a39a5a5384338d0` | 09-24 |
 
 ## Still waiting on the owner
 
@@ -26,6 +26,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- The killed-shim "hang" was a test artifact: the detached announcement could land on the watch's opening page, while the test waited only on the tail. The new `awaitAgentEntry` searches the page, then the tail, with a regression test (`fix/killed-shim-revive-hang`; shim integration 346 on master).
 - Post-bootstrap log defects (`fix/post-bootstrap-log-defects`): a retired keep-alive row is superseded by its real record, with no nuke (the 3 parked subagent transcripts were re-read at 14:26, 3 INFO supersedes, 0 producer-defects); the shim scopes keep-alives by descent; the stand-down manifest is consumed once and a DIED shim with a free lock resolves; the script runner leaves the verdict to its callers and launchctl 113 is not-loaded; a notice-only turn is not a defect; workspace directories are canonical on-disk spellings (the empty case-duplicate is forgotten); the orphan-log sweep spares closed workspaces. Deployed 14:25; all suites green on master except one shim integration hang, now dispatched.
 - A query death's turn terminal is self-describing: `AgentFailure.query_died` (tag 19, carrying the pushed `SessionQueryDied`) replaces the `execution_error` stand-in, so the feed, footer and replay draw the death whichever statement lands first (`fix/query-death-terminal-race`; the e2e flake `TestWebappLayerQueryDeath` passed 3 of 3 full runs). CONTRACT ADDITION, lead-approved as a defect fix; the owner may revisit it.
 - A lock holder that can't be spawned answers `lock_holder_unavailable {binary, os_error}` (typed `StartSessionFailure` and `OpenWorkspaceError` arms, drawn truthfully by Emacs and the webapp); the shared node store repairs a broken entry in place (`bin/lib-node-store.sh`: a per-entry mkdir lock, a fresh tree, an atomic symlink swap), and `ensure-deps` goes private only if the repair fails (`fix/lock-spawn-refusal-and-store-self-heal`). Realtest 7 (`SPC TAB f`): the fork works with real keys; the run failed only on log findings, which were handed to the log-defects branch.
