@@ -76,36 +76,24 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 		t.Fatalf("the host's stop left %d process(es) alive: %v — the relaunch cannot resume a conversation another process still holds", len(left), left)
 	}
 
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		// THE LOCK DIRECTORY AND THE LOCK BINARY ARE BOTH RESTATED. NewWorld
-		// hands every shim it spawns the `shim-lock` this run built into a
-		// temp directory, and this successor is a hand-rolled second daemon
-		// that inherits none of that world's env. Without the binary the
-		// revived shim's kernel claim dies `spawn ENOENT` against the deploy
-		// location under a $HOME the e2e world does not have, and locks.ts's
-		// caller reports that as `conversation_owned` — a resume refused for
-		// a conversation nobody actually holds.
-		ExtraEnv: append([]string{
-			"AGENT_REPL_LOCK_DIR=" + w.LockDir,
-			"AGENT_REPL_SHIM_LOCK_BIN=" + requireLockBinary(t),
-		}, buildIdentityEnv()...),
-		// THE ACCOUNT ROOTS ARE THE ONES THE CONVERSATION WAS FILED UNDER. A
-		// resume is filed against the vendor transcript, and a successor that
-		// minted its own roots would find none and come up FRESH — abandoning
-		// the very conversation this test is about.
-		ExtraArgs: []string{
-			"--default-config-dir", w.DefaultConfigDir,
-			"--multi-repo-config-dir", w.MultiRepoConfigDir,
-		},
-		// The revival spawns a SECOND real shim process inside the
-		// registration this test then asserts on, which is the same
-		// two-process-lifecycles-on-one-budget shape the adoption chain has.
-		Timeout: AdoptionChainTimeout,
-	})
+	// THE LOCK DIRECTORY AND THE LOCK BINARY ARE RESTATED by SuccessorOpts:
+	// without the binary the revived shim's kernel claim dies `spawn ENOENT`
+	// and the resume is refused `conversation_owned` for a conversation nobody
+	// holds.
+	opts := w.SuccessorOpts(t)
+	// THE ACCOUNT ROOTS ARE THE ONES THE CONVERSATION WAS FILED UNDER. A
+	// resume is filed against the vendor transcript, and a successor that
+	// minted its own roots would find none and come up FRESH — abandoning the
+	// very conversation this test is about.
+	opts.ExtraArgs = []string{
+		"--default-config-dir", w.DefaultConfigDir,
+		"--multi-repo-config-dir", w.MultiRepoConfigDir,
+	}
+	// The revival spawns a SECOND real shim process inside the registration
+	// this test then asserts on, which is the same
+	// two-process-lifecycles-on-one-budget shape the adoption chain has.
+	opts.Timeout = AdoptionChainTimeout
+	successor := harness.StartDaemon(t, opts)
 	successor.ExpectWarnings("daemon.rollout.reconcile")
 	return successor
 }

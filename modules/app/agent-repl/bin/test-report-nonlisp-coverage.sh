@@ -335,8 +335,8 @@ test_typescript_packages_validate_all_declared_dependencies() {
     local package
 
     for package in "$webapp_package" "$shim_package"; do
-        if ! grep -Fq '"ensure-deps": "npm ls --depth=0 >/dev/null 2>&1 || npm ci"' "$package" ||
-            ! grep -Fq '"precoverage": "npm run ensure-deps"' "$package" ||
+        if ! grep -Eq '"ensure-deps": "(\.\./)+bin/ensure-deps\.sh"' "$package" ||
+            ! grep -Eq '"precoverage": "((\.\./)+bin/background\.sh )?npm run ensure-deps"' "$package" ||
             ! grep -Fq '"pretypecheck": "npm run ensure-deps"' "$package"; then
             fail "TypeScript packages validate every declared dependency"
             return

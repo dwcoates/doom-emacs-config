@@ -108,6 +108,31 @@ EFFECTIVE FLOOR IS REFUSED, not clamped: it describes a ladder that cannot
 climb, and the check is against the effective pair, so a floor above the
 DEFAULT ceiling is refused as well.
 
+## Build reporting
+
+The sidecar has no connection to the daemon at all, so it reports the build
+it is running through a FILE: `reportBuild` (`buildreport.go`) writes
+`<run dir>/shim-claude-sidecar.build.json` — this process's pid and the
+content hash of its own executable — as soon as the canonical logger exists
+and before the sidecar starts its discovery loop. The run dir is
+`agentrepl/logging/buildreport`'s `ResolveDir` (`$AGENT_REPL_LOCK_DIR`, else
+`~/.cache/agent-repl/run`), the same directory the kernel locks already live
+under.
+
+The daemon's deploy reads this file and compares it against the build it just
+made to decide whether the launchd-managed sidecar is stale and needs a
+restart. A failure at any step (resolving the process's own build, resolving
+the run dir, or writing the file) is logged once at `error` through the
+canonical logger and swallowed: the sidecar keeps booting regardless, because
+a service that cannot report its own build still has every reason to keep
+tailing transcripts with the one it has. The daemon simply reads the missing
+or stale report as "not running the fresh build".
+
+**Every harness that boots a real sidecar (or the real store it talks to)
+must set `AGENT_REPL_LOCK_DIR` to a private directory.** Without it, a real
+process spawned by a test resolves the run dir to the developer's actual
+`~/.cache/agent-repl/run` and overwrites their real build-report file.
+
 ## The cursor-first production cycle, and the store-unreachable invariant
 
 `cycle.go`. EVERY PRODUCTION CYCLE BEGINS WITH A SUCCESSFUL

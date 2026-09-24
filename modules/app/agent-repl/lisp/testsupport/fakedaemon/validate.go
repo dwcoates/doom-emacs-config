@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	v1 "agentrepl/proto/agentrepl/v1"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -20,6 +22,20 @@ import (
 // misspelling half is the strict protojson codec).
 func validateRequest(msg proto.Message) error {
 	return validateMessage(msg.ProtoReflect(), string(msg.ProtoReflect().Descriptor().Name()), 0)
+}
+
+// validateWatchDaemonRequest is the WatchDaemon refusal the real daemon
+// performs: the generic invariant (the `client` oneof must name an arm), and
+// an Emacs arm's REQUIRED elisp_build, which protojson cannot distinguish from
+// "nobody filled this in" because an empty string is the proto3 default.
+func validateWatchDaemonRequest(req *v1.WatchDaemonRequest) error {
+	if err := validateRequest(req); err != nil {
+		return err
+	}
+	if emacs := req.GetEmacs(); emacs != nil && emacs.GetElispBuild() == "" {
+		return fmt.Errorf("WatchDaemonRequest.emacs.elisp_build: an empty build is illegal")
+	}
+	return nil
 }
 
 func validateMessage(m protoreflect.Message, path string, depth int) error {

@@ -523,9 +523,15 @@ func (s *server) openingPage() *conversationv1.HistoryPage {
 	return page
 }
 
+// buildSHA is the build this process reports: a profile's override, else the
+// build its spawner stated in SHIM_BUILD_SHA — exactly what the real shim
+// reports — else the default.
 func (s *server) buildSHA() string {
 	if s.profile.BuildSHA != "" {
 		return s.profile.BuildSHA
+	}
+	if spawned := os.Getenv("SHIM_BUILD_SHA"); spawned != "" {
+		return spawned
 	}
 	return DefaultBuildSHA
 }
@@ -1153,8 +1159,12 @@ func (s *server) rememberPushedBash(frame *conversationv1.AgentFrame) {
 // A profile that states an OpeningFault makes it unhealthy on every stream,
 // which is what the shim standing on a fault it never clears does.
 func (s *server) openingDiagnostics() *conversationv1.SessionUpdate {
+	opening := HealthyDiagnostics()
 	if s.profile.OpeningFault != "" {
-		return UnhealthyDiagnostics(s.profile.OpeningFault)
+		opening = UnhealthyDiagnostics(s.profile.OpeningFault)
 	}
-	return HealthyDiagnostics()
+	// The opening frame states the build this process runs, as every real
+	// shim's diagnostics frame does.
+	opening.GetDiagnostics().ShimBuild = s.buildSHA()
+	return opening
 }

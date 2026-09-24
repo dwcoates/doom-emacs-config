@@ -22,6 +22,15 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message WatchWebWorkspaceRequest {
   // The workspace this webview is bound to.
   workspace.v1.WorkspaceRef workspace = 1;
+  // THE WEBAPP BUILD THIS PAGE IS RUNNING, because every process reports its
+  // build when it connects: a deploy pushes `reload_webapp` to exactly the
+  // webviews whose build is not the one it just built. REQUIRED — a watch
+  // without it is refused.
+  //
+  // It is the CONTENT HASH Vite gives the entry bundle: the `<hash>` in the
+  // page's own `assets/index-<hash>.js`, read from the running module's URL.
+  // The daemon reads the fresh build's from the `index.html` it serves.
+  string webapp_build = 2;
 }
 
 message WatchWebWorkspaceResponse {
