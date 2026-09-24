@@ -1262,3 +1262,193 @@ func TestAbbrevGrowsPastAnAmbiguousPrefix(t *testing.T) {
 		t.Fatalf("Abbrev = %q, want a prefix grown until it is unique", got)
 	}
 }
+
+// --- the landed-worktree reaper's commands -----------------------------------
+
+// addTree cuts a worktree off main in the world and answers its directory.
+func addTree(t *testing.T, s *State, dir, name string) string {
+	t.Helper()
+	target := filepath.Join(filepath.Dir(dir), name)
+	if got := Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", name, target, "main"}); got.Exit != 0 {
+		t.Fatalf("worktree add = %+v", got)
+	}
+	return target
+}
+
+func TestWorktreeRemoveRefusesADirtyTreeUnlessForced(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := addTree(t, s, dir, "wt")
+	repo.Worktree(target).Dirty = true
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "remove", target})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "modified or untracked") || repo.Worktree(target) == nil {
+		t.Fatalf("worktree remove of a dirty tree = %+v, want git's refusal and the tree kept", got)
+	}
+}
+
+func TestWorktreeListWithDashZEndsEveryAttributeWithNUL(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "list", "--porcelain", "-z"})
+
+	// Assert.
+	want := "worktree " + dir + "\x00HEAD " + repo.BranchHeads["main"] + "\x00branch refs/heads/main\x00\x00"
+	if got.Stdout != want {
+		t.Fatalf("worktree list -z = %q, want %q", got.Stdout, want)
+	}
+}
+
+func TestWorktreeListStatesADetachedHead(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := addTree(t, s, dir, "wt")
+	repo.Worktree(target).Branch = ""
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "list", "--porcelain"})
+
+	// Assert.
+	if !strings.Contains(got.Stdout, "worktree "+target+"\nHEAD "+repo.BranchHeads["main"]+"\ndetached\n") {
+		t.Fatalf("worktree list = %q, want the detached tree stated", got.Stdout)
+	}
+}
+
+func TestWorktreeListStatesALock(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := addTree(t, s, dir, "wt")
+	repo.Worktree(target).Locked = true
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "list", "--porcelain"})
+
+	// Assert.
+	if !strings.Contains(got.Stdout, "branch refs/heads/wt\nlocked\n") {
+		t.Fatalf("worktree list = %q, want the lock stated", got.Stdout)
+	}
+}
+
+func TestRevParseAnswersACommitsTree(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := repo.BranchHeads["main"]
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "rev-parse", "--verify", "--end-of-options", head + "^{tree}"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != s.Commits[head].TreeOf()+"\n" {
+		t.Fatalf("rev-parse ^{tree} = %+v, want the commit's tree", got)
+	}
+}
+
+func TestACommitsTreeIsItsOwnUnlessScripted(t *testing.T) {
+	// Arrange.
+	s, repo, _ := world(t)
+	first := s.Commits[repo.BranchHeads["main"]]
+	second := s.AddCommit(repo, "main", "more", []string{first.SHA}, nil)
+
+	// Act, Assert.
+	if first.TreeOf() == second.TreeOf() || first.TreeOf() == first.SHA {
+		t.Fatalf("trees %q and %q, want each commit's tree distinct and not its sha", first.TreeOf(), second.TreeOf())
+	}
+	second.Tree = first.TreeOf()
+	if second.TreeOf() != first.TreeOf() {
+		t.Fatalf("a scripted tree = %q, want %q", second.TreeOf(), first.TreeOf())
+	}
+}
+
+func TestMergeTreeOfAnAncestorIsTheBasesOwnTree(t *testing.T) {
+	// Arrange: the branch's commit is already on main.
+	s, repo, dir := world(t)
+	branchHead := repo.BranchHeads["main"]
+	next := s.AddCommit(repo, "main", "more", []string{branchHead}, nil)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge-tree", "--write-tree", "--no-messages", next.SHA, branchHead})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != next.TreeOf()+"\n" {
+		t.Fatalf("merge-tree of a landed commit = %+v, want main's own tree", got)
+	}
+}
+
+func TestMergeTreeOfADescendantIsItsTree(t *testing.T) {
+	// Arrange: the branch is ahead of main.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	ahead := s.AddCommit(nil, "", "ahead", []string{base}, nil)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge-tree", "--write-tree", base, ahead.SHA})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != ahead.TreeOf()+"\n" {
+		t.Fatalf("merge-tree of an unlanded commit = %+v, want the branch's tree", got)
+	}
+}
+
+func TestMergeTreeOfDivergedLinesIsNeitherSidesTree(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	root := repo.BranchHeads["main"]
+	left := s.AddCommit(nil, "", "left", []string{root}, nil)
+	right := s.AddCommit(nil, "", "right", []string{root}, nil)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge-tree", "--write-tree", left.SHA, right.SHA})
+
+	// Assert.
+	tree := strings.TrimSpace(got.Stdout)
+	if got.Exit != 0 || tree == left.TreeOf() || tree == right.TreeOf() || tree == "" {
+		t.Fatalf("merge-tree of diverged lines = %+v, want a tree of its own", got)
+	}
+}
+
+func TestMergeTreeRefusesWithoutWriteTree(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := repo.BranchHeads["main"]
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "merge-tree", head, head})
+
+	// Assert.
+	if got.Exit == 0 {
+		t.Fatalf("merge-tree without --write-tree = %+v, want a refusal", got)
+	}
+}
+
+func TestUpdateRefDeletesABranchAtItsHead(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.AddBranch("feature", repo.BranchHeads["main"])
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "update-ref", "-d", "refs/heads/feature", repo.BranchHeads["main"]})
+
+	// Assert.
+	if got.Exit != 0 || repo.HasBranch("feature") {
+		t.Fatalf("update-ref -d = %+v, branches %v, want the branch gone", got, repo.Branches)
+	}
+}
+
+func TestUpdateRefRefusesABranchThatMoved(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.AddBranch("feature", repo.BranchHeads["main"])
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "update-ref", "-d", "refs/heads/feature", "0123456789012345678901234567890123456789"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "but expected") || !repo.HasBranch("feature") {
+		t.Fatalf("update-ref -d of a moved branch = %+v, want git's refusal and the branch kept", got)
+	}
+}
