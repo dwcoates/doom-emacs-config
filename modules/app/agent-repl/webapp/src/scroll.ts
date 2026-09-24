@@ -67,6 +67,10 @@ export interface ScrollPosition {
  *
  * - `promptSent`: a prompt this client sent was drawn; the feed parks at its
  *   tail and follows until the reader scrolls away.
+ * - `promptHeld`: a held prompt's card was drawn in the hold tray for the FIRST
+ *   time (one this client just sent that the daemon held included); the feed
+ *   parks at its tail and follows, exactly as for `promptSent`. A re-push of a
+ *   card already drawn, or its removal, moves nothing.
  * - `selectionMoved`: the reader stepped the reply-to-a-past-response
  *   selection by keybinding; the selected row is centered, and a cleared
  *   selection returns to the tail.
@@ -95,6 +99,7 @@ export interface ScrollPosition {
  */
 export const SCROLL_CAUSES = [
   "promptSent",
+  "promptHeld",
   "selectionMoved",
   "detachedWorkSelected",
   "initialPlacement",
@@ -111,7 +116,13 @@ export type ScrollCause = (typeof SCROLL_CAUSES)[number];
  * The causes that latch the follow. All but `latestVisible` also land the feed
  * at its tail; `latestVisible` latches where the view already stands.
  */
-type ParkCause = "promptSent" | "selectionMoved" | "initialPlacement" | "replaceRestore" | "latestVisible";
+type ParkCause =
+  | "promptSent"
+  | "promptHeld"
+  | "selectionMoved"
+  | "initialPlacement"
+  | "replaceRestore"
+  | "latestVisible";
 
 /** Registering a listener for a box's own scroll events. */
 export type SubscribeScroll = (onScroll: () => void) => void;
@@ -227,6 +238,11 @@ export class TailFollow {
   /** A prompt this client sent was drawn: park at the tail and follow. */
   promptSent(): void {
     this.park("promptSent");
+  }
+
+  /** A held prompt's card was drawn for the first time: park at the tail and follow. */
+  promptHeld(): void {
+    this.park("promptHeld");
   }
 
   /** A feed's first paint: land at the tail and follow. */

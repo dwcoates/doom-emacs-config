@@ -410,8 +410,9 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 // `hold-spool`, 6,748 `tail-pickup`, 6,172 `boot-rewind` and 4,789
 // `lost-policy` INFO records, and rolled the 64 MB durable log five times over.
 // None of it is news: it is the same inverted-pyramid flood the rescan-driven
-// holds and the LOST tracker already level, arriving through the six operations
-// that read the corpus.
+// holds and the LOST tracker already level, arriving through the operations
+// that read the corpus — and, with them, the per-spool claim and skip decisions
+// a restart re-derives for every spool on disk.
 //
 // During catch-up each is stated at DEBUG and tallied; the window's end states
 // one INFO `catchup-summary` per operation carrying the count. After the window
@@ -420,6 +421,8 @@ var catchupOperations = []string{
 	"launch",
 	"record-spawn",
 	"hold-spool",
+	"spool-claim",
+	"spool-skip",
 	"tail-pickup",
 	"boot-rewind",
 	"lost-policy",
@@ -1470,6 +1473,18 @@ func (s *sidecar) pollAll() {
 			Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
 		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
+		if result.More && s.pass != nil {
+			// THE BATCH STOPPED AT ITS BOUND, NOT AT THE FILE'S END. The file goes
+			// back to the head of the pass, so it is read again on this tick in
+			// the next bounded write rather than one poll interval later — each
+			// write stays small enough not to hold the store, and the slice
+			// deadline above still yields the tick to discovery.
+			s.pass.pending = append([]string{path}, s.pass.pending...)
+			s.log.With(logging.Context{
+				Operation: "tail-bounded", Path: path, TaskID: w.target.TaskID,
+				Offset: logging.Off(result.Next.GetOffset()),
+			}).LogVerbose("the batch stopped at its bound with bytes unread past it; the file is read again at once")
+		}
 	}
 	if s.pass == nil {
 		// PRODUCTION WAS SUSPENDED FROM INSIDE THE LOOP — a cancelled terminal's
