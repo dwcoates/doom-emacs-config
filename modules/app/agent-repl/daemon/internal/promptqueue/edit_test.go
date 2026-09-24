@@ -451,6 +451,22 @@ func TestEditorGoneWithNoEditStandingIsANoOp(t *testing.T) {
 	}
 }
 
+func TestEditorGoneWithNoEditStandingReadsNothingAndRecordsNothing(t *testing.T) {
+	// Arrange: the state store is already gone, as on an orderly exit.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	delete(h.db.workspaces, theWorkspace)
+	h.db.mu.Unlock()
+	// Act
+	h.q.EditorGone(theWorkspace)
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "error" {
+			t.Fatalf("records = %+v, want no error for an editor leaving with no edit", h.log.Records())
+		}
+	}
+}
+
 func TestDroppingTheEditedPromptReleasesTheClaim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
