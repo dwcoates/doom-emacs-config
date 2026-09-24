@@ -324,6 +324,12 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
 				Cause: &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
+				// RESTATED so the stopped spawn a replay serves alone still
+				// draws its label and addresses its sub-feed: the commission
+				// its launch recorded, and the created agent the minting rule
+				// names (the spawning call itself).
+				Prompt:         c.spawnPrompt(run),
+				CreatedAgentId: agentID(run),
 			}},
 		}})
 		activity.ActivityId = activityID(run)
@@ -418,7 +424,7 @@ func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason 
 	} else {
 		bound.Log(line, reason)
 	}
-	return SubagentLostEntry(at, run, ownerAgent, reason)
+	return SubagentLostEntry(at, run, ownerAgent, reason, c.spawnPrompt(run))
 }
 
 // SubagentLostEntry is SubagentLost without a converter, so a caller that holds
@@ -427,10 +433,16 @@ func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason 
 // THE WRITE IDENTITY IS STABLE FOR THE VERDICT, exactly as the bash terminal's
 // is: a run is lost once however many sweeps observe it, so a re-emission is
 // absorbed at the store rather than appending a second settle.
-func SubagentLostEntry(at Attribution, run, ownerAgent string, reason LostReason) *storev1.StoreEntry {
+//
+// THE LOSS IS A SETTLED FRAME AND RESTATES THE SPAWN: `prompt` is the
+// commission the launch recorded (empty when the caller never saw it), and the
+// created agent is the run itself by the minting rule.
+func SubagentLostEntry(at Attribution, run, ownerAgent string, reason LostReason, prompt *conversationv1.AgentSubagentPrompt) *storev1.StoreEntry {
 	activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 		Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
-			Cause: &conversationv1.AgentSubagentFailure_Lost{Lost: DetachedLostArm(reason)},
+			Cause:          &conversationv1.AgentSubagentFailure_Lost{Lost: DetachedLostArm(reason)},
+			Prompt:         prompt,
+			CreatedAgentId: agentID(run),
 		}},
 	}})
 	activity.ActivityId = activityID(run)
