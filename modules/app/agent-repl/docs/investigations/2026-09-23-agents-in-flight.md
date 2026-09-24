@@ -12,16 +12,17 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
+| `feat/every-turn-ends-visibly` | `~/.config/doom-worktrees/every-turn-ends-visibly` | Owner ruling: one door closes every turn row AND writes its `turn_ended` row (with replay backfill and a source-scan guard); a non-normal ending draws a red-bordered purple response bubble (the ONLY UI change allowed; anything else is surfaced first); a shim death gets its own reason; tool groups never span turns. | `aeb94414b855775de` | 09-24 |
 | `fix/first-real-handover-defects` | `~/.config/doom-worktrees/first-real-handover-defects` | First handover with live sessions (18:06): the incumbent keeps watching handed-over shims (ERROR/WARN/fault); the takeover's staleness check re-judges in-flight bounces (ERROR); relaunching an ADOPTED shim can't see it exit, so it waits the 30 s window with prompts held (ERROR force-kill, pid 0). | `a6cf472730982a2e6` | 09-24 |
-| `feat/mcp-card-keepalive-retire-lock-arms` | `~/.config/doom-worktrees/mcp-card-keepalive-retire-lock-arms` | Owner rulings: MCP calls get an ordinary tool-call arm and card; `keepalive` is retired in the proto (`reserved`, no UX change); every lock-holder failure gets a truthful typed refusal (`conversation_owned` only for exit 3). | `afda9bea961f51280` | 09-24 |
-| `fix/dead-shim-recovery-and-adopted-turns` | `~/.config/doom-worktrees/dead-shim-recovery-and-adopted-turns` | Prove a self-died shim recovers with no user-facing interruption (the owner's condition for dropping `bounce_died`), fixing it if not; the daemon closes open turn rows at adoption when the shim reports them finished. | `a22842cfb7f22f1e8` | 09-24 |
 
 ## Still waiting on the owner
 
-- (none open) Store profiling stays on per the owner; the lead watches its results this session.
+- Store profiling stays on per the owner; the lead watches its results this session.
+- Owner rule, 2026-09-24: no UI changes except the red-bordered ending bubble; surface anything else first.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- MCP calls are an ordinary tool-call arm and card; the `keepalive` unserved arm is retired in the proto; every lock-holder failure is a truthful `LockHolderFailure` refusal (`feat/mcp-card-keepalive-retire-lock-arms`; all suites green on master after regenerating the conflicting store protos). A shim that dies on its own is revived unasked in about 150 ms and the turn it cut ends; an adoption closes turns that ended unobserved (`fix/dead-shim-recovery-and-adopted-turns`). Open for the owner: the footer shows a brief `disconnected`/`shim_died` transient during the revival; hiding it would be a UI change.
 - Every record within a turn carries its turn id (`HistoryEntryAt.turn`, `StoreEntry.turn`, `StoreLineAt.turn`; the store keeps the first stamp); the daemon charges terminals, rows and usage by id, and old unstamped data falls back at INFO (`feat/turn-id-everywhere`; all suites green on master). A store itest readiness flake was fixed by the lead (`e2b673259`). Deployed 18:06: the first handover to carry sessions (5 workspaces), which exposed three handover defects (dispatched). Open for the owner: should tool-card groups break at turn boundaries?
 - The takeover promotes the wsm handle before it adopts, recovers or claims (a successor handed nothing had served READ-ONLY for its whole life); a refused claim leaves the fleet untouched; `Fleet.Adopt` dials `NewestLive` (`fix/takeover-claims-after-writable`). Live: the read-only daemon 80861 was cold-restarted at 15:18 via `agent-repl-frontend-daemon-restart`; 3 sessions came up fresh, claimed by 894735edfd134d30, with no WARN or ERROR. The live handover check waits for the next daemon change.
 - Every session the fleet begins holding claims serving; `served()` hands over a live session under a foreign owner at ERROR and reclaims its row; the takeover adopts orphaned shims (`fix/cold-start-claims-serving`, daemon unit+integration green). Deployed 15:07: the orphan claim FAILED on a read-only handle (follow-up running).
