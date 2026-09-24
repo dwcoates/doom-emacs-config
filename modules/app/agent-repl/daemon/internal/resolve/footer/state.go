@@ -243,6 +243,40 @@ type agentRow struct {
 	// row with a handle is no longer retired by the spawning call's stream
 	// alone. See chips.go OnSubagent.
 	work string
+	// provenance names what FIRST described this row, so the record a jump
+	// writes can say what a row is from the log alone. See rowProvenance.
+	provenance rowProvenance
+	// spawnedOn is the agent whose stream carried the spawn frame that opened
+	// the row, empty when no spawn frame did (an announcement, the live set).
+	spawnedOn string
+	// jump is the click resolution last recorded for this row.
+	jump jumpMemo
+}
+
+// rowProvenance is what first described a detached-work row.
+type rowProvenance string
+
+// The provenances a row can have.
+const (
+	// provenanceSpawnFrame: the spawn's own start frame, on the calling
+	// agent's stream.
+	provenanceSpawnFrame rowProvenance = "spawn_frame"
+	// provenanceRunFrame: a frame addressed to the run's detached handle.
+	provenanceRunFrame rowProvenance = "detached_run_frame"
+	// provenanceAnnouncement: a created-work announcement.
+	provenanceAnnouncement rowProvenance = "created_announcement"
+	// provenanceLiveWorkSet: the watcher's live-work set listed an id no row
+	// stood for, so a MINIMAL row was opened (label "subagent", no tokens, the
+	// clock from the instant the footer learned of it) while its descriptive
+	// frame was on its way — or never came.
+	provenanceLiveWorkSet rowProvenance = "live_work_set"
+)
+
+// jumpMemo is the click resolution last recorded for one row, so the record is
+// written when the resolution CHANGES rather than on every push.
+type jumpMemo struct {
+	recorded bool
+	value    string
 }
 
 // shellRow is one live detached shell.
@@ -255,14 +289,12 @@ type shellRow struct {
 	startedAt time.Time
 	// order is the announcement order the panel draws in.
 	order int
-	// owner is the agent whose work the shell is — the agent that made its
-	// call — which decides the feed its head is drawn on and so the panel
-	// row's jump target. Empty until something states it.
-	owner string
+	// jump is the click resolution last recorded for this row.
+	jump jumpMemo
 }
 
-// monitorRow is one live background monitor. Monitors have no feed bubble, so
-// the row is not a jump target.
+// monitorRow is one live background monitor. Monitors draw NO feed entry, so
+// the row's jump is always unresolved(no_feed_entry).
 type monitorRow struct {
 	// unit is the monitor's activity id, which keys the row.
 	unit string
@@ -274,6 +306,8 @@ type monitorRow struct {
 	startedAt time.Time
 	// order is the arming order the panel draws in.
 	order int
+	// jump is the click resolution last recorded for this row.
+	jump jumpMemo
 }
 
 // taskRow is one tracker task as it currently stands.
@@ -479,10 +513,6 @@ type wsState struct {
 	// id, so a shell that DETACHES from a unit can be described from the unit
 	// it detached from (the announcement carries no command of its own).
 	bashUnits map[string]*shellRow
-	// mainAgent is the session's main agent as the watcher named it: the one
-	// agent whose detached work is on the ROOT feed. Every other owner's is on
-	// that owner's sub-feed (feedid.AgentFeed, the rule the feed places by).
-	mainAgent string
 	// liveWork is the watcher's AUTHORITATIVE live-work set: the one party
 	// that reaps each detached item's watch at its terminal, and therefore the
 	// only one that can say a detached item has ENDED. It governs which
@@ -521,6 +551,14 @@ type wsState struct {
 	// the set has not listed yet, so the set change that lists them does not
 	// read as a launch. See markAdopted.
 	adoptedWork map[string]struct{}
+	// entries are the FeedIds the feed drew each detached-work-capable entry
+	// under, keyed by unit (a subagent's spawn unit, a shell's work id), as
+	// the feed resolver announced them (OnEntryPlaced). They are what a jump
+	// row names: the address ON THE FEED THAT DRAWS THE ENTRY, never a guess.
+	entries map[string]*frontendv1.FeedId
+	// jumpNotes are the jump-resolution records a render produced, written
+	// once the lock is released.
+	jumpNotes []dlog.Context
 	// focus is the expanded panel the last launch of detached work named, and
 	// the generation it was minted under. See mintFocus.
 	focus focusState
@@ -551,6 +589,7 @@ func newWSState() *wsState {
 		bashUnits:   map[string]*shellRow{},
 		retiredWork: map[string]struct{}{},
 		adoptedWork: map[string]struct{}{},
+		entries:     map[string]*frontendv1.FeedId{},
 		tok:         newTokenState(),
 	}
 }

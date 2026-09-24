@@ -25,6 +25,7 @@
  * acked, then exit. Ending the query first would abandon writes the record
  * needs.
  */
+import { randomUUID } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { bindLog, clearRequestId, onLogSinkPoisoned, setClaudeSessionId, setRequestId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
@@ -42,6 +43,7 @@ import {
   announceLiveWork,
   closingAgentTerminal,
   closingBashTerminal,
+  closingMonitorTerminal,
   closingSubagentTerminal,
   findBashStart,
   findUnit,
@@ -103,8 +105,10 @@ import {
 import {
   KeepaliveCadence,
   KeepaliveRewind,
+  KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
+  type KeepaliveAttribution,
   type KeepaliveScheduler,
   type RewindObligation,
 } from "./keepalive.js";
@@ -167,6 +171,12 @@ interface EngineDeps {
     readonly cwd: string;
   };
   readonly nowMs: () => number;
+  /**
+   * Mints the client uuid a keep-alive send carries, the one the vendor echoes
+   * on every reply to it (engine/keepalive.ts, `KeepaliveScope`). Injected so a
+   * suite can stamp its scripted replies; production mints a random one.
+   */
+  readonly newUuid?: () => string;
   /** Injected so a suite never waits on a clock. */
   readonly scheduler?: KeepaliveScheduler;
   /**
@@ -476,6 +486,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const live = new LiveWorkTable();
   const foreground = new ForegroundUnitTable();
   const rewind = new KeepaliveRewind();
+  /**
+   * WHICH VENDOR MESSAGES THE KEEP-ALIVE PRODUCED. Asked once per message in
+   * {@link onSdkMessage}; its answer is the tag every row and push of that
+   * message carries (engine/keepalive.ts).
+   */
+  const keepaliveScope = new KeepaliveScope();
+  const newUuid = deps.newUuid ?? randomUUID;
 
   let identity: SessionIdentity | undefined;
   /**
@@ -571,6 +588,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         readonly said: conversationv1.UserSaid;
         /** True when the rewind was performed to precede a keep-alive, not a real prompt. */
         readonly keepalive: boolean;
+        /** The keep-alive send's client uuid, which a re-delivery must carry too. */
+        readonly clientUuid: string | undefined;
       }
     | undefined;
   /**
@@ -710,7 +729,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return undefined;
     },
     persist: (entries) => deps.persistence.write(entries),
-    keepalive: () => open?.keepalive === true,
+    // THE RUNNING VENDOR TURN'S ATTRIBUTION, not the shim's open turn: a
+    // question a task-notification turn asks while the keep-alive waits is a
+    // real question, and hiding it would leave the vendor waiting forever.
+    keepalive: () => keepaliveScope.producing(),
     nowMs: deps.nowMs,
     onPermissionModeSet: (mode) => {
       permissionMode = mode;
@@ -725,11 +747,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return identity;
   }
 
-  function foldContext(): FoldContext {
+  /**
+   * What the fold holds for one message, under that message's attribution.
+   *
+   * THE KEEP-ALIVE'S TURN ID NAMES ONLY ITS OWN ROWS. A message the keep-alive
+   * did not produce is folded with no turn while the keep-alive is the open
+   * turn — otherwise a vendor turn nobody asked for would write served rows
+   * keyed to a turn id that must never reach the wire.
+   */
+  function foldContext(attribution: KeepaliveAttribution): FoldContext {
+    const turn = open !== undefined && (!open.keepalive || attribution.keepalive) ? open.id : undefined;
     return {
       mainAgentId: requireIdentity().agentId,
-      ...(open === undefined ? {} : { turnId: open.id }),
-      keepalive: open?.keepalive === true,
+      ...(turn === undefined ? {} : { turnId: turn }),
+      keepalive: attribution.keepalive,
       nowMs: deps.nowMs,
       // DIAGNOSTIC-ONLY session facts the terminal's api-failure record reads.
       // The config-dir is the ACCOUNT the failing token belonged to (a path,
@@ -1518,26 +1549,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // prompt alive. A recovered message is consumed: the query it arrived on is
     // already closed and the prompt already re-delivered on its replacement.
     if (await noteRewindOutcome(message)) return;
+    // THE TAG, TAKEN ONCE. Everything below reads this one answer: the fold
+    // writes it into every row (the store keeps a tagged row and never serves
+    // it), and the push plane drops every tagged session fact.
+    const attribution = keepaliveScope.attribute(message);
     noteRewindBoundary(message);
     notePreInitMessage(message);
-    noteIdentityFacts(message);
+    noteIdentityFacts(message, attribution);
     settleStartOnBlockingHook(message);
     settleStartOnErrorResult(message);
     noteDetachedWork(message);
     converterDefectThisMessage = false;
-    const output = deps.fold.onSdkMessage(message, foldContext());
+    const output = deps.fold.onSdkMessage(message, foldContext(attribution));
     if (converterDefectThisMessage) {
       LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
     }
     const entries = [...output.entries];
     noteForegroundUnits(entries);
     if (entries.length > 0) deps.persistence.write(entries);
-    for (const entry of entries) {
-      if (entry.item.kind !== "session_update") continue;
-      const arm = entry.item.update.update.case ?? "";
-      if (OWNED_ARMS.has(arm)) continue;
-      pushes.push(entry.item.update);
-    }
+    serveSessionUpdates(entries);
     // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
     // rewind itself refuses everything that is not an assistant record of the
     // open real turn (see engine/keepalive.ts).
@@ -1545,16 +1575,42 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       message,
       open === undefined ? undefined : { turnId: open.id.value, keepalive: open.keepalive },
     );
-    if (output.turnEnded !== undefined) {
-      // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
-      // WHOLE length: the messages that follow the refused one are the same
-      // turn's own remainder, and recovering on the next of them closed the
-      // window a millisecond after opening it — before any consumer could
-      // observe it, and while the turn that lost a record was still running.
-      // So the window closes only at the end of a turn that refused nothing.
-      if (!converterDefectThisTurn) noteConverterHealthy();
-      converterDefectThisTurn = false;
-      await closeTurn();
+    if (output.turnEnded === undefined) return;
+    // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
+    // WHOLE length: the messages that follow the refused one are the same
+    // turn's own remainder, and recovering on the next of them closed the
+    // window a millisecond after opening it — before any consumer could
+    // observe it, and while the turn that lost a record was still running. So
+    // the window closes only at the end of a turn that refused nothing.
+    if (!converterDefectThisTurn) noteConverterHealthy();
+    converterDefectThisTurn = false;
+    // A VENDOR TURN ENDING IS NOT THE KEEP-ALIVE ENDING. Only the result that
+    // answers the keep-alive's own send closes it; a turn the vendor ran on its
+    // own while the keep-alive waited leaves it open.
+    if (open?.keepalive === true && !attribution.endsKeepalive) return;
+    await closeTurn();
+  }
+
+  /**
+   * THE WATCHSESSION PLANE'S ONE FILTER over what the fold produced.
+   *
+   * A session fact the keep-alive turn produced — its rate-limit reading, its
+   * usage — is recorded with the rest of the batch and never pushed: the tag on
+   * the entry is the whole decision, so no reader downstream has to ask.
+   */
+  function serveSessionUpdates(entries: readonly PersistEntry[]): void {
+    for (const entry of entries) {
+      if (entry.item.kind !== "session_update") continue;
+      if (entry.keepalive) {
+        LOGGER.logVerbose(
+          { arm: entry.item.update.update.case },
+          "a session fact the keep-alive turn produced is recorded and never pushed",
+        );
+        continue;
+      }
+      const arm = entry.item.update.update.case ?? "";
+      if (OWNED_ARMS.has(arm)) continue;
+      pushes.push(entry.item.update);
     }
   }
 
@@ -1733,7 +1789,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     reject(new Error(`the vendor query ended before its init message: ${detail}`));
   }
 
-  function noteIdentityFacts(message: SdkMessage): void {
+  /**
+   * The session facts a message states about the vendor itself.
+   *
+   * A KEEP-ALIVE'S FACTS ARE NOT SERVED. The model it was answered on and the
+   * fast-mode state its result restates are pushed to WatchSession as changes
+   * — the footer's chips — so under the keep-alive tag only the request id,
+   * which joins the shim's own log records, is taken.
+   */
+  function noteIdentityFacts(message: SdkMessage, attribution: KeepaliveAttribution): void {
     if (message.type === "system" && message.subtype === "init") {
       setClaudeSessionId(message.session_id);
       recordAgentBinaryVersion(message.claude_code_version);
@@ -1768,6 +1832,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return;
     }
     if (message.type === "result") {
+      if (attribution.keepalive) return;
       // EVERY RESULT RESTATES IT, which is the only way a flip mid-session is
       // ever seen: the vendor announces the change nowhere else.
       noteFastMode(
@@ -1784,6 +1849,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // absent field is the vendor not saying, never a new request.
       const requestId = (message as { request_id?: unknown }).request_id;
       if (typeof requestId === "string" && requestId !== "") setRequestId(requestId);
+      if (attribution.keepalive) return;
       // UNSOLICITED CHANGES ARE STILL CHANGES: nothing called SetSessionModel,
       // so this message is the only evidence the swap happened.
       noteReportedModel((message.message as { model?: unknown } | undefined)?.model);
@@ -1967,39 +2033,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // turn to a request that is already answered.
     clearRequestId();
     if (ended === undefined) return;
-    if (ended.keepalive) rewind.noteKeepaliveTurn();
     cadence?.resume();
-    if (pendingModel !== undefined) {
-      const waiting = pendingModel;
-      pendingModel = undefined;
-      try {
-        await applyModel(waiting.model);
-        waiting.resolve(
-          create(shimv1.SetSessionModelResponseSchema, {
-            result: {
-              case: "success",
-              value: create(shimv1.SetSessionModelSuccessSchema, {
-                modelChanged: create(conversationv1.SessionModelChangedSchema, {
-                  effectiveModel: waiting.model,
-                }),
-              }),
-            },
-          }),
-        );
-      } catch (err) {
-        // The caller has been waiting for this exact moment, so the vendor's
-        // refusal is ITS answer; swallowing it would leave the daemon believing
-        // a model change landed that never did.
-        waiting.resolve(
-          setSessionModelRefused(
-            { kind: "vendorRefused" },
-            err instanceof Error ? err.message : String(err),
-          ),
-        );
-      }
-    }
-    await pushContextUsage();
-    pushSessionTitle();
+    await applyPendingModel();
     if (identity !== undefined) {
       backupTranscript({
         transcript: transcriptPath(deps.env.configDir, deps.env.cwd, identity.vendorSessionId),
@@ -2009,6 +2044,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         atMs: deps.nowMs(),
       });
     }
+    if (ended.keepalive) {
+      // A KEEP-ALIVE'S END IS NOBODY'S TURN END. Nothing is pushed for it: the
+      // context usage it moved, the title it cannot have changed and the
+      // account usage it spent all belong to housekeeping no surface shows, and
+      // the next real turn's own end restates every one of them.
+      rewind.noteKeepaliveTurn();
+      LOGGER.info({ turn_id: ended.id.value, keepalive: true }, "closed a turn");
+      return;
+    }
+    await pushContextUsage();
+    pushSessionTitle();
     // A TURN CAN CHANGE WHAT THE PROBES ANSWER. Account usage and mcp health
     // are PULLED from the vendor rather than folded out of the stream, so a
     // session that probed once at StartSession would report the account's
@@ -2017,7 +2063,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // Awaited, not fired and forgotten: an unawaited probe would race the next
     // turn's own close.
     await reprobeSessionFacts();
-    LOGGER.info({ turn_id: ended.id.value, keepalive: ended.keepalive }, "closed a turn");
+    LOGGER.info({ turn_id: ended.id.value, keepalive: false }, "closed a turn");
+  }
+
+  /** A model change that waited for the turn to end lands now, and its caller is answered. */
+  async function applyPendingModel(): Promise<void> {
+    if (pendingModel === undefined) return;
+    const waiting = pendingModel;
+    pendingModel = undefined;
+    try {
+      await applyModel(waiting.model);
+      waiting.resolve(
+        create(shimv1.SetSessionModelResponseSchema, {
+          result: {
+            case: "success",
+            value: create(shimv1.SetSessionModelSuccessSchema, {
+              modelChanged: create(conversationv1.SessionModelChangedSchema, {
+                effectiveModel: waiting.model,
+              }),
+            }),
+          },
+        }),
+      );
+    } catch (err) {
+      // The caller has been waiting for this exact moment, so the vendor's
+      // refusal is ITS answer; swallowing it would leave the daemon believing
+      // a model change landed that never did.
+      waiting.resolve(
+        setSessionModelRefused(
+          { kind: "vendorRefused" },
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    }
   }
 
   async function applyModel(model: conversationv1.AgentModel): Promise<void> {
@@ -2113,6 +2191,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // still needs its turn concluded.
     writeQueryDeathTerminal(detail);
     open = undefined;
+    keepaliveScope.abandon(`the vendor query died: ${detail}`);
     cadence?.stop();
     // NO RECOVERY PATH, DELIBERATELY. Nothing in this process restarts a query
     // it lost, so this fault is meant to stand for the session's life -- and it
@@ -2134,8 +2213,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const queue = prompts;
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
     cadence?.pause();
-    queue.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null });
+    queue.push(userMessage(text, keepalive ? keepaliveScope.pendingUuid() : undefined));
     LOGGER.debug({ keepalive, characters: text.length }, "submitted a prompt to the vendor");
+  }
+
+  /**
+   * One streaming-input send.
+   *
+   * A KEEP-ALIVE SEND CARRIES ITS CLIENT UUID, and it is the only send that
+   * does: the vendor echoes it on every reply to that send, which is how the
+   * keep-alive turn scope knows its own answer from a turn the vendor ran on
+   * its own (engine/keepalive.ts).
+   */
+  function userMessage(text: string, clientUuid: string | undefined): SdkUserMessage {
+    return {
+      type: "user",
+      message: { role: "user", content: text },
+      parent_tool_use_id: null,
+      ...(clientUuid === undefined ? {} : { uuid: clientUuid as SdkUserMessage["uuid"] }),
+    };
   }
 
   /**
@@ -2222,6 +2318,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       anchorTurnId: owed.anchorTurnId,
       said,
       keepalive,
+      clientUuid: keepalive ? keepaliveScope.pendingUuid() : undefined,
     };
   }
 
@@ -2395,11 +2492,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return false;
     }
-    queue.push({
-      type: "user",
-      message: { role: "user", content: saidText(watch.said) },
-      parent_tool_use_id: null,
-    });
+    // THE SAME SEND, uuid and all: a re-delivered keep-alive is still the
+    // keep-alive, and its answer must still be recognized as such.
+    queue.push(userMessage(saidText(watch.said), watch.clientUuid));
     LOGGER.info(
       { resume_session_at: watch.anchorUuid, anchor_turn_id: watch.anchorTurnId },
       "the prompt the refused rewind was carrying was RE-DELIVERED on a plain resume; it was not lost",
@@ -2467,6 +2562,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     query = created;
     prompts = queue;
     abort = controller;
+    // A NEW QUERY RUNS NO VENDOR TURN YET: whatever the last one was midway
+    // through ended with it.
+    keepaliveScope.queryBound();
     loop = runLoop(created);
     return created;
   }
@@ -3318,11 +3416,57 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * How much of the book a reconciliation reads to describe live work.
    *
    * Generous rather than exact: the descriptions it needs are the STARTS of
-   * units that are still open, which are near the end of the book by
-   * definition, and a budget too small would silently leave live work
-   * undescribed — which reads to a consumer as work that does not exist.
+   * units that are still open, which are USUALLY near the end of the book, so
+   * one page ordinarily finds them all. It is a page size, not a bound: work
+   * that started earlier is found by walking back (readBookFor).
    */
   const RECONCILE_PAGE_SIZE = 512;
+
+  /**
+   * The book, read from its newest page back until every unit in `units` has
+   * been found or the book's floor is reached.
+   *
+   * THE NEWEST PAGE IS NOT "WHERE LIVE WORK STARTED". A long session's detached
+   * agents can have started thousands of entries ago, and a unit the read never
+   * reached was closed as a SHELL run: on 2026-09-23 eight running subagents of
+   * the owner's main session were closed with shell terminals and relabelled
+   * `bash` in the store. The walk stops as soon as nothing is missing, so the
+   * ordinary case still reads one page.
+   */
+  async function readBookFor(
+    agentId: conversationv1.AgentId,
+    units: readonly string[],
+  ): Promise<conversationv1.HistoryEntryAt[]> {
+    const first = await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE, undefined, () =>
+      knowsAgent(agentId),
+    );
+    const book = [...first.entries];
+    const missing = new Set(units);
+    const mark = (entries: readonly conversationv1.HistoryEntryAt[]): void => {
+      for (const unit of [...missing]) {
+        const id = create(conversationv1.AgentActivityIdSchema, { value: unit });
+        if (findUnit(entries, id) !== undefined) missing.delete(unit);
+      }
+    };
+    mark(first.entries);
+    let boundary = first.boundary;
+    let pages = 1;
+    while (missing.size > 0 && boundary.case === "more") {
+      const oldest = book[book.length - 1]?.at;
+      if (oldest === undefined) break;
+      const older = await deps.persistence.readAgentPage(agentId, RECONCILE_PAGE_SIZE, oldest);
+      if (older.entries.length === 0) break;
+      book.push(...older.entries);
+      mark(older.entries);
+      boundary = older.boundary;
+      pages++;
+    }
+    LOGGER.debug(
+      { agent: agentId.value, pages, entries: book.length, unfound: missing.size },
+      "read the book back for the live work it must describe",
+    );
+    return book;
+  }
 
   /**
    * Whether the record plane ANSWERED "no rows under that agent yet".
@@ -3378,11 +3522,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let book: readonly conversationv1.HistoryEntryAt[] = [];
     if (open.liveDetached.length > 0 || open.liveAgents.length > 0) {
       try {
-        book = (
-          await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE, undefined, () =>
-            knowsAgent(agentId),
-          )
-        ).entries;
+        book = await readBookFor(
+          agentId,
+          open.liveDetached.map((work) => work.value),
+        );
       } catch (err) {
         if (answeredNoBookYet(err)) {
           LOGGER.debug(
@@ -3464,6 +3607,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         closing.push(closingSubagentTerminal(agentId, run));
         continue;
       }
+      if (item?.case === "monitor") {
+        closing.push(closingMonitorTerminal(agentId, run));
+        continue;
+      }
       const recorded = findBashStart(book, run);
       if (recorded === undefined) {
         LOGGER.debug(
@@ -3523,6 +3670,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveCount += 1;
     const said = textSaid(keepalivePromptText(keepaliveCount));
     open = { id: turn, keepalive: true, startedAtMs: deps.nowMs() };
+    // THE SCOPE OPENS BEFORE THE SEND, so the vendor cannot answer a send the
+    // shim does not yet recognize as its own.
+    keepaliveScope.begin(newUuid(), turn.value);
     try {
       const prompt = buildPrompt(
         turn,
@@ -3539,6 +3689,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushes.resolveComponent(KEEPALIVE_COMPONENT, 0);
     } catch (err) {
       open = undefined;
+      keepaliveScope.abandon(`the keep-alive could not be submitted: ${err instanceof Error ? err.message : String(err)}`);
       pushes.fault(
         sessionFault(
           { kind: "keepaliveFailed" },
@@ -3749,7 +3900,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (!started || identity === undefined) {
       return hibernateRefused({ kind: "noSession" });
     }
-    if (open !== undefined) {
+    // A keep-alive is not a turn in flight to the daemon (see servedOpenTurn):
+    // standing the shim down under one ends housekeeping, never anyone's work.
+    if (servedOpenTurn() !== undefined) {
       return hibernateRefused({ kind: "turnInFlight" });
     }
     LOGGER.info(
@@ -3786,7 +3939,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         ? {}
         : { permissionMode: announcedStart.permissionMode }),
       modelCatalog: announcedStart.modelCatalog,
-      ...(open === undefined ? {} : { turnInFlight: open.id }),
+      ...servedTurnInFlight(),
       liveWork: await announceLiveWorkNow(),
     });
   }
@@ -3817,14 +3970,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
-      const page = await deps.persistence.readFirstPage(
+      const book = await readBookFor(
         agentId,
-        RECONCILE_PAGE_SIZE,
-        undefined,
-        () => knowsAgent(agentId),
+        handles.map((handle) => handle.value),
       );
       const undescribed: conversationv1.DetachedWorkId[] = [];
-      const announcements = announceLiveWork(page.entries, handles, agentId, (handle) => {
+      const announcements = announceLiveWork(book, handles, agentId, (handle) => {
         undescribed.push(handle);
       });
       for (const handle of undescribed) await recordUndescribedHandle(handle);
@@ -3921,10 +4072,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     reportUndescribableWork(handle);
   }
 
+  /**
+   * The open turn AS ANY CONSUMER MAY SEE IT: the daemon's turn, never the
+   * shim's own keep-alive.
+   *
+   * A KEEP-ALIVE IS NEVER A TURN IN FLIGHT to anyone outside this process: its
+   * id is the shim's own, minted for a row key, and a daemon told of it would
+   * track, draw and wait on a turn it never started. Every verb that answers
+   * the daemon about the open turn asks this, never `open` itself.
+   */
+  function servedOpenTurn(): OpenTurn | undefined {
+    return open === undefined || open.keepalive ? undefined : open;
+  }
+
+  function servedTurnInFlight(): { turnInFlight?: conversationv1.TurnId } {
+    const served = servedOpenTurn();
+    return served === undefined ? {} : { turnInFlight: served.id };
+  }
+
   function sessionLive(): conversationv1.SessionLive {
     const announceable = live.announceable();
     return create(conversationv1.SessionLiveSchema, {
-      ...(open === undefined ? {} : { turnInFlight: open.id }),
+      ...servedTurnInFlight(),
       liveWork: live.workIds(announceable),
     });
   }
@@ -3936,18 +4105,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return killSessionRefused({ kind: "noSession" }, "no session has been started on this shim");
     }
     const announceable = live.announceable();
-    const busy = open !== undefined || announceable.length > 0;
+    // A KEEP-ALIVE HOLDS NOTHING A KILL MUST WAIT FOR: it is housekeeping no
+    // consumer asked for, and ending it mid-flight costs nothing but its call.
+    const served = servedOpenTurn();
+    const busy = served !== undefined || announceable.length > 0;
     if (busy && !request.force) {
       LOGGER.debug(
-        { turn_in_flight: open?.id.value ?? "", live_work: announceable.length },
+        { turn_in_flight: served?.id.value ?? "", live_work: announceable.length },
         "refused KillSession because the session is live and force was not set",
       );
       return killSessionRefused(
         { kind: "live", live: sessionLive() },
-        `the session has ${open === undefined ? "no turn" : `turn ${open.id.value}`} in flight and ${announceable.length} live item(s)`,
+        `the session has ${served === undefined ? "no turn" : `turn ${served.id.value}`} in flight and ${announceable.length} live item(s)`,
       );
     }
-    const interruptedTurn = open?.id;
+    const interruptedTurn = served?.id;
     const stopped = live.workIds(live.all());
     await teardown("KillSession");
     const killed = create(conversationv1.SessionKilledSchema, {
@@ -4047,6 +4219,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // that forgot the turn first would have nothing to write it for.
     writeHostShutdownTerminal(reason);
     open = undefined;
+    keepaliveScope.abandon(`the session is being torn down: ${reason}`);
     prompts?.close();
     abort?.abort();
     active?.close();

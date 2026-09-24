@@ -2,6 +2,7 @@ package feed
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -35,6 +36,17 @@ func (r *resolver) toolRow(s *wsState, at placement, unitID, name string, outcom
 		Input: input,
 	}
 	outcome(card)
+	// A START AFTER THE RETURN DOES NOT REOPEN THE CARD. The two planes write
+	// one unit under one key and neither waits for the other, so the file
+	// plane's start can arrive after the stream plane's return. Its facts (the
+	// input line, the start instant) are taken above; its running arm is not,
+	// because nothing will ever return the call a second time.
+	if returned := u.row.GetActivity().GetSimpleToolCall().GetReturned(); returned != nil && card.GetRunning() != nil {
+		r.logger(s.id).Debug("daemon.feed.start_after_settle",
+			"a tool call's start arrived after its return; the returned card stands",
+			dlog.Context{"unit": unitID})
+		card.Outcome = &frontendv1.FeedSimpleToolCall_Returned{Returned: returned}
+	}
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID}),
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
@@ -181,6 +193,37 @@ func (r *resolver) failureImageForm(s *wsState, failure *conversationv1.AgentToo
 	return nil
 }
 
+// errSettleNotRestated is a settled frame that restated nothing of its call,
+// arriving with no start held to draw it from. It draws NO ROW: a card with an
+// empty input line (or a send with an empty body) is the defect the settle's
+// restatement exists to prevent. The sink records it once, at ERROR.
+var errSettleNotRestated = errors.New("feed: a settled frame restated nothing of its call, and no start was held to draw it from")
+
+// restatedOrHeld answers what a SETTLED frame draws its input from.
+//
+// THE SETTLE STANDS ALONE (conversation/v1/agent_activity.proto): a call's
+// start and its settle upsert ONE unit, and the store keeps one row per unit,
+// so a replay (a workspace open, a transcript select) serves the settle with no
+// start beside it. Every settled arm therefore restates what its start carried,
+// and that restatement is what is drawn.
+//
+// A SETTLE THAT RESTATES NOTHING IS AN INVARIANT VIOLATION by its producer. It
+// is recorded at ERROR either way: when this process held the start it is drawn
+// from what the start said, and when it did not the frame draws no row at all,
+// answered as errSettleNotRestated.
+func (r *resolver) restatedOrHeld(s *wsState, u *unitState, unitID, kind, restated, held string) (string, error) {
+	if restated != "" {
+		return restated, nil
+	}
+	if !u.startHeld {
+		return "", fmt.Errorf("%w (unit %s, kind %s)", errSettleNotRestated, unitID, kind)
+	}
+	r.logger(s.id).Error("daemon.feed.settle_not_restated",
+		"a settled frame restated nothing of its call; it is drawn from the start this process held",
+		dlog.Context{"unit": unitID, "kind": kind})
+	return held, nil
+}
+
 // failureSettledMs is the instant a failed call settled, zero when none was
 // observed.
 func failureSettledMs(failure *conversationv1.AgentToolFailure) int64 {
@@ -198,6 +241,7 @@ func (r *resolver) drawRead(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := read.GetResult().(type) {
 	case *conversationv1.AgentRead_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetPath().GetPath()
 		u.inputForm = inputFormPath
@@ -224,6 +268,12 @@ func (r *resolver) drawRead(s *wsState, at placement, act *conversationv1.AgentA
 			returnedOutcome(u, true, form, state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentRead_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawRead", "branch": "case *conversationv1.AgentRead_Failure"})
+		input, err := r.restatedOrHeld(s, u, unitID, "read", state.Failure.GetPath().GetPath(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Read",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
@@ -316,6 +366,7 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 	switch state := write.GetResult().(type) {
 	case *conversationv1.AgentWrite_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetPath().GetPath()
 		u.inputForm = inputFormPath
@@ -340,6 +391,12 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 				state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentWrite_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWrite", "branch": "case *conversationv1.AgentWrite_Failure"})
+		input, err := r.restatedOrHeld(s, u, unitID, "write", state.Failure.GetPath().GetPath(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Write",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
@@ -358,6 +415,7 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := edit.GetResult().(type) {
 	case *conversationv1.AgentEdit_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetPath().GetPath()
 		u.inputForm = inputFormPath
@@ -379,6 +437,12 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 				state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentEdit_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawEdit", "branch": "case *conversationv1.AgentEdit_Failure"})
+		input, err := r.restatedOrHeld(s, u, unitID, "edit", state.Failure.GetPath().GetPath(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Edit",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
@@ -522,6 +586,7 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := grep.GetResult().(type) {
 	case *conversationv1.AgentGrep_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
@@ -542,6 +607,12 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 			returnedOutcome(u, true, grepForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentGrep_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGrep", "branch": "case *conversationv1.AgentGrep_Failure"})
+		input, err := r.restatedOrHeld(s, u, unitID, "grep", state.Failure.GetQuery().GetPattern(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Grep",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
@@ -590,6 +661,7 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := glob.GetResult().(type) {
 	case *conversationv1.AgentGlob_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
@@ -610,6 +682,12 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 			returnedOutcome(u, true, globForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
 	case *conversationv1.AgentGlob_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawGlob", "branch": "case *conversationv1.AgentGlob_Failure"})
+		input, err := r.restatedOrHeld(s, u, unitID, "glob", state.Failure.GetQuery().GetPattern(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Glob",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
 				failureSettledMs(state.Failure.GetError()))), nil
@@ -690,6 +768,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := bash.GetResult().(type) {
 	case *conversationv1.AgentBash_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
 		u.input = state.Start.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
@@ -723,6 +802,12 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 				bashExit(state.Success))), nil
 	case *conversationv1.AgentBash_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
+		input, err := r.restatedOrHeld(s, u, unitID, "bash", state.Failure.GetCommand().GetLine(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormCommand
 		u.ending = bash
 		return r.toolRow(s, at, unitID, "Bash",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetError()),
@@ -922,6 +1007,7 @@ func (r *resolver) drawWebSearch(s *wsState, at placement, act *conversationv1.A
 	switch state := search.GetResult().(type) {
 	case *conversationv1.AgentWebSearch_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Start"})
+		u.startHeld = true
 		u.startedAtMs = state.Start.GetStartedAtMs()
 		u.input = state.Start.GetQuery().GetTerms()
 		u.inputForm = inputFormQuery
@@ -938,6 +1024,15 @@ func (r *resolver) drawWebSearch(s *wsState, at placement, act *conversationv1.A
 			returnedOutcome(u, true, linksForm(state.Success.GetResults()), 0)), nil
 	case *conversationv1.AgentWebSearch_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawWebSearch", "branch": "case *conversationv1.AgentWebSearch_Failure"})
+		// The failure RESTATES the query (it always has); drawing it rather
+		// than only what a held start said is what lets a replayed failure name
+		// its search.
+		input, err := r.restatedOrHeld(s, u, unitID, "web_search", state.Failure.GetQuery().GetTerms(), u.input)
+		if err != nil {
+			return nil, err
+		}
+		u.input = input
+		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "WebSearch",
 			returnedOutcome(u, false, r.failureForm(s, state.Failure.GetFailure()),
 				failureSettledMs(state.Failure.GetFailure()))), nil

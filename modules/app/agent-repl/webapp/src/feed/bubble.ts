@@ -10,8 +10,17 @@
  *
  * COLLAPSE CANCELS ONLY THE CLIENT LEG. Closing a watch stream is a normal
  * client act that ends nothing: the work goes on daemon-side, and stopping it
- * is always the `Interrupt` rpc. The last drawn DOM is kept so a re-expand is
- * cheap to look at while it re-opens.
+ * is always the `Interrupt` rpc.
+ *
+ * COLLAPSE WIPES THE SUB-FEED (owner ruling, 2026-09-23). An expansion renders
+ * ONLY the sub-feed's newest page (`OpenFeed`) and then streams new rows in
+ * while the bubble stays open; a collapse disposes the child controller, every
+ * row it holds and the bubble's composer, so nothing of the sub-feed remains.
+ * The next expansion starts fresh from a new `OpenFeed` page — never from the
+ * history an earlier expansion accumulated. A collapse moves nothing the
+ * reader is looking at: the one case that would, a bubble whose sub-feed lies
+ * wholly ABOVE the viewport, is compensated through the scroll module's
+ * content-preserving cause (`prependCompensation`).
  *
  * THE FOLD IS THE READER'S AFTER THE FIRST DRAW (R2). A merge row ships
  * `FeedMergeFold.folded` and a subagent row ships nothing, so a subagent bubble
@@ -54,6 +63,7 @@ import type {
 import { stopTicking } from "./ticking.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import type { Overscan } from "./overscan.js";
+import type { TailFollow } from "../scroll.js";
 
 export interface BubbleOptions {
   ctx: AppContext;
@@ -79,6 +89,12 @@ export interface BubbleOptions {
    * that watches the root feed. Absent with the scroll box.
    */
   overscan?: Overscan;
+  /**
+   * The page's scroll box and its one tail owner, so a collapse whose sub-feed
+   * lies wholly above the viewport keeps the reader's content where it was.
+   * Absent with the scroll box (a fixture rendering a feed on its own).
+   */
+  scroll?: { readonly box: Element; readonly tail: TailFollow };
 }
 
 /** Build the bubble chrome for one bubble row. */
@@ -296,7 +312,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     }
   }
 
-  /** The sub-feed's controller, built on the first expansion and kept after. */
+  /** The sub-feed's controller, built on an expansion and disposed by the collapse. */
   function ensureChild(): FeedController {
     if (child !== null) return child;
     const composerSlot = mountComposerSlot();
@@ -405,15 +421,52 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     }
   }
 
-  /** Collapse: abandon the token, keep the DOM. */
+  /**
+   * Collapse: abandon the token AND the sub-feed. The watch is cancelled, the
+   * child controller disposed with every row it drew, and the composer with
+   * it, so the next expansion begins from a fresh `OpenFeed` page.
+   */
   function collapse(): void {
+    const above = heightWhollyAboveViewport();
     log.info("collapsing a bubble", {
       operation: "feed.bubble-collapse",
-      context: { row: id.value },
+      context: { row: id.value, above_viewport_px: above },
     });
     watch?.cancel();
     watch = null;
     applyExpanded(false);
+    discardSubFeed();
+    // THE READER'S CONTENT STAYS PUT. Hiding a sub-feed that lies wholly above
+    // the viewport shrinks the content above the reader by its height, which
+    // would slide what they are reading up; the content-preserving cause moves
+    // the feed back by exactly that. Anything at or below the viewport's top
+    // is the reader's own view, and a collapse there moves nothing.
+    if (above > 0) opts.scroll?.tail.prependCompensation(-above);
+  }
+
+  /**
+   * The sub-feed's height when it lies WHOLLY above the scroll box's top, else
+   * 0. Read before the collapse hides it, off the live layout (reading moves
+   * nothing).
+   */
+  function heightWhollyAboveViewport(): number {
+    if (opts.scroll === undefined || !expanded) return 0;
+    const box = opts.scroll.box.getBoundingClientRect();
+    const sub = panel.getBoundingClientRect();
+    return sub.bottom <= box.top ? sub.height : 0;
+  }
+
+  /** Dispose the child controller, its rows and the composer: nothing remains. */
+  function discardSubFeed(): void {
+    const rows = child === null ? 0 : panel.querySelectorAll("[data-feed-row]").length;
+    composer?.dispose();
+    composer = null;
+    child?.dispose();
+    child = null;
+    log.debug("a collapsed bubble's sub-feed was discarded", {
+      operation: "feed.bubble-subfeed-discarded",
+      context: { row: id.value, rows },
+    });
   }
 
   /** The refusal, drawn at the control that made the call. */

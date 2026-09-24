@@ -2030,7 +2030,7 @@ func TestStartTurnsNamingRenamesTheViewsMainAgentLoudly(t *testing.T) {
 	h.w.SetMainAgent(agentID("main-2"))
 
 	// Assert.
-	want := []string{"feed:main-1", "footer:main-1", "feed:main-2", "footer:main-2"}
+	want := []string{"feed:main-1", "feed:main-2"}
 	if got := h.rec.mainNamings(); !slices.Equal(got, want) {
 		t.Fatalf("main namings = %v, want %v", got, want)
 	}

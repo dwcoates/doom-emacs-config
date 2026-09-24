@@ -19,6 +19,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
+import { installBackgroundClear } from "./background-click.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -64,7 +65,8 @@ import {
   type RowRenderers,
 } from "./renderers.js";
 import { drawFeedSubagent, drawFeedDetachedSubagent } from "./rows/subagent.js";
-import { activateGroupedMember } from "./tool-group.js";
+import { FEED_GROUP_CLASS, activateGroupedMember } from "./tool-group.js";
+import { HELD_ENTRY_SELECTOR } from "../tray/tray.js";
 import { tick, stopTicking } from "./ticking.js";
 import { createOverscan } from "./overscan.js";
 
@@ -103,7 +105,13 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   log.info("mounting the feed", { operation: "feed.mount", context: {} });
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
-  const tail = scrollBox === null ? null : new TailFollow(scrollBox);
+  const tail =
+    scrollBox === null
+      ? null
+      : new TailFollow(scrollBox, () => {
+          const entry = latestEntry(scrollBox);
+          return entry === null ? null : revealGeometry(scrollBox, entry);
+        });
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
   // The size half is the footer occlusion (see `observeScrollBox`) — the
@@ -161,6 +169,12 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     overscan: overscan ?? undefined,
   });
+
+  // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends an active reply selection
+  // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
+  // the daemon's cleared push then parks the tail through `applySelection`.
+  const uninstallClear =
+    scrollBox === null ? null : installBackgroundClear(scrollBox, ctx, () => root.selectionActive());
 
   openWatch();
 
@@ -322,6 +336,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       composerFactory: deps.composerFactory,
       head: bubbleHead,
       overscan: overscan ?? undefined,
+      scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
     };
     if (unitCase(row) === "merge") {
       return mountBubble({
@@ -420,7 +435,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     );
     if (page.case !== "success") return false;
     const crumbs = requireMessage(page.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
-    const walked = await walk(crumbs);
+    const walked = await walk(crumbs, id);
     if (!walked) return false;
     const found = findAcrossOpenFeeds(root, id);
     if (found === null) {
@@ -434,10 +449,27 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     return true;
   }
 
-  /** Expand each container top-down, each awaiting its own open. */
-  async function walk(crumbs: readonly FeedBreadcrumb[]): Promise<boolean> {
+  /**
+   * Expand each container top-down, each awaiting its own open — and STOP the
+   * moment the row being revealed is on the page.
+   *
+   * ONLY WHAT SELECTING THE ROW REQUIRES IS OPENED. The probe answers the crumbs
+   * of the row's OWN feed, and for a bubble head (a subagent's, a shell's) the
+   * last crumb is that head itself: the row is already drawn once its container
+   * is open, so expanding it too would open a bubble the reader never asked
+   * for. Each crumb is therefore expanded only while the row is still not
+   * found.
+   */
+  async function walk(crumbs: readonly FeedBreadcrumb[], id: FeedId): Promise<boolean> {
     let controller: FeedController = root;
     for (const crumb of crumbs) {
+      if (findAcrossOpenFeeds(root, id) !== null) {
+        log.debug("the reveal target is drawn; the walk opens nothing further", {
+          operation: "feed.reveal-walk-stopped",
+          context: { row: id.value, crumb: crumb.target?.value ?? "unset" },
+        });
+        return true;
+      }
       const target = requireMessage(crumb.target, "FeedBreadcrumb.target");
       const bubble = bubbleOn(controller, target);
       if (bubble === null) {
@@ -498,12 +530,40 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     watch?.cancel();
     unobserve?.();
     intentScroll?.uninstall();
+    uninstallClear?.();
     overscan?.dispose();
     root.dispose();
   }
 }
 
 /** The row's element, searched across the root feed and every OPEN sub-feed. */
+/** Every feed row's element, at whatever depth of sub-feed it is drawn. */
+const FEED_ROW_SELECTOR = "[data-feed-row]";
+
+/**
+ * THE FEED COLUMN'S LATEST ENTRY inside the scroll BOX: the last thing drawn in
+ * it, whatever it is, or null when nothing is drawn.
+ *
+ * - A held entry in the hold tray, when there is one: the tray is laid out
+ *   after the feed in the same scroll zone, so its last card is the column's
+ *   last entry.
+ * - Otherwise the last ROOT-level row: a response, a tool call, a prompt. A row
+ *   nested in a bubble's sub-feed is part of its bubble, not an entry of its
+ *   own, so the last row in document order is walked up to its outermost row.
+ * - A root row drawn as a member of a tool group is shown behind a tab strip
+ *   and may be the hidden one, so the group's own bubble stands for it.
+ */
+export function latestEntry(box: Element): Element | null {
+  const held = box.querySelectorAll(HELD_ENTRY_SELECTOR);
+  if (held.length > 0) return held[held.length - 1] ?? null;
+  const rows = box.querySelectorAll(FEED_ROW_SELECTOR);
+  let row = rows[rows.length - 1] ?? null;
+  if (row === null) return null;
+  const outer = (el: Element): Element | null => el.parentElement?.closest(FEED_ROW_SELECTOR) ?? null;
+  for (let up = outer(row); up !== null; up = outer(up)) row = up;
+  return row.closest(`.${FEED_GROUP_CLASS}`) ?? row;
+}
+
 export function findAcrossOpenFeeds(
   controller: FeedController,
   id: FeedId,

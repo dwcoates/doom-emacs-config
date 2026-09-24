@@ -51,6 +51,7 @@ import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { stopTicking, tick } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
+import { drawDetachedWorkId } from "../work-id.js";
 import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import {
   clearRefusals,
@@ -179,6 +180,11 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
   }
+
+  // THE DETACHED-WORK ID closes the head, drawn verbatim: a shell bubble is
+  // always detached work, so the daemon names it on every head.
+  const workId = drawDetachedWorkId(u.workId);
+  if (workId !== null) head.append(workId);
 
   // THE COMMAND IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the one
   // two-line title fold, owned by the bubble's fold (bubble.ts). Folded AFTER a

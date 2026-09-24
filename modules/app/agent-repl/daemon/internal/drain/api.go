@@ -92,6 +92,12 @@ type Deps struct {
 	// Freeness answers, and waits for, a workspace's freeness. Teardown never
 	// interrupts: the wait is the whole mechanism.
 	Freeness Freeness
+	// Reviving reports whether the prompt queue is reviving the workspace's
+	// session for a held prompt. REQUIRED: a revival's bring-up serves the
+	// session before its prompt is delivered, and a sweep that cannot see the
+	// revival reads that session as idle and stands it down under the prompt
+	// (see Sweep).
+	Reviving func(ws ids.WorkspaceID) bool
 	// Announcer publishes the WatchDaemon pushes: the standing drain schedule,
 	// its cancellation, and the shutdown announcement.
 	Announcer Announcer
@@ -291,6 +297,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Freeness == nil {
 		return nil, errors.New("drain: a freeness answer is required")
+	}
+	if deps.Reviving == nil {
+		return nil, errors.New("drain: a revival answer is required")
 	}
 	if deps.Announcer == nil {
 		return nil, errors.New("drain: an announcer is required")

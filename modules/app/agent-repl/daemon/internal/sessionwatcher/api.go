@@ -180,10 +180,6 @@ type FooterSink interface {
 	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
 	// OnAgentTerminal retires an agent from the status tree.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure)
-	// OnMainAgent names the session's main agent, the same naming the feed is
-	// given, so a live-work chip addresses its row on the feed the feed drew it
-	// on: the root for the main agent's work, a sub-feed for a subagent's.
-	OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId)
 	// OnDetachedWork adds or updates a live-work chip.
 	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork)
 	// OnBash advances a shell chip.

@@ -1142,7 +1142,11 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
-	f.shim.ExpectStartSession()
+	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
+	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
+	// this line runs, and a live pop then met a closed control socket
+	// ("broken pipe") on a loaded host.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	roster := f.d.WatchRoster()
 
 	// Assert: Hibernate then KillSession fire once the session goes idle. Both
@@ -1335,7 +1339,11 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	// closeBlocker (internal/workspace/open.go) reach its held_prompts branch
 	// instead of returning turn_in_flight first.
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
-	f.shim.ExpectStartSession()
+	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
+	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
+	// this line runs, and a live pop then met a closed control socket
+	// ("broken pipe") on a loaded host.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
@@ -1849,7 +1857,11 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
-	f.shim.ExpectStartSession()
+	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
+	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
+	// this line runs, and a live pop then met a closed control socket
+	// ("broken pipe") on a loaded host.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
 	killed := &shimv1.KillSessionRequest{}
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
@@ -2253,7 +2265,11 @@ func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testi
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
-	f.shim.ExpectStartSession()
+	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
+	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
+	// this line runs, and a live pop then met a closed control socket
+	// ("broken pipe") on a loaded host.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
 	f.shim.AwaitGone()
@@ -2301,7 +2317,11 @@ func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
-	f.shim.ExpectStartSession()
+	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
+	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
+	// this line runs, and a live pop then met a closed control socket
+	// ("broken pipe") on a loaded host.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	// THE STREAM IS OPENED BEFORE THE PARK, which is what makes this a
 	// regression guard rather than a re-resolution. WatchHostWorkspace
 	// composes a fresh view for each new subscriber, so a client that
@@ -2361,7 +2381,11 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
-	f.shim.ExpectStartSession()
+	// THE START IS READ FROM THE SHIM'S DURABLE LOG, never popped live. At a
+	// 50ms cutoff the sweep can hibernate the shim, which then exits, before
+	// this line runs, and a live pop then met a closed control socket
+	// ("broken pipe") on a loaded host.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
 	f.shim.AwaitGone()

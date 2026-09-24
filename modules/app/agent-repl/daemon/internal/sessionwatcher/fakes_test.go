@@ -592,10 +592,6 @@ func (s *footerSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.Ag
 	s.rec.emit(event{sink: "footer", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn})
 }
 
-func (s *footerSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId) {
-	s.rec.nameMain("footer", agent.GetValue())
-}
-
 func (s *footerSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
 	s.rec.emit(event{sink: "footer", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue()})
 }
