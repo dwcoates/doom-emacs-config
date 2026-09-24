@@ -395,6 +395,37 @@ export const toolCallReturnedUnit = (
   };
 };
 
+/**
+ * An MCP server's tool call, as the daemon composes it: the ORDINARY tool
+ * card, headed by the qualified tool name, the arguments' JSON as a plain
+ * input line, and what it returned as text. Grounded in the claude-in-chrome
+ * server's real transcript shapes (a navigate call and its answer; an
+ * `is_error` answer that is one sentence).
+ */
+export const mcpToolCallUnit = (verdict: (typeof TOOL_VERDICTS)[number] = "succeeded"): ActivityUnit => ({
+  case: "simpleToolCall",
+  value: {
+    name: { text: "mcp__claude-in-chrome__navigate" },
+    input: { text: '{"tabId":7,"url":"https://example.com"}' },
+    outcome: {
+      case: "returned",
+      value: {
+        verdict: { case: verdict, value: {} },
+        form: {
+          case: "text",
+          value: {
+            text:
+              verdict === "succeeded"
+                ? "Navigated to https://example.com"
+                : "Error: Couldn't determine which page this action targets.",
+          },
+        },
+        runtime: { text: "ran 1.2 s" },
+      },
+    },
+  },
+});
+
 /** A Monitor call's card: the ordinary tool-call card, named Monitor, running. */
 export const monitorCallUnit = (): ActivityUnit => ({
   case: "simpleToolCall",
