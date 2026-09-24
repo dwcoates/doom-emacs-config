@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -253,5 +255,30 @@ func TestRevivalsOfDifferentWorkspacesDoNotJoin(t *testing.T) {
 	slices.Sort(got)
 	if !slices.Equal(got, []ids.WorkspaceID{"w1", "w2"}) {
 		t.Fatalf("starts entered = %v, want one per workspace", got)
+	}
+}
+
+// TestStartEndedByDaemonTellsTheDaemonLeavingFromAFailure covers the one
+// classifier the register and the select revival share.
+func TestStartEndedByDaemonTellsTheDaemonLeavingFromAFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantEnded bool
+	}{
+		{name: "the fleet's lifetime ended", err: fmt.Errorf("start: %w", context.Canceled), wantEnded: true},
+		{name: "the daemon is standing down", err: fmt.Errorf("start: %w", shimclient.ErrStandingDown), wantEnded: true},
+		{name: "the bring-up failed", err: errFake, wantEnded: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			why, ended := startEndedByDaemon(tt.err)
+
+			// Assert.
+			if ended != tt.wantEnded || (ended && why == "") {
+				t.Fatalf("startEndedByDaemon = (%q, %v), want ended=%v with a reason", why, ended, tt.wantEnded)
+			}
+		})
 	}
 }

@@ -2,9 +2,9 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -303,17 +303,23 @@ func (f *Fleet) HostSessionFacts(ws ids.WorkspaceID) (HostSessionFacts, bool) {
 
 // freshSocketPath mints a socket path no running shim of this workspace holds.
 // The generation rides in the name rather than in a directory, so the state
-// root's socket-path budget — checked once at boot — still bounds it.
+// root's socket-path budget — checked once at boot — still bounds it. It is
+// minted past every generation on disk as well as this fleet's own counter
+// (shimsocket.NextGeneration): an ADOPTED shim may already hold one this
+// daemon never minted.
 func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
+	base := f.deps.SocketPath(ws)
 	f.mu.Lock()
 	before := f.generation[ws]
-	f.generation[ws]++
-	gen := f.generation[ws]
+	path, gen := shimsocket.NextGeneration(base, before)
+	f.generation[ws] = gen
 	f.mu.Unlock()
 	f.logTransition(ws, "shim_generation", before, gen, nil)
-	base := f.deps.SocketPath(ws)
-	return strings.TrimSuffix(base, ".sock") + ".n" + strconv.Itoa(gen) + ".sock"
+	return path
 }
+
+// ErrInstallDeadShim is Install's refusal of a client whose process is gone.
+var ErrInstallDeadShim = errors.New("the shim to install has already exited")
 
 // Install makes c the workspace's shim client, retiring whatever was there.
 // The OLD PROCESS IS NOT KILLED HERE: the relaunch engine stood it down and
@@ -322,6 +328,14 @@ func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
 func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) error {
 	if c == nil {
 		return fmt.Errorf("workspace: install a shim for %q: no client", ws)
+	}
+	// A DEAD CLIENT IS NEVER INSTALLED. A relaunch installed a replacement
+	// that had died thirty seconds earlier, and its watches then dialed a
+	// socket nobody served, leaving the workspace linked to nothing (deploy
+	// 2026-09-24T18:27:44). Refused here, before the claim, the fleet is left
+	// exactly as it was.
+	if info, reaped := c.Reaped(); reaped {
+		return fmt.Errorf("workspace: install a shim for %q: %w (pid %d, code %d, signal %q)", ws, ErrInstallDeadShim, info.PID, info.Code, info.Signal)
 	}
 	// AN INSTALLED CLIENT IS SERVED BY THIS DAEMON: the boot's adoption of a
 	// survivor, the handover's adoption, the takeover's orphan recovery and a
@@ -769,6 +783,46 @@ func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, forc
 	f.deps.Log.WorkspaceOrCentral(record.Dir).Debug(opBringUp,
 		"no session was started on this shim; stopping the process",
 		dlog.Context{"workspace": string(ws), "force": force})
+}
+
+// HandOver ends this daemon's supervision of a workspace's shim for a handover:
+// its watches are closed, then the client is detached, leaving the process
+// running for the successor. It answers false when the workspace has no
+// session here.
+//
+// THE WATCHES CLOSE WITH THE DETACH. A detach alone left the watch fleet
+// standing on a shim that was now the successor's, so when the successor
+// bounced that shim, every stream ended against a watcher nobody had told and
+// the exiting incumbent recorded ERROR severings, a `link_severed` WARN and a
+// health fault for a shim it no longer owned (live handover 2026-09-24T18:06).
+// A closed watcher reads any later stream end as a torn-down stream, at DEBUG.
+//
+// A FAILED CLOSE IS RETURNED AND NOTHING IS DETACHED, so the transfer fails
+// loudly rather than handing over a shim this daemon is still watching.
+func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	session, ok := f.sessions[ws]
+	var watcher sessionwatcher.Watcher
+	if ok {
+		watcher = session.watcher
+		session.watcher = nil
+	}
+	f.mu.Unlock()
+	if !ok {
+		return false, nil
+	}
+	// The close runs OFF the lock: it joins the watcher's in-flight sink
+	// dispatch, and those sinks read the fleet.
+	if watcher != nil {
+		if err := watcher.Close(); err != nil {
+			return true, fmt.Errorf("workspace: hand over %q: close the watches: %w", ws, err)
+		}
+	}
+	session.client.Detach()
+	f.deps.Log.Global().Info(opFleetRollout, "handed the workspace's shim over; its watches are closed and the process keeps running", dlog.Context{
+		"workspace": string(ws), "shim_pid": session.client.PID(), "watched": watcher != nil,
+	})
+	return true, nil
 }
 
 // StandDown is the rollout's stand-down: end the session, then stop the

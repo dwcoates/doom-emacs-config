@@ -169,6 +169,31 @@ func TestATransferDetachesTheShimRatherThanKillingIt(t *testing.T) {
 	}
 }
 
+// TestATransferWhoseHandOverFailsPushesNoTransferNotice pins the refusal arm:
+// a shim the fleet could not hand over is neither detached nor announced, so
+// the workspace stays served here rather than half-transferred.
+func TestATransferWhoseHandOverFailsPushesNoTransferNotice(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	shim := h.fleet.live[ws]
+	h.fleet.handOverErr[ws] = errors.New("the watches would not close")
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+
+	// Assert
+	if shim.Detached() {
+		t.Fatal("a shim whose hand-over failed was detached")
+	}
+	if calls := h.pusher.Calls(); len(calls) != 0 {
+		t.Fatalf("pushes = %+v, want no transfer notice for a failed hand-over", calls)
+	}
+}
+
 func TestATransferReleasesServingOwnership(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

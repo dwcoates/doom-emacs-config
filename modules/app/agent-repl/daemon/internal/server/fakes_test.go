@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -218,6 +219,10 @@ type fakeVerbs struct {
 	createTaskErr error
 
 	selectErr error
+	// selectEntered, when set, is closed as Select begins; Select then waits
+	// for its caller to leave, answers that, and closes selectLeft.
+	selectEntered chan struct{}
+	selectLeft    chan struct{}
 
 	// markViewed records every workspace MarkWorkspaceViewed resolved onto the
 	// verb, so the handler's own resolution is what a test asserts.
@@ -360,7 +365,15 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 	return f.createTask, f.createTaskErr
 }
 
-func (f *fakeVerbs) Select(context.Context, ids.WorkspaceID) error { return f.selectErr }
+func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID) error {
+	if f.selectEntered != nil {
+		close(f.selectEntered)
+		<-ctx.Done()
+		defer close(f.selectLeft)
+		return fmt.Errorf("select: revive: %w", ctx.Err())
+	}
+	return f.selectErr
+}
 
 func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
 	f.markViewed = append(f.markViewed, ws)

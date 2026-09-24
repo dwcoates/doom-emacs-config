@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -574,6 +575,14 @@ func (s *server) SelectWorkspace(
 		return answer(resp, cerr)
 	}
 	if err := s.deps.Verbs.Select(ctx, subject.Record.ID); err != nil {
+		// A CALLER THAT LEFT IS NOT A FAILURE. A user switching workspaces
+		// quickly cancels the select of the one they switched away from while
+		// its revival runs; the revival goes on without it, and the answer
+		// has nobody to reach.
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			subject.Log.Info(rpc, "the caller left before the select finished", dlog.Context{"cause": err.Error()})
+			return nil, connect.NewError(connect.CodeCanceled, err)
+		}
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SelectWorkspaceResponse_Success{

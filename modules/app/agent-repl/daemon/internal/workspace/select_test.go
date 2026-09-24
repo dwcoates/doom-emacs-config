@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -644,5 +645,98 @@ func TestConcurrentSelectsOfAParkedWorkspaceStartOneSession(t *testing.T) {
 	// Assert: one bring-up for four selects.
 	if !slices.Equal(f.fleet.startCalls, []ids.WorkspaceID{"w1"}) {
 		t.Fatalf("starts = %v, want exactly one for w1", f.fleet.startCalls)
+	}
+}
+
+// ---- a select's revival outlives the select ----
+
+// arrangeCancelledSelect selects parked "w1", holds its DETACHED revival until
+// the select's caller has left, and answers the select's error. The revival is
+// then released, and the call returns once its flight has finished.
+func arrangeCancelledSelect(t *testing.T, f *fixture, startErr error) error {
+	t.Helper()
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.startErr = startErr
+	f.fleet.detachEntered, f.fleet.detachHold = make(chan struct{}), make(chan struct{})
+	finished := make(chan ids.WorkspaceID, 1)
+	f.verbs.(*verbs).revivals.observeFinish = func(ws ids.WorkspaceID) { finished <- ws }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := f.selectAsync(ctx, "w1")
+	receive(t, f.fleet.detachEntered, "the detached revival")
+	cancel()
+	err := receive(t, done, "the cancelled select's answer")
+	close(f.fleet.detachHold)
+	receive(t, finished, "the revival's finish")
+	return err
+}
+
+// errorRecords answers every ERROR the fixture recorded.
+func errorRecords(f *fixture) []dlog.Record {
+	var out []dlog.Record
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelError {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestASelectCancelledMidRevivalLeavesTheWorkspaceRevived is the 18:28:56
+// switch: the user moved on while the parked workspace was coming back, and
+// the bring-up was torn in half at its session record's write.
+func TestASelectCancelledMidRevivalLeavesTheWorkspaceRevived(t *testing.T) {
+	// Arrange, Act.
+	f := newFixture(t)
+	err := arrangeCancelledSelect(t, f, nil)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Select() = %v, want the caller's own cancellation", err)
+	}
+	if !slices.Equal(f.fleet.started, []ids.WorkspaceID{"w1"}) || f.fleet.startCtxErr != nil {
+		t.Fatalf("started = %v (ctx err %v), want w1 started whole on a live context", f.fleet.started, f.fleet.startCtxErr)
+	}
+	if len(f.topbarParked) != 1 || f.topbarParked[0] {
+		t.Fatalf("topbar parked = %v, want the revival to have unparked it", f.topbarParked)
+	}
+}
+
+// TestASelectCancelledMidRevivalRecordsNoError pins that a caller leaving is
+// not a failure.
+func TestASelectCancelledMidRevivalRecordsNoError(t *testing.T) {
+	// Arrange, Act.
+	f := newFixture(t)
+	_ = arrangeCancelledSelect(t, f, nil)
+
+	// Assert.
+	if errs := errorRecords(f); len(errs) != 0 {
+		t.Fatalf("errors = %+v, want none for a caller that left", errs)
+	}
+}
+
+// TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError covers the fleet's
+// lifetime ending under the revival: the daemon leaving, not a failure.
+func TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError(t *testing.T) {
+	// Arrange, Act.
+	f := newFixture(t)
+	_ = arrangeCancelledSelect(t, f, context.Canceled)
+
+	// Assert.
+	if errs := errorRecords(f); len(errs) != 0 {
+		t.Fatalf("errors = %+v, want none for a revival the daemon's exit ended", errs)
+	}
+}
+
+// TestADetachedRevivalThatFailsIsStillAnError keeps a real failure loud after
+// its caller left.
+func TestADetachedRevivalThatFailsIsStillAnError(t *testing.T) {
+	// Arrange, Act.
+	f := newFixture(t)
+	_ = arrangeCancelledSelect(t, f, errFake)
+
+	// Assert.
+	if errs := errorRecords(f); len(errs) != 1 || errs[0].Message != "the hibernated workspace's session did not come back up" {
+		t.Fatalf("errors = %+v, want the failed bring-up at ERROR once", errs)
 	}
 }

@@ -31,8 +31,14 @@ func TestRolloutStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 		{
 			name: "a repeated build stamp keeps its claim", operation: opStaleness, state: "bounced_build_stamp",
 			before: "build-a", after: "build-a",
-			arrange: func(c *controller) { c.claimStaleBounce(ws, "build-a") },
-			act:     func(c *controller) { c.claimStaleBounce(ws, "build-a") },
+			// The first claim's bounce has FINISHED: a claim still in flight is
+			// skipped before the stamp is read.
+			arrange: func(c *controller) {
+				c.claimStaleBounce(ws, "build-a")
+				c.settleStaleBounce(ws, nil)
+				c.staleChecks.Wait()
+			},
+			act: func(c *controller) { c.claimStaleBounce(ws, "build-a") },
 		},
 		{
 			name: "a manifest arms a rendezvous", operation: opJoin, state: "rendezvous",

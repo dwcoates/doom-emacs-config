@@ -120,6 +120,10 @@ type controller struct {
 	// this the bounce re-triggers on every report forever, spawning a shim
 	// each round.
 	bouncedStamp map[ids.WorkspaceID]string
+	// staleInFlight marks the workspaces whose stale-build bounce is
+	// registered or running, from its claim until its Done. A report judged
+	// meanwhile is the shim being replaced, not a relaunched one.
+	staleInFlight map[ids.WorkspaceID]bool
 }
 
 // entry is one workspace's rendezvous state.

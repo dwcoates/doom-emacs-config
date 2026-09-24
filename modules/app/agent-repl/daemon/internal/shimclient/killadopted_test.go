@@ -357,3 +357,162 @@ func TestSocketGoneReadsALostPeerAsGoneThroughAnOpError(t *testing.T) {
 		t.Fatalf("isSocketGone(%v) = false, want true for a net.OpError carrying ENOTCONN", err)
 	}
 }
+
+// ---- an adopted shim's own exit, after a stand-down ----
+
+// standingDownAdopted is an adopted client that knows its peer's pid and has
+// been asked to stand down, which is the state the relaunch's reap gate
+// waits on.
+func standingDownAdopted(p *peer) *client {
+	c := adoptedClientFor(p.uds, 2*time.Second)
+	c.pid = p.pid
+	c.standDown.Store(true)
+	return c
+}
+
+// awaitExitInfo waits for the client's exit, failing the test past bound.
+func awaitExitInfo(t *testing.T, c *client, bound time.Duration) ExitInfo {
+	t.Helper()
+	select {
+	case info := <-c.Exited():
+		return info
+	case <-time.After(bound):
+		t.Fatalf("no exit was published within %s", bound)
+		return ExitInfo{}
+	}
+}
+
+// TestAwaitAdoptedExitPublishesTheExitOnceTheProcessGroupIsGone is the reap
+// gate's missing evidence: an adopted shim that leaves after its stand-down is
+// seen leaving, with its pid, promptly.
+func TestAwaitAdoptedExitPublishesTheExitOnceTheProcessGroupIsGone(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := standingDownAdopted(p)
+	go c.awaitAdoptedExit(context.Background())
+
+	// Act.
+	start := time.Now()
+	if err := syscall.Kill(-p.pid, syscall.SIGTERM); err != nil {
+		t.Fatalf("stop the peer: %v", err)
+	}
+	info := awaitExitInfo(t, c, 5*time.Second)
+
+	// Assert.
+	if info.PID != p.pid || !info.Inferred {
+		t.Fatalf("exit = %+v, want the adopted peer's pid %d, inferred", info, p.pid)
+	}
+	t.Logf("the adopted shim's exit was published %s after it was signalled", time.Since(start))
+}
+
+// TestAwaitAdoptedExitWatchesAPeerThatLeadsNoGroupByItsPid covers a peer that
+// is a member of someone else's group: the group outlives it, so the pid is
+// what is watched.
+func TestAwaitAdoptedExitWatchesAPeerThatLeadsNoGroupByItsPid(t *testing.T) {
+	// Arrange.
+	leader := startPeer(t, 0)
+	p := startPeer(t, leader.pid)
+	c := standingDownAdopted(p)
+	go c.awaitAdoptedExit(context.Background())
+
+	// Act.
+	if err := syscall.Kill(p.pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("stop the peer: %v", err)
+	}
+	info := awaitExitInfo(t, c, 5*time.Second)
+
+	// Assert.
+	if info.PID != p.pid {
+		t.Fatalf("exit = %+v, want the peer's pid %d while its group's leader lives on", info, p.pid)
+	}
+}
+
+// TestAwaitAdoptedExitPublishesNothingForALiveShimWhenItsLifetimeEnds covers
+// the end of supervision (a detach) while the shim is still running.
+func TestAwaitAdoptedExitPublishesNothingForALiveShimWhenItsLifetimeEnds(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	c := standingDownAdopted(p)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	c.awaitAdoptedExit(ctx)
+
+	// Assert.
+	if _, reaped := c.Reaped(); reaped {
+		t.Fatal("an exit was published for a shim that is still running")
+	}
+}
+
+// TestAwaitAdoptedExitWithNoPidPublishesNothing covers an adoption whose
+// socket yielded no pid: nothing is guessed.
+func TestAwaitAdoptedExitWithNoPidPublishesNothing(t *testing.T) {
+	// Arrange.
+	c := adoptedClientFor(filepath.Join(shortDir(t), "absent.sock"), 2*time.Second)
+	c.standDown.Store(true)
+
+	// Act.
+	c.awaitAdoptedExit(context.Background())
+
+	// Assert.
+	if _, reaped := c.Reaped(); reaped {
+		t.Fatal("an exit was published for a shim whose pid was never known")
+	}
+}
+
+// TestKillOfAnAbsentAdoptedSocketKeepsTheAdoptedPid covers the exit the
+// relaunch reported as `pid: 0`: the pid learned at adoption stays on it.
+func TestKillOfAnAbsentAdoptedSocketKeepsTheAdoptedPid(t *testing.T) {
+	// Arrange.
+	c := adoptedClientFor(filepath.Join(shortDir(t), "absent.sock"), 2*time.Second)
+	c.pid = 28278
+
+	// Act.
+	if err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the stand-down window expired"}); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	// Assert.
+	info, reaped := c.Reaped()
+	if !reaped || info.PID != 28278 {
+		t.Fatalf("exit = %+v (reaped %v), want the adopted pid 28278 kept", info, reaped)
+	}
+}
+
+// TestProcessGoneReadsTheKernelsAnswer covers the observation both adopted
+// waits share, for a pid and for its group.
+func TestProcessGoneReadsTheKernelsAnswer(t *testing.T) {
+	// Arrange.
+	p := startPeer(t, 0)
+	tests := []struct {
+		name   string
+		target int
+		kill   bool
+		want   bool
+	}{
+		{name: "a running process", target: p.pid, want: false},
+		{name: "a running process group", target: -p.pid, want: false},
+		{name: "a process that has gone", target: p.pid, kill: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.kill {
+				if err := syscall.Kill(-p.pid, syscall.SIGKILL); err != nil {
+					t.Fatalf("stop the peer: %v", err)
+				}
+				c := standingDownAdopted(p)
+				go c.awaitAdoptedExit(context.Background())
+				awaitExitInfo(t, c, 5*time.Second)
+			}
+
+			// Act.
+			got := processGone(tt.target)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("processGone(%d) = %v, want %v", tt.target, got, tt.want)
+			}
+		})
+	}
+}
