@@ -175,6 +175,12 @@ type Converter struct {
 	// (keepalive.go). None of them is ever stored.
 	keepaliveScope keepaliveScope
 
+	// turnScope is which nameable turn each of this file's records belongs to,
+	// by the same links (turn.go). openedTurn is the turn the record being
+	// converted opened, set by externalPrompt and read once by Line.
+	turnScope  turnScope
+	openedTurn string
+
 	// joined records WHERE IN THE FILE this converter started reading, and
 	// whether it has started at all. ONE OFFSET, written once.
 	//
@@ -208,6 +214,7 @@ func New(log *logging.Bound) *Converter {
 		spawns:         map[string]spawnRecord{},
 		foreignSpawns:  map[string]string{},
 		keepaliveScope: newKeepaliveScope(),
+		turnScope:      newTurnScope(),
 	}
 }
 
@@ -245,13 +252,18 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 	// per-record answer is what makes the skip exact: every entry this record
 	// fans out to — a unit, a settle, a prompt, residue — is withheld together,
 	// whichever branch minted it.
-	keepalive := c.keepaliveScope.classify(keepaliveFactsOf(record))
+	facts := keepaliveFactsOf(record)
+	keepalive := c.keepaliveScope.classify(facts)
 	// THE LINE IS CLASSIFIED IN FULL, and the READER decides what is written:
 	// residue is withheld at the sidecar's single write path (neverpersist.go,
 	// cycle.go withholdResidue), so every branch here still runs and still
 	// states what the vendor recorded. A keep-alive's record is converted too,
 	// so the joins it opens or settles stay exactly as warm as any other's.
+	c.openedTurn = ""
 	entries := c.lineEntries(record, at, next)
+	// THE TURN IS ASKED ONCE PER RECORD, after the conversion that may have
+	// opened one, and stamped on every entry the record produced (turn.go).
+	stampTurn(entries, c.turnScope.resolve(facts, c.openedTurn))
 	if !keepalive {
 		return entries
 	}
