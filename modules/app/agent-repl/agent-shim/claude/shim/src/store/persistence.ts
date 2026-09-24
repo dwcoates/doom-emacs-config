@@ -69,6 +69,14 @@ export interface PersistEntry {
    * so the tag is the whole decision and no producer has to ask.
    */
   readonly keepalive: boolean;
+  /**
+   * THE TURN THIS ROW WAS PRODUCED WITHIN: the turn the shim had open when the
+   * vendor produced it (a keep-alive's own id for a keep-alive's rows), or
+   * `undefined` for a row produced outside any turn. REQUIRED, so every place
+   * that builds a row has to decide it; never guessed. The writer stamps it on
+   * the store envelope (`StoreEntry.turn`).
+   */
+  readonly turn: conversationv1.TurnId | undefined;
   /** What this row says. The arm decides the store arm it lands in. */
   readonly item:
     | { readonly kind: "prompt"; readonly prompt: conversationv1.AgentPrompt }

@@ -207,6 +207,7 @@ export function activityEntry(
     upsertKey: activityUpsertKey(activity.activityId),
     source: sourceOf(origin),
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: { kind: "frame", frame: updateFrame(origin.agentId, activityUpdate(activity)) },
   };
 }
@@ -229,6 +230,7 @@ export function terminalEntry(
     upsertKey: terminalUpsertKey(origin.agentId, origin.vendorUuid),
     source: sourceOf(origin),
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: { kind: "frame", frame: agentFrame(origin.agentId, result) },
   };
 }
@@ -245,6 +247,7 @@ export function pageLineEntry(
     upsertKey,
     source: sourceOf(origin),
     keepalive: context.keepalive,
+    turn: context.turnId,
     item: { kind: "frame", frame: updateFrame(origin.agentId, update) },
   };
 }

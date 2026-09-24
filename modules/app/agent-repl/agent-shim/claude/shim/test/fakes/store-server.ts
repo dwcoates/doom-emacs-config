@@ -60,6 +60,8 @@ interface StoredRow {
   readonly upsertKey: string;
   /** The line itself, replaced whole on every upsert. */
   line: storev1.StorePageLine;
+  /** The row's FIRST turn stamp, kept across upserts as the real store keeps it. */
+  turn: conversationv1.TurnId | undefined;
 }
 
 /** An opened reading session: which book, and where its tail begins. */
@@ -289,7 +291,11 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     create(storev1.StoreItemPointerSchema, { value: row.pointer });
 
   const lineAt = (row: StoredRow): storev1.StoreLineAt =>
-    create(storev1.StoreLineAtSchema, { at: pointerOf(row), line: row.line });
+    create(storev1.StoreLineAtSchema, {
+      at: pointerOf(row),
+      line: row.line,
+      ...(row.turn === undefined ? {} : { turn: row.turn }),
+    });
 
   /**
    * Deliver a line to every tail watching its book.
@@ -315,15 +321,20 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   };
 
   /** Land one page line, upserting by key and keeping first-insert position. */
-  const upsertPageLine = (upsertKey: string, line: storev1.StorePageLine): void => {
+  const upsertPageLine = (
+    upsertKey: string,
+    line: storev1.StorePageLine,
+    turn: conversationv1.TurnId | undefined,
+  ): void => {
     const bookId = line.pageAgentId?.value ?? "";
     const existing = rowsByKey.get(upsertKey);
     if (existing !== undefined) {
       existing.line = line;
+      existing.turn ??= turn;
       fanOut(bookId, existing);
       return;
     }
-    const row: StoredRow = { pointer: String(nextPointer++), upsertKey, line };
+    const row: StoredRow = { pointer: String(nextPointer++), upsertKey, line, turn };
     rowsByKey.set(upsertKey, row);
     const book = books.get(bookId) ?? [];
     book.push(row);
@@ -415,7 +426,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       case "serveableFrame":
         registerFromLine(info.value);
         recordLiveness(info.value);
-        upsertPageLine(entry.upsertKey, info.value);
+        upsertPageLine(entry.upsertKey, info.value, entry.turn);
         return;
       case "unservedItem": {
         unservedRows.push(info.value);
