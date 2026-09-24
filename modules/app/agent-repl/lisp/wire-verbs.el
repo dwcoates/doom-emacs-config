@@ -62,6 +62,8 @@
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-optional-string "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-optional-message "agent-repl-wire-common" (message-name field object decoder))
+(declare-function agent-repl-wire--decode-message "agent-repl-wire-common" (message-name field object decoder))
+(declare-function agent-repl-wire-decode-lock-holder-failure "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire--decode-double "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
@@ -718,17 +720,20 @@ The shim came up but the VENDOR failed to start the session."
     (list :detail (agent-repl-wire-verbs--decode-string
                        message 'detail json))))
 
+(defun agent-repl-wire-decode-open-workspace-lock-holder-unavailable-failure (json)
+  "Decode OpenWorkspaceLockHolderUnavailable's `failure' field from JSON."
+  (agent-repl-wire-decode-lock-holder-failure json))
+
 (defun agent-repl-wire-decode-open-workspace-lock-holder-unavailable (json)
   "Decode OpenWorkspaceLockHolderUnavailable from JSON into a plist
-\(`:binary' `:os-error').
-The session's shim could not spawn its own kernel-lock holder: a broken
-lock helper, never an ownership conflict."
+\(`:failure'), a decoded `conversation.v1.LockHolderFailure'.
+The session's shim's own kernel-lock holder failed: a broken lock helper,
+never an ownership conflict."
   (let ((message "OpenWorkspaceLockHolderUnavailable"))
-    (agent-repl-wire-verbs--check-keys message json '(binary osError))
-    (list :binary (agent-repl-wire-verbs--decode-string
-                   message 'binary json)
-          :os-error (agent-repl-wire-verbs--decode-string
-                     message 'osError json))))
+    (agent-repl-wire-verbs--check-keys message json '(failure))
+    (list :failure (agent-repl-wire--decode-message
+                    message 'failure json
+                    #'agent-repl-wire-decode-open-workspace-lock-holder-unavailable-failure))))
 
 (defun agent-repl-wire-decode-open-workspace-error-unknown-workspace (json)
   "Decode OpenWorkspaceError's `unknown_workspace' cause arm from JSON."

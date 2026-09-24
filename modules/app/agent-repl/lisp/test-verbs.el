@@ -696,30 +696,58 @@ daemon starts sending it, with no table to update here."
     (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
     (should (agent-repl-test-verbs--messaged-p "the sdk threw"))))
 
+(defun agent-repl-test-verbs--lock-holder-refusal (how)
+  "An OpenWorkspace refusal whose lock holder /b/shim-lock failed as HOW."
+  `((:open . (:response (:arm :error
+                          :value (:cause (:arm :lock-holder-unavailable
+                                          :value (:failure (:binary "/b/shim-lock" :how ,how)))))))))
+
 (ert-deftest agent-repl-verbs-open-lock-holder-unavailable-says-the-helper-failed ()
-  "An open refused because the shim's lock helper would not spawn says so."
+  "An open refused because the shim's lock helper failed names the helper."
   (agent-repl-test-verbs--with
-      '((:open . (:response (:arm :error
-                            :value (:cause (:arm :lock-holder-unavailable
-                                            :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :spawn-failed :value (:os-error "spawn ENOENT")))
     (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
-    (should (agent-repl-test-verbs--messaged-p "the shim's lock helper /b/shim-lock failed to start"))))
+    (should (agent-repl-test-verbs--messaged-p "the shim's lock helper /b/shim-lock could not be spawned"))))
 
 (ert-deftest agent-repl-verbs-open-lock-holder-unavailable-echoes-the-os-error ()
   "The OS error is the user's lead to the broken binary, so it is drawn too."
   (agent-repl-test-verbs--with
-      '((:open . (:response (:arm :error
-                            :value (:cause (:arm :lock-holder-unavailable
-                                            :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :spawn-failed :value (:os-error "spawn ENOENT")))
     (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
-    (should (agent-repl-test-verbs--messaged-p "(spawn ENOENT)"))))
+    (should (agent-repl-test-verbs--messaged-p ": spawn ENOENT;"))))
+
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-states-the-exit-code ()
+  "A holder that exited is drawn with its code and stderr."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :exited :value (:code 1 :stderr "EACCES")))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "exited with code 1 before taking the lock (EACCES)"))))
+
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-states-the-signal ()
+  "A holder a signal killed is drawn with the signal."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :signaled :value (:signal "SIGSEGV" :stderr "")))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "was killed by SIGSEGV before taking the lock;"))))
+
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-states-the-line ()
+  "A holder that answered the wrong line is drawn with that line."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :misanswered :value (:line "ok")))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "answered \"ok\" instead of \"locked\" and was killed"))))
+
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-states-the-bound ()
+  "A holder that never answered is drawn with the bound the shim waited."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :silent :value (:timeout-ms 5000)))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "gave no \"locked\" answer within 5000 ms and was killed"))))
 
 (ert-deftest agent-repl-verbs-open-lock-holder-unavailable-denies-an-owner ()
   "The refusal must never read as another process owning the conversation."
   (agent-repl-test-verbs--with
-      '((:open . (:response (:arm :error
-                            :value (:cause (:arm :lock-holder-unavailable
-                                            :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+      (agent-repl-test-verbs--lock-holder-refusal '(:arm :exited :value (:code 1 :stderr "")))
     (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
     (should (agent-repl-test-verbs--messaged-p "no other process owns this conversation"))))
 
