@@ -564,6 +564,41 @@ func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
 	return "master", nil
 }
 
+// THE REAPER'S OPERATIONS are no part of a merge. Each one fails loudly, so a
+// merge that ever reached for one would fail its test rather than pass on a
+// zero answer.
+func (g *fakeGit) ListWorktrees(context.Context, string) ([]gitclient.Worktree, error) {
+	return nil, errors.New("merge fake git: ListWorktrees is not a merge operation")
+}
+
+func (g *fakeGit) PruneWorktrees(context.Context, string) error {
+	return errors.New("merge fake git: PruneWorktrees is not a merge operation")
+}
+
+func (g *fakeGit) RemoveCleanWorktree(context.Context, string, string) error {
+	return errors.New("merge fake git: RemoveCleanWorktree is not a merge operation")
+}
+
+func (g *fakeGit) AdminDir(context.Context, string) (string, error) {
+	return "", errors.New("merge fake git: AdminDir is not a merge operation")
+}
+
+func (g *fakeGit) CommitterTime(context.Context, string, string) (time.Time, error) {
+	return time.Time{}, errors.New("merge fake git: CommitterTime is not a merge operation")
+}
+
+func (g *fakeGit) TreeOf(context.Context, string, string) (string, error) {
+	return "", errors.New("merge fake git: TreeOf is not a merge operation")
+}
+
+func (g *fakeGit) MergeTree(context.Context, string, string, string) (gitclient.MergeTreeOutcome, error) {
+	return gitclient.MergeTreeOutcome{}, errors.New("merge fake git: MergeTree is not a merge operation")
+}
+
+func (g *fakeGit) DeleteBranchAt(context.Context, string, string, string) error {
+	return errors.New("merge fake git: DeleteBranchAt is not a merge operation")
+}
+
 // seen reports whether git was asked for something.
 func (g *fakeGit) seen(call string) bool {
 	g.mu.Lock()
