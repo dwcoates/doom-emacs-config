@@ -720,7 +720,7 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 				}
 				row.command = truncate(item.Start.GetCommand().GetLine(), DefaultWarningRowWidth)
 				row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
-			case *conversationv1.AgentBash_Update:
+			case *conversationv1.AgentBash_Tail:
 			default:
 				s.retiredWork[id] = struct{}{}
 				delete(s.shells, id)

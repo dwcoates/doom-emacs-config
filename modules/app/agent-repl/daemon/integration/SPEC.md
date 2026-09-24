@@ -310,9 +310,9 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   created agent id route to that sub-feed; settled → `settled.succeeded`
   with tokens; a detached subagent gets `detached_subagent` and its own
   WatchAgent opened EAGERLY (assert the fake saw it before any OpenFeed)
-- detached bash: `detached_shell` head, spool tail from WatchBash deltas,
-  `settled.completed{exit}`; a spool gap (from_offset mismatch) is refused
-  and logged
+- detached bash: `detached_shell` head, spool body drawn verbatim from the
+  WatchBash `tail` snapshot, `settled.completed{exit}`; a tail past
+  `AGENT_BASH_TAIL_CAP_BYTES` is refused and logged
 - turn terminal: `turn_ended.concluded{answer}` stamps the answering
   response; api_request_failed arms respell to the FeedTurnEndedErrored
   arms (429 with retry_after, 401, refusal, max_tokens, query died);
