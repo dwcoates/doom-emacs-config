@@ -92,6 +92,11 @@ type FleetDeps struct {
 	// DB holds the session record the fresh-versus-resume decision is made
 	// from.
 	DB wsm.DB
+	// Instance identifies this daemon process for serving ownership. Every
+	// client the fleet begins holding claims the workspace for it; see
+	// claimServing. Required: a fleet that cannot claim serves sessions its
+	// own handover would never hand over.
+	Instance ids.InstanceID
 	// Accounts routes a workspace to its config root and locates a
 	// conversation's transcript, which is what the resume guard checks.
 	Accounts account.Resolver
@@ -327,6 +332,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	switch {
 	case deps.DB == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a state client")
+	case deps.Instance == "":
+		return nil, fmt.Errorf("workspace: the session fleet needs this daemon's instance id; every session it holds is claimed for it")
 	case deps.Accounts == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs an account resolver")
 	case deps.Supervisor == nil:
@@ -2104,6 +2111,11 @@ func (f *Fleet) hold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, s
 	f.remember(ws, session)
 	if restated {
 		return nil
+	}
+	// A NEW ARRIVAL IS SERVED BY THIS DAEMON, and the durable row says so
+	// before the bring-up can report the session up. See claimServing.
+	if err := f.claimServing(ctx, log, ws); err != nil {
+		return err
 	}
 	return retireTerminalRecord(ctx, log, f.deps.DB, opBringUp, ws)
 }
