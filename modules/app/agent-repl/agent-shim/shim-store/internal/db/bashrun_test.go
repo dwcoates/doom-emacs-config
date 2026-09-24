@@ -2,7 +2,10 @@ package db
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
 func TestWriteBatchLandsABashFrameAsItsOwnEntryRow(t *testing.T) {
@@ -192,5 +195,79 @@ func TestBashRowIsTerminalRecognizesTheConcludingArms(t *testing.T) {
 				t.Fatalf("BashRowIsTerminal = %t, want %t", got, tc.want)
 			}
 		})
+	}
+}
+
+// ---- the rendered tail ----
+
+func bashTail(text string) *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{Tail: &conversationv1.AgentBashTail{Text: text}}}
+}
+
+func TestWriteBatchLandsATailAtTheCap(t *testing.T) {
+	// Arrange: a tail of exactly the contract's cap is what the producer
+	// writes for every run past it.
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-producer", WriteBulk,
+		batch(bashEntry("w1", "bash:run-1:tail", "run-1", bashTail(strings.Repeat("y", bashTailCap)))), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want a tail at the cap stored", err)
+	}
+}
+
+func TestWriteBatchRefusesATailPastTheCap(t *testing.T) {
+	// Arrange: output beyond what is rendered is never stored.
+	d, s := newStore(t)
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-producer", WriteBulk,
+		batch(bashEntry("w1", "bash:run-1:tail", "run-1", bashTail(strings.Repeat("y", bashTailCap+1)))), nil)
+
+	// Assert
+	if !errors.Is(err, ErrInvalid) || RefusalSite(err) != SiteBashTailOverCap {
+		t.Fatalf("WriteBatch = %v (site %q), want ErrInvalid at %q", err, RefusalSite(err), SiteBashTailOverCap)
+	}
+	s.assertTracedRefusal(t, "AGENT_BASH_TAIL_CAP_BYTES")
+}
+
+func TestTheStoresTailBoundIsTheContractsCap(t *testing.T) {
+	// Arrange: the producer, the renderer and the store read ONE number.
+	want := int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)
+
+	// Act
+	got := bashTailCap
+
+	// Assert
+	if got != want {
+		t.Fatalf("bashTailCap = %d, want the contract's %d", got, want)
+	}
+}
+
+func TestBashRunReplaysASupersededTailAtItsFirstInsertPosition(t *testing.T) {
+	// Arrange: the tail is one row every write supersedes; the terminal was
+	// first inserted after it, so the replay serves the NEWEST window where
+	// the tail has always been.
+	d, _ := newStore(t)
+	writeOK(t, d, bashEntry("w1", "bash:run-1:start", "run-1", bashStart()))
+	writeOK(t, d, bashEntry("w2", "bash:run-1:tail", "run-1", bashTail("one\n")))
+	writeOK(t, d, bashEntry("w3", "bash:run-1:terminal", "run-1", bashSuccess()))
+	writeOK(t, d, bashEntry("w4", "bash:run-1:tail", "run-1", bashTail("one\ntwo\n")))
+
+	// Act
+	replay, err := d.BashRun(ctx(), "run-1")
+	if err != nil {
+		t.Fatalf("BashRun = %v, want nil", err)
+	}
+
+	// Assert
+	if len(replay.Rows) != 3 {
+		t.Fatalf("rows = %d, want start, one tail, terminal", len(replay.Rows))
+	}
+	if got := replay.Rows[1].Row.GetFrame().GetTail().GetText(); got != "one\ntwo\n" {
+		t.Fatalf("second row's tail = %q, want the newest window in the tail's place", got)
 	}
 }

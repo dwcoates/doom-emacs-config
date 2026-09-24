@@ -58,6 +58,7 @@ const (
 	SiteUpsertChangesIdentity = db.SiteUpsertChangesIdentity
 	SitePageBookMismatch      = db.SitePageBookMismatch
 	SiteResidueRawUnset       = db.SiteResidueRawUnset
+	SiteBashTailOverCap       = db.SiteBashTailOverCap
 	SiteUnknownAgent          = db.SiteUnknownAgent
 	SiteSessionEmpty          = db.SiteSessionEmpty
 	SiteWriteClassUnset       = db.SiteWriteClassUnset
