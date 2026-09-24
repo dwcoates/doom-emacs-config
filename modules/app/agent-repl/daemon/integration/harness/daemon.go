@@ -1305,7 +1305,7 @@ func (d *Daemon) strayPIDs() []int {
 	var pids []int
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || !strings.Contains(line, d.StateDir) {
+		if line == "" || !namesPath(line, d.StateDir) {
 			continue
 		}
 		fields := strings.Fields(line)
@@ -1316,6 +1316,29 @@ func (d *Daemon) strayPIDs() []int {
 		pids = append(pids, pid)
 	}
 	return pids
+}
+
+// namesPath reports whether line names dir itself or a path beneath it: an
+// occurrence of dir that ends the line, or is followed by a separator or by
+// whitespace.
+//
+// A BARE SUBSTRING IS NOT A PATH. Two ShortTempDir roots are `ar` plus a
+// random decimal, so one can be a textual prefix of its sibling (`ar12` of
+// `ar123`), and a state root handed to StartDaemon without a trailing
+// component (TestBootOpensTheWorkspaceStateFresh's) would then have matched —
+// and ReapStrays SIGKILLed — the other test's daemon and shims.
+func namesPath(line, dir string) bool {
+	for rest := line; ; {
+		i := strings.Index(rest, dir)
+		if i < 0 {
+			return false
+		}
+		after := rest[i+len(dir):]
+		if after == "" || after[0] == filepath.Separator || after[0] == ' ' || after[0] == '\t' {
+			return true
+		}
+		rest = rest[i+1:]
+	}
 }
 
 // ProjectDir answers where the vendor CLI files one workspace's conversations
