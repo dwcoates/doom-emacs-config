@@ -183,9 +183,10 @@ export function closingSubagentTerminal(
 export function closingMonitorTerminal(
   agent: conversationv1.AgentId,
   monitor: conversationv1.AgentActivityId,
+  call: conversationv1.AgentMonitorStart | undefined,
 ): PersistEntry {
   LOGGER.debug(
-    { agent: agent.value, monitor: monitor.value },
+    { agent: agent.value, monitor: monitor.value, restated: call !== undefined },
     "closing a monitor the record holds no terminal for as ended",
   );
   const activity = create(conversationv1.AgentActivitySchema, {
@@ -193,7 +194,9 @@ export function closingMonitorTerminal(
     item: {
       case: "monitor",
       value: create(conversationv1.AgentMonitorSchema, {
-        result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, {}) },
+        // THE CALL IS RESTATED from the record's own start: this row replaces
+        // it, and the daemon draws the monitor's card from it on a replay.
+        result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call }) },
       }),
     },
   });
@@ -381,6 +384,29 @@ export function findUnit(
     return update.value.item;
   }
   return undefined;
+}
+
+/**
+ * The start a monitor was armed with, found in one agent's book: its `start`
+ * frame, or the call a settled arm restated. Undefined when the book holds no
+ * monitor unit for it, or one that restated nothing.
+ */
+export function findMonitorCall(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  monitor: conversationv1.AgentActivityId,
+): conversationv1.AgentMonitorStart | undefined {
+  const item = findUnit(entries, monitor);
+  if (item?.case !== "monitor") return undefined;
+  const result = item.value.result;
+  switch (result.case) {
+    case "start":
+      return result.value;
+    case "ended":
+    case "failure":
+      return result.value.call;
+    case undefined:
+      return undefined;
+  }
 }
 
 /** The shell run's own `start` frame, found in one agent's book. */

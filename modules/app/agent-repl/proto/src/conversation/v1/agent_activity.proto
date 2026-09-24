@@ -2915,9 +2915,11 @@ message AgentWebSearchFailure {
 // ---- The monitor: a background watcher whose events wake the agent ----
 
 // The agent's background watcher: a shell command or WebSocket whose lines
-// wake the agent as ordinary turn input while it runs. FOOTER-ONLY: no feed
-// bubble exists — the daemon tracks liveness for the footer's monitors chip
-// and panel, and the events themselves are drawn nowhere special.
+// wake the agent as ordinary turn input while it runs. The call draws the
+// ordinary tool-call card in its owner's feed (owner ruling, 2026-09-23), and
+// that card is the footer monitor row's jump target; the daemon also tracks
+// liveness for the footer's monitors chip and panel. The events themselves
+// are drawn nowhere special.
 message AgentMonitor {
   // Where the watch stands.
   oneof result {
@@ -2943,8 +2945,8 @@ message AgentMonitorStart {
     // Runs until stopped or the session ends; the footer row marks it.
     AgentMonitorPersistent persistent = 3;
   }
-  // What is being watched. EXPECTED UNMAPPED: no surface draws the source —
-  // the description is the drawn account; carried for fidelity.
+  // What is being watched: the tool-call card's input line (the command, or
+  // the socket URL). The footer row draws the description instead.
   oneof source {
     // A shell command whose stdout lines are the events.
     AgentMonitorCommand command = 4;
@@ -2979,12 +2981,19 @@ message AgentMonitorWebsocket {
 // The watch ended. No cause taxonomy is claimed: the vendor reports only
 // that the watch left the live set. Its events reached the agent as
 // ordinary turn input while it ran; nothing here restates them.
-message AgentMonitorEnded {}
+message AgentMonitorEnded {
+  // THE CALL, RESTATED. A settled arm stands alone: the store keeps one row
+  // per unit, so a replay serves this frame with no start beside it, and the
+  // tool-call card is drawn from what this says.
+  AgentMonitorStart call = 1;
+}
 
 // The watch never armed.
 message AgentMonitorFailure {
   // Why it could not be armed, in the shared vocabulary.
   AgentToolFailure failure = 1;
+  // THE CALL, RESTATED, for the reason `AgentMonitorEnded.call` is.
+  AgentMonitorStart call = 2;
 }
 
 // ---- The self-wakeup: the agent scheduling its own next tick ----
