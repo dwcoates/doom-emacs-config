@@ -42,14 +42,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-//
-// 8: the `entry.kind` vocabulary no longer holds `keepalive`. A database
-// written at 7 can hold keep-alive rows whose upsert_keys are real subagent
-// records (the pre-2026-09-23 shim tagged a backgrounded subagent's frames
-// arriving during a keep-alive turn), and every later page line for one of
-// those keys is refused as an identity change. No table changed shape; the
-// rows this binary would never have written did.
-const SchemaVersion = 8
+const SchemaVersion = 7
 
 // THE PAGE CACHE AND THE MAP. SQLite's default cache is 2 MB per connection,
 // against an events.db of 1.1 GB on the owner's box, so an upsert's B-tree
