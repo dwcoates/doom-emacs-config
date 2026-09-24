@@ -1503,7 +1503,8 @@ function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
     agents: {
       rows: [
         {
-          target: feedId(FOOTER_AGENT_TARGET),
+          work: { value: "work-agent" },
+          jump: { target: { case: "entry" as const, value: feedId(FOOTER_AGENT_TARGET) } },
           label: { text: "reviewer" },
           description: { text: "review the diff" },
           tokens: { text: "12.4k" },
@@ -1529,7 +1530,8 @@ function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
     shells: {
       rows: [
         {
-          target: feedId(FOOTER_SHELL_TARGET),
+          work: { value: "work-shell" },
+          jump: { target: { case: "entry" as const, value: feedId(FOOTER_SHELL_TARGET) } },
           command: { text: "npm run watch" },
           runtime: { startedAtMs: 1_000n },
         },
@@ -1537,7 +1539,18 @@ function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
     },
     monitors: {
       rows: [
-        { description: { text: "watch the daemon log" }, runtime: { startedAtMs: 1_000n }, persistent: {} },
+        {
+          work: { value: "work-monitor" },
+          jump: {
+            target: {
+              case: "unresolved" as const,
+              value: { reason: { case: "noFeedEntry" as const, value: {} } },
+            },
+          },
+          description: { text: "watch the daemon log" },
+          runtime: { startedAtMs: 1_000n },
+          persistent: {},
+        },
       ],
     },
     crons: {
@@ -2072,6 +2085,9 @@ export const WATCH_DAEMON_PUSHES = [
   // contract: `unreachablePushArm` raises `UnknownPushArm`, and the stream
   // pipeline skips it quietly rather than filing a bad frame.
   "mutationProgress",
+  // Addressed to stale EMACS streams alone, never to a webview; a page that
+  // meets one skips it as the same forward-compat skew.
+  "reloadElisp",
 ] as const;
 
 export function shutdownAnnounced(init?: {

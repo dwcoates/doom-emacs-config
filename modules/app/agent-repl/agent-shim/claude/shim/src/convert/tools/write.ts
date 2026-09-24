@@ -130,12 +130,27 @@ export const writeConverter: ToolConverter = {
   settle(call, outcome) {
     if (outcome.isError) {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a write failed");
+      // THE SETTLED FRAME STANDS ALONE: it restates what the call named, since
+      // the start it upserts over is gone once it lands. A call that named
+      // nothing has no start either, so it gets no failure frame, exactly as
+      // it got no announcement.
+      const path = requestedPath(call);
+      if (path === undefined) {
+        LOGGER.debug(
+          { tool_use_id: call.toolUseId },
+          "a write failed with no file path to restate; no failure frame is produced",
+        );
+        return undefined;
+      }
       return {
         case: "write",
         value: create(conversationv1.AgentWriteSchema, {
           result: {
             case: "failure",
-            value: create(conversationv1.AgentWriteFailureSchema, { error: failureOf(outcome) }),
+            value: create(conversationv1.AgentWriteFailureSchema, {
+              error: failureOf(outcome),
+              path: readPath(path),
+            }),
           },
         }),
       };

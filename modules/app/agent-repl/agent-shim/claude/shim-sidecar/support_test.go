@@ -279,3 +279,20 @@ const (
 // normalized is discover.Normalize, spelled here so tests read in the same
 // resolved spelling the sidecar keys everything by.
 func normalized(path string) string { return discover.Normalize(path) }
+
+// danglingAgentSpool writes an a* task spool that is a LINK to its subagent's
+// transcript before that transcript exists — the window in which discovery
+// still sees the spool under its own spelling — and returns its path.
+func (h *harness) danglingAgentSpool(t *testing.T, taskID string) string {
+	t.Helper()
+	dir := filepath.Join(h.spool, "claude-501", "proj", "runtime-sess", "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	transcript := filepath.Join(h.rootA, "projects", "proj", "sess-1", "subagents", "agent-"+taskID+".jsonl")
+	link := filepath.Join(dir, taskID+".output")
+	if err := os.Symlink(transcript, link); err != nil {
+		t.Fatalf("linking %s: %v", link, err)
+	}
+	return normalized(link)
+}

@@ -511,36 +511,30 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 // no session left to resubmit onto. daemon/integration/merge_test.go's own
 // working test for this exact sentence
 // (TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce) never
-// lets its merge land either — it interrupts the merge with a daemon CRASH,
-// then makes the target dirty so the restart REFUSES to resume it (an
-// "abandoned", not "landed", release), and it is the boot-time recovery
-// sweep (internal/merge/recover.go's recoverDisplaced, daemon.md's own
-// citation) that performs the resubmit. That test lands its crash inside the
-// narrow window between capture and the merge's own next step using an
-// internal-only test hook (AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE /
-// merge.Deps.PauseAfterCapture) that is not named in any of the six contract
-// docs, PROTO-CHANGES.md, or the protos themselves — reproducing that exact
-// hook is the daemon's own integration suite's job, not this cross-system
-// suite's, per this task's own instruction to write to the contract and not
-// to production internals discovered by reading source.
+// lets its merge land either — it crashes the daemon inside the window
+// between the capture and everything that would close it, then makes the
+// target dirty so the restart REFUSES to resume the merge (an "abandoned",
+// not "landed", release), and it is the boot-time recovery sweep
+// (internal/merge/recover.go's recoverDisplaced) that performs the resubmit.
 //
-// This test reaches the SAME abandoned-release shape without that hook, by
-// scripting a CONFLICT: the merge's own conflict-repair turn runs through
-// the REAL shim (a genuine process round trip, wide compared to this test's
-// own local RPCs), so crashing the daemon immediately after observing the
-// DISPLACED turn's own end — a real, wire-visible, event-driven signal, not
-// an internal rendezvous file — lands comfortably before the merge can reach
-// its own terminal (park or land) on its own. The crashed daemon's restart,
-// finding the target dirty, abandons the interrupted merge exactly as
-// daemon/integration's own test relies on, and its boot recovery sweep
-// resubmits the displaced turn.
+// THE CRASH LANDS IN A HELD WINDOW, NEVER A RACED ONE. claude-repld's own
+// test seam, AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE, holds a merge run right
+// after it captured and ended the displaced turn, and logs
+// `daemon.merge.capture_pause` once it is held. This test used to race the
+// crash against the merge's own next step instead — a scripted conflict whose
+// repair turn it expected to start "comfortably" after the test's reaction —
+// which is a bet on the host's speed, not a guarantee. Held, the merge never
+// reaches git at all, so no conflict is scripted.
 // ---------------------------------------------------------------------------
 
 func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	t.Parallel()
 	const displacedText = "keep going"
+	// A daemon killed mid-merge writes no stand-down manifest
+	// (daemon.rollout.reconcile), the restart refuses to resume the merge into
+	// an unclean target (daemon.merge.recover), and a turn left in flight by a
+	// killed daemon is closed by the next boot (daemon.promptqueue.restore_holds).
 	mqExpectedBounceWarnings := []string{
-		"daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab",
 		"daemon.rollout.reconcile", "daemon.merge.recover", "daemon.promptqueue.restore_holds",
 	}
 
@@ -575,12 +569,14 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
 			turnGateTextEnv + "=" + displacedText,
+			// Only the incumbent holds its merge; the daemons booted after the
+			// crash recover it rather than run it.
+			"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + filepath.Join(t.TempDir(), "capture.rendezvous"),
 		},
 	}})
 	w.ExpectWarnings(mqExpectedBounceWarnings...)
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-displaced")
-	repo.ScriptConflict(repo.Dir, mqBranchOf(child), "conflict.txt")
 
 	// The root feed is opened and tailed BEFORE the merge is enqueued (see
 	// mqFeedWatch's own doc comment): this merge is abandoned by a crash
@@ -606,27 +602,22 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		t.Fatalf("the displaced turn's terminal = %v, want FeedTurnEndedInterrupted (KillTurn's feed-visible shape)", endedRow.GetTurnEnded())
 	}
 
-	// Act: crash the daemon RIGHT NOW — immediately after the ONE
-	// event-driven signal that capture+end already happened, and before
-	// this test does anything else that could let the merge's own
-	// conflict-repair turn (which has not even started yet: it is a SECOND,
-	// still-to-come StartTurn) begin or conclude. Make the target dirty so
-	// the restart cannot resume the interrupted merge — the same real-git
-	// fact daemon/integration/merge_test.go's own bounce test relies on
-	// (repo.SetDirty is USABLE against this suite's scripted fake git).
+	// Act: crash the daemon while its merge is HELD after the capture — the
+	// pause's own record says the run can go no further — so nothing the
+	// merge would do next (the git merge, a target bring-up) is under way.
+	// Make the target dirty so the restart cannot resume the interrupted
+	// merge — the same fact daemon/integration/merge_test.go's own bounce test
+	// relies on (repo.SetDirty is USABLE against this suite's scripted fake
+	// git).
+	w.AwaitRunLogOperation("daemon.merge.capture_pause")
 	repo.SetDirty(repo.Dir, true)
 	w.Kill()
 
 	// Act: a second real claude-repld boots on the SAME state root, store
 	// socket and lock dir.
-	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		SelfRepo:    repo.Dir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
-	})
+	d2Opts := w.SuccessorOpts(t)
+	d2Opts.SelfRepo = repo.Dir
+	d2 := harness.StartDaemon(t, d2Opts)
 	d2.ExpectWarnings(mqExpectedBounceWarnings...)
 	// Re-point World at the new process: every w.Client()/w.WatchFeed/... call
 	// from here on reaches d2, exactly as
@@ -675,14 +666,9 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// Assert: a SECOND bounce does not resubmit again — the claim that put
 	// the turn back is durable, so the boot after it finds nothing owed.
 	w.Kill()
-	d3 := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		SelfRepo:    repo.Dir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
-	})
+	d3Opts := w.SuccessorOpts(t)
+	d3Opts.SelfRepo = repo.Dir
+	d3 := harness.StartDaemon(t, d3Opts)
 	d3.ExpectWarnings(mqExpectedBounceWarnings...)
 	w.Daemon = d3
 	if n := d3.DisplacedTurnCount(); n != 0 {
@@ -709,14 +695,16 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// are what "resubmitted twice" would duplicate.
 	afterSecondBoot := mqOpenFeedWatch(t, w, child, nil)
 	defer afterSecondBoot.Close()
+	// DISTINCT ROWS: Rows() holds every push, and a replayed prompt row is
+	// pushed again when its turn's end settles it.
 	mqDisplacedRows := func(rows []*frontendv1.FeedRow) int {
-		n := 0
+		ids := map[string]bool{}
 		for _, row := range rows {
 			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
-				n++
+				ids[row.GetId().GetValue()] = true
 			}
 		}
-		return n
+		return len(ids)
 	}
 	afterSecondBoot.AwaitRow("the replayed rows carrying the displaced turn's words", func(*frontendv1.FeedRow) bool {
 		return mqDisplacedRows(afterSecondBoot.Rows()) >= matches
@@ -727,6 +715,19 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 
 	// A resubmission the boot sweep made would arrive as one more such row.
 	// Nothing else can end this wait, so it necessarily waits out the probe.
+	//
+	// A NEW ROW, NOT A NEW PUSH. The replay draws each prompt row and then
+	// re-publishes it once its turn's end is replayed ("no longer working"),
+	// and whether that restatement lands before or after the wait above is
+	// how the stream happens to be drained — so counting pushes failed this
+	// test on a row the feed already held. A resubmission is a turn of its
+	// own, drawn as a row id the feed has not held.
+	seen := map[string]bool{}
+	for _, row := range afterSecondBoot.Rows() {
+		if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
+			seen[row.GetId().GetValue()] = true
+		}
+	}
 	deadline := time.NewTimer(harness.ProbeWindow)
 	defer deadline.Stop()
 	for done := false; !done; {
@@ -736,7 +737,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 				done = true
 				break
 			}
-			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
+			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText && !seen[row.GetId().GetValue()] {
 				t.Fatalf("a further root feed row carries the displaced turn's words after a second bounce, want unchanged at %d (never resubmitted twice)", matches)
 			}
 		case <-deadline.C:

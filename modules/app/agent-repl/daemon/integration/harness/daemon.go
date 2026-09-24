@@ -128,6 +128,20 @@ func BuildIdentityEnv(checkout string) []string {
 	}
 }
 
+// ServiceBinaries are the real launchd services a world runs beside its
+// daemon (Opts.ServiceBinaries). Both or neither.
+type ServiceBinaries struct {
+	Store, Sidecar string
+}
+
+// LockDirFor is the kernel-lock and build-report directory StartDaemon
+// redirects a daemon over stateDir to (Daemon.LockDir). A world that starts
+// real services before its daemon points their AGENT_REPL_LOCK_DIR here, so
+// the build reports they write are the ones the daemon's deploy reads.
+func LockDirFor(stateDir string) string {
+	return filepath.Join(filepath.Dir(stateDir), "locks")
+}
+
 // Opts configures one daemon process.
 type Opts struct {
 	// StateDir overrides the state root; empty mints a fresh temp one.
@@ -159,11 +173,20 @@ type Opts struct {
 	FooterMomentaryDwell time.Duration
 	// Pprof sets the profiling listener address; empty leaves it off.
 	Pprof string
+	// ServiceBinaries names the real shim-store and shim-claude-sidecar
+	// binaries this daemon's world runs, when it runs them. Those processes
+	// report their own builds into LockDirFor(StateDir) — the world points
+	// their AGENT_REPL_LOCK_DIR there — and the deploy's fake build stages
+	// copies of these binaries, so a deploy judges the running services up to
+	// date and never restarts them. Empty: the world runs no real services,
+	// and the harness states their reports itself.
+	ServiceBinaries ServiceBinaries
 	// SelfRepo names the daemon's own checkout via AGENT_REPL_SELF_REPO_DIR,
 	// so a merge target can be recognized as the emacs repo. The self-reload
 	// deploy stays ON under this override: test safety comes from
-	// AGENT_REPL_DEPLOY_BUILDER naming the fake build, which fails, so a
-	// landing's one deploy is assertable end to end and deploys nothing.
+	// AGENT_REPL_DEPLOY_BUILDER naming the fake build, which stages what runs
+	// unless a test stages another (StageDeployBuild), so a landing's one
+	// deploy is assertable end to end and never builds for real.
 	SelfRepo string
 	// MultiRepoRoot is the tree whose workspaces use the multi-repo account.
 	MultiRepoRoot string
@@ -246,9 +269,10 @@ type Daemon struct {
 	// LockDir is the redirected kernel-lock directory.
 	LockDir string
 	// Browser, Deploy and Launchctl record what the daemon invoked. Deploy is
-	// the deploy's build, which always fails: a harness never builds.
+	// the deploy's fake build, which stages what runs (DeployCurrent) unless
+	// a test stages another: a harness never builds.
 	Browser   *Recorder
-	Deploy    *Recorder
+	Deploy    *DeployBuilder
 	Launchctl *Recorder
 	// PromptsDir is the copy of prompts/ the daemon reads its briefs from.
 	PromptsDir string
@@ -424,7 +448,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// It is a SIBLING of the state root rather than a child: the boot's own
 	// refusal tests hand the daemon an unwritable state root, and a lock
 	// directory beneath it could not be created at all.
-	d.LockDir = filepath.Join(filepath.Dir(d.StateDir), "locks")
+	d.LockDir = LockDirFor(d.StateDir)
 	requireSocketPathBudget(t, d.StateDir)
 	for _, dir := range []string{d.ProfileDir, d.LockDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -437,7 +461,10 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		mainJS = opts.ShimMain
 	}
 	fakeBin := filepath.Join(root, "bin")
-	d.Deploy = newFakeDeployBuilder(t, fakeBin, mainJS, d.WebappDir)
+	d.Deploy = NewFakeDeployBuilder(t, fakeBin, DeploySources{
+		ShimMain: mainJS, WebappDist: d.WebappDir,
+		Store: opts.ServiceBinaries.Store, Sidecar: opts.ServiceBinaries.Sidecar,
+	})
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
 	// daemon reads comes out of this test's fixture file and the real binary is

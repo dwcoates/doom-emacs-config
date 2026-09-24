@@ -63,7 +63,7 @@ binary it built itself.
 ## Tests
 
 ```bash
-go test ./...
+../../bin/background.sh go test ./...   # tests run only at background priority
 ```
 
 The suite re-executes its own test binary as the holder (`TestMain` honors

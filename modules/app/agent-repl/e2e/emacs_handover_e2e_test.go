@@ -10,7 +10,8 @@
 // pushed and to re-register what it already holds, idempotently.
 //
 // Scenario 40 (HandoverTransfersAtFreeness) provokes a REAL self-merge
-// rollout to get the one announcement that carries a successor's address.
+// landing, whose one deploy finds the daemon stale and hands it over, to get
+// the one announcement that carries a successor's address.
 // See the block above `TestEmacsHandoverTransfersAtFreeness`.
 package e2e
 
@@ -37,13 +38,13 @@ const daemonStopBound = 6 * time.Second
 
 // handoverAnnounceBound is how long the whole self-merge rollout may take to
 // reach Emacs as an announcement carrying a successor's address: the merge,
-// the classify, the deploy chain, the SUCCESSOR DAEMON'S OWN SPAWN AND BOOT,
-// and only then the push.
+// the landing's deploy (a staged fake build), the SUCCESSOR DAEMON'S OWN
+// SPAWN AND BOOT, and only then the push.
 //
 // MEASURED: 190ms from the daemon admitting the merge to Emacs logging
 // `elisp.link.handover-announced`. The multiple is 10x rather than 3x, for
 // the reason the boot bound states and one more: the observed number covers
-// a deploy script and a whole daemon process spawn, whose cost is the
+// the landing's deploy and a whole daemon process spawn, whose cost is the
 // machine's rather than this module's.
 const handoverAnnounceBound = 2 * time.Second
 
@@ -306,24 +307,25 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 //
 // Emacs attaches a successor from EXACTLY ONE push: a `shutdown_announced`
 // that CARRIES AN ADDRESS, published only by
-// `daemon/internal/rollout/handover.go` when a self-merge rollout lands on
-// the daemon's own checkout. `drain/controller.go`'s announcements carry no
+// `daemon/internal/rollout/handover.go` when a deploy finds the daemon stale
+// — here the one deploy a merge landing on the daemon's own checkout runs,
+// over a staged build whose daemon is not the running one. `drain/controller.go`'s announcements carry no
 // address and are the plain-bounce path (area E's scenario 30), so they
 // cannot stand in, and dialing `agent-repl-link-dial-successor` at an
 // address nothing announced would assert Emacs's dial rather than the
 // handover.
 //
-// So the rollout is provoked for real, the way the Go layer's
-// `adTriggerSelfMergeRollout` provokes it, but every act is EMACS's: the
+// So the handover is provoked for real, the way the Go layer's
+// `adTriggerDeploy` provokes it, but every act is EMACS's: the
 // daemon's own checkout is stated as environment the Emacs process carries
 // (`WithEmacsEnv`) and its daemon child inherits, the trigger workspace is
 // created through `agent-repl-create-workspace`, and the merge is enqueued
 // through `agent-repl-merge-workspace`.
 
-// emHO40SelfMergeTriggerPath is the daemon-subsystem-prefixed path whose
-// landed range classifies as a self-merge rollout worth handing over for —
-// the same path `adoption_e2e_test.go` commits for the Go layer's own
-// handover tests.
+// emHO40SelfMergeTriggerPath is the path the trigger commit touches — the
+// same path `adoption_e2e_test.go` commits for the Go layer's own handover
+// tests. What the landing's deploy changes is the staged build's
+// (`EmacsWorld.Deploy`), never the path's.
 const emHO40SelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
 
 // emHO40TriggerName is the name given to the trigger workspace at creation.
@@ -430,22 +432,20 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	t.Parallel()
 	// Arrange: a world whose Emacs — and therefore whose daemon — is told
 	// which checkout is the daemon's OWN, and given a merge gate that
-	// passes, so a commit landing on it fires a real self-merge rollout.
+	// passes, so a commit landing on it runs the daemon's one deploy.
 	box := requireSandbox(t)
 	selfRepo := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "self-repo"))
 	gate := harness.NewTestAllScript(t, selfRepo.Dir)
 	gate.SetExitCode(0)
 	gate.SetStdout("e2e: passed in 1s\n")
-	// Arrange: the rollout's DEPLOY CHAIN. Without it the trigger resolves
-	// `bin/deploy-all.sh` relative to the daemon's own cwd, the exec fails,
-	// and the self-reload aborts BEFORE a successor is ever spawned -- so no
-	// announcement can carry an address and the handover cannot begin.
-	deploy := harness.NewFakeDeployScript(t, filepath.Join(selfRepo.Dir, "bin"))
-	deploy.SetExitCode(0)
 	w := NewEmacsWorld(t, box,
 		WithEmacsEnv("AGENT_REPL_SELF_REPO_DIR", selfRepo.Dir),
-		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path),
-		WithEmacsEnv("AGENT_REPL_DEPLOY_SCRIPT", deploy.Path))
+		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
+	// Arrange: the landing's ONE DEPLOY finds the daemon stale. The world's
+	// fake build stages what runs; staged with a daemon binary that is not
+	// the running one, the deploy hands the daemon over blue-green, and that
+	// handover's announcement is the one that carries a successor's address.
+	w.Deploy.Stage(harness.DeployStaleDaemon)
 	e := w.Emacs
 	e.EnsureDaemon()
 
@@ -486,7 +486,8 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 
 	// Act: land a scripted commit touching a daemon-subsystem path in that
 	// worktree, then enqueue the merge through the ordinary command. The
-	// merge lands, the rollout classifies, and the handover announces.
+	// merge lands, its one deploy finds the daemon stale, and the handover
+	// announces.
 	sha := selfRepo.CommitIn(triggerDir, emHO40SelfMergeTriggerPath, "trigger\n")
 	selfRepo.SetPaths(sha, emHO40SelfMergeTriggerPath)
 	e.Eval(`(agent-repl-merge-workspace ` + elispString(trigger) + `)`)

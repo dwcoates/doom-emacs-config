@@ -103,8 +103,10 @@ function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: b
  *
  * The budget derives from the CAP ALONE — the bubble's `max-width` resolved
  * against its containing block, less the bubble's fixed chrome summed from
- * computed styles — and never from the bubble's current fit-content width, so
- * a tree below the cap never wraps and a shrink cannot feed back into a re-wrap.
+ * computed styles and the EXPANDED scroll box's scrollbar gutter — and never
+ * from the bubble's current fit-content width or fold, so a tree below the cap
+ * never wraps, a shrink cannot feed back into a re-wrap, and an expand (whose
+ * scrollbar appears past 50vh) never re-wraps it.
  *
  * It measures only a body that is IN THE DOCUMENT, and anything it cannot read
  * is an invariant violation (`unmeasurable`), never a default.
@@ -151,16 +153,49 @@ export function measureTreeCols(body: HTMLElement): number {
   for (let el: HTMLElement | null = body; el !== null && el !== bubble; el = el.parentElement) {
     chromePx += insetXPx(el, view, { border: true, margin: true });
   }
+  // WRAP AS IF EXPANDED (owner ruling, 2026-09-23): the gutter an expanded
+  // bubble's scrollbar takes inside the scroll box comes off ALWAYS, so a tree
+  // is wrapped the same collapsed and expanded and never re-wraps on a click.
+  const gutterPx = scrollbarGutterPx(body, view);
+  chromePx += gutterPx;
 
   const contentPx = capPx - chromePx;
   const cols = Math.floor(contentPx / charPx);
-  const context = { cols, char_px: charPx, cap_px: capPx, chrome_px: chromePx, containing_px: containingPx };
+  const context = {
+    cols,
+    char_px: charPx,
+    cap_px: capPx,
+    chrome_px: chromePx,
+    gutter_px: gutterPx,
+    containing_px: containingPx,
+  };
   if (cols < 1) unmeasurable("the bubble's content width at its cap holds no column", context);
   log.debug("measured a metaprompt tree's column budget", {
     operation: "bubble.body.tree-cols",
     context,
   });
   return cols;
+}
+
+/** The token the scrollbar's gutter is declared by (styles.css), read by the stylesheet's bar too. */
+export const SCROLLBAR_GUTTER_TOKEN = "--scrollbar-gutter-width";
+
+/**
+ * The width an EXPANDED bubble's scrollbar takes from its content, in px: the
+ * stylesheet's own `--scrollbar-gutter-width` token, which is what sizes the
+ * bar, resolved on the body it would narrow. The bubble's other insets
+ * (`--bubble-scroll-gap` in the bubble's right padding and the body's) are
+ * the same collapsed and expanded and are already counted from computed
+ * styles; the gutter is the one thing the expanded, scrolling geometry adds.
+ * A token that does not read as px is unmeasurable, never a guessed width.
+ */
+function scrollbarGutterPx(body: HTMLElement, view: Window): number {
+  const value = view.getComputedStyle(body).getPropertyValue(SCROLLBAR_GUTTER_TOKEN).trim();
+  const px = /^(\d+(?:\.\d+)?)px$/.exec(value);
+  if (px === null) {
+    unmeasurable("the scrollbar gutter token is not in px", { token: SCROLLBAR_GUTTER_TOKEN, value });
+  }
+  return Number.parseFloat(px[1]);
 }
 
 /** The block the bubble's percentage cap resolves against: its parent. */

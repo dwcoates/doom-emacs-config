@@ -295,28 +295,38 @@ func TestTheUnparkedFileRereadsTheSameBytesUnderTheNewBook(t *testing.T) {
 	}
 }
 
-// TestAFirstAttributionIsNotStatedAsABookMove is the realtest-5 record: a spool
-// aged into residue before anything named its owner is watched with NO book at
-// all, and the launch that finally names one arrives later. That is the first
-// attribution of a file that had nowhere to move FROM, so it must not be stated
-// as the rotation-driven book move a person has to act on.
-func TestAFirstAttributionIsNotStatedAsABookMove(t *testing.T) {
-	// Arrange: the spool ages out unclaimed and is tailed with no book.
-	h := newHarness(t, &fakeStore{})
-	spool := h.spoolFile(t, "b1firstbook", "work whose launch line has not been read yet\n")
+// watchedWithNoBook arranges a claimed spool whose watcher holds NO book yet —
+// the state a file watched before anything named its owner is in. A spool is
+// only ever watched once claimed now, so the state is set on the watcher
+// directly: what is under test is the re-key's reading of it, not how a
+// watcher came to be without a book.
+func watchedWithNoBook(t *testing.T, h *harness, task, call, spawner string) string {
+	t.Helper()
+	spool := h.spoolFile(t, task, "work whose book is not settled yet\n")
+	h.sc.TaskSpawned(task, call, spawner, spool, false, "/workspace", "workspace-id", "session-1")
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
-	h.advance(UnownedSpoolWindow)
-	h.sc.rescan()
-	if got := h.sc.watchers[spool].ctx.MainAgentID; got != "" {
-		t.Fatalf("precondition: the unclaimed spool booked to %q, want no book at all", got)
+	w, ok := h.sc.watchers[spool]
+	if !ok {
+		t.Fatalf("precondition: the claimed spool %s is not watched", spool)
 	}
+	w.ctx.MainAgentID = ""
+	return spool
+}
 
-	// Act: the launch is converted, and the spawner's book is a subagent's own
-	// identity — a tool_use_id under the cross-plane minting rule, which is
-	// exactly what a spawn observed inside a sidechain reports.
-	h.sc.TaskSpawned("b1firstbook", "toolu_first_call", "toolu_spawning_agent", spool, false, "/workspace", "workspace-id", "session-1")
+// TestAFirstAttributionIsNotStatedAsABookMove is the realtest-5 record: a file
+// watched with NO book at all is given one later. That is the first attribution
+// of a file that had nowhere to move FROM, so it must not be stated as the
+// rotation-driven book move a person has to act on.
+func TestAFirstAttributionIsNotStatedAsABookMove(t *testing.T) {
+	// Arrange: the spawner's book is a subagent's own identity — a tool_use_id
+	// under the cross-plane minting rule, which is exactly what a spawn observed
+	// inside a sidechain reports.
+	h := newHarness(t, &fakeStore{})
+	spool := watchedWithNoBook(t, h, "b1firstbook", "toolu_first_call", "toolu_spawning_agent")
+
+	// Act.
 	h.sc.rescan()
 
 	// Assert.
@@ -338,15 +348,9 @@ func TestAFirstAttributionIsNotStatedAsABookMove(t *testing.T) {
 func TestAFirstAttributionDoesNotBlameTheShimsIdentityFiles(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
-	spool := h.spoolFile(t, "b1blame", "work whose launch line has not been read yet\n")
-	if err := h.sc.beginCycle(); err != nil {
-		t.Fatalf("beginCycle: %v", err)
-	}
-	h.advance(UnownedSpoolWindow)
-	h.sc.rescan()
+	watchedWithNoBook(t, h, "b1blame", "toolu_blame_call", "toolu_blame_agent")
 
 	// Act.
-	h.sc.TaskSpawned("b1blame", "toolu_blame_call", "toolu_blame_agent", spool, false, "/workspace", "workspace-id", "session-1")
 	h.sc.rescan()
 
 	// Assert.

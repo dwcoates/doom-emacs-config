@@ -270,18 +270,13 @@ func adAwaitReplayedFeedRow(t *testing.T, d *harness.Daemon, ws *workspacev1.Wor
 func adColdBoot(t *testing.T, w *World) *harness.Daemon {
 	t.Helper()
 	w.Kill()
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir:    w.StateDir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: w.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
-		// A cold boot's own re-adoption of a still-running real shim chains a
-		// SECOND real process's full boot onto this one test, exactly the
-		// shape AdoptionChainTimeout documents (world_test.go) — reused
-		// verbatim rather than the tighter single-boot DefaultTimeout.
-		Timeout: AdoptionChainTimeout,
-	})
+	opts := w.SuccessorOpts(t)
+	// A cold boot's own re-adoption of a still-running real shim chains a
+	// SECOND real process's full boot onto this one test, exactly the shape
+	// AdoptionChainTimeout documents (world_test.go) — reused verbatim rather
+	// than the tighter single-boot DefaultTimeout.
+	opts.Timeout = AdoptionChainTimeout
+	successor := harness.StartDaemon(t, opts)
 	successor.ExpectWarnings("daemon.rollout.reconcile")
 	return successor
 }
@@ -402,13 +397,15 @@ func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.Reposit
 	return ws
 }
 
-// adTriggerSelfMergeRollout lands one fake-git-scripted commit touching
-// `path` on selfRepo through a real created child workspace and a real
-// MergeWorkspace call, firing the rollout classified by that path's
-// subsystem prefix (mirrors daemon/integration/drain_rollout_test.go's
-// drainTriggerRollout).
-func adTriggerSelfMergeRollout(t *testing.T, w *World, selfRepo *harness.Repo, path string) {
+// adTriggerDeploy stages a deploy build that changes one component, then
+// lands one fake-git-scripted commit on selfRepo through a real created child
+// workspace and a real MergeWorkspace call: the landing runs the daemon's ONE
+// deploy for it, which finds that component out of date (mirrors
+// daemon/integration/drain_rollout_test.go's drainTriggerDeploy).
+func adTriggerDeploy(t *testing.T, w *World, selfRepo *harness.Repo, build harness.DeployBuild) {
 	t.Helper()
+	w.StageDeployBuild(build)
+	path := adSelfMergeTriggerPath
 	// THE TRIGGER WORKSPACE'S SHIM IS STOOD DOWN BY THE MERGE before its
 	// worktree is removed, and its link severing is the evidence of that stop
 	// rather than a fault. The trigger is gone before the handover begins, so
@@ -476,9 +473,10 @@ func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 	}
 }
 
-// adSelfMergeTriggerPath is the daemon-subsystem-prefixed path
-// daemon/integration/drain_rollout_test.go's own handover tests commit to
-// classify the landed range as a self-merge rollout worth handing over for.
+// adSelfMergeTriggerPath is the path a trigger commit touches on the daemon's
+// own checkout, the same one daemon/integration/drain_rollout_test.go's
+// drainTriggerDeploy commits. What the landing's deploy changes is the staged
+// build's, never the path's.
 const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
 
 func TestHandoverTransfersAtFreeness(t *testing.T) {
@@ -499,7 +497,7 @@ func TestHandoverTransfersAtFreeness(t *testing.T) {
 	// Act: land a real, fake-git-scripted commit on the daemon's own
 	// checkout, driven through a real created child workspace and a real
 	// MergeWorkspace call.
-	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
 
 	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
@@ -554,7 +552,7 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	defer daemonStream.Close()
 
 	// Act
-	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	adTriggerDeploy(t, w, selfRepo, harness.DeployStaleDaemon)
 	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
@@ -576,31 +574,13 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 		t.Fatalf("SubmitPrompt on the new daemon before adoption = %v, want error.not_yet_adopted", newResp.Msg)
 	}
 
-	// Act: the lagging client self-heals by completing the rendezvous.
+	// THE OLD DAEMON'S REFUSAL IS ASSERTED BEFORE THE ADOPTS. It exits the
+	// moment the successor serves every workspace (rollout/handover.go's
+	// completeHandover: the rendezvous closing ends the adoption window, and
+	// the exit follows at once, by design), so asked after the adopts it was
+	// sometimes already gone — `connection refused` one run in three. Until the
+	// rendezvous closes, timeAdoption holds it alive, still answering.
 	//
-	// THE TWO ADOPTS MUST BE CONCURRENT. "EVERY EXPECTED PARTICIPANT
-	// SUCCEEDS TOGETHER. The callers arrive concurrently and the one that
-	// arrives first has not failed: it waits for the one that completes the
-	// rendezvous" (daemon/internal/rollout/adopt.go:222-251). Issuing them
-	// one after the other blocks the host call inside the rendezvous until
-	// its own context expires — the web call is never made, and the caller
-	// gets ErrNotYetAdopted — so this test issued them concurrently and
-	// joins both.
-	adopts := make(chan error, 2)
-	go func() {
-		_, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
-		adopts <- err
-	}()
-	go func() {
-		_, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
-		adopts <- err
-	}()
-	for i := 0; i < 2; i++ {
-		if err := <-adopts; err != nil {
-			t.Fatalf("adopting the workspace on the successor = error %v, want a success (both adopts succeed together)", err)
-		}
-	}
-
 	// Assert: both watchers see the transfer, naming the successor.
 	//
 	// THE TRANSFER PUSH IS THE BARRIER FOR THE OLD DAEMON'S REFUSAL. The old
@@ -630,6 +610,31 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
 		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
+	}
+
+	// Act: the lagging client self-heals by completing the rendezvous.
+	//
+	// THE TWO ADOPTS MUST BE CONCURRENT. "EVERY EXPECTED PARTICIPANT
+	// SUCCEEDS TOGETHER. The callers arrive concurrently and the one that
+	// arrives first has not failed: it waits for the one that completes the
+	// rendezvous" (daemon/internal/rollout/adopt.go:222-251). Issuing them
+	// one after the other blocks the host call inside the rendezvous until
+	// its own context expires — the web call is never made, and the caller
+	// gets ErrNotYetAdopted — so this test issued them concurrently and
+	// joins both.
+	adopts := make(chan error, 2)
+	go func() {
+		_, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	go func() {
+		_, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	for i := 0; i < 2; i++ {
+		if err := <-adopts; err != nil {
+			t.Fatalf("adopting the workspace on the successor = error %v, want a success (both adopts succeed together)", err)
+		}
 	}
 
 	// Assert: the self-heal is complete — the workspace now answers
