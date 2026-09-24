@@ -580,6 +580,7 @@ func TestRefusalClassLogLevel(t *testing.T) {
 		{name: "a database failure is a warning here and an error in db", class: classStorage, want: "warn"},
 		{name: "a verb this wave cannot answer is a warning", class: classNotImplemented, want: "warn"},
 		{name: "an agent id naming no book is the ordinary answer", class: classUnknownAgent, want: "info"},
+		{name: "a run id naming no row yet is the ordinary answer", class: classUnknownRun, want: "info"},
 	}
 
 	for _, test := range tests {
@@ -600,7 +601,7 @@ func TestRefusalClassLogLevel(t *testing.T) {
 // is a programming error the process reports rather than absorbs.
 func TestRefusalClassLogLevelPanicsForAClassItDoesNotKnow(t *testing.T) {
 	// Arrange.
-	unmapped := refusalClass(len([]string{"invalid", "stale", "storage", "not_implemented", "unknown_agent"}) + 1)
+	unmapped := refusalClass(len([]string{"invalid", "stale", "storage", "not_implemented", "unknown_agent", "unknown_run"}) + 1)
 
 	// Act & Assert.
 	defer func() {
