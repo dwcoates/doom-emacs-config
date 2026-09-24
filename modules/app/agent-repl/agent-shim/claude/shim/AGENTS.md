@@ -60,6 +60,8 @@ src/
     fold.ts            the fold seam and FoldOutput
     ids.ts             the four identifier spaces, minted
   store/
+    persistence.ts     THE seam the engine writes and reads through; retry + batch policies
+    writer.ts          the one ordered store writer: never drops, bounded batches, backpressure
     keys.ts            upsert_key + write_id (THE one place)
     retry.ts           the READ half's retry schedule (the writer's own policy)
     client.ts          the store.v1 client over the store UDS
@@ -343,7 +345,7 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!bash-timeout` | a foreground `Bash` that hits its timeout: `task_started`, then a result carrying `timedOutAfterMs` and `backgroundTaskId` — the vendor auto-backgrounds rather than killing | the tool_use line, the tool_result line, an incremental spool with NO `EXIT=` line, the closing text line | AgentBashInterrupted.cause=timed_out; the run stays live as detached work |
 | `!bash-spill` | a foreground `Bash` whose output was too large for the message and spilled to a file on disk | the tool_use line, the tool_result line carrying `persistedOutputPath`/`persistedOutputSize`, the closing text line | AgentBashOutputPartial — the partial extent with the omitted byte count |
 | `!bash-image` | a foreground `Bash` whose stdout IS image data (`isImage: true`), answered with an image content block | the tool_use line, the image tool_result line, the closing text line | AgentBashOutput.form=image |
-| `!bash-detach` | a `Bash` with `run_in_background`, `task_started`, `background_tasks_changed`, a result carrying only `backgroundTaskId`, then — after the turn — `task_updated` and a completed `task_notification`. When `AGENT_REPL_FAKE_DETACH_GATE` names a path, the run PARKS after its first spool line until that path exists, so a test can observe the turn concluded and the detached work still going | the tool_use and tool_result lines, and `<spool-root>/<slug>/<session>/tasks/b<hex>.output` written INCREMENTALLY (the first line before any detach gate, the rest after it) and terminated by `EXIT=0` | AgentBash detached_work + AgentBashUpdate deltas fed by the sidecar tailing the spool |
+| `!bash-detach` | a `Bash` with `run_in_background`, `task_started`, `background_tasks_changed`, a result carrying only `backgroundTaskId`, then — after the turn — `task_updated` and a completed `task_notification`. When `AGENT_REPL_FAKE_DETACH_GATE` names a path, the run PARKS after its first spool line until that path exists, so a test can observe the turn concluded and the detached work still going | the tool_use and tool_result lines, and `<spool-root>/<slug>/<session>/tasks/b<hex>.output` written INCREMENTALLY (the first line before any detach gate, the rest after it) and terminated by `EXIT=0` | AgentBash detached_work + the AgentBashTail snapshot fed by the sidecar tailing the spool |
 | `!bash-detach-poll [command]` | a `Bash` with `run_in_background`, then — in the SAME turn — explicit `TaskOutput` poll tool_use/tool_result pairs: two reporting RUNNING with growing output, then one reporting a terminal exit code and status. UNGROUNDED, INVENTED: no capture ever calls `TaskOutput`, only lists it in `init.tools` | the tool_use/tool_result lines for the background and for each poll, and the spool terminated by `EXIT=0` | AgentBash detached_work; the polls themselves reach no converter arm — `TaskOutput` is in `EXEMPT_TOOLS`, so each poll is dropped SILENTLY: no unit, no `AgentUnmodeled`, no unmodeled warning |
 | `!bash-detach-fail` | a detached `Bash` that ends non-zero: `task_updated{status:"failed"}` and a failed `task_notification` | the tool_use and tool_result lines, and a spool terminated by `EXIT=3` | AgentBash detached_work terminating in a non-zero exit |
 | `!bash-detach-live` | a detached `Bash` that NEVER finishes: no terminal notification, and the task stays in the live set | an unterminated spool with no `EXIT=` line — the corpus's `bash-midoutput.output` shape | AgentBash detached_work still live; what a fan-wide cancel and a StopBash act on |
@@ -794,6 +796,58 @@ it is seen open; its terminals and running beats restate the prompt from it and
 the created agent by the minting rule. The boot sweep's spawn closing restates
 what the agent's book records for the unit.
 
+## The store writer: it never drops a row
+
+`src/store/writer.ts` is the ONE ordered writer every row the shim produces goes
+through (`write`, `writeDurable`). Its invariants:
+
+- **NO ROW IS EVER DROPPED FOR AN OUTAGE OR A BACKLOG.** The store is the
+  durable record every consumer reads from, the daemon's turn endings
+  included. A failed batch is HELD in its place and replayed: on the retry
+  schedule, then — once `maxAttempts` failures declare it PERSISTENT — every
+  `heldRetryMs` (1s; a `--fake` backoff override's last step) for as long as
+  the process lives, which bounds how long a store that came back waits to be
+  noticed. The first failure
+  opens the degraded window and raises `store_unreachable` (WARN); the
+  persistent declaration is an ERROR naming the held keys; the window closes,
+  with nothing dropped, when a write lands again (INFO). The only row that is
+  ever not written is one the store REFUSES as malformed: it is named at ERROR
+  and raised as `converter_defect`, and a refused multi-row batch is re-sent one
+  row at a time so its well-formed neighbours still land.
+- **THE BUFFER IS BOUNDED BY BACKPRESSURE, NOT EVICTION.** At either high-water
+  mark (`DEFAULT_BATCH_POLICY`: 1,024 rows or 16 MiB queued) the writer opens a
+  backlog episode (one WARN) and `Persistence.whenWritable()` holds the vendor
+  message loop (`engine/session.ts` `runLoop`) before it reads the next
+  message; the episode closes (one INFO) at the low-water marks (256 rows and
+  4 MiB). A durable producer-side spill was rejected: it would make the shim a
+  second durable copy of the record. The SDK keeps reading its child's stdout
+  while the loop is held (it must, to answer control requests), so a pause
+  moves the backlog into the SDK's own queue of raw vendor messages rather
+  than into the writer.
+- **BATCHES ARE BOUNDED IN ROWS, BYTES AND TIME.** An interactive batch is one
+  store transaction, so its size is the store's hold on its one writer. A
+  batch carries at most `maxBatchRows` (64) rows and `maxBatchBytes` (1 MiB) of
+  payload — at least one row, always — and a batch that overran
+  `batchTimeBudgetMs` (500ms) halves the next one's row bound, which doubles
+  back once a batch lands inside a quarter of the budget. A backlog of one-row
+  writes is MERGED into bounded batches; one huge write (an interrupt's cut
+  calls) is SPLIT.
+- **THE STORE RECEIVES EVERY ROW IN EXACTLY THE ORDER IT WAS PRODUCED, across
+  every book.** A turn's terminal is the turn's last word — the fold puts even
+  the calls a stop cut ahead of it — and consumers read "the terminal landed"
+  as "the whole turn is recorded", subagent books included (the integration
+  suite's subagent and meta-sidecar scenarios wait on exactly that). So no row
+  overtakes another; the latency lever for a TURN EDGE (a prompt, an agent
+  terminal) is that its batch ENDS at it, so its ack never waits on a row
+  produced after it. `writeDurable` joins the same buffer: its caller is
+  released at once when the store is known to be down, and the rows stay held
+  — a caller must never re-queue them.
+- **`flush()` never waits forever.** It resolves when the buffer is empty, or
+  as soon as an attempt declares or confirms a persistent failure, counting the
+  rows still held; the stand-down's exit code is decided by that count.
+- Batch timing is logged per batch (`logVerbose`, or `debug` while a backlog
+  episode is open) with rows, bytes, attempts, `duration_ms` and the backlog.
+
 ## Validation and errors
 
 - **One base validate function per request message** (`service/validate/
@@ -980,10 +1034,10 @@ env; a test that wants a production window back overrides it per-spawn through
 `SpawnShimOptions.env`, which layers over that standard env.
 
 ONLY THE WAITING IS OVERRIDABLE. The retry override reaches `backoffMs` alone —
-`maxAttempts` and `bufferCapacity` stay pinned to `DEFAULT_RETRY_POLICY` and are
-not reachable from the environment at all, precisely so this cannot become a way
-to weaken the attempt-count and bounded-buffer assertions it exists to keep
-fast. Keep it that way.
+`maxAttempts` stays pinned to `DEFAULT_RETRY_POLICY`, and the batch and backlog
+bounds to `DEFAULT_BATCH_POLICY`; none is reachable from the environment at all,
+precisely so this cannot become a way to weaken the attempt-count and
+never-drop assertions it exists to keep fast. Keep it that way.
 
 The forced-kill scenarios fell from ~5.14s to ~0.64s and the six store-outage
 scenarios from ~4.2s to ~0.55s each; the suite went from 30.9s to 11.6s, and its

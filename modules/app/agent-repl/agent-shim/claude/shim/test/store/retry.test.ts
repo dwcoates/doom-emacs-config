@@ -10,7 +10,7 @@ import { PersistenceError } from "../../src/store/persistence.js";
 import { isRetryableRead, readWithRetry } from "../../src/store/retry.js";
 
 /** The schedule, shortened so the assertions are about behavior, not time. */
-const POLICY = { bufferCapacity: 4, backoffMs: [1, 2], maxAttempts: 3 } as const;
+const POLICY = { backoffMs: [1, 2], maxAttempts: 3 } as const;
 
 /** Every backoff this suite took, so the schedule itself is observable. */
 function recorder(): { slept: number[]; sleep: (ms: number) => Promise<void> } {
@@ -152,7 +152,7 @@ describe("a read on the retry schedule", () => {
 
     // Act.
     const answer = await readWithRetry("liveWork", read, {
-      retry: { bufferCapacity: 4, backoffMs: [1], maxAttempts: 2 },
+      retry: { backoffMs: [1], maxAttempts: 2 },
     });
 
     // Assert.
@@ -169,7 +169,7 @@ describe("a read on the retry schedule", () => {
 
     // Act.
     await readWithRetry("liveWork", () => Promise.reject(busy()), {
-      retry: { bufferCapacity: 4, backoffMs: [], maxAttempts: 2 },
+      retry: { backoffMs: [], maxAttempts: 2 },
       sleep,
     }).catch(() => undefined);
 
@@ -195,7 +195,7 @@ describe("a read on the retry schedule", () => {
 
     // Act.
     const answer = await readWithRetry("liveWork", read, {
-      retry: { bufferCapacity: 4, backoffMs: [1], maxAttempts: 2 },
+      retry: { backoffMs: [1], maxAttempts: 2 },
       sleep,
     });
 

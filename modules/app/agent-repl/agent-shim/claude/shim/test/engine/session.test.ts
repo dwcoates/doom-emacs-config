@@ -1337,6 +1337,57 @@ describe("the vendor's own facts", () => {
   });
 });
 
+/** Let pending microtasks and I/O settle, up to a bound, until `done` holds. */
+async function settledUntil(done: () => boolean): Promise<void> {
+  for (let index = 0; index < 1_000 && !done(); index++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+describe("the store writer's backpressure", () => {
+  it("does not read the next vendor message while the writer's backlog is past its mark", async () => {
+    // Arrange. The writer reports a backlog episode that has not drained.
+    const h = harness();
+    await started(h);
+    let drained: () => void = () => undefined;
+    h.persistence.backlog = new Promise<void>((resolve) => {
+      drained = resolve;
+    });
+    const query = (await untilQuery(h, 0)).query;
+
+    // Act.
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000a" }));
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000b" }));
+    await settledUntil(() => h.fold.seen.length >= 2);
+    await settledUntil(() => false);
+
+    // Assert. The first was folded; the second waits for the backlog.
+    expect(h.fold.seen).toHaveLength(2);
+    drained();
+  });
+
+  it("reads the next vendor message once the backlog drains", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    let drained: () => void = () => undefined;
+    h.persistence.backlog = new Promise<void>((resolve) => {
+      drained = resolve;
+    });
+    const query = (await untilQuery(h, 0)).query;
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000a" }));
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000b" }));
+    await settledUntil(() => h.fold.seen.length >= 2);
+
+    // Act.
+    drained();
+    await settledUntil(() => h.fold.seen.length >= 3);
+
+    // Assert.
+    expect(h.fold.seen).toHaveLength(3);
+  });
+});
+
 describe("the turn loop", () => {
   it("hands the fold every SDK message", async () => {
     const h = harness();
@@ -6515,6 +6566,37 @@ describe("reconciliation when the record cannot describe the work", () => {
     const discriminators = h.persistence.buffered.map((entry) => entry.source.discriminator);
     expect(discriminators).toContain("activity.monitor.ended.swept_up");
     expect(discriminators).not.toContain("agent_bash.success.interrupted.lost.swept_up");
+  });
+
+  it("restates the recorded start on the monitor it closes, so its card still draws", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_watch" })],
+    });
+    const armed = create(conversationv1.AgentMonitorStartSchema, { description: "watch the log" });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [
+        unitEntry("1", "toolu_watch", {
+          case: "monitor",
+          value: create(conversationv1.AgentMonitorSchema, { result: { case: "start", value: armed } }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    const closed = h.persistence.buffered.find(
+      (entry) => entry.source.discriminator === "activity.monitor.ended.swept_up",
+    );
+    const frame = closed?.item.kind === "frame" ? closed.item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate | undefined)?.update;
+    const monitor = (update?.value as conversationv1.AgentActivity | undefined)?.item.value as
+      | conversationv1.AgentMonitor
+      | undefined;
+    expect((monitor?.result.value as conversationv1.AgentMonitorEnded | undefined)?.call?.description).toBe(
+      "watch the log",
+    );
   });
 
   it("neither re-adopts nor closes a live WORKFLOW run", async () => {

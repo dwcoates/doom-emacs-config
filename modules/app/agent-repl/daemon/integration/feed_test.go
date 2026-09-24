@@ -1986,35 +1986,6 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 // Detached bash.
 // ==========================================================================
 
-func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-detachshell", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-	pushDetachedShell(f.shim, "work-shell-1", "tail -f build.log")
-	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
-	if got := head.GetShellHead().GetCommand().GetText(); got != "tail -f build.log" {
-		t.Fatalf("the head's command = %q, want the announced command", got)
-	}
-	if head.GetShellHead().GetSpool() != nil {
-		t.Fatalf("the head carries a spool %v, want none — the spool is the BODY row on the sub-feed", head.GetShellHead().GetSpool())
-	}
-
-	// Act
-	f.shim.PushBash("work-shell-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n", FromOffset: 0},
-	}})
-
-	// Assert: the spool rides the BODY row, on the sub-feed the head addresses.
-	spool := awaitShellSpool(t, f, head, "the spool body growing from the bash delta", func(sh *frontendv1.FeedShell) bool {
-		return sh.GetSpool() != nil
-	})
-	if spool.GetSpool().GetText() != "building...\n" {
-		t.Fatalf("the spool tail = %q, want the delta's text", spool.GetSpool().GetText())
-	}
-}
-
 func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -2086,30 +2057,6 @@ func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testin
 	// sub-feed, so "no spool" is the absence of that row, not an empty field on
 	// the head.
 	expectNoShellSpool(t, f, head, "a shell whose output was never observed draws no spool body")
-}
-
-func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	f.submit("go", "k-spoolgap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	tail := f.watchRootFeed()
-	pushDetachedShell(f.shim, "work-gap-1", "long-build")
-	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
-
-	// Act: a delta whose from_offset does not match what has accumulated
-	// (nothing has accumulated yet, so any nonzero offset is a gap).
-	f.shim.PushBash("work-gap-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
-		Update: &conversationv1.AgentBashUpdate{NewOutput: "mid-stream\n", FromOffset: 999},
-	}})
-
-	// Assert: the gap is refused — the spool does not silently jump ahead, so
-	// the BODY row it would have drawn on the sub-feed never appears.
-	expectNoShellSpool(t, f, head, "a spool gap must not draw the shell's spool body")
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a spool gap must not upsert the shell's head")
-	// subagent.go logs daemon.feed.spool_gap at ERROR precisely on a refused
-	// gap ("a detached shell's output frame did not continue the spool").
-	f.d.ExpectWarnings("daemon.feed.spool_gap")
 }
 
 // ==========================================================================
@@ -3022,7 +2969,7 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 
 	// Act: the next turn's live-work reconciliation announces the SAME work
 	// again, carrying the run's start and no ending at all.
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-resettle-1", "make")))
+	pushDetachedShell(f.shim, "work-resettle-1", "make")
 
 	// Assert: nothing the replay produced drew the run live. A bubble drawn
 	// from the frame in hand walked back here -- an orange dot and a stop
@@ -3047,4 +2994,55 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 	if redrawnLive {
 		t.Fatal("a replayed announcement redrew the settled shell bubble as live")
 	}
+}
+
+func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashTail(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-detachshell", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	pushDetachedShell(f.shim, "work-shell-1", "tail -f build.log")
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
+	if got := head.GetShellHead().GetCommand().GetText(); got != "tail -f build.log" {
+		t.Fatalf("the head's command = %q, want the announced command", got)
+	}
+	if head.GetShellHead().GetSpool() != nil {
+		t.Fatalf("the head carries a spool %v, want none — the spool is the BODY row on the sub-feed", head.GetShellHead().GetSpool())
+	}
+
+	// Act
+	f.shim.PushBash("work-shell-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: "building...\n"},
+	}})
+
+	// Assert: the spool rides the BODY row, on the sub-feed the head addresses.
+	spool := awaitShellSpool(t, f, head, "the spool body drawn from the bash tail", func(sh *frontendv1.FeedShell) bool {
+		return sh.GetSpool() != nil
+	})
+	if spool.GetSpool().GetText() != "building...\n" {
+		t.Fatalf("the spool tail = %q, want the tail's text", spool.GetSpool().GetText())
+	}
+}
+
+func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-spoolovercap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	pushDetachedShell(f.shim, "work-overcap-1", "long-build")
+	head := awaitShellHead(t, f, tail, "the shell bubble's head on the root feed")
+
+	// Act: a tail longer than the contract's cap — a producer that no longer
+	// agrees with the renderer on what is drawn.
+	f.shim.PushBash("work-overcap-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Tail{
+		Tail: &conversationv1.AgentBashTail{Text: strings.Repeat("y", int(conversationv1.AgentBashTailCap_AGENT_BASH_TAIL_CAP_BYTES)+1)},
+	}})
+
+	// Assert: refused — the BODY row it would have drawn never appears.
+	expectNoShellSpool(t, f, head, "an over-cap tail must not draw the shell's spool body")
+	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "an over-cap tail must not upsert the shell's head")
+	// subagent.go logs daemon.feed.spool_over_cap at ERROR on the refusal.
+	f.d.ExpectWarnings("daemon.feed.spool_over_cap")
 }

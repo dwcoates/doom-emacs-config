@@ -275,7 +275,7 @@ type Deps struct {
 	// EntryPlaced is told the FeedId of every detached-work-capable entry the
 	// moment the feed first draws it, and again whenever that FeedId changes:
 	// a subagent bubble keyed by its spawn unit, a shell bubble's head keyed by
-	// its work id. It is how the footer's jump rows name the entry ON THE FEED
+	// its work id, a monitor's tool-call card keyed by its unit. It is how the footer's jump rows name the entry ON THE FEED
 	// THAT DRAWS IT (a subagent of a subagent is on its parent's sub-feed, not
 	// the root) instead of guessing an address.
 	//

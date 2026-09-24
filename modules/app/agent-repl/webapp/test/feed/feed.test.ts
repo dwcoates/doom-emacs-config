@@ -13,7 +13,8 @@ import {
   onClientVerdict,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { REVEAL_CLASS, latestEntry, mountFeed } from "../../src/feed/feed.js";
+import { latestEntry, mountFeed } from "../../src/feed/feed.js";
+import { SELECTED_ENTRY_CLASS } from "../../src/feed/selected-entry.js";
 import {
   Channel,
   feedId,
@@ -385,11 +386,25 @@ describe("mountFeed: selectDetachedWork", () => {
     expect(await feed.selectDetachedWork(feedId("r1"))).toBe(true);
   });
 
-  it("marks the revealed row, so the reader's eye lands on it", async () => {
+  /** The card drawn in a row: the row's first element child. */
+  function cardIn(host: HTMLElement, rowId: string): Element | null | undefined {
+    return host.querySelector(`[data-feed-row="${rowId}"]`)?.firstElementChild;
+  }
+
+  it("marks the revealed row's card, so the reader's eye lands on it", async () => {
     const { feed, host } = mount(rootPage([responseRow("r1")]));
     await settle();
     await feed.selectDetachedWork(feedId("r1"));
-    expect(host.querySelector('[data-feed-row="r1"]')?.classList.contains(REVEAL_CLASS)).toBe(true);
+    expect(cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(true);
+  });
+
+  it("leaves the revealed row's full-width wrapper unmarked", async () => {
+    const { feed, host } = mount(rootPage([responseRow("r1")]));
+    await settle();
+    await feed.selectDetachedWork(feedId("r1"));
+    expect(host.querySelector('[data-feed-row="r1"]')?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(
+      false,
+    );
   });
 
   it("clears the mark once the eye has had time to land", async () => {
@@ -397,9 +412,7 @@ describe("mountFeed: selectDetachedWork", () => {
     await settle();
     await feed.selectDetachedWork(feedId("r1"));
     await vi.advanceTimersByTimeAsync(3000);
-    expect(host.querySelector('[data-feed-row="r1"]')?.classList.contains(REVEAL_CLASS)).toBe(
-      false,
-    );
+    expect(cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS)).toBe(false);
   });
 
   /** The feed's scroll box, with rects scripted since jsdom lays out nothing. */
@@ -446,7 +459,7 @@ describe("mountFeed: selectDetachedWork", () => {
     await settle();
     // Assert -- the row is marked, and the feed is where the reader left it.
     expect([
-      host.querySelector('[data-feed-row="r1"]')?.classList.contains(REVEAL_CLASS),
+      cardIn(host, "r1")?.classList.contains(SELECTED_ENTRY_CLASS),
       scroll.scrollTop,
     ]).toEqual([true, 100]);
   });

@@ -87,8 +87,12 @@ type unitState struct {
 	// restates the addressed string, and the address line prefers a name a
 	// reader recognizes.
 	sendAddressedTo string
+	// monitor records that this unit is a MONITOR's tool-call card, which is
+	// the monitor's feed entry itself: a detachment naming it continues
+	// nothing, and it is never redrawn as a shell head.
+	monitor bool
 	// drawsNoRow records that this unit's KIND draws no feed row at all —
-	// a monitor, a wakeup, an unmodeled tool. It is not "has not drawn yet":
+	// a wakeup, an unmodeled tool. It is not "has not drawn yet":
 	// nothing will ever draw it, so a detachment naming it can never be
 	// claimed by a row and is retired rather than held.
 	drawsNoRow bool
@@ -234,19 +238,22 @@ type shellState struct {
 	//
 	// A DETACHED RUN'S FIRST FRAME NEED NOT BE ITS `start`. Two producers write
 	// one run under one key — the shim's stream and the sidecar's spool tail —
-	// so a reconnect or replay legitimately delivers an `update`/`progress`
+	// so a reconnect or replay legitimately delivers a `tail`/`progress`
 	// BEFORE the re-announced `start`. Drawn from startedAtMs alone that window
 	// stamped the runtime at zero, and the live clock counted up from the epoch
 	// — an absurd age (observed as ~56 years). The daemon stamps this once on
 	// first sight so the clock counts from a sane instant until the real start
 	// lands, at which point startedAtMs takes over and the clock corrects.
 	firstObservedMs int64
-	// spool is the accumulated output.
+	// spool is the run's rendered tail as its newest frame stated it, drawn
+	// verbatim.
 	spool string
-	// nextOffset is the byte offset the next update must start at. A frame
-	// that does not is a GAP, and the resolver refuses it rather than
-	// concatenating across a hole.
-	nextOffset uint64
+	// linesOmitted is how many lines came before spool, the count the body's
+	// "earlier lines not shown" states.
+	linesOmitted uint64
+	// written is every byte the run has written as of that frame (omitted
+	// bytes plus the tail), which tells growth from a re-delivery.
+	written uint64
 	// lastProgressMs is the last append the daemon observed.
 	lastProgressMs int64
 	// row is the bubble's identity.
