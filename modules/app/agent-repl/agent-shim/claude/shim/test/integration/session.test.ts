@@ -1442,6 +1442,41 @@ describe("turn_in_flight, on both messages that carry it", () => {
     expect(revived.liveWork.length).toBeGreaterThan(0);
   });
 
+  test("a killed shim's revive of its surviving detached run logs no WARN", async () => {
+    // Arrange: a detached run outlives a SIGKILLed shim.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const agent = openStream((options) =>
+      first.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await awaitAgentEntry(agent, (entry) => entryFrame(entry)?.result.case === "detachedWork");
+    agent.close();
+    first.signal("SIGKILL");
+    await first.exited;
+
+    // Act: revive, then run one turn to completion so everything the revive
+    // put on the vendor stream has been folded before the record is read.
+    const second = await spawnShim({ reuse: first.dirs });
+    await second.clients.h1.startSession(resumeSession(started.vendorSessionId, remediationPay()));
+    const revivedAgent = openStream((options) =>
+      second.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await awaitAgentEntry(revivedAgent, (entry) => {
+      const result = entryFrame(entry)?.result;
+      return result?.case === "success" || result?.case === "failure";
+    });
+    revivedAgent.close();
+
+    // Assert: a healthy revive is not a defect.
+    const loud = second.log
+      .records()
+      .filter((record) => record.pid === second.child.pid && (record.level === "warn" || record.level === "error"))
+      .map((record) => record.message);
+    expect(loud).toEqual([]);
+  });
+
   test("a killed shim's detached announcement already on the opening page still revives as live work", async () => {
     // Arrange: the interleaving that hung the test above, FORCED. The watch
     // opens only once the writer has drained everything the turn enqueued, so

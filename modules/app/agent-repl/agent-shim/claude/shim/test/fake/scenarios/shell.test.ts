@@ -467,6 +467,32 @@ describe("VendorBackgrounded", () => {
   });
 
 
+  it("answers backgroundTasks for a task already in the background without patching it again", async () => {
+    // The real vendor patches is_backgrounded only on the Ctrl-B transition
+    // (ctrl-b-detach-of-foreground-work, turn-stop-max-turns); a
+    // run_in_background task is never patched (bash-detached). A revived
+    // shim's reconciliation only ASKS, and a replayed patch reached it with no
+    // originating call it could name.
+    // Arrange.
+    let answered: boolean | undefined;
+
+    // Act.
+    const driven = await driveScenario(["!bash-detach-live"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        const started = messages.find((m) => m.subtype === "task_started");
+        if (started === undefined) throw new Error("no task to ask about");
+        answered = await query.backgroundTasks(String(started.tool_use_id));
+      },
+    });
+
+    // Assert.
+    expect({ answered, patches: ofType(driven, "system", "task_updated").length }).toEqual({
+      answered: true,
+      patches: 0,
+    });
+  });
+
   it("parks a foreground Bash until an interrupt lands, with no terminal on its own", async () => {
     // !bash-hold's run() calls ctx.awaitInterrupt() and never returns on its
     // own -- a bare driveScenario() would hang the suite forever, which is why
