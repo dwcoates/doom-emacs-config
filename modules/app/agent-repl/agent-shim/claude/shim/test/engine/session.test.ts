@@ -1481,6 +1481,40 @@ describe("the keep-alive turn", () => {
     expect(h.persistence.buffered.filter((entry) => entry.item.kind === "prompt")).toEqual([]);
   });
 
+  it("does NOT beat while a StartTurn is still being opened", async () => {
+    // Arrange: a start parked on its durable prompt row, before it has adopted
+    // its turn -- the window in which the session reports no turn open.
+    const h = harness();
+    await started(h);
+    let releaseStart = (): void => {};
+    const blocked = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await blocked;
+      await durable(entries);
+    };
+    h.persistence.buffered.length = 0;
+    const starting = h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    // Act: the beat fires inside that window.
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    releaseStart();
+    await starting;
+
+    // Assert: no keep-alive prompt was written; the start was the only submitter.
+    expect(h.persistence.buffered.filter((entry) => entry.item.kind === "prompt" && entry.keepalive)).toEqual([]);
+  });
+
   it("REWINDS the vendor context before the next real prompt", async () => {
     const h = harness();
     await started(h);

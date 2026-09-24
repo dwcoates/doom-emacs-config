@@ -550,6 +550,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * keep-alive prompts are the pattern the numbering exists to break.
    */
   let keepaliveCount = 0;
+  /** StartTurns being opened; while any is, the keep-alive beat holds. */
+  let startsInFlight = 0;
   let startResolve: (() => void) | undefined;
   /** Settles the same pending start as {@link startResolve}, with a named reason. */
   let startReject: ((reason: Error) => void) | undefined;
@@ -3660,6 +3662,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   async function keepaliveBeat(): Promise<void> {
     if (open !== undefined || query === undefined || identity === undefined) return;
+    if (startsInFlight > 0) {
+      LOGGER.logVerbose({ outcome: "skipped_start_in_flight" }, "keep-alive beat skipped: a StartTurn is being opened");
+      return;
+    }
     // A keep-alive turn's id NEVER reaches the wire: TurnIds are daemon-minted
     // and adopted, and this turn has no daemon behind it. The value exists only
     // so the prompt row has a key, and the row is flagged keep-alive so no page
@@ -3716,6 +3722,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       open = turn;
       if (turn === undefined) cadence?.resume();
       else cadence?.pause();
+    },
+    holdKeepalive: () => {
+      startsInFlight += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        startsInFlight -= 1;
+      };
     },
     reportStoreUnreachable: (detail) => {
       pushes.fault(sessionFault({ kind: "storeUnreachable" }, HISTORY_READ_COMPONENT, detail));
