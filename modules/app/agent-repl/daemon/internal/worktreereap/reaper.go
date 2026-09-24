@@ -199,7 +199,7 @@ func (r *Reaper) Sweep(ctx context.Context) (Report, error) {
 		return Report{}, nil
 	}
 	defer func() {
-		if err := lock.release(); err != nil {
+		if err := lock.Release(); err != nil {
 			r.deps.Log.Error(opSweep, "the sweep's kernel lock could not be released", dlog.Context{
 				"lock": r.deps.LockPath, "cause": err.Error(),
 			})
