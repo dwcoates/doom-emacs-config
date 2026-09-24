@@ -97,6 +97,16 @@ interface ActivityEnvelope {
   readonly attribution?: conversationv1.AgentActivityAttribution;
 }
 
+/**
+ * The stands-alone contract revision this producer writes every unit under.
+ *
+ * STAMPED HERE, in the one activity constructor, and never by the per-kind
+ * converters that do the restating: a new arm that forgets to restate is still
+ * stamped, so a consumer grades its bare settle a defect rather than old data.
+ */
+export const ACTIVITY_CONTRACT =
+  conversationv1.AgentActivityContract.SETTLES_STAND_ALONE;
+
 /** One unit of work at whatever state it has reached. */
 export function agentActivity(
   activityId: conversationv1.AgentActivityId,
@@ -109,6 +119,7 @@ export function agentActivity(
     usage: envelope.usage,
     effort: envelope.effort,
     attribution: envelope.attribution,
+    contract: ACTIVITY_CONTRACT,
   });
 }
 

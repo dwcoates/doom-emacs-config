@@ -40,6 +40,7 @@
  * walking the agent's own book for the unit — the one place the fact still is.
  */
 import { create } from "@bufbuild/protobuf";
+import { agentActivity } from "../convert/entries.js";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
@@ -135,19 +136,16 @@ export function closingSubagentTerminal(
     { agent: agent.value, spawn: spawn.value },
     "closing a spawn unit the record holds no terminal for as lost",
   );
-  const activity = create(conversationv1.AgentActivitySchema, {
-    activityId: spawn,
-    item: {
-      case: "subagent",
-      value: create(conversationv1.AgentSubagentSchema, {
-        result: {
-          case: "failure",
-          value: create(conversationv1.AgentSubagentFailureSchema, {
-            cause: { case: "lost", value: sweptUp() },
-          }),
-}
-      }),
-}
+  const activity = agentActivity(spawn, {
+    case: "subagent",
+    value: create(conversationv1.AgentSubagentSchema, {
+      result: {
+        case: "failure",
+        value: create(conversationv1.AgentSubagentFailureSchema, {
+          cause: { case: "lost", value: sweptUp() },
+        }),
+      },
+    }),
   });
   return {
     agentId: agent,
@@ -188,14 +186,11 @@ export function closingMonitorTerminal(
     { agent: agent.value, monitor: monitor.value },
     "closing a monitor the record holds no terminal for as ended",
   );
-  const activity = create(conversationv1.AgentActivitySchema, {
-    activityId: monitor,
-    item: {
-      case: "monitor",
-      value: create(conversationv1.AgentMonitorSchema, {
-        result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, {}) },
-      }),
-    },
+  const activity = agentActivity(monitor, {
+    case: "monitor",
+    value: create(conversationv1.AgentMonitorSchema, {
+      result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, {}) },
+    }),
   });
   return {
     agentId: agent,

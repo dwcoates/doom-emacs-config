@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
+  ACTIVITY_CONTRACT,
   activityEntry,
   agentActivity,
   agentFrame,
@@ -110,6 +111,25 @@ describe("the activity envelope", () => {
     });
 
     expect(activity.effort).toBe(conversationv1.AgentEffortLevel.HIGH);
+  });
+
+  it("stamps the stands-alone contract on a start, where no per-kind code restates anything", () => {
+    const activity = agentActivity(UNIT, readStart());
+
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
+  });
+
+  it("stamps the stands-alone contract on a settle whatever its arm restated", () => {
+    const bare: conversationv1.AgentActivity["item"] = {
+      case: "read",
+      value: create(conversationv1.AgentReadSchema, {
+        result: { case: "failure", value: create(conversationv1.AgentReadFailureSchema, {}) },
+      }),
+    };
+
+    const activity = agentActivity(UNIT, bare);
+
+    expect(activity.contract).toBe(ACTIVITY_CONTRACT);
   });
 });
 

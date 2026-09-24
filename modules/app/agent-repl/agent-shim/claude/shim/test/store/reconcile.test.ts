@@ -471,6 +471,17 @@ describe("closingAgentTerminal", () => {
     expect(failed.cause.case).toBe("lost");
   });
 
+  it("stamps the closed spawn unit with the stands-alone contract", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn-contract");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN);
+
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    const activity = (frame?.result.value as conversationv1.AgentUpdate).update
+      .value as conversationv1.AgentActivity;
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
+  });
+
   it("keys the row deterministically, so a second reconciliation upserts one ending", async () => {
     const { reconciler: plane } = await reconciler("close-agent-key");
 
@@ -491,6 +502,15 @@ describe("closingMonitorTerminal", () => {
     const activity = update.value as conversationv1.AgentActivity;
     expect(activity.item.case).toBe("monitor");
     expect((activity.item.value as conversationv1.AgentMonitor).result.case).toBe("ended");
+  });
+
+  it("stamps the closed monitor unit with the stands-alone contract", () => {
+    const entry = closingMonitorTerminal(BOOK, RUN);
+
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    const activity = (frame?.result.value as conversationv1.AgentUpdate).update
+      .value as conversationv1.AgentActivity;
+    expect(activity.contract).toBe(conversationv1.AgentActivityContract.SETTLES_STAND_ALONE);
   });
 
   it("keys the row by the monitor's own unit, so the unit concludes in place", () => {
