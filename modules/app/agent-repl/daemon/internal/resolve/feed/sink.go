@@ -28,18 +28,20 @@ func (r *resolver) OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, p
 
 // OnPeerMessage draws a message another Claude session sent into this
 // conversation as the abbreviated peer bubble on the recipient's feed.
-func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPeerMessage(ws ids.WorkspaceID, peer *conversationv1.PeerMessage, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.drawPeerMessage(s, peer)
 }
 
 // OnActivity draws one unit of a turn's synchronous progress.
-func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.drawActivity(s, agent, act, nil)
 }
 
@@ -222,6 +224,12 @@ func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversa
 		row.Turn = turn
 		return
 	}
+	// THE ENTRY'S OWN STAMP OUTRANKS EVERYTHING BELOW: it is the producer's
+	// statement of which turn the row belongs to, where the rest is inference.
+	if s.entryTurn != nil {
+		row.Turn = &conversationv1.TurnId{Value: string(*s.entryTurn)}
+		return
+	}
 	if prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil"})
 		row.Turn = prior
@@ -250,36 +258,40 @@ func (r *resolver) publishedTurn(s *wsState, id string) *conversationv1.TurnId {
 }
 
 // OnQuestion draws the agent blocking on a choice.
-func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.drawQuestion(s, agent, q)
 }
 
 // OnPermission draws the agent blocking on consent.
-func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.drawPermission(s, agent, p)
 }
 
 // OnContextCut draws the separation divider a context cut leaves.
-func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.drawContextCut(s, agent, cut, at)
 }
 
 // OnApiError records a mid-turn vendor failure as EVIDENCE on the turn. It is
 // never a terminal and never its own row: the turn's end is the frame-level
 // failure arm and nothing else.
-func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.addEvidence(s, apiErrorEvidence(failed.GetMessage()))
 	r.logger(ws).Warn("daemon.feed.api_error",
 		"a mid-turn vendor request failure was recorded as the turn's evidence",
@@ -319,11 +331,12 @@ func apiErrorEvidence(message string) turnEvidenceLine {
 
 // addEvidence attaches a line to the turn in flight, if one is.
 func (r *resolver) addEvidence(s *wsState, line turnEvidenceLine) {
-	if s.turnInFlight == nil {
+	turn := s.evidenceTurn()
+	if turn == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.turnInFlight == nil"})
 		return
 	}
-	key := string(*s.turnInFlight)
+	key := string(*turn)
 	s.turnEvidence[key] = append(s.turnEvidence[key], line)
 }
 
@@ -354,10 +367,11 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 }
 
 // OnDetachedWork draws the bubble of work that left the stream.
-func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
+	defer s.drawingEntry(turn)()
 	r.drawDetachedWork(s, agent, work)
 }
 
@@ -389,6 +403,7 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 	running := turn
 	s.turnInFlight = &running
 	s.turnStamp = &running
+	s.knowTurn(running)
 	// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and the next
 	// turn beginning is what retires it.
 	r.turnStarted(s, running)

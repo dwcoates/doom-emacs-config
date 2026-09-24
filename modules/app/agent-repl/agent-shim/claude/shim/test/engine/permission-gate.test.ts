@@ -32,6 +32,7 @@ const SUBAGENT = create(conversationv1.AgentIdSchema, { value: "agent-sub" });
 
 function gateWith(
   keepalive: (agentId: conversationv1.AgentId) => boolean = () => false,
+  turn: (agentId: conversationv1.AgentId) => conversationv1.TurnId | undefined = () => undefined,
 ): { gate: PermissionGate; written: PersistEntry[]; modes: conversationv1.AgentPermissionMode[] } {
   const written: PersistEntry[] = [];
   const modes: conversationv1.AgentPermissionMode[] = [];
@@ -40,6 +41,7 @@ function gateWith(
     agentFor: (vendorAgentId) => (vendorAgentId === SUBAGENT.value ? SUBAGENT : undefined),
     persist: (entries) => written.push(...entries),
     keepalive,
+    turn,
     nowMs: () => 1000,
     onPermissionModeSet: (mode) => modes.push(mode),
   });
@@ -803,6 +805,31 @@ describe("whose book an ask lands on", () => {
 
     // Assert.
     expect(written[0]?.keepalive).toBe(true);
+  });
+
+  it("stamps an ask with the turn the session names for its book", async () => {
+    // Arrange.
+    const turn = create(conversationv1.TurnIdSchema, { value: "turn-9" });
+    const { gate, written } = gateWith(undefined, (agentId) => (agentId.value === AGENT.value ? turn : undefined));
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions());
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.turn?.value).toBe("turn-9");
+  });
+
+  it("leaves an ask unstamped when the session names no turn for its book", async () => {
+    // Arrange.
+    const { gate, written } = gateWith();
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions());
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.turn).toBeUndefined();
   });
 
   it("leaves a main-agent ask on the main agent's book", async () => {

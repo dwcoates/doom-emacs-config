@@ -117,6 +117,26 @@ describe("openAgentPage", () => {
     expect(more.lastEntry?.value).not.toBe("");
   });
 
+  it("serves each entry with the turn the store keeps for its row", async () => {
+    const { plane } = await seeded("page-turn", 0);
+    plane.write([promptEntry(BOOK, "turn-5", "hello")]);
+    await plane.flush();
+
+    const session = await plane.openAgentPage(BOOK, 10);
+    session.close();
+
+    expect(session.page.entries[0]?.turn?.value).toBe("turn-5");
+  });
+
+  it("serves an entry whose row no write stamped with no turn", async () => {
+    const { plane } = await seeded("page-no-turn", 1);
+
+    const session = await plane.openAgentPage(BOOK, 10);
+    session.close();
+
+    expect(session.page.entries[0]?.turn).toBeUndefined();
+  });
+
   it("bounds the page by the caller's own high-water mark", async () => {
     const { plane } = await seeded("page-known-through", 3);
     const first = await plane.openAgentPage(BOOK, 10);

@@ -61,7 +61,7 @@ func (h *harness) replayClearTurn(turn, command string) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-"+turn, &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 }
 
 // A REPLAYED /clear SHOWS ONLY ITS DIVIDER. On a fresh resolver the prompt is
@@ -131,7 +131,7 @@ func TestAReplayedDirectivesLateFramesStaySuppressed(t *testing.T) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-turn-2", &conversationv1.AgentResponseSuccess{
 			Prose: &conversationv1.AgentResponseProse{Markdown: ""},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Assert: still nothing but the divider.
 	if got := len(h.userPromptRows()); got != 0 {

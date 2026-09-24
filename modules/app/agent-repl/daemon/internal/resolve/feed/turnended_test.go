@@ -80,7 +80,7 @@ func TestAConfirmedClearTurnDrawsNoTerminalBubble(t *testing.T) {
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-2"))
 	h.resolver.OnContextCut(testWorkspace, mainAgent(),
 		&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
-		&conversationv1.HistoryPointer{Value: "entry-clear"}, noAddress())
+		&conversationv1.HistoryPointer{Value: "entry-clear"}, nil, noAddress())
 
 	// Act: the interrupted terminal the clear left arrives.
 	h.terminal("turn-2", interruptedByUser(), nil)
@@ -136,7 +136,7 @@ func TestAConcludedTurnNamesItsAnsweringRow(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "what is it")
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseSuccessActivity("unit-9", "it is this"), noAddress())
+		responseSuccessActivity("unit-9", "it is this"), nil, noAddress())
 
 	// Act.
 	h.terminal("turn-1", &conversationv1.AgentSuccess{
@@ -527,7 +527,7 @@ func TestAModelErrorAfterARefusedResponseDrawsTheRefusalArm(t *testing.T) {
 					Refused: &conversationv1.AgentResponseRefused{},
 				},
 			},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Act.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -558,7 +558,7 @@ func TestAModelErrorAfterAMaxTokensResponseIsNotARefusal(t *testing.T) {
 					MaxTokens: &conversationv1.AgentResponseStoppedAtMaxTokens{},
 				},
 			},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 
 	// Act.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -589,7 +589,7 @@ func TestARefusalDoesNotColorTheNextTurnsModelError(t *testing.T) {
 					Refused: &conversationv1.AgentResponseRefused{},
 				},
 			},
-		}, nil), noAddress())
+		}, nil), nil, noAddress())
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
 		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
 	})
@@ -869,7 +869,7 @@ func TestAMidTurnApiErrorRidesTheTerminalsHeadlineAsEvidence(t *testing.T) {
 	h.deliverPrompt("turn-1", "hello")
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: "connection reset",
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Act: the turn then dies of something else.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -1155,7 +1155,7 @@ func TestATerminalDoesNotRestateTheApiFailureItEndedOn(t *testing.T) {
 	h.deliverPrompt("turn-1", "!api-401")
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: message,
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Act: the turn then ends on THAT failure.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -1200,7 +1200,7 @@ func TestATerminalRestatesNothingWhateverOrderTheTwoProducersArriveIn(t *testing
 	})
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: message,
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Assert: the same sentence the other ordering drew.
 	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
@@ -1219,7 +1219,7 @@ func TestATerminalStatesAMidTurnApiFailureItDidNotDieOf(t *testing.T) {
 	h.deliverPrompt("turn-1", "hello")
 	h.resolver.OnApiError(testWorkspace, mainAgent(), &conversationv1.ApiRequestFailed{
 		Message: "Rate limited; retry after 30 seconds.",
-	}, noAddress())
+	}, nil, noAddress())
 
 	// Act
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
@@ -1255,7 +1255,7 @@ func TestInterruptedTerminalDrawsForAUserStopButNotAClear(t *testing.T) {
 	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("clear-turn"))
 	h.resolver.OnContextCut(testWorkspace, mainAgent(),
 		&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}}},
-		&conversationv1.HistoryPointer{Value: "entry-clear"}, noAddress())
+		&conversationv1.HistoryPointer{Value: "entry-clear"}, nil, noAddress())
 
 	// An ordinary turn the user stops — no cut.
 	h.deliverPrompt("stop-turn", "do the thing")

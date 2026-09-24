@@ -21,6 +21,12 @@ lossy against what the stream plane already holds; that unit is stream-owned and
 the file plane writes no part of it (`internal/convert/streamowned.go`). Both write through the same envelope, into one
 upsert-key space, over one write path.
 
+THE TURN STAMP (`StoreEntry.turn`) is set only for a turn the vendor's own
+records name — an adopted external prompt's uuid, followed by `promptId` and
+`parentUuid` (`internal/convert/turn.go`). An agent-repl turn's id is in no
+vendor record, so its rows stay unstamped here and the store keeps the stream
+plane's stamp.
+
 The sidecar is 100% specific to Claude's file formats BY DESIGN; its entire job
 is converting that vendor reality into the vendor-agnostic contract.
 

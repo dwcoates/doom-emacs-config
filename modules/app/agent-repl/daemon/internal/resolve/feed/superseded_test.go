@@ -212,7 +212,7 @@ func TestASubFeedFollowsTheRuleWithinItselfOnly(t *testing.T) {
 			act: func(h *harness) {
 				h.send(settledThinking("think-root", "weighing options"))
 				h.resolver.OnActivity(testWorkspace, created,
-					responseSuccessActivity("prose-sub", "what I found"), noAddress())
+					responseSuccessActivity("prose-sub", "what I found"), nil, noAddress())
 			},
 			feed: rootFeed(),
 			unit: "think-root",
@@ -222,7 +222,7 @@ func TestASubFeedFollowsTheRuleWithinItselfOnly(t *testing.T) {
 			name: "the root feed's prose does not supersede a subagent's thinking",
 			act: func(h *harness) {
 				h.resolver.OnActivity(testWorkspace, created,
-					settledThinking("think-sub", "looking around"), noAddress())
+					settledThinking("think-sub", "looking around"), nil, noAddress())
 				h.send(responseSuccessActivity("prose-root", "an interim note"))
 			},
 			feed: sub,
@@ -233,9 +233,9 @@ func TestASubFeedFollowsTheRuleWithinItselfOnly(t *testing.T) {
 			name: "a subagent's prose supersedes its own earlier thinking",
 			act: func(h *harness) {
 				h.resolver.OnActivity(testWorkspace, created,
-					settledThinking("think-sub", "looking around"), noAddress())
+					settledThinking("think-sub", "looking around"), nil, noAddress())
 				h.resolver.OnActivity(testWorkspace, created,
-					responseSuccessActivity("prose-sub", "what I found"), noAddress())
+					responseSuccessActivity("prose-sub", "what I found"), nil, noAddress())
 			},
 			feed: sub,
 			unit: "think-sub",

@@ -167,6 +167,26 @@ type wsState struct {
 	// to turnInFlight drew a turn_ended row for a turn that had only begun
 	// (every turn open repaints the opening page) and settled its prompt.
 	replayTurn *ids.TurnID
+	// entryTurn is the STAMP of the entry being drawn (HistoryEntryAt.turn),
+	// in force only while that entry is drawn (drawingEntry). Nil for an
+	// unstamped entry, which is what selects the positional fallback.
+	entryTurn *ids.TurnID
+	// knownTurns is every turn this feed has seen OPENED: a prompt drawn for
+	// it, or the daemon handing it over (entryturn.go).
+	knownTurns map[ids.TurnID]bool
+	// predatesPage is every turn a replay met at a page's head whose prompt is
+	// older than the page, so its later entries are not judged again.
+	predatesPage map[ids.TurnID]bool
+	// unknownTurnsReported is every stamped turn already reported as naming a
+	// prompt its book does not carry, so the ERROR is written once per turn.
+	unknownTurnsReported map[ids.TurnID]bool
+	// replayPromptDrawn, replayAtFloor and replayUnstamped describe the page
+	// being replayed: whether it has drawn a main-agent prompt yet, whether it
+	// claims to reach the book's floor, and how many of its entries carried no
+	// stamp and were attributed by position.
+	replayPromptDrawn bool
+	replayAtFloor     bool
+	replayUnstamped   int
 	// clearTurns is the set of turns the daemon opened as a `/clear`. A clear's
 	// visible outcome is the cleared divider it leaves, NOT a terminal row: the
 	// turn is interrupted to make the cut, and drawing that interrupt as a
@@ -517,6 +537,9 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		clearConfirmed:       map[ids.TurnID]bool{},
 		clearedTurnByPointer: map[string]ids.TurnID{},
 		directiveTurns:       map[ids.TurnID]bool{},
+		knownTurns:           map[ids.TurnID]bool{},
+		predatesPage:         map[ids.TurnID]bool{},
+		unknownTurnsReported: map[ids.TurnID]bool{},
 		directiveUnits:       map[string]bool{},
 		answerRows:           map[string]*frontendv1.FeedId{},
 		finalAnswerSeen:      map[string]bool{},

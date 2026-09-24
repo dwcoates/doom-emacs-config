@@ -92,6 +92,8 @@ function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntr
   return create(conversationv1.HistoryEntryAtSchema, {
     at: toHistoryPointer(line.at),
     entry: toHistoryEntry(line.line),
+    // The row's turn as the store keeps it (its first stamp), passed through.
+    ...(line.turn === undefined ? {} : { turn: line.turn }),
   });
 }
 

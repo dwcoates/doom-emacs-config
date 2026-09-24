@@ -777,16 +777,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // real question, and hiding it would leave the vendor waiting forever. A
     // SUBAGENT's ask is the keep-alive's only when the keep-alive spawned it:
     // a backgrounded subagent keeps asking across the turns after its own.
-    keepalive: (agentId) =>
-      agentId.value === requireIdentity().agentId.value
-        ? keepaliveScope.producing()
-        : keepaliveScope.spawned(agentId.value),
+    keepalive: (agentId) => askIsKeepalive(agentId),
+    // THE SAME ATTRIBUTION NAMES THE ASK'S TURN: the open turn, unless the open
+    // turn is the keep-alive and the keep-alive did not raise this ask.
+    turn: (agentId) => turnFor(askIsKeepalive(agentId)),
     nowMs: deps.nowMs,
     onPermissionModeSet: (mode) => {
       permissionMode = mode;
       pushPermissionMode();
     },
   });
+
+  /** Whether the ask raised on `agentId`'s book is the keep-alive's. */
+  function askIsKeepalive(agentId: conversationv1.AgentId): boolean {
+    return agentId.value === requireIdentity().agentId.value
+      ? keepaliveScope.producing()
+      : keepaliveScope.spawned(agentId.value);
+  }
+
+  /**
+   * THE TURN A ROW PRODUCED NOW BELONGS TO, under its keep-alive attribution:
+   * the open turn, except that while the keep-alive is the open turn only the
+   * keep-alive's own rows carry its id. A row produced with no turn open, or
+   * one the keep-alive did not produce while it is open, belongs to no turn.
+   */
+  function turnFor(keepalive: boolean): conversationv1.TurnId | undefined {
+    return open !== undefined && (!open.keepalive || keepalive) ? open.id : undefined;
+  }
 
   function requireIdentity(): SessionIdentity {
     if (identity === undefined) {
@@ -804,7 +821,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * keyed to a turn id that must never reach the wire.
    */
   function foldContext(attribution: KeepaliveAttribution): FoldContext {
-    const turn = open !== undefined && (!open.keepalive || attribution.keepalive) ? open.id : undefined;
+    const turn = turnFor(attribution.keepalive);
     return {
       mainAgentId: requireIdentity().agentId,
       ...(turn === undefined ? {} : { turnId: turn }),
@@ -3470,6 +3487,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           discriminator: "agent_frame.failure.query_died",
         },
         keepalive: ended.keepalive,
+        turn: ended.id,
         item: {
           kind: "frame",
           frame: create(conversationv1.AgentFrameSchema, {
@@ -3521,6 +3539,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           discriminator: "agent_frame.success.interrupted.host_shutdown",
         },
         keepalive: ended.keepalive,
+        turn: ended.id,
         item: {
           kind: "frame",
           frame: create(conversationv1.AgentFrameSchema, {
@@ -3571,6 +3590,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         discriminator: `agent_frame.update.context_cut.${cut.cut.case ?? ""}`,
       },
       keepalive: false,
+      turn: turnFor(false),
       item: {
         kind: "frame",
         frame: create(conversationv1.AgentFrameSchema, {

@@ -2087,6 +2087,31 @@ func TestTurnEndedConcludedStampsTheAnsweringResponse(t *testing.T) {
 	}
 }
 
+// A TERMINAL ENDS THE TURN ITS STAMP NAMES. A stray terminal stamped with a
+// turn nobody opened arrives first; it must not end the open turn, and the
+// open turn's own stamped terminal is the one that draws its end.
+func TestAStampedTerminalEndsOnlyTheTurnItNames(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.sessionwatcher.terminal_turn_unknown")
+	turn := f.submit("go", "k-stamped", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn().GetValue()
+	tail := f.watchRootFeed()
+	f.shim.PushAgentFrameIn(mainAgent, "turn-nobody-opened", interruptedFrame(mainAgent))
+
+	// Act
+	f.shim.PushAgentFrameIn(mainAgent, turn, successFrame(mainAgent, nil))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the first terminal row", func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded() != nil })
+	if row.GetTurnEnded().GetConcluded() == nil {
+		t.Fatalf("the first terminal row = %v, want the open turn's own concluded end", row.GetTurnEnded())
+	}
+	if row.GetTurn().GetValue() != turn {
+		t.Fatalf("terminal row turn = %q, want %q", row.GetTurn().GetValue(), turn)
+	}
+}
+
 func TestInterruptedTurnDrawsInterrupted(t *testing.T) {
 	t.Parallel()
 	// Arrange

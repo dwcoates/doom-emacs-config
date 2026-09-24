@@ -52,6 +52,23 @@ message StoreEntry {
     StoreAgentUpdate agent_update = 4;
     conversation.v1.SessionUpdate session_update = 5;
   }
+
+  // THE TURN THIS FACT WAS PRODUCED WITHIN, stamped by the producer at the one
+  // place it builds this envelope — so every arm carries it and no arm can
+  // forget to. The same semantics as conversation.v1 HistoryEntryAt.turn,
+  // which is what it is served as.
+  //
+  // THE SHIM stamps the turn it had open when the vendor produced the record
+  // (a keep-alive's own id for a keep-alive's records). THE SIDECAR stamps
+  // only a turn the vendor's own records identify, and leaves it UNSET for
+  // every other record — never a guess.
+  //
+  // THE STORE KEEPS A ROW'S FIRST STAMP. An upsert that carries no turn
+  // inherits the stored row's, and one that names a different turn keeps the
+  // stored one: a fact never moves between turns, whichever plane wrote it
+  // last. Present with an empty value is refused — absence is expressed by
+  // absence.
+  optional conversation.v1.TurnId turn = 6;
 }
 
 // A fact about an agent's work, and whether it may ever be served.
@@ -241,13 +258,16 @@ message StoreItemPointer {
   string value = 1;
 }
 
-// One line and its position, so the caller always holds a reconnect and
-// paging pointer for the newest thing it has seen.
+// One line, its position and its turn, so the caller always holds a reconnect
+// and paging pointer for the newest thing it has seen.
 message StoreLineAt {
   // This line's position in its book's order.
   StoreItemPointer at = 1;
   // The line itself.
   StorePageLine line = 2;
+  // The turn the line's row is stamped with, as the store holds it (the row's
+  // first stamp — see StoreEntry.turn). UNSET for a row no write ever stamped.
+  optional conversation.v1.TurnId turn = 3;
 }
 
 // Older lines exist below this page.
