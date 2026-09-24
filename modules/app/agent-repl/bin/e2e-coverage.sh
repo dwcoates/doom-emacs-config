@@ -25,6 +25,10 @@
 #   E2E_COVERAGE_PARALLEL        override `-parallel` (default 8)
 #   E2E_COVERAGE_TIMEOUT         override `-timeout` (default 45m)
 #   E2E_COVERAGE_RUN             pass a `-run` pattern through
+
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -74,7 +78,7 @@ TEST_ARGS=(-count=1 -timeout "$TIMEOUT" -parallel "$PARALLEL")
 
 log "running the e2e suite with coverage collection on"
 (
-    cd "$E2E_DIR"
+    cd "$E2E_DIR" || { log "cannot enter the e2e directory $E2E_DIR"; exit 1; }
     # TMPDIR=/tmp IS REQUIRED on macOS: the suite's unix sockets do not fit
     # the 103-byte path cap beneath the default per-user temp root.
     TMPDIR=/tmp AGENT_REPL_E2E_COVERAGE="$COVERAGE_ROOT" \
