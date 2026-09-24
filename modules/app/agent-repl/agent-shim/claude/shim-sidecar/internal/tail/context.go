@@ -11,10 +11,9 @@ const (
 	KindWorkflowJournal               // .../workflows/wf_*/journal.jsonl
 	KindShellSpool                    // <spool root>/.../tasks/b*.output
 	// KindResidueSpool is a spool whose task id carries no a/b/w kind prefix.
-	// It is a TOTAL-INGESTION VIOLATION rather than a file to skip: the prefix
-	// is how a spool's conversion is selected, so an unrecognized one means the
-	// bytes cannot be converted — but they are still ingested, whole, as
-	// unparsed residue, because nothing on disk is ever dropped.
+	// The prefix is how a spool's conversion is selected, so an unrecognized
+	// one means the bytes cannot be converted and nothing could render them:
+	// such a spool is discovered, stated, and never read.
 	KindResidueSpool
 	// KindWorkflowSpool is a w*.output task spool. Workflow is KICKED this wave,
 	// so its bytes are ingested WHOLE as declared residue rather than converted

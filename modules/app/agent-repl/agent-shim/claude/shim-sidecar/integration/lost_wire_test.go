@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
@@ -158,16 +157,12 @@ func TestAClaimedPreBootSpoolSettlesSweptUpOnTheWire(t *testing.T) {
 	// EVERY silence window stays long, so went_silent cannot reach a verdict
 	// first and steal the subject. Only the boot sweep can conclude here.
 	//
-	// THE UNOWNED WINDOW IS LONG FOR THE SAME REASON, and it used to be 1ms.
-	// This spool is CLAIMED — its launch pair is in the transcript — so the
-	// hold is released the moment the reader observes that claim and the
-	// window is never reached on the healthy path. At 1ms it WAS reached:
-	// discovery does not promise to read the transcript before it resolves the
-	// spool, so a rescan that saw the spool first demoted it to residue, and a
-	// residue spool names no run and is owed no terminal. The subject then
-	// waited out its whole budget for a settle that could no longer happen. A
-	// long window costs nothing when the claim arrives and fails loudly when it
-	// does not, instead of silently switching the subject to a different one.
+	// THE UNOWNED WINDOW NO LONGER DECIDES ANYTHING HERE. It used to: a rescan
+	// that resolved the spool before reading the transcript demoted a claimed
+	// spool to residue, which names no run and is owed no terminal. A lapsed
+	// hold now leaves the spool unread and claimable, so the launch claims it
+	// whichever order discovery takes. The long window is kept as the default
+	// this subject was tuned under.
 	opts.UnownedSpoolWindow = longWindow
 
 	// Act.
@@ -215,13 +210,7 @@ func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
 		t.Fatalf("stamp %s: %v", fx.SpoolPath, err)
 	}
 	opts := lostOptions(t, fake.Socket, tree)
-	// LONG, FOR THE REASON THE SUBJECT ABOVE STATES. This spool is CLAIMED, so
-	// the hold is released the moment the reader observes the transcript line
-	// naming it and the window is never reached on the healthy path. At 1ms it
-	// WAS reached: a rescan that resolved the spool before reading the
-	// transcript demoted a claimed spool to residue, which names no run and is
-	// owed no terminal, and the subject then waited out its whole budget for a
-	// settle that could no longer happen.
+	// Long, as in the subject above; the window no longer decides the outcome.
 	opts.UnownedSpoolWindow = longWindow
 
 	// Act.
@@ -257,14 +246,15 @@ func TestAnExitedRunIsNeverRestatedLost(t *testing.T) {
 	tree := newVendorTree(t)
 	session := "e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5"
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-exited-probe", session)
-	fence := tree.spoolPath(fx.Slug, session, "b0fence")
+	// The fence is a second CLAIMED run: only a claimed spool is read, so only a
+	// claimed one can go silent and be concluded under the same window.
+	fence := appendDetachedLaunch(t, fx, "b0fence", capturedBashCall2)
 	mustMkdirAll(t, filepath.Dir(fence))
 	if err := os.WriteFile(fence, []byte("the fence never says anything more\n"), 0o644); err != nil {
 		t.Fatalf("write the fence spool: %v", err)
 	}
 	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleShellSilence = shortSilence
-	opts.UnownedSpoolWindow = time.Millisecond
 
 	// Act: the run exits on its own marker...
 	startSidecar(t, opts)

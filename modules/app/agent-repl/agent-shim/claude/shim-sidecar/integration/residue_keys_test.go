@@ -144,3 +144,35 @@ func TestTheTwoResiduePopulationsStayDistinct(t *testing.T) {
 	}
 	requireNoResidueStored(t, fake.Entries())
 }
+
+// TestWithheldResidueAnnouncesNoRow asserts residue attributes itself to
+// nothing at all: an unclassifiable record may belong to nobody, so it names no
+// agent — and since it is never persisted, it names no ROW either. The reader's
+// withholding record therefore carries no upsert_key, because a record naming a
+// key nobody can look up is an untraceable announcement.
+func TestWithheldResidueAnnouncesNoRow(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	cwd := "/Users/dodgecoates/residue-toplevel-probe"
+	slug := cwdSlug(cwd)
+	session := "70707070-7070-4070-8070-70707070aaaa"
+	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
+
+	// Act.
+	startSidecar(t, opts)
+	g := newGrowingFile(t, tree.sessionPath(slug, session))
+	g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)))
+	g.AppendLine(`{"type":"assistant","uuid":"` + session + `",`)
+	rec := awaitResidueWithheld(ctx, t, opts.LogPath, "unparsed")
+
+	// Assert.
+	if key, ok := rec.Context["upsert_key"]; ok && key != "" {
+		t.Errorf("the withholding record names upsert_key %v; it announces no row, and a key nobody can look up is untraceable", key)
+	}
+	requireNoResidueStored(t, fake.Entries())
+}
