@@ -14,6 +14,8 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/drain"
 	"claude-repld/internal/merge"
@@ -70,31 +72,22 @@ func TestSetResponseErrorFillsTheArmsOwnField(t *testing.T) {
 }
 
 // TestSetResponseErrorFillsTheLockHolderUnavailableArm pins that OpenWorkspace
-// answers an unspawnable lock holder on its TYPED arm, evidence and all, so a
-// client never has to read it out of an unlanded-arm sentence.
+// answers a failed lock holder on its TYPED arm, the shim's LockHolderFailure
+// whole, so a client never has to read it out of an unlanded-arm sentence.
 func TestSetResponseErrorFillsTheLockHolderUnavailableArm(t *testing.T) {
-	tests := []struct {
-		name string
-		get  func(*agentreplv1.OpenWorkspaceLockHolderUnavailable) string
-		want string
-	}{
-		{name: "binary", get: (*agentreplv1.OpenWorkspaceLockHolderUnavailable).GetBinary, want: "/missing/shim-lock"},
-		{name: "os_error", get: (*agentreplv1.OpenWorkspaceLockHolderUnavailable).GetOsError, want: "spawn ENOENT"},
+	// Arrange.
+	resp := &agentreplv1.OpenWorkspaceResponse{}
+	failure := &conversationv1.LockHolderFailure{
+		Binary: "/bin/shim-lock",
+		How:    &conversationv1.LockHolderFailure_Signaled{Signaled: &conversationv1.LockHolderSignaled{Signal: "SIGSEGV"}},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			resp := &agentreplv1.OpenWorkspaceResponse{}
 
-			// Act.
-			setResponseError(resp, workspace.ArmLockHolderUnavailable,
-				map[string]any{"binary": "/missing/shim-lock", "os_error": "spawn ENOENT"})
+	// Act.
+	setResponseError(resp, workspace.ArmLockHolderUnavailable, map[string]any{"failure": failure})
 
-			// Assert.
-			if got := tt.get(resp.GetError().GetLockHolderUnavailable()); got != tt.want {
-				t.Fatalf("%s = %q, want %q", tt.name, got, tt.want)
-			}
-		})
+	// Assert.
+	if got := resp.GetError().GetLockHolderUnavailable().GetFailure(); !proto.Equal(got, failure) {
+		t.Fatalf("failure = %v, want %v", got, failure)
 	}
 }
 

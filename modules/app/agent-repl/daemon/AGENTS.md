@@ -334,10 +334,10 @@ together on a kill or a stand-down (project-lead ruling). Nothing is locked at
 the shim's startup, which is what lets the rollout's relaunch engine PRELAUNCH
 an inert shim beside a live one: an inert shim holds neither lock. A workspace
 another shim already holds answers `StartSessionFailure.conversation_owned`,
-which the daemon relays as an intended arm (ERROR-ARMS.md). A shim that could
-not even SPAWN its `shim-lock` holder answers
-`StartSessionFailure.lock_holder_unavailable {binary, os_error}` instead —
-nobody owns the conversation then — and the daemon relays it on the typed
+which the daemon relays as an intended arm (ERROR-ARMS.md). A shim whose own
+`shim-lock` holder FAILED (spawn, exit, signal, wrong line, silence) answers
+`StartSessionFailure.lock_holder_unavailable {failure}` instead — nobody owns
+the conversation then — and the daemon relays that `LockHolderFailure` whole on
 `OpenWorkspaceError.lock_holder_unavailable`, never as `conversation_owned`.
 
 ## State root layout
