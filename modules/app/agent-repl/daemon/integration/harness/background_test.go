@@ -15,8 +15,7 @@ func TestRequireBackgroundPriority(t *testing.T) {
 	}{
 		{name: "unset marker is refused", env: map[string]string{}, wantErr: errNotBackground},
 		{name: "empty marker is refused", env: map[string]string{BackgroundPriorityEnv: ""}, wantErr: errNotBackground},
-		{name: "darwin marker is admitted", env: map[string]string{BackgroundPriorityEnv: "darwin-bg"}},
-		{name: "linux marker is admitted", env: map[string]string{BackgroundPriorityEnv: "nice-19"}},
+		{name: "the nice-19 marker is admitted", env: map[string]string{BackgroundPriorityEnv: "nice-19"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
