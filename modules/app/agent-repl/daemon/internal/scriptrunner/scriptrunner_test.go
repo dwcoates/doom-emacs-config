@@ -70,6 +70,36 @@ func TestRunNonZeroExitIsNotAnError(t *testing.T) {
 	}
 }
 
+// TestRunNonZeroExitLeavesTheLevelToItsCaller: the runner cannot know whether
+// an exit was expected (`launchctl print` of a stopped service exits 113), so a
+// non-zero exit is recorded at DEBUG and never at WARN or ERROR; the caller
+// that asked logs its own judgement of the code.
+func TestRunNonZeroExitLeavesTheLevelToItsCaller(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "fail.sh", "exit 113\n")
+	log := dlog.NewTestLogger()
+	r, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act.
+	_, code, err := r.Run(context.Background(), dir, []string{script})
+
+	// Assert.
+	if err != nil || code != 113 {
+		t.Fatalf("Run = %d, %v; want 113 and nil", code, err)
+	}
+	var levels []string
+	for _, rec := range log.Records() {
+		levels = append(levels, rec.Level)
+	}
+	if strings.Join(levels, ",") != "debug" {
+		t.Fatalf("record levels = %v, want exactly one debug record", levels)
+	}
+}
+
 func TestRunCombinesStderrIntoOutput(t *testing.T) {
 	// Arrange.
 	dir := t.TempDir()
