@@ -6,14 +6,17 @@
  * absorption — are the STORE's semantics, and a hand-rolled double would be
  * asserting our own beliefs about them rather than the contract.
  */
-import { afterEach, describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { writeSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { create, toBinary } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { producerId } from "../../src/store/keys.js";
 import {
+  DEFAULT_BATCH_POLICY,
   DEFAULT_RETRY_POLICY,
   type Persistence,
+  type PersistenceBatchPolicy,
   type PersistEntry,
 } from "../../src/store/persistence.js";
 import { createPersistence, toStoreEntry, toWriteBatchRequest } from "../../src/store/writer.js";
@@ -25,6 +28,7 @@ import {
   readEntry,
   socketPathForTest,
   spawnEntry,
+  terminalEntry,
 } from "./persistence-fixtures.js";
 
 const PRODUCER = producerId("vendor-session-1");
@@ -37,21 +41,66 @@ afterEach(async () => {
   store = undefined;
 });
 
+/**
+ * A backoff that is FREE through the retry schedule and then PARKS.
+ *
+ * THE WRITER NEVER GIVES UP ON A HELD BATCH: past the schedule it retries for
+ * as long as the process lives. A free sleep would make that a spin against a
+ * store the test keeps down, so the sleep after the `free`-th parks until the
+ * test calls `release()` -- typically once it has brought the store back.
+ */
+function schedule(free = DEFAULT_RETRY_POLICY.maxAttempts - 1): {
+  sleep: (ms: number) => Promise<void>;
+  release: () => void;
+} {
+  let calls = 0;
+  let parked: (() => void)[] = [];
+  return {
+    sleep: () => {
+      calls += 1;
+      if (calls <= free) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        parked.push(resolve);
+      });
+    },
+    release: () => {
+      calls = 0;
+      const waiting = parked;
+      parked = [];
+      for (const resolve of waiting) resolve();
+    },
+  };
+}
+
 /** A persistence over a fresh fake store, with a fast, deterministic backoff. */
-async function persistence(name: string): Promise<{ store: FakeStore; persistence: Persistence }> {
+async function persistence(
+  name: string,
+  free?: number,
+): Promise<{ store: FakeStore; persistence: Persistence; release: () => void }> {
   const started = await startFakeStore(socketPathForTest(name));
   store = started;
+  const backoff = schedule(free);
   return {
     store: started,
+    release: backoff.release,
     persistence: createPersistence({
       client: createStoreClient(started.socketPath),
       producer: PRODUCER,
       nowMs: () => 1_000,
       // The schedule's SHAPE is what is under test, never its wall-clock cost.
-      sleep: async () => undefined,
+      sleep: backoff.sleep,
       retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
     }),
   };
+}
+
+/** Every canonical log record written since `before` calls to the log sink. */
+const mockedWriteSync = vi.mocked(writeSync);
+function logRecordsSince(before: number): Array<Record<string, unknown>> {
+  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+  );
 }
 
 describe("PersistEntry → StoreEntry routing", () => {
@@ -149,7 +198,7 @@ describe("writeDurable", () => {
     expect(fake.book("book-1")).toHaveLength(1);
   });
 
-  it("rejects with store_unavailable when the retry schedule is exhausted", async () => {
+  it("rejects with store_unavailable once the store is known to be down", async () => {
     const { store: fake, persistence: plane } = await persistence("durable-fail");
     fake.failWrites("the store is down");
 
@@ -160,8 +209,9 @@ describe("writeDurable", () => {
 
   it("makes ONE attempt at an unreachable store, leaving the schedule to the retry buffer", async () => {
     // Arrange. The caller of a durable write holds an RPC open, and the retry
-    // schedule is longer than the deadline that RPC is held under.
-    const { store: fake, persistence: plane } = await persistence("durable-one-attempt");
+    // schedule is longer than the deadline that RPC is held under. The backoff
+    // parks from the first retry, so the count is the caller's own attempt.
+    const { store: fake, persistence: plane } = await persistence("durable-one-attempt", 0);
     fake.failWrites("the store is down");
 
     // Act.
@@ -171,6 +221,23 @@ describe("writeDurable", () => {
 
     // Assert.
     expect(fake.writes()).toHaveLength(1);
+  });
+
+  it("keeps a durable row it could not ack HELD, and lands it once the store answers", async () => {
+    // Arrange. A rejection releases the caller; it never costs the record a row.
+    const { store: fake, persistence: plane, release } = await persistence("durable-held");
+    fake.failWrites("the store is down");
+    await expect(plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")])).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+
+    // Act.
+    fake.failWrites(null);
+    release();
+    await plane.flush();
+
+    // Assert.
+    expect(fake.book("book-1")).toHaveLength(1);
   });
 
   it("refuses without attempting at all while a degraded window is already open", async () => {
@@ -206,7 +273,7 @@ describe("the bounded retry buffer", () => {
     expect(fake.book("book-1")).toHaveLength(1);
   });
 
-  it("drops loudly and raises a store_unreachable fault when the store stays down", async () => {
+  it("raises a store_unreachable fault when the store stays down", async () => {
     const { store: fake, persistence: plane } = await persistence("exhausted");
     const faults: conversationv1.SessionFault[] = [];
     plane.onFault((fault) => faults.push(fault));
@@ -216,7 +283,62 @@ describe("the bounded retry buffer", () => {
     await plane.flush();
 
     expect(faults.map((fault) => fault.kind.case)).toContain("storeUnreachable");
-    expect(fake.book("book-1")).toHaveLength(0);
+  });
+
+  it("drops NOTHING when the store stays down past the schedule: the held row lands once it answers", async () => {
+    // Arrange. The whole schedule fails, so the failure is declared persistent.
+    const { store: fake, persistence: plane, release } = await persistence("exhausted-held");
+    fake.failWrites("the store is down");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Act.
+    fake.failWrites(null);
+    release();
+    await plane.flush();
+
+    // Assert.
+    expect(fake.book("book-1")).toHaveLength(1);
+  });
+
+  it("states a persistent failure at ERROR, naming the held keys", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("exhausted-error");
+    fake.failWrites("the store is down");
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    const record = logRecordsSince(before).find(
+      (entry) => entry.level === "error" && String(entry.message).includes("whole retry schedule"),
+    );
+    expect((record?.context as Record<string, unknown> | undefined)?.held_upsert_keys).toEqual([
+      "activity:unit-1",
+    ]);
+  });
+
+  it("states at INFO that the held batch landed once the store answers again", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane, release } = await persistence("exhausted-recovered");
+    fake.failWrites("the store is down");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    fake.failWrites(null);
+    release();
+    await plane.flush();
+
+    // Assert.
+    expect(
+      logRecordsSince(before).some(
+        (entry) => entry.level === "info" && String(entry.message).includes("nothing was dropped"),
+      ),
+    ).toBe(true);
   });
 
   it("does NOT replay a batch the store called invalid_request: the same bytes cannot become valid", async () => {
@@ -317,11 +439,12 @@ describe("the bounded retry buffer", () => {
   it("reports the rows THIS flush lost, not the writer's lifetime total", async () => {
     // The stand-down's exit code answers "did the writes this flush waited for
     // land"; an outage the session already recovered from is not a dirty exit.
-    const { store: fake, persistence: plane } = await persistence("flush-scoped");
+    const { store: fake, persistence: plane, release } = await persistence("flush-scoped");
     fake.failWrites("the store is down");
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
     await plane.flush();
     fake.failWrites(null);
+    release();
 
     plane.write([readEntry(BOOK, "unit-2", "/tmp/b")]);
     const outcome = await plane.flush();
@@ -329,7 +452,7 @@ describe("the bounded retry buffer", () => {
     expect(outcome.lostRows).toBe(0);
   });
 
-  it("reports the rows a flush watched being dropped", async () => {
+  it("counts the rows a flush left HELD under a persistent failure", async () => {
     const { store: fake, persistence: plane } = await persistence("flush-lost");
     fake.failWrites("the store is down");
 
@@ -339,14 +462,15 @@ describe("the bounded retry buffer", () => {
     expect(outcome.lostRows).toBe(1);
   });
 
-  it("closes the degraded window with what was lost once a write succeeds again", async () => {
-    const { store: fake, persistence: plane } = await persistence("degraded-close");
+  it("closes the degraded window with NOTHING dropped once the held row lands", async () => {
+    const { store: fake, persistence: plane, release } = await persistence("degraded-close");
     const windows: conversationv1.SessionDegradedWindow[] = [];
     plane.onDegradedWindow((window) => windows.push(window));
     fake.failWrites("the store is down");
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
     await plane.flush();
     fake.failWrites(null);
+    release();
 
     plane.write([readEntry(BOOK, "unit-2", "/tmp/b")]);
     await plane.flush();
@@ -354,29 +478,7 @@ describe("the bounded retry buffer", () => {
     const closed = windows.find((window) => window.extent.case === "closed");
     expect(closed).toBeDefined();
     const extent = closed?.extent.value as conversationv1.SessionDegradedClosed;
-    expect(extent.droppedCount).toBe(1n);
-  });
-
-  it("evicts the oldest batch when the buffer is full, naming what was lost", async () => {
-    const started = await startFakeStore(socketPathForTest("capacity"));
-    store = started;
-    started.failWrites("the store is down");
-    const plane = createPersistence({
-      client: createStoreClient(started.socketPath),
-      producer: PRODUCER,
-      nowMs: () => 1_000,
-      sleep: async () => undefined,
-      retry: { bufferCapacity: 1, backoffMs: [0], maxAttempts: 2 },
-    });
-
-    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
-    plane.write([readEntry(BOOK, "unit-2", "/tmp/b")]);
-    plane.write([readEntry(BOOK, "unit-3", "/tmp/c")]);
-    await plane.flush();
-
-    // Nothing landed — the point is that the buffer stayed bounded rather than
-    // growing to hold every batch a dead store never accepted.
-    expect(started.book("book-1")).toHaveLength(0);
+    expect(extent.droppedCount).toBe(0n);
   });
 });
 
@@ -715,7 +817,7 @@ function planeOver(overrides: Partial<StoreClient>): Persistence {
     client: stubClient(overrides),
     producer: PRODUCER,
     nowMs: () => 1_000,
-    sleep: async () => undefined,
+    sleep: schedule().sleep,
     retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
   });
 }
@@ -808,7 +910,7 @@ describe("a durable write the store calls invalid_request", () => {
 
     // Act.
     await expect(plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")])).rejects.toMatchObject({
-      kind: "store_unavailable",
+      kind: "invalid_request",
     });
     fake.failWritesWith(null, "");
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
@@ -984,5 +1086,699 @@ describe("which writes end a minted book's absence", () => {
     // Assert.
     expect(fake.reads().filter((read) => read.rpc === "OpenAgentSession")).toHaveLength(1);
     session.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backpressure, bounded batches, and the order the store receives
+// ---------------------------------------------------------------------------
+
+const MAIN = agent("main-1");
+const SUB = agent("sub-1");
+
+/** The store's durable answer. */
+function durable(): storev1.WriteBatchResponse {
+  return create(storev1.WriteBatchResponseSchema, {
+    result: { case: "success", value: create(storev1.WriteBatchSuccessSchema, {}) },
+  });
+}
+
+/** The store's refusal of a malformed batch. */
+function malformed(detail: string): storev1.WriteBatchResponse {
+  return create(storev1.WriteBatchResponseSchema, {
+    result: {
+      case: "failure",
+      value: create(storev1.WriteBatchFailureSchema, {
+        detail,
+        kind: { case: "invalidRequest", value: create(storev1.WriteBatchInvalidRequestSchema, {}) },
+      }),
+    },
+  });
+}
+
+/** The upsert keys one request carried, in order. */
+function keysOf(request: storev1.WriteBatchRequest | undefined): string[] {
+  return (request?.batch?.entries ?? []).map((entry) => entry.upsertKey);
+}
+
+/**
+ * A store that answers WriteBatch only when the test lets it, recording every
+ * request in the order it arrived.
+ *
+ * `hold()` makes the NEXT answers wait; `open()` lets every waiting and later
+ * answer through. The first request of a drain is issued synchronously inside
+ * `write()`, so a held store has exactly one batch in flight the moment the
+ * first write returns — the in-flight write every later row queues behind.
+ */
+function gatedStore(answer: (request: storev1.WriteBatchRequest) => storev1.WriteBatchResponse = durable): {
+  client: StoreClient;
+  requests: storev1.WriteBatchRequest[];
+  hold: () => void;
+  open: () => void;
+} {
+  const requests: storev1.WriteBatchRequest[] = [];
+  let gate: Promise<void> | undefined;
+  let release: () => void = () => undefined;
+  return {
+    requests,
+    client: stubClient({
+      writeBatch: async (request) => {
+        requests.push(request);
+        if (gate !== undefined) await gate;
+        return answer(request);
+      },
+    }),
+    hold: () => {
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+    open: () => {
+      gate = undefined;
+      release();
+    },
+  };
+}
+
+/** A writer over `client`, named for the MAIN book, with the given bounds. */
+function boundedPlane(
+  client: StoreClient,
+  batching: Partial<PersistenceBatchPolicy> = {},
+  nowMs: () => number = () => 1_000,
+): Persistence {
+  const plane = createPersistence({
+    client,
+    nowMs,
+    sleep: schedule().sleep,
+    retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
+    batching: { ...DEFAULT_BATCH_POLICY, ...batching },
+  });
+  plane.setProducer(MAIN.value);
+  return plane;
+}
+
+/** Let every pending I/O and microtask settle, so a promise that could resolve has. */
+const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+describe("backpressure, never eviction", () => {
+  const MARKS = { backlogHighWaterRows: 4, backlogLowWaterRows: 1 };
+
+  it("resolves whenWritable at once while there is no backlog", async () => {
+    // Arrange.
+    const { client } = gatedStore();
+    const plane = boundedPlane(client, MARKS);
+
+    // Act, Assert.
+    await expect(plane.whenWritable()).resolves.toBeUndefined();
+  });
+
+  it("holds the vendor stream while the backlog is past its high-water mark", async () => {
+    // Arrange. A slow store: the first batch stays in flight.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, MARKS);
+    for (let index = 0; index < 5; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+
+    // Act.
+    let writable = false;
+    void plane.whenWritable().then(() => {
+      writable = true;
+    });
+    await settle();
+
+    // Assert.
+    expect(writable).toBe(false);
+    gated.open();
+    await plane.flush();
+  });
+
+  it("releases the vendor stream once the backlog drains to its low-water mark", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, MARKS);
+    for (let index = 0; index < 5; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+    const waiting = plane.whenWritable();
+
+    // Act.
+    gated.open();
+
+    // Assert.
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it("opens the episode on bytes alone when the rows are few but large", async () => {
+    // Arrange. One row past the byte mark is a backlog even at one row.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, { backlogHighWaterBytes: 1, backlogLowWaterBytes: 0 });
+    plane.write([readEntry(MAIN, "unit-0", "/tmp/a")]);
+
+    // Act.
+    let writable = false;
+    void plane.whenWritable().then(() => {
+      writable = true;
+    });
+    await settle();
+
+    // Assert.
+    expect(writable).toBe(false);
+    gated.open();
+    await plane.flush();
+  });
+
+  it("lands every row a slow store fell behind on, far past the old 256-batch buffer", async () => {
+    // Arrange. The old buffer evicted its oldest batch at 256; nothing may go.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client);
+    for (let index = 0; index < 300; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(new Set(gated.requests.flatMap(keysOf)).size).toBe(300);
+  });
+
+  it("warns ONCE per backlog episode, however far past the mark it grows", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, MARKS);
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    for (let index = 0; index < 12; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+
+    // Assert.
+    const warnings = logRecordsSince(before).filter(
+      (entry) => entry.level === "warn" && String(entry.message).includes("high-water mark"),
+    );
+    expect(warnings).toHaveLength(1);
+    gated.open();
+    await plane.flush();
+  });
+
+  it("clears the episode at INFO once the backlog drains", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, MARKS);
+    for (let index = 0; index < 5; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(
+      logRecordsSince(before).some(
+        (entry) => entry.level === "info" && String(entry.message).includes("low-water mark"),
+      ),
+    ).toBe(true);
+  });
+
+  it("logs each batch's flush timing at debug while the writer is behind", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, MARKS);
+    for (let index = 0; index < 5; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    const timing = logRecordsSince(before).find((entry) =>
+      String(entry.message).includes("landed while the store writer is behind"),
+    );
+    expect(timing?.context).toMatchObject({ rows: 1, duration_ms: 0 });
+  });
+});
+
+describe("bounded batches", () => {
+  it("merges a backlog of small writes into batches of at most maxBatchRows", async () => {
+    // Arrange. One write in flight, nine queued behind it.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, { maxBatchRows: 4 });
+    for (let index = 0; index < 10; index += 1) plane.write([readEntry(MAIN, `unit-${index}`, "/tmp/a")]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([1, 4, 4, 1]);
+  });
+
+  it("splits one large write, the way an interrupt's 494 rows arrive, into bounded batches", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    const plane = boundedPlane(gated.client, { maxBatchRows: 4 });
+    const rows = Array.from({ length: 10 }, (_, index) => readEntry(MAIN, `unit-${index}`, "/tmp/a"));
+
+    // Act.
+    plane.write(rows);
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([4, 4, 2]);
+  });
+
+  it("cuts a batch at maxBatchBytes", async () => {
+    // Arrange. The bound holds exactly two of these rows' payloads.
+    const gated = gatedStore();
+    const row = readEntry(MAIN, "unit-0", "/tmp/a");
+    const size = row.item.kind === "frame" ? toBinary(conversationv1.AgentFrameSchema, row.item.frame).length : 0;
+    const plane = boundedPlane(gated.client, { maxBatchBytes: size * 2 });
+    const rows = Array.from({ length: 5 }, (_, index) => readEntry(MAIN, `unit-${index}`, "/tmp/a"));
+
+    // Act.
+    plane.write(rows);
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([2, 2, 1]);
+  });
+
+  it("carries a row larger than the byte bound on its own rather than never", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    const plane = boundedPlane(gated.client, { maxBatchBytes: 1 });
+
+    // Act.
+    plane.write([readEntry(MAIN, "unit-0", "/tmp/a"), readEntry(MAIN, "unit-1", "/tmp/b")]);
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([1, 1]);
+  });
+
+  it("halves the next batch's row bound after a batch that overran its time budget", async () => {
+    // Arrange. Every WriteBatch takes a second on this clock; the budget is 500ms.
+    let now = 0;
+    const plane = boundedPlane(
+      stubClient({
+        writeBatch: () => {
+          now += 1_000;
+          return Promise.resolve(durable());
+        },
+      }),
+      { maxBatchRows: 4, batchTimeBudgetMs: 500 },
+      () => now,
+    );
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    plane.write(Array.from({ length: 6 }, (_, index) => readEntry(MAIN, `unit-${index}`, "/tmp/a")));
+    await plane.flush();
+
+    // Assert.
+    const halved = logRecordsSince(before).find((entry) => String(entry.message).includes("halving"));
+    expect(halved?.context).toMatchObject({ rows: 4, duration_ms: 1_000, row_limit: 2 });
+  });
+
+  it("raises the row bound back after a batch well inside its time budget", async () => {
+    // Arrange. The first WriteBatch is slow, every later one instant.
+    let now = 0;
+    let calls = 0;
+    const requests: storev1.WriteBatchRequest[] = [];
+    const plane = boundedPlane(
+      stubClient({
+        writeBatch: (request) => {
+          requests.push(request);
+          calls += 1;
+          if (calls === 1) now += 1_000;
+          return Promise.resolve(durable());
+        },
+      }),
+      { maxBatchRows: 4, batchTimeBudgetMs: 500 },
+      () => now,
+    );
+
+    // Act.
+    plane.write(Array.from({ length: 12 }, (_, index) => readEntry(MAIN, `unit-${index}`, "/tmp/a")));
+    await plane.flush();
+
+    // Assert.
+    expect(requests.map((request) => keysOf(request).length)).toEqual([4, 2, 4, 2]);
+  });
+});
+
+describe("turn edges, and the order the store receives", () => {
+  it("ends a batch at a turn terminal, so its ack never waits on a row produced after it", async () => {
+    // Arrange. One write in flight; the terminal is queued mid-backlog.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client);
+    plane.write([readEntry(MAIN, "unit-m0", "/tmp/a")]);
+    plane.write([readEntry(MAIN, "unit-m1", "/tmp/a"), terminalEntry(MAIN, "t1")]);
+    plane.write([readEntry(MAIN, "unit-m2", "/tmp/a")]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(keysOf(gated.requests[1])).toEqual(["activity:unit-m1", "terminal:t1"]);
+  });
+
+  it("ends a batch at a prompt row", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client);
+    plane.write([readEntry(MAIN, "unit-m0", "/tmp/a")]);
+    plane.write([promptEntry(MAIN, "turn-2", "next"), readEntry(MAIN, "unit-m1", "/tmp/a")]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(keysOf(gated.requests[1])).toEqual(["prompt:turn-2"]);
+  });
+
+  it("does not end a batch at a keep-alive's terminal: nobody is waiting on it", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client);
+    plane.write([readEntry(MAIN, "unit-m0", "/tmp/a")]);
+    plane.write([{ ...terminalEntry(MAIN, "keepalive-1"), keepalive: true }, readEntry(MAIN, "unit-m1", "/tmp/a")]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(keysOf(gated.requests[1])).toEqual(["terminal:keepalive-1", "activity:unit-m1"]);
+  });
+
+  it("does not end a batch at a session fact", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client);
+    plane.write([readEntry(MAIN, "unit-m0", "/tmp/a")]);
+    plane.write([
+      {
+        agentId: MAIN,
+        upsertKey: "session:compacting:uuid-1",
+        source: { vendorUuid: "uuid-1", discriminator: "session_update.compacting" },
+        keepalive: false,
+        item: {
+          kind: "session_update",
+          update: create(conversationv1.SessionUpdateSchema, {
+            update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+          }),
+        },
+      },
+      readEntry(MAIN, "unit-m1", "/tmp/a"),
+    ]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(keysOf(gated.requests[1])).toEqual(["session:compacting:uuid-1", "activity:unit-m1"]);
+  });
+
+  it("hands the store every row in exactly the order produced, across books", async () => {
+    // Arrange. A backlog interleaving the main book, a subagent and the turn's end.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, { maxBatchRows: 2 });
+    const produced = [
+      readEntry(MAIN, "unit-m0", "/tmp/a"),
+      spawnEntry(MAIN, "sub-1"),
+      readEntry(SUB, "unit-s1", "/tmp/s"),
+      readEntry(MAIN, "unit-m1", "/tmp/a"),
+      readEntry(SUB, "unit-s2", "/tmp/s"),
+      terminalEntry(SUB, "sub-end"),
+      terminalEntry(MAIN, "t1"),
+    ];
+    for (const row of produced) plane.write([row]);
+
+    // Act.
+    gated.open();
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.flatMap(keysOf)).toEqual(produced.map((row) => row.upsertKey));
+  });
+
+  it("lands a turn's terminal only after every row the turn produced before it", async () => {
+    // Arrange. The interrupt shape: the calls a stop cut, then the terminal.
+    const gated = gatedStore();
+    const plane = boundedPlane(gated.client, { maxBatchRows: 4 });
+    const cut = Array.from({ length: 10 }, (_, index) => readEntry(SUB, `cut-${index}`, "/tmp/s"));
+
+    // Act.
+    plane.write([...cut, terminalEntry(MAIN, "t1")]);
+    await plane.flush();
+
+    // Assert. The terminal is the last word the store received.
+    expect(gated.requests.flatMap(keysOf).at(-1)).toBe("terminal:t1");
+  });
+
+  it("acks a durable prompt only after every row produced before it", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    gated.hold();
+    const plane = boundedPlane(gated.client, { maxBatchRows: 4 });
+    plane.write([readEntry(MAIN, "unit-m0", "/tmp/a")]);
+    for (let index = 0; index < 6; index += 1) plane.write([readEntry(SUB, `unit-s${index}`, "/tmp/s")]);
+    const acked = plane.writeDurable([promptEntry(MAIN, "turn-2", "next")]);
+
+    // Act.
+    gated.open();
+    await acked;
+
+    // Assert.
+    expect(gated.requests.flatMap(keysOf)).toEqual([
+      "activity:unit-m0",
+      ...Array.from({ length: 6 }, (_, index) => `activity:unit-s${index}`),
+      "prompt:turn-2",
+    ]);
+  });
+});
+
+describe("a multi-row batch the store refuses as malformed", () => {
+  /** A store that refuses any batch carrying the `bad` unit, and takes the rest. */
+  function pickyStore(): ReturnType<typeof gatedStore> {
+    return gatedStore((request) =>
+      keysOf(request).includes("activity:bad") ? malformed("entries[0] is malformed") : durable(),
+    );
+  }
+
+  it("lands every row the store would carry on its own", async () => {
+    // Arrange.
+    const picky = pickyStore();
+    const plane = boundedPlane(picky.client);
+
+    // Act.
+    plane.write([readEntry(MAIN, "good-1", "/tmp/a"), readEntry(MAIN, "bad", "/tmp/a"), readEntry(MAIN, "good-2", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert. The last three requests are the one-row resends, in order.
+    expect(picky.requests.slice(1).map(keysOf)).toEqual([
+      ["activity:good-1"],
+      ["activity:bad"],
+      ["activity:good-2"],
+    ]);
+  });
+
+  it("names only the refused row at ERROR", async () => {
+    // Arrange.
+    const picky = pickyStore();
+    const plane = boundedPlane(picky.client);
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    plane.write([readEntry(MAIN, "good-1", "/tmp/a"), readEntry(MAIN, "bad", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    const refused = logRecordsSince(before).filter(
+      (entry) => entry.level === "error" && String(entry.message).includes("refused a row as malformed"),
+    );
+    expect(refused.map((entry) => (entry.context as Record<string, unknown>).lost_upsert_keys)).toEqual([
+      ["activity:bad"],
+    ]);
+  });
+
+  it("states at debug that it is isolating the refusal", async () => {
+    // Arrange.
+    const picky = pickyStore();
+    const plane = boundedPlane(picky.client);
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    plane.write([readEntry(MAIN, "good-1", "/tmp/a"), readEntry(MAIN, "bad", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    expect(
+      logRecordsSince(before).some(
+        (entry) => entry.level === "debug" && String(entry.message).includes("one at a time"),
+      ),
+    ).toBe(true);
+  });
+
+  it("counts the refused row as lost to the flush that watched it", async () => {
+    // Arrange.
+    const picky = pickyStore();
+    const plane = boundedPlane(picky.client);
+
+    // Act.
+    plane.write([readEntry(MAIN, "good-1", "/tmp/a"), readEntry(MAIN, "bad", "/tmp/a")]);
+    const outcome = await plane.flush();
+
+    // Assert.
+    expect(outcome.lostRows).toBe(1);
+  });
+});
+
+describe("payload sizing for the byte bound", () => {
+  /** A peer message row in the MAIN book. */
+  function peerEntry(id: string): PersistEntry {
+    return {
+      agentId: MAIN,
+      upsertKey: `peer:${id}`,
+      source: { vendorUuid: id, discriminator: "peer_message" },
+      keepalive: false,
+      item: {
+        kind: "peer",
+        peer: create(conversationv1.PeerMessageSchema, { agent: MAIN, sender: "Explore", body: "hi", id }),
+      },
+    };
+  }
+
+  it("sizes a peer message by its payload", async () => {
+    // Arrange. A one-byte bound holds one sized row per batch.
+    const gated = gatedStore();
+    const plane = boundedPlane(gated.client, { maxBatchBytes: 1 });
+
+    // Act.
+    plane.write([peerEntry("u1"), peerEntry("u2")]);
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([1, 1]);
+  });
+
+  it("sizes a residue row by its payload", async () => {
+    // Arrange.
+    const gated = gatedStore();
+    const plane = boundedPlane(gated.client, { maxBatchBytes: 1 });
+    const residue = (key: string): PersistEntry => ({
+      ...residueEntry(),
+      upsertKey: key,
+      item: {
+        kind: "residue",
+        residue: create(storev1.StoreUnservedItemSchema, {
+          unservedItem: { case: "unknown", value: create(storev1.StoreUnknownSchema, { discriminator: "a_new_kind" }) },
+        }),
+      },
+    });
+
+    // Act.
+    plane.write([residue("residue:1"), residue("residue:2")]);
+    await plane.flush();
+
+    // Assert.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([1, 1]);
+  });
+
+  it("sizes a row of unknown kind as nothing, leaving its refusal to the envelope", async () => {
+    // Arrange. The unknown row rides with the next one, and the envelope refuses it.
+    const gated = gatedStore();
+    const good = readEntry(MAIN, "unit-1", "/tmp/a");
+    const size = good.item.kind === "frame" ? toBinary(conversationv1.AgentFrameSchema, good.item.frame).length : 0;
+    const plane = boundedPlane(gated.client, { maxBatchBytes: size });
+    const broken = { ...readEntry(MAIN, "unit-0", "/tmp/a"), item: { kind: "not_a_kind" } as unknown as PersistEntry["item"] };
+
+    // Act.
+    plane.write([broken, good]);
+    await plane.flush();
+
+    // Assert. Only the well-formed row ever reaches the wire.
+    expect(gated.requests.map(keysOf)).toEqual([["activity:unit-1"]]);
+  });
+});
+
+describe("a durable write split across batches", () => {
+  it("acks only once its LAST row lands", async () => {
+    // Arrange. Three rows, cut into two batches.
+    const gated = gatedStore();
+    const plane = boundedPlane(gated.client, { maxBatchRows: 2 });
+
+    // Act.
+    await plane.writeDurable([
+      promptEntry(MAIN, "turn-1", "one"),
+      readEntry(MAIN, "unit-1", "/tmp/a"),
+      readEntry(MAIN, "unit-2", "/tmp/b"),
+    ]);
+
+    // Assert. The prompt, a turn edge, ends the first batch.
+    expect(gated.requests.map((request) => keysOf(request).length)).toEqual([1, 2]);
+  });
+});
+
+describe("a held batch past the retry schedule", () => {
+  it("is retried every heldRetryMs once its failure is persistent", async () => {
+    // Arrange. Record every backoff; the sixth one parks, and says so.
+    const slept: number[] = [];
+    let sixth: () => void = () => undefined;
+    const reachedSixth = new Promise<void>((resolve) => {
+      sixth = resolve;
+    });
+    const plane = createPersistence({
+      client: stubClient({ writeBatch: () => Promise.reject(new Error("the store is down")) }),
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: (ms) => {
+        slept.push(ms);
+        if (slept.length < 6) return Promise.resolve();
+        sixth();
+        return new Promise<void>(() => undefined);
+      },
+      retry: { backoffMs: [1, 2, 3, 4], maxAttempts: 5, heldRetryMs: 99 },
+    });
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await reachedSixth;
+
+    // Assert. The schedule, then the held cadence.
+    expect(slept).toEqual([1, 2, 3, 4, 99, 99]);
+  });
+
+  it("keeps retrying it, stating each further failure at debug", async () => {
+    // Arrange. The schedule is spent and the store is still down.
+    const { store: fake, persistence: plane, release } = await persistence("held-retries");
+    fake.failWrites("the store is down");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act. One more attempt fails, and the flush answers on it.
+    release();
+    await plane.flush();
+
+    // Assert.
+    expect(
+      logRecordsSince(before).some(
+        (entry) => entry.level === "debug" && String(entry.message).includes("still failing"),
+      ),
+    ).toBe(true);
   });
 });

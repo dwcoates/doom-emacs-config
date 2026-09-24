@@ -310,3 +310,28 @@ export function bashTerminalEntry(book = agent("book-1")): PersistEntry {
     book,
   );
 }
+
+/**
+ * An agent terminal: the `success` frame a turn ends on in `book`. A TURN EDGE
+ * for the writer's priority rule when `book` is the main agent's.
+ */
+export function terminalEntry(book: conversationv1.AgentId, turnValue: string): PersistEntry {
+  return {
+    agentId: book,
+    upsertKey: `terminal:${turnValue}`,
+    source: { vendorUuid: `uuid-result-${turnValue}`, discriminator: "agent_frame.success.completed" },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: book,
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentSuccessSchema, {
+            outcome: { case: "completed", value: create(conversationv1.AgentCompletedSchema, {}) },
+          }),
+        },
+      }),
+    },
+  };
+}

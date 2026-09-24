@@ -845,10 +845,16 @@ describe("subagents", () => {
     const child = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest({ target: agentId(created) }), options),
     );
-    await child.next();
-    const own = await child.until((frame) => frame.frame.case === "entry");
+    // THE CHILD'S FRAMES ARE ON ITS PAGE OR ITS TAIL, whichever the writer's
+    // pace put them on: the store writer lands a backlog in merged batches, so
+    // a synchronous subagent's rows can all be durable before this watch opens.
+    const opening = watchAgentPage(await child.next());
+    const own =
+      opening.entries.length > 0
+        ? opening.entries[0]
+        : watchAgentEntry(await child.until((frame) => frame.frame.case === "entry"));
 
-    expect(entryFrame(watchAgentEntry(own))?.agentId?.value).toBe(created);
+    expect(entryFrame(own)?.agentId?.value).toBe(created);
     // AND NOTHING OF THE CHILD'S IS ON THE PARENT'S STREAM: every frame the
     // spawning agent's book served names the spawning agent.
     for (const frame of stream.frames()) {
@@ -970,9 +976,16 @@ describe("subagents", () => {
     stream.close();
   });
 
-  test("WatchAgent(created_agent_id) opens with that agent's own page and tails its frames", async () => {
+  test("WatchAgent(created_agent_id) opens with that agent's own page, serving its own frames", async () => {
     // ONE API whether the agent is the main thread or a subagent: the created
     // agent id is the key a consumer draws a container under.
+    //
+    // ITS FRAMES ARE ON THE PAGE OR THE TAIL, whichever the writer's pace put
+    // them on. This used to wait for a TAIL entry, which only held because the
+    // writer once spent a store round trip per vendor message; it lands a
+    // backlog in merged batches now, so the agent's rows can all be durable
+    // before this watch opens. The tail itself is proven by the main-book and
+    // reader suites with rows written after the open.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
@@ -986,10 +999,13 @@ describe("subagents", () => {
       shim.clients.h1.watchAgent(watchAgentRequest({ target: agentId(created) }), options),
     );
     const page = watchAgentPage(await child.next());
-    const tailed = await child.until((frame) => frame.frame.case === "entry");
+    const own =
+      page.entries.length > 0
+        ? page.entries[0]
+        : watchAgentEntry(await child.until((frame) => frame.frame.case === "entry"));
 
     expect(page.boundary.case).not.toBeUndefined();
-    expect(entryFrame(watchAgentEntry(tailed))?.agentId?.value).toBe(created);
+    expect(entryFrame(own)?.agentId?.value).toBe(created);
     stream.close();
     child.close();
   });
