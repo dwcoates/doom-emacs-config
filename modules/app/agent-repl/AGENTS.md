@@ -475,8 +475,10 @@ was accepted (`daemon/bin/.rolled-out-fingerprint`), never "did this build
 change the file": a `--no-bounce` run changes the file and rolls nothing out.
 
 Store and sidecar are launchd services the chain restarts itself, in the
-recorded safe order. A running shim rides a store restart out on its bounded
-retry buffer; the sidecar re-reads its files from its cursor.
+recorded safe order. A running shim rides a store restart out on its retry
+buffer, which holds every row until it lands and never drops one (its vendor
+stream pauses instead while the backlog is high); the sidecar re-reads its
+files from its cursor.
 
 ## Every landed remediation gets a changelog line
 

@@ -112,11 +112,11 @@ func WithRunRoot(body func() int) int {
 	// A dead run's leftovers are reclaimed BEFORE this run adds its own. A
 	// reclaim that fails is a failed run, never a shrug: the leftovers are
 	// exactly the disk and the CPU the suite cannot spare.
-	if err := reclaimDeadRuns(); err != nil {
+	if err := hostRunRoots.reclaimDeadRuns(); err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1
 	}
-	root, lock, err := newRunRoot()
+	root, lock, err := hostRunRoots.newRunRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		return 1

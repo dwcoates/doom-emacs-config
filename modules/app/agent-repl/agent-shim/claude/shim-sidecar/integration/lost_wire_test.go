@@ -319,7 +319,7 @@ func TestBytesAppendedAfterAWentSilentVerdictStillLand(t *testing.T) {
 	// EXACT EQUALITY of the joined deltas, which is also what proves the earlier
 	// bytes were not RE-EMITTED alongside the later ones: a containment check
 	// passed just as happily on a delta stream that had replayed the whole file.
-	joined := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
+	joined := requireLatestTail(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
 	if want := "before the silence\nand it spoke again after all\n"; joined != want {
 		t.Fatalf("the run's deltas joined to %q, wanted exactly the bytes written either side of the verdict, %q", joined, want)
 	}

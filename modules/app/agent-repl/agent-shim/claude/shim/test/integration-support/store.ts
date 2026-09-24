@@ -127,15 +127,12 @@ export function bashCommand(line: string): conversationv1.AgentBashCommand {
   return create(conversationv1.AgentBashCommandSchema, { line });
 }
 
-/** `AgentBash{update}` — an offset plus the bytes that appeared at it. */
-export function bashUpdate(newOutput: string, fromOffset: number): conversationv1.AgentBash {
+/** `AgentBash{tail}` — the run's whole output so far, inside the cap. */
+export function bashTail(text: string): conversationv1.AgentBash {
   return create(conversationv1.AgentBashSchema, {
     result: {
-      case: "update",
-      value: create(conversationv1.AgentBashUpdateSchema, {
-        newOutput,
-        fromOffset: BigInt(fromOffset),
-      }),
+      case: "tail",
+      value: create(conversationv1.AgentBashTailSchema, { text }),
     },
   });
 }
@@ -204,12 +201,9 @@ export interface BashLifecycleSeed {
 }
 
 /**
- * Seed a run's `start`, its `update` deltas and (unless it never ends) its
- * terminal.
- *
- * The rows share one `upsert_key` (the run's lifecycle key) and differ by
- * `write_id`: the bash table is a LIFECYCLE table, so the sequence is the
- * point, and `WatchBashRun` replays it in order.
+ * Seed a run's `start`, one `tail` write per chunk (each superseding the
+ * run's one tail row with the whole output so far, as the sidecar writes it)
+ * and (unless it never ends) its terminal, each under the producers' own key.
  */
 export async function seedBashLifecycle(
   client: StoreClient,
@@ -224,19 +218,18 @@ export async function seedBashLifecycle(
       ...(seed.topLevel === undefined ? {} : { topLevel: seed.topLevel }),
     }),
   ];
-  let offset = 0;
   let whole = "";
   for (const [index, chunk] of seed.chunks.entries()) {
+    whole += chunk;
     entries.push(
       bashRowEntry({
         run: seed.run,
-        frame: bashUpdate(chunk, offset),
-        writeId: `seed-${seed.run}-update-${String(index)}`,
+        frame: bashTail(whole),
+        writeId: `seed-${seed.run}-tail-${String(index)}`,
+        upsertKey: `bash:${seed.run}:tail`,
         ...(seed.topLevel === undefined ? {} : { topLevel: seed.topLevel }),
       }),
     );
-    offset += Buffer.byteLength(chunk, "utf8");
-    whole += chunk;
   }
   if (seed.exitCode !== null) {
     entries.push(
@@ -244,6 +237,7 @@ export async function seedBashLifecycle(
         run: seed.run,
         frame: bashCompleted(seed.command, seed.exitCode, whole),
         writeId: `seed-${seed.run}-terminal`,
+        upsertKey: `bash:${seed.run}:terminal`,
         ...(seed.topLevel === undefined ? {} : { topLevel: seed.topLevel }),
       }),
     );

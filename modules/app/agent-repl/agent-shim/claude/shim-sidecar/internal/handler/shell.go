@@ -7,8 +7,9 @@ package handler
 // when a harness marker sits above a wrapper line the harness's is the
 // command's verdict and wins.
 //
-// So the handler does two things: append the bytes to the run as a DELTA carrying
-// the offset they start at, and END the run when the marker arrives. Completion is
+// So the handler does two things: fold the bytes into the run's rendered TAIL,
+// which supersedes the run's one tail row whole, and END the run when the
+// marker arrives. Completion is
 // never GUESSED — absent the marker this handler infers nothing and the staleness
 // policy owns the outcome.
 
@@ -143,10 +144,25 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	}
 	atLineStart := h.atLineStart(frames[0].Offset)
 	h.observe(output.Bytes())
-	h.Remember(ctx, output.Bytes())
-	// The delta's from_offset is the file position these bytes START at, which is
-	// exactly the count the consumer must already hold for this run.
-	entries := []*storev1.StoreEntry{h.Conv().BashDelta(at, run, output.String(), frames[0].Offset)}
+	// THE RUN'S TAIL, NOT THE BATCH. Output past what is rendered is never
+	// stored (owner ruling 2026-09-23), so each batch supersedes the run's one
+	// tail row with the window as it is drawn. The row is identified by where
+	// the window ends: the tail through a file position is a pure function of
+	// the file's prefix, so a batch re-read after an unacknowledged write mints
+	// the same identity and the same bytes.
+	var entries []*storev1.StoreEntry
+	through := frames[0].Offset + int64(output.Len())
+	if err := h.Absorb(ctx, frames[0].Offset, output.Bytes()); err != nil {
+		// THE TAIL IS WITHHELD, NOT GUESSED. A window missing the file's prefix
+		// would state omitted counts that are wrong for the rest of the run, so
+		// this batch writes no tail and the next one reseeds from the file. The
+		// batch's bytes are not lost: they are in the prefix that reseed reads.
+		h.log.With(handleErr("shell-tail", ctx)).With(logging.Context{ActivityID: run, Offset: logging.Off(frames[0].Offset)}).
+			Log("the run's tail could not be rebuilt from its spool; no tail row is written for this batch and the next batch reseeds: %v", err)
+	} else {
+		text, bytesOmitted, linesOmitted := h.Rendered()
+		entries = append(entries, h.Conv().BashTail(attribute(ctx, through), run, text, bytesOmitted, linesOmitted))
+	}
 
 	end, ok := trailingTerminator(frames[0].Raw, atLineStart)
 	if !ok {

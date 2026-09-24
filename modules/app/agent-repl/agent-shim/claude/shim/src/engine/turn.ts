@@ -350,16 +350,24 @@ export class TurnEngine {
       // A STORE OUTAGE IS NOT A REFUSED TURN. The daemon asked for work the
       // vendor can do, and answering Code.Internal would leave it unable to
       // tell an unreachable store from a shim defect; refusing the turn would
-      // make the record plane's availability the session's. So the row goes
-      // back through the ORDERED retry buffer, which owns the outage: it
-      // replays transiently, opens a degraded window, raises store_unreachable,
-      // and -- if it never lands -- drops loudly naming the key. The write id
-      // is deterministic, so a partially-landed batch absorbs the replay.
-      LOGGER.error(
-        { turn_id: turn.value, upsert_key: promptRow.upsertKey, cause: err.message },
-        "the prompt row could not be made durable before the turn; re-queued it behind the retry buffer",
-      );
-      this.session.persistence.write([promptRow]);
+      // make the record plane's availability the session's. The row is ALREADY
+      // HELD on the ordered retry buffer, which owns the outage: it replays,
+      // keeps its degraded window and store_unreachable fault standing, and
+      // never drops it. Re-queuing it here would write it twice.
+      if (err.kind === "invalid_request") {
+        // The store read the row and cannot carry it; the writer has already
+        // named it at ERROR and raised a converter_defect fault. The turn
+        // still runs -- the vendor can do the work -- with the refusal stated.
+        LOGGER.error(
+          { turn_id: turn.value, upsert_key: promptRow.upsertKey, kind: err.kind, cause: err.message },
+          "the store refused the prompt row as malformed; the turn runs without it",
+        );
+      } else {
+        LOGGER.error(
+          { turn_id: turn.value, upsert_key: promptRow.upsertKey, kind: err.kind, cause: err.message },
+          "the prompt row could not be acked before the turn; the retry buffer holds it in order",
+        );
+      }
     }
     // ONE CALL SUBMITS AND PAINTS — and the page is read BEFORE the prompt is
     // delivered, not after. R15 (RULED) says a fresh session's opening page
