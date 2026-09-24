@@ -483,7 +483,7 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 			withField(fields, "error", err.Error()))
 		return
 	}
-	if !claimed {
+	if !claimed.Claimed {
 		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn was already put back by a boot recovery", fields)
 		return
 	}
