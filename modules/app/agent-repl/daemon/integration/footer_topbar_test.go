@@ -413,6 +413,28 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 	_ = got
 }
 
+// A MONITOR ROW JUMPS TO ITS CALL'S TOOL-CALL CARD: the feed draws the card
+// and announces it, and the footer row names exactly that FeedId.
+func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftMonitorActivity("mon-1", "watching the build log")))
+
+	// Assert
+	card := awaitRow(t, f, feed, "the monitor's tool-call card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetName().GetText() == "Monitor"
+	})
+	awaitFooter(t, f, footer, "the monitor row naming the card", func(v *frontendv1.FooterView) bool {
+		rows := v.GetExpanded().GetMonitors().GetRows()
+		return len(rows) == 1 && rows[0].GetJump().GetEntry().GetValue() == card.GetId().GetValue()
+	})
+}
+
 // A STATUS-ONLY UPDATE MUST NOT BLANK THE CHECKLIST. `TaskUpdate` carries no
 // subject when it names only a status, so the act's state leaves the field
 // UNSET -- and applying that over the create's own subject drew every checklist
