@@ -13,9 +13,23 @@ import (
 // SENDER's feed draws it with the agent_prompt component and a composed
 // address line naming the recipient.
 
-// sendMessage pushes one send frame through the sink under `unit`.
+// sendMessage pushes one send frame through the sink under `unit`, as a row
+// that predates the stands-alone contract writes it.
 func (h *harness) sendMessage(unit string, result any) {
 	h.t.Helper()
+	h.send(sendActivity(h.t, unit, result))
+}
+
+// sendMessageBound pushes one send frame as a producer bound by the
+// stands-alone contract writes it.
+func (h *harness) sendMessageBound(unit string, result any) {
+	h.t.Helper()
+	h.send(bound(sendActivity(h.t, unit, result)))
+}
+
+// sendActivity wraps one send arm as an activity under `unit`.
+func sendActivity(t *testing.T, unit string, result any) *conversationv1.AgentActivity {
+	t.Helper()
 	send := &conversationv1.AgentSendMessage{}
 	switch r := result.(type) {
 	case *conversationv1.AgentSendMessageStart:
@@ -25,12 +39,12 @@ func (h *harness) sendMessage(unit string, result any) {
 	case *conversationv1.AgentSendMessageFailure:
 		send.Result = &conversationv1.AgentSendMessage_Failure{Failure: r}
 	default:
-		h.t.Fatalf("sendMessage: unhandled result %T", result)
+		t.Fatalf("sendMessage: unhandled result %T", result)
 	}
-	h.send(&conversationv1.AgentActivity{
+	return &conversationv1.AgentActivity{
 		ActivityId: &conversationv1.AgentActivityId{Value: unit},
 		Item:       &conversationv1.AgentActivity_SendMessage{SendMessage: send},
-	})
+	}
 }
 
 // sendRow returns the agent-prompt row a send drew on the sender's feed,
@@ -602,8 +616,8 @@ func TestAReplayedSettledSendRestatingNoAddressIsRecordedAtError(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 
-			// Act.
-			h.sendMessage("unit-1", tc.settle)
+			// Act: a producer bound by the contract that restated nothing.
+			h.sendMessageBound("unit-1", tc.settle)
 
 			// Assert.
 			if !h.hasRecord("error", "daemon.feed.activity_undrawable") {
@@ -620,12 +634,64 @@ func TestASettledSendRestatingNoAddressIsRecordedAtErrorWithTheStartHeld(t *test
 			h := newHarness(t)
 			h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
 
-			// Act.
-			h.sendMessage("unit-1", tc.settle)
+			// Act: a producer bound by the contract that restated nothing.
+			h.sendMessageBound("unit-1", tc.settle)
 
 			// Assert.
 			if !h.hasRecord("error", "daemon.feed.settle_not_restated") {
 				t.Fatalf("records = %+v, want an ERROR daemon.feed.settle_not_restated", h.records())
+			}
+		})
+	}
+}
+
+func TestAReplayedPreContractSendRestatingNoAddressIsRecordedAtInfo(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: a row written before the contract, replayed alone.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			if !h.hasRecord("info", "daemon.feed.settle_predates_contract") || len(h.anyErrors()) != 0 {
+				t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
+			}
+		})
+	}
+}
+
+func TestAReplayedPreContractSendRestatingNoAddressDrawsNothing(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			if rows := h.rows(rootFeed()); len(rows) != 0 {
+				t.Fatalf("rows = %d, want 0: a send with an empty body is never drawn", len(rows))
+			}
+		})
+	}
+}
+
+func TestAPreContractSendRestatingNoAddressIsRecordedAtInfoWithTheStartHeld(t *testing.T) {
+	for _, tc := range replayedSends("", "") {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+			// Act.
+			h.sendMessage("unit-1", tc.settle)
+
+			// Assert.
+			if !h.hasRecord("info", "daemon.feed.settle_predates_contract") || len(h.anyErrors()) != 0 {
+				t.Fatalf("records = %+v, want an INFO daemon.feed.settle_predates_contract and no ERROR", h.records())
 			}
 		})
 	}

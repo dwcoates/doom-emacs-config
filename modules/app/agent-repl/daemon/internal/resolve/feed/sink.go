@@ -161,6 +161,14 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 			dlog.Context{"unit": unit, "agent": agent.GetValue()})
 		return
 	}
+	if errors.Is(err, errSettlePredatesContract) {
+		// EXPECTED OLD DATA, not a defect: a row the store kept from before
+		// every settle restated its start, replayed with no start beside it.
+		log.Info("daemon.feed.settle_predates_contract",
+			"a settled frame written before the stands-alone contract restates nothing of its call and no start was held; it draws no row",
+			dlog.Context{"unit": unit, "agent": agent.GetValue(), "drawn": "nothing", "cause": err.Error()})
+		return
+	}
 	if err != nil {
 		log.Error("daemon.feed.activity_undrawable",
 			"an activity could not be resolved into a row",
