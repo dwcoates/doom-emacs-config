@@ -1077,6 +1077,53 @@ func TestTheWriteConnectionLimitsTheWALFileItLeavesBehind(t *testing.T) {
 	}
 }
 
+// TestEveryConnectionCarriesTheCacheAndMapSizes holds two read connections open
+// at once, so the second is a genuinely new connection of the pool rather than
+// the first one handed back.
+func TestEveryConnectionCarriesTheCacheAndMapSizes(t *testing.T) {
+	d, _ := newStore(t)
+	firstRead, err := d.read.Conn(ctx())
+	if err != nil {
+		t.Fatalf("read Conn: %v", err)
+	}
+	defer firstRead.Close() //nolint:errcheck // best-effort test teardown
+	secondRead, err := d.read.Conn(ctx())
+	if err != nil {
+		t.Fatalf("second read Conn: %v", err)
+	}
+	defer secondRead.Close() //nolint:errcheck // best-effort test teardown
+	write, err := d.sql.Conn(ctx())
+	if err != nil {
+		t.Fatalf("write Conn: %v", err)
+	}
+	defer write.Close() //nolint:errcheck // best-effort test teardown
+
+	tests := []struct {
+		name   string
+		conn   *sql.Conn
+		pragma string
+		want   int64
+	}{
+		{"the write connection's cache", write, "cache_size", -WriteCacheKiB},
+		{"the write connection's map", write, "mmap_size", MmapSizeBytes},
+		{"a read connection's cache", firstRead, "cache_size", -ReadCacheKiB},
+		{"a read connection's map", firstRead, "mmap_size", MmapSizeBytes},
+		{"a second read connection's cache", secondRead, "cache_size", -ReadCacheKiB},
+		{"a second read connection's map", secondRead, "mmap_size", MmapSizeBytes},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act
+			got := pragmaOn(t, test.conn, test.pragma)
+
+			// Assert
+			if got != test.want {
+				t.Fatalf("PRAGMA %s = %d, want %d", test.pragma, got, test.want)
+			}
+		})
+	}
+}
+
 func TestCloseReleasesTheWALIndexDescriptor(t *testing.T) {
 	// Arrange
 	_, log := newSink(t)
