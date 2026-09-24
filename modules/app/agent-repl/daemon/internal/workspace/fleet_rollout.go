@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -303,16 +302,19 @@ func (f *Fleet) HostSessionFacts(ws ids.WorkspaceID) (HostSessionFacts, bool) {
 
 // freshSocketPath mints a socket path no running shim of this workspace holds.
 // The generation rides in the name rather than in a directory, so the state
-// root's socket-path budget — checked once at boot — still bounds it.
+// root's socket-path budget — checked once at boot — still bounds it. It is
+// minted past every generation on disk as well as this fleet's own counter
+// (shimsocket.NextGeneration): an ADOPTED shim may already hold one this
+// daemon never minted.
 func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
+	base := f.deps.SocketPath(ws)
 	f.mu.Lock()
 	before := f.generation[ws]
-	f.generation[ws]++
-	gen := f.generation[ws]
+	path, gen := shimsocket.NextGeneration(base, before)
+	f.generation[ws] = gen
 	f.mu.Unlock()
 	f.logTransition(ws, "shim_generation", before, gen, nil)
-	base := f.deps.SocketPath(ws)
-	return strings.TrimSuffix(base, ".sock") + ".n" + strconv.Itoa(gen) + ".sock"
+	return path
 }
 
 // Install makes c the workspace's shim client, retiring whatever was there.

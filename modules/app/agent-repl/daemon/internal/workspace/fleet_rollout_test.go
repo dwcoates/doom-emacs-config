@@ -1045,3 +1045,27 @@ func TestHandOverSurfacesAFailedCloseAndDetachesNothing(t *testing.T) {
 		t.Fatalf("detached = %d, want nothing detached after a failed close", f.client.detached)
 	}
 }
+
+// TestAPrelaunchBesideAnAdoptedRelaunchedShimTakesTheNextGeneration is the
+// 18:27:44 deploy's collision: the adopted shim already held `.n1.sock`, and
+// the successor's counter, starting at zero, handed its replacement the same
+// socket.
+func TestAPrelaunchBesideAnAdoptedRelaunchedShimTakesTheNextGeneration(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	f := newFleetFixture(t)
+	f.socketDir = dir
+	ws := f.workspace("w1")
+	held := filepath.Join(dir, "w1.n1.sock")
+	if err := os.WriteFile(held, nil, 0o600); err != nil {
+		t.Fatalf("writing the adopted shim's socket path: %v", err)
+	}
+
+	// Act.
+	got := f.fleet.freshSocketPath(ws.ID)
+
+	// Assert.
+	if want := filepath.Join(dir, "w1.n2.sock"); got != want {
+		t.Fatalf("freshSocketPath = %q, want %q past the adopted shim's generation", got, want)
+	}
+}
