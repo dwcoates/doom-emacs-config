@@ -1734,15 +1734,21 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		if unavailable := failure.GetLockHolderUnavailable(); unavailable != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetLockHolderUnavailable() != nil"})
-			// THE SHIM'S OWN LOCK HELPER FAILED TO START. No claim was
-			// attempted, so nobody is known to own the conversation: saying
-			// "another shim holds it" here would send the reader hunting for
-			// a process that does not exist. The binary and the OS error ride
-			// the typed arm, because fixing that binary is the remediation.
+			// THE SHIM'S OWN LOCK HELPER FAILED. No claim was completed, so
+			// nobody is known to own the conversation: saying "another shim
+			// holds it" here would send the reader hunting for a process that
+			// does not exist. The shim's LockHolderFailure rides the typed arm
+			// whole, because how that binary failed is the remediation.
+			holder := unavailable.GetFailure()
+			how, stated := describeLockHolderFailure(holder)
+			if !stated {
+				log.Error(opBringUp, "the shim's lock_holder_unavailable refusal states no how; relayed as given",
+					dlog.Context{"binary": holder.GetBinary(), "detail": failure.GetDetail()})
+			}
 			return nil, refuseWith(log, "OpenWorkspace", ArmLockHolderUnavailable,
-				fmt.Sprintf("the shim's lock helper %s failed to start for workspace %q: %s",
-					unavailable.GetBinary(), ws, unavailable.GetOsError()), false,
-				map[string]any{"binary": unavailable.GetBinary(), "os_error": unavailable.GetOsError()})
+				fmt.Sprintf("the shim's lock helper %s %s for workspace %q; nobody owns the conversation",
+					holder.GetBinary(), how, ws), false,
+				map[string]any{"failure": holder})
 		}
 		if failure.GetUnknownSession() != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetUnknownSession() != nil"})
