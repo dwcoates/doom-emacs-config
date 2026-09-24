@@ -17,7 +17,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 | `fix/restate-rest-and-old-row-level` | `~/.config/doom-worktrees/restate-rest-and-old-row-level` | Pre-contract unrestated rows log INFO (a new defect stays ERROR). Subagent and artifact failures restate; every settle carries `started_at`. | `aa95f06fc74ba5cf4` | 23:05 |
 | `fix/remove-keepalive-hold` | `~/.config/doom-worktrees/remove-keepalive-hold` | Remove `turn_already_open.keepalive` and the keep-alive hold arm and badge. The shim handles a real prompt during a keep-alive internally, and the daemon never sees keep-alives. | `a3d48a539c2a3b1c4` | 23:05 |
 | `feat/monitor-feed-card` | `~/.config/doom-worktrees/monitor-feed-card` | A Monitor call draws an ordinary tool-call card in its owner's feed; its footer row jumps to and centers it (owner: monitors clickable and centered). | `ab71a2baf32886c69` (resumed) | 23:25 |
-| `fix/shim-open-call-leak` | `~/.config/doom-worktrees/shim-open-call-leak` | The shim's in-flight tool registry leaks (full at 512; an interrupt cut 493 phantom calls). Settle and remove every call on its settling path; reaching the bound is an ERROR. | (see the tracker commit) | 23:55 |
+| `fix/shim-open-call-leak` | `~/.config/doom-worktrees/shim-open-call-leak` | The shim's in-flight tool registry leaks (full at 512; an interrupt cut 493 phantom calls). Settle and remove every call on its settling path; reaching the bound is an ERROR. | `a90cb0143868c171b` | 23:55 |
 
 ## Queued for dispatch once the load drops (found by the deploy agent)
 
