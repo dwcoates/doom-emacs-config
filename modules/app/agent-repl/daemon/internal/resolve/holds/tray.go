@@ -34,7 +34,8 @@ func orderedHolds(held []wsm.HeldPrompt) []wsm.HeldPrompt {
 }
 
 // heldPrompt converts one durable hold into the tray's entry, or nil when the
-// record is not a standing hold at all.
+// record is not a standing hold at all. EDITING says the hold is the one an
+// EditHeldPrompt claim stands on.
 //
 // EVERY BRANCH LOGS. The two facts the contract requires — a classification arm
 // and, on the uninterruptible arm, the command that made the turn
@@ -42,7 +43,7 @@ func orderedHolds(held []wsm.HeldPrompt) []wsm.HeldPrompt {
 // the entry is still emitted: a prompt the daemon is really holding must be
 // visible even when its explanation is defective, and dropping it would hide
 // pending work.
-func heldPrompt(h wsm.HeldPrompt, log dlog.Logger) *frontendv1.HeldPrompt {
+func heldPrompt(h wsm.HeldPrompt, editing bool, log dlog.Logger) *frontendv1.HeldPrompt {
 	if h.Tombstone != nil {
 		log.Debug("daemon.holds.convert", "a retired hold was skipped: the tray draws standing holds only",
 			dlog.Context{"turn_id": string(h.Turn), "tombstone": h.Tombstone.Kind})
@@ -63,6 +64,10 @@ func heldPrompt(h wsm.HeldPrompt, log dlog.Logger) *frontendv1.HeldPrompt {
 	}
 	setClassification(out, h, log)
 	setHold(out, h, log)
+	if editing {
+		log.Debug("daemon.holds.editing", "the hold is being edited", dlog.Context{"turn_id": string(h.Turn)})
+		out.Editing = &frontendv1.HeldPromptEditing{}
+	}
 	out.Badges = heldBadges(out, log)
 	return out
 }
@@ -175,9 +180,9 @@ const commandLabelMax = 24
 
 // heldBadges composes the card's status badges from the projected entry: THE
 // ONE PLACE a held prompt's status words are decided. One badge per standing
-// fact, in the order daemon_hold.proto fixes — the verdict, its confirmation,
-// the hold — each a short label and, where the full sentence says more than
-// the label, that sentence as the detail.
+// fact, in the order daemon_hold.proto fixes — the verdict, the edit, the
+// verdict's confirmation, the hold — each a short label and, where the full
+// sentence says more than the label, that sentence as the detail.
 //
 // A classification arm it cannot name is recorded LOUDLY and contributes no
 // badge: the projection above never leaves one, and a frontend rejects a badge
@@ -185,7 +190,7 @@ const commandLabelMax = 24
 // rather than papered over with invented words.
 func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPromptBadge {
 	ctx := dlog.Context{"turn_id": p.GetTurn().GetValue()}
-	var out []*frontendv1.HeldPromptBadge
+	var out, confirmed []*frontendv1.HeldPromptBadge
 	switch arm := p.GetClassification().(type) {
 	case *frontendv1.HeldPrompt_Classifying:
 		out = append(out, badge("classifying", "queued — classifying"))
@@ -195,7 +200,7 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		// A refused interrupt is returned to this arm, so it reads the same.
 		out = append(out, badge("after this turn", "after this turn"))
 		if arm.HoldForTurnEnd.GetAccepted().GetAccepted() {
-			out = append(out, badge("confirmed", "confirmed"))
+			confirmed = append(confirmed, badge("confirmed", "confirmed"))
 		}
 	case *frontendv1.HeldPrompt_UninterruptibleTurn:
 		literal, ok := commandLiteral(arm.UninterruptibleTurn.GetCommand())
@@ -215,6 +220,10 @@ func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPro
 		ctx["remediation"] = "add the arm to heldBadges"
 		log.Error("daemon.holds.badges", "a held prompt's verdict has no badge and was composed without one", ctx)
 	}
+	if p.GetEditing() != nil {
+		out = append(out, badge("editing", "editing"))
+	}
+	out = append(out, confirmed...)
 	switch arm := p.GetHold().(type) {
 	case nil:
 	case *frontendv1.HeldPrompt_Shutdown:

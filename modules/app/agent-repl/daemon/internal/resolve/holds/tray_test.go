@@ -423,6 +423,17 @@ func TestHeldBadgesComposeEveryStatus(t *testing.T) {
 			want: []wantBadge{{"unclassified", ""}},
 		},
 		{
+			name: "editing",
+			p:    &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(false), Editing: &frontendv1.HeldPromptEditing{}},
+			want: []wantBadge{{"after this turn", ""}, {"editing", ""}},
+		},
+		{
+			name: "every fact at once, in the proto's order",
+			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(true), Editing: &frontendv1.HeldPromptEditing{},
+				Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
+			want: []wantBadge{{"after this turn", ""}, {"editing", ""}, {"confirmed", ""}, {"build refresh", "held for the build refresh"}},
+		},
+		{
 			name: "shutdown hold",
 			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Shutdown{Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: "s-1"}}},
 			want: []wantBadge{{"after this turn", ""}, {"restart hold", "held for the scheduled restart (s-1)"}},
