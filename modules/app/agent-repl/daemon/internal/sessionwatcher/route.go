@@ -1397,11 +1397,25 @@ func activityToolName(act *conversationv1.AgentActivity) string {
 		return "Cron"
 	case *conversationv1.AgentActivity_PushNotification:
 		return "PushNotification"
+	case *conversationv1.AgentActivity_McpToolCall:
+		return mcpToolName(item.McpToolCall)
 	case *conversationv1.AgentActivity_Unmodeled:
 		return unmodeledToolName(item.Unmodeled)
 	default:
 		return ""
 	}
+}
+
+// mcpToolName is the tool an MCP call named, from whichever of its frames
+// carried it. A progress beat names none.
+func mcpToolName(call *conversationv1.AgentMcpToolCall) string {
+	if start := call.GetStart(); start != nil {
+		return start.GetTool().GetName()
+	}
+	if success := call.GetSuccess(); success != nil {
+		return success.GetTool().GetName()
+	}
+	return call.GetFailure().GetTool().GetName()
 }
 
 // unmodeledToolName is the tool an unmodeled call named, from whichever of its
