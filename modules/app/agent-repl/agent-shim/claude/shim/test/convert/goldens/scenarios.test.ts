@@ -62,7 +62,7 @@ const UNIT_KINDS: readonly (readonly [string, readonly string[]])[] = [
   ["interrupt", ["hook", "thinking", "response"]],
   ["max-tokens", ["hook", "response"]],
   ["mcp-server-healths", ["hook", "thinking", "bash", "response"]],
-  ["mcp-unmodeled-tool", ["hook", "thinking", "response", "unmodeled"]],
+  ["mcp-unmodeled-tool", ["hook", "thinking", "response", "mcpToolCall"]],
   ["model-changed", ["hook", "thinking", "response"]],
   ["monitor-deadline", ["hook", "thinking", "bash", "monitor", "response"]],
   ["monitor-persistent", ["hook", "thinking", "monitor", "response"]],

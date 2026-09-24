@@ -115,7 +115,7 @@ export const FAKE_AGENTS: AgentInfoLike[] = [
  *
  * `SessionMcpServer` has five arms and a mock that only ever reported
  * `connected` would leave four unproducible. `echo` is the one whose tools the
- * unmodeled-tool scenario calls, so its `tools` list is populated and the
+ * MCP tool scenario calls, so its `tools` list is populated and the
  * others' are not — which is itself faithful (`tools` is documented as
  * "available when connected").
  */
