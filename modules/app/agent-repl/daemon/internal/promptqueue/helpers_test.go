@@ -64,6 +64,10 @@ type fakeDB struct {
 	allHeldErr error
 	// openTurnsErr fails the open-turns read the judge compares against.
 	openTurnsErr error
+	// byTurnErr fails the one-hold read an edit resolves its prompt through,
+	// and replaceErr fails an edit's content replacement.
+	byTurnErr  error
+	replaceErr error
 }
 
 func newFakeDB() *fakeDB {
@@ -178,6 +182,38 @@ func (d *fakeDB) TombstoneHeldPrompt(_ context.Context, turn ids.TurnID, why wsm
 	}
 	copied := why
 	h.Tombstone = &copied
+	return nil
+}
+
+// HeldPromptByTurn answers one hold, retired or not.
+func (d *fakeDB) HeldPromptByTurn(_ context.Context, turn ids.TurnID) (wsm.HeldPrompt, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.byTurnErr != nil {
+		return wsm.HeldPrompt{}, false, d.byTurnErr
+	}
+	h, ok := d.held[turn]
+	if !ok {
+		return wsm.HeldPrompt{}, false, nil
+	}
+	return *h, true, nil
+}
+
+// ReplaceHeldPromptSaid replaces a standing hold's content and discards its
+// verdict, as the store does.
+func (d *fakeDB) ReplaceHeldPromptSaid(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.replaceErr != nil {
+		return d.replaceErr
+	}
+	h, ok := d.held[turn]
+	if !ok || h.Tombstone != nil {
+		return errors.New("no such standing hold")
+	}
+	h.Said = said
+	h.Classification = nil
+	h.Accepted = false
 	return nil
 }
 
@@ -685,6 +721,21 @@ type fakeHolds struct {
 	holds.Resolver
 	mu     sync.Mutex
 	pushes [][]wsm.HeldPrompt
+	// editing records every SetEditing, in order.
+	editing []ids.TurnID
+}
+
+func (h *fakeHolds) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.editing = append(h.editing, turn)
+}
+
+// editingMarks answers every recorded SetEditing.
+func (h *fakeHolds) editingMarks() []ids.TurnID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.TurnID(nil), h.editing...)
 }
 
 func (h *fakeHolds) SetHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt) {
@@ -793,6 +844,17 @@ type harness struct {
 	noSession  bool
 	// coldGate is the standing gate's own account, empty when no gate stands.
 	coldGate string
+
+	// hostPublishes counts the host-view republications the queue asked for.
+	hostMu        sync.Mutex
+	hostPublishes int
+}
+
+// hostPublished answers how many host-view republications the queue asked for.
+func (h *harness) hostPublished() int {
+	h.hostMu.Lock()
+	defer h.hostMu.Unlock()
+	return h.hostPublishes
 }
 
 // waitRevivals joins every background revival the queue started.
@@ -857,8 +919,13 @@ func newHarness(t *testing.T) *harness {
 			return "guidance-turn", h.parkedErr
 		},
 		DrainRefusals: h.drain,
-		Now:           func() time.Time { return instant },
-		Log:           h.log,
+		PublishHost: func(ids.WorkspaceID) {
+			h.hostMu.Lock()
+			defer h.hostMu.Unlock()
+			h.hostPublishes++
+		},
+		Now: func() time.Time { return instant },
+		Log: h.log,
 	})
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)

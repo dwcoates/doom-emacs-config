@@ -24,6 +24,8 @@ type wsState struct {
 	held []wsm.HeldPrompt
 	// offer is the parked question, nil when none is posed.
 	offer *frontendv1.HeldOffer
+	// editing is the held prompt being edited, empty when none is.
+	editing ids.TurnID
 }
 
 // resolver is the hold-tray resolver. One instance serves every workspace;
@@ -144,6 +146,14 @@ func (r *resolver) SetHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt) {
 		})
 }
 
+// SetEditing names the held prompt being edited, or clears it with "".
+func (r *resolver) SetEditing(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.mutate(ws, "daemon.holds.set_editing", "the hold tray took the edit standing",
+		dlog.Context{"editing_turn": string(turn)}, func(s *wsState) {
+			s.editing = turn
+		})
+}
+
 // SetOffer installs the parked question the tray poses, or clears it.
 //
 // The offer arrives ALREADY COMPOSED (MergeDequeueOffer is its one author). An
@@ -175,6 +185,10 @@ func (r *resolver) render(s *wsState, log dlog.Logger) *frontendv1.DaemonHoldTra
 		prompt := heldPrompt(h, log)
 		if prompt == nil {
 			continue
+		}
+		if s.editing != "" && h.Turn == s.editing {
+			log.Debug("daemon.holds.editing", "the hold is being edited", dlog.Context{"turn_id": string(h.Turn)})
+			prompt.Editing = &frontendv1.HeldPromptEditing{}
 		}
 		items = append(items, &frontendv1.DaemonHoldItem{
 			Item: &frontendv1.DaemonHoldItem_Prompt{Prompt: prompt},

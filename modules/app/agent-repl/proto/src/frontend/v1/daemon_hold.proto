@@ -128,7 +128,16 @@ message HeldPrompt {
     // more work.
     HeldPromptBuildRefreshHold build_refresh = 12;
   }
+  // PRESENT WHILE THIS PROMPT IS BEING EDITED (EditHeldPrompt.begin), absent
+  // otherwise. Daemon-stated: the card draws its editing badge off this
+  // field alone. While it stands, this prompt and every prompt queued after
+  // it stay held.
+  HeldPromptEditing editing = 13;
 }
+
+// The prompt is being edited in the editor's input. DELIBERATELY EMPTY: the
+// field's presence is the whole fact.
+message HeldPromptEditing {}
 
 // When a held prompt was queued.
 message HeldPromptQueuedAt {

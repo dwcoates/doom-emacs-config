@@ -11,6 +11,8 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -126,6 +128,23 @@ message HostWorkspace {
   // What Emacs names the workspace's buffers from — a sibling of the
   // lifecycle because a buffer needs a name in every standing.
   HostWorkspaceNaming naming = 3;
+  // The held prompt this workspace's editor is EDITING (EditHeldPrompt),
+  // absent when no edit stands. It is STATE, not an event, so a subscriber
+  // always reads the edit that stands now: the editor puts `said` into its
+  // input when an edit it has not yet taken appears, and leaves its edit mode
+  // when the field goes absent (a commit, a cancel, the prompt dropped).
+  HostHeldPromptEdit held_prompt_edit = 4;
+}
+
+// One standing held-prompt edit.
+message HostHeldPromptEdit {
+  // The held prompt being edited — the turn a commit or cancel names.
+  conversation.v1.TurnId turn = 1;
+  // The prompt's content as the edit began, WHOLE.
+  conversation.v1.UserSaid said = 2;
+  // Which edit this is: daemon-minted, distinct for every begin, so a second
+  // edit of the same prompt with the same content is still a new edit.
+  uint64 edit = 3;
 }
 
 message HostSessionNone {}
