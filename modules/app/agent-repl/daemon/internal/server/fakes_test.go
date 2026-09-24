@@ -383,13 +383,65 @@ func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *convers
 	return f.outcome, f.err
 }
 
-// fakeQueue answers the three held-prompt verbs.
+// fakeQueue answers the three held-prompt verbs and the edit's steps.
 type fakeQueue struct {
 	promptqueue.Queue
 	releaseErr error
 	dropErr    error
 	acceptErr  error
 	released   []ids.TurnID
+
+	// beginErr, commitErr and cancelErr answer the edit's three steps.
+	beginErr  error
+	commitErr error
+	cancelErr error
+	// editorLive is what the begin's editor probe answered.
+	editorLive []bool
+	// committed is every commit's new content, in order.
+	committed []*conversationv1.UserSaid
+	// cancelled is every cancelled turn, in order.
+	cancelled []ids.TurnID
+	// editorGone is every workspace whose editor left, in order; the host
+	// stream's own goroutine writes it, so goneMu guards it.
+	goneMu     sync.Mutex
+	editorGone []ids.WorkspaceID
+	// edit is the standing edit Editing answers, nil when none stands.
+	edit *promptqueue.Edit
+}
+
+func (f *fakeQueue) BeginEdit(_ context.Context, _ ids.WorkspaceID, _ ids.TurnID, editor promptqueue.EditorProbe) error {
+	f.editorLive = append(f.editorLive, editor())
+	return f.beginErr
+}
+
+func (f *fakeQueue) CommitEdit(_ context.Context, _ ids.WorkspaceID, _ ids.TurnID, said *conversationv1.UserSaid) error {
+	f.committed = append(f.committed, said)
+	return f.commitErr
+}
+
+func (f *fakeQueue) CancelEdit(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) error {
+	f.cancelled = append(f.cancelled, turn)
+	return f.cancelErr
+}
+
+func (f *fakeQueue) EditorGone(ws ids.WorkspaceID) {
+	f.goneMu.Lock()
+	defer f.goneMu.Unlock()
+	f.editorGone = append(f.editorGone, ws)
+}
+
+// editorsGone answers every workspace whose editor left, in order.
+func (f *fakeQueue) editorsGone() []ids.WorkspaceID {
+	f.goneMu.Lock()
+	defer f.goneMu.Unlock()
+	return append([]ids.WorkspaceID(nil), f.editorGone...)
+}
+
+func (f *fakeQueue) Editing(ids.WorkspaceID) (promptqueue.Edit, bool) {
+	if f.edit == nil {
+		return promptqueue.Edit{}, false
+	}
+	return *f.edit, true
 }
 
 func (f *fakeQueue) Release(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) error {
