@@ -12,7 +12,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/revive-warn-and-lock-bound` | `~/.config/doom-worktrees/revive-warn-and-lock-bound` | A healthy revive WARNs "a task was backgrounded by hand but names no originating call" (fake or real vendor?); `acquireExclusiveLock` gets a bound on the holder's `locked` line that refuses `lock_holder_unavailable`. | `a3a39a5a5384338d0` | 09-24 |
 
 ## Still waiting on the owner
 
@@ -26,6 +25,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- The revive WARN came from the fake vendor, which replayed an `is_backgrounded` patch for work already in the background; captures show the real vendor never does. A silent lock holder is killed and refused `lock_holder_unavailable` after 5 s: the agent's 250 ms off the bench was widened by the lead, because a false expiry refuses a real session start on a loaded host (`fix/revive-warn-and-lock-bound`; shim 6103 unit + 347 integration).
 - The killed-shim "hang" was a test artifact: the detached announcement could land on the watch's opening page, while the test waited only on the tail. The new `awaitAgentEntry` searches the page, then the tail, with a regression test (`fix/killed-shim-revive-hang`; shim integration 346 on master).
 - Post-bootstrap log defects (`fix/post-bootstrap-log-defects`): a retired keep-alive row is superseded by its real record, with no nuke (the 3 parked subagent transcripts were re-read at 14:26, 3 INFO supersedes, 0 producer-defects); the shim scopes keep-alives by descent; the stand-down manifest is consumed once and a DIED shim with a free lock resolves; the script runner leaves the verdict to its callers and launchctl 113 is not-loaded; a notice-only turn is not a defect; workspace directories are canonical on-disk spellings (the empty case-duplicate is forgotten); the orphan-log sweep spares closed workspaces. Deployed 14:25; all suites green on master except one shim integration hang, now dispatched.
 - A query death's turn terminal is self-describing: `AgentFailure.query_died` (tag 19, carrying the pushed `SessionQueryDied`) replaces the `execution_error` stand-in, so the feed, footer and replay draw the death whichever statement lands first (`fix/query-death-terminal-race`; the e2e flake `TestWebappLayerQueryDeath` passed 3 of 3 full runs). CONTRACT ADDITION, lead-approved as a defect fix; the owner may revisit it.
