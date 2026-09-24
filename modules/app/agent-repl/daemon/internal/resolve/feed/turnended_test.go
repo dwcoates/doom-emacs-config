@@ -998,40 +998,66 @@ func TestADeathStatingNoCauseLeavesTheCauseUnset(t *testing.T) {
 	}
 }
 
-// TestTheShimsOwedTerminalDoesNotRedrawADeathAsAnExecutionError covers the
-// frame the shim owes every open turn when the query dies under it. It states
-// AgentFailure.execution_error -- conversation.v1 gives a dead query no
-// failure arm -- and it arrives AFTER the session stated the death.
-func TestTheShimsOwedTerminalDoesNotRedrawADeathAsAnExecutionError(t *testing.T) {
-	// Arrange: the death, drawn.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.queryDied(&conversationv1.SessionQueryDied{
-		Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
-			UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
-		},
-	})
-
-	// Act: the shim's stand-in terminal for the same turn.
-	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
-		Errors: []string{"the vendor query ended without being asked to"},
-		Failure: &conversationv1.AgentFailure_ExecutionError{
-			ExecutionError: &conversationv1.AgentExecutionError{},
-		},
-	})
-
-	// Assert: the death is the truer account and keeps the arm.
-	errored := h.terminalRow("turn-1").GetErrored()
-	if errored.GetQueryDied() == nil {
-		t.Fatalf("arm = %q, want query_died", erroredArmWord(errored))
-	}
-	if errored.GetQueryDied().GetUnexpectedEof() == nil {
-		t.Fatalf("cause = %v, want the death's own unexpected_eof", errored.GetQueryDied())
+// queryDiedTerminal is the terminal the shim owes the open turn when its query
+// dies under it: AgentFailure's own query_died arm, carrying the death.
+func queryDiedTerminal(died *conversationv1.SessionQueryDied) *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Errors:  []string{"fake vendor query died mid-turn"},
+		Failure: &conversationv1.AgentFailure_QueryDied{QueryDied: died},
 	}
 }
 
-// TestAnOrdinaryExecutionErrorIsStillDrawnAsOne: the witness is per turn, so
-// a turn with no death behind it keeps the producer's own arm.
+// iteratorDeath is a query death whose SDK iterator threw.
+func iteratorDeath() *conversationv1.SessionQueryDied {
+	return &conversationv1.SessionQueryDied{
+		Cause: &conversationv1.SessionQueryDied_IteratorFailure{
+			IteratorFailure: &conversationv1.SessionQueryIteratorFailure{Cause: "fake vendor query died mid-turn"},
+		},
+	}
+}
+
+// TestAQueryDeathDrawsQueryDiedWhicheverStatementArrivesFirst covers the two
+// statements of one death: the session's query_died push and the turn's own
+// query_died terminal, served from the store. They travel by independent
+// channels with no ordering between them, so the drawn terminal must be the
+// death, with its cause, in either arrival order.
+func TestAQueryDeathDrawsQueryDiedWhicheverStatementArrivesFirst(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(h *harness)
+	}{
+		{name: "the terminal first, then the push", act: func(h *harness) {
+			h.terminal("turn-1", nil, queryDiedTerminal(iteratorDeath()))
+			h.queryDied(iteratorDeath())
+		}},
+		{name: "the push first, then the terminal", act: func(h *harness) {
+			h.queryDied(iteratorDeath())
+			h.terminal("turn-1", nil, queryDiedTerminal(iteratorDeath()))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a turn in flight.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "!query-fail")
+
+			// Act.
+			tc.act(h)
+
+			// Assert.
+			errored := h.terminalRow("turn-1").GetErrored()
+			if errored.GetQueryDied().GetIteratorFailure() == nil {
+				t.Fatalf("arm = %q (%v), want query_died.iterator_failure", erroredArmWord(errored), errored)
+			}
+			if got := errored.GetMessage().GetText(); got != "fake vendor query died mid-turn" {
+				t.Fatalf("message = %q, want the thrown cause", got)
+			}
+		})
+	}
+}
+
+// TestAnOrdinaryExecutionErrorIsStillDrawnAsOne: only the query_died arm is a
+// death, so a producer's execution_error keeps its own arm.
 func TestAnOrdinaryExecutionErrorIsStillDrawnAsOne(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)

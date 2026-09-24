@@ -948,6 +948,44 @@ describe("query death", () => {
     expect(inner?.case).toBe("agentFrame");
     agent.close();
   });
+
+  // THE TERMINAL SAYS THE DEATH ITSELF. It reaches the daemon through the
+  // store and the session push through WatchSession, with no ordering between
+  // them, and a replayed turn has only the terminal — so the terminal's own arm
+  // must carry the death and its cause, not an execution_error stand-in.
+  test.each([
+    { prompt: "!query-eof", cause: "unexpectedEof", thrown: undefined },
+    { prompt: "!query-fail", cause: "iteratorFailure", thrown: "fake vendor query died mid-turn" },
+  ])("$prompt concludes the turn with the query_died arm carrying $cause", async ({ prompt, cause, thrown }) => {
+    // Arrange
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const agent = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await agent.next();
+
+    // Act
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: prompt }));
+    const terminal = await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const inner = watchAgentEntry(frame).entry?.entry;
+      return inner?.case === "agentFrame" && inner.value.result.case === "failure";
+    });
+
+    // Assert
+    const inner = watchAgentEntry(terminal).entry?.entry;
+    const failure =
+      inner?.case === "agentFrame" && inner.value.result.case === "failure"
+        ? inner.value.result.value.failure
+        : undefined;
+    expect(failure?.case).toBe("queryDied");
+    const died = failure?.case === "queryDied" ? failure.value : undefined;
+    expect(died?.cause.case).toBe(cause);
+    const said = died?.cause.case === "iteratorFailure" ? died.cause.value.cause : undefined;
+    expect(said).toBe(thrown);
+    agent.close();
+  });
 });
 
 describe("the shim's own faults", () => {

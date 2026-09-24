@@ -147,14 +147,6 @@ type wsState struct {
 	// response's own AgentResponseFailureReason.refused is the only place that
 	// fact is stated, and the terminal row is drawn after it.
 	turnRefusals map[string]bool
-	// turnQueryDeaths records, per turn, that the SESSION's query died under
-	// it. The shim owes every open turn a terminal and writes one as
-	// AgentFailure.execution_error -- conversation.v1 gives a dead query no
-	// failure arm of its own -- so that frame arrives after the death and
-	// would otherwise redraw the terminal as execution_error. The death is the
-	// truer account, and feed.proto has an arm for exactly it, so the witness
-	// outlives the row it drew and the cause it carries is the death's own.
-	turnQueryDeaths map[string]*conversationv1.SessionQueryDied
 	// turnInFlight is the turn the session is running, learned from the rows
 	// it stamps. It is what a session-scoped death (query_died) terminates.
 	turnInFlight *ids.TurnID
@@ -521,7 +513,6 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		gatedCalls:           map[string]string{},
 		turnEvidence:         map[string][]turnEvidenceLine{},
 		turnRefusals:         map[string]bool{},
-		turnQueryDeaths:      map[string]*conversationv1.SessionQueryDied{},
 		clearTurns:           map[ids.TurnID]bool{},
 		clearConfirmed:       map[ids.TurnID]bool{},
 		clearedTurnByPointer: map[string]ids.TurnID{},

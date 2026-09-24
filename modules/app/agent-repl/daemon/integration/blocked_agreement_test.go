@@ -63,6 +63,8 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}},
 		{"prompt_too_long", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{
 			PromptTooLong: &conversationv1.AgentPromptTooLong{}}}},
+		{"query_died", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{
+			QueryDied: &conversationv1.SessionQueryDied{}}}},
 	}
 
 	for _, tc := range tests {
