@@ -235,12 +235,16 @@ export const ENGINE_OWNED_TOOLS: ReadonlySet<string> = new Set(["AskUserQuestion
 // ---------------------------------------------------------------------------
 
 /**
- * How many unsettled calls are remembered before the oldest is forgotten.
+ * How many unsettled calls may be held at once.
  *
- * A CAP RATHER THAN A LEAK: a vendor that announces a call and never returns a
- * result would otherwise grow this forever, and the shim's statelessness is not
- * a preference. Forgetting is logged, because a settle that arrives afterwards
- * finds no call and produces no terminal.
+ * AN INVARIANT, NOT A WORKING LIMIT. The registry holds only what is
+ * genuinely open on this plane — every call leaves it at its result, at a
+ * detached handoff, with its agent's end or at the turn's end — so it drains
+ * to empty at every turn terminal, and reaching the bound means a path
+ * registered calls and never let them go. That is logged at error, and the
+ * oldest call is still forgotten, because the shim's
+ * statelessness is not a preference: an unbounded table would be a second
+ * record growing beside the store's.
  */
 export const CALL_REGISTRY_CAPACITY = 512;
 
@@ -339,10 +343,17 @@ export function createCallRegistry(): CallRegistry {
       if (calls.size >= CALL_REGISTRY_CAPACITY && !calls.has(call.toolUseId)) {
         const [oldest] = calls.values();
         if (oldest !== undefined) {
-          // warn: a defect because bounded call bookkeeping discarded a live tool call.
-          LOGGER.warn(
-            { tool_use_id: oldest.toolUseId, capacity: CALL_REGISTRY_CAPACITY },
-            "forgetting the oldest unsettled tool call: the in-flight registry is full",
+          LOGGER.error(
+            {
+              tool_use_id: oldest.toolUseId,
+              tool: oldest.toolName,
+              agent: oldest.agentId.value,
+              spawning_call: oldest.spawningCall ?? "main",
+              held: calls.size,
+              capacity: CALL_REGISTRY_CAPACITY,
+              detail: "the in-flight registry reached its bound; a path registered calls and never released them",
+            },
+            "invariant violated: the in-flight call registry is full; the oldest call is forgotten and its unit can no longer settle on this plane",
           );
           calls.delete(oldest.toolUseId);
           detached.delete(oldest.toolUseId);
