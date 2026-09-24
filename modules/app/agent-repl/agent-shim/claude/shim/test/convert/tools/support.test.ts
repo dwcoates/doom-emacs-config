@@ -12,8 +12,10 @@ import {
   failureOf,
   hunksOf,
   resultText,
+  returnedContent,
   settle,
   uint,
+  untypedArguments,
 } from "../../../src/convert/tools/support.js";
 import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
 
@@ -172,5 +174,45 @@ describe("failureOf", () => {
 
     // Assert
     expect(failure.settledAt?.startedAt?.atMs).toBe(2_000n);
+  });
+});
+
+describe("untypedArguments", () => {
+  it("carries a JSON-representable input as its JSON object", () => {
+    // Arrange
+    const announced = { ...call(0), input: { tabId: 7, nested: { a: [1, "b"] } } };
+
+    // Act, Assert
+    expect(untypedArguments(announced)).toEqual({ tabId: 7, nested: { a: [1, "b"] } });
+  });
+
+  it("answers undefined for an input JSON cannot represent", () => {
+    // Arrange
+    const cyclic: Record<string, unknown> = {};
+    cyclic["self"] = cyclic;
+
+    // Act, Assert
+    expect(untypedArguments({ ...call(0), input: cyclic })).toBeUndefined();
+  });
+});
+
+describe("returnedContent", () => {
+  it("carries what the tool returned, and says it returned", () => {
+    // Arrange
+    const returned = content([]);
+
+    // Act
+    const got = returnedContent({ ...outcome(0), content: returned });
+
+    // Assert
+    expect(got).toEqual({ content: returned, returned: true });
+  });
+
+  it("answers an EMPTY content when the vendor returned nothing, and says so", () => {
+    // Arrange, Act
+    const got = returnedContent(outcome(0));
+
+    // Assert
+    expect(got).toEqual({ content: create(conversationv1.ToolResultContentSchema, {}), returned: false });
   });
 });

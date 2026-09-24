@@ -2,7 +2,8 @@
  * convert/tools/registry.ts — WHICH CONVERTER OWNS WHICH VENDOR TOOL NAME.
  *
  * ONE TABLE, and it is the only place a vendor tool name appears beside a unit
- * kind. A name absent from here and absent from the exempt and engine-owned sets
+ * kind. An `mcp__` name is an MCP server's tool and becomes `AgentMcpToolCall`.
+ * Any other name absent from here and from the exempt and engine-owned sets
  * becomes `AgentUnmodeled`, which is the contract's meaning of "a tool whose
  * schema genuinely cannot be known" — so a built-in missing from this table is a
  * producer defect, and the suite asserts it never happens.
@@ -11,13 +12,14 @@
  * `Agent` and `Task`, and the plan-mode and worktree pairs are two calls each of
  * one unit kind, distinguished by the `act` arm the converter reads off the name.
  */
-import { UNMODELED_KEY, type ToolConverter } from "../tool-calls.js";
+import { MCP_KEY, UNMODELED_KEY, type ToolConverter } from "../tool-calls.js";
 import { artifactConverter } from "./artifact.js";
 import { bashConverter } from "./bash.js";
 import { cronConverter } from "./cron.js";
 import { editConverter } from "./edit.js";
 import { globConverter } from "./glob.js";
 import { grepConverter } from "./grep.js";
+import { mcpToolConverter } from "./mcp.js";
 import { monitorConverter } from "./monitor.js";
 import { planModeConverter } from "./plan-mode.js";
 import { pushNotificationConverter } from "./push-notification.js";
@@ -76,6 +78,9 @@ export const TOOL_CONVERTERS: ReadonlyMap<string, ToolConverter> = new Map<strin
   ["CronList", cronConverter],
   // Outbound attention.
   ["PushNotification", pushNotificationConverter],
+  // Every MCP server's tool (`mcp__<server>__<tool>`), matched by prefix and
+  // filed under a key no vendor tool can be named.
+  [MCP_KEY, mcpToolConverter],
   // The fallback, filed under a key no vendor tool can be named.
   [UNMODELED_KEY, unmodeledConverter],
 ]);

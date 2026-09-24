@@ -361,20 +361,37 @@ const ARTIFACT_LIST = scenario({
   },
 });
 
-const UNMODELED_MCP = scenario({
-  name: "unmodeled",
-  prompt: "!unmodeled",
-  emits: "an `mcp__echo__echo` call — a tool NO converter owns — answered with an opaque payload",
+const MCP_TOOL = scenario({
+  name: "mcp-tool",
+  prompt: "!mcp-tool",
+  emits: "an `mcp__echo__echo` call — an MCP server's tool — answered with its text",
   writes: "the tool_use line, the tool_result line, the closing text line",
-  arms: "AgentUnmodeled, with `mcp_server` stated from the vendor's own field rather than parsed out of the name",
+  arms: "AgentMcpToolCall, an ordinary tool call, its address resolved by lookup against the session's `echo` server",
   run(ctx) {
-    ctx.log.debug({ turn: ctx.turn, branch: "unmodeled" }, "fake unmodeled-MCP-tool turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "mcp-tool" }, "fake MCP tool turn");
     const call = ctx.toolUse("mcp__echo__echo", { text: "hello from the offline session" });
     ctx.toolResult(call, "hello from the offline session", {
       content: [{ type: "text", text: "hello from the offline session" }],
       isError: false,
     });
     conclude(ctx, "The MCP tool echoed.");
+  },
+});
+
+const UNMODELED = scenario({
+  name: "unmodeled",
+  prompt: "!unmodeled",
+  emits: "a `StructuredOutput` call — an SDK tool NO converter owns and no MCP server serves — answered with an opaque payload",
+  writes: "the tool_use line, the tool_result line, the closing text line",
+  arms: "AgentUnmodeled",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "unmodeled" }, "fake unmodeled-tool turn");
+    const call = ctx.toolUse("StructuredOutput", { answer: "offline" });
+    ctx.toolResult(call, "Structured output provided successfully", {
+      content: [{ type: "text", text: "Structured output provided successfully" }],
+      isError: false,
+    });
+    conclude(ctx, "The unmodeled tool answered.");
   },
 });
 
@@ -394,5 +411,6 @@ export const AUTOMATION_SCENARIOS = [
   WAKEUP_STOP,
   ARTIFACT_PUBLISH,
   ARTIFACT_LIST,
-  UNMODELED_MCP,
+  MCP_TOOL,
+  UNMODELED,
 ];

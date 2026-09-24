@@ -414,6 +414,11 @@ export function dispositionOf(
   if (converter !== undefined) return { case: "modelled", converter };
   if (EXEMPT_TOOLS.has(toolName)) return { case: "exempt" };
   if (ENGINE_OWNED_TOOLS.has(toolName)) return { case: "engine_owned" };
+  if (isMcpToolName(toolName)) {
+    const mcp = converters.get(MCP_KEY);
+    if (mcp === undefined) throw new Error("shim convert: the MCP tool converter is missing from the registry");
+    return { case: "modelled", converter: mcp };
+  }
   return { case: "unmodeled" };
 }
 
@@ -524,6 +529,21 @@ export function convertToolUse(
  * would not silently take the fallback's place.
  */
 export const UNMODELED_KEY = " unmodeled";
+
+/** The vendor's MCP tool-name prefix: `mcp__<server>__<tool>`. */
+export const MCP_PREFIX = "mcp__";
+
+/** Whether a vendor tool name is an MCP server's tool. */
+export function isMcpToolName(toolName: string): boolean {
+  return toolName.startsWith(MCP_PREFIX);
+}
+
+/**
+ * The registry key the MCP tool converter is filed under. Every MCP tool name
+ * is matched by its `mcp__` prefix rather than looked up, so the converter sits
+ * under a key no vendor tool can ever be named.
+ */
+export const MCP_KEY = " mcp";
 
 // ---------------------------------------------------------------------------
 // The result side

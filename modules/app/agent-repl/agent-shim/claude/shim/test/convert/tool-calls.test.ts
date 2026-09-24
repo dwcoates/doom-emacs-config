@@ -640,8 +640,17 @@ describe("disposition", () => {
     expect(dispositionOf(TOOL_CONVERTERS, "AskUserQuestion").case).toBe("engine_owned");
   });
 
-  it("is UNMODELED for a runtime-registered MCP tool", () => {
-    expect(dispositionOf(TOOL_CONVERTERS, "mcp__Slack__send").case).toBe("unmodeled");
+  it("is MODELLED as an MCP tool call for a runtime-registered MCP tool", () => {
+    const disposition = dispositionOf(TOOL_CONVERTERS, "mcp__Slack__send");
+    expect(disposition.case === "modelled" ? disposition.converter.kind : disposition.case).toBe("mcp_tool_call");
+  });
+
+  it("is UNMODELED for a genuinely unknown tool", () => {
+    expect(dispositionOf(TOOL_CONVERTERS, "StructuredOutput").case).toBe("unmodeled");
+  });
+
+  it("refuses an MCP tool when the registry holds no MCP converter", () => {
+    expect(() => dispositionOf(new Map(), "mcp__Slack__send")).toThrow(/MCP tool converter is missing/);
   });
 
   it("never routes a recognizable built-in to unmodeled — that would be a defect", () => {
@@ -832,7 +841,7 @@ describe("a registry with no unmodeled converter", () => {
 
     // Act + Assert
     expect(() =>
-      convertToolUse(empty, foldContext(), registry, call("toolu_x", "mcp__Slack__send"), {
+      convertToolUse(empty, foldContext(), registry, call("toolu_x", "StructuredOutput"), {
         agentId: MAIN_AGENT,
         vendorUuid: "uuid-1",
       }),
@@ -842,7 +851,7 @@ describe("a registry with no unmodeled converter", () => {
   it("refuses the RESULT of a call it cannot model too", () => {
     // Arrange
     const registry = createCallRegistry();
-    registry.remember(call("toolu_x", "mcp__Slack__send"));
+    registry.remember(call("toolu_x", "StructuredOutput"));
     const empty = new Map<string, ToolConverter>();
 
     // Act + Assert
@@ -871,7 +880,7 @@ describe("an unmodeled converter that announces nothing", () => {
         new Map([[UNMODELED_KEY, silent]]),
         foldContext(),
         registry,
-        call("toolu_x", "mcp__Slack__send"),
+        call("toolu_x", "StructuredOutput"),
         { agentId: MAIN_AGENT, vendorUuid: "uuid-1" },
       ),
     ).toThrow(/produced no start frame/);
