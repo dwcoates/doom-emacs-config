@@ -605,7 +605,7 @@ export class TurnEngine {
       return updateAgentRefused({ kind: "nothingRunning" }, "the vendor query is dead; nothing is running");
     }
     if (isMain) {
-      if (this.session.openTurn() === undefined) {
+      if (this.servedTurn() === undefined) {
         return updateAgentRefused({ kind: "nothingRunning" }, "the main agent has no turn in flight");
       }
       // Callback liveness FIRST: an unresolved canUseTool promise survives an
@@ -775,7 +775,7 @@ export class TurnEngine {
     }
     const requested = request.turn?.value ?? "";
     await this.awaitStartOf(requested);
-    const open = this.session.openTurn();
+    const open = this.servedTurn();
     // AN INTERRUPT ENDS ONLY THE SYNCHRONOUS TURN. Detached work — background
     // subagents, shells, monitors, workflows — outlives the turn that spawned
     // it by design, and it ends only through its own per-task stop or a
@@ -839,6 +839,21 @@ export class TurnEngine {
       );
     }
     return killTurnKilled(killed);
+  }
+
+  /**
+   * The open turn as a consumer may address it: never the shim's own keep-alive.
+   *
+   * A KEEP-ALIVE IS NOBODY'S TURN TO STOP. A consumer's stop or kill that lands
+   * while only a keep-alive holds the slot (the consumer's own turn already
+   * ended) finds nothing running, exactly as on an idle session. Interrupting
+   * the keep-alive instead would end a send whose result the SDK declares no
+   * attribution for, and naming it `not_the_open_turn` would tell the daemon a
+   * keep-alive exists.
+   */
+  private servedTurn(): OpenTurn | undefined {
+    const slot = this.session.openTurn();
+    return slot?.keepalive === true ? undefined : slot;
   }
 
   /**
