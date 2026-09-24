@@ -1332,3 +1332,28 @@ func TestAJoiningDaemonKeepsTheRendezvousItArmedAfterRetiringTheManifest(t *test
 		t.Fatalf("armed workspaces = %d, want the one the retired manifest named", got)
 	}
 }
+
+func TestAHandoverAdoptionClaimsOnTheJoiningReadOnlyHandle(t *testing.T) {
+	// Arrange: the incumbent has released the transferred workspace, and this
+	// successor still holds the read-only handle it joined with.
+	h := newHarness(t)
+	first, _ := joinedWithOneOfTwo(t, h)
+	if err := h.db.ReleaseServing(context.Background(), first, selfInstance); err != nil {
+		t.Fatalf("ReleaseServing: %v", err)
+	}
+	h.joiningHandle(t)
+
+	// Act
+	if err := h.c.AdoptHost(context.Background(), first); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+
+	// Assert
+	owner, err := h.db.Serving(context.Background(), first)
+	if err != nil {
+		t.Fatalf("Serving: %v", err)
+	}
+	if owner == nil || *owner != selfInstance {
+		t.Fatalf("serving owner = %q, want this daemon once the adoption promoted its handle", ownerText(owner))
+	}
+}

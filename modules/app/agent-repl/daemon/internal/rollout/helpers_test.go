@@ -927,3 +927,20 @@ func waitForForceKill(t *testing.T, shim *fakeShim) {
 		t.Fatalf("the shim was never force-killed")
 	}
 }
+
+// joiningHandle swaps the controller's state client for a READ-ONLY handle on
+// the harness's own store, which is what a joining successor boots with
+// (wsm.OpenReadOnly): nothing may be written until the handle is promoted.
+func (h *harness) joiningHandle(t *testing.T) {
+	t.Helper()
+	ro, err := wsm.OpenReadOnly(context.Background(), filepath.Join(h.state, "wsm.db"), wsm.WithLogger(h.log.Global()))
+	if err != nil {
+		t.Fatalf("wsm.OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ro.Close(); err != nil {
+			t.Errorf("close the joining handle: %v", err)
+		}
+	})
+	h.c.deps.DB = ro
+}
