@@ -60,6 +60,9 @@ export async function writeEntries(
 ): Promise<void> {
   const response = await client.writeBatch(
     create(storev1.WriteBatchRequestSchema, {
+      writeClass: create(storev1.WriteClassSchema, {
+        writeClass: { case: "interactive", value: create(storev1.WriteClassInteractiveSchema, {}) },
+      }),
       producer,
       batch: create(storev1.EntryBatchSchema, { entries: [...entries] }),
     }),

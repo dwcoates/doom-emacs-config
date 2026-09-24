@@ -24,6 +24,9 @@
 #
 # Run with:   bash bin/test-build-frontend.sh
 
+# Tests run only at background priority: re-exec once through bin/background.sh.
+[[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
+
 set -euo pipefail
 
 # A pre-commit hook exports its live index to children. The fake git ignores

@@ -478,6 +478,7 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!query-eof-mid-ask` | a gated `Bash` whose `canUseTool` ask is opened and then NEVER answered by the vendor: the iterable ENDS with the callback still pending. THE ASK IS OPENED BEFORE THE DEATH, which is the whole point — an unresolved `canUseTool` promise wedges the vendor process, so the query-death path owes every pending callback a denial | the tool_use line and the prompt line; there is no turn record because there was no turn end | SessionQueryDied.cause=unexpected_eof with an AgentPermission settling denied |
 | `!query-fail` | NOTHING, and then the iterable REJECTS — the producer died rather than finished | the prompt line only | SessionQueryDied.cause=iterator_failure |
 | `!keepalive` | an ordinary short turn. It exists so a test can drive a keep-alive-shaped turn deterministically; the `<!--agent-repl:keepalive-->` marker is the SHIM's, and the mock never adds or removes it | the assistant line, the prompt line (marker and all) and the turn record | AgentResponse.from_model, AgentSuccess.completed — classified keep-alive by the marker on the PROMPT |
+| `!queue-vendor-turn` | an ordinary short turn, and then — ahead of the NEXT send's own turn — a turn the vendor runs ON ITS OWN, the way a background task's notification starts one: an assistant answer and a result with `origin: {kind: "task-notification"}`, and NO `user_message_uuid` anywhere, because no send asked for it | the assistant line, the prompt line and the turn record, then the vendor turn's assistant line and record | AgentResponse.from_model, AgentSuccess.completed — twice, the second answering nobody. Grounded in the 2026-09-23 keep-alive leak, where such a turn's result closed the shim's keep-alive early |
 
 ### What the mock writes, and where
 
@@ -688,6 +689,39 @@ component (`shim-engine-keepalive-rewind`, cleared by the next rewind that
 lands) so the footer says what happened. The refusal never reaches the fold, so
 the feed shows the answer rather than "the run broke while executing".
 
+## The keep-alive turn scope: what the keep-alive produced, and who may see it
+
+A keep-alive turn is NEVER served to anyone: not its prompt, its reply, its
+thinking, its usage, its terminal or its end (`src/engine/keepalive.ts`,
+`KeepaliveScope`).
+
+- **THE VENDOR ATTRIBUTES, NOT ARRIVAL ORDER.** The keep-alive send carries a
+  client `uuid` the shim mints; the vendor echoes it (`user_message_uuid` /
+  `user_message_uuids`) on the first reply frames and the `result` of the turn
+  that answers it. A vendor turn is the keep-alive's from its first frame
+  naming that uuid to its result. Paid for on 2026-09-23: the vendor ran a
+  background task's notification turn between the keep-alive's send and its
+  answer, that turn's `result` closed the keep-alive, and the keep-alive's `.`
+  arrived untagged and was drawn as a green final answer.
+- **ONE TAG, TAKEN ONCE.** `onSdkMessage` asks the scope once per message; the
+  answer is the fold context's `keepalive`, so every row the fold produces
+  carries it. The store writer lands a tagged row on `unserved_item.keepalive`
+  (recorded, never paged, never streamed); `serveSessionUpdates` never pushes
+  a tagged session fact. Only the keep-alive's own result closes it, and that
+  close pushes nothing (no context usage, title or account re-probe).
+- **THE DAEMON NEVER SEES ONE.** No verb names a keep-alive as the turn in
+  flight (`servedOpenTurn`): not `SessionStarted`, not `SessionLive`, not
+  `KillSession`, not `Hibernate`. The one keep-alive fact on the wire is the
+  ruled `turn_already_open.keepalive` refusal the daemon re-drives past.
+- **PERSISTED, NOT DROPPED.** The rows are kept (unserved) because the
+  keep-alive made a real, billed API call and the file plane writes the same
+  keys; dropping them would lose accounting and let the sidecar's copy be the
+  only one.
+- **WHAT IT DOES NOT CLAIM.** A vendor turn's preamble (`init`, a
+  `UserPromptSubmit` hook, a status line) carries no stamp and stays untagged.
+- **THE FILE PLANE is the marker, not the stamp**: the title digest and the
+  transcript listing skip a prompt that begins with the keep-alive marker.
+
 ## The hibernate contract: at most one compaction per idle period
 
 `Hibernate` is the daemon's pre-hibernation directive, and the shim's answer to
@@ -838,6 +872,8 @@ npm run coverage      # vitest with istanbul coverage over authored src/**/*.ts
 npm run coverage:verify  # prove the per-file numbers are still a measurement
 npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
+# test, coverage and smoke (and their pre-hooks) run through ../../../bin/background.sh;
+# the vitest configs refuse a run without it, so prefix any bare `npx vitest` with it
 ```
 
 - `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same

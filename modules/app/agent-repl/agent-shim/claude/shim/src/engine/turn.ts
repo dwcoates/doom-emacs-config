@@ -86,6 +86,16 @@ export interface SessionContext {
   /** Adopt (or clear) the open turn. */
   setOpenTurn(turn: OpenTurn | undefined): void;
   /**
+   * Hold the keep-alive beat while a `StartTurn` is being opened, answering
+   * the release.
+   *
+   * A START IN FLIGHT OWNS THE SUBMITTER SLOT. It checks for an open turn
+   * first and adopts its own only after two store round trips, and a beat
+   * landing between the two saw "no turn open", submitted, and was then
+   * overwritten by the start's own turn -- two submitters for one query.
+   */
+  holdKeepalive(): () => void;
+  /**
    * Register an open `WatchAgent` tail so the teardown can conclude it.
    *
    * A standing tail must not be CUT at the exit: the consumer is waiting on it
@@ -300,9 +310,11 @@ export class TurnEngine {
       }),
     };
     this.starting = starting;
+    const releaseKeepalive = this.session.holdKeepalive();
     try {
       return await this.openTurnForStart(request);
     } finally {
+      releaseKeepalive();
       if (this.starting === starting) this.starting = undefined;
       settle();
     }

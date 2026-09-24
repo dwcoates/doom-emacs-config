@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/workspace"
 )
 
 // TestScheduleEncodesTheReasonBeforeItIsDurable pins that the drain reason is
@@ -422,5 +423,55 @@ func TestClientLogRecordsTheUnknownWorkspaceRefusalAtInfo(t *testing.T) {
 	}
 	if refusal.Level != "INFO" {
 		t.Fatalf("record = %+v, want the refusal at INFO", refusal)
+	}
+}
+
+// A DIAGNOSTIC RECORD IS FILED BY WHICHEVER DAEMON IT REACHES. During a
+// handover a forwarder keeps dialing the incumbent until the successor
+// publishes its address, and can reach the successor before it has adopted;
+// a record is not intake, so neither standing refuses it, and no unlanded-arm
+// WARN is written for it (TestRefusalOrderingDuringHandover's flake).
+func TestClientLogIsFiledWhateverTheServingStanding(t *testing.T) {
+	tests := []struct {
+		name     string
+		standing workspace.Standing
+	}{
+		{name: "a workspace this daemon transferred away", standing: workspace.StandingTransferringAway},
+		{name: "a workspace this daemon has not adopted yet", standing: workspace.StandingNotYetAdopted},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			surfaces := &fakeSurfaces{global: log, workspace: log}
+			h := newHarness(t, func(deps *Deps) {
+				deps.Log = surfaces
+			})
+			h.Ownership.standing = tc.standing
+
+			// Act.
+			resp, err := h.Client.ClientLog(context.Background(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+				Workspace: ref(),
+				Record: &agentreplv1.ClientLogRecord{
+					Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+					Operation: "sidecar.tail.pickup",
+					Message:   "a record forwarded across the handover",
+				},
+			}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ClientLog: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if len(surfaces.clientRecords) != 1 {
+				t.Fatalf("persisted %d records, want 1", len(surfaces.clientRecords))
+			}
+			if warnings := log.at("WARN"); len(warnings) != 0 {
+				t.Fatalf("warnings = %v, want none", warnings)
+			}
+		})
 	}
 }

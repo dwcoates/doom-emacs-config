@@ -21,7 +21,7 @@ import {
   FooterTokensCellVerdictSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { bootColdOnce, startHarness, type Harness } from "./harness";
 import { panelStorageKey } from "../../src/footer/footer";
 import {
   assertVocabCoversArms,
@@ -54,6 +54,8 @@ import {
 import { ROOT_FEED } from "./fake-daemon";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
@@ -670,13 +672,28 @@ describe("panel jump rows", () => {
     expect(harness.row(FOOTER_AGENT_TARGET)?.dataset.revealed).toBe("true");
   });
 
-  it("makes no jump target of a monitor row", async () => {
+  it("makes a monitor row a jump row that names no FeedId", async () => {
     // Arrange
     await withFooter({ status: "idle" });
     // Act
     await harness.click('.footer-chip[data-chip="monitors"]');
-    // Assert: monitors carry no FeedId — there is nothing to jump to.
+    // Assert: a monitor draws no feed entry, so the daemon states why.
     expect(harness.$('.footer-expanded[data-panel="monitors"] [data-jump]')).toBeNull();
+    expect(
+      harness.$('.footer-expanded[data-panel="monitors"] [data-jump-unresolved="noFeedEntry"]'),
+    ).not.toBeNull();
+  });
+
+  it("says not on screen when a monitor row is clicked", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    await harness.click('.footer-chip[data-chip="monitors"]');
+    // Act
+    await harness.click('.footer-expanded[data-panel="monitors"] [data-jump-unresolved]');
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="monitors"] .footer-row-unreachable')).toBe(
+      "not on screen",
+    );
   });
 
   it("makes no jump target of a cron row", async () => {
@@ -1127,6 +1144,18 @@ describe("a jump whose target is not drawn", () => {
     await harness.click(`[data-jump="${FOOTER_SHELL_TARGET}"]`);
     // Assert: the walk finds nothing, and the reader is left where they were.
     expect(harness.row(FOOTER_SHELL_TARGET)).toBeNull();
+  });
+
+  it("says so at the row rather than doing nothing", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Act
+    await harness.click(`[data-jump="${FOOTER_SHELL_TARGET}"]`);
+    // Assert: the known entry could not be brought on screen, so the notice.
+    expect(harness.text('.footer-expanded[data-panel="shells"] .footer-row-unreachable')).toBe(
+      "not on screen",
+    );
   });
 });
 

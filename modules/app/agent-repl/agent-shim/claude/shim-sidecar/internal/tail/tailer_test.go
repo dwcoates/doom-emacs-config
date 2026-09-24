@@ -392,3 +392,100 @@ func TestTheSecondPollAfterAnAllDroppedBatchRereadsNothing(t *testing.T) {
 		t.Fatalf("the second poll reported a change; the dropped lines' offset was already committed")
 	}
 }
+
+// threeLines is a fixture of three one-record lines, and lineTwoAt the offset
+// its second line starts at.
+const threeLines = `{"a":1}` + "\n" + `{"b":2}` + "\n" + `{"c":3}` + "\n"
+
+const lineTwoAt = int64(len(`{"a":1}` + "\n"))
+
+func TestTailerBatchBounds(t *testing.T) {
+	tests := []struct {
+		name       string
+		maxRead    int
+		maxFrames  int
+		wantFrames int
+		wantOffset int64
+		wantMore   bool
+	}{
+		{name: "the frame bound stops the batch at the first frame past it", maxRead: MaxBatchBytes, maxFrames: 1, wantFrames: 1, wantOffset: lineTwoAt, wantMore: true},
+		{name: "the byte bound stops the read short of the file's end", maxRead: 9, maxFrames: MaxBatchFrames, wantFrames: 1, wantOffset: 9, wantMore: true},
+		{name: "a batch inside both bounds reads to the end and reports no more", maxRead: MaxBatchBytes, maxFrames: MaxBatchFrames, wantFrames: 3, wantOffset: int64(len(threeLines)), wantMore: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			p := filepath.Join(t.TempDir(), "t.jsonl")
+			writeFile(t, p, threeLines)
+			tr, h := newTailer(t, p)
+			tr.maxRead, tr.maxFrames = tc.maxRead, tc.maxFrames
+
+			// Act.
+			r, err := tr.Poll()
+			if err != nil {
+				t.Fatalf("poll: %v", err)
+			}
+
+			// Assert.
+			if got := len(h.batches[0]); got != tc.wantFrames {
+				t.Fatalf("handler saw %d frame(s), want %d", got, tc.wantFrames)
+			}
+			if got := r.Next.GetOffset(); got != tc.wantOffset {
+				t.Fatalf("next offset = %d, want %d", got, tc.wantOffset)
+			}
+			if r.More != tc.wantMore {
+				t.Fatalf("more = %t, want %t", r.More, tc.wantMore)
+			}
+		})
+	}
+}
+
+func TestTailerFrameBoundedBatchesLoseNothing(t *testing.T) {
+	// Arrange: a frame bound of one forces a batch per line.
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	writeFile(t, p, threeLines)
+	tr, _ := newTailer(t, p)
+	tr.maxFrames = 1
+
+	// Act: drain while the tailer says there is more.
+	total, polls := 0, 0
+	for {
+		r, err := tr.Poll()
+		if err != nil {
+			t.Fatalf("poll: %v", err)
+		}
+		tr.Commit(r)
+		total += len(r.Entries)
+		polls++
+		if !r.More {
+			break
+		}
+	}
+
+	// Assert: every record surfaced exactly once, one bounded batch each.
+	if total != 3 || polls != 3 {
+		t.Fatalf("records = %d over %d poll(s), want 3 over 3", total, polls)
+	}
+}
+
+func TestTailerFrameBoundCountsOnlyTheFramesItKept(t *testing.T) {
+	// Arrange.
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	writeFile(t, p, threeLines)
+	tr, h := newTailer(t, p)
+	tr.maxFrames = 2
+
+	// Act.
+	r, err := tr.Poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	// Assert: the counters describe the bounded batch, not the whole read.
+	if r.Records != 2 || h.lastCtx.RecordsObserved != 2 {
+		t.Fatalf("records = %d observed = %d, want 2 each", r.Records, h.lastCtx.RecordsObserved)
+	}
+	if h.lastCtx.BytesObserved != 2*lineTwoAt {
+		t.Fatalf("bytes observed = %d, want the bounded batch's end %d", h.lastCtx.BytesObserved, 2*lineTwoAt)
+	}
+}

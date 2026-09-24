@@ -1,3 +1,6 @@
+// Refuses a run that did not come through bin/background.sh: tests only ever
+// run at background priority (see that script and require-background.mjs).
+import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 import { viteCacheDir } from "./vite-cache";
@@ -40,6 +43,9 @@ export default defineConfig({
     // before failing. ~3x the observed max, so real variance has headroom
     // without masking a hang. If a test needs more, it gets its own
     // `{ timeout: ... }` with a one-line reason, not a raised global.
+    // A file's COLD boot is the one standing exception: it is paid once per
+    // file in `bootColdOnce`'s `beforeAll` (test/integration/harness.ts),
+    // under its own measured bound, so no test body carries it.
     testTimeout: 900,
     hookTimeout: 900,
   },

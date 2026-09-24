@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
 import { Agent } from "undici";
-import { vi } from "vitest";
+import { beforeAll, vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { shellElements, type ShellElements } from "../../src/shell";
@@ -55,6 +55,7 @@ import type { TerminalFactory } from "../../src/login/terminal";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
+import { resetPageState } from "../page-state";
 import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 
@@ -236,8 +237,21 @@ export interface Harness extends MountedApp {
   startSecondDaemon(): Promise<FakeDaemon>;
 }
 
-/** The body of the real index.html, so the shell under test is the shipped one. */
-function installShell(doc: Document): void {
+/**
+ * The webapp build a harness page states when its caller names none.
+ *
+ * A served page states its build through its built entry tag
+ * (`src/webapp-build.ts`), and the lifecycle refuses to open its watch
+ * without one. The fake daemon judges no build, so any well-formed entry
+ * serves; a real daemon's caller names the entry its daemon serves.
+ */
+export const HARNESS_WEBAPP_BUILD = "integration";
+
+/**
+ * The body of the real index.html, so the shell under test is the shipped one,
+ * stating BUILD the way a built page does.
+ */
+function installShell(doc: Document, build: string): void {
   // RESOLVED OFF THE PROJECT ROOT, not off `import.meta.url`. Under the jsdom
   // environment the module's own url is an http one (jsdom's document base),
   // and `fileURLToPath` refuses it — vitest runs from `webapp/`, so the shell
@@ -248,6 +262,14 @@ function installShell(doc: Document): void {
   // Drop the module script tag: the harness mounts components itself rather
   // than letting main.ts boot, so that a test can script the daemon first.
   doc.body.innerHTML = body[1].replace(/<script[\s\S]*?<\/script>/gi, "");
+  // THE BUILT ENTRY TAG, in place of the dev one: `npm run build` rewrites
+  // `/src/main.ts` to `/assets/index-<hash>.js`, and that tag is the only
+  // place a page's build is read from. jsdom neither fetches nor runs it.
+  for (const stale of doc.head.querySelectorAll('script[type="module"]')) stale.remove();
+  const entry = doc.createElement("script");
+  entry.setAttribute("type", "module");
+  entry.setAttribute("src", `/assets/index-${build}.js`);
+  doc.head.append(entry);
 }
 
 /**
@@ -321,6 +343,12 @@ export interface HarnessOptions {
    * call `installClientLogSink()` instead.
    */
   clientLog?: boolean;
+  /**
+   * The webapp build the page states through its built entry tag. Default
+   * `HARNESS_WEBAPP_BUILD`; a real daemon's caller names the build that daemon
+   * serves, so the page is judged current.
+   */
+  webappBuild?: string;
 }
 
 /** Where the app's transport points, and how a request gets routed there. */
@@ -401,6 +429,48 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   return harness;
 }
 
+/**
+ * THE BOUND ON ONE FILE'S COLD BOOT, which `bootColdOnce` pays in a
+ * `beforeAll`. MEASURED across the full suite: the slowest cold boot at a
+ * load average of ~60 was 602ms, and 1800 is ~3x that. Even at loads of
+ * 100-300 the slowest seen was 971ms, so a boot that crosses this is hung,
+ * not slow.
+ */
+const COLD_BOOT_TIMEOUT_MS = 1_800;
+
+/**
+ * PAY THE FILE'S COLD BOOT BEFORE ITS FIRST TEST, NOT INSIDE IT.
+ *
+ * The integration run is isolated, so every file evaluates the app's modules
+ * afresh, and the FIRST `startHarness` in a file is the first time any of
+ * that code runs: the shell's parse, the transport and the codecs on the
+ * first round trip, every mount's first draw. V8 compiles all of it lazily,
+ * on that call. MEASURED with a per-phase probe in `startHarness` (every
+ * phase is slower, the first settle most): the first boot in a file took
+ * ~90-100ms against ~25ms for every later one on an idle machine, and
+ * ~410-600ms against ~110-270ms at a load average of ~60. At the loads the
+ * suite failed under, the first boot alone (945ms) crossed the 900ms
+ * `testTimeout` before the test had asserted anything. That is why a loaded
+ * run failed EXACTLY the first harness-booting test of each file, and why
+ * each of those files passed alone.
+ *
+ * So every file that boots the app calls this once at its top level: it
+ * boots and stops one throwaway app (composer on, so the composer's mounts
+ * are compiled too) in a `beforeAll` with its OWN bound, and no test body
+ * carries the cold start. The 900ms test bound then means what it says: one
+ * warm test. harness.self.test.ts checks that every file that calls
+ * `startHarness` calls this.
+ */
+export function bootColdOnce(): void {
+  beforeAll(async () => {
+    // setup.ts installs this per TEST, and a `beforeAll` runs before any of
+    // those: without it the first mount's first log line has no logger.
+    resetPageState();
+    const cold = await startHarness({ composer: true });
+    await cold.stop();
+  }, COLD_BOOT_TIMEOUT_MS);
+}
+
 // pageSerial names each mounted app's page. A page id addresses ONE stream on
 // the daemon, and a second stream for one id is refused, so two mounts in one
 // file must not share one.
@@ -443,7 +513,7 @@ async function mountApp(
   };
   if (fake !== undefined) options.arrange?.(fake);
 
-  installShell(document);
+  installShell(document, options.webappBuild ?? HARNESS_WEBAPP_BUILD);
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.
@@ -560,7 +630,7 @@ async function mountApp(
   handles.push(login);
   topbar.watch(ctx, { openLogin: (control) => login.open(control) });
   handles.push(mountSidebar(shell.sidebar, ctx));
-  handles.push(mountHoldTray(shell.holdTray, ctx));
+  handles.push(mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) }));
 
   if (composerEnabled) {
     shell.composer.hidden = false;

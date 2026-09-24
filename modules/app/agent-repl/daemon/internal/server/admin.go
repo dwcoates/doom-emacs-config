@@ -199,6 +199,20 @@ func (s *server) ClientLog(
 // subjectForClientLog is subjectFor for ClientLog, whose unknown-workspace
 // refusal is ORDINARY TRAFFIC rather than a fault.
 //
+// A DIAGNOSTIC RECORD IS NOT INTAKE, SO IT PASSES NO SERVING-STANDING GATE.
+// During a handover a forwarder keeps dialing the address daemon.addr names,
+// and the successor publishes its own only once it owns EVERY workspace — so
+// for that whole window records for a workspace already transferred still
+// reach the incumbent, and records can reach the successor before it has
+// adopted. Gated like intake, each was refused `transferring_away` or
+// `not_yet_adopted`, arms ClientLogError does not carry, and every one became
+// a WARN (`daemon.refusal.unlanded_arm`) whose appearance depended only on
+// how the sidecar's next poll fell against the handover — the flake in
+// TestRefusalOrderingDuringHandover. A record changes no workspace state and
+// its sink is keyed by the registered directory, which both daemons hold, so
+// whichever daemon it reaches files it. The answer no longer depends on the
+// handover's timing at all.
+//
 // A LATE LOG LINE AFTER A CLOSE IS EXPECTED. A forwarder learns its workspace
 // is gone only by being told, and records it already wrote keep arriving for
 // the seconds it takes that to happen (measured, realtest 8, 2026-09-12: a
@@ -214,7 +228,7 @@ func (s *server) subjectForClientLog(
 	if err := validateWorkspaceRef("workspace", ref); err != nil {
 		return resolved{}, err, true
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, ref)
+	subject, r, err := s.resolveRegistered(ctx, rpc, ref)
 	if err != nil {
 		return resolved{}, fail(s.log, rpc, err), true
 	}

@@ -16,7 +16,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { FailureKindSchema } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 
-import { chipFailureText, startHarness, type Harness } from "./harness";
+import { bootColdOnce, chipFailureText, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { RENDER_COLORS, failureSideColor } from "./vocab";
 import {
@@ -33,6 +33,8 @@ import {
 } from "./fixtures";
 
 let harness: Harness;
+
+bootColdOnce();
 
 afterEach(async () => {
   await harness?.stop();
