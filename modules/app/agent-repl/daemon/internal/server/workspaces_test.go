@@ -5,12 +5,14 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -707,5 +709,53 @@ func TestMarkWorkspaceViewedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 	if len(h.Verbs.markViewed) != 0 {
 		t.Fatalf("marked = %v, want nothing marked for an unknown workspace", h.Verbs.markViewed)
+	}
+}
+
+// TestASelectWhoseCallerLeftRecordsNoError is the 18:28:56 switch at the rpc:
+// the caller cancelled mid-revival, and "the rpc failed" was recorded twice
+// at ERROR for a select nobody was still waiting on.
+func TestASelectWhoseCallerLeftRecordsNoError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Verbs.selectEntered, h.Verbs.selectLeft = make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	answered := make(chan error, 1)
+	go func() {
+		_, err := h.Client.SelectWorkspace(ctx, connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()}))
+		answered <- err
+	}()
+
+	// Act.
+	awaitClosed(t, h.Verbs.selectEntered, "the select")
+	cancel()
+	awaitClosed(t, h.Verbs.selectLeft, "the select's return")
+	// Close waits for the handler to finish, so its records are all in.
+	h.HTTP.Close()
+
+	// Assert.
+	infos := 0
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError {
+			t.Fatalf("records = %+v, want no ERROR for a caller that left", log.Records())
+		}
+		if r.Level == dlog.LevelInfo && r.Message == "the caller left before the select finished" {
+			infos++
+		}
+	}
+	if infos != 1 {
+		t.Fatalf("records = %+v, want the departure at INFO once", log.Records())
+	}
+}
+
+// awaitClosed waits for ch to close, failing the test past a bound.
+func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s never happened", what)
 	}
 }

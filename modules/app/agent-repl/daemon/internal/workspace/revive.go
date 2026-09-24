@@ -2,11 +2,13 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 )
 
 // A HIBERNATED WORKSPACE IS REVIVED BY BEING LOOKED AT, not only by being
@@ -68,6 +70,10 @@ type revivalFlights struct {
 	// test release the leader only once every joiner is provably waiting on
 	// it; production leaves it nil.
 	observeJoin func(ids.WorkspaceID)
+	// observeFinish, when set, is told every flight that finished, after its
+	// outcome is published. It is the test seam for a revival that outlives
+	// the caller that started it; production leaves it nil.
+	observeFinish func(ids.WorkspaceID)
 }
 
 // revivalFlight is one revival's outcome, published to its joiners when done
@@ -106,9 +112,13 @@ func (r *revivalFlights) join(ws ids.WorkspaceID) (*revivalFlight, bool) {
 func (r *revivalFlights) finish(ws ids.WorkspaceID, flight *revivalFlight, revived bool, err error) {
 	r.mu.Lock()
 	delete(r.inFlight, ws)
+	observe := r.observeFinish
 	r.mu.Unlock()
 	flight.revived, flight.err = revived, err
 	close(flight.done)
+	if observe != nil {
+		observe(ws)
+	}
 }
 
 // reviveIfParked brings a hibernated workspace's session back and lifts the
@@ -123,43 +133,85 @@ func (r *revivalFlights) finish(ws ids.WorkspaceID, flight *revivalFlight, reviv
 // marker; it is lowered the moment Start returns, whichever way it returned,
 // so the row never says "coming back" about a session that already did or
 // never will.
+//
+// THE REVIVAL IS NOT THE CALLER'S TO CANCEL. It runs as a detached start
+// (Sessions.StartDetached, on the fleet's own lifetime, which the daemon's
+// exit ends and joins), so a caller that leaves mid-bring-up -- a user
+// switching workspaces quickly -- stops WAITING and nothing else: the
+// bring-up lands whole. Bound to the rpc, it was torn in half at its session
+// record's write ("begin transaction: context canceled") and reported at
+// ERROR as a session that did not come back (2026-09-24T18:28:56, workspace
+// 0100059cb65649bc). A caller that left is recorded at INFO and answered its
+// own cancellation.
 func (v *verbs) reviveIfParked(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
 	flight, leads := v.revivals.join(ws)
-	if !leads {
+	if leads {
+		v.lead(ctx, log, operation, ws, flight)
+	} else {
 		log.Debug(operation, "a revival of this workspace is already in flight; joining it", nil)
-		select {
-		case <-flight.done:
-			return flight.revived, flight.err
-		case <-ctx.Done():
-			log.Error(operation, "gave up waiting on the in-flight revival", dlog.Context{"cause": ctx.Err().Error()})
-			return false, fmt.Errorf("revive %q: await the in-flight revival: %w", ws, ctx.Err())
-		}
 	}
-	revived, err := v.revive(ctx, log, operation, ws)
-	v.revivals.finish(ws, flight, revived, err)
-	return revived, err
+	select {
+	case <-flight.done:
+		return flight.revived, flight.err
+	case <-ctx.Done():
+	}
+	// An outcome that is already published is answered: the caller did not
+	// miss it.
+	select {
+	case <-flight.done:
+		return flight.revived, flight.err
+	default:
+	}
+	log.Info(operation, "the caller left before the revival finished; the revival goes on without it", dlog.Context{"cause": ctx.Err().Error()})
+	return false, fmt.Errorf("revive %q: await the revival: %w", ws, ctx.Err())
 }
 
-// revive is the leader's half of reviveIfParked: the park check and, for a
-// parked workspace, the bring-up under the REVIVING marker.
-func (v *verbs) revive(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
-	asleep, err := v.parked(ctx, ws)
+// lead is the leader's half of reviveIfParked: the park check and, for a
+// parked workspace, the detached bring-up under the REVIVING marker. It
+// finishes the flight on every path. The park read is the flight's, not the
+// caller's, so it is not cancelled with the caller either.
+func (v *verbs) lead(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID, flight *revivalFlight) {
+	asleep, err := v.parked(context.WithoutCancel(ctx), ws)
 	if err != nil {
 		log.Error(operation, "could not tell whether the workspace was hibernated", dlog.Context{"cause": err.Error()})
-		return false, err
+		v.revivals.finish(ws, flight, false, err)
+		return
 	}
 	if !asleep {
-		return false, nil
+		v.revivals.finish(ws, flight, false, nil)
+		return
 	}
 	log.Info(operation, "reviving the hibernated workspace", nil)
 	v.deps.Sidebar.SetReviving(ws, true)
-	err = v.deps.Sessions.Start(ctx, ws)
-	v.deps.Sidebar.SetReviving(ws, false)
-	if err != nil {
-		log.Error(operation, "the hibernated workspace's session did not come back up", dlog.Context{"cause": err.Error()})
-		return false, fmt.Errorf("revive %q: start the session: %w", ws, err)
+	v.deps.Sessions.StartDetached(ws, func(err error) {
+		v.deps.Sidebar.SetReviving(ws, false)
+		if err != nil {
+			if why, ended := startEndedByDaemon(err); ended {
+				log.Info(operation, "the hibernated workspace's revival "+why, dlog.Context{"cause": err.Error()})
+			} else {
+				log.Error(operation, "the hibernated workspace's session did not come back up", dlog.Context{"cause": err.Error()})
+			}
+			v.revivals.finish(ws, flight, false, fmt.Errorf("revive %q: start the session: %w", ws, err))
+			return
+		}
+		v.unpark(ws)
+		log.Info(operation, "revived the hibernated workspace", nil)
+		v.revivals.finish(ws, flight, true, nil)
+	})
+}
+
+// startEndedByDaemon reports whether a DETACHED start ended because this
+// daemon is leaving rather than because the session failed to come up, and
+// says which. A detached start runs on the fleet's own lifetime, so its
+// context ending is the daemon's exit, and a standing-down refusal is the
+// same departure reached from the other side.
+func startEndedByDaemon(err error) (string, bool) {
+	switch {
+	case canceled(err):
+		return "ended when its context was cancelled", true
+	case errors.Is(err, shimclient.ErrStandingDown):
+		return "stopped because this daemon is standing down", true
+	default:
+		return "", false
 	}
-	v.unpark(ws)
-	log.Info(operation, "revived the hibernated workspace", nil)
-	return true, nil
 }
