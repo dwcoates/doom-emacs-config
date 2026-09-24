@@ -12,6 +12,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
+| `fix/cold-start-claims-serving` | `~/.config/doom-worktrees/cold-start-claims-serving` | A cold-started daemon never `ClaimServing`s its bring-ups, so `served()` silently skips them at handover and the shims are ORPHANED (live now: pids 43503, 43570, 43666 for c9fac76b, 498b3b65, 9e138edb). Claim at the one bring-up door, ERROR on a live-but-foreign owner, and recover unmanifested live shims at boot. | `a5be0435771b765a7` | 09-24 |
 
 ## Still waiting on the owner
 
