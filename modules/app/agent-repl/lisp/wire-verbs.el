@@ -718,6 +718,18 @@ The shim came up but the VENDOR failed to start the session."
     (list :detail (agent-repl-wire-verbs--decode-string
                        message 'detail json))))
 
+(defun agent-repl-wire-decode-open-workspace-lock-holder-unavailable (json)
+  "Decode OpenWorkspaceLockHolderUnavailable from JSON into a plist
+\(`:binary' `:os-error').
+The session's shim could not spawn its own kernel-lock holder: a broken
+lock helper, never an ownership conflict."
+  (let ((message "OpenWorkspaceLockHolderUnavailable"))
+    (agent-repl-wire-verbs--check-keys message json '(binary osError))
+    (list :binary (agent-repl-wire-verbs--decode-string
+                   message 'binary json)
+          :os-error (agent-repl-wire-verbs--decode-string
+                     message 'osError json))))
+
 (defun agent-repl-wire-decode-open-workspace-error-unknown-workspace (json)
   "Decode OpenWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-open-workspace-unknown-workspace json))
@@ -750,12 +762,16 @@ The shim came up but the VENDOR failed to start the session."
   "Decode OpenWorkspaceError's `vendor_start_failed\' cause arm from JSON."
   (agent-repl-wire-decode-open-workspace-vendor-start-failed json))
 
+(defun agent-repl-wire-decode-open-workspace-error-lock-holder-unavailable (json)
+  "Decode OpenWorkspaceError's `lock_holder_unavailable' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-lock-holder-unavailable json))
+
 (defun agent-repl-wire-decode-open-workspace-error (json)
   "Decode OpenWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "OpenWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed vendorStartFailed))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed vendorStartFailed lockHolderUnavailable))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -766,7 +782,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-open-workspace-error-session-deleted)
          (list 'transcriptMissing :transcript-missing #'agent-repl-wire-decode-open-workspace-error-transcript-missing)
          (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-open-workspace-error-spawn-failed)
-         (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-open-workspace-error-vendor-start-failed))))))
+         (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-open-workspace-error-vendor-start-failed)
+         (list 'lockHolderUnavailable :lock-holder-unavailable #'agent-repl-wire-decode-open-workspace-error-lock-holder-unavailable))))))
 
 (defun agent-repl-wire-decode-open-workspace-response-success (json)
   "Decode OpenWorkspaceResponse's `success' arm from JSON."

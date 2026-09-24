@@ -696,6 +696,33 @@ daemon starts sending it, with no table to update here."
     (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
     (should (agent-repl-test-verbs--messaged-p "the sdk threw"))))
 
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-says-the-helper-failed ()
+  "An open refused because the shim's lock helper would not spawn says so."
+  (agent-repl-test-verbs--with
+      '((:open . (:response (:arm :error
+                            :value (:cause (:arm :lock-holder-unavailable
+                                            :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "the shim's lock helper /b/shim-lock failed to start"))))
+
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-echoes-the-os-error ()
+  "The OS error is the user's lead to the broken binary, so it is drawn too."
+  (agent-repl-test-verbs--with
+      '((:open . (:response (:arm :error
+                            :value (:cause (:arm :lock-holder-unavailable
+                                            :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "(spawn ENOENT)"))))
+
+(ert-deftest agent-repl-verbs-open-lock-holder-unavailable-denies-an-owner ()
+  "The refusal must never read as another process owning the conversation."
+  (agent-repl-test-verbs--with
+      '((:open . (:response (:arm :error
+                            :value (:cause (:arm :lock-holder-unavailable
+                                            :value (:binary "/b/shim-lock" :os-error "spawn ENOENT")))))))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "no other process owns this conversation"))))
+
 (ert-deftest agent-repl-verbs-empty-arm-draws-no-empty-fields ()
   "An empty arm is its own whole assertion and renders no trailing payload."
   (agent-repl-test-verbs--with
