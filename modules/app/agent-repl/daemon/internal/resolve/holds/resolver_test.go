@@ -293,3 +293,21 @@ func TestTrayKeepsTheEditingMarkerAcrossAHoldsPush(t *testing.T) {
 		t.Fatal("a holds push dropped the standing editing marker")
 	}
 }
+
+func TestTrayBadgesThePromptBeingEdited(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
+
+	// Act.
+	r.SetEditing(testWS, "t1")
+
+	// Assert.
+	var labels []string
+	for _, b := range latest(t, r).GetItems()[0].GetPrompt().GetBadges() {
+		labels = append(labels, b.GetLabel())
+	}
+	if len(labels) != 2 || labels[0] != "classifying" || labels[1] != "editing" {
+		t.Fatalf("badge labels = %v, want [classifying editing]", labels)
+	}
+}
