@@ -269,45 +269,29 @@ func raiseColdGate(t *testing.T) *coldGate {
 	// state root, and both must outlive the bounce.
 	first.Kill()
 	coldGateKillShims(t, first.Daemon)
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir:    first.StateDir,
-		ShimNode:    requireNode(t),
-		ShimMain:    requireShimBundle(t),
-		StoreSocket: first.Store.Socket,
-		// THE LOCK BINARY IS RESTATED HERE, exactly as the lock DIRECTORY is.
-		// NewWorld hands every shim it spawns AGENT_REPL_SHIM_LOCK_BIN (the
-		// shim-lock this run built into a temp directory), but this successor
-		// is a hand-rolled second daemon and inherits none of that world's
-		// env. Without it the successor's shim falls back to the deploy
-		// location under $HOME — which the e2e HOME does not have — and its
-		// kernel claim dies `spawn ENOENT`, which locks.ts's caller reports as
-		// `conversation_owned`: "another process already owns vendor session".
-		// The first StartSession never reaches the claim (the cold refusal
-		// returns before either lock is taken), so the whole arrangement stands
-		// up and only the REMEDIATED re-open collides.
-		ExtraEnv: []string{
-			"AGENT_REPL_LOCK_DIR=" + first.LockDir,
-			"AGENT_REPL_SHIM_LOCK_BIN=" + requireLockBinary(t),
-		},
-		ServiceBinaries: first.ServiceBinaries(),
-		// THE SUCCESSOR MUST ROUTE THROUGH THE FIRST DAEMON'S ACCOUNT ROOT,
-		// or the resume it performs looks at an empty projects tree, the
-		// source classifier finds no transcript, and the session comes up
-		// FRESH instead of cold (daemon.md's RESUME GUARDS: "a vendor id
-		// whose transcript is MISSING comes up FRESH"). harness.StartDaemon
-		// mints a fresh config root per daemon and exposes no override for
-		// it, so the flag is RESTATED here: ExtraArgs is appended after the
-		// harness's own argv, and the daemon parses with Go's flag package,
-		// where the last occurrence of a flag wins. (OmitArgs cannot help —
-		// harness.StartDaemon applies it AFTER ExtraArgs, so it would strip
-		// this restatement along with the harness's own.)
-		ExtraArgs: []string{"--default-config-dir", first.DefaultConfigDir},
-		// The successor's boot and the resume its bring-up performs are two
-		// real process lifecycles on one budget — the shape AdoptionChainTimeout
-		// documents (world_test.go), reused verbatim rather than the tighter
-		// single-boot DefaultTimeout.
-		Timeout: AdoptionChainTimeout,
-	})
+	// THE LOCK BINARY, THE LOCK DIRECTORY AND THE SPOOL ROOT ARE RESTATED by
+	// SuccessorOpts. The first StartSession never reaches the kernel claim (the
+	// cold refusal returns before either lock is taken), so a successor missing
+	// the lock binary stands the whole arrangement up and fails only the
+	// REMEDIATED re-open, as `conversation_owned`.
+	opts := first.SuccessorOpts(t)
+	// THE SUCCESSOR MUST ROUTE THROUGH THE FIRST DAEMON'S ACCOUNT ROOT, or the
+	// resume it performs looks at an empty projects tree, the source classifier
+	// finds no transcript, and the session comes up FRESH instead of cold
+	// (daemon.md's RESUME GUARDS: "a vendor id whose transcript is MISSING
+	// comes up FRESH"). harness.StartDaemon mints a fresh config root per
+	// daemon and exposes no override for it, so the flag is RESTATED here:
+	// ExtraArgs is appended after the harness's own argv, and the daemon
+	// parses with Go's flag package, where the last occurrence of a flag wins.
+	// (OmitArgs cannot help — harness.StartDaemon applies it AFTER ExtraArgs,
+	// so it would strip this restatement along with the harness's own.)
+	opts.ExtraArgs = []string{"--default-config-dir", first.DefaultConfigDir}
+	// The successor's boot and the resume its bring-up performs are two real
+	// process lifecycles on one budget — the shape AdoptionChainTimeout
+	// documents (world_test.go), reused verbatim rather than the tighter
+	// single-boot DefaultTimeout.
+	opts.Timeout = AdoptionChainTimeout
+	successor := harness.StartDaemon(t, opts)
 	successor.ExpectWarnings(append([]string{"daemon.rollout.reconcile"}, coldGateWarnings...)...)
 	w := &World{Daemon: successor, Store: first.Store, Sidecar: first.Sidecar}
 

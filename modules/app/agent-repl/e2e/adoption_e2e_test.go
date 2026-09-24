@@ -270,19 +270,13 @@ func adAwaitReplayedFeedRow(t *testing.T, d *harness.Daemon, ws *workspacev1.Wor
 func adColdBoot(t *testing.T, w *World) *harness.Daemon {
 	t.Helper()
 	w.Kill()
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir:        w.StateDir,
-		ShimNode:        requireNode(t),
-		ShimMain:        requireShimBundle(t),
-		StoreSocket:     w.Store.Socket,
-		ServiceBinaries: w.ServiceBinaries(),
-		ExtraEnv:        []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir},
-		// A cold boot's own re-adoption of a still-running real shim chains a
-		// SECOND real process's full boot onto this one test, exactly the
-		// shape AdoptionChainTimeout documents (world_test.go) — reused
-		// verbatim rather than the tighter single-boot DefaultTimeout.
-		Timeout: AdoptionChainTimeout,
-	})
+	opts := w.SuccessorOpts(t)
+	// A cold boot's own re-adoption of a still-running real shim chains a
+	// SECOND real process's full boot onto this one test, exactly the shape
+	// AdoptionChainTimeout documents (world_test.go) — reused verbatim rather
+	// than the tighter single-boot DefaultTimeout.
+	opts.Timeout = AdoptionChainTimeout
+	successor := harness.StartDaemon(t, opts)
 	successor.ExpectWarnings("daemon.rollout.reconcile")
 	return successor
 }
