@@ -462,3 +462,58 @@ func TestRecheckLinksKeepsTheMissWhenNothingChanged(t *testing.T) {
 		t.Errorf("a recheck over an unchanged tree dropped the remembered miss: %+v", got)
 	}
 }
+
+// TestAPollRefreshKeepsTheMissWhenNoLinkMoved pins the poll path's cost: the
+// change probe refreshes on nearly every tick of an active session, and a
+// refresh that dropped every miss sent each watcher back to a glob over every
+// shim directory (74% of the sidecar's CPU, 2026-09-24).
+func TestAPollRefreshKeepsTheMissWhenNoLinkMoved(t *testing.T) {
+	t.Parallel()
+	// Arrange: a remembered miss over a tree that holds a link directory.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	writeVendorLink(t, stateDir, wsKey, stranger, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Fatalf("precondition: the unlinked id resolved as %+v, want unrecorded", got)
+	}
+	globs := idx.globs
+
+	// Act: a poll-path refresh over an untouched link tree, then the lookup.
+	idx.RefreshKeepingMisses()
+	before := idx.globs
+	got := idx.Resolve(rotated)
+
+	// Assert: the refresh read the records but the lookup ran no glob.
+	if got.Source != SourceUnrecorded {
+		t.Fatalf("the miss resolved as %+v, want the remembered miss", got)
+	}
+	if idx.globs != before {
+		t.Errorf("the lookup after a poll refresh ran %d glob(s), want none (refresh itself ran %d)", idx.globs-before, before-globs)
+	}
+}
+
+// TestAPollRefreshDropsTheMissWhenALinkAppeared keeps the guarantee: a link
+// written since the miss moves its directory, and the poll refresh then finds
+// it.
+func TestAPollRefreshDropsTheMissWhenALinkAppeared(t *testing.T) {
+	t.Parallel()
+	// Arrange: a remembered miss, and a link written after it.
+	stateDir := t.TempDir()
+	writeAgentID(t, stateDir, wsKey, original)
+	idx, _ := index(t, stateDir)
+	idx.Refresh()
+	if got := idx.Resolve(rotated); got.Source != SourceUnrecorded {
+		t.Fatalf("precondition: the unlinked id resolved as %+v, want unrecorded", got)
+	}
+	writeVendorLink(t, stateDir, wsKey, rotated, original)
+
+	// Act.
+	idx.RefreshKeepingMisses()
+
+	// Assert.
+	if got := idx.Resolve(rotated); got.Original != original || got.Source != SourceVendorLink {
+		t.Errorf("after a poll refresh the new link resolved to %+v, want %q from its link file", got, original)
+	}
+}

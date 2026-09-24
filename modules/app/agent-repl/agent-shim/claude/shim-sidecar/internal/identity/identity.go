@@ -135,6 +135,9 @@ type Index struct {
 	// each `<state>/shim/*/vendor-id` and its mtime, which moves when a file is
 	// created in it. An empty stamp means no check has run yet.
 	linkStamp string
+	// globs counts filepath.Glob calls, for the suite that pins the poll
+	// path's cost.
+	globs int
 }
 
 // New builds an index over one state root. An empty stateDir builds an index
@@ -157,7 +160,15 @@ func New(stateDir string, log *logging.Bound) *Index {
 // file appears without warning and nothing notifies this process of it. A
 // missing state root is NOT an error: the sidecar may be running beside a
 // daemon that has not started a shim yet.
-func (i *Index) Refresh() {
+func (i *Index) Refresh() { i.refresh(true) }
+
+// RefreshKeepingMisses is Refresh for the POLL PATH: it re-reads every record
+// but keeps the remembered misses unless a link directory moved (see refresh).
+// The rescan's Refresh stays unconditional, which is the net under a link
+// written inside the same mtime tick as the fingerprint.
+func (i *Index) RefreshKeepingMisses() { i.refresh(false) }
+
+func (i *Index) refresh(clearMisses bool) {
 	if i.stateDir == "" {
 		return
 	}
@@ -166,10 +177,19 @@ func (i *Index) Refresh() {
 	// a link nobody stands behind any more.
 	i.links = map[string]Resolution{}
 	i.originals = map[string]string{}
-	// The negative cache goes with them, and for the same reason: an id nothing
-	// linked before this refresh may be linked by a record this refresh reads.
-	i.unlinked = map[string]bool{}
-	i.linkStamp = i.linkFingerprint()
+	// THE NEGATIVE CACHE GOES ONLY IF A LINK CAN HAVE APPEARED. A miss is
+	// falsified by exactly one event, a link file landing, and that moves its
+	// `vendor-id` directory's mtime, which the fingerprint reads. Refresh runs
+	// on every poll tick whose change probe found anything, and an active
+	// session creates files nearly every tick; clearing the misses on each one
+	// sent every watcher back to a per-id glob over every shim directory,
+	// which held 74% of the sidecar's CPU (2026-09-24 profile, 2085 watchers,
+	// 132 shim directories).
+	stamp := i.linkFingerprint()
+	if clearMisses || stamp != i.linkStamp {
+		i.unlinked = map[string]bool{}
+	}
+	i.linkStamp = stamp
 
 	for _, path := range i.glob(filepath.Join(i.stateDir, "shim", "*", "agent-id.json")) {
 		var record agentIDRecord
@@ -328,6 +348,7 @@ func (i *Index) readLink(path string) (vendorLinkRecord, bool) {
 // PATTERN, which is this package's own bug, so it is stated at error rather
 // than passed off as "no records".
 func (i *Index) glob(pattern string) []string {
+	i.globs++
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		i.log.With(logging.Context{Operation: "identity-refresh", Level: "error", Path: pattern}).Log(

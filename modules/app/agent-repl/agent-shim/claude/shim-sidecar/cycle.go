@@ -824,7 +824,7 @@ func (s *sidecar) discoverChanged() {
 	}
 	now := s.now()
 	defer s.flushCatchupSummaries(now.UnixMilli())
-	s.identity.Refresh()
+	s.identity.RefreshKeepingMisses()
 	for _, dir := range changed {
 		watched, ok := s.watchTargets(dir.Targets, now)
 		if watched > 0 {
