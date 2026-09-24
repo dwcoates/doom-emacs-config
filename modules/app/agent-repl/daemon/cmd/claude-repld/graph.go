@@ -780,6 +780,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the command-file ingress: %w", err)
 	}
 
+	// THE LANDED-WORKTREE REAPER reads the registry and the fleet's live set
+	// and takes no lock any interactive path takes: it is background work.
+	reaper, err := buildWorktreeReaper(git, p.DB, fleet.Workspaces, log)
+	if err != nil {
+		return nil, err
+	}
+
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
 	})
@@ -859,6 +866,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "shim_log_roll", Run: func(ctx context.Context) error {
 				return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 			}},
+			{Name: "worktree_reaper", Run: reaper.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		DrainQueue:    queue.Drain,
