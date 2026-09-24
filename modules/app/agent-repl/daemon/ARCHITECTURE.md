@@ -78,6 +78,11 @@ daemon/
                    call. Guard, binary resolution, stdin discipline, deadline
     merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate, briefs, ledger)
     drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive)
+    worktreereap/  the landed-worktree reaper: a daily low-priority sweep that removes linked
+                   worktrees whose changes landed on the default branch (see AGENTS.md)
+    flock/         the one held non-blocking exclusive kernel lock (merge repo lock, reaper sweep lock)
+    clock/         the one injectable Now/After clock every waiting package takes (drain, rollout,
+                   startingshim, worktreereap alias it)
     rollout/       self-reload trigger consumer: daemon handover, adopt rendezvous, shim relaunch engine,
                    build-staleness bounce, asset origin, intent manifest, reload_webapp push
     workspace/     workspace verbs (create standard + one-shot, register, open, close, kill, nuke,
@@ -95,10 +100,10 @@ daemon/
 
 Package dependency direction (a package may import only what is at or
 below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
-feedid, prompts, publish, apiresponses  <  wsm, sessionlock, shimclient, gitclient,
+feedid, prompts, publish, apiresponses, flock, clock  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
-health, commandfile  <  server, boot  <  cmd. The shim client and git
+health, commandfile, worktreereap  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
 and drain controller never import each other; they meet at wsm (the
 lease) and at the shim client.

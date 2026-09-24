@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"claude-repld/integration/fakegit"
 )
@@ -294,4 +295,24 @@ func (r *Repo) SetDirty(worktreeDir string, dirty bool) {
 		}
 		wt.Dirty = dirty
 	})
+}
+
+// IdleWorktree makes a linked worktree look untouched since at, as the
+// landed-worktree reaper reads it: the worktree's admin files (HEAD, index and
+// the HEAD reflog, in the directory the scripted `rev-parse --absolute-git-dir`
+// names) are written with that mtime. The fixture's commits are already years
+// old, so their committer times say nothing newer.
+func (r *Repo) IdleWorktree(dir string, at time.Time) {
+	r.t.Helper()
+	admin, ok := r.w.read().GitDirOf(dir)
+	if !ok {
+		r.t.Fatalf("harness: %s is not a fake worktree", dir)
+	}
+	for _, name := range []string{"HEAD", "index", filepath.Join("logs", "HEAD")} {
+		path := filepath.Join(admin, name)
+		writeFile(r.t, path, "fake admin file\n")
+		if err := os.Chtimes(path, at, at); err != nil {
+			r.t.Fatalf("harness: chtimes %s: %v", path, err)
+		}
+	}
 }

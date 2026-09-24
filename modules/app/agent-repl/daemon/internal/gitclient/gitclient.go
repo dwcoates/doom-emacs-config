@@ -12,6 +12,7 @@ package gitclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -158,9 +159,51 @@ func (c *client) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, w
 // and only a directory that is STILL THERE afterwards is reported as a
 // failure. This is the exact shape the old merge teardown had to be corrected
 // into after it logged loud failures for directories that were already gone.
+//
+// --force is what a tree parked mid-merge needs: it has a paused operation in
+// it and git refuses a plain remove.
 func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error {
-	const operation = "daemon.gitclient.remove_worktree"
+	return c.removeWorktree(ctx, "daemon.gitclient.remove_worktree", repoDir, worktreeDir, true)
+}
 
+// RemoveCleanWorktree removes a worktree WITHOUT --force and leaves its branch
+// alone. It is RemoveWorktree's door -- the sinks are detached first, the
+// prune runs, the postcondition decides -- for a caller whose whole premise is
+// that the tree holds nothing: git itself refuses a tree with modified or
+// untracked content, so a tree that became dirty after the caller looked is
+// kept rather than destroyed.
+//
+// A REFUSED REMOVAL RE-ATTACHES the directory to its log sinks. The tree is
+// still there and may still be somebody's workspace, whose sinks must keep
+// their canonical links.
+func (c *client) RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir string) error {
+	const operation = "daemon.gitclient.remove_clean_worktree"
+	err := c.removeWorktree(ctx, operation, repoDir, worktreeDir, false)
+	if err == nil {
+		return nil
+	}
+	stillThere, statErr := pathPresent(worktreeDir)
+	if statErr != nil {
+		c.log.Global().Error(operation, "could not tell whether the refused worktree is still present; its log sinks stay detached", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "cause": statErr.Error(), "removal": err.Error(),
+		})
+		return errors.Join(err, statErr)
+	}
+	if !stillThere {
+		return err
+	}
+	if attachErr := c.log.AttachDir(worktreeDir); attachErr != nil {
+		c.log.Global().Error(operation, "the refused worktree could not be re-attached to its log sinks", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "cause": attachErr.Error(), "removal": err.Error(),
+		})
+		return errors.Join(err, fmt.Errorf("gitclient: re-attach the log sinks of %s: %w", worktreeDir, attachErr))
+	}
+	return err
+}
+
+// removeWorktree is the one removal door both RemoveWorktree and
+// RemoveCleanWorktree go through; force is the only thing they differ in.
+func (c *client) removeWorktree(ctx context.Context, operation, repoDir, worktreeDir string, force bool) error {
 	// THE LOG SINKS LET GO OF THE DIRECTORY BEFORE ANYTHING REMOVES IT. A
 	// workspace sink opened mid-removal re-created `<worktree>/.claude/emacs`
 	// with its canonical link, and the postcondition below then found the
@@ -178,11 +221,13 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 		return err
 	}
 
+	command := []string{"worktree", "remove", worktreeDir}
+	if force {
+		command = []string{"worktree", "remove", "--force", worktreeDir}
+	}
 	var removeFailure error
 	if present {
-		// --force is what a tree parked mid-merge needs: it has a paused
-		// operation in it and git refuses a plain remove.
-		in, invokeErr := c.runRaw(ctx, operation, repoDir, "worktree", "remove", "--force", worktreeDir)
+		in, invokeErr := c.runRaw(ctx, operation, repoDir, command...)
 		if invokeErr != nil {
 			return invokeErr
 		}
@@ -191,14 +236,8 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 		}
 	}
 
-	pruned, err := c.runRaw(ctx, operation, repoDir, "worktree", "prune")
-	if err != nil {
+	if err := c.prune(ctx, operation, repoDir); err != nil {
 		return err
-	}
-	if pruned.exitCode != 0 {
-		failure := pruned.fail()
-		c.log.Global().Error(operation, "git exited nonzero", pruned.logContext())
-		return failure
 	}
 
 	stillThere, err := pathPresent(worktreeDir)
@@ -209,9 +248,10 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 		return nil
 	}
 	if removeFailure != nil {
-		c.log.Global().Error(operation, "the worktree survived `worktree remove --force`", dlog.Context{
+		c.log.Global().Error(operation, "the worktree survived `git "+strings.Join(command[:len(command)-1], " ")+"`", dlog.Context{
 			"dir":          repoDir,
 			"worktree_dir": worktreeDir,
+			"force":        force,
 			"cause":        removeFailure.Error(),
 		})
 		return removeFailure
@@ -219,8 +259,29 @@ func (c *client) RemoveWorktree(ctx context.Context, repoDir, worktreeDir string
 	c.log.Global().Error(operation, "the worktree is still present after removal", dlog.Context{
 		"dir":          repoDir,
 		"worktree_dir": worktreeDir,
+		"force":        force,
 	})
-	return fmt.Errorf("gitclient: the worktree %s is still present after `git worktree remove --force`", worktreeDir)
+	return fmt.Errorf("gitclient: the worktree %s is still present after `git %s`", worktreeDir, strings.Join(command, " "))
+}
+
+// PruneWorktrees retires every registration whose directory is gone. It is
+// the same `git worktree prune` every removal ends with, reachable on its own.
+func (c *client) PruneWorktrees(ctx context.Context, repoDir string) error {
+	return c.prune(ctx, "daemon.gitclient.prune_worktrees", repoDir)
+}
+
+// prune runs `git worktree prune`, recording a nonzero exit at ERROR.
+func (c *client) prune(ctx context.Context, operation, repoDir string) error {
+	pruned, err := c.runRaw(ctx, operation, repoDir, "worktree", "prune")
+	if err != nil {
+		return err
+	}
+	if pruned.exitCode != 0 {
+		failure := pruned.fail()
+		c.log.Global().Error(operation, "git exited nonzero", pruned.logContext())
+		return failure
+	}
+	return nil
 }
 
 // Nuke force-removes both the worktree and the branch. This is data
@@ -533,9 +594,17 @@ func (c *client) ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]str
 // IsClean reports whether the working tree and index are clean. Untracked files
 // COUNT as unclean: every caller asks this before doing something that would
 // either lose them or sweep them into a commit, so "there is unexpected content
-// in this tree" is the answer they need.
+// in this tree" is the answer they need. Ignored files do not count: plain
+// `--porcelain` never lists them.
+//
+// A PROBE WRITES NOTHING. `--no-optional-locks` stops status from refreshing
+// the index's stat cache and writing it back, which it otherwise does
+// opportunistically. That write takes `index.lock` against whoever is working
+// in the tree, and it bumps the index's mtime -- which the landed-worktree
+// reaper reads as a sign of activity, so its own probe would otherwise keep a
+// tree looking busy.
 func (c *client) IsClean(ctx context.Context, dir string) (bool, error) {
-	out, err := c.run(ctx, "daemon.gitclient.is_clean", dir, "status", "--porcelain")
+	out, err := c.run(ctx, "daemon.gitclient.is_clean", dir, "--no-optional-locks", "status", "--porcelain")
 	if err != nil {
 		return false, err
 	}
@@ -644,4 +713,150 @@ func pathPresent(path string) (bool, error) {
 	default:
 		return false, fmt.Errorf("gitclient: reading %s: %w", path, err)
 	}
+}
+
+// ListWorktrees lists every worktree the repository registers, MAIN FIRST --
+// git's own documented order for `worktree list`. `-z` is not a detail: without
+// it a lock or prune reason with unusual bytes is quoted and escaped, and a path
+// could not be read back byte for byte.
+func (c *client) ListWorktrees(ctx context.Context, repoDir string) ([]Worktree, error) {
+	const operation = "daemon.gitclient.list_worktrees"
+
+	out, err := c.run(ctx, operation, repoDir, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return nil, err
+	}
+	worktrees, err := parseWorktrees(out)
+	if err != nil {
+		c.log.Global().Error(operation, "the worktree listing could not be read", dlog.Context{
+			"dir": repoDir, "stdout": out, "cause": err.Error(),
+		})
+		return nil, err
+	}
+	return worktrees, nil
+}
+
+// parseWorktrees reads `git worktree list --porcelain -z`: one NUL-terminated
+// attribute per field, and an empty field ending each worktree's record. An
+// attribute this client does not know is a LOUD failure rather than a skipped
+// line, because a newer git that states something new about a tree (a new kind
+// of lock, say) is exactly what a caller deciding whether to remove it must
+// not be allowed to miss.
+func parseWorktrees(out string) ([]Worktree, error) {
+	var (
+		worktrees []Worktree
+		current   *Worktree
+	)
+	for _, field := range strings.Split(out, "\x00") {
+		if field == "" {
+			if current != nil {
+				worktrees = append(worktrees, *current)
+				current = nil
+			}
+			continue
+		}
+		name, value, _ := strings.Cut(field, " ")
+		if name == "worktree" {
+			if current != nil {
+				return nil, fmt.Errorf("gitclient: worktree record for %s was not terminated before %q", current.Dir, value)
+			}
+			current = &Worktree{Dir: value}
+			continue
+		}
+		if current == nil {
+			return nil, fmt.Errorf("gitclient: worktree attribute %q precedes any worktree", field)
+		}
+		switch name {
+		case "HEAD":
+			current.Head = value
+		case "branch":
+			current.Branch = strings.TrimPrefix(value, "refs/heads/")
+		case "detached":
+			current.Detached = true
+		case "bare":
+			current.Bare = true
+		case "locked":
+			current.Locked = true
+			current.LockedReason = value
+		case "prunable":
+			current.Prunable = true
+			current.PrunableReason = value
+		default:
+			return nil, fmt.Errorf("gitclient: unknown worktree attribute %q for %s", field, current.Dir)
+		}
+	}
+	if current != nil {
+		return nil, fmt.Errorf("gitclient: worktree record for %s was not terminated", current.Dir)
+	}
+	return worktrees, nil
+}
+
+// AdminDir reports a worktree's own git directory: `.git/worktrees/<name>` of
+// the common dir for a linked worktree, where its HEAD, index and reflog live.
+// It is asked of git rather than derived from the directory's name, because git
+// suffixes the name when two worktrees share a base name.
+func (c *client) AdminDir(ctx context.Context, worktreeDir string) (string, error) {
+	return c.run(ctx, "daemon.gitclient.admin_dir", worktreeDir, "rev-parse", "--absolute-git-dir")
+}
+
+// CommitterTime reports a commit's COMMITTER time -- when it was last written,
+// which a rebase or an amend moves and the author time does not.
+func (c *client) CommitterTime(ctx context.Context, dir, ref string) (time.Time, error) {
+	const operation = "daemon.gitclient.committer_time"
+
+	out, err := c.run(ctx, operation, dir, "show", "--no-patch", "--format=%cI", ref)
+	if err != nil {
+		return time.Time{}, err
+	}
+	at, err := time.Parse(time.RFC3339, strings.TrimSpace(out))
+	if err != nil {
+		c.log.Global().Error(operation, "a commit's committer date was unreadable", dlog.Context{
+			"dir": dir, "ref": ref, "stdout": out, "cause": err.Error(),
+		})
+		return time.Time{}, fmt.Errorf("gitclient: unreadable committer date %q for %s in %s: %w", out, ref, dir, err)
+	}
+	return at, nil
+}
+
+// TreeOf resolves a ref to the tree it records. `--verify` means an unknown
+// ref fails loudly instead of being echoed back.
+func (c *client) TreeOf(ctx context.Context, dir, ref string) (string, error) {
+	return c.run(ctx, "daemon.gitclient.tree_of", dir, "rev-parse", "--verify", "--end-of-options", ref+"^{tree}")
+}
+
+// MergeTree computes the tree a merge of other INTO base would record, without
+// touching any worktree, index or ref: `merge-tree --write-tree` writes only
+// objects. A conflicted merge is an ANSWER (exit 1), not a failure; every other
+// nonzero exit is git's refusal and fails loudly. It needs git >= 2.38.
+func (c *client) MergeTree(ctx context.Context, dir, base, other string) (MergeTreeOutcome, error) {
+	const operation = "daemon.gitclient.merge_tree"
+
+	in, err := c.runRaw(ctx, operation, dir, "merge-tree", "--write-tree", "--no-messages", base, other)
+	if err != nil {
+		return MergeTreeOutcome{}, err
+	}
+	if in.exitCode != 0 && in.exitCode != 1 {
+		failure := in.fail()
+		c.log.Global().Error(operation, "git exited nonzero", in.logContext())
+		return MergeTreeOutcome{}, failure
+	}
+	tree, _, _ := strings.Cut(in.stdout, "\n")
+	tree = strings.TrimSpace(tree)
+	if tree == "" {
+		c.log.Global().Error(operation, "merge-tree printed no tree", in.logContext())
+		return MergeTreeOutcome{}, fmt.Errorf("gitclient: merge-tree of %s into %s in %s printed no tree", other, base, dir)
+	}
+	return MergeTreeOutcome{Tree: tree, Conflicted: in.exitCode == 1}, nil
+}
+
+// DeleteBranchAt deletes a local branch ONLY WHILE IT STILL POINTS AT head.
+// `update-ref -d <ref> <old>` is git's compare-and-delete: the check and the
+// deletion happen under the ref's own lock, so a commit that moved the branch
+// after the caller judged it makes git refuse, and the branch -- with the
+// commit the caller never saw -- survives. A branch that moved, or is gone, is
+// that refusal as a *gitclient.Error.
+func (c *client) DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error {
+	_, err := c.run(ctx, "daemon.gitclient.delete_branch_at", repoDir,
+		"update-ref", "-d", "refs/heads/"+branch, head)
+	return err
 }

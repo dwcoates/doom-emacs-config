@@ -27,26 +27,15 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/clock"
 	"claude-repld/internal/shimsocket"
 )
 
-// Clock is this package's view of time, injected so no test of a wait here
-// sleeps.
-type Clock interface {
-	// Now is the current instant.
-	Now() time.Time
-	// After yields one value after d has passed.
-	After(d time.Duration) <-chan time.Time
-}
+// Clock is this package's view of time; see internal/clock.
+type Clock = clock.Clock
 
 // SystemClock is the production Clock.
-type SystemClock struct{}
-
-// Now is the wall clock's instant.
-func (SystemClock) Now() time.Time { return time.Now() }
-
-// After is time.After.
-func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+type SystemClock = clock.System
 
 // DefaultPoll is how often the wait re-probes the socket. The fact lives in
 // the KERNEL and cannot announce itself, so a poll is the floor under it; the
