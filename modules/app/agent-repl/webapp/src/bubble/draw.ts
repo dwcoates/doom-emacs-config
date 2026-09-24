@@ -149,7 +149,7 @@ const drawnHooks = new WeakMap<Element, readonly string[]>();
  * element, its scroll box and its body keep their identity (so a reader
  * scrolled inside the box keeps their place), its classes and attributes are
  * brought to the spec (a class the bubble did not get from a spec — the
- * controller's `response-selected` — is left alone), a header, corner or footer
+ * controller's `entry-selected` — is left alone), a header, corner or footer
  * element that states the same `data-says` is kept (a replaced one's clock
  * stops), the
  * working wave keeps its phase, and the content is repainted in place

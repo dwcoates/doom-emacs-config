@@ -28,6 +28,7 @@
  * card was unreadable would lose the reader everything, including the evidence.
  */
 import { log } from "../log.js";
+import { SELECTED_RESPONSE_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import {
   applyExpanded,
   cappedSectionsOf,
@@ -196,22 +197,6 @@ export interface FeedController extends Handle {
   view(): SubfeedView;
 }
 
-/**
- * THE MARK A SELECTED FINAL-RESPONSE ROW WEARS, on its chrome — the dual of
- * the final-answer marker (`data-final-answer`, turn-ended.ts). The
- * reply-to-a-past-response selection is the daemon's per-workspace state, and this is the feed's own record of which row
- * carries it, spelled once so a re-push naming a different row can strip it
- * from every other row by this same name.
- */
-export const SELECTED_RESPONSE_ATTRIBUTE = "data-selected-response";
-
-/**
- * The class the selected final-response bubble wears so the stylesheet paints
- * its border BLUE instead of the green final-answer border. It goes on the same
- * `.bubble.assistant` element the green `.final-response` rule keys on, so the
- * two are one hierarchy of rules rather than two competing places.
- */
-export const SELECTED_RESPONSE_CLASS = "response-selected";
 
 /** Build a controller for ONE feed and draw its shell into the host. */
 export function createFeedController(opts: FeedControllerOptions): FeedController {
@@ -682,10 +667,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       const chosen = state.element === target;
       if (chosen) state.element.setAttribute(SELECTED_RESPONSE_ATTRIBUTE, "true");
       else state.element.removeAttribute(SELECTED_RESPONSE_ATTRIBUTE);
-      // The blue-border rule keys on the response bubble itself, the same place
-      // the green `.final-response` rule reads, so the class goes there.
-      const bubble = state.element.querySelector(".bubble.assistant");
-      if (bubble !== null) bubble.classList.toggle(SELECTED_RESPONSE_CLASS, chosen);
+      // The mark goes on the row's CARD, the same bubble the green
+      // `.final-response` rule reads, so the blue replaces the green there.
+      syncSelectedEntry(state.element);
     }
   }
 
@@ -935,6 +919,9 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     // A bubble says whether it is open on itself; the row is what a reader —
     // and the reveal walk — holds, so it says the same thing.
     mirror(state, "data-expanded");
+    // THE SELECTION MARK IS THE ROW'S FACT, DRAWN ON ITS CARD: a card a push
+    // replaced inherits it from the row it is drawn in (selected-entry.ts).
+    syncSelectedEntry(state.element);
   }
 
   /** Copy one attribute from the row's body up onto its chrome. */
