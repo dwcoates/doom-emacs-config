@@ -1429,7 +1429,7 @@ func requireBashRunReadableThroughTheStore(t *testing.T, scenario string, in *mo
 	for _, run := range runs {
 		rows := awaitBashRunTerminal(ctx, t, in.Store.Client, run)
 		requireBashReplayOrder(t, run, rows)
-		requireContiguousDeltas(t, run, rows)
+		requireLatestTail(t, run, rows)
 	}
 }
 

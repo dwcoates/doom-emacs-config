@@ -55,20 +55,21 @@ func ContextInjectedUnitID(kind, agent, recordUUID string) string {
 // session's life and none of them supersedes another.
 func TerminalKey(agent, recordUUID string) string { return "terminal:" + agent + ":" + recordUUID }
 
-// Bash row keys — ONE ROW PER SPOOL-DERIVED WRITE, never one row superseded.
+// Bash row keys — ONE ROW PER KIND OF FACT about a run: its start, its
+// rendered tail, its terminal.
 //
-// WHY NOT ONE KEY FOR THE RUN. The store holds one row per upsert key and a
-// write supersedes that row WHOLE, so a single `bash:<run>` key would leave the
-// run holding only its most recent delta: every earlier chunk of output would be
-// erased by the next one. store.v1 WatchBashRun exists to REPLAY a run's rows in
-// write order — the start, each delta, then the terminal — which is only
-// possible if each of those writes is its own row.
-//
-// THE DELTA'S KEY IS ITS from_offset, which is the delta's identity: the same
-// bytes re-read after a restart mint the same key and supersede their own row
-// rather than appending a second copy of themselves. The terminal has a fixed
-// key because a run has exactly one, however many times it is restated (an EXIT
+// THE TAIL IS ONE ROW, SUPERSEDED WHOLE (owner ruling 2026-09-23: output beyond
+// what is rendered is not stored). It used to be one row per delta, keyed by
+// the delta's from_offset, so a run's rows joined to its whole spool; now each
+// batch upserts `bash:<run>:tail` with the window as it is drawn, and the
+// store holds nothing before it. store.v1 WatchBashRun replays a run's rows in
+// first-insert order — start, tail, terminal — and every upsert of the tail
+// reaches a live watcher as a row of its own. The terminal has a fixed key
+// because a run has exactly one, however many times it is restated (an EXIT
 // marker re-read, a LOST sweep re-concluding).
+//
+// Rows written under the retired `bash:<run>:<from_offset>` spelling are left
+// in the store as OUTMODED; nothing here mints that key any more.
 
 // BashStartKey names a run's opening row. The sidecar does not normally mint one
 // — a spool exists only after the launch the STREAM plane announced — but the
@@ -76,10 +77,8 @@ func TerminalKey(agent, recordUUID string) string { return "terminal:" + agent +
 // replay order.
 func BashStartKey(run string) string { return "bash:" + run + ":start" }
 
-// BashDeltaKey names one delta of a run by the file offset its bytes start at.
-func BashDeltaKey(run string, fromOffset int64) string {
-	return "bash:" + run + ":" + itoa(int(fromOffset))
-}
+// BashTailKey names a run's single rendered-tail row.
+func BashTailKey(run string) string { return "bash:" + run + ":tail" }
 
 // BashTerminalKey names a run's single terminal row.
 func BashTerminalKey(run string) string { return "bash:" + run + ":terminal" }
