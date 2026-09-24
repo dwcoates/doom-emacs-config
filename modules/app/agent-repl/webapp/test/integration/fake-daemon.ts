@@ -96,6 +96,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_account_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
+import { EditHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
 import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { UpdateShutdownScheduleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_shutdown_schedule_pb";
 import { UpdateMergeQueueResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
@@ -1326,6 +1327,12 @@ export function createFakeDaemon(): FakeDaemon {
       updateHeldPrompt(request) {
         record("updateHeldPrompt", request);
         return answerFor("updateHeldPrompt", UpdateHeldPromptResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      editHeldPrompt(request) {
+        record("editHeldPrompt", request);
+        return answerFor("editHeldPrompt", EditHeldPromptResponseSchema, {
           result: { case: "success", value: {} },
         });
       },
