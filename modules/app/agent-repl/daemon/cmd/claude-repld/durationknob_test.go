@@ -85,3 +85,23 @@ func TestEveryDurationKnobRefusesInTheSharedWords(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveDurationKnobAnswersTheFallbackWhenBlank(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveDurationKnob("KNOB", "  ", time.Minute)
+
+	// Assert.
+	if err != nil || got != time.Minute {
+		t.Fatalf("resolveDurationKnob(blank) = (%v, %v), want the fallback", got, err)
+	}
+}
+
+func TestResolveDurationKnobParsesASetValue(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveDurationKnob("KNOB", "3s", time.Minute)
+
+	// Assert.
+	if err != nil || got != 3*time.Second {
+		t.Fatalf("resolveDurationKnob(3s) = (%v, %v), want 3s", got, err)
+	}
+}

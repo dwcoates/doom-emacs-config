@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -32,26 +31,17 @@ const worktreeReapLockName = "worktree-reap.lock"
 // resolveWorktreeReapIdle reads the idle threshold's override. Empty is the
 // default; a malformed or non-positive value is a REFUSAL.
 func resolveWorktreeReapIdle(value string) (time.Duration, error) {
-	return resolveWindow(envWorktreeReapIdle, value, worktreereap.DefaultIdleAfter)
+	return resolveDurationKnob(envWorktreeReapIdle, value, worktreereap.DefaultIdleAfter)
 }
 
 // resolveWorktreeReapStartDelay reads the start delay's override.
 func resolveWorktreeReapStartDelay(value string) (time.Duration, error) {
-	return resolveWindow(envWorktreeReapStartDelay, value, worktreereap.DefaultStartDelay)
+	return resolveDurationKnob(envWorktreeReapStartDelay, value, worktreereap.DefaultStartDelay)
 }
 
 // resolveWorktreeReapEvery reads the cadence's override.
 func resolveWorktreeReapEvery(value string) (time.Duration, error) {
-	return resolveWindow(envWorktreeReapEvery, value, worktreereap.DefaultEvery)
-}
-
-// resolveWindow is one reaper window: the default when unset, else the shared
-// positive-duration parse.
-func resolveWindow(name, value string, fallback time.Duration) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return fallback, nil
-	}
-	return parsePositiveDuration(name, value)
+	return resolveDurationKnob(envWorktreeReapEvery, value, worktreereap.DefaultEvery)
 }
 
 // buildWorktreeReaper builds the landed-worktree reaper from its three knobs.
