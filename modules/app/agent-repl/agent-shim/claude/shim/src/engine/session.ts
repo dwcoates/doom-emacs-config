@@ -3670,7 +3670,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const run = toolCallActivityId(work.value);
       const item = findUnit(book, run);
       if (item?.case === "subagent") {
-        closing.push(closingSubagentTerminal(agentId, run));
+        closing.push(closingSubagentTerminal(agentId, run, item.value));
         continue;
       }
       if (item?.case === "monitor") {
