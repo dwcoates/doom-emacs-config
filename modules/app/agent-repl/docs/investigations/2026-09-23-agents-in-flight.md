@@ -12,7 +12,6 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 | Branch | Worktree | Task | Agent id | Dispatched |
 |---|---|---|---|---|
-| `fix/e2e-load-flakes` | `~/.config/doom-worktrees/e2e-load-flakes` | Root-cause the e2e flakes `TestWebappLayerRoster` (ClientLog/lease ERRORs during a drain) and `TestClearRotatesIdentity` (the separation row timed out; `final_answer_unresolved`). | `a3cc32b3e6611f35f` | 22:55 |
 
 ## Still waiting on the owner
 
@@ -27,6 +26,7 @@ check the worktree for partial work and dispatch a fresh agent to finish it.
 
 ## Landed on master (this session, since the 09-21 compaction)
 
+- e2e load flakes fixed at their sources: the sidecar holds a rotated transcript until a record names its book; registry reads are ordered against Close; worktree log sinks detach inside `RemoveWorktree` and re-attach in `CreateWorktree` (master's `Surfaces.Retire` removed as the duplicate); one adoption per rendezvous; the restarting notice waits for a dropped stream to read again; `WatchBash` waits for an announced run's rows; store `unknown_run` at INFO (`fix/e2e-load-flakes`, e2e 3x green on the branch). Open: `forkSession` rotations aren't held; a `/clear` outside the shim in a shared directory is held forever (INFO once).
 - A handover owns one successor slot: every post-spawn failure stops (TERM, KILL, reap) its successor and disarms the rendezvous; an unstoppable successor keeps the slot claimed. A shim's departure is a freeness edge: a dead shim in an open workspace is relaunched at once, an ordered or closed-workspace departure unregisters the bounce (INFO) (`fix/handover-leak-and-dead-shim-freeness`, daemon unit and integration green on master). Open for the owner: no proto arm retracts a successor announcement after a manifest-write failure.
 - The shim's in-flight tool registry holds only calls its stream can settle (background agents' calls are never held; every result releases; handoffs are never cut; an agent's end releases its stream; every turn and query end drains it); reaching 512 is an ERROR. All 4,490 live evictions were already-settled calls (`fix/shim-open-call-leak`; shim unit 6073, integration 341 on master).
 - Settles restate the rest: subagent failures (prompt, created agent), artifact failures (the start's act), and `AgentActivitySettledAt.started_at` for runtime. `AgentActivity.contract` stamps bound producers; unstamped old rows that restate nothing log INFO `settle_predates_contract`, while stamped ones stay ERROR (`fix/restate-rest-and-old-row-level`, all suites green, e2e with Emacs tests skipped).
