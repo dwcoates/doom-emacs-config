@@ -287,7 +287,7 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 			o.deps.Log.Global().Error(op, "a displaced turn could not be claimed", withField(fields, "error", err.Error()))
 			return fmt.Errorf("merge: claim the displaced turn %q: %w", t.ID, err)
 		}
-		if !claimed {
+		if !claimed.Claimed {
 			o.deps.Log.Global().Debug(op, "a displaced turn was already put back by its merge", fields)
 			continue
 		}
