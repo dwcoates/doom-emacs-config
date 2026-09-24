@@ -220,7 +220,8 @@ environment. Every flag is optional.
    restore the holds
    all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
    transaction each (an adopted workspace's in-flight turns are re-opened by its
-   sessionwatcher instead), recover the in-flight merges, and — for a successor
+   sessionwatcher instead, and any the shim's `turn_in_flight` no longer names
+   is closed orphaned at INFO), recover the in-flight merges, and — for a successor
    — `rollout.Controller.Join`. A JOINING SUCCESSOR RECONCILES NOTHING, so the
    missing-directory close is also done by `verbs.PublishRegistry`, the walk
    that publishes the opening roster;
@@ -287,6 +288,13 @@ A predecessor's shim is not this daemon's own spawn, so
 `refuseAdoptingOurOwnSpawn` does not fire on it: the supervisor's `SpawnedFor`
 ledger is the in-memory `held` set of one process and holds nothing across a
 restart.
+
+### A shim that dies on its own is brought back
+
+An unordered departure with no bounce registered revives the session at once
+(`promptqueue.reviveAfterDeath`, the prompt's own revival): same vendor session,
+a prompt sent meanwhile joins it. The cut turn ends as `query_died`. One
+unattended revival until a turn ends; a second death is WARN and left down.
 
 ## Environment (process contracts and test knobs)
 

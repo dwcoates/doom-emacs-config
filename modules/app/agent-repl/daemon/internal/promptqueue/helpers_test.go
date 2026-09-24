@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"sync"
 	"testing"
 	"time"
@@ -849,6 +850,8 @@ func (n *noteRecorder) count() int {
 
 // harness is one wired queue and every fake behind it.
 type harness struct {
+	// statErr is what reading any workspace directory answers.
+	statErr error
 	q       *queue
 	db      *fakeDB
 	sender  *fakeSender
@@ -941,7 +944,9 @@ func newHarness(t *testing.T) *harness {
 			h.hostPublishes++
 		},
 		Now: func() time.Time { return instant },
-		Log: h.log,
+		// Every workspace directory exists unless a test says otherwise.
+		Stat: func(string) (fs.FileInfo, error) { return nil, h.statErr },
+		Log:  h.log,
 	})
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)
